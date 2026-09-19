@@ -48,6 +48,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
 - **Task Overflow Actions**: task view title menus expose supported task actions in place: pin/unpin, rename, archive, copy working directory, copy task ID, copy `cowork://tasks/<taskId>` deeplink, copy Markdown, fork session, view outputs, and create a same-thread or new-task automation from the current task. See [Task Automations](task-automations.md).
 - **Managed Agents**: Agents Hub provides a dedicated surface for creating, inspecting, publishing, suspending, and improving reusable agents. Agent detail screens are configuration-first and single-pane: test, preview, and starter-prompt actions create normal runtime managed sessions and open their backing tasks in the main task window, where questions, responses, approvals, artifacts, and outputs are handled like any other task. See [Managed Agents](managed-agents.md).
+- **Persistent Bots**: the sidebar Bots surface gives reusable agent roles a stable identity across many durable conversations. Bots open or create dormant conversations, keep history separate from Sessions, support profile editing/deactivation, expose notification and host-computer state, and can message verified teammates through the persistent CoWork Bot Team. See [Bots, conversations, and tasks](bots-and-conversations.md).
 - **Runtime Orchestration**: SessionRuntime owns task-session state, session checklists, resume snapshots, recovery state, and task projection while the turn kernel handles each individual step, follow-up, or text turn; metadata-driven tool scheduling, graph-backed delegation, typed worker roles, verifier verdicts, semantic tool-batch summaries, and terminal-state reconciliation keep delegated work coherent across tasks, follow-ups, teams, and ACP runs.
 - **Prompt-Aware Tooling**: visible tools receive concise prompt-local guidance after policy filtering, and planning plus execution share the same render source for compact tool text and provider-facing tool descriptions.
 - **Composer Mentions**: type `@` in the main composer to choose Agents, configured Integrations, or Files. Integration mentions render as icon+name chips and add soft runtime routing guidance without changing permissions. See [Composer Mentions](composer-mentions.md).
@@ -55,6 +56,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Sectioned Prompt Stack**: execution and follow-up prompts are built from named session- and turn-scoped sections with explicit budgets, memoization of stable sections, provider-aware prompt caching, and truncation/drop reporting when token pressure rises.
 - **Provider-Aware Prompt Caching**: CoWork keeps stable system blocks cacheable and dynamic turn context uncached, prefers Anthropic automatic caching where supported, uses explicit Claude breakpoints on OpenRouter, and derives stable OpenAI-family cache keys for GPT routes.
 - **Mixture of Agents**: Settings can expose a virtual LLM provider where enabled presets run tool-free advisor models first and then hand bounded advisory context to a final aggregator model with the original tools. Presets support named advisor/aggregator slots, advisor output limits, concurrency, slot-level provider failover, and whole-preset failover when explicitly configured. See [Mixture of Agents](mixture-of-agents.md).
+- **Jev Decision Support**: An optional structured-decision route can choose an agent team and leader for Collaborative mode and `/multitask`, route eligible foreground tasks between existing model profiles, choose bounded task strategies and lanes, and review selected higher-risk tool calls, using either the TypeSafe API or OpenRouter. Observe mode records evidence; Active mode escalates concerning reviews, keeps uncertain/unavailable observations advisory, and applies cost guards before expanding ordinary tasks. Jev tokens and provider cost are reported separately from LLM usage. See [Jev Decision Support](jev.md) and the [JEV harness validation record](jev-harness-validation.md).
 - **OpenRouter Pareto Code Routing**: OpenRouter model selection includes `openrouter/pareto-code` and `openrouter/pareto-code:nitro`. When selected, Settings exposes OpenRouter's optional Pareto minimum coding score as a decimal from `0` to `1` so coding tasks can route by capability tier without pinning one concrete model.
 - **Grok Account Routing**: xAI/Grok can run with either a direct xAI API key or a supported browser OAuth account connection. Available models, limits, and charges depend on xAI and the connected account; token refresh stays inside encrypted profile settings.
 - **Session Checklist Primitive**: execution-style tasks can create a session-local ordered checklist with `task_list_create`, maintain it with `task_list_update`, inspect it with `task_list_list`, and surface it read-only in the task UI. The runtime can issue a non-blocking verification nudge when implementation items are done but no verification item exists yet.
@@ -150,11 +152,11 @@ See [LLM Wiki](llm-wiki.md) for command syntax, layout, modes, and analyzer beha
 
 Cross-platform location access for nearby-place, walking-distance, and local-errand queries. Use `get_current_location` to obtain the user's desktop coordinates before calling the Maps MCP connector for nearby search or route calculation.
 
-| Platform | Provider | How it works |
-|----------|----------|-------------|
-| **macOS** | Core Location | Compiled Swift helper with `com.apple.security.personal-information.location` entitlement |
-| **Windows** | Windows.Devices.Geolocation | Bundled PowerShell script using WinRT API |
-| **Linux** | GeoClue2 | Bundled Bash script using `gdbus` over system D-Bus |
+| Platform    | Provider                    | How it works                                                                              |
+| ----------- | --------------------------- | ----------------------------------------------------------------------------------------- |
+| **macOS**   | Core Location               | Compiled Swift helper with `com.apple.security.personal-information.location` entitlement |
+| **Windows** | Windows.Devices.Geolocation | Bundled PowerShell script using WinRT API                                                 |
+| **Linux**   | GeoClue2                    | Bundled Bash script using `gdbus` over system D-Bus                                       |
 
 - **One-time permission**: Each request prompts the user via the OS permission dialog. Location access cannot be auto-approved or persisted across tasks.
 - **Accuracy modes**: `precise` (GPS/Wi-Fi best) or `coarse` (city-level)
@@ -355,17 +357,17 @@ Mission Control exposes this through the `Core Harness` view. See [Core Automati
 
 Reliability is built as a continuous loop: capture failures -> replay deterministically -> gate risky completions -> harden nightly/release workflows.
 
-| Reliability Capability | What It Does |
-|------------------------|--------------|
-| **Eval Corpus (local)** | Converts failed/partial tasks into replayable eval cases stored in local SQLite |
-| **Deterministic Replay** | Re-runs eval suites to catch regressions before they reappear in production usage |
-| **Risk-Based Review Gate** | Scores task risk (`low`/`medium`/`high`) and escalates review/verification only when justified |
-| **Policy Modes** | `off`, `balanced`, and `strict` review policies for domain-appropriate guard strength |
-| **Skill/Prompt Hardening** | Uses modular prompt sections, explicit token budgets, and skill shortlist routing to reduce drift and context overload |
-| **PR Reliability Contract** | Enforces “production failure fix must add/update eval case” in CI |
-| **Nightly Hardening** | Runs eval + battery loops nightly, produces grouped and machine-readable artifacts |
-| **Release Gate** | Applies hardening checks before release with a date-based stability-window promotion |
-| **Local-Only Data Policy** | Keeps reliability artifacts local; no required telemetry upload path |
+| Reliability Capability      | What It Does                                                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Eval Corpus (local)**     | Converts failed/partial tasks into replayable eval cases stored in local SQLite                                        |
+| **Deterministic Replay**    | Re-runs eval suites to catch regressions before they reappear in production usage                                      |
+| **Risk-Based Review Gate**  | Scores task risk (`low`/`medium`/`high`) and escalates review/verification only when justified                         |
+| **Policy Modes**            | `off`, `balanced`, and `strict` review policies for domain-appropriate guard strength                                  |
+| **Skill/Prompt Hardening**  | Uses modular prompt sections, explicit token budgets, and skill shortlist routing to reduce drift and context overload |
+| **PR Reliability Contract** | Enforces “production failure fix must add/update eval case” in CI                                                      |
+| **Nightly Hardening**       | Runs eval + battery loops nightly, produces grouped and machine-readable artifacts                                     |
+| **Release Gate**            | Applies hardening checks before release with a date-based stability-window promotion                                   |
+| **Local-Only Data Policy**  | Keeps reliability artifacts local; no required telemetry upload path                                                   |
 
 See [Reliability Flywheel](reliability-flywheel.md) for architecture, schema, scripts, IPC endpoints, CI workflows, and operational commands.
 
@@ -373,13 +375,13 @@ See [Reliability Flywheel](reliability-flywheel.md) for architecture, schema, sc
 
 The UI exposes a small set of execution modes. Chat mode is separate from task execution and uses the direct conversation path.
 
-| Mode | Behavior |
-|------|----------|
-| **Chat** | Direct assistant conversation, no tools, no step timeline, same-session follow-ups, and chat-only streaming for supported providers. |
-| **Execute** | Full task execution path with tools, planning, and artifacts. |
-| **Plan** | Structured planning path; can pause for `request_user_input` when structured human input is enabled and is intended for non-mutating planning/coordination. |
-| **Analyze** | Read-only analysis path that stays evidence-focused and blocks mutating tools. |
-| **Verified** | Execute-like path that adds external verification checks after steps before completion. |
+| Mode         | Behavior                                                                                                                                                    |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat**     | Direct assistant conversation, no tools, no step timeline, same-session follow-ups, and chat-only streaming for supported providers.                        |
+| **Execute**  | Full task execution path with tools, planning, and artifacts.                                                                                               |
+| **Plan**     | Structured planning path; can pause for `request_user_input` when structured human input is enabled and is intended for non-mutating planning/coordination. |
+| **Analyze**  | Read-only analysis path that stays evidence-focused and blocks mutating tools.                                                                              |
+| **Verified** | Execute-like path that adds external verification checks after steps before completion.                                                                     |
 
 These modes are mutually exclusive. Chat is the conversational path; the others are task execution modes.
 
@@ -394,14 +396,14 @@ boundary. A mode or orchestration toggle cannot widen the selected profile.
 
 The task creation UI also includes higher-level toggles that change how tasks are orchestrated:
 
-| Toggle | Behavior |
-|--------|----------|
-| **Autonomous** | Legacy/reduced-friction task toggle that can auto-approve eligible actions and suppress optional user-input pauses within the effective access profile. It cannot add tools, widen profile scope, or bypass hard guardrails. |
-| **Check-ins** | Opts a fresh task into legacy clarification pauses. Keep this off for Codex/Claude Code-style execution that chooses safe defaults and stops only for hard blockers. |
-| **Collaborative** | Auto-creates an ephemeral team of agents that analyze the task from multiple perspectives, then a leader synthesizes the results. Phases: dispatch → think → synthesize → complete. |
-| **Multitask command** | Type `/multitask [N] <task>` to create a fresh collaborative run that splits the prompt into lane-specific child tasks before synthesis. Defaults to 4 lanes, bounded to 2-8. |
-| **Multi-LLM** | Sends the same task to multiple LLM providers/models in parallel. A designated judge model synthesizes the best result. Requires 2+ providers configured. |
-| **Think With Me** | Socratic brainstorming mode — agent asks follow-up questions and explores trade-offs without executing tools. Read-only tools only. |
+| Toggle                | Behavior                                                                                                                                                                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Autonomous**        | Legacy/reduced-friction task toggle that can auto-approve eligible actions and suppress optional user-input pauses within the effective access profile. It cannot add tools, widen profile scope, or bypass hard guardrails. |
+| **Check-ins**         | Opts a fresh task into legacy clarification pauses. Keep this off for Codex/Claude Code-style execution that chooses safe defaults and stops only for hard blockers.                                                         |
+| **Collaborative**     | Auto-creates an ephemeral team of agents that analyze the task from multiple perspectives, then a leader synthesizes the results. Phases: dispatch → think → synthesize → complete.                                          |
+| **Multitask command** | Type `/multitask [N] <task>` to create a fresh collaborative run that splits the prompt into lane-specific child tasks before synthesis. Defaults to 4 lanes, bounded to 2-8.                                                |
+| **Multi-LLM**         | Sends the same task to multiple LLM providers/models in parallel. A designated judge model synthesizes the best result. Requires 2+ providers configured.                                                                    |
+| **Think With Me**     | Socratic brainstorming mode — agent asks follow-up questions and explores trade-offs without executing tools. Read-only tools only.                                                                                          |
 
 > **Note:** Autonomous mode shows a confirmation dialog before enabling. It is
 > not a replacement for the access selector: choose **Full access** explicitly
@@ -442,14 +444,14 @@ When the agent is operating in plan-mode execution, it can also use `request_use
 
 The runtime now includes a set of decision and recovery contracts aimed at keeping tasks convergent without hiding failures:
 
-| Capability | Behavior |
-|------------|----------|
-| **Structured input requests** | `request_user_input` asks 1-3 concise multiple-choice questions, pauses the task, and resumes after submit/dismiss. Available in plan/debug mode when the task human-input policy allows structured input. |
+| Capability                        | Behavior                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Structured input requests**     | `request_user_input` asks 1-3 concise multiple-choice questions, pauses the task, and resumes after submit/dismiss. Available in plan/debug mode when the task human-input policy allows structured input.                                                                                                                                              |
 | **Explicit turn-window recovery** | Main interactive tasks run without an implicit turn window. If a caller, managed template, or helper explicitly sets `maxTurns` or `windowTurnCap`, the runtime applies the requested `turnBudgetPolicy`, soft-logs exhausted adaptive windows, reserves space for finalization, and allows bounded follow-up recovery before triggering a safety stop. |
-| **Context overflow retry** | Context-capacity errors trigger compaction plus retry instead of immediate hard failure when the model context window is exceeded. |
-| **Workspace alias repair** | Absolute alias paths such as `/workspace/...` can be remapped into the active workspace for file and directory tools, or blocked via `strict_fail`. |
-| **Pinned task-root repair** | Relative paths that drift outside the task's canonical root can be rewritten back under the pinned root, retried with a bounded budget, or rejected under strict policy. |
-| **Parallel tool-lane rendering** | Parallel read-only tool groups are projected into stable lane rows in the timeline so summary mode stays readable. |
+| **Context overflow retry**        | Context-capacity errors trigger compaction plus retry instead of immediate hard failure when the model context window is exceeded.                                                                                                                                                                                                                      |
+| **Workspace alias repair**        | Absolute alias paths such as `/workspace/...` can be remapped into the active workspace for file and directory tools, or blocked via `strict_fail`.                                                                                                                                                                                                     |
+| **Pinned task-root repair**       | Relative paths that drift outside the task's canonical root can be rewritten back under the pinned root, retried with a bounded budget, or rejected under strict policy.                                                                                                                                                                                |
+| **Parallel tool-lane rendering**  | Parallel read-only tool groups are projected into stable lane rows in the timeline so summary mode stays readable.                                                                                                                                                                                                                                      |
 
 ---
 
@@ -524,15 +526,16 @@ Access from **Settings** > **Skills** > **Skill Store**. Users can start with bu
 
 Organization-level policy controls for managing plugin packs, connectors, and agents across teams.
 
-| Policy Area | Capabilities |
-|-------------|-------------|
-| **Pack policies** | Allow, block, or require specific packs by ID. Whitelist mode restricts to approved packs only. |
-| **Connector policies** | Block specific MCP connectors |
-| **Agent policies** | Set max heartbeat frequency (min 60s) and max concurrent agents per workspace |
-| **Installation controls** | Toggle custom pack creation, Git-based install, URL-based install |
-| **Organization directory** | Distribute admin-managed packs from a shared directory to all users |
+| Policy Area                | Capabilities                                                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Pack policies**          | Allow, block, or require specific packs by ID. Whitelist mode restricts to approved packs only. |
+| **Connector policies**     | Block specific MCP connectors                                                                   |
+| **Agent policies**         | Set max heartbeat frequency (min 60s) and max concurrent agents per workspace                   |
+| **Installation controls**  | Toggle custom pack creation, Git-based install, URL-based install                               |
+| **Organization directory** | Distribute admin-managed packs from a shared directory to all users                             |
 
 **Policy enforcement:**
+
 - Blocked packs appear disabled in the Customize panel and cannot be enabled
 - Required packs cannot be disabled by users
 - Installation policies block scaffold, Git install, and URL install at the handler level
@@ -546,18 +549,18 @@ Access from **Settings** > **Admin Policies** (Power density mode). See [Admin P
 
 Talk to your AI assistant with voice input and audio responses.
 
-| Feature | Description |
-|---------|-------------|
-| **Text-to-Speech** | ElevenLabs (premium), OpenAI TTS, or local Web Speech API |
-| **Speech-to-Text** | OpenAI Whisper for accurate transcription |
-| **Multiple Voices** | ElevenLabs voices or OpenAI voices (alloy, echo, fable, onyx, nova, shimmer) |
-| **Outbound Phone Calls** | Initiate calls via ElevenLabs Agents |
+| Feature                  | Description                                                                  |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| **Text-to-Speech**       | ElevenLabs (premium), OpenAI TTS, or local Web Speech API                    |
+| **Speech-to-Text**       | OpenAI Whisper for accurate transcription                                    |
+| **Multiple Voices**      | ElevenLabs voices or OpenAI voices (alloy, echo, fable, onyx, nova, shimmer) |
+| **Outbound Phone Calls** | Initiate calls via ElevenLabs Agents                                         |
 
-| Provider | TTS | STT | Cost |
-|----------|-----|-----|------|
-| **ElevenLabs** | Yes (premium) | — | Pay-per-character |
-| **OpenAI** | Yes | Yes (Whisper) | Pay-per-token |
-| **Local** | Yes (Web Speech) | Coming soon | Free |
+| Provider       | TTS              | STT           | Cost              |
+| -------------- | ---------------- | ------------- | ----------------- |
+| **ElevenLabs** | Yes (premium)    | —             | Pay-per-character |
+| **OpenAI**     | Yes              | Yes (Whisper) | Pay-per-token     |
+| **Local**      | Yes (Web Speech) | Coming soon   | Free              |
 
 Configure in **Settings** > **Voice**.
 
@@ -565,31 +568,31 @@ Configure in **Settings** > **Voice**.
 
 ## Persistent Memory System
 
-| Feature | Description |
-|---------|-------------|
-| **Curated Hot Memory** | Small prompt-visible memory lane for durable user/workspace facts, constraints, workflow rules, project facts, and active commitments |
-| **Wake-Up Layers** | The runtime exposes memory as `L0 Identity`, `L1 Essential Story`, `L2 Topic Packs`, and `L3 Deep Recall`; only `L0 + L1` are injected into the live prompt by default |
-| **Curated Memory Tools** | `memory_curate` adds/replaces/removes curated entries, and `memory_curated_read` inspects the current hot-memory layer with stable entry IDs for deterministic edits |
-| **Archive Memory** | `memory_save` persists observations, decisions, errors, and insights into the larger searchable archive lane for cross-session recall |
-| **Structured Observations** | Archive memories get inspectable sidecar metadata with title, narrative, facts, concepts, files, tools, source events, privacy state, and deterministic migration status |
-| **Dreaming Memory Curation** | Background Dreaming runs review recent session, observation, and curated-memory evidence, then persist reviewable `dreaming_candidates` for stale archives, corrections, open loops, recurring tasks, constraints, ignored-noise patterns, and curated-memory cleanup |
-| **Progressive Recall Tools** | `memory_search_index`, `memory_timeline`, and `memory_details` let agents search compact metadata first, inspect timeline context second, and fetch full details only for selected IDs |
-| **Durable Runtime Context** | Optional task-scoped runtime recall stores sanitized task messages and source-linked compaction summaries, then exposes read-only `context_grep` and `context_describe` tools for active-task facts after compaction. [Guide](durable-runtime-context.md) |
-| **Checkpoint Capture** | Runtime-native checkpoints are written before compaction, on non-trivial task completion, and every 12 meaningful exchanges, each carrying both a structured summary and a verbatim evidence packet |
-| **Session Recall** | `search_sessions` searches recent transcript spans and optional checkpoints when the agent needs to recall what happened in a prior run |
-| **Verbatim Quote Recall** | `search_quotes` returns exact spans with provenance from transcripts, task messages, imported memories, and indexed workspace markdown when the agent needs “what was actually said?” |
-| **Topic Packs** | `memory_topics_load` loads focused packs from `.cowork/memory/topics`, and `refresh: false` performs a true read-only lookup over existing topic files |
-| **Memory Hub Preview And Inspector** | Memory Hub shows the current `L0/L1` payload, the `L2/L3` layers excluded from default injection, structured observation search, detail/timeline views, token estimates, privacy filters, metadata editing, promotion, redaction, suppression, and explicit metadata rebuild |
-| **Memory Write Governance** | Optional approval modes can stage durable archive, curated, background, and external-provider writes before commit. Pending writes are reviewed in Memory Hub, approvals are atomically claimed as `applying`, and sensitive external-memory payloads are blocked before they can be stored in the queue. [Flow](workspace-memory-flow.md#memory-write-governance) |
-| **Supermemory Provider** | Optional external provider lane with prompt-time profile injection, explicit `supermemory_profile` / `supermemory_search` / `supermemory_remember` / `supermemory_forget` tools, and optional mirroring of non-private `MemoryService.capture(...)` writes |
-| **Privacy Protection** | Auto-detects sensitive patterns (API keys, passwords, tokens) |
-| **Unified Search** | `search_memories` searches archive memory plus indexed `.cowork/` markdown with hybrid semantic + BM25 ranking |
-| **LLM Compression** | Summarizes observations for ~10x token efficiency |
-| **Prompt Defaults** | `L0 Identity` and `L1 Essential Story` are injected by default; archive injection is off by default; `L2/L3` recall stays explicit and tool-driven |
-| **Temporal Knowledge Graph** | Relationships can carry `valid_from` / `valid_to`, `kg_invalidate_edge` closes an active fact without deleting history, and historical reads can opt into `as_of` |
-| **ChatGPT History Import** | Import your full ChatGPT conversation history to reduce cold start. Imported content stays local in SQLite and uses memory privacy filtering; selected sensitive settings/fields are encrypted separately. [Details below](#chatgpt-history-import) |
-| **Per-Workspace Settings** | Enable/disable, privacy modes, retention policies |
-| **Optional External Memory Provider** | Supermemory can be enabled from Memory Hub for prompt-time profile injection, explicit external memory tools, and optional mirroring of non-private local memory captures. [Guide](supermemory.md) |
+| Feature                               | Description                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Curated Hot Memory**                | Small prompt-visible memory lane for durable user/workspace facts, constraints, workflow rules, project facts, and active commitments                                                                                                                                                                                                                              |
+| **Wake-Up Layers**                    | The runtime exposes memory as `L0 Identity`, `L1 Essential Story`, `L2 Topic Packs`, and `L3 Deep Recall`; only `L0 + L1` are injected into the live prompt by default                                                                                                                                                                                             |
+| **Curated Memory Tools**              | `memory_curate` adds/replaces/removes curated entries, and `memory_curated_read` inspects the current hot-memory layer with stable entry IDs for deterministic edits                                                                                                                                                                                               |
+| **Archive Memory**                    | `memory_save` persists observations, decisions, errors, and insights into the larger searchable archive lane for cross-session recall                                                                                                                                                                                                                              |
+| **Structured Observations**           | Archive memories get inspectable sidecar metadata with title, narrative, facts, concepts, files, tools, source events, privacy state, and deterministic migration status                                                                                                                                                                                           |
+| **Dreaming Memory Curation**          | Background Dreaming runs review recent session, observation, and curated-memory evidence, then persist reviewable `dreaming_candidates` for stale archives, corrections, open loops, recurring tasks, constraints, ignored-noise patterns, and curated-memory cleanup                                                                                              |
+| **Progressive Recall Tools**          | `memory_search_index`, `memory_timeline`, and `memory_details` let agents search compact metadata first, inspect timeline context second, and fetch full details only for selected IDs                                                                                                                                                                             |
+| **Durable Runtime Context**           | Optional task-scoped runtime recall stores sanitized task messages and source-linked compaction summaries, then exposes read-only `context_grep` and `context_describe` tools for active-task facts after compaction. [Guide](durable-runtime-context.md)                                                                                                          |
+| **Checkpoint Capture**                | Runtime-native checkpoints are written before compaction, on non-trivial task completion, and every 12 meaningful exchanges, each carrying both a structured summary and a verbatim evidence packet                                                                                                                                                                |
+| **Session Recall**                    | `search_sessions` searches recent transcript spans and optional checkpoints when the agent needs to recall what happened in a prior run                                                                                                                                                                                                                            |
+| **Verbatim Quote Recall**             | `search_quotes` returns exact spans with provenance from transcripts, task messages, imported memories, and indexed workspace markdown when the agent needs “what was actually said?”                                                                                                                                                                              |
+| **Topic Packs**                       | `memory_topics_load` loads focused packs from `.cowork/memory/topics`, and `refresh: false` performs a true read-only lookup over existing topic files                                                                                                                                                                                                             |
+| **Memory Hub Preview And Inspector**  | Memory Hub shows the current `L0/L1` payload, the `L2/L3` layers excluded from default injection, structured observation search, detail/timeline views, token estimates, privacy filters, metadata editing, promotion, redaction, suppression, and explicit metadata rebuild                                                                                       |
+| **Memory Write Governance**           | Optional approval modes can stage durable archive, curated, background, and external-provider writes before commit. Pending writes are reviewed in Memory Hub, approvals are atomically claimed as `applying`, and sensitive external-memory payloads are blocked before they can be stored in the queue. [Flow](workspace-memory-flow.md#memory-write-governance) |
+| **Supermemory Provider**              | Optional external provider lane with prompt-time profile injection, explicit `supermemory_profile` / `supermemory_search` / `supermemory_remember` / `supermemory_forget` tools, and optional mirroring of non-private `MemoryService.capture(...)` writes                                                                                                         |
+| **Privacy Protection**                | Auto-detects sensitive patterns (API keys, passwords, tokens)                                                                                                                                                                                                                                                                                                      |
+| **Unified Search**                    | `search_memories` searches archive memory plus indexed `.cowork/` markdown with hybrid semantic + BM25 ranking                                                                                                                                                                                                                                                     |
+| **LLM Compression**                   | Summarizes observations for ~10x token efficiency                                                                                                                                                                                                                                                                                                                  |
+| **Prompt Defaults**                   | `L0 Identity` and `L1 Essential Story` are injected by default; archive injection is off by default; `L2/L3` recall stays explicit and tool-driven                                                                                                                                                                                                                 |
+| **Temporal Knowledge Graph**          | Relationships can carry `valid_from` / `valid_to`, `kg_invalidate_edge` closes an active fact without deleting history, and historical reads can opt into `as_of`                                                                                                                                                                                                  |
+| **ChatGPT History Import**            | Import your full ChatGPT conversation history to reduce cold start. Imported content stays local in SQLite and uses memory privacy filtering; selected sensitive settings/fields are encrypted separately. [Details below](#chatgpt-history-import)                                                                                                                |
+| **Per-Workspace Settings**            | Enable/disable, privacy modes, retention policies                                                                                                                                                                                                                                                                                                                  |
+| **Optional External Memory Provider** | Supermemory can be enabled from Memory Hub for prompt-time profile injection, explicit external memory tools, and optional mirroring of non-private local memory captures. [Guide](supermemory.md)                                                                                                                                                                 |
 
 **Privacy Modes:** Normal (auto-detect sensitive data), Strict (all private), Disabled (no capture).
 
@@ -613,12 +616,12 @@ Import your full ChatGPT conversation history into CoWork OS's memory system. In
 
 ### What Gets Imported
 
-| Data | How It's Used |
-|------|---------------|
-| **Your messages** | Stored as observations — reveals your interests, projects, preferences, and communication style |
+| Data                    | How It's Used                                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| **Your messages**       | Stored as observations — reveals your interests, projects, preferences, and communication style     |
 | **Assistant responses** | Summarized and stored as insights — captures decisions, recommendations, and solutions you received |
-| **Conversation titles** | Indexed for semantic search — helps match relevant past context to new tasks |
-| **Timestamps** | Preserved for time-based relevance ranking — recent conversations weighted higher |
+| **Conversation titles** | Indexed for semantic search — helps match relevant past context to new tasks                        |
+| **Timestamps**          | Preserved for time-based relevance ranking — recent conversations weighted higher                   |
 
 ### Security & Privacy
 
@@ -638,15 +641,16 @@ Most AI assistants start with zero context about you. Every new tool means re-ex
 
 CoWork OS still keeps a multi-layered learning stack under the reflective loop. These services improve recall, personalization, and future evidence quality across sessions.
 
-| Layer | Service | What It Learns |
-|-------|---------|----------------|
-| **Task Patterns** | PlaybookService | Successful approaches, failure categories, error recovery strategies |
-| **Core Memory** | MemoryService | Observations, decisions, insights with hybrid semantic + BM25 search |
-| **User Profile** | UserProfileService | Name, preferences, location, goals, constraints |
-| **Relationship** | RelationshipMemoryService | 5-layer context: identity, preferences, context, history, commitments |
-| **Feedback** | FeedbackService | Rejection patterns, preference corrections, workspace-local MISTAKES.md |
+| Layer             | Service                   | What It Learns                                                          |
+| ----------------- | ------------------------- | ----------------------------------------------------------------------- |
+| **Task Patterns** | PlaybookService           | Successful approaches, failure categories, error recovery strategies    |
+| **Core Memory**   | MemoryService             | Observations, decisions, insights with hybrid semantic + BM25 search    |
+| **User Profile**  | UserProfileService        | Name, preferences, location, goals, constraints                         |
+| **Relationship**  | RelationshipMemoryService | 5-layer context: identity, preferences, context, history, commitments   |
+| **Feedback**      | FeedbackService           | Rejection patterns, preference corrections, workspace-local MISTAKES.md |
 
 **Key mechanisms:**
+
 - **Error classification**: 7 categories for targeted recovery strategies
 - **Confidence decay**: older playbook entries receive lower relevance scores (30d: 0.8x, 90d: 0.5x)
 - **Reinforcement**: successful patterns are boosted via reinforcement memories
@@ -660,18 +664,19 @@ These layers feed `Workflow Intelligence` and the normal task runtime. Dreaming 
 
 A set of connected subsystems that make improvement visible and measurable over time.
 
-| Subsystem | Purpose |
-|-----------|---------|
-| **Layered Memory Runtime** | Uses explicit wake-up layers: `<cowork_hot_memory>` for `L0 Identity`, `<cowork_structured_memory>` for `L1 Essential Story`, and tool-driven `L2/L3` recall through `memory_topics_load`, `search_sessions`, `search_memories`, and `search_quotes`. |
+| Subsystem                         | Purpose                                                                                                                                                                                                                                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Layered Memory Runtime**        | Uses explicit wake-up layers: `<cowork_hot_memory>` for `L0 Identity`, `<cowork_structured_memory>` for `L1 Essential Story`, and tool-driven `L2/L3` recall through `memory_topics_load`, `search_sessions`, `search_memories`, and `search_quotes`.                                      |
 | **Retry-Aware Recovery Guidance** | When execution retries or resumes, injects retry count, retry reason/classification, pending verification items, and recent session evidence so the agent keeps moving from the last good state instead of restarting blindly. Planning retries can also include compact playbook context. |
-| **Adaptive Style Engine** | Observes message length, emoji usage, technical vocabulary, and structured feedback to gradually shift personality settings (response length, emoji usage, explanation depth). Rate-limited to a configurable number of level-shifts per week. |
-| **Playbook-to-Skill Promotion** | When a playbook pattern is reinforced 3+ times, auto-generates a `skill_proposal` for admin review. No skill is created until explicitly approved. |
-| **Channel Persona Adapter** | Applies channel-appropriate communication directives (Slack = terse/structured, email = formal/greeting+sign-off, WhatsApp = short/emoji, etc.) on top of the core persona without replacing it. |
-| **Evolution Metrics** | Computes 5 on-demand metrics: Correction Rate, Style Adaptations, Knowledge Graph growth, Task Success Rate, and Style Alignment. Produces an overall 0–100 Evolution Score. Surfaced in the Daily Briefing. |
-| **Daily Operational Log** | `DailyLogService` manages optional per-day raw logs under `.cowork/memory/daily/<YYYY-MM-DD>.md`. Raw logs are never injected directly into prompts. |
-| **Daily Log Summarizer** | Reads pre-written summary files from `.cowork/memory/summaries/<YYYY-MM-DD>.md`, applies recency decay, and feeds ranked summaries into the structured-memory lane. |
+| **Adaptive Style Engine**         | Observes message length, emoji usage, technical vocabulary, and structured feedback to gradually shift personality settings (response length, emoji usage, explanation depth). Rate-limited to a configurable number of level-shifts per week.                                             |
+| **Playbook-to-Skill Promotion**   | When a playbook pattern is reinforced 3+ times, auto-generates a `skill_proposal` for admin review. No skill is created until explicitly approved.                                                                                                                                         |
+| **Channel Persona Adapter**       | Applies channel-appropriate communication directives (Slack = terse/structured, email = formal/greeting+sign-off, WhatsApp = short/emoji, etc.) on top of the core persona without replacing it.                                                                                           |
+| **Evolution Metrics**             | Computes 5 on-demand metrics: Correction Rate, Style Adaptations, Knowledge Graph growth, Task Success Rate, and Style Alignment. Produces an overall 0–100 Evolution Score. Surfaced in the Daily Briefing.                                                                               |
+| **Daily Operational Log**         | `DailyLogService` manages optional per-day raw logs under `.cowork/memory/daily/<YYYY-MM-DD>.md`. Raw logs are never injected directly into prompts.                                                                                                                                       |
+| **Daily Log Summarizer**          | Reads pre-written summary files from `.cowork/memory/summaries/<YYYY-MM-DD>.md`, applies recency decay, and feeds ranked summaries into the structured-memory lane.                                                                                                                        |
 
 **Behavior Adaptation controls** (Settings > Guardrails > Behavior Adaptation):
+
 - **Adaptive Style** toggle — enable/disable style learning (off by default)
 - **Max drift per week** — maximum one-level style shifts per 7-day window (default: 1)
 - **Reset learned style** — clears all accumulated style adaptations
@@ -685,13 +690,13 @@ See [Evolving Agent Intelligence](evolving-agent-intelligence.md) and [Behavior 
 
 CoWork OS now exposes the learning loop as a visible operator surface instead of leaving it buried inside background services.
 
-| Surface | What users see |
-|---------|----------------|
+| Surface                       | What users see                                                                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Task learning progression** | A standardized post-task learning card showing memory capture, playbook reinforcement, skill proposal state, evidence links, and next action. The same event stream also feeds activity feeds and Mission Control task details. |
-| **Unified recall** | One “search everything” surface across tasks, messages, files, workspace notes, memory entries, and knowledge-graph context, with shared ranking/dedup logic for UI and prompt injection. |
-| **Persistent shell sessions** | Long-lived shell state per task/workspace with retained cwd, env deltas, aliases, reset controls, and one-shot fallback for incompatible commands. |
-| **Model routing visibility** | Live active provider/model, routing reason, fallback chain, and retry/fallback state in the task UI and settings surfaces. |
-| **Applied skills visibility** | The task header keeps the canonical request visible and shows applied skills separately, including trigger/reason metadata from runtime events. |
+| **Unified recall**            | One “search everything” surface across tasks, messages, files, workspace notes, memory entries, and knowledge-graph context, with shared ranking/dedup logic for UI and prompt injection.                                       |
+| **Persistent shell sessions** | Long-lived shell state per task/workspace with retained cwd, env deltas, aliases, reset controls, and one-shot fallback for incompatible commands.                                                                              |
+| **Model routing visibility**  | Live active provider/model, routing reason, fallback chain, and retry/fallback state in the task UI and settings surfaces.                                                                                                      |
+| **Applied skills visibility** | The task header keeps the canonical request visible and shows applied skills separately, including trigger/reason metadata from runtime events.                                                                                 |
 
 This layer is intentionally additive. It makes learning and routing legible while preserving the desktop control plane, channels, inbox, devices, and governed automation that define CoWork OS.
 
@@ -703,17 +708,17 @@ See [Operator Runtime Visibility](operator-runtime-visibility.md) for the cross-
 
 SQLite-backed structured entity and relationship memory with full-text search and graph traversal.
 
-| Feature | Description |
-|---------|-------------|
-| **10 built-in entity types** | person, organization, project, technology, concept, file, service, api_endpoint, database_table, environment |
-| **15 built-in edge types** | uses, depends_on, part_of, created_by, maintained_by, deployed_to, and more |
-| **FTS5 search** | Full-text search with BM25 ranking over entity names and descriptions |
-| **Graph traversal** | Iterative BFS up to 3 hops with edge type filtering |
-| **Observations** | Append-only timestamped fact log per entity |
-| **Auto-extraction** | Regex-based entity extraction from completed task results |
-| **Confidence decay** | Auto-extracted entities decay over time (floor: 0.3) |
-| **9 agent tools** | kg_create_entity, kg_update_entity, kg_delete_entity, kg_create_edge, kg_delete_edge, kg_add_observation, kg_search, kg_get_neighbors, kg_get_subgraph |
-| **Context injection** | Relevant entities auto-injected into task system prompts |
+| Feature                      | Description                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **10 built-in entity types** | person, organization, project, technology, concept, file, service, api_endpoint, database_table, environment                                           |
+| **15 built-in edge types**   | uses, depends_on, part_of, created_by, maintained_by, deployed_to, and more                                                                            |
+| **FTS5 search**              | Full-text search with BM25 ranking over entity names and descriptions                                                                                  |
+| **Graph traversal**          | Iterative BFS up to 3 hops with edge type filtering                                                                                                    |
+| **Observations**             | Append-only timestamped fact log per entity                                                                                                            |
+| **Auto-extraction**          | Regex-based entity extraction from completed task results                                                                                              |
+| **Confidence decay**         | Auto-extracted entities decay over time (floor: 0.3)                                                                                                   |
+| **9 agent tools**            | kg_create_entity, kg_update_entity, kg_delete_entity, kg_create_edge, kg_delete_edge, kg_add_observation, kg_search, kg_get_neighbors, kg_get_subgraph |
+| **Context injection**        | Relevant entities auto-injected into task system prompts                                                                                               |
 
 See [Knowledge Graph](knowledge-graph.md) for the full architecture guide.
 
@@ -727,25 +732,25 @@ The workspace kit is contract-driven: every tracked markdown file has a declared
 
 ### Root workspace files
 
-| File | Title | Scope | Parser | Typical use |
-|---|---|---|---|---|
-| `AGENTS.md` | Workspace Rules | `task`, `main-session` | `sectioned` | workspace-wide operating guidance and coordination rules |
-| `MEMORY.md` | Long-Term Memory | `task`, `main-session` | `decision-log` | durable learnings and long-lived constraints |
-| `USER.md` | User Profile | `task`, `main-session` | `kv-lines` | preferences, timezone, communication defaults |
-| `TOOLS.md` | Local Setup Notes | `task`, `main-session` | `sectioned` | environment notes, common commands, local conventions |
-| `IDENTITY.md` | Workspace Identity | `task`, `main-session`, `role` | `kv-lines` | who the agent is and what it owns |
-| `RULES.md` | Operational Rules | `task`, `main-session`, `role`, `company-ops` | `checklist` | must/must-not behavior and approval defaults |
-| `SOUL.md` | Workspace Persona | `task`, `main-session`, `role` | `sectioned` | tone, collaboration style, pushback contract, accountability loop, execution philosophy |
-| `VIBES.md` | Current Operating Mode | `task`, `role` | `sectioned` | what to optimize for right now |
-| `MISTAKES.md` | Recurring Mistakes | `task`, `main-session`, `role` | `decision-log` | recurring failure patterns and corrections |
-| `LORE.md` | Durable Context | `task`, `main-session` | `decision-log` | important historical decisions and background context |
-| `CROSS_SIGNALS.md` | Cross-Agent Signals | `task`, `main-session`, `company-ops` | `decision-log` | contradictions, risks, amplified opportunities |
-| `PRIORITIES.md` | Current Priorities | `company-ops`, `task` | `checklist` | current priorities, owners, review dates |
-| `COMPANY.md` | Company Context | `company-ops` | `sectioned` | mission, offer, customer, constraints |
-| `OPERATIONS.md` | Operating Model | `company-ops` | `sectioned` | auto-allowed actions, approvals, escalation paths |
-| `KPIS.md` | Business Metrics | `company-ops` | `sectioned` | metrics, targets, and guardrails |
-| `BOOTSTRAP.md` | Bootstrap Instructions | `bootstrap` | `checklist` | one-time onboarding checklist |
-| `HEARTBEAT.md` | Heartbeat Checklist | `heartbeat` | `checklist` | recurring Heartbeat v3 checklist work |
+| File               | Title                  | Scope                                         | Parser         | Typical use                                                                             |
+| ------------------ | ---------------------- | --------------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| `AGENTS.md`        | Workspace Rules        | `task`, `main-session`                        | `sectioned`    | workspace-wide operating guidance and coordination rules                                |
+| `MEMORY.md`        | Long-Term Memory       | `task`, `main-session`                        | `decision-log` | durable learnings and long-lived constraints                                            |
+| `USER.md`          | User Profile           | `task`, `main-session`                        | `kv-lines`     | preferences, timezone, communication defaults                                           |
+| `TOOLS.md`         | Local Setup Notes      | `task`, `main-session`                        | `sectioned`    | environment notes, common commands, local conventions                                   |
+| `IDENTITY.md`      | Workspace Identity     | `task`, `main-session`, `role`                | `kv-lines`     | who the agent is and what it owns                                                       |
+| `RULES.md`         | Operational Rules      | `task`, `main-session`, `role`, `company-ops` | `checklist`    | must/must-not behavior and approval defaults                                            |
+| `SOUL.md`          | Workspace Persona      | `task`, `main-session`, `role`                | `sectioned`    | tone, collaboration style, pushback contract, accountability loop, execution philosophy |
+| `VIBES.md`         | Current Operating Mode | `task`, `role`                                | `sectioned`    | what to optimize for right now                                                          |
+| `MISTAKES.md`      | Recurring Mistakes     | `task`, `main-session`, `role`                | `decision-log` | recurring failure patterns and corrections                                              |
+| `LORE.md`          | Durable Context        | `task`, `main-session`                        | `decision-log` | important historical decisions and background context                                   |
+| `CROSS_SIGNALS.md` | Cross-Agent Signals    | `task`, `main-session`, `company-ops`         | `decision-log` | contradictions, risks, amplified opportunities                                          |
+| `PRIORITIES.md`    | Current Priorities     | `company-ops`, `task`                         | `checklist`    | current priorities, owners, review dates                                                |
+| `COMPANY.md`       | Company Context        | `company-ops`                                 | `sectioned`    | mission, offer, customer, constraints                                                   |
+| `OPERATIONS.md`    | Operating Model        | `company-ops`                                 | `sectioned`    | auto-allowed actions, approvals, escalation paths                                       |
+| `KPIS.md`          | Business Metrics       | `company-ops`                                 | `sectioned`    | metrics, targets, and guardrails                                                        |
+| `BOOTSTRAP.md`     | Bootstrap Instructions | `bootstrap`                                   | `checklist`    | one-time onboarding checklist                                                           |
+| `HEARTBEAT.md`     | Heartbeat Checklist    | `heartbeat`                                   | `checklist`    | recurring Heartbeat v3 checklist work                                                   |
 
 ### Project and role subdirectories
 
@@ -799,27 +804,27 @@ Configure in **Settings** > **Memory Hub**.
 
 Define per-role personality and operating guidelines in `.cowork/agents/<role-id>/`. These files reuse the same contracts, parser rules, and titles as the root workspace kit, and role/task prompts can combine role files with root workspace files when scopes match.
 
-| File | Title | Purpose |
-|---|---|---|
-| `IDENTITY.md` | Workspace Identity | role identity, ownership boundaries, confirmation rules |
-| `RULES.md` | Operational Rules | role-specific must/must-not behavior and safety defaults |
-| `SOUL.md` | Workspace Persona | collaboration style, tone, pushback contract, accountability loop, execution philosophy |
-| `VIBES.md` | Current Operating Mode | current emphasis, urgency, and optimization target |
+| File          | Title                  | Purpose                                                                                 |
+| ------------- | ---------------------- | --------------------------------------------------------------------------------------- |
+| `IDENTITY.md` | Workspace Identity     | role identity, ownership boundaries, confirmation rules                                 |
+| `RULES.md`    | Operational Rules      | role-specific must/must-not behavior and safety defaults                                |
+| `SOUL.md`     | Workspace Persona      | collaboration style, tone, pushback contract, accountability loop, execution philosophy |
+| `VIBES.md`    | Current Operating Mode | current emphasis, urgency, and optimization target                                      |
 
 ---
 
 ## Agent Teams
 
-| Feature | Description |
-|---------|-------------|
-| **Team Management** | Create and manage teams with multiple agent members |
-| **Persistent Teams** | Mark teams as persistent so they survive across sessions with a default workspace |
-| **Shared Checklists** | Agents share checklist items for coordinated task execution |
-| **Run Tracking** | Track team runs with status, progress, and history |
-| **Collaborative Mode** | Ephemeral teams with real-time thought sharing |
-| **Multitask Command** | One-shot ephemeral team runs with auto-planned independent lanes from `/multitask [N] <task>` |
-| **Multi-LLM Mode** | Dispatch same task to multiple providers with judge-based synthesis |
-| **Collaborative Thoughts** | Real-time thought panel shows agent reasoning as it happens |
+| Feature                    | Description                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| **Team Management**        | Create and manage teams with multiple agent members                                           |
+| **Persistent Teams**       | Mark teams as persistent so they survive across sessions with a default workspace             |
+| **Shared Checklists**      | Agents share checklist items for coordinated task execution                                   |
+| **Run Tracking**           | Track team runs with status, progress, and history                                            |
+| **Collaborative Mode**     | Ephemeral teams with real-time thought sharing                                                |
+| **Multitask Command**      | One-shot ephemeral team runs with auto-planned independent lanes from `/multitask [N] <task>` |
+| **Multi-LLM Mode**         | Dispatch same task to multiple providers with judge-based synthesis                           |
+| **Collaborative Thoughts** | Real-time thought panel shows agent reasoning as it happens                                   |
 
 Configure in **Mission Control** > **Teams**.
 
@@ -834,19 +839,20 @@ Centralized agent orchestration and monitoring dashboard. Access from **Settings
   <br><em>Mission Control shows global runtime queue state, scoped board work, agent status, and operational review.</em>
 </p>
 
-| Panel | Purpose |
-|-------|---------|
-| **Agents** | Heartbeat-enabled agents with status dots, Pulse/Dispatch state, automation-profile-backed cadence, idle/running labels, and manual trigger controls |
+| Panel                    | Purpose                                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Agents**               | Heartbeat-enabled agents with status dots, Pulse/Dispatch state, automation-profile-backed cadence, idle/running labels, and manual trigger controls          |
 | **Global Runtime Queue** | Executor queue summary for tasks currently running or waiting for an execution slot; this matches the chat/right-panel queue and may include other workspaces |
-| **Mission Board** | 5-column tracked-work Kanban board (Inbox → Assigned → In Progress → Review → Done) with drag-and-drop |
-| **Feed & Details** | Real-time activity feed with event type and agent filters, plus task detail view with comments and mentions |
-| **Core Harness** | Runtime traces, failure clusters, evals, experiments, and learnings |
+| **Mission Board**        | 5-column tracked-work Kanban board (Inbox → Assigned → In Progress → Review → Done) with drag-and-drop                                                        |
+| **Feed & Details**       | Real-time activity feed with event type and agent filters, plus task detail view with comments and mentions                                                   |
+| **Core Harness**         | Runtime traces, failure clusters, evals, experiments, and learnings                                                                                           |
 
 **Header controls:** Agent Teams management, Performance Reviews, Standup Report generation, and workspace selector with live stats for Heartbeat agents, global runtime queue, board work, and pending mentions.
 
 All panels update in real-time via event subscriptions — no manual refresh needed.
 
 **Dispatched Agents Progress:** When you mention agents in a task prompt (e.g. `@Security Analyst review this codebase`), the parent task's main window shows a live progress panel with:
+
 - Agent chips showing each dispatched agent's status (working/completed/failed)
 - Phase indicator (Dispatched → Working → Complete)
 - Real-time event stream from all child agent tasks (plans, steps, results)
@@ -864,22 +870,22 @@ Create role-specific AI digital twins from pre-built persona templates. Each twi
 
 ### Templates (10 roles, 5 categories)
 
-| Category | Templates |
-|----------|-----------|
-| **Engineering** | Software Engineer, Hardware Engineer, QA/Test Engineer, DevOps/SRE, Technical Writer |
-| **Management** | Engineering Manager, Technical Director, VP Engineering |
-| **Product** | Product Manager |
-| **Data & Analytics** | Data Scientist / Analyst |
+| Category             | Templates                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| **Engineering**      | Software Engineer, Hardware Engineer, QA/Test Engineer, DevOps/SRE, Technical Writer |
+| **Management**       | Engineering Manager, Technical Director, VP Engineering                              |
+| **Product**          | Product Manager                                                                      |
+| **Data & Analytics** | Data Scientist / Analyst                                                             |
 
 ### What Each Template Includes
 
-| Component | Description |
-|-----------|-------------|
-| **System Prompt** | Role-tailored persona with behavior guidelines |
-| **Capabilities** | Skill tags (code, review, test, analyze, document, etc.) |
-| **Cognitive Offload** | Categorized by mental burden relieved: context switching, status reporting, review prep, decision prep, documentation, dependency tracking |
-| **Recommended Skills** | Pre-mapped skills with required/optional flags |
-| **Autonomy Level** | `specialist` (IC roles) or `lead` (management roles) |
+| Component              | Description                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **System Prompt**      | Role-tailored persona with behavior guidelines                                                                                             |
+| **Capabilities**       | Skill tags (code, review, test, analyze, document, etc.)                                                                                   |
+| **Cognitive Offload**  | Categorized by mental burden relieved: context switching, status reporting, review prep, decision prep, documentation, dependency tracking |
+| **Recommended Skills** | Pre-mapped skills with required/optional flags                                                                                             |
+| **Autonomy Level**     | `specialist` (IC roles) or `lead` (management roles)                                                                                       |
 
 ### Activation Flow
 
@@ -897,12 +903,12 @@ The twin appears in the agents panel as a normal role. If you want it to partici
 
 Dedicated "idea → working prototype" workflow powered by Live Canvas with four phases:
 
-| Phase | Description |
-|-------|-------------|
-| **Concept** | Restate the idea, identify core requirements, choose tech stack |
-| **Plan** | Break down into components, define file structure, outline implementation |
-| **Scaffold** | Generate working code, push to canvas, create checkpoint |
-| **Iterate** | Refine based on feedback, add features, polish UI |
+| Phase        | Description                                                               |
+| ------------ | ------------------------------------------------------------------------- |
+| **Concept**  | Restate the idea, identify core requirements, choose tech stack           |
+| **Plan**     | Break down into components, define file structure, outline implementation |
+| **Scaffold** | Generate working code, push to canvas, create checkpoint                  |
+| **Iterate**  | Refine based on feedback, add features, polish UI                         |
 
 Each phase creates a named checkpoint. You can revert to any phase, diff between phases, and view the full phase timeline. Build Mode is available as a built-in skill (`build-mode`).
 
@@ -914,16 +920,23 @@ See [Live Canvas](live-canvas.md) for the full guide.
 
 Dashboard showing task activity, cost trends, agent efficiency, and productivity patterns. Access from **Settings** > **Usage Insights**.
 
+Usage Insights reads local usage data. **CoWork Pulse** is a separate, explicitly opt-in daily
+aggregate collector with controls in onboarding, **Settings → CoWork Pulse**, and
+`cowork telemetry`. It reports coarse usage to `pulse.coworkosapp.com` without task content.
+The independent update check has no installation identifier. See [CoWork Pulse](cowork-pulse.md)
+for data fields, consent/deletion behavior, metric definitions, and current limitations. This
+analytics feature is also separate from the Heartbeat v3 operator feature called Pulse.
+
 ### Overview
 
 The panel opens with a **hero stats row** showing four key metrics at a glance:
 
-| Stat | Description |
-|------|-------------|
-| **Completed** | Total tasks completed in the selected period |
+| Stat             | Description                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Completed**    | Total tasks completed in the selected period                                                                      |
 | **Success Rate** | Percentage of completed tasks out of total, with a color-coded progress bar (green ≥ 70%, amber ≥ 40%, red < 40%) |
-| **Failed** | Total failed tasks |
-| **Avg Time** | Average completion time across completed tasks |
+| **Failed**       | Total failed tasks                                                                                                |
+| **Avg Time**     | Average completion time across completed tasks                                                                    |
 
 Below the hero row, detailed sections are arranged in a **two-column grid** for information density.
 
@@ -933,16 +946,16 @@ The workspace dropdown at the top lets you filter insights to a single workspace
 
 ### Sections
 
-| Section | Description |
-|---------|-------------|
-| **Cost & Tokens** | Total cost, input/output token counts, cached-token totals, cache-read rate when available, and cost breakdown by model |
-| **Agent Efficiency (AWU)** | Agentic Work Unit metrics — see below |
-| **Activity by Day** | Tasks per day-of-week with peak day indicator |
-| **Activity by Hour** | Hourly task histogram with peak hour indicator |
-| **Top Skills** | Most-used skills ranked by usage count |
-| **Skill Usage by Pack** | Skills grouped by their parent plugin pack with aggregated usage counts and mini bar charts |
-| **Persona Performance** | Per-persona totals, success/failure mix, retry behavior, and cost attribution |
-| **Feedback & Quality** | Feedback satisfaction rate, top rejection reasons, retried-task count, and average attempts |
+| Section                    | Description                                                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Cost & Tokens**          | Total cost, input/output token counts, cached-token totals, cache-read rate when available, and cost breakdown by model |
+| **Agent Efficiency (AWU)** | Agentic Work Unit metrics — see below                                                                                   |
+| **Activity by Day**        | Tasks per day-of-week with peak day indicator                                                                           |
+| **Activity by Hour**       | Hourly task histogram with peak hour indicator                                                                          |
+| **Top Skills**             | Most-used skills ranked by usage count                                                                                  |
+| **Skill Usage by Pack**    | Skills grouped by their parent plugin pack with aggregated usage counts and mini bar charts                             |
+| **Persona Performance**    | Per-persona totals, success/failure mix, retry behavior, and cost attribution                                           |
+| **Feedback & Quality**     | Feedback satisfaction rate, top rejection reasons, retried-task count, and average attempts                             |
 
 ### Agentic Work Units (AWU)
 
@@ -952,12 +965,12 @@ Inspired by [Salesforce's AWU concept](https://www.salesforce.com/agentforce/age
 
 The AWU section shows:
 
-| Metric | Description |
-|--------|-------------|
-| **AWU Count** | Number of completed work units in the period |
-| **Tokens per AWU** | Total tokens consumed ÷ AWU count (lower is more efficient) |
-| **Cost per AWU** | Total cost ÷ AWU count (lower is cheaper) |
-| **AWUs per Dollar** | AWU count ÷ total cost (higher is better ROI) |
+| Metric               | Description                                                                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **AWU Count**        | Number of completed work units in the period                                                                                                   |
+| **Tokens per AWU**   | Total tokens consumed ÷ AWU count (lower is more efficient)                                                                                    |
+| **Cost per AWU**     | Total cost ÷ AWU count (lower is cheaper)                                                                                                      |
+| **AWUs per Dollar**  | AWU count ÷ total cost (higher is better ROI)                                                                                                  |
 | **Efficiency Trend** | Percentage change in tokens/AWU and cost/AWU vs the previous period. A downward arrow (green) means improvement; upward (red) means regression |
 
 The trend comparison uses the same period length — e.g., if you're viewing a 7-day window, it compares against the prior 7 days. The AWU section is hidden when no tasks were completed in the period.
@@ -984,12 +997,12 @@ Configurable as a scheduled task in **Settings** > **Scheduled Tasks** with time
 
 Automatic source attribution for web research. When agents use `web_search` or `web_fetch`, the Citation Engine tracks and deduplicates all referenced URLs, assigning sequential citation indices.
 
-| Feature | Description |
-|---------|-------------|
-| **Auto-tracking** | Intercepts results from `web_search` and `web_fetch` tools |
-| **Deduplication** | Same URL referenced multiple times gets a single [N] index |
+| Feature                     | Description                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| **Auto-tracking**           | Intercepts results from `web_search` and `web_fetch` tools                           |
+| **Deduplication**           | Same URL referenced multiple times gets a single [N] index                           |
 | **System prompt injection** | Formatted citation list injected into LLM context so the agent can reference sources |
-| **Citation panel** | UI panel showing all sources with URL, title, domain, snippet, and access timestamp |
+| **Citation panel**          | UI panel showing all sources with URL, title, domain, snippet, and access timestamp  |
 
 Citations appear inline in agent responses as `[1]`, `[2]`, etc. and link to the source in the Citation Panel.
 
@@ -999,10 +1012,10 @@ Citations appear inline in agent responses as `[1]`, `[2]`, etc. and link to the
 
 Session-scoped note-taking system for agents during long-running tasks.
 
-| Tool | Description |
-|------|-------------|
+| Tool               | Description                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------- |
 | `scratchpad_write` | Write or update notes with key-value pairs (max 100-char keys, 10,000-char values) |
-| `scratchpad_read` | Retrieve all notes or a specific note by key |
+| `scratchpad_read`  | Retrieve all notes or a specific note by key                                       |
 
 Notes persist to `.cowork/scratchpad-{taskId}.json` for crash recovery. The scratchpad is ephemeral per task — useful for agents to track intermediate findings, partial results, and working state during complex multi-step tasks.
 
@@ -1014,13 +1027,13 @@ Notes persist to `.cowork/scratchpad-{taskId}.json` for crash recovery. The scra
 
 Multi-phase task execution for complex workflows. The Workflow Decomposer detects multi-step prompts (using connectives like "then", "after that", "next", "finally") and splits them into sequential phases.
 
-| Feature | Description |
-|---------|-------------|
-| **Auto-detection** | Regex-based decomposition of multi-phase prompts |
-| **5 phase types** | research, create, deliver, analyze, general |
-| **Sequential execution** | Each phase creates a child task; output pipes into the next phase |
-| **LLM fallback** | Complex prompts that resist regex decomposition use LLM-powered splitting |
-| **Pipeline events** | `pipeline_started`, `phase_started`, `phase_completed`, `pipeline_completed` |
+| Feature                  | Description                                                                  |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| **Auto-detection**       | Regex-based decomposition of multi-phase prompts                             |
+| **5 phase types**        | research, create, deliver, analyze, general                                  |
+| **Sequential execution** | Each phase creates a child task; output pipes into the next phase            |
+| **LLM fallback**         | Complex prompts that resist regex decomposition use LLM-powered splitting    |
+| **Pipeline events**      | `pipeline_started`, `phase_started`, `phase_completed`, `pipeline_completed` |
 
 ### Deep Work Mode
 
@@ -1036,12 +1049,12 @@ Extended execution mode for complex tasks that need sustained focus:
 
 Four dedicated agent tools for generating formatted documents from task context:
 
-| Tool | Output | Description |
-|------|--------|-------------|
-| `compile_latex` | PDF + `.tex` source pairing | Compile a workspace `.tex` file with an installed system engine (`tectonic`, `latexmk`, `xelatex`, `lualatex`, or `pdflatex`) and register the PDF with source metadata |
-| `generate_document` | PDF | Generate PDF documents with markdown content and structured sections |
-| `generate_presentation` | PPTX | Generate PowerPoint presentations with multiple slides |
-| `generate_spreadsheet` | XLSX | Generate Excel spreadsheets with multiple sheets and data |
+| Tool                    | Output                      | Description                                                                                                                                                             |
+| ----------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compile_latex`         | PDF + `.tex` source pairing | Compile a workspace `.tex` file with an installed system engine (`tectonic`, `latexmk`, `xelatex`, `lualatex`, or `pdflatex`) and register the PDF with source metadata |
+| `generate_document`     | PDF                         | Generate PDF documents with markdown content and structured sections                                                                                                    |
+| `generate_presentation` | PPTX                        | Generate PowerPoint presentations with multiple slides                                                                                                                  |
+| `generate_spreadsheet`  | XLSX                        | Generate Excel spreadsheets with multiple sheets and data                                                                                                               |
 
 These tools complement the existing document skills (spreadsheet.ts, document.ts, presentation.ts) by providing direct LLM-callable tool interfaces. Generated files are registered as task artifacts with proper MIME types.
 
@@ -1063,15 +1076,15 @@ Live website testing uses the Browser Workbench instead of the generated web art
 
 Condition-based automation engine that fires actions in response to events.
 
-| Feature | Description |
-|---------|-------------|
-| **Trigger sources** | Channel gateway messages, cron service, webhooks, and MCP connector/resource events |
-| **Action types** | `create_task`, `send_message`, `wake_agent` |
-| **Condition logic** | "all" (AND) evaluation of multiple conditions |
-| **Cooldown** | Configurable cooldown period (default 1 min) to prevent rapid re-firing |
+| Feature                       | Description                                                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger sources**           | Channel gateway messages, cron service, webhooks, and MCP connector/resource events                                          |
+| **Action types**              | `create_task`, `send_message`, `wake_agent`                                                                                  |
+| **Condition logic**           | "all" (AND) evaluation of multiple conditions                                                                                |
+| **Cooldown**                  | Configurable cooldown period (default 1 min) to prevent rapid re-firing                                                      |
 | **Connector content filters** | Optional `serverId`, `connectorId`, and `resourceUri` filters let a trigger subscribe to specific MCP-backed content changes |
-| **Variable substitution** | Event data can be injected into action prompts/titles |
-| **History** | Last 50 fires per trigger stored for audit |
+| **Variable substitution**     | Event data can be injected into action prompts/titles                                                                        |
+| **History**                   | Last 50 fires per trigger stored for audit                                                                                   |
 
 Configure in **Settings** > **Event Triggers**.
 
@@ -1081,16 +1094,16 @@ Configure in **Settings** > **Event Triggers**.
 
 Unified file aggregation service combining local workspace files, task artifacts, and cloud storage into a single searchable interface.
 
-| Feature | Description |
-|---------|-------------|
-| **Multi-source** | Local workspace files, task artifacts, connected cloud storage |
-| **Search** | Filename-based search across all connected sources |
-| **Recent files** | Tracks recently accessed files with timestamps |
-| **MIME detection** | 20+ common formats (PDF, images, docs, sheets, slides, code, etc.) |
-| **Spreadsheet workbench** | Workbook and CSV/TSV task outputs open in a resizable sidebar or fullscreen editable grid with copy/save/zoom and follow-up composer controls; native spreadsheet formats keep external artifact actions |
+| Feature                    | Description                                                                                                                                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Multi-source**           | Local workspace files, task artifacts, connected cloud storage                                                                                                                                                        |
+| **Search**                 | Filename-based search across all connected sources                                                                                                                                                                    |
+| **Recent files**           | Tracks recently accessed files with timestamps                                                                                                                                                                        |
+| **MIME detection**         | 20+ common formats (PDF, images, docs, sheets, slides, code, etc.)                                                                                                                                                    |
+| **Spreadsheet workbench**  | Workbook and CSV/TSV task outputs open in a resizable sidebar or fullscreen editable grid with copy/save/zoom and follow-up composer controls; native spreadsheet formats keep external artifact actions              |
 | **Presentation workbench** | PPTX decks show artifact cards, sidebar/fullscreen preview, thumbnails, text, speaker notes, fast text-first loading, cached rendered slides, and external open/show actions when opened from task artifacts or Files |
-| **Web page workbench** | Generated HTML/HTM files and built React output open in a resizable sidebar or fullscreen sandboxed iframe preview with browser/folder/copy actions and follow-up refresh after completion |
-| **Source/rendered pairs** | LaTeX `.tex` files compiled through `compile_latex` are paired with their generated PDFs in task artifact surfaces |
+| **Web page workbench**     | Generated HTML/HTM files and built React output open in a resizable sidebar or fullscreen sandboxed iframe preview with browser/folder/copy actions and follow-up refresh after completion                            |
+| **Source/rendered pairs**  | LaTeX `.tex` files compiled through `compile_latex` are paired with their generated PDFs in task artifact surfaces                                                                                                    |
 
 Access from the **File Hub** panel in the sidebar.
 
@@ -1100,14 +1113,14 @@ Access from the **File Hub** panel in the sidebar.
 
 Serve CoWork OS as a web application accessible from any browser on the network.
 
-| Feature | Description |
-|---------|-------------|
-| **HTTP server** | Configurable host/port with static file serving |
-| **Authentication** | Bearer token with timing-safe comparison |
-| **CORS** | Origin whitelisting for cross-origin access |
-| **REST API** | Maps endpoints to IPC channels (tasks, workspaces, accounts, briefings, suggestions) |
-| **WebSocket** | Real-time event streaming for connected clients |
-| **Health check** | Unauthenticated `/api/health` endpoint for monitoring |
+| Feature            | Description                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| **HTTP server**    | Configurable host/port with static file serving                                      |
+| **Authentication** | Bearer token with timing-safe comparison                                             |
+| **CORS**           | Origin whitelisting for cross-origin access                                          |
+| **REST API**       | Maps endpoints to IPC channels (tasks, workspaces, accounts, briefings, suggestions) |
+| **WebSocket**      | Real-time event streaming for connected clients                                      |
+| **Health check**   | Unauthenticated `/api/health` endpoint for monitoring                                |
 
 Configure in **Settings** > **Web Access**.
 
@@ -1117,20 +1130,20 @@ Configure in **Settings** > **Web Access**.
 
 Multi-provider image and PDF analysis with caching and optimization.
 
-| Tool | Description |
-|------|-------------|
-| `analyze_image` | Analyze any image with the active non-Gemini vision LLM (OpenAI, Anthropic, Azure OpenAI, Bedrock) |
-| `read_pdf_visual` | Convert PDF pages to images and analyze layout/design |
-| `parse_document` | Extract text from PDFs and other document formats; this is the preferred path for ordinary PDF summaries, Q&A, extraction, comparison, and transformation |
+| Tool              | Description                                                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `analyze_image`   | Analyze any image with the active non-Gemini vision LLM (OpenAI, Anthropic, Azure OpenAI, Bedrock)                                                        |
+| `read_pdf_visual` | Convert PDF pages to images and analyze layout/design                                                                                                     |
+| `parse_document`  | Extract text from PDFs and other document formats; this is the preferred path for ordinary PDF summaries, Q&A, extraction, comparison, and transformation |
 
-| Feature | Description |
-|---------|-------------|
-| **Result caching** | SHA1-keyed cache (128 entries) prevents redundant vision API calls |
-| **Auto-downscaling** | Images >2MB automatically downscaled to 1600×1200 at 80% quality |
-| **Active-provider routing** | Image analysis uses the active non-Gemini image-capable provider; otherwise the user is asked to switch models |
-| **Retry logic** | Transient errors (429, 5xx, timeouts) trigger single retry |
-| **PDF text reading** | Uploaded PDFs use compact prompt excerpts first, then `parse_document` for deeper content; normal text PDFs use embedded text, while weak/scanned PDFs can fall back to OCR-aware extraction |
-| **PDF visual conversion** | `read_pdf_visual` uses `pdftoppm` to convert PDF pages to PNG for layout/design/page-appearance analysis |
+| Feature                     | Description                                                                                                                                                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Result caching**          | SHA1-keyed cache (128 entries) prevents redundant vision API calls                                                                                                                           |
+| **Auto-downscaling**        | Images >2MB automatically downscaled to 1600×1200 at 80% quality                                                                                                                             |
+| **Active-provider routing** | Image analysis uses the active non-Gemini image-capable provider; otherwise the user is asked to switch models                                                                               |
+| **Retry logic**             | Transient errors (429, 5xx, timeouts) trigger single retry                                                                                                                                   |
+| **PDF text reading**        | Uploaded PDFs use compact prompt excerpts first, then `parse_document` for deeper content; normal text PDFs use embedded text, while weak/scanned PDFs can fall back to OCR-aware extraction |
+| **PDF visual conversion**   | `read_pdf_visual` uses `pdftoppm` to convert PDF pages to PNG for layout/design/page-appearance analysis                                                                                     |
 
 ---
 
@@ -1138,11 +1151,11 @@ Multi-provider image and PDF analysis with caching and optimization.
 
 Three-tier UI density controlling which features and settings are visible:
 
-| Tier | Description |
-|------|-------------|
-| **Focused** | Simplified view — hides Connected Tools, Remote Access, Extensions, Infrastructure. Shows only core settings. |
-| **Standard** | Default view — all settings visible (default) |
-| **Power** | Full power-user view with all settings and advanced options |
+| Tier         | Description                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------- |
+| **Focused**  | Simplified view — hides Connected Tools, Remote Access, Extensions, Infrastructure. Shows only core settings. |
+| **Standard** | Default view — all settings visible (default)                                                                 |
+| **Power**    | Full power-user view with all settings and advanced options                                                   |
 
 Configure in **Settings** > **Appearance**.
 
@@ -1163,15 +1176,15 @@ When disabled, CoWork does not render those cards and skips their home-screen da
 
 ## Configurable Guardrails
 
-| Guardrail | Default | Range |
-|-----------|---------|-------|
-| **Token Budget** | 100,000 | 1K - 10M |
-| **Cost Budget** | $1.00 (disabled) | $0.01 - $100 |
-| **Iteration Limit** | 50 | 5 - 500 |
-| **Dangerous Command Blocking** | Enabled | On/Off + custom |
-| **Auto-Approve Trusted Commands** | Disabled | On/Off + patterns |
-| **File Size Limit** | 50 MB | 1 - 500 MB |
-| **Domain Rules / Allowlist** | Profile-controlled | Legacy On/Off + domains and named-profile rules |
+| Guardrail                         | Default            | Range                                           |
+| --------------------------------- | ------------------ | ----------------------------------------------- |
+| **Token Budget**                  | 100,000            | 1K - 10M                                        |
+| **Cost Budget**                   | $1.00 (disabled)   | $0.01 - $100                                    |
+| **Iteration Limit**               | 50                 | 5 - 500                                         |
+| **Dangerous Command Blocking**    | Enabled            | On/Off + custom                                 |
+| **Auto-Approve Trusted Commands** | Disabled           | On/Off + patterns                               |
+| **File Size Limit**               | 50 MB              | 1 - 500 MB                                      |
+| **Domain Rules / Allowlist**      | Profile-controlled | Legacy On/Off + domains and named-profile rules |
 
 ---
 
@@ -1179,14 +1192,14 @@ When disabled, CoWork does not render those cards and skips their home-screen da
 
 Built-in tools for efficient code navigation and editing:
 
-| Tool | Description |
-|------|-------------|
-| **glob** | Fast pattern-based file search (e.g., `**/*.ts`) |
-| **grep** | Regex content search across files with context lines |
-| **edit_file** | Surgical file editing with find-and-replace |
-| **git_commit** | Commit changes in the workspace (or worktree) |
-| **git_diff** | View staged/unstaged changes |
-| **git_branch** | List, create, or switch branches |
+| Tool           | Description                                          |
+| -------------- | ---------------------------------------------------- |
+| **glob**       | Fast pattern-based file search (e.g., `**/*.ts`)     |
+| **grep**       | Regex content search across files with context lines |
+| **edit_file**  | Surgical file editing with find-and-replace          |
+| **git_commit** | Commit changes in the workspace (or worktree)        |
+| **git_diff**   | View staged/unstaged changes                         |
+| **git_branch** | List, create, or switch branches                     |
 
 ---
 
@@ -1236,14 +1249,14 @@ Use `web_fetch` for reading a known static URL. Use the browser workbench for in
 
 Multi-provider web search with automatic fallback. DuckDuckGo is built-in and requires no API key, so `web_search` works out of the box for every user.
 
-| Provider | Types | API Key | Notes |
-|----------|-------|---------|-------|
-| **DuckDuckGo** | Web | Not required | Built-in free fallback, always last in chain |
-| **Tavily** | Web, News | Required | AI-optimized results (recommended) |
-| **Exa** | Web, News | Required | Semantic search and research-heavy retrieval |
-| **Brave Search** | Web, News, Images | Required | Privacy-focused |
-| **SerpAPI** | Web, News, Images | Required | Google results |
-| **Google Custom Search** | Web, Images | Required | Direct Google integration |
+| Provider                 | Types             | API Key      | Notes                                        |
+| ------------------------ | ----------------- | ------------ | -------------------------------------------- |
+| **DuckDuckGo**           | Web               | Not required | Built-in free fallback, always last in chain |
+| **Tavily**               | Web, News         | Required     | AI-optimized results (recommended)           |
+| **Exa**                  | Web, News         | Required     | Semantic search and research-heavy retrieval |
+| **Brave Search**         | Web, News, Images | Required     | Privacy-focused                              |
+| **SerpAPI**              | Web, News, Images | Required     | Google results                               |
+| **Google Custom Search** | Web, Images       | Required     | Direct Google integration                    |
 
 Paid providers are tried first in configured order. DuckDuckGo is automatically appended as the last-resort fallback. Includes retry with exponential backoff, provider cooldowns, and explicit primary/fallback ordering in Settings.
 
@@ -1262,50 +1275,50 @@ The agent auto-selects the appropriate tier: `web_search` for discovering inform
 
 Browser tools first target the active visible browser workbench for the selected task. If no renderer/webview is available, or the task explicitly requests `force_headless`, `profile`, `browser_channel`, or `debugger_url`, the tools fall back to native Playwright or explicit external CDP. The legacy `headless` flag is compatibility-only and does not override visible browser workbench routing for normal site testing.
 
-| Tool | Description |
-|------|-------------|
-| `browser_attach` | Attach to existing Chrome/Edge via Chrome DevTools Protocol after explicit real-browser consent. See [Chrome DevTools attach](#chrome-devtools-attach-mode) below. |
-| `browser_act_batch` | Execute batched actions (click, fill, type, press, wait, scroll) in sequence with optional delays |
-| `browser_navigate` | Navigate to URL with configurable wait states; opens the visible in-app browser workbench by default |
-| `browser_snapshot` | Return compact accessibility nodes with short-lived refs, focus state, console summary, and network summary |
-| `browser_screenshot` | Capture viewport, full-page, or supported element/ref screenshots |
-| `browser_get_content` | Extract text, links, and form data from current page |
-| `browser_click` | Click by Browser V2 ref or legacy selector |
-| `browser_hover` | Move pointer over an element by ref or selector |
-| `browser_drag` | Drag from one snapshot ref to another |
-| `browser_fill` | Fill form fields by ref or selector |
-| `browser_type` | Type text character-by-character by ref or selector |
-| `browser_press` | Press keyboard keys (Enter, Tab, Escape, shortcuts) |
-| `browser_wait` | Wait for element visibility with timeout |
-| `browser_scroll` | Scroll page (up, down, top, bottom) |
-| `browser_select` | Select dropdown options |
-| `browser_get_text` | Extract text from a specific ref or selector |
-| `browser_upload_file` | Upload a workspace-readable file into a file input |
-| `browser_handle_dialog` | Accept or dismiss the latest JavaScript dialog |
-| `browser_tabs` | List tabs for the active browser session |
-| `browser_switch_tab` | Switch to a tab by tab id |
-| `browser_close_tab` | Close a tab by tab id where supported |
-| `browser_console` | Return recent redacted console messages |
-| `browser_network` | Return recent redacted network requests, responses, and failures |
-| `browser_downloads` | Return recent browser downloads |
-| `browser_storage` | Return redacted local/session storage for the current page |
-| `browser_emulate` | Set viewport/device emulation and resize the visible workbench for responsive testing |
-| `browser_trace_start` | Start lightweight browser tracing |
-| `browser_trace_stop` | Stop lightweight browser tracing |
-| `browser_evaluate` | Execute JavaScript in browser context |
-| `browser_back` | Navigate browser history back |
-| `browser_forward` | Navigate browser history forward |
-| `browser_reload` | Reload the current page |
-| `browser_save_pdf` | Save page as PDF file |
-| `browser_close` | Close browser session and free resources |
+| Tool                    | Description                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `browser_attach`        | Attach to existing Chrome/Edge via Chrome DevTools Protocol after explicit real-browser consent. See [Chrome DevTools attach](#chrome-devtools-attach-mode) below. |
+| `browser_act_batch`     | Execute batched actions (click, fill, type, press, wait, scroll) in sequence with optional delays                                                                  |
+| `browser_navigate`      | Navigate to URL with configurable wait states; opens the visible in-app browser workbench by default                                                               |
+| `browser_snapshot`      | Return compact accessibility nodes with short-lived refs, focus state, console summary, and network summary                                                        |
+| `browser_screenshot`    | Capture viewport, full-page, or supported element/ref screenshots                                                                                                  |
+| `browser_get_content`   | Extract text, links, and form data from current page                                                                                                               |
+| `browser_click`         | Click by Browser V2 ref or legacy selector                                                                                                                         |
+| `browser_hover`         | Move pointer over an element by ref or selector                                                                                                                    |
+| `browser_drag`          | Drag from one snapshot ref to another                                                                                                                              |
+| `browser_fill`          | Fill form fields by ref or selector                                                                                                                                |
+| `browser_type`          | Type text character-by-character by ref or selector                                                                                                                |
+| `browser_press`         | Press keyboard keys (Enter, Tab, Escape, shortcuts)                                                                                                                |
+| `browser_wait`          | Wait for element visibility with timeout                                                                                                                           |
+| `browser_scroll`        | Scroll page (up, down, top, bottom)                                                                                                                                |
+| `browser_select`        | Select dropdown options                                                                                                                                            |
+| `browser_get_text`      | Extract text from a specific ref or selector                                                                                                                       |
+| `browser_upload_file`   | Upload a workspace-readable file into a file input                                                                                                                 |
+| `browser_handle_dialog` | Accept or dismiss the latest JavaScript dialog                                                                                                                     |
+| `browser_tabs`          | List tabs for the active browser session                                                                                                                           |
+| `browser_switch_tab`    | Switch to a tab by tab id                                                                                                                                          |
+| `browser_close_tab`     | Close a tab by tab id where supported                                                                                                                              |
+| `browser_console`       | Return recent redacted console messages                                                                                                                            |
+| `browser_network`       | Return recent redacted network requests, responses, and failures                                                                                                   |
+| `browser_downloads`     | Return recent browser downloads                                                                                                                                    |
+| `browser_storage`       | Return redacted local/session storage for the current page                                                                                                         |
+| `browser_emulate`       | Set viewport/device emulation and resize the visible workbench for responsive testing                                                                              |
+| `browser_trace_start`   | Start lightweight browser tracing                                                                                                                                  |
+| `browser_trace_stop`    | Stop lightweight browser tracing                                                                                                                                   |
+| `browser_evaluate`      | Execute JavaScript in browser context                                                                                                                              |
+| `browser_back`          | Navigate browser history back                                                                                                                                      |
+| `browser_forward`       | Navigate browser history forward                                                                                                                                   |
+| `browser_reload`        | Reload the current page                                                                                                                                            |
+| `browser_save_pdf`      | Save page as PDF file                                                                                                                                              |
+| `browser_close`         | Close browser session and free resources                                                                                                                           |
 
 ### Web Fetch Tools (2 tools)
 
 Lightweight HTTP without browser overhead — preferred for reading known URLs.
 
-| Tool | Description |
-|------|-------------|
-| `web_fetch` | Fetch URL → HTML-to-Markdown conversion with optional CSS selector filtering |
+| Tool           | Description                                                                               |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `web_fetch`    | Fetch URL → HTML-to-Markdown conversion with optional CSS selector filtering              |
 | `http_request` | Raw HTTP requests (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) with custom headers/body |
 
 ### Chrome DevTools Attach Mode
@@ -1328,51 +1341,51 @@ See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-
 
 ### Browser Features
 
-| Feature | Description |
-|---------|-------------|
-| **Multi-Browser** | Chromium (bundled), Chrome (system), Brave (auto-discovered) |
-| **Visible Workbench** | Default Browser V2 surface inside the task sidebar/fullscreen workbench |
-| **Workspace Browser Profile** | Embedded webview uses a persistent workspace partition isolated from system Chrome |
-| **Accessibility Snapshot Refs** | `browser_snapshot` returns compact nodes with short-lived refs used by click/fill/type/read/hover/drag/upload actions |
-| **CDP-Backed Workbench Actions** | Main-process automation controls the renderer-owned webview through Electron debugger/CDP rather than DOM-script-first control |
-| **Diagnostics Drawer** | Console, network, downloads, storage, and trace state are visible in-app and available through tools |
-| **Visible Cursor** | Agent browser actions render cursor movement and click/action pulses over the in-app webview |
-| **Screenshot Annotation** | Capture, mark up, save, and send browser screenshots back to the agent as image attachments |
-| **Real-Browser Consent** | System Chrome/Edge profile control requires explicit approval; default workbench never silently reuses system cookies |
-| **Profile Presets** | `user` (launch new Chrome with system profile after consent — fails if Chrome is already running), `chrome-relay` (extension relay), `workspace` (workspace default). For existing signed-in sessions, use `browser_attach` instead. |
-| **Persistent Profiles** | Cookies and storage persist across tasks in `.cowork/browser-profiles/` |
-| **Consent Auto-Dismiss** | 40+ pattern detectors for cookie/GDPR consent popups |
-| **Retry Logic** | 2-attempt retry with per-attempt timeout calculation |
-| **Failure Diagnostics** | Screenshot + page content + URL captured on failure |
-| **Domain Guardrails** | Whitelist enforcement via GuardrailManager |
-| **Headless/Headed** | Toggle visible browser window for debugging |
-| **Configurable Timeouts** | Per-tool `timeout_ms` parameter (default: 90s) |
+| Feature                          | Description                                                                                                                                                                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Multi-Browser**                | Chromium (bundled), Chrome (system), Brave (auto-discovered)                                                                                                                                                                         |
+| **Visible Workbench**            | Default Browser V2 surface inside the task sidebar/fullscreen workbench                                                                                                                                                              |
+| **Workspace Browser Profile**    | Embedded webview uses a persistent workspace partition isolated from system Chrome                                                                                                                                                   |
+| **Accessibility Snapshot Refs**  | `browser_snapshot` returns compact nodes with short-lived refs used by click/fill/type/read/hover/drag/upload actions                                                                                                                |
+| **CDP-Backed Workbench Actions** | Main-process automation controls the renderer-owned webview through Electron debugger/CDP rather than DOM-script-first control                                                                                                       |
+| **Diagnostics Drawer**           | Console, network, downloads, storage, and trace state are visible in-app and available through tools                                                                                                                                 |
+| **Visible Cursor**               | Agent browser actions render cursor movement and click/action pulses over the in-app webview                                                                                                                                         |
+| **Screenshot Annotation**        | Capture, mark up, save, and send browser screenshots back to the agent as image attachments                                                                                                                                          |
+| **Real-Browser Consent**         | System Chrome/Edge profile control requires explicit approval; default workbench never silently reuses system cookies                                                                                                                |
+| **Profile Presets**              | `user` (launch new Chrome with system profile after consent — fails if Chrome is already running), `chrome-relay` (extension relay), `workspace` (workspace default). For existing signed-in sessions, use `browser_attach` instead. |
+| **Persistent Profiles**          | Cookies and storage persist across tasks in `.cowork/browser-profiles/`                                                                                                                                                              |
+| **Consent Auto-Dismiss**         | 40+ pattern detectors for cookie/GDPR consent popups                                                                                                                                                                                 |
+| **Retry Logic**                  | 2-attempt retry with per-attempt timeout calculation                                                                                                                                                                                 |
+| **Failure Diagnostics**          | Screenshot + page content + URL captured on failure                                                                                                                                                                                  |
+| **Domain Guardrails**            | Whitelist enforcement via GuardrailManager                                                                                                                                                                                           |
+| **Headless/Headed**              | Toggle visible browser window for debugging                                                                                                                                                                                          |
+| **Configurable Timeouts**        | Per-tool `timeout_ms` parameter (default: 90s)                                                                                                                                                                                       |
 
 ### Comparison with ClawHub Agent Browser
 
-| Capability | ClawHub Agent Browser | CoWork OS Browser |
-|---|---|---|
-| **Architecture** | External Rust CLI, commands via Bash shell | Browser V2 session manager with visible Electron-workbench default plus Playwright/external-CDP adapters |
-| **Performance** | CLI process spawn per command + JSON serialization | Persistent browser session, CDP-backed workbench actions, fallback adapters only when needed |
-| **Navigation** | `open`, `back`, `forward`, `reload` | `browser_navigate`, `browser_back`, `browser_forward`, `browser_reload` |
-| **Element interaction** | 12 commands (click, fill, type, hover, drag, check, select, etc.) | Ref-aware click, fill, type, read, hover, drag, upload, press, scroll, and select tools |
-| **Page analysis** | Accessibility tree snapshots with `@ref` identifiers | `browser_snapshot` compact accessibility refs plus content extraction and element text |
-| **Screenshots/PDF** | Screenshot + full-page + PDF export | `browser_screenshot` viewport/full/element where supported + `browser_save_pdf` |
-| **JavaScript** | `eval "expression"` | `browser_evaluate` (full JS execution) |
-| **Wait strategies** | Element, text, URL, network idle, JS condition | Element visibility plus navigation wait states and snapshot refresh after page updates |
-| **Tabs/frames** | Tab management, iframe switching | Workbench tabs and active-tab tool routing; iframe support follows backend snapshot/action support |
-| **State management** | `state save/load` JSON files | Persistent browser profiles (automatic) |
-| **Network interception** | Route, mock, block requests | Network diagnostics exposed; request mutation remains guarded/internal |
-| **Video recording** | `record start/stop` to WebM | Lightweight trace tooling; video capture is not a core Browser V2 tool |
-| **Device emulation** | Presets ("iPhone 14"), geolocation, viewport | Visible desktop/tablet/mobile viewport checks through `browser_emulate` |
-| **Cookies/storage** | Manual cookie and localStorage management | Workspace profile persistence plus redacted storage diagnostics |
-| **Anti-bot bypass** | None | Scrapling integration (TLS fingerprinting, Cloudflare bypass) |
-| **Consent popups** | None | Auto-dismissal with 40+ pattern detectors |
-| **Retry on failure** | None (single attempt) | 2-attempt retry with diagnostics |
-| **Domain guardrails** | None | Whitelist enforcement |
-| **Lightweight fetch** | None (always launches browser) | `web_fetch` for reads without browser overhead |
-| **Multi-browser** | Playwright only | Chromium, Chrome, Brave |
-| **Integration** | Loose (CLI → Bash → agent) | Tight (session manager, visible workbench, IPC, daemon logging, artifact registry, diagnostics drawer) |
+| Capability               | ClawHub Agent Browser                                             | CoWork OS Browser                                                                                        |
+| ------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **Architecture**         | External Rust CLI, commands via Bash shell                        | Browser V2 session manager with visible Electron-workbench default plus Playwright/external-CDP adapters |
+| **Performance**          | CLI process spawn per command + JSON serialization                | Persistent browser session, CDP-backed workbench actions, fallback adapters only when needed             |
+| **Navigation**           | `open`, `back`, `forward`, `reload`                               | `browser_navigate`, `browser_back`, `browser_forward`, `browser_reload`                                  |
+| **Element interaction**  | 12 commands (click, fill, type, hover, drag, check, select, etc.) | Ref-aware click, fill, type, read, hover, drag, upload, press, scroll, and select tools                  |
+| **Page analysis**        | Accessibility tree snapshots with `@ref` identifiers              | `browser_snapshot` compact accessibility refs plus content extraction and element text                   |
+| **Screenshots/PDF**      | Screenshot + full-page + PDF export                               | `browser_screenshot` viewport/full/element where supported + `browser_save_pdf`                          |
+| **JavaScript**           | `eval "expression"`                                               | `browser_evaluate` (full JS execution)                                                                   |
+| **Wait strategies**      | Element, text, URL, network idle, JS condition                    | Element visibility plus navigation wait states and snapshot refresh after page updates                   |
+| **Tabs/frames**          | Tab management, iframe switching                                  | Workbench tabs and active-tab tool routing; iframe support follows backend snapshot/action support       |
+| **State management**     | `state save/load` JSON files                                      | Persistent browser profiles (automatic)                                                                  |
+| **Network interception** | Route, mock, block requests                                       | Network diagnostics exposed; request mutation remains guarded/internal                                   |
+| **Video recording**      | `record start/stop` to WebM                                       | Lightweight trace tooling; video capture is not a core Browser V2 tool                                   |
+| **Device emulation**     | Presets ("iPhone 14"), geolocation, viewport                      | Visible desktop/tablet/mobile viewport checks through `browser_emulate`                                  |
+| **Cookies/storage**      | Manual cookie and localStorage management                         | Workspace profile persistence plus redacted storage diagnostics                                          |
+| **Anti-bot bypass**      | None                                                              | Scrapling integration (TLS fingerprinting, Cloudflare bypass)                                            |
+| **Consent popups**       | None                                                              | Auto-dismissal with 40+ pattern detectors                                                                |
+| **Retry on failure**     | None (single attempt)                                             | 2-attempt retry with diagnostics                                                                         |
+| **Domain guardrails**    | None                                                              | Whitelist enforcement                                                                                    |
+| **Lightweight fetch**    | None (always launches browser)                                    | `web_fetch` for reads without browser overhead                                                           |
+| **Multi-browser**        | Playwright only                                                   | Chromium, Chrome, Brave                                                                                  |
+| **Integration**          | Loose (CLI → Bash → agent)                                        | Tight (session manager, visible workbench, IPC, daemon logging, artifact registry, diagnostics drawer)   |
 
 **Key advantage:** CoWork OS's Browser V2 approach keeps normal website testing in the visible app surface while using a shared session manager for automation, diagnostics, guardrails, and fallback adapters. The tiered architecture also means the agent does not launch or control a browser when a simple HTTP fetch is enough.
 
@@ -1382,34 +1395,34 @@ See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-
 
 Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scrapling) — anti-bot bypass, stealth browsing, adaptive element tracking, and structured data extraction.
 
-| Feature | Description |
-|---------|-------------|
-| **Anti-Bot Bypass** | TLS fingerprinting impersonates real browsers at the network level |
-| **Stealth Mode** | Cloudflare Turnstile bypass, stealth headers, browser fingerprint masking |
-| **Playwright Fetcher** | Full browser rendering for JavaScript-heavy sites |
-| **Structured Extraction** | Auto-detect and extract tables, lists, headings, and metadata |
-| **Batch Scraping** | Scrape up to 20 URLs in a single operation |
-| **Persistent Sessions** | Multi-step workflows with login → navigate → extract |
-| **Proxy Support** | Route requests through HTTP/HTTPS/SOCKS5 proxies |
-| **Rate Limiting** | Configurable requests-per-minute throttling |
+| Feature                   | Description                                                               |
+| ------------------------- | ------------------------------------------------------------------------- |
+| **Anti-Bot Bypass**       | TLS fingerprinting impersonates real browsers at the network level        |
+| **Stealth Mode**          | Cloudflare Turnstile bypass, stealth headers, browser fingerprint masking |
+| **Playwright Fetcher**    | Full browser rendering for JavaScript-heavy sites                         |
+| **Structured Extraction** | Auto-detect and extract tables, lists, headings, and metadata             |
+| **Batch Scraping**        | Scrape up to 20 URLs in a single operation                                |
+| **Persistent Sessions**   | Multi-step workflows with login → navigate → extract                      |
+| **Proxy Support**         | Route requests through HTTP/HTTPS/SOCKS5 proxies                          |
+| **Rate Limiting**         | Configurable requests-per-minute throttling                               |
 
 ### Agent Tools
 
-| Tool | Description |
-|------|-------------|
-| `scrape_page` | Scrape a single URL with fetcher selection, CSS selectors, link/image/table extraction |
-| `scrape_multiple` | Batch scrape multiple URLs with shared config |
-| `scrape_extract` | Extract structured data (tables, lists, headings, meta, or custom selectors) |
-| `scrape_session` | Multi-step session with persistent browser state |
-| `scraping_status` | Check Scrapling installation and version |
+| Tool              | Description                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `scrape_page`     | Scrape a single URL with fetcher selection, CSS selectors, link/image/table extraction |
+| `scrape_multiple` | Batch scrape multiple URLs with shared config                                          |
+| `scrape_extract`  | Extract structured data (tables, lists, headings, meta, or custom selectors)           |
+| `scrape_session`  | Multi-step session with persistent browser state                                       |
+| `scraping_status` | Check Scrapling installation and version                                               |
 
 ### Fetcher Modes
 
-| Mode | Best For | Speed |
-|------|----------|-------|
-| **Default** | Most sites — fast HTTP with TLS fingerprinting | Fast |
-| **Stealth** | Cloudflare-protected sites, anti-bot detection | Medium |
-| **Playwright** | JavaScript-rendered SPAs, dynamic content | Slow |
+| Mode           | Best For                                       | Speed  |
+| -------------- | ---------------------------------------------- | ------ |
+| **Default**    | Most sites — fast HTTP with TLS fingerprinting | Fast   |
+| **Stealth**    | Cloudflare-protected sites, anti-bot detection | Medium |
+| **Playwright** | JavaScript-rendered SPAs, dynamic content      | Slow   |
 
 ### Skills
 
@@ -1469,58 +1482,58 @@ See [Remote Access](remote-access.md) for details.
   <br><em>The connector catalog keeps MCP-backed integrations discoverable and configurable.</em>
 </p>
 
-| Connector | Type | Notes |
-|-----------|------|-------|
-| **Salesforce** | CRM | OAuth, health, list/search/create/update |
-| **Jira** | Issue Tracking | OAuth, health, projects, issues |
-| **HubSpot** | CRM | OAuth, contacts, companies, deals |
-| **Zendesk** | Support | OAuth, tickets, search |
-| **ServiceNow** | ITSM | health, list, get, search, create, update |
-| **Linear** | Product | health, projects, issues |
-| **Asana** | Work Management | health, projects, tasks |
-| **Okta** | Identity | health, users, groups |
-| **Resend** | Email | send, webhooks |
-| **Discord** | Community | 19 tools: guilds, channels, messages, roles |
-| **Google Workspace** | Productivity (OAuth) | Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, Chat |
-| **Figma** | Design | get file, export |
-| **Vercel** | Deploy | projects, deployments |
-| **Monday** | Work Management | boards, items |
-| **Miro** | Whiteboard | boards, content |
-| **Supabase** | Database | query, tables, auth |
-| **Excalidraw** | Diagrams | create, update elements |
-| **Stripe** | Payments | customers, payments, products |
-| **Hugging Face** | ML | models, inference, Gradio |
-| **Ahrefs** | SEO | search, metrics |
-| **Mermaid Chart** | Diagrams | validate, render SVG |
-| **Cloudflare** | Infrastructure | Workers, KV, D1, R2 |
-| **Make** | Automation | scenarios, modules |
-| **Clinical Trials** | Legal/Health | search studies |
-| **Smartsheet** | Spreadsheet | sheets, rows |
-| **Netlify** | Deploy | sites, deploy |
-| **Airtable** | Database | bases, records |
-| **PayPal** | Payments | invoices, orders |
-| **Square** | Payments | transactions, API |
-| **Attio** | CRM | companies, notes |
-| **Honeycomb** | Observability | datasets, queries |
-| **Cal.com** | Scheduling | bookings, event types |
-| **Cloudinary** | Media | upload, find assets |
-| **Tavily** | Web Search | search, extract, crawl |
-| **tldraw** | Diagrams | read/write .tldr canvases |
-| **Amplitude** | Analytics | track events, users |
-| **Clerk** | Auth | users, sessions, invitations |
-| **Mem** | Notes | mem_it, notes, collections |
-| **Grafana** | Monitoring | dashboards, datasources |
-| **Mailtrap** | Email | send, templates, sandbox |
-| **Socket** | Security | dependency scores |
-| **Metabase** | Analytics | dashboards, queries |
-| **Shadcn UI** | Components | list, search, install |
-| **GrowthBook** | Feature Flags | flags, experiments |
-| **Drafts** | Notes (macOS) | create, search drafts |
-| **Fantastical** | Calendar (macOS) | events, schedule |
-| **Tomba** | Email | finder, verifier, domain search |
-| **Rhino** | Architecture/CAD | localhost bridge for site, massing, floor plan, viewport, and export operations |
-| **Blender** | 3D/Rendering | localhost bridge for import, materials, camera, lighting, viewport, render, and scene save operations |
-| **ComfyUI** | Image Generation | local API workflow submission, Flux-style photoreal pass, job status, history, and output collection |
+| Connector            | Type                 | Notes                                                                                                 |
+| -------------------- | -------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Salesforce**       | CRM                  | OAuth, health, list/search/create/update                                                              |
+| **Jira**             | Issue Tracking       | OAuth, health, projects, issues                                                                       |
+| **HubSpot**          | CRM                  | OAuth, contacts, companies, deals                                                                     |
+| **Zendesk**          | Support              | OAuth, tickets, search                                                                                |
+| **ServiceNow**       | ITSM                 | health, list, get, search, create, update                                                             |
+| **Linear**           | Product              | health, projects, issues                                                                              |
+| **Asana**            | Work Management      | health, projects, tasks                                                                               |
+| **Okta**             | Identity             | health, users, groups                                                                                 |
+| **Resend**           | Email                | send, webhooks                                                                                        |
+| **Discord**          | Community            | 19 tools: guilds, channels, messages, roles                                                           |
+| **Google Workspace** | Productivity (OAuth) | Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, Chat                                             |
+| **Figma**            | Design               | get file, export                                                                                      |
+| **Vercel**           | Deploy               | projects, deployments                                                                                 |
+| **Monday**           | Work Management      | boards, items                                                                                         |
+| **Miro**             | Whiteboard           | boards, content                                                                                       |
+| **Supabase**         | Database             | query, tables, auth                                                                                   |
+| **Excalidraw**       | Diagrams             | create, update elements                                                                               |
+| **Stripe**           | Payments             | customers, payments, products                                                                         |
+| **Hugging Face**     | ML                   | models, inference, Gradio                                                                             |
+| **Ahrefs**           | SEO                  | search, metrics                                                                                       |
+| **Mermaid Chart**    | Diagrams             | validate, render SVG                                                                                  |
+| **Cloudflare**       | Infrastructure       | Workers, KV, D1, R2                                                                                   |
+| **Make**             | Automation           | scenarios, modules                                                                                    |
+| **Clinical Trials**  | Legal/Health         | search studies                                                                                        |
+| **Smartsheet**       | Spreadsheet          | sheets, rows                                                                                          |
+| **Netlify**          | Deploy               | sites, deploy                                                                                         |
+| **Airtable**         | Database             | bases, records                                                                                        |
+| **PayPal**           | Payments             | invoices, orders                                                                                      |
+| **Square**           | Payments             | transactions, API                                                                                     |
+| **Attio**            | CRM                  | companies, notes                                                                                      |
+| **Honeycomb**        | Observability        | datasets, queries                                                                                     |
+| **Cal.com**          | Scheduling           | bookings, event types                                                                                 |
+| **Cloudinary**       | Media                | upload, find assets                                                                                   |
+| **Tavily**           | Web Search           | search, extract, crawl                                                                                |
+| **tldraw**           | Diagrams             | read/write .tldr canvases                                                                             |
+| **Amplitude**        | Analytics            | track events, users                                                                                   |
+| **Clerk**            | Auth                 | users, sessions, invitations                                                                          |
+| **Mem**              | Notes                | mem_it, notes, collections                                                                            |
+| **Grafana**          | Monitoring           | dashboards, datasources                                                                               |
+| **Mailtrap**         | Email                | send, templates, sandbox                                                                              |
+| **Socket**           | Security             | dependency scores                                                                                     |
+| **Metabase**         | Analytics            | dashboards, queries                                                                                   |
+| **Shadcn UI**        | Components           | list, search, install                                                                                 |
+| **GrowthBook**       | Feature Flags        | flags, experiments                                                                                    |
+| **Drafts**           | Notes (macOS)        | create, search drafts                                                                                 |
+| **Fantastical**      | Calendar (macOS)     | events, schedule                                                                                      |
+| **Tomba**            | Email                | finder, verifier, domain search                                                                       |
+| **Rhino**            | Architecture/CAD     | localhost bridge for site, massing, floor plan, viewport, and export operations                       |
+| **Blender**          | 3D/Rendering         | localhost bridge for import, materials, camera, lighting, viewport, render, and scene save operations |
+| **ComfyUI**          | Image Generation     | local API workflow submission, Flux-style photoreal pass, job status, history, and output collection  |
 
 GitHub and Notion prefer native CoWork integrations first, with MCP as fallback. See [Enterprise Connectors](enterprise-connectors.md) for the full catalog and contract.
 
@@ -1530,10 +1543,10 @@ GitHub and Notion prefer native CoWork integrations first, with MCP as fallback.
 
 Two orchestration tools are available for runtime setup and governed expansion:
 
-| Tool | Purpose |
-|------|---------|
+| Tool                | Purpose                                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `integration_setup` | Chat-native Tier-1 integration management with `list`, `inspect`, and `configure`, including OAuth, health checks, and stale-plan protection via `expected_plan_hash` |
-| `skill_proposal` | Approval-gated skill proposal lifecycle (`create`, `list`, `approve`, `reject`) with workspace-local persistence and duplicate cooldown controls |
+| `skill_proposal`    | Approval-gated skill proposal lifecycle (`create`, `list`, `approve`, `reject`) with workspace-local persistence and duplicate cooldown controls                      |
 
 Tier-1 providers currently covered by `integration_setup`: `resend`, `google-workspace`, `jira`, `linear`, `hubspot`, `salesforce`, `zendesk`, `servicenow`.
 
@@ -1545,14 +1558,14 @@ See [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](integration-sk
 
 The main composer supports grouped `@` mentions for **Agents**, **Integrations**, and **Files**. The Integrations section only shows configured, locally usable integrations. Google Workspace splits into service-specific options: **Gmail**, **Google Drive**, **Google Calendar**, **Google Docs**, **Google Sheets**, **Google Slides**, **Google Tasks**, and **Google Chat** when native or MCP-backed tools are available. The **Google Calendar** option merges native `calendar_action` and MCP `google-workspace.calendar_*` tools into one first-class calendar surface. Selecting an integration inserts an icon+name chip, preserves clean prompt text such as `@Gmail`, and sends `integrationMentions` metadata as soft routing guidance without granting permissions or restricting tools. See [Composer Mentions](composer-mentions.md).
 
-| Service | Tool | Actions |
-|---------|------|---------|
-| **Notion** | `notion_action` | Search, read, create, update, query data sources |
-| **Box** | `box_action` | Search, read, upload, manage files |
-| **OneDrive** | `onedrive_action` | Search, read, upload, manage files |
+| Service              | Tool                                                                                     | Actions                                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Notion**           | `notion_action`                                                                          | Search, read, create, update, query data sources                                                                                                                    |
+| **Box**              | `box_action`                                                                             | Search, read, upload, manage files                                                                                                                                  |
+| **OneDrive**         | `onedrive_action`                                                                        | Search, read, upload, manage files                                                                                                                                  |
 | **Google Workspace** | `gmail_action`, `google_drive_action`, `calendar_action`, `google-workspace.*` MCP tools | Gmail, Drive, and Calendar natively; Calendar availability/event tools plus Docs, Sheets, Slides, Tasks, and Chat through the shared Google Workspace MCP connector |
-| **Dropbox** | `dropbox_action` | List, search, upload, manage files |
-| **SharePoint** | `sharepoint_action` | Search sites, manage drive items |
+| **Dropbox**          | `dropbox_action`                                                                         | List, search, upload, manage files                                                                                                                                  |
+| **SharePoint**       | `sharepoint_action`                                                                      | Search sites, manage drive items                                                                                                                                    |
 
 Google Workspace uses one OAuth connection for the built-in tools and MCP connector. The default consent set covers Drive, Gmail read/send/modify, Calendar, Spreadsheets, Documents, Tasks, Presentations, Chat messages, and Chat spaces readonly. Existing users with older tokens may need to reconnect when a release adds required scopes; the status check reports missing scopes when reconnect is needed. Calendar event writes and destructive or broad Tasks/Slides operations require explicit confirmation fields before the MCP connector executes them.
 
@@ -1579,15 +1592,15 @@ Infrastructure tools are registered in the Tool Registry alongside file, shell, 
 
 Spin up isolated Linux VMs for running code, deploying services, or testing in a clean environment.
 
-| Tool | Description |
-|------|-------------|
-| `cloud_sandbox_create` | Create a new sandbox (name, timeout, env vars) |
-| `cloud_sandbox_exec` | Run a shell command in a sandbox |
-| `cloud_sandbox_write_file` | Write a file into a sandbox |
-| `cloud_sandbox_read_file` | Read a file from a sandbox |
-| `cloud_sandbox_list` | List all active sandboxes |
-| `cloud_sandbox_delete` | Delete a sandbox and free resources |
-| `cloud_sandbox_url` | Get the public URL for an exposed port |
+| Tool                       | Description                                    |
+| -------------------------- | ---------------------------------------------- |
+| `cloud_sandbox_create`     | Create a new sandbox (name, timeout, env vars) |
+| `cloud_sandbox_exec`       | Run a shell command in a sandbox               |
+| `cloud_sandbox_write_file` | Write a file into a sandbox                    |
+| `cloud_sandbox_read_file`  | Read a file from a sandbox                     |
+| `cloud_sandbox_list`       | List all active sandboxes                      |
+| `cloud_sandbox_delete`     | Delete a sandbox and free resources            |
+| `cloud_sandbox_url`        | Get the public URL for an exposed port         |
 
 Sandboxes auto-expire per E2B tier (5 min default, configurable up to 60 min on free tier). E2B provides $100 free credits with no credit card required.
 
@@ -1595,14 +1608,14 @@ Sandboxes auto-expire per E2B tier (5 min default, configurable up to 60 min on 
 
 Search, register, and manage domains and DNS records.
 
-| Tool | Description |
-|------|-------------|
-| `domain_search` | Search available domains across TLDs (.com, .io, .ai, .dev, etc.) |
-| `domain_register` | Register a domain (requires user approval) |
-| `domain_list` | List all registered domains |
-| `domain_dns_list` | List DNS records for a domain |
-| `domain_dns_add` | Add a DNS record (A, AAAA, CNAME, MX, TXT, NS) |
-| `domain_dns_delete` | Delete a DNS record |
+| Tool                | Description                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `domain_search`     | Search available domains across TLDs (.com, .io, .ai, .dev, etc.) |
+| `domain_register`   | Register a domain (requires user approval)                        |
+| `domain_list`       | List all registered domains                                       |
+| `domain_dns_list`   | List DNS records for a domain                                     |
+| `domain_dns_add`    | Add a DNS record (A, AAAA, CNAME, MX, TXT, NS)                    |
+| `domain_dns_delete` | Delete a DNS record                                               |
 
 Domain registration requires explicit user approval before any purchase is made.
 
@@ -1610,22 +1623,23 @@ Domain registration requires explicit user approval before any purchase is made.
 
 Built-in USDC wallet on Base network for infrastructure payments.
 
-| Tool | Description |
-|------|-------------|
-| `wallet_info` | Get wallet address, network, and USDC balance |
-| `wallet_balance` | Get current USDC balance |
-| `x402_check` | Check if a URL requires x402 payment |
-| `x402_fetch` | Fetch a URL with automatic x402 payment (requires approval) |
+| Tool             | Description                                                 |
+| ---------------- | ----------------------------------------------------------- |
+| `wallet_info`    | Get wallet address, network, and USDC balance               |
+| `wallet_balance` | Get current USDC balance                                    |
+| `x402_check`     | Check if a URL requires x402 payment                        |
+| `x402_fetch`     | Fetch a URL with automatic x402 payment (requires approval) |
 
-The wallet is auto-generated on first setup, with the private key encrypted in the OS keychain. The wallet address and balance are displayed in the sidebar. x402 is an HTTP-native payment protocol where the agent signs EIP-712 typed data to authorize USDC payments on Base — useful for paying for API access, premium content, or compute resources.
+The wallet is auto-generated on first setup, with the private key encrypted in the OS keychain. The wallet address and balance are displayed in the sidebar. x402 v2 is an HTTP-native payment protocol where the agent signs EIP-3009 EIP-712 typed data to authorize exact USDC payments on Base. Payment requirements use atomic-unit strings such as `1000` (0.001 USDC), which are preserved unchanged in the signed payload.
 
 ### Status & Configuration
 
-| Tool | Description |
-|------|-------------|
+| Tool           | Description                                                              |
+| -------------- | ------------------------------------------------------------------------ |
 | `infra_status` | Get overall status: provider connections, active sandboxes, wallet state |
 
 Configure in **Settings** > **Infrastructure**. The settings UI shows:
+
 - Provider connection status (E2B, Namecheap, Wallet)
 - API key configuration for each provider
 - Wallet address with copy button and balance display
@@ -1648,16 +1662,16 @@ Customize agent behavior via Settings or conversation:
 
 ## Visual Theme System
 
-| Visual Style | Description |
-|-------------|-------------|
-| **Modern** | Refined non-terminal UI style with rounded components (default) |
-| **Terminal** | CLI-inspired interface with prompt-style visuals |
+| Visual Style | Description                                                     |
+| ------------ | --------------------------------------------------------------- |
+| **Modern**   | Refined non-terminal UI style with rounded components (default) |
+| **Terminal** | CLI-inspired interface with prompt-style visuals                |
 
-| Color Mode | Description |
-|------------|-------------|
+| Color Mode | Description                                   |
+| ---------- | --------------------------------------------- |
 | **System** | Follows your macOS light/dark mode preference |
-| **Light** | Clean light interface |
-| **Dark** | Dark mode for reduced eye strain |
+| **Light**  | Clean light interface                         |
+| **Dark**   | Dark mode for reduced eye strain              |
 
 Configure in **Settings** > **Appearance**.
 
@@ -1679,12 +1693,12 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 - Scheduled task prompts should produce the final result as task output; the scheduler delivers that output to the selected channel
 - Run history with status and duration
 
-| Schedule | Expression |
-|----------|------------|
-| Every hour | `0 * * * *` |
-| Daily at 9am | `0 9 * * *` |
-| Weekdays at 6pm | `0 18 * * 1-5` |
-| Weekly on Sunday | `0 0 * * 0` |
+| Schedule         | Expression     |
+| ---------------- | -------------- |
+| Every hour       | `0 * * * *`    |
+| Daily at 9am     | `0 9 * * *`    |
+| Weekdays at 6pm  | `0 18 * * 1-5` |
+| Weekly on Sunday | `0 0 * * 0`    |
 
 ---
 
@@ -1696,24 +1710,24 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 
 ## Built-in Skills (150)
 
-| Category | Skills |
-|----------|--------|
-| **Developer** | GitHub, GitLab, Linear, Jira, Sentry, Code Reviewer, Multi-PR Review, Developer Growth Analysis |
-| **Communication** | Slack, Discord, Telegram, Email, Voice Calls |
-| **Productivity** | Notion, Obsidian, Todoist, Apple Notes/Reminders/Calendar, PRD Generator, Memory Kit |
-| **Media** | Spotify, YouTube, SoundCloud |
-| **Image** | Image Generation (Gemini/OpenAI/Azure), Agentic Image Loop |
-| **Documents** | Excel, Word, PDF, PowerPoint |
-| **Architecture / 3D** | Architecture Design |
-| **Frontend** | Frontend Design, React Best Practices, React Native Best Practices, Taste Skill |
-| **Mobile** | iOS Development, Android Development |
-| **Game Dev** | Unity Development, Unreal Engine Development, Game Performance Optimization |
-| **IaC / DevOps** | Terraform Operations, Kubernetes Operations, Cloud Migration, Docker Compose Operations |
-| **Data** | Supabase SDK Patterns |
-| **Search** | Local Web Search (SearXNG), Bird |
-| **Finance** | Crypto Trading, Crypto Execution, Trading Foundation, DCF Valuation, Earnings Analyzer, ESG Scorer, Financial Modeling, Market Screener, Portfolio Optimizer, Risk Analyzer, Tax Optimizer |
-| **Marketing** | Email Marketing Bible |
-| **Use Cases** | Booking Options, Draft Reply, Family Digest, Household Capture, Newsletter Digest, Transaction Scan |
+| Category              | Skills                                                                                                                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Developer**         | GitHub, GitLab, Linear, Jira, Sentry, Code Reviewer, Multi-PR Review, Developer Growth Analysis                                                                                            |
+| **Communication**     | Slack, Discord, Telegram, Email, Voice Calls                                                                                                                                               |
+| **Productivity**      | Notion, Obsidian, Todoist, Apple Notes/Reminders/Calendar, PRD Generator, Memory Kit                                                                                                       |
+| **Media**             | Spotify, YouTube, SoundCloud                                                                                                                                                               |
+| **Image**             | Image Generation (Gemini/OpenAI/Azure), Agentic Image Loop                                                                                                                                 |
+| **Documents**         | Excel, Word, PDF, PowerPoint                                                                                                                                                               |
+| **Architecture / 3D** | Architecture Design                                                                                                                                                                        |
+| **Frontend**          | Frontend Design, React Best Practices, React Native Best Practices, Taste Skill                                                                                                            |
+| **Mobile**            | iOS Development, Android Development                                                                                                                                                       |
+| **Game Dev**          | Unity Development, Unreal Engine Development, Game Performance Optimization                                                                                                                |
+| **IaC / DevOps**      | Terraform Operations, Kubernetes Operations, Cloud Migration, Docker Compose Operations                                                                                                    |
+| **Data**              | Supabase SDK Patterns                                                                                                                                                                      |
+| **Search**            | Local Web Search (SearXNG), Bird                                                                                                                                                           |
+| **Finance**           | Crypto Trading, Crypto Execution, Trading Foundation, DCF Valuation, Earnings Analyzer, ESG Scorer, Financial Modeling, Market Screener, Portfolio Optimizer, Risk Analyzer, Tax Optimizer |
+| **Marketing**         | Email Marketing Bible                                                                                                                                                                      |
+| **Use Cases**         | Booking Options, Draft Reply, Family Digest, Household Capture, Newsletter Digest, Transaction Scan                                                                                        |
 
 ---
 
@@ -1721,13 +1735,13 @@ Run multiple tasks concurrently with configurable limits (1-10, default: 3). Tas
 
 Access CoWork OS from any web browser — no Electron desktop app required.
 
-| Aspect | Details |
-|--------|---------|
-| **How** | `cowork-os --serve --port 3000` starts a Node.js server exposing the full React UI over HTTP/WebSocket |
-| **Approach** | Reuses all existing main-process logic (agent, tools, database, gateways). IPC calls are mapped to HTTP/WebSocket endpoints |
-| **Desktop features** | System tray, desktop screenshots, and AppleScript degrade gracefully. File dialogs use browser-native pickers |
-| **Security** | Challenge-response authentication (extends existing control plane auth). HTTPS recommended for production |
-| **Existing foundation** | Control plane already serves a web dashboard at `http://127.0.0.1:18789/`. Web mode extends this to the full React UI |
+| Aspect                  | Details                                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **How**                 | `cowork-os --serve --port 3000` starts a Node.js server exposing the full React UI over HTTP/WebSocket                      |
+| **Approach**            | Reuses all existing main-process logic (agent, tools, database, gateways). IPC calls are mapped to HTTP/WebSocket endpoints |
+| **Desktop features**    | System tray, desktop screenshots, and AppleScript degrade gracefully. File dialogs use browser-native pickers               |
+| **Security**            | Challenge-response authentication (extends existing control plane auth). HTTPS recommended for production                   |
+| **Existing foundation** | Control plane already serves a web dashboard at `http://127.0.0.1:18789/`. Web mode extends this to the full React UI       |
 
 See [Architecture: Web Browser Mode](architecture.md#web-browser-mode-planned--serve) for the implementation plan.
 
@@ -1747,10 +1761,10 @@ Programmatic API for external automation and mobile companion apps.
 - Web dashboard at `http://127.0.0.1:18789/`
 - Deployment posture in `config.get` reports `ready`, `degraded`, or `blocked` with sanitized reasons
 
-| Mode | Binding | Use Case |
-|------|---------|----------|
-| **Local Only** | `127.0.0.1:18789` | Desktop automation |
-| **Private LAN / Tailscale** | private interface or Tailscale URL | Mobile companions and remote devices |
-| **Container** | `0.0.0.0:18789` inside container, host port loopback/private | Docker or Kubernetes-style deployment |
+| Mode                        | Binding                                                      | Use Case                              |
+| --------------------------- | ------------------------------------------------------------ | ------------------------------------- |
+| **Local Only**              | `127.0.0.1:18789`                                            | Desktop automation                    |
+| **Private LAN / Tailscale** | private interface or Tailscale URL                           | Mobile companions and remote devices  |
+| **Container**               | `0.0.0.0:18789` inside container, host port loopback/private | Docker or Kubernetes-style deployment |
 
 Configure in **Settings** > **Control Plane**. For reverse proxies, keep the daemon loopback/private when possible, set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin, and only set `COWORK_CONTROL_PLANE_TRUST_PROXY=1` behind a proxy you control.

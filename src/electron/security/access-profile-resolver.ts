@@ -22,6 +22,7 @@ import type {
   Workspace,
   WorkspacePermissions,
 } from "../../shared/types";
+import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import type { AdminPolicies } from "../admin/policies";
 
 export interface EffectiveAccessProfile {
@@ -55,36 +56,11 @@ export function applyDefaultAccessProfile(
   agentConfig: AgentConfig | undefined,
   settings: PermissionSettingsData,
 ): AgentConfig | undefined {
-  let normalizedAgentConfig = agentConfig;
-  if (typeof agentConfig?.accessProfileId === "string") {
-    const accessProfileId = agentConfig.accessProfileId.trim();
-    if (accessProfileId) {
-      normalizedAgentConfig = { ...agentConfig, accessProfileId };
-    } else {
-      const { accessProfileId: _ignored, ...withoutEmptyProfile } = agentConfig;
-      normalizedAgentConfig = withoutEmptyProfile;
-    }
-  }
-  if (
-    typeof normalizedAgentConfig?.permissionMode === "string" ||
-    typeof normalizedAgentConfig?.shellAccess === "boolean"
-  ) {
-    return normalizedAgentConfig;
-  }
-
-  const defaultAccessProfileId = settings.defaultAccessProfileId;
-  if (typeof defaultAccessProfileId !== "string" || !defaultAccessProfileId.trim()) {
-    return normalizedAgentConfig;
-  }
-
-  return {
-    ...normalizedAgentConfig,
-    accessProfileId: defaultAccessProfileId.trim(),
-  };
+  return taskAgentConfigForCreation(agentConfig, settings);
 }
 
 interface ResolveAccessProfileInput {
-  task?: Pick<Task, "agentConfig">;
+  task?: Pick<Task, "agentConfig"> & Partial<Pick<Task, "workerRole">>;
   workspace?: Pick<Workspace, "permissions" | "path">;
   settings?: PermissionSettingsData;
   adminPolicies?: AdminPolicies;
@@ -262,6 +238,35 @@ export function resolveEffectiveAccessProfile(
     constraintReason = "Requested permission mode is blocked by administrator policy.";
   }
 
+  // A verifier or internal read-only helper is a separate trust boundary from
+  // the task that requested it.
+  // Apply the read-only profile after ordinary profile/admin resolution so an
+  // inherited full-access or custom approval profile cannot re-enable writes,
+  // shell, network, or dynamically-discovered MCP tools. Preserve only the
+  // caller's explicit filesystem/domain scope; widening that scope would make
+  // the role boundary unsafe for custom profiles.
+  if (
+    input.task?.workerRole === "verifier" ||
+    input.task?.agentConfig?.readOnlyExecution === true
+  ) {
+    const readOnlyProfile = profileForMode("plan");
+    definition = {
+      ...readOnlyProfile,
+      ...(definition.workspaceRoots ? { workspaceRoots: definition.workspaceRoots } : {}),
+      ...(definition.filesystemRules ? { filesystemRules: definition.filesystemRules } : {}),
+      ...(definition.domainRules ? { domainRules: definition.domainRules } : {}),
+      shellAccess: false,
+    };
+    permissionMode = "plan";
+    adminConstrained = true;
+    constraintReason = [
+      constraintReason,
+      "Read-only worker execution enforces a read-only access boundary.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
   const workspacePermissions = input.workspace?.permissions;
   const fullAccess = isFullAccessProfile(definition) && permissionMode === "bypass_permissions";
   const restricted = isRestrictedAccessProfile(definition);
@@ -320,8 +325,16 @@ export function applyAccessProfileToWorkspace(
 ): Workspace {
   const current = workspace.permissions;
   const definition = profile.definition;
-  const fullAccess =
-    isFullAccessProfile(definition) && profile.permissionMode === "bypass_permissions";
+  // The resolved definition is the authority for a named profile. Do not
+  // derive this from PermissionMode: mode mapping is retained only for legacy
+  // callers and would make a custom `never` profile depend on a retired mode.
+  const namedProfile = Boolean(profile.requestedId || profile.profileUnavailable);
+  // Both dimensions must line up before the filesystem boundary and the
+  // process sandbox come off: a `danger-full-access` profile that still asks
+  // for approval on request has chosen to keep the external-file prompt, and
+  // deriving this from the sandbox mode alone silently converts that
+  // "on-request" into "never ask".
+  const fullAccess = isFullAccessProfile(definition);
   const readOnly = definition.sandbox === "read-only";
   const extraRoots = (definition.workspaceRoots || [])
     .map((root) => resolveProfilePath(workspace.path, root))
@@ -330,28 +343,40 @@ export function applyAccessProfileToWorkspace(
     .map((rule) => ({ ...rule, path: resolveProfilePath(workspace.path, rule.path) }))
     .filter((rule) => rule.path);
 
+  const profileMetadata: Partial<WorkspacePermissions> = namedProfile
+    ? {
+        accessProfileId: profile.id,
+        accessSandboxMode: definition.sandbox,
+        accessApprovalPolicy: definition.approval,
+        accessReviewer: definition.reviewer,
+        accessNetworkMode: definition.network,
+        accessWorkspaceRoots: extraRoots,
+        accessFilesystemRules: filesystemRules,
+        accessDomainRules: definition.domainRules || [],
+        accessProfileScoped: profile.profileScoped,
+        accessFilesystemScoped: profile.filesystemScoped,
+        accessProfileUnavailable: profile.profileUnavailable,
+      }
+    : {
+        // Clear stale named-profile metadata when an old task is resumed in a
+        // legacy compatibility mode. Otherwise the runtime engine would see
+        // the old fields and silently apply the modern boundary policy.
+        accessProfileId: undefined,
+        accessSandboxMode: undefined,
+        accessApprovalPolicy: undefined,
+        accessReviewer: undefined,
+        accessNetworkMode: undefined,
+        accessWorkspaceRoots: undefined,
+        accessFilesystemRules: undefined,
+        accessDomainRules: undefined,
+        accessProfileScoped: undefined,
+        accessFilesystemScoped: undefined,
+        accessProfileUnavailable: undefined,
+      };
+
   const nextPermissions: WorkspacePermissions = {
     ...current,
-    // Keep the legacy workspace view unlabelled when no named profile was
-    // explicitly selected. This lets old tasks retain their legacy
-    // allowedPaths/temp-workspace behavior without making a synthetic Ask
-    // profile appear authoritative.
-    ...(profile.requestedId || profile.profileUnavailable
-      ? { accessProfileId: profile.id }
-      : { accessProfileId: undefined }),
-    accessSandboxMode: definition.sandbox,
-    accessApprovalPolicy: definition.approval,
-    accessReviewer: definition.reviewer,
-    accessNetworkMode: definition.network,
-    // These are effective profile roots, not an append-only capability list.
-    // Replacing them prevents a task that switches from a broad profile to a
-    // narrower one from retaining the previous profile's roots.
-    accessWorkspaceRoots: extraRoots,
-    accessFilesystemRules: filesystemRules,
-    accessDomainRules: definition.domainRules || [],
-    accessProfileScoped: profile.profileScoped,
-    accessFilesystemScoped: profile.filesystemScoped,
-    accessProfileUnavailable: profile.profileUnavailable,
+    ...profileMetadata,
     read: fullAccess ? true : current.read,
     write: fullAccess ? true : current.write && !readOnly,
     delete: fullAccess ? true : current.delete && !readOnly,
@@ -361,7 +386,7 @@ export function applyAccessProfileToWorkspace(
     // boundary, while a disabled-network profile must turn it off.
     network: profile.networkEnabled,
     shell: profile.shellEnabled,
-    unrestrictedFileAccess: fullAccess,
+    unrestrictedFileAccess: fullAccess && !profile.filesystemScoped,
     // A restricted profile must not inherit a legacy `none` setting. The
     // sandbox factory will fail closed if no restricted backend is available.
     sandboxType: fullAccess
@@ -372,7 +397,7 @@ export function applyAccessProfileToWorkspace(
     // Named profiles own their filesystem boundary. Legacy allowedPaths are
     // retained only for unprofiled tasks; otherwise they would silently widen
     // a newly selected profile.
-    allowedPaths: profile.requestedId ? undefined : current.allowedPaths,
+    allowedPaths: namedProfile ? undefined : current.allowedPaths,
   };
 
   return {

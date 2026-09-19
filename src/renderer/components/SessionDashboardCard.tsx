@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
+  ChevronDown,
   ExternalLink,
   FileOutput,
   GitBranch,
@@ -26,6 +27,7 @@ import type {
   LocalPreviewTemplateId,
 } from "../../shared/local-preview";
 import { buildSessionDashboardMetrics } from "../utils/session-dashboard";
+import { hasLocalPreviewDevScript } from "../utils/session-sidebar-visibility";
 
 interface SessionDashboardCardProps {
   task?: Task;
@@ -76,6 +78,8 @@ export function SessionDashboardCard({
   const [memberCount, setMemberCount] = useState(0);
   const [preview, setPreview] = useState<LocalPreviewProcessInfo>();
   const [previewTemplates, setPreviewTemplates] = useState<LocalPreviewCommandTemplate[]>([]);
+  const [hasDevScript, setHasDevScript] = useState(false);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [previewTemplateId, setPreviewTemplateId] = useState<LocalPreviewTemplateId>("npm-dev");
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -120,6 +124,7 @@ export function SessionDashboardCard({
     if (!task?.id || !workspacePath || !window.electronAPI?.listLocalPreviews) {
       setPreview(undefined);
       setPreviewTemplates([]);
+      setHasDevScript(false);
       return;
     }
     void Promise.all([
@@ -140,6 +145,38 @@ export function SessionDashboardCard({
       cancelled = true;
     };
   }, [task?.id, task?.workspaceId, workspacePath, refreshKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspacePath || !window.electronAPI?.readFileForViewer) {
+      setHasDevScript(false);
+      return;
+    }
+    void window.electronAPI
+      .readFileForViewer("package.json", workspacePath, { includeImageContent: false })
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.success || typeof result.data?.content !== "string") {
+          setHasDevScript(false);
+          return;
+        }
+        try {
+          setHasDevScript(hasLocalPreviewDevScript(JSON.parse(result.data.content)));
+        } catch {
+          setHasDevScript(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHasDevScript(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath, refreshKey]);
+
+  useEffect(() => {
+    setPreviewExpanded(false);
+  }, [task?.id]);
 
   const refreshCredentialRequests = async () => {
     if (!task?.id || !window.electronAPI?.listProtectedCredentialRequests) return;
@@ -293,12 +330,31 @@ export function SessionDashboardCard({
 
   if (!task) return null;
   const branchLabel = task.branchLabel || (task.branchFromTaskId ? "Branch" : undefined);
-  const hasPreviewTools = Boolean(workspacePath && previewTemplates.length > 0);
+  const hasPreviewCapability = Boolean(
+    workspacePath && previewTemplates.length > 0 && hasDevScript,
+  );
+  const showPreviewTrigger = hasPreviewCapability && !preview && !previewExpanded;
+  const hasPreviewTools = Boolean(workspacePath && (preview || previewExpanded));
   const hasCredentialTools = credentialRequests.length > 0 || Boolean(credentialError);
   const hasSessionTools = hasPreviewTools || hasCredentialTools || Boolean(task.branchFromTaskId);
 
-  if (!showSummary && !hasSessionTools) return null;
+  if (!showSummary && !hasSessionTools && !showPreviewTrigger) return null;
   if (showSummary && (!progress || !metrics) && !hasSessionTools) return null;
+
+  if (!showSummary && !hasSessionTools && showPreviewTrigger) {
+    return (
+      <button
+        type="button"
+        className="session-dashboard-preview-trigger"
+        onClick={() => setPreviewExpanded(true)}
+        aria-expanded={false}
+      >
+        <Play size={12} aria-hidden="true" />
+        <span>Local preview</span>
+        <ChevronDown size={12} aria-hidden="true" />
+      </button>
+    );
+  }
 
   return (
     <section
@@ -390,6 +446,18 @@ export function SessionDashboardCard({
           onClick={() => onSelectTask(task.branchFromTaskId!)}
         >
           <GitBranch size={13} /> Open parent session
+        </button>
+      ) : null}
+      {showPreviewTrigger ? (
+        <button
+          type="button"
+          className="session-dashboard-preview-trigger"
+          onClick={() => setPreviewExpanded(true)}
+          aria-expanded={false}
+        >
+          <Play size={12} aria-hidden="true" />
+          <span>Local preview</span>
+          <ChevronDown size={12} aria-hidden="true" />
         </button>
       ) : null}
       {hasPreviewTools ? (

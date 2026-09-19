@@ -447,6 +447,37 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
     expect(ids.has("terminal-1")).toBe(true);
   });
 
+  it("retains every conversation message outside the bounded live window", () => {
+    const rawEvents = [
+      makeEvent("user-early", 1, "user_message", { message: "First request" }),
+      ...Array.from({ length: 24 }, (_, index) =>
+        makeEvent(`tool-early-${index}`, index + 2, "tool_call", { tool: "read_file" }),
+      ),
+      makeEvent("assistant-early", 30, "assistant_message", {
+        message: "First answer",
+      }),
+      ...Array.from({ length: 24 }, (_, index) =>
+        makeEvent(`tool-late-${index}`, index + 31, "tool_result", { tool: "read_file" }),
+      ),
+      makeEvent("user-late", 60, "user_message", { message: "Follow-up" }),
+      makeEvent("assistant-late", 61, "assistant_message", { message: "Second answer" }),
+    ];
+
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents,
+      task: { id: "task-1", status: "executing" } as Any,
+      workspace: null,
+      verboseSteps: false,
+      projectionMode: "live",
+      liveWindowSize: 10,
+    });
+
+    const ids = new Set(shared.normalizedEvents.map((event) => event.id));
+    expect(
+      ["user-early", "assistant-early", "user-late", "assistant-late"].every((id) => ids.has(id)),
+    ).toBe(true);
+  });
+
   it("coalesces identical provider failures in live projection", () => {
     const shared = deriveSharedTaskEventUiState({
       rawEvents: [

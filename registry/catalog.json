@@ -8,9 +8,7 @@
       "description": "Set up and use 1Password CLI (op). Use when installing the CLI, enabling desktop app integration, signing in (single or multi-account), or reading/injecting/running secrets via op.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🔐",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -22,9 +20,7 @@
       "description": "Generate JSDoc/docstrings for functions",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "📚",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -36,9 +32,7 @@
       "description": "Generate -> annotate -> refine -> repeat using generate_image + Visual Annotator (Live Canvas).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🧩",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -50,9 +44,7 @@
       "description": "Load a CSV and provide insights",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Data"
-      ],
+      "tags": ["Data"],
       "icon": "📊",
       "category": "Data",
       "updatedAt": "2026-05-11",
@@ -64,9 +56,7 @@
       "description": "Android/Kotlin development: Jetpack Compose, Room database, Gradle builds, emulator management, and Play Store submission.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Engineering"
-      ],
+      "tags": ["Engineering"],
       "icon": "🤖",
       "category": "Engineering",
       "updatedAt": "2026-05-11",
@@ -78,9 +68,7 @@
       "description": "Manage Apple Notes via the `memo` CLI on macOS (create, view, edit, delete, search, move, and export notes). Use when a user asks CoWork-OSS to add a note, list notes, search notes, or manage note folders.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📝",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -92,9 +80,7 @@
       "description": "Manage Apple Reminders via the `remindctl` CLI on macOS (list, add, edit, complete, delete). Supports lists, date filters, and JSON/plain output.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "⏰",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -127,13 +113,7 @@
       "description": "Turn any API into a CLI command. Register OpenAPI or GraphQL endpoints by name, then explore and invoke them. Built for AI agents to use APIs like tool calls.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "api",
-        "openapi",
-        "graphql",
-        "rest",
-        "curl"
-      ],
+      "tags": ["api", "openapi", "graphql", "rest", "curl"],
       "icon": "🔗",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -145,12 +125,7 @@
       "description": "Learn a reliable browser workflow by iterating on a real web task, recording strategy, and proposing a reusable skill.",
       "version": "1.0.0",
       "author": "cowork-os",
-      "tags": [
-        "browser",
-        "automation",
-        "skills",
-        "learning"
-      ],
+      "tags": ["browser", "automation", "skills", "learning"],
       "icon": "🌐",
       "category": "Automation",
       "updatedAt": "2026-05-11",
@@ -183,12 +158,7 @@
       "description": "Plan and execute parallel, repeatable migrations across code, docs, research artifacts, ops configs, or mixed task sets.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "workflow",
-        "parallel",
-        "migration",
-        "cross-domain"
-      ],
+      "tags": ["workflow", "parallel", "migration", "cross-domain"],
       "icon": "🧺",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -200,11 +170,7 @@
       "description": "X/Twitter CLI for reading, searching, posting, and engagement via cookies.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "x",
-        "twitter",
-        "cli"
-      ],
+      "tags": ["x", "twitter", "cli"],
       "icon": "🐦",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -216,9 +182,7 @@
       "description": "Monitor blogs and RSS/Atom feeds for updates using the blogwatcher CLI.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📰",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -230,13 +194,7 @@
       "description": "Use Box's hosted MCP server to search, read, analyze, and manage Box content with Box AI and Hubs.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "box",
-        "mcp",
-        "box-ai",
-        "hubs",
-        "files"
-      ],
+      "tags": ["box", "mcp", "box-ai", "hubs", "files"],
       "icon": "📦",
       "category": "Tools",
       "updatedAt": "2026-08-29",
@@ -248,9 +206,7 @@
       "description": "Find booking openings in a time window, cross-check calendar, propose 3 options. Stops before booking.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "📅",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -262,9 +218,7 @@
       "description": "Turn an idea into a working prototype through guided phases: concept → plan → scaffold → iterate. Uses Canvas for live preview with checkpoints at each phase.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "development"
-      ],
+      "tags": ["development"],
       "category": "development",
       "updatedAt": "2026-05-11",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/build-mode.json"
@@ -275,14 +229,7 @@
       "description": "Manage Calendly scheduling via the v2 API. List event types, view scheduled events, check invitee details, manage availability schedules, cancel/reschedule events, create one-off links, and configure webhooks. Use when the user asks about their calendar, upcoming meetings, scheduling links, or availability.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "calendly",
-        "scheduling",
-        "calendar",
-        "meetings",
-        "booking",
-        "availability"
-      ],
+      "tags": ["calendly", "scheduling", "calendar", "meetings", "booking", "availability"],
       "icon": "📅",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -294,9 +241,7 @@
       "description": "Build a morning/evening executive brief from calendar, inbox, tasks, and optional ops signals.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "🧭",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -308,9 +253,7 @@
       "description": "Remove unused imports from files",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Utilities"
-      ],
+      "tags": ["Utilities"],
       "icon": "🧹",
       "category": "Utilities",
       "updatedAt": "2026-05-11",
@@ -322,9 +265,7 @@
       "description": "Cloud migration strategy and execution: assessment frameworks, migration patterns, database migration, network cutover, and multi-cloud planning.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "DevOps"
-      ],
+      "tags": ["DevOps"],
       "icon": "☁️",
       "category": "DevOps",
       "updatedAt": "2026-05-11",
@@ -336,9 +277,7 @@
       "description": "Review code for best practices and potential issues",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🔍",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -350,9 +289,7 @@
       "description": "Perform professional code review for local changes or GitHub pull requests.",
       "version": "1.0.0",
       "author": "google-gemini",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🧪",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -364,9 +301,7 @@
       "description": "Run OpenAI Codex CLI as a background agent — detect, install, configure, and execute coding tasks via codex exec.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "⚡",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -378,9 +313,7 @@
       "description": "Run Codex CLI, OpenCode, or Pi Coding Agent via background process for programmatic control.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🧩",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -392,9 +325,7 @@
       "description": "Compare two files and show differences",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Data"
-      ],
+      "tags": ["Data"],
       "icon": "⚖️",
       "category": "Data",
       "updatedAt": "2026-05-11",
@@ -406,9 +337,7 @@
       "description": "Research competitors for a product, market, or idea and identify opportunities to differentiate",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Research"
-      ],
+      "tags": ["Research"],
       "icon": "🔍",
       "category": "Research",
       "updatedAt": "2026-05-11",
@@ -420,9 +349,7 @@
       "description": "Monitor web pages for changes and extract updated content with scheduling support.",
       "version": "1.0.0",
       "author": "cowork-os",
-      "tags": [
-        "Data"
-      ],
+      "tags": ["Data"],
       "icon": "👁️",
       "category": "Data",
       "updatedAt": "2026-05-11",
@@ -434,9 +361,7 @@
       "description": "Convert code from one language to another",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🔄",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -448,9 +373,7 @@
       "description": "Multi-agent system research agent for CoWork OS. Use when: researching multi-agent papers, frameworks, production case studies; maintaining a research queue; producing CoWork OS applicability analysis and implementation recommendations. Triggers: 'multi-agent research', 'research multi-agent systems', 'multi-agent papers', 'agent orchestration research', 'CoWork OS research'.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Research"
-      ],
+      "tags": ["Research"],
       "icon": "🔬",
       "category": "Research",
       "updatedAt": "2026-05-11",
@@ -462,9 +385,7 @@
       "description": "Use ccxt (Python) for crypto prices, balances, and order actions across 100+ exchanges.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "📈",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -476,9 +397,7 @@
       "description": "Discounted cash flow valuation with WACC calculation, free cash flow projection, terminal value estimation, sensitivity analysis, and enterprise-to-equity value bridge.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "🧮",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -490,9 +409,7 @@
       "description": "Analyze an error message and suggest fixes",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🐛",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -504,12 +421,7 @@
       "description": "Assemble data, options, and analysis for a pending decision. Presents trade-offs and recommendations without making the decision. Used by digital twin personas to reduce decision fatigue.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "digital-twin",
-        "decision",
-        "analysis",
-        "trade-off"
-      ],
+      "tags": ["digital-twin", "decision", "analysis", "trade-off"],
       "icon": "⚖️",
       "category": "Digital Twin",
       "updatedAt": "2026-05-11",
@@ -521,9 +433,7 @@
       "description": "Audit dependencies for updates and vulnerabilities",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Project"
-      ],
+      "tags": ["Project"],
       "icon": "📦",
       "category": "Project",
       "updatedAt": "2026-05-11",
@@ -535,9 +445,7 @@
       "description": "Create and run an agent-ready development queue from issues/PRs with progress checkpoints.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "🛠️",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -549,9 +457,7 @@
       "description": "Analyze recent coding patterns and generate a personalized developer growth report.",
       "version": "1.0.0",
       "author": "ComposioHQ",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "📈",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -563,9 +469,7 @@
       "description": "Docker Compose operations: service orchestration, compose file authoring, multi-stage builds, networking, volumes, and production configurations.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "DevOps"
-      ],
+      "tags": ["DevOps"],
       "icon": "🐳",
       "category": "DevOps",
       "updatedAt": "2026-05-11",
@@ -577,9 +481,7 @@
       "description": "Summarize a chat and draft 2 reply options. Stops before sending.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "💬",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -591,9 +493,7 @@
       "description": "Analyze quarterly and annual earnings reports including EPS beat/miss analysis, revenue trends, margin expansion, forward guidance parsing, and management commentary extraction.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "📋",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -626,9 +526,7 @@
       "description": "Environmental, Social, and Governance scoring with SASB materiality mapping, TCFD climate risk alignment, carbon footprint analysis, and sustainability benchmarking.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "🌱",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -640,9 +538,7 @@
       "description": "Get a detailed explanation of how code works",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Learning"
-      ],
+      "tags": ["Learning"],
       "icon": "📖",
       "category": "Learning",
       "updatedAt": "2026-05-11",
@@ -654,9 +550,7 @@
       "description": "Find all TODO/FIXME comments in codebase",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Utilities"
-      ],
+      "tags": ["Utilities"],
       "icon": "📌",
       "category": "Utilities",
       "updatedAt": "2026-05-11",
@@ -668,9 +562,7 @@
       "description": "Draft a daily digest based on calendar + tasks. Stops before sending.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "👨‍👩‍👧‍👦",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -682,9 +574,7 @@
       "description": "Run resilient multi-tool problem solving with explicit fallback strategy and auditable execution notes.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "🧩",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -696,9 +586,7 @@
       "description": "Build and analyze three-statement financial models with integrated income statement, balance sheet, and cash flow projections, scenario analysis, and key driver assumptions.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "📐",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -710,9 +598,7 @@
       "description": "Design and build premium frontend interfaces when art direction, hierarchy, restraint, imagery, and motion matter more than component count.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🖥️",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -724,9 +610,7 @@
       "description": "Design and build production-grade frontends with bold, distinctive aesthetics.",
       "version": "1.0.0",
       "author": "Anthropic",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🎨",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -738,9 +622,7 @@
       "description": "Cross-engine game performance: draw call optimization, LOD, object pooling, GPU profiling, memory management, and platform-specific tuning.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Engineering"
-      ],
+      "tags": ["Engineering"],
       "icon": "⚡",
       "category": "Engineering",
       "updatedAt": "2026-05-11",
@@ -752,9 +634,7 @@
       "description": "Gemini CLI for one-shot Q&A, summaries, and generation.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "♊️",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -766,9 +646,7 @@
       "description": "Create a README.md for a project",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Project"
-      ],
+      "tags": ["Project"],
       "icon": "📄",
       "category": "Project",
       "updatedAt": "2026-05-11",
@@ -780,9 +658,7 @@
       "description": "Create a well-formatted commit message from staged changes",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "📝",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -794,9 +670,7 @@
       "description": "Interact with GitHub using the `gh` CLI. Use `gh issue`, `gh pr`, `gh run`, and `gh api` for issues, PRs, CI runs, and advanced queries.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🐙",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -808,9 +682,7 @@
       "description": "Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Tasks, Sheets, Docs, and Slides.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🎮",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -822,9 +694,7 @@
       "description": "Query Google Places API (New) via the goplaces CLI for text search, place details, resolve, and reviews. Use for human-friendly place lookup or JSON output for scripts.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📍",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -836,14 +706,7 @@
       "description": "GSAP animation patterns for HyperFrames: tweens, timelines, easing, stagger, responsive motion, and performance-aware choreography.",
       "version": "0.4.3",
       "author": "HeyGen",
-      "tags": [
-        "gsap",
-        "animation",
-        "timelines",
-        "easing",
-        "video",
-        "hyperframes"
-      ],
+      "tags": ["gsap", "animation", "timelines", "easing", "video", "hyperframes"],
       "icon": "✨",
       "category": "Creative",
       "updatedAt": "2026-05-11",
@@ -855,9 +718,7 @@
       "description": "CLI to manage emails via IMAP/SMTP. Use `himalaya` to list, read, write, reply, forward, search, and organize emails from the terminal. Supports multiple accounts and message composition with MML (MIME Meta Language).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📧",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -869,9 +730,7 @@
       "description": "Turn a messy household message into Notion tasks + optional reminders.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "🏠",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -883,14 +742,7 @@
       "description": "Rewrite AI-generated text to sound natural and human-written. Removes LLM tells — cliché phrases, predictable structure, inflated language, and robotic patterns. Use when editing drafts, emails, articles, or any text that reads like it was written by AI.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "writing",
-        "editing",
-        "humanize",
-        "ai-detection",
-        "rewriting",
-        "content"
-      ],
+      "tags": ["writing", "editing", "humanize", "ai-detection", "rewriting", "content"],
       "icon": "✍️",
       "category": "Creative",
       "updatedAt": "2026-05-11",
@@ -902,15 +754,7 @@
       "description": "Create HTML-native video compositions, captions, voiceovers, transitions, and audio-reactive motion with the HyperFrames framework.",
       "version": "0.4.3",
       "author": "HeyGen",
-      "tags": [
-        "video",
-        "animation",
-        "html",
-        "gsap",
-        "captions",
-        "tts",
-        "creative"
-      ],
+      "tags": ["video", "animation", "html", "gsap", "captions", "tts", "creative"],
       "icon": "🎥",
       "category": "Creative",
       "updatedAt": "2026-05-11",
@@ -922,14 +766,7 @@
       "description": "Scaffold, lint, preview, render, transcribe, and troubleshoot HyperFrames projects with the HyperFrames CLI.",
       "version": "0.4.3",
       "author": "HeyGen",
-      "tags": [
-        "video",
-        "cli",
-        "ffmpeg",
-        "rendering",
-        "tts",
-        "transcription"
-      ],
+      "tags": ["video", "cli", "ffmpeg", "rendering", "tts", "transcription"],
       "icon": "🛠️",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -941,14 +778,7 @@
       "description": "Install and wire reusable HyperFrames blocks and components with `hyperframes add`.",
       "version": "0.4.3",
       "author": "HeyGen",
-      "tags": [
-        "video",
-        "registry",
-        "components",
-        "blocks",
-        "html",
-        "creative"
-      ],
+      "tags": ["video", "registry", "components", "blocks", "html", "creative"],
       "icon": "🧩",
       "category": "Creative",
       "updatedAt": "2026-05-11",
@@ -960,9 +790,7 @@
       "description": "Validate a business or product idea with market research, competitor analysis, and a go/no-go recommendation",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Research"
-      ],
+      "tags": ["Research"],
       "icon": "💡",
       "category": "Research",
       "updatedAt": "2026-05-11",
@@ -974,13 +802,7 @@
       "description": "Generate premium, conversion-aware frontend website design reference images with one separate horizontal image per section. Use for landing pages, marketing sites, product comps, and Awwwards-level web section art direction.",
       "version": "1.0.0",
       "author": "Leonxlnx",
-      "tags": [
-        "image-generation",
-        "frontend",
-        "web-design",
-        "landing-pages",
-        "art-direction"
-      ],
+      "tags": ["image-generation", "frontend", "web-design", "landing-pages", "art-direction"],
       "icon": "IMG",
       "category": "Creative",
       "updatedAt": "2026-05-11",
@@ -992,9 +814,7 @@
       "description": "iMessage/SMS CLI for listing chats, history, watch, and sending.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📨",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1006,9 +826,7 @@
       "description": "Triage Inbox Agent Today lanes, search mailbox evidence, prepare manual or AI-assisted replies, and suggest cleanup automations with strict confirmation gates.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "📥",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -1020,9 +838,7 @@
       "description": "iOS/Swift development: SwiftUI, UIKit, Core Data, Xcode builds, simulator management, code signing, and App Store submission.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Engineering"
-      ],
+      "tags": ["Engineering"],
       "icon": "🍎",
       "category": "Engineering",
       "updatedAt": "2026-05-11",
@@ -1034,11 +850,7 @@
       "description": "Typeset documents with the Kami editorial design system only when the user explicitly asks for Kami.",
       "version": "1.0.0",
       "author": "Tw93, ported by CoWork OS",
-      "tags": [
-        "kami",
-        "kami-skill",
-        "kami-editorial-design"
-      ],
+      "tags": ["kami", "kami-skill", "kami-editorial-design"],
       "icon": "📄",
       "category": "Writing",
       "updatedAt": "2026-05-11",
@@ -1050,9 +862,7 @@
       "description": "Kubernetes cluster operations: kubectl commands, manifest generation, Helm charts, RBAC, debugging, and deployment strategies.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "DevOps"
-      ],
+      "tags": ["DevOps"],
       "icon": "☸️",
       "category": "DevOps",
       "updatedAt": "2026-05-11",
@@ -1064,9 +874,7 @@
       "description": "Research a topic from the past X days using web search. Specify the number of days or let it be inferred from your prompt.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Research"
-      ],
+      "tags": ["Research"],
       "icon": "🔬",
       "category": "Research",
       "updatedAt": "2026-05-11",
@@ -1078,9 +886,7 @@
       "description": "Extract business and contact information from directory pages and company websites.",
       "version": "1.0.0",
       "author": "cowork-os",
-      "tags": [
-        "Data"
-      ],
+      "tags": ["Data"],
       "icon": "📇",
       "category": "Data",
       "updatedAt": "2026-05-11",
@@ -1092,9 +898,7 @@
       "description": "Manually record an insight, correction, preference, or rule that the agent should remember for future tasks.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Productivity"
-      ],
+      "tags": ["Productivity"],
       "icon": "🧠",
       "category": "Productivity",
       "updatedAt": "2026-05-11",
@@ -1106,9 +910,7 @@
       "description": "Analyze counterparty contract changes against agreement/schedules, flag conflicts, and produce severity-rated counterpositions.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Legal"
-      ],
+      "tags": ["Legal"],
       "icon": "⚖️",
       "category": "Legal",
       "updatedAt": "2026-05-11",
@@ -1120,9 +922,7 @@
       "description": "Map allegations to contract language and draft a response letter with no unintended admissions.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Legal"
-      ],
+      "tags": ["Legal"],
       "icon": "✉️",
       "category": "Legal",
       "updatedAt": "2026-05-11",
@@ -1134,9 +934,7 @@
       "description": "Generate a legal research memo with claim-level source verification, confidence flags, and primary-authority priority.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Legal"
-      ],
+      "tags": ["Legal"],
       "icon": "📚",
       "category": "Legal",
       "updatedAt": "2026-05-11",
@@ -1148,9 +946,7 @@
       "description": "Process links from a message, fetch each URL, and build a structured findings report with classification. Optimized for downstream agents.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Research"
-      ],
+      "tags": ["Research"],
       "icon": "🔬",
       "category": "Research",
       "updatedAt": "2026-05-11",
@@ -1182,9 +978,7 @@
       "description": "Search for places (restaurants, cafes, etc.) via Google Places API proxy on localhost.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📍",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1196,9 +990,7 @@
       "description": "Search the web privately via a self-hosted SearXNG metasearch engine.",
       "version": "1.0.0",
       "author": "stperic",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🔍",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1230,9 +1022,7 @@
       "description": "Screen equities, ETFs, and bonds using fundamental, technical, and quantitative criteria with multi-factor ranking and sector filtering.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "🔎",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -1267,9 +1057,7 @@
       "description": "Use the mcporter CLI to list, configure, auth, and call MCP servers/tools directly (HTTP or stdio), including ad-hoc servers, config edits, and CLI/type generation.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📦",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1281,12 +1069,7 @@
       "description": "Prepare a structured brief for an upcoming meeting with relevant context, open items, data points, and talking points. Used by digital twin personas to reduce meeting preparation overhead.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "digital-twin",
-        "meeting",
-        "preparation",
-        "brief"
-      ],
+      "tags": ["digital-twin", "meeting", "preparation", "brief"],
       "icon": "📅",
       "category": "Digital Twin",
       "updatedAt": "2026-05-11",
@@ -1298,9 +1081,7 @@
       "description": "Create a workspace-local .cowork/ memory kit (rules, identity, long-term notes, daily logs, heartbeat templates).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🧠",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1312,9 +1093,7 @@
       "description": "Use CodexBar CLI local cost usage to summarize per-model usage for Codex or Claude, including the current (most recent) model or a full model breakdown. Trigger when asked for model-level usage/cost data from codexbar, or when you need a scriptable per-model summary from codexbar cost JSON.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📊",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1326,14 +1105,7 @@
       "description": "Interact with Moltbook — the social network for AI agents. Post content, reply to discussions, browse feeds, upvote/downvote, join submolt communities, follow agents, search semantically, and track engagement. Use when the user wants to engage with Moltbook, check their feed, post, reply, or manage their agent presence.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "moltbook",
-        "social",
-        "agents",
-        "community",
-        "posting",
-        "feed"
-      ],
+      "tags": ["moltbook", "social", "agents", "community", "posting", "feed"],
       "icon": "🤖",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1345,9 +1117,7 @@
       "description": "Run a consensus-style multi-agent review of a PR with severity-based findings.",
       "version": "1.0.0",
       "author": "dyad-sh",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🔎",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -1359,9 +1129,7 @@
       "description": "Edit PDFs with natural-language instructions using the nano-pdf CLI.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📄",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1373,9 +1141,7 @@
       "description": "Summarize newsletter/email feed messages from the last N hours and propose follow-ups.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "📰",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -1387,9 +1153,7 @@
       "description": "Notion API for creating and managing pages, databases, and blocks.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📝",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1401,9 +1165,7 @@
       "description": "Draft, revise, and package a novel with a mostly autonomous workflow and durable artifacts.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Writing"
-      ],
+      "tags": ["Writing"],
       "icon": "📚",
       "category": "Writing",
       "updatedAt": "2026-05-11",
@@ -1415,9 +1177,7 @@
       "description": "Batch-generate images via OpenAI Images API. Random prompt sampler + `index.html` gallery.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🖼️",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1429,9 +1189,7 @@
       "description": "Local speech-to-text with the Whisper CLI (no API key).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🎙️",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1443,9 +1201,7 @@
       "description": "Transcribe audio via OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text APIs.",
       "version": "1.2.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "☁️",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1457,9 +1213,7 @@
       "description": "Foodora-only CLI for checking past orders and active order status (Deliveroo WIP).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🛵",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1471,9 +1225,7 @@
       "description": "Capture and automate macOS UI with the Peekaboo CLI.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "👀",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1485,12 +1237,7 @@
       "description": "Orchestrate pi-finder and optional pi-librarian to produce a compact context pack and Codex kickoff prompt before coding.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "pi",
-        "context",
-        "subagent",
-        "codex"
-      ],
+      "tags": ["pi", "context", "subagent", "codex"],
       "icon": "🧵",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1502,12 +1249,7 @@
       "description": "Read-only local workspace scout subagent for Pi. Use it to narrow context to relevant files/snippets before implementation.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "pi",
-        "subagent",
-        "context",
-        "code-search"
-      ],
+      "tags": ["pi", "subagent", "context", "code-search"],
       "icon": "🧭",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1519,12 +1261,7 @@
       "description": "GitHub research subagent for Pi that uses gh workflows to find and cite relevant repo files before implementation.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "pi",
-        "subagent",
-        "github",
-        "research"
-      ],
+      "tags": ["pi", "subagent", "github", "research"],
       "icon": "📚",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1536,9 +1273,7 @@
       "description": "Automated visual QA testing using Playwright — navigate web apps like a real user, capture screenshots, find bugs, and fix them.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🎭",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -1550,14 +1285,7 @@
       "description": "Query Polymarket prediction markets — search events, check odds and prices, view trending markets, track price momentum, get orderbook depth, analyze volume, and monitor market resolution timelines. Use when the user asks about prediction markets, betting odds, event probabilities, or Polymarket data.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "prediction-markets",
-        "odds",
-        "polymarket",
-        "betting",
-        "probabilities",
-        "events"
-      ],
+      "tags": ["prediction-markets", "odds", "polymarket", "betting", "probabilities", "events"],
       "icon": "📊",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1569,9 +1297,7 @@
       "description": "Modern portfolio theory optimization including Markowitz mean-variance, Black-Litterman, risk parity, and efficient frontier construction with constraints.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "⚖️",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -1583,13 +1309,7 @@
       "description": "Scan open pull requests, assess risk and complexity, and build a prioritized review queue. Used by digital twin personas to reduce PR review cognitive load.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "digital-twin",
-        "code-review",
-        "PR",
-        "triage",
-        "github"
-      ],
+      "tags": ["digital-twin", "code-review", "PR", "triage", "github"],
       "icon": "🔍",
       "category": "Digital Twin",
       "updatedAt": "2026-05-11",
@@ -1601,9 +1321,7 @@
       "description": "Generate a structured Product Requirements Document from a feature request.",
       "version": "1.0.0",
       "author": "snarktank/ralph",
-      "tags": [
-        "Product"
-      ],
+      "tags": ["Product"],
       "icon": "📋",
       "category": "Product",
       "updatedAt": "2026-05-11",
@@ -1615,9 +1333,7 @@
       "description": "Track and compare prices across e-commerce websites using stealth scraping.",
       "version": "1.0.0",
       "author": "cowork-os",
-      "tags": [
-        "Data"
-      ],
+      "tags": ["Data"],
       "icon": "💰",
       "category": "Data",
       "updatedAt": "2026-05-11",
@@ -1629,9 +1345,7 @@
       "description": "Analyze and explain project architecture",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Project"
-      ],
+      "tags": ["Project"],
       "icon": "🏗️",
       "category": "Project",
       "updatedAt": "2026-05-11",
@@ -1643,9 +1357,7 @@
       "description": "Check document for grammar and clarity",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Writing"
-      ],
+      "tags": ["Writing"],
       "icon": "✏️",
       "category": "Writing",
       "updatedAt": "2026-05-11",
@@ -1657,13 +1369,7 @@
       "description": "React and Next.js performance guidance for code changes, enhancements, feature work, reviews, and refactors.",
       "version": "1.0.0",
       "author": "Vercel",
-      "tags": [
-        "react",
-        "nextjs",
-        "performance",
-        "frontend",
-        "vercel"
-      ],
+      "tags": ["react", "nextjs", "performance", "frontend", "vercel"],
       "icon": "⚛️",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -1675,9 +1381,7 @@
       "description": "React Native and Expo best practices for performance, UI patterns, and native integrations.",
       "version": "1.0.0",
       "author": "Vercel",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "📱",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -1689,9 +1393,7 @@
       "description": "Improve code structure and readability",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🔧",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -1703,9 +1405,7 @@
       "description": "Rename a variable/function across files",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Utilities"
-      ],
+      "tags": ["Utilities"],
       "icon": "🏷️",
       "category": "Utilities",
       "updatedAt": "2026-05-11",
@@ -1717,9 +1417,7 @@
       "description": "Portfolio risk analysis including Value at Risk (parametric, historical, Monte Carlo), Conditional VaR, stress testing, drawdown analysis, and factor exposure assessment.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "🛡️",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -1731,9 +1429,7 @@
       "description": "ElevenLabs text-to-speech with mac-style say UX.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🗣️",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1745,9 +1441,7 @@
       "description": "Capture desktop screenshots with OS-aware save-location rules, app/window/region support, and bundled helpers.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📸",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1759,9 +1453,7 @@
       "description": "Check code for common security vulnerabilities",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🔒",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -1773,9 +1465,7 @@
       "description": "Query prior conversations/tasks via the task_history tool (replaces filesystem JSONL session logs).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📜",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1787,12 +1477,7 @@
       "description": "Improve existing work with focused simplification passes across code, writing, research, operations, or general tasks.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "workflow",
-        "quality",
-        "optimization",
-        "cross-domain"
-      ],
+      "tags": ["workflow", "quality", "optimization", "cross-domain"],
       "icon": "🧹",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -1804,9 +1489,7 @@
       "description": "Crawl a website and build a structured content map with page summaries.",
       "version": "1.0.0",
       "author": "cowork-os",
-      "tags": [
-        "Data"
-      ],
+      "tags": ["Data"],
       "icon": "🗺️",
       "category": "Data",
       "updatedAt": "2026-05-11",
@@ -1818,11 +1501,7 @@
       "description": "Create or update AgentSkills for CoWork-OSS. Use when designing, structuring, or packaging skills. Supports JSON format with requirements, installation specs, and metadata.",
       "version": "2.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "development",
-        "skills",
-        "authoring"
-      ],
+      "tags": ["development", "skills", "authoring"],
       "icon": "✨",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1834,11 +1513,7 @@
       "description": "Use the skill-hub CLI to search, install, update, and publish agent skills from skill-hub.com. Use when you need to fetch new skills on the fly, sync installed skills to latest or a specific version, or publish new/updated skill folders with the npm-installed skill-hub CLI.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "cli",
-        "registry",
-        "skills"
-      ],
+      "tags": ["cli", "registry", "skills"],
       "icon": "🔧",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1850,9 +1525,7 @@
       "description": "Use when you need to control Slack from CoWork-OSS via the slack tool, including reacting to messages or pinning/unpinning items in Slack channels or DMs.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "💬",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1864,9 +1537,7 @@
       "description": "Coordinate smart-home actions across existing integrations with clear dry-run and safety confirmation.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "🏠",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -1878,9 +1549,7 @@
       "description": "Terminal Spotify playback/search via spogo (preferred) or spotify_player.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🎵",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1892,9 +1561,7 @@
       "description": "AI CFO for bootstrapped startups. Provides financial frameworks for cash management, runway calculations, unit economics (LTV:CAC), capital allocation, hiring ROI, burn rate analysis, working capital optimization, and forecasting.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "💰",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -1906,12 +1573,7 @@
       "description": "Generate a concise status report from recent activity, tasks, commits, and conversations. Used by digital twin personas to prepare standup updates and progress summaries.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "digital-twin",
-        "status",
-        "reporting",
-        "standup"
-      ],
+      "tags": ["digital-twin", "status", "reporting", "standup"],
       "icon": "📋",
       "category": "Digital Twin",
       "updatedAt": "2026-05-11",
@@ -1944,9 +1606,7 @@
       "description": "Summarize or extract text/transcripts from URLs, podcasts, and local files (great fallback for “transcribe this YouTube/video”).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🧾",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -1958,9 +1618,7 @@
       "description": "Create a summary of all files in a folder",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Documentation"
-      ],
+      "tags": ["Documentation"],
       "icon": "📋",
       "category": "Documentation",
       "updatedAt": "2026-05-11",
@@ -1972,9 +1630,7 @@
       "description": "Apply production-ready Supabase SDK patterns for TypeScript and Python projects.",
       "version": "1.0.0",
       "author": "Jeremy Longshore",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🗄️",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -1986,9 +1642,7 @@
       "description": "Surgical execution guardrails for coding, debugging, review, and refactor tasks",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Guidelines"
-      ],
+      "tags": ["Guidelines"],
       "icon": "🧠",
       "category": "Guidelines",
       "updatedAt": "2026-05-11",
@@ -2000,15 +1654,7 @@
       "description": "Apply the Taste Skill methodology for high-agency frontend work with stricter anti-slop layout, typography, motion, and implementation rules.",
       "version": "1.0.0",
       "author": "Leonxlnx",
-      "tags": [
-        "frontend",
-        "design",
-        "react",
-        "nextjs",
-        "tailwind",
-        "motion",
-        "ui"
-      ],
+      "tags": ["frontend", "design", "react", "nextjs", "tailwind", "motion", "ui"],
       "icon": "🎚️",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -2020,9 +1666,7 @@
       "description": "Tax optimization strategies including tax-loss harvesting, wash sale rule navigation, asset location optimization, Roth conversion analysis, and charitable giving strategies.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Finance"
-      ],
+      "tags": ["Finance"],
       "icon": "🏛️",
       "category": "Finance",
       "updatedAt": "2026-05-11",
@@ -2034,9 +1678,7 @@
       "description": "Infrastructure-as-Code operations: plan, apply, import, state management, module development, and drift detection using Terraform CLI.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "DevOps"
-      ],
+      "tags": ["DevOps"],
       "icon": "🏗️",
       "category": "DevOps",
       "updatedAt": "2026-05-11",
@@ -2048,9 +1690,7 @@
       "description": "Manage Things 3 via the `things` CLI on macOS (add/update projects+todos via URL scheme; read/search/list from the local Things database). Use when a user asks CoWork-OSS to add a task to Things, list inbox/today/upcoming, search tasks, or inspect projects/areas/tags.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "✅",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -2062,9 +1702,7 @@
       "description": "Remote-control tmux sessions for interactive CLIs by sending keystrokes and scraping pane output.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🧵",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -2076,9 +1714,7 @@
       "description": "Scan recent messages/emails for card transactions and flag suspicious charges.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Use Cases"
-      ],
+      "tags": ["Use Cases"],
       "icon": "💳",
       "category": "Use Cases",
       "updatedAt": "2026-05-11",
@@ -2090,9 +1726,7 @@
       "description": "Translate content to another language",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Writing"
-      ],
+      "tags": ["Writing"],
       "icon": "🌐",
       "category": "Writing",
       "updatedAt": "2026-05-11",
@@ -2104,9 +1738,7 @@
       "description": "Manage Trello boards, lists, and cards via the Trello REST API.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📋",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -2118,13 +1750,23 @@
       "description": "Write viral, persuasive tweets and threads optimized for X's algorithm. Research viral examples in your niche, then craft content using proven hook formulas and copywriting frameworks.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Marketing"
-      ],
+      "tags": ["Marketing"],
       "icon": "𝕏",
       "category": "Marketing",
       "updatedAt": "2026-05-11",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/twitter.json"
+    },
+    {
+      "id": "typesafe-ai",
+      "name": "TypeSafe",
+      "description": "Design and implement TypeSafe System One integrations using Jev's typed Choice, Score, and Noul judgments. Use when the user explicitly asks for TypeSafe or Jev, or wants semantic model decisions expressed as typed, confidence-aware primitives.",
+      "version": "1.0.0",
+      "author": "TypeSafe AI",
+      "tags": ["typesafe", "jev", "system-one", "structured-decisions", "routing", "ranking", "verification"],
+      "icon": "🧭",
+      "category": "Development",
+      "updatedAt": "2026-09-19",
+      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/typesafe-ai.json"
     },
     {
       "id": "unbroker",
@@ -2132,16 +1774,7 @@
       "description": "Find and remove authorized personal information exposures from data brokers and people-search sites with a consent-gated local workflow.",
       "version": "1.0.0",
       "author": "SHL0MS / Nous Research, ported by CoWork OS",
-      "tags": [
-        "privacy",
-        "security",
-        "data-broker",
-        "opt-out",
-        "ccpa",
-        "cpra",
-        "gdpr",
-        "doxxing"
-      ],
+      "tags": ["privacy", "security", "data-broker", "opt-out", "ccpa", "cpra", "gdpr", "doxxing"],
       "icon": "🛡️",
       "category": "Security",
       "updatedAt": "2026-07-06",
@@ -2153,9 +1786,7 @@
       "description": "Unity/C# development: MonoBehaviour lifecycle, ScriptableObjects, Addressables, URP/HDRP, physics, UI, editor scripting, and CLI builds.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Engineering"
-      ],
+      "tags": ["Engineering"],
       "icon": "🔲",
       "category": "Engineering",
       "updatedAt": "2026-05-11",
@@ -2167,9 +1798,7 @@
       "description": "Unreal Engine development: C++/Blueprint patterns, Gameplay Framework, Niagara, Lumen/Nanite, multiplayer, and packaging.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Engineering"
-      ],
+      "tags": ["Engineering"],
       "icon": "🔷",
       "category": "Engineering",
       "updatedAt": "2026-05-11",
@@ -2181,9 +1810,7 @@
       "description": "Extract frames or short clips from videos using ffmpeg.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🎞️",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -2195,9 +1822,7 @@
       "description": "Initiate outbound phone calls via ElevenLabs Agents.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📞",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -2209,9 +1834,7 @@
       "description": "Send WhatsApp messages to other people or search/sync WhatsApp history via the wacli CLI (not for normal user chats).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "📱",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -2223,9 +1846,7 @@
       "description": "Get current weather and forecasts (no API key required).",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🌤️",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -2237,9 +1858,7 @@
       "description": "Scrape web pages with anti-bot bypass and structured data extraction using Scrapling.",
       "version": "1.0.0",
       "author": "cowork-os",
-      "tags": [
-        "Data"
-      ],
+      "tags": ["Data"],
       "icon": "🕸️",
       "category": "Data",
       "updatedAt": "2026-05-11",
@@ -2251,9 +1870,7 @@
       "description": "Interact with WebMCP-enabled web pages — discover and invoke tools declared in the page's JavaScript/DOM using Chrome automation. Triggers: webmcp, call page tools, browser tools, web tools, interact with page, webmcp-starter.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Tools"
-      ],
+      "tags": ["Tools"],
       "icon": "🌐",
       "category": "Tools",
       "updatedAt": "2026-05-11",
@@ -2265,9 +1882,7 @@
       "description": "Generate unit tests for existing code",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "Development"
-      ],
+      "tags": ["Development"],
       "icon": "🧪",
       "category": "Development",
       "updatedAt": "2026-05-11",
@@ -2279,14 +1894,7 @@
       "description": "Fetch transcripts, metadata, and captions from YouTube videos. Use when you need to summarize a video, answer questions about its content, extract key points, compare videos, or pull quotes with timestamps. Supports auto-generated and manual captions, multiple languages, and translation.",
       "version": "1.0.0",
       "author": "CoWork OS",
-      "tags": [
-        "youtube",
-        "video",
-        "transcript",
-        "captions",
-        "subtitles",
-        "summary"
-      ],
+      "tags": ["youtube", "video", "transcript", "captions", "subtitles", "summary"],
       "icon": "📺",
       "category": "Tools",
       "updatedAt": "2026-05-11",

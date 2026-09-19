@@ -37,15 +37,15 @@ Tax optimization strategies including tax-loss harvesting, wash sale rule naviga
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| portfolio | string | Yes | Portfolio details including account types and holdings (e.g., Taxable: SPY $200K, AAPL $50K; IRA: BND $100K; Roth: VTI $75K) |
-| strategy | select | Yes | Tax optimization strategy to focus on |
-| question | string | Yes | Your specific tax optimization question |
-| taxBracket | select | Yes | Federal marginal tax bracket |
-| filingStatus | select | Yes | Tax filing status |
+| Name         | Type   | Required | Description                                                                                                                  |
+| ------------ | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| portfolio    | string | Yes      | Portfolio details including account types and holdings (e.g., Taxable: SPY $200K, AAPL $50K; IRA: BND $100K; Roth: VTI $75K) |
+| strategy     | select | Yes      | Tax optimization strategy to focus on                                                                                        |
+| question     | string | Yes      | Your specific tax optimization question                                                                                      |
+| taxBracket   | select | Yes      | Federal marginal tax bracket                                                                                                 |
+| filingStatus | select | Yes      | Tax filing status                                                                                                            |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1139 characters.
-- Runtime prompt is defined directly in `../tax-optimizer.json`. 
+- Runtime prompt is defined directly in `../tax-optimizer.json`.

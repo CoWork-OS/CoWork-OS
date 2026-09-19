@@ -38,4 +38,4 @@ Manage Apple Reminders via the `remindctl` CLI on macOS (list, add, edit, comple
 ## Runtime Prompt
 
 - Current runtime prompt length: 1852 characters.
-- Runtime prompt is defined directly in `../apple-reminders.json`. 
+- Runtime prompt is defined directly in `../apple-reminders.json`.

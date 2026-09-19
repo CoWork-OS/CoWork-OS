@@ -103,6 +103,13 @@ describe("output-token-policy", () => {
     expect(
       resolveOutputTokenParamName({
         providerType: "openai",
+        modelId: "gpt-6-astra",
+        apiMode: "chat_completions",
+      }),
+    ).toBe("max_completion_tokens");
+    expect(
+      resolveOutputTokenParamName({
+        providerType: "openai",
         modelId: "gpt-5.4",
         apiMode: "chat_completions",
       }),
@@ -114,6 +121,25 @@ describe("output-token-policy", () => {
         apiMode: "responses",
       }),
     ).toBe("max_output_tokens");
+  });
+
+  it("caps Astra output budgets at the documented 128K limit", () => {
+    process.env.COWORK_LLM_OUTPUT_POLICY = "adaptive";
+    process.env.COWORK_LLM_MAX_OUTPUT_TOKENS = "9999999";
+
+    const budget = resolveOutputTokenBudget({
+      providerType: "openai",
+      modelId: "gpt-6-astra",
+      messages: [{ role: "user", content: "hello" }],
+      system: "system",
+      contextManager: { estimateMaxOutputTokens: () => 500_000 } as Any,
+      taskMaxTokens: null,
+      requestKind: "agentic_main",
+      phase: "initial",
+    });
+
+    expect(budget.knownHardCap).toBe(128_000);
+    expect(budget.transport.value).toBe(128_000);
   });
 
   it("classifies thinking-only truncation as reasoning exhausted", () => {

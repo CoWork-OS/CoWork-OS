@@ -37,12 +37,12 @@ Generate a concise status report from recent activity, tasks, commits, and conve
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| period | string | No | Time period to cover |
-| audience | select | No | Who the report is for |
+| Name     | Type   | Required | Description           |
+| -------- | ------ | -------- | --------------------- |
+| period   | string | No       | Time period to cover  |
+| audience | select | No       | Who the report is for |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 544 characters.
-- Runtime prompt is defined directly in `../twin-status-report.json`. 
+- Runtime prompt is defined directly in `../twin-status-report.json`.

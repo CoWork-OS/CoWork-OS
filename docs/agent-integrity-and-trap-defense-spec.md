@@ -68,14 +68,14 @@ This spec does not initially cover:
 
 ## 5. Threat Model Mapped to CoWork OS
 
-| Trap class from report | CoWork OS exposure | Primary failure mode |
-|---|---|---|
-| Content injection | `web_fetch`, `browser_get_content`, scraping, documents, OCR, email | Hidden or machine-only instructions enter context |
-| Semantic manipulation | research, summarization, drafting, ranking, triage | Agent adopts attacker framing or false confidence |
-| Cognitive state poisoning | memory capture, daily summaries, KG, playbooks, skills | Poisoned facts persist and later drive actions |
-| Behavioral control | tool calls, shell, browser, computer use, spend | External content causes unauthorized side effects |
-| Systemic traps | agent teams, collaborative mode, remote delegation, automations | Correlated agent failure, cascades, quota exhaustion |
-| Human-in-the-loop traps | approvals, summaries, review dialogs | Operator approves risky action because risk is obscured |
+| Trap class from report    | CoWork OS exposure                                                  | Primary failure mode                                    |
+| ------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------- |
+| Content injection         | `web_fetch`, `browser_get_content`, scraping, documents, OCR, email | Hidden or machine-only instructions enter context       |
+| Semantic manipulation     | research, summarization, drafting, ranking, triage                  | Agent adopts attacker framing or false confidence       |
+| Cognitive state poisoning | memory capture, daily summaries, KG, playbooks, skills              | Poisoned facts persist and later drive actions          |
+| Behavioral control        | tool calls, shell, browser, computer use, spend                     | External content causes unauthorized side effects       |
+| Systemic traps            | agent teams, collaborative mode, remote delegation, automations     | Correlated agent failure, cascades, quota exhaustion    |
+| Human-in-the-loop traps   | approvals, summaries, review dialogs                                | Operator approves risky action because risk is obscured |
 
 ## 6. Product Principles
 

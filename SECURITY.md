@@ -7,10 +7,10 @@
 Security fixes are delivered in the latest stable release. Upgrade to that release
 to receive fixes; older releases do not receive separate security backports.
 
-| Release | Security fixes |
-| ------- | -------------- |
-| [Latest stable release](https://github.com/CoWork-OS/CoWork-OS/releases/latest) | Yes |
-| Older releases | No; upgrade to the latest stable release |
+| Release                                                                         | Security fixes                           |
+| ------------------------------------------------------------------------------- | ---------------------------------------- |
+| [Latest stable release](https://github.com/CoWork-OS/CoWork-OS/releases/latest) | Yes                                      |
+| Older releases                                                                  | No; upgrade to the latest stable release |
 
 The published npm version is available on [npm](https://www.npmjs.com/package/cowork-os).
 Please report suspected vulnerabilities even if you found them in an older release;
@@ -100,16 +100,19 @@ Please include as much of the following information as possible:
 **Impact**: Development/build environment only. These vulnerabilities relate to tarball extraction during the build process. The packaged application does not include or use the vulnerable `tar` package.
 
 **Risk assessment**:
+
 - **Runtime risk**: None - tar is a devDependency only
 - **Attack vector**: Malicious tarball during `npm install`
 - **Realistic threat**: Low - developers control what packages are installed
 
 **Why it's not fixed**:
+
 - The patched `tar` v7.5.6+ uses ESM exports incompatible with current `electron-builder`
 - Waiting for `electron-builder` maintainers to update their dependencies
 - Using `npm audit fix --force` breaks the build toolchain
 
 **Mitigation**:
+
 - Only install dependencies from trusted sources
 - Review package changes before updating
 - Monitor electron-builder releases for updates
@@ -119,11 +122,13 @@ Please include as much of the following information as possible:
 ## Scope
 
 This security policy applies to:
+
 - The CoWork OS application code
 - Build and distribution processes
 - Documentation
 
 Out of scope:
+
 - Third-party dependencies (report to respective maintainers)
 - User configuration issues
 - Social engineering attacks

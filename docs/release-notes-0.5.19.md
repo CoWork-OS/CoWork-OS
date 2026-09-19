@@ -79,9 +79,9 @@ Release `0.5.19` expands production operations with **isolated app profiles** (e
 
 ## References
 
-- [Changelog](changelog.md) — full version history  
-- [Features](features.md) — feature reference  
-- [Channels](channels.md) — channel setup  
-- [Skill Store & External Skills](skill-store-and-external-skills.md) — external directories  
+- [Changelog](changelog.md) — full version history
+- [Features](features.md) — feature reference
+- [Channels](channels.md) — channel setup
+- [Skill Store & External Skills](skill-store-and-external-skills.md) — external directories
 
 This page is the canonical high-level summary for changes in `0.5.19`.

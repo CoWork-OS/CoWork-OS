@@ -7,12 +7,7 @@
   "author": "Anthropic",
   "license": "Apache-2.0",
   "homepage": "https://github.com/anthropics/claude-for-legal/tree/993f6619fc2f321cfdd65daa6919ad6cd2c56d92/corporate-legal",
-  "keywords": [
-    "legal",
-    "law",
-    "compliance",
-    "corporate-legal"
-  ],
+  "keywords": ["legal", "law", "compliance", "corporate-legal"],
   "icon": "⚖️",
   "category": "Legal",
   "recommendedConnectors": [
@@ -477,13 +472,7 @@
       "description": "Runs M&A diligence at scale with cited tabular review, builds disclosure schedules and closing checklists, drafts board consents and minutes in house format, and tracks entity compliance deadlines across jurisdictions.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "research",
-        "review",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "research", "review", "summarize", "triage"],
       "systemPrompt": "You are a Corporate Legal assistant in CoWork OS. Produce draft legal work product for attorney review, preserve citations and source provenance, flag uncertainty, and require explicit confirmation before irreversible actions. This pack also includes upstream scheduled-agent workflows: Dataroom Watcher. In CoWork OS, keep those recurring workflows opt-in through routines or automation profiles."
     },
     {
@@ -492,12 +481,7 @@
       "description": "Monitors the VDR for new document uploads and posts closing checklist status on schedule. Flags new uploads that match high-priority categories. Trigger: \"what's new in the data room\", \"VDR updates\", or on schedule.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "monitor",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "monitor", "summarize", "triage"],
       "systemPrompt": "CoWork OS adaptation of the upstream corporate-legal/dataroom-watcher scheduled agent.\n\nRecurring execution is opt-in. Use CoWork routines or automation profiles when the user asks to schedule this workflow.\n\n# Dataroom Watcher Agent\n\n## Purpose\n\nVDRs get updated at 11pm the night before a call. This agent watches for new uploads and tells the team what came in. Also runs the closing checklist status on the configured cadence.\n\n## Schedule\n\nDaily during active diligence. Checklist status per `~/.claude/plugins/config/claude-for-legal/corporate-legal/CLAUDE.md` → Deal team briefing cadence.\n\n## Integrations\n\nPosting to Slack requires a Slack MCP server in your environment. This plugin does not bundle one. If no Slack MCP is configured, write the VDR update and checklist status to a file in `~/.claude/plugins/config/claude-for-legal/corporate-legal/deals/[code]/updates/[date].md` and notify the user — do not fail silently.\n\nVDR tools (Box, Intralinks, Datasite) are likewise external MCPs — if none are connected, prompt the user for the VDR export or ask them to update `~/.claude/plugins/config/claude-for-legal/corporate-legal/deals/[code]/vdr-inventory.md` manually.\n\n## What it does\n\n1. Query VDR for documents added since last run.\n2. Map new docs to request list categories.\n3. Flag anything in high-priority categories (Material Contracts, Litigation, IP).\n4. Run closing-checklist Mode 4 if it's briefing day.\n5. Post to deal channel.\n\n## Output\n\n```\n📁 **VDR update — [deal code] — [date]**\n\n**New since [last run]:** [N] docs\n\n**Priority categories:**\n• /02-Contracts/Customer/ — [N] new ([filenames])\n• /05-Litigation/ — [N] new ⚠️\n\n**Other:** [N] docs in [categories]\n\n[If briefing day: closing checklist status per Mode 4]\n```\n\n## What it does NOT do\n\n- Read the new docs — flags them for review, human reads\n- Update the closing checklist — reports status, human updates"
     }
   ],

@@ -484,10 +484,13 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
     );
     const parts = useMemo(() => buildRenderParts(value, validMentions), [validMentions, value]);
 
-    const resize = useCallback((shrink = false) => {
+    const resize = useCallback((_shrink = false) => {
       const root = rootRef.current;
       if (!root) return;
-      if (shrink) root.style.height = "auto";
+      // Always measure from the natural content height. Keeping the previous
+      // inline height makes a newly wrapped line paint outside the flex row
+      // until a later resize pass catches up.
+      root.style.height = "auto";
       const nextHeight = Math.min(root.scrollHeight, 200);
       root.style.height = `${Math.max(24, nextHeight)}px`;
     }, []);

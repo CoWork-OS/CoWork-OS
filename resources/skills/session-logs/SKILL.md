@@ -38,4 +38,4 @@ Query prior conversations/tasks via the task_history tool (replaces filesystem J
 ## Runtime Prompt
 
 - Current runtime prompt length: 1034 characters.
-- Runtime prompt is defined directly in `../session-logs.json`. 
+- Runtime prompt is defined directly in `../session-logs.json`.

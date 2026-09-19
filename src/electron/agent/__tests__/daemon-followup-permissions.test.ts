@@ -2,7 +2,33 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
 
 describe("AgentDaemon follow-up permission overrides", () => {
-  it("applies full-access follow-up overrides before queueing work on an active executor", async () => {
+  it("keeps later messages queued until the preceding mode turn completes", async () => {
+    let finishFirst!: () => void;
+    const first = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    const queue = [
+      { message: "Discuss", interactionMode: { mode: "chat" } },
+      { message: "Implement", interactionMode: { mode: "smart" } },
+    ];
+    const executor = {
+      isRunning: false,
+      takeNextFollowUpAtTurnBoundary: () => queue.shift(),
+      suppressNextUserMessageEvent: vi.fn(),
+    };
+    const daemon = Object.create(AgentDaemon.prototype) as Any;
+    daemon.drainingFollowUps = new Set();
+    daemon.logEvent = vi.fn();
+    daemon.sendMessage = vi.fn().mockReturnValueOnce(first).mockResolvedValue({ queued: false });
+    daemon.processOrphanedFollowUps("task", executor);
+    daemon.processOrphanedFollowUps("task", executor);
+    expect(queue).toHaveLength(1);
+    expect(daemon.sendMessage).toHaveBeenCalledTimes(1);
+    finishFirst();
+    await vi.waitFor(() => expect(daemon.sendMessage).toHaveBeenCalledTimes(2));
+    expect(daemon.sendMessage.mock.calls[1][4].interactionMode).toEqual({ mode: "smart" });
+  });
+  it("applies permission changes immediately but queues mode changes without changing the active mode", async () => {
     const task = {
       id: "550e8400-e29b-41d4-a716-446655440000",
       title: "Existing task",
@@ -62,10 +88,21 @@ describe("AgentDaemon follow-up permission overrides", () => {
       "Continue with full access",
       undefined,
       undefined,
-      { permissionMode: "bypass_permissions", shellAccess: true },
+      {
+        permissionMode: "bypass_permissions",
+        shellAccess: true,
+        interactionMode: { mode: "chat" },
+      },
     );
 
-    expect(result).toEqual({ queued: true });
+    expect(result).toEqual({
+      queued: true,
+      deliveryMode: "follow_up",
+      deliveryStatus: "queued",
+      acceptedAt: expect.any(Number),
+      queuedAt: expect.any(Number),
+    });
+    expect(result.queuedAt).toBe(result.acceptedAt);
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(task.id, {
       agentConfig: {
         permissionMode: "bypass_permissions",
@@ -85,6 +122,12 @@ describe("AgentDaemon follow-up permission overrides", () => {
     );
     expect(executor.queueFollowUp).toHaveBeenCalledWith(
       "Continue with full access",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { mode: "chat" },
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -159,7 +202,14 @@ describe("AgentDaemon follow-up permission overrides", () => {
       { agentConfigOverride },
     );
 
-    expect(result).toEqual({ queued: true });
+    expect(result).toEqual({
+      queued: true,
+      deliveryMode: "follow_up",
+      deliveryStatus: "queued",
+      acceptedAt: expect.any(Number),
+      queuedAt: expect.any(Number),
+    });
+    expect(result.queuedAt).toBe(result.acceptedAt);
     expect(daemonLike.taskRepo.update).not.toHaveBeenCalled();
     expect(executor.updateTaskAgentConfig).toHaveBeenCalledWith({
       permissionMode: "default",
@@ -172,6 +222,12 @@ describe("AgentDaemon follow-up permission overrides", () => {
       undefined,
       undefined,
       agentConfigOverride,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
     );
   });
 });

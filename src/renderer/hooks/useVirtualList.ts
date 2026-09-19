@@ -37,6 +37,8 @@ export interface UseVirtualListOptions<T> {
   scrollOffsetTop?: number;
   /** Skip the next item-count auto-scroll, used when callers prepend history. */
   suppressAutoScrollOnItemsChange?: boolean;
+  /** Stable task/surface key used to restore each task's scroll anchor. */
+  scrollAnchorKey?: string | null;
 }
 
 export interface UseVirtualListResult<T> {
@@ -54,6 +56,20 @@ export interface UseVirtualListResult<T> {
   visibleStartIndex: number;
   /** Last item index currently rendered, including overscan. */
   visibleEndIndex: number;
+}
+
+export function shouldAutoScrollOnItemsChange(options: {
+  itemCountChanged: boolean;
+  enabled: boolean;
+  suppressAutoScrollOnItemsChange: boolean;
+  isAtBottom: boolean;
+}): boolean {
+  return (
+    options.itemCountChanged &&
+    options.enabled &&
+    !options.suppressAutoScrollOnItemsChange &&
+    options.isAtBottom
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +120,7 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
     enabled = true,
     scrollOffsetTop = 0,
     suppressAutoScrollOnItemsChange = false,
+    scrollAnchorKey = null,
   } = options;
 
   const [scrollTop, setScrollTop] = useState(0);
@@ -111,6 +128,11 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
   const rafRef = useRef(0);
   const isAtBottomRef = useRef(true);
   const previousItemCountRef = useRef(items.length);
+  const previousOffsetsRef = useRef<number[]>([]);
+  const previousScrollAnchorKeyRef = useRef(scrollAnchorKey);
+  const scrollAnchorsRef = useRef(
+    new Map<string, { scrollTop: number; followingBottom: boolean }>(),
+  );
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   // ---- Compute item offsets ------------------------------------------------
@@ -142,6 +164,12 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
         const atBottom = st + container.clientHeight >= container.scrollHeight - 30;
         isAtBottomRef.current = atBottom;
         setIsAtBottom(atBottom);
+        if (scrollAnchorKey) {
+          scrollAnchorsRef.current.set(scrollAnchorKey, {
+            scrollTop: st,
+            followingBottom: atBottom,
+          });
+        }
       });
     };
 
@@ -150,7 +178,65 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
       container.removeEventListener("scroll", onScroll);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [containerRef, enabled]);
+  }, [containerRef, enabled, scrollAnchorKey]);
+
+  // Preserve the visible task surface when switching between tasks. A task
+  // without a saved anchor starts at the latest content, matching normal
+  // conversation behavior.
+  useEffect(() => {
+    const previousKey = previousScrollAnchorKeyRef.current;
+    const nextKey = scrollAnchorKey;
+    if (previousKey === nextKey) return;
+    const container = containerRef.current;
+    if (container && previousKey) {
+      scrollAnchorsRef.current.set(previousKey, {
+        scrollTop: container.scrollTop,
+        followingBottom: isAtBottomRef.current,
+      });
+    }
+    previousScrollAnchorKeyRef.current = nextKey;
+    if (!container) return;
+    const saved = nextKey ? scrollAnchorsRef.current.get(nextKey) : undefined;
+    isAtBottomRef.current = saved?.followingBottom ?? true;
+    setIsAtBottom(isAtBottomRef.current);
+    previousItemCountRef.current = items.length;
+    requestAnimationFrame(() => {
+      const current = containerRef.current;
+      if (!current) return;
+      if (saved?.followingBottom || !saved) {
+        current.scrollTop = current.scrollHeight;
+      } else {
+        current.scrollTop = Math.min(saved.scrollTop, current.scrollHeight);
+      }
+      setScrollTop(current.scrollTop);
+    });
+  }, [containerRef, items.length, scrollAnchorKey]);
+
+  // Correct the scroll position when a measured row above the viewport grows
+  // or shrinks. Late Markdown/image measurement must not move the reader's
+  // anchor row.
+  useEffect(() => {
+    const container = containerRef.current;
+    const previousOffsets = previousOffsetsRef.current;
+    if (
+      enabled &&
+      container &&
+      previousOffsets.length === offsets.length &&
+      offsets.length > 0 &&
+      !isAtBottomRef.current
+    ) {
+      const anchorIndex = Math.min(
+        Math.max(findStartIndex(previousOffsets, container.scrollTop - scrollOffsetTop), 0),
+        offsets.length - 1,
+      );
+      const delta = (offsets[anchorIndex] ?? 0) - (previousOffsets[anchorIndex] ?? 0);
+      if (Math.abs(delta) >= 1) {
+        container.scrollTop = Math.max(0, container.scrollTop + delta);
+        setScrollTop(container.scrollTop);
+      }
+    }
+    previousOffsetsRef.current = offsets;
+  }, [containerRef, enabled, offsets, scrollOffsetTop]);
 
   // ---- ResizeObserver for viewport height ---------------------------------
 
@@ -175,8 +261,16 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
     const previousItemCount = previousItemCountRef.current;
     const itemCountChanged = previousItemCount !== items.length;
     previousItemCountRef.current = items.length;
-    if (!itemCountChanged) return;
-    if (!enabled || suppressAutoScrollOnItemsChange || !isAtBottomRef.current) return;
+    if (
+      !shouldAutoScrollOnItemsChange({
+        itemCountChanged,
+        enabled,
+        suppressAutoScrollOnItemsChange,
+        isAtBottom: isAtBottomRef.current,
+      })
+    ) {
+      return;
+    }
     const container = containerRef.current;
     if (container) {
       container.scrollTop = container.scrollHeight;

@@ -331,6 +331,7 @@ export class CronService {
         workspaceId: input.workspaceId,
         taskPrompt: input.taskPrompt,
         taskTitle: input.taskTitle,
+        assignedAgentRoleId: input.assignedAgentRoleId,
         runMode: input.runMode,
         targetTaskId: input.targetTaskId,
         workflowRoutineId: input.workflowRoutineId,
@@ -404,6 +405,8 @@ export class CronService {
       if (patch.workspaceId !== undefined) job.workspaceId = patch.workspaceId;
       if (patch.taskPrompt !== undefined) job.taskPrompt = patch.taskPrompt;
       if (patch.taskTitle !== undefined) job.taskTitle = patch.taskTitle;
+      if (patch.assignedAgentRoleId !== undefined)
+        job.assignedAgentRoleId = patch.assignedAgentRoleId;
       if (patch.runMode !== undefined) {
         job.runMode = patch.runMode;
         if (patch.runMode === "new_task") {
@@ -829,6 +832,7 @@ export class CronService {
             title: job.taskTitle || `Scheduled: ${job.name}`,
             prompt: renderedPrompt,
             workspaceId: workspaceIdForRun,
+            assignedAgentRoleId: job.assignedAgentRoleId,
             modelKey: job.modelKey,
             allowUserInput: job.allowUserInput ?? false,
             agentConfig: { ...agentConfig, scheduledJobId: job.id },

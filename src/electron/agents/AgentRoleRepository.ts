@@ -585,7 +585,10 @@ export class AgentRoleRepository {
   }
 
   /**
-   * Delete an agent role (only non-system roles)
+   * Remove an agent role from active use without breaking historical references.
+   *
+   * Tasks, activity, and collaboration records retain the role ID for history,
+   * so custom roles are deactivated instead of being hard-deleted.
    */
   delete(id: string): boolean {
     const existing = this.findById(id);
@@ -597,9 +600,33 @@ export class AgentRoleRepository {
       return false;
     }
 
-    const stmt = this.db.prepare("DELETE FROM agent_roles WHERE id = ? AND is_system = 0");
-    const result = stmt.run(id);
-    return result.changes > 0;
+    const deactivate = this.db.transaction(() => {
+      const now = Date.now();
+      const result = this.db
+        .prepare(
+          `UPDATE agent_roles
+           SET is_active = 0,
+               heartbeat_enabled = 0,
+               heartbeat_status = 'idle',
+               updated_at = ?
+           WHERE id = ? AND is_system = 0`,
+        )
+        .run(now, id);
+      if (result.changes === 0) return false;
+
+      this.db
+        .prepare(
+          `UPDATE automation_profiles
+           SET enabled = 0,
+               heartbeat_status = 'idle',
+               updated_at = ?
+           WHERE agent_role_id = ?`,
+        )
+        .run(now, id);
+      return true;
+    });
+
+    return deactivate();
   }
 
   /**

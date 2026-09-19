@@ -167,4 +167,22 @@ describe("AppearanceManager settings", () => {
 
     expect(AppearanceManager.loadSettings().uiDensity).toBe("power");
   });
+
+  it("persists the minimal command output style across a cache reset", () => {
+    AppearanceManager.saveSettings({ commandOutputStyle: "minimal" });
+    AppearanceManager.clearCache();
+
+    expect(AppearanceManager.loadSettings().commandOutputStyle).toBe("minimal");
+  });
+
+  it("falls back to the terminal command output style when the stored value is invalid", () => {
+    mocks.storedSettings = {
+      themeMode: "system",
+      visualTheme: "warm",
+      accentColor: "cyan",
+      commandOutputStyle: "fancy" as never,
+    };
+
+    expect(AppearanceManager.loadSettings().commandOutputStyle).toBe("terminal");
+  });
 });

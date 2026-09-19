@@ -13,9 +13,7 @@
       "dontUseWhen": "Do not use for topic-based web search (use research-last-days or web_search). Do not use when no URLs are present.",
       "outputs": "Structured findings report with per-URL summaries, key points, and classification tags.",
       "successCriteria": "All extractable URLs are processed; report includes title, summary, key points, and classification per URL.",
-      "expectedArtifacts": [
-        "findings-report.md"
-      ],
+      "expectedArtifacts": ["findings-report.md"],
       "examples": {
         "positive": [
           "Research these links and build a findings report with classification",

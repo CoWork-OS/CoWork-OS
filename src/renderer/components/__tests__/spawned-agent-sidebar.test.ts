@@ -51,6 +51,7 @@ function renderSidebar(props: {
       uiDensity: "focused",
       onSelectTask: () => undefined,
       onClose: () => undefined,
+      onCancelTask: () => undefined,
       onModelChange: () => undefined,
       showTranscript: false,
     }),
@@ -76,7 +77,17 @@ describe("SpawnedAgentSidebar", () => {
     expect(markup).toContain("Spawned from Parent task");
     expect(markup).toContain("Euclid");
     expect(markup).toContain("1 event");
+    expect(markup).toContain("Pause");
+    expect(markup).toContain("Stop");
     expect(markup).not.toContain('role="tab"');
+  });
+
+  it("shows resume for an interrupted worker", () => {
+    const markup = renderSidebar({
+      childTasks: [makeTask("child-1", { status: "interrupted" })],
+    });
+
+    expect(markup).toContain("Resume");
   });
 
   it("renders switchable tabs for multiple spawned agents", () => {

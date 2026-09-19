@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   ArrowUp,
   BarChart3,
-  Bot,
   Briefcase,
   Bug,
   CalendarDays,
@@ -27,6 +26,7 @@ import {
   Sparkles,
   Wrench,
 } from "lucide-react";
+import { BotGlyph } from "./BotGlyph";
 import type {
   AgentTemplate,
   AgentBuilderConnectionRequirement,
@@ -996,7 +996,7 @@ function getTemplateGlyph(template: AgentTemplate) {
         case "finance":
           return BarChart3;
         default:
-          return Bot;
+          return BotGlyph;
       }
   }
 }
@@ -2023,7 +2023,7 @@ export function AgentsHubPanel({
                     Add advanced logic
                   </button>
                   <button type="button" className="agents-link-btn" disabled>
-                    <Bot size={16} />
+                    <BotGlyph size={17} />
                     Optimize this agent
                   </button>
                 </div>
@@ -3186,7 +3186,7 @@ export function AgentsHubPanel({
                   className="agents-builder-plan-icon"
                   style={{ color: builderPlan.color || "#1570ef" }}
                 >
-                  <Bot size={28} />
+                  <BotGlyph size={28} />
                 </div>
                 <div>
                   <span>{builderPlan.subtitle || "Private in CoWork OS"}</span>
@@ -3368,7 +3368,7 @@ export function AgentsHubPanel({
           executionMode: "solo",
         }
       : null;
-    const AgentGlyph = templateRecord ? getTemplateGlyph(templateRecord) : Bot;
+    const AgentGlyph = templateRecord ? getTemplateGlyph(templateRecord) : BotGlyph;
     const customIcon = studio?.appearance?.icon;
     const customColor = studio?.appearance?.color || templateRecord?.color || "#1570ef";
     const starterPrompts = studio?.starterPrompts || [];
@@ -3987,7 +3987,7 @@ export function AgentsHubPanel({
                     executionMode: "solo",
                   }
                 : null;
-              const TemplateGlyph = templateRecord ? getTemplateGlyph(templateRecord) : Bot;
+              const TemplateGlyph = templateRecord ? getTemplateGlyph(templateRecord) : BotGlyph;
               const cardColor = studio?.appearance?.color || templateRecord?.color || "#1570ef";
               return (
                 <button

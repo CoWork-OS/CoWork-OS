@@ -1,24 +1,24 @@
-import * as readline from 'readline';
+import * as readline from "readline";
 
 // ==================== MCP Types ====================
 
 type JSONRPCId = string | number;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   result?: any;
   error?: { code: number; message: string; data?: any };
@@ -38,7 +38,7 @@ type MCPTool = {
   name: string;
   description?: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties?: Record<string, MCPToolProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -54,14 +54,14 @@ type MCPServerInfo = {
   };
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+const PROTOCOL_VERSION = "2024-11-05";
 
 const MCP_METHODS = {
-  INITIALIZE: 'initialize',
-  INITIALIZED: 'notifications/initialized',
-  SHUTDOWN: 'shutdown',
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  INITIALIZE: "initialize",
+  INITIALIZED: "notifications/initialized",
+  SHUTDOWN: "shutdown",
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 } as const;
 
 const MCP_ERROR_CODES = {
@@ -75,7 +75,7 @@ const MCP_ERROR_CODES = {
 
 // ==================== Discord Client ====================
 
-const DISCORD_API_BASE = 'https://discord.com/api/v10';
+const DISCORD_API_BASE = "https://discord.com/api/v10";
 
 type DiscordConfig = {
   botToken?: string;
@@ -110,56 +110,64 @@ class DiscordClient {
   }
 
   async health(): Promise<RequestResult> {
-    return this.requestJson('GET', '/users/@me');
+    return this.requestJson("GET", "/users/@me");
   }
 
   async listGuilds(limit?: number, after?: string): Promise<RequestResult> {
     const params = new URLSearchParams();
-    if (limit !== undefined) params.set('limit', String(limit));
-    if (after) params.set('after', after);
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (after) params.set("after", after);
     const query = params.toString();
-    return this.requestJson('GET', `/users/@me/guilds${query ? `?${query}` : ''}`);
+    return this.requestJson("GET", `/users/@me/guilds${query ? `?${query}` : ""}`);
   }
 
   async getGuild(guildId: string): Promise<RequestResult> {
-    return this.requestJson('GET', `/guilds/${encodeURIComponent(guildId)}?with_counts=true`);
+    return this.requestJson("GET", `/guilds/${encodeURIComponent(guildId)}?with_counts=true`);
   }
 
   async listChannels(guildId: string): Promise<RequestResult> {
-    return this.requestJson('GET', `/guilds/${encodeURIComponent(guildId)}/channels`);
+    return this.requestJson("GET", `/guilds/${encodeURIComponent(guildId)}/channels`);
   }
 
   async getChannel(channelId: string): Promise<RequestResult> {
-    return this.requestJson('GET', `/channels/${encodeURIComponent(channelId)}`);
+    return this.requestJson("GET", `/channels/${encodeURIComponent(channelId)}`);
   }
 
   async createChannel(guildId: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', `/guilds/${encodeURIComponent(guildId)}/channels`, payload);
+    return this.requestJson("POST", `/guilds/${encodeURIComponent(guildId)}/channels`, payload);
   }
 
   async editChannel(channelId: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('PATCH', `/channels/${encodeURIComponent(channelId)}`, payload);
+    return this.requestJson("PATCH", `/channels/${encodeURIComponent(channelId)}`, payload);
   }
 
   async deleteChannel(channelId: string): Promise<RequestResult> {
-    return this.requestJson('DELETE', `/channels/${encodeURIComponent(channelId)}`);
+    return this.requestJson("DELETE", `/channels/${encodeURIComponent(channelId)}`);
   }
 
   async sendMessage(channelId: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', `/channels/${encodeURIComponent(channelId)}/messages`, payload);
+    return this.requestJson("POST", `/channels/${encodeURIComponent(channelId)}/messages`, payload);
   }
 
-  async getMessages(channelId: string, limit?: number, before?: string, after?: string): Promise<RequestResult> {
+  async getMessages(
+    channelId: string,
+    limit?: number,
+    before?: string,
+    after?: string,
+  ): Promise<RequestResult> {
     const params = new URLSearchParams();
-    if (limit !== undefined) params.set('limit', String(limit));
-    if (before) params.set('before', before);
-    if (after) params.set('after', after);
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (before) params.set("before", before);
+    if (after) params.set("after", after);
     const query = params.toString();
-    return this.requestJson('GET', `/channels/${encodeURIComponent(channelId)}/messages${query ? `?${query}` : ''}`);
+    return this.requestJson(
+      "GET",
+      `/channels/${encodeURIComponent(channelId)}/messages${query ? `?${query}` : ""}`,
+    );
   }
 
   async createThread(channelId: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', `/channels/${encodeURIComponent(channelId)}/threads`, payload);
+    return this.requestJson("POST", `/channels/${encodeURIComponent(channelId)}/threads`, payload);
   }
 
   async createMessageThread(
@@ -168,23 +176,27 @@ class DiscordClient {
     payload: Record<string, any>,
   ): Promise<RequestResult> {
     return this.requestJson(
-      'POST',
+      "POST",
       `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/threads`,
       payload,
     );
   }
 
   async listRoles(guildId: string): Promise<RequestResult> {
-    return this.requestJson('GET', `/guilds/${encodeURIComponent(guildId)}/roles`);
+    return this.requestJson("GET", `/guilds/${encodeURIComponent(guildId)}/roles`);
   }
 
   async createRole(guildId: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', `/guilds/${encodeURIComponent(guildId)}/roles`, payload);
+    return this.requestJson("POST", `/guilds/${encodeURIComponent(guildId)}/roles`, payload);
   }
 
-  async editRole(guildId: string, roleId: string, payload: Record<string, any>): Promise<RequestResult> {
+  async editRole(
+    guildId: string,
+    roleId: string,
+    payload: Record<string, any>,
+  ): Promise<RequestResult> {
     return this.requestJson(
-      'PATCH',
+      "PATCH",
       `/guilds/${encodeURIComponent(guildId)}/roles/${encodeURIComponent(roleId)}`,
       payload,
     );
@@ -192,7 +204,7 @@ class DiscordClient {
 
   async deleteRole(guildId: string, roleId: string): Promise<RequestResult> {
     return this.requestJson(
-      'DELETE',
+      "DELETE",
       `/guilds/${encodeURIComponent(guildId)}/roles/${encodeURIComponent(roleId)}`,
     );
   }
@@ -200,43 +212,51 @@ class DiscordClient {
   async addReaction(channelId: string, messageId: string, emoji: string): Promise<RequestResult> {
     const encoded = encodeURIComponent(emoji);
     return this.requestJson(
-      'PUT',
+      "PUT",
       `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${encoded}/@me`,
     );
   }
 
   async createWebhook(channelId: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', `/channels/${encodeURIComponent(channelId)}/webhooks`, payload);
+    return this.requestJson("POST", `/channels/${encodeURIComponent(channelId)}/webhooks`, payload);
   }
 
   async listWebhooks(channelId: string): Promise<RequestResult> {
-    return this.requestJson('GET', `/channels/${encodeURIComponent(channelId)}/webhooks`);
+    return this.requestJson("GET", `/channels/${encodeURIComponent(channelId)}/webhooks`);
   }
 
   async listMembers(guildId: string, limit?: number, after?: string): Promise<RequestResult> {
     const params = new URLSearchParams();
-    if (limit !== undefined) params.set('limit', String(limit));
-    if (after) params.set('after', after);
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (after) params.set("after", after);
     const query = params.toString();
-    return this.requestJson('GET', `/guilds/${encodeURIComponent(guildId)}/members${query ? `?${query}` : ''}`);
+    return this.requestJson(
+      "GET",
+      `/guilds/${encodeURIComponent(guildId)}/members${query ? `?${query}` : ""}`,
+    );
   }
 
   private getToken(): string {
     if (!this.config.botToken) {
-      throw new Error('DISCORD_BOT_TOKEN is required');
+      throw new Error("DISCORD_BOT_TOKEN is required");
     }
     return this.config.botToken;
   }
 
-  private async requestJson(method: string, path: string, body?: any, retryCount = 0): Promise<RequestResult> {
+  private async requestJson(
+    method: string,
+    path: string,
+    body?: any,
+    retryCount = 0,
+  ): Promise<RequestResult> {
     const start = Date.now();
     const url = `${DISCORD_API_BASE}${path}`;
     const headers: Record<string, string> = {
       Authorization: `Bot ${this.getToken()}`,
-      'User-Agent': 'CoWork-Discord-Connector/0.1.0',
+      "User-Agent": "CoWork-Discord-Connector/0.1.0",
     };
     if (body !== undefined) {
-      headers['Content-Type'] = 'application/json';
+      headers["Content-Type"] = "application/json";
     }
 
     const res = await fetch(url, {
@@ -247,7 +267,7 @@ class DiscordClient {
 
     const durationMs = Date.now() - start;
     const rateLimit = parseRateLimit(res.headers);
-    const vendorRequestId = res.headers.get('x-request-id') || undefined;
+    const vendorRequestId = res.headers.get("x-request-id") || undefined;
 
     // Retry on rate limit (429), up to 2 retries
     if (res.status === 429 && retryCount < 2) {
@@ -255,7 +275,7 @@ class DiscordClient {
       let retryAfterMs = 1000;
       try {
         const parsed = JSON.parse(retryBody);
-        if (typeof parsed.retry_after === 'number') {
+        if (typeof parsed.retry_after === "number") {
           retryAfterMs = Math.ceil(parsed.retry_after * 1000);
         }
       } catch {
@@ -285,7 +305,7 @@ class DiscordClient {
         durationMs,
         rateLimit,
         vendorRequestId,
-        apiVersion: 'v10',
+        apiVersion: "v10",
       },
     };
   }
@@ -298,7 +318,7 @@ class DiscordClient {
     try {
       const parsed = JSON.parse(text);
       if (parsed.message) {
-        return `Discord API error (${res.status}): ${parsed.message}${parsed.code ? ` [code ${parsed.code}]` : ''}`;
+        return `Discord API error (${res.status}): ${parsed.message}${parsed.code ? ` [code ${parsed.code}]` : ""}`;
       }
       return JSON.stringify(parsed);
     } catch {
@@ -310,9 +330,9 @@ class DiscordClient {
 // ==================== Helpers ====================
 
 function parseRateLimit(headers: Headers): RateLimitInfo | undefined {
-  const limit = numberHeader(headers.get('x-ratelimit-limit'));
-  const remaining = numberHeader(headers.get('x-ratelimit-remaining'));
-  const reset = headers.get('x-ratelimit-reset');
+  const limit = numberHeader(headers.get("x-ratelimit-limit"));
+  const remaining = numberHeader(headers.get("x-ratelimit-remaining"));
+  const reset = headers.get("x-ratelimit-reset");
   if (limit === undefined || remaining === undefined) {
     return undefined;
   }
@@ -352,11 +372,11 @@ class StdioMCPServer {
       terminal: false,
     });
 
-    this.rl.on('line', (line) => this.handleLine(line));
-    this.rl.on('close', () => this.stop());
+    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("close", () => this.stop());
 
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    process.on("SIGINT", () => this.stop());
+    process.on("SIGTERM", () => this.stop());
   }
 
   stop(): void {
@@ -375,17 +395,17 @@ class StdioMCPServer {
       const message = JSON.parse(trimmed);
       this.handleMessage(message);
     } catch (error) {
-      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, 'Parse error');
+      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
-    if ('id' in message && message.id !== null) {
+    if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
       return;
     }
 
-    if ('method' in message) {
+    if ("method" in message) {
       await this.handleNotification(message as JSONRPCNotification);
     }
   }
@@ -420,7 +440,7 @@ class StdioMCPServer {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
-        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || 'Internal error');
+        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
       }
     }
   }
@@ -435,11 +455,11 @@ class StdioMCPServer {
 
   private handleInitialize(_params: any): {
     protocolVersion: string;
-    capabilities: MCPServerInfo['capabilities'];
+    capabilities: MCPServerInfo["capabilities"];
     serverInfo: MCPServerInfo;
   } {
     if (this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, 'Already initialized');
+      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, "Already initialized");
     }
 
     return {
@@ -456,27 +476,27 @@ class StdioMCPServer {
   private async handleToolsCall(params: any): Promise<any> {
     const { name, arguments: args } = params || {};
     if (!name) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, 'Tool name is required');
+      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, "Tool name is required");
     }
 
     try {
       const result = await this.toolProvider.executeTool(name, args || {});
 
-      if (typeof result === 'string') {
-        return { content: [{ type: 'text', text: result }] };
+      if (typeof result === "string") {
+        return { content: [{ type: "text", text: result }] };
       }
 
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
-      return { content: [{ type: 'text', text: String(result) }] };
+      return { content: [{ type: "text", text: String(result) }] };
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Error: ${error?.message || 'Tool failed'}` }],
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
         isError: true,
       };
     }
@@ -488,13 +508,13 @@ class StdioMCPServer {
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
-    const response: JSONRPCResponse = { jsonrpc: '2.0', id, result };
+    const response: JSONRPCResponse = { jsonrpc: "2.0", id, result };
     this.sendMessage(response);
   }
 
   private sendError(id: JSONRPCId, code: number, message: string, data?: any): void {
     const response: JSONRPCResponse = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       error: { code, message, data },
     };
@@ -502,350 +522,367 @@ class StdioMCPServer {
   }
 
   private sendMessage(message: JSONRPCResponse | JSONRPCNotification): void {
-    process.stdout.write(JSON.stringify(message) + '\n');
+    process.stdout.write(JSON.stringify(message) + "\n");
   }
 
   private requireInitialized(): void {
     if (!this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, 'Server not initialized');
+      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, "Server not initialized");
     }
   }
 
-  private createError(code: number, message: string, data?: any): { code: number; message: string; data?: any } {
+  private createError(
+    code: number,
+    message: string,
+    data?: any,
+  ): { code: number; message: string; data?: any } {
     return { code, message, data };
   }
 }
 
 // ==================== Tool Definitions ====================
 
-const CONNECTOR_PREFIX = 'discord';
+const CONNECTOR_PREFIX = "discord";
 
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
-    description: 'Check connector health and authentication status',
+    description: "Check connector health and authentication status",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_guilds`,
-    description: 'List guilds (servers) the bot has access to',
+    description: "List guilds (servers) the bot has access to",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        limit: { type: 'number', description: 'Max guilds to return (1-200, default 200)' },
-        cursor: { type: 'string', description: 'Pagination cursor (guild id to start after)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        limit: { type: "number", description: "Max guilds to return (1-200, default 200)" },
+        cursor: { type: "string", description: "Pagination cursor (guild id to start after)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_guild`,
-    description: 'Get detailed information about a guild (server)',
+    description: "Get detailed information about a guild (server)",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        guild_id: { type: 'string', description: 'Guild id (uses DISCORD_GUILD_ID if omitted)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        guild_id: { type: "string", description: "Guild id (uses DISCORD_GUILD_ID if omitted)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_channels`,
-    description: 'List all channels in a guild',
+    description: "List all channels in a guild",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        guild_id: { type: 'string', description: 'Guild id (uses DISCORD_GUILD_ID if omitted)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        guild_id: { type: "string", description: "Guild id (uses DISCORD_GUILD_ID if omitted)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_channel`,
-    description: 'Create a new channel in a guild',
+    description: "Create a new channel in a guild",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        guild_id: { type: 'string', description: 'Guild id (uses DISCORD_GUILD_ID if omitted)' },
-        name: { type: 'string', description: 'Channel name' },
+        guild_id: { type: "string", description: "Guild id (uses DISCORD_GUILD_ID if omitted)" },
+        name: { type: "string", description: "Channel name" },
         type: {
-          type: 'number',
-          description: 'Channel type (0=text, 2=voice, 4=category, 5=announcement, 13=stage, 15=forum)',
+          type: "number",
+          description:
+            "Channel type (0=text, 2=voice, 4=category, 5=announcement, 13=stage, 15=forum)",
         },
-        topic: { type: 'string', description: 'Channel topic (up to 1024 characters)' },
-        parent_id: { type: 'string', description: 'Category channel id to nest under' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        topic: { type: "string", description: "Channel topic (up to 1024 characters)" },
+        parent_id: { type: "string", description: "Category channel id to nest under" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['name'],
+      required: ["name"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.edit_channel`,
-    description: 'Edit an existing channel',
+    description: "Edit an existing channel",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id' },
-        name: { type: 'string', description: 'New channel name' },
-        topic: { type: 'string', description: 'New channel topic' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        channel_id: { type: "string", description: "Channel id" },
+        name: { type: "string", description: "New channel name" },
+        topic: { type: "string", description: "New channel topic" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id'],
+      required: ["channel_id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.delete_channel`,
-    description: 'Delete a channel (irreversible)',
+    description: "Delete a channel (irreversible)",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id to delete' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        channel_id: { type: "string", description: "Channel id to delete" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id'],
+      required: ["channel_id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.send_message`,
-    description: 'Send a message to a channel',
+    description: "Send a message to a channel",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id to send to' },
-        content: { type: 'string', description: 'Message text content (up to 2000 characters)' },
+        channel_id: { type: "string", description: "Channel id to send to" },
+        content: { type: "string", description: "Message text content (up to 2000 characters)" },
         embeds: {
-          type: 'array',
-          description: 'Array of embed objects (rich content cards, max 10)',
+          type: "array",
+          description: "Array of embed objects (rich content cards, max 10)",
           items: {
-            type: 'object',
+            type: "object",
             properties: {
-              title: { type: 'string', description: 'Embed title (max 256 characters)' },
-              description: { type: 'string', description: 'Embed description (max 4096 characters)' },
-              url: { type: 'string', description: 'URL for the title hyperlink' },
-              color: { type: 'number', description: 'Color code as integer (e.g. 0x00ff00 = 65280)' },
+              title: { type: "string", description: "Embed title (max 256 characters)" },
+              description: {
+                type: "string",
+                description: "Embed description (max 4096 characters)",
+              },
+              url: { type: "string", description: "URL for the title hyperlink" },
+              color: {
+                type: "number",
+                description: "Color code as integer (e.g. 0x00ff00 = 65280)",
+              },
               footer: {
-                type: 'object',
+                type: "object",
                 properties: {
-                  text: { type: 'string', description: 'Footer text (max 2048 characters)' },
-                  icon_url: { type: 'string', description: 'Footer icon URL' },
+                  text: { type: "string", description: "Footer text (max 2048 characters)" },
+                  icon_url: { type: "string", description: "Footer icon URL" },
                 },
               },
               image: {
-                type: 'object',
+                type: "object",
                 properties: {
-                  url: { type: 'string', description: 'Image URL' },
+                  url: { type: "string", description: "Image URL" },
                 },
               },
               thumbnail: {
-                type: 'object',
+                type: "object",
                 properties: {
-                  url: { type: 'string', description: 'Thumbnail URL' },
+                  url: { type: "string", description: "Thumbnail URL" },
                 },
               },
               author: {
-                type: 'object',
+                type: "object",
                 properties: {
-                  name: { type: 'string', description: 'Author name (max 256 characters)' },
-                  url: { type: 'string', description: 'Author URL' },
-                  icon_url: { type: 'string', description: 'Author icon URL' },
+                  name: { type: "string", description: "Author name (max 256 characters)" },
+                  url: { type: "string", description: "Author URL" },
+                  icon_url: { type: "string", description: "Author icon URL" },
                 },
               },
               fields: {
-                type: 'array',
-                description: 'Array of field objects (max 25)',
+                type: "array",
+                description: "Array of field objects (max 25)",
                 items: {
-                  type: 'object',
+                  type: "object",
                   properties: {
-                    name: { type: 'string', description: 'Field name (max 256 characters)' },
-                    value: { type: 'string', description: 'Field value (max 1024 characters)' },
-                    inline: { type: 'boolean', description: 'Display field inline' },
+                    name: { type: "string", description: "Field name (max 256 characters)" },
+                    value: { type: "string", description: "Field value (max 1024 characters)" },
+                    inline: { type: "boolean", description: "Display field inline" },
                   },
-                  required: ['name', 'value'],
+                  required: ["name", "value"],
                 },
               },
             },
           },
         },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id'],
+      required: ["channel_id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_messages`,
-    description: 'Get recent messages from a channel',
+    description: "Get recent messages from a channel",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id' },
-        limit: { type: 'number', description: 'Number of messages to fetch (1-100, default 50)' },
-        before: { type: 'string', description: 'Get messages before this message id' },
-        after: { type: 'string', description: 'Get messages after this message id' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        channel_id: { type: "string", description: "Channel id" },
+        limit: { type: "number", description: "Number of messages to fetch (1-100, default 50)" },
+        before: { type: "string", description: "Get messages before this message id" },
+        after: { type: "string", description: "Get messages after this message id" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id'],
+      required: ["channel_id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_thread`,
-    description: 'Create a new thread from a channel or message',
+    description: "Create a new thread from a channel or message",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id to create thread in' },
-        name: { type: 'string', description: 'Thread name' },
-        message_id: { type: 'string', description: 'Message id to start thread from (optional for forum channels)' },
-        auto_archive_duration: {
-          type: 'number',
-          description: 'Minutes before auto-archive (60, 1440, 4320, 10080)',
+        channel_id: { type: "string", description: "Channel id to create thread in" },
+        name: { type: "string", description: "Thread name" },
+        message_id: {
+          type: "string",
+          description: "Message id to start thread from (optional for forum channels)",
         },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        auto_archive_duration: {
+          type: "number",
+          description: "Minutes before auto-archive (60, 1440, 4320, 10080)",
+        },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id', 'name'],
+      required: ["channel_id", "name"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_roles`,
-    description: 'List all roles in a guild',
+    description: "List all roles in a guild",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        guild_id: { type: 'string', description: 'Guild id (uses DISCORD_GUILD_ID if omitted)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        guild_id: { type: "string", description: "Guild id (uses DISCORD_GUILD_ID if omitted)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_role`,
-    description: 'Create a new role in a guild',
+    description: "Create a new role in a guild",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        guild_id: { type: 'string', description: 'Guild id (uses DISCORD_GUILD_ID if omitted)' },
-        name: { type: 'string', description: 'Role name' },
-        color: { type: 'number', description: 'RGB color value as integer' },
-        hoist: { type: 'boolean', description: 'Display role members separately in sidebar' },
-        mentionable: { type: 'boolean', description: 'Allow anyone to mention this role' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        guild_id: { type: "string", description: "Guild id (uses DISCORD_GUILD_ID if omitted)" },
+        name: { type: "string", description: "Role name" },
+        color: { type: "number", description: "RGB color value as integer" },
+        hoist: { type: "boolean", description: "Display role members separately in sidebar" },
+        mentionable: { type: "boolean", description: "Allow anyone to mention this role" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['name'],
+      required: ["name"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.add_reaction`,
-    description: 'Add a reaction emoji to a message',
+    description: "Add a reaction emoji to a message",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id' },
-        message_id: { type: 'string', description: 'Message id' },
-        emoji: { type: 'string', description: 'Emoji (unicode character or name:id for custom emoji)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        channel_id: { type: "string", description: "Channel id" },
+        message_id: { type: "string", description: "Message id" },
+        emoji: {
+          type: "string",
+          description: "Emoji (unicode character or name:id for custom emoji)",
+        },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id', 'message_id', 'emoji'],
+      required: ["channel_id", "message_id", "emoji"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_webhook`,
-    description: 'Create a webhook for a channel',
+    description: "Create a webhook for a channel",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id' },
-        name: { type: 'string', description: 'Webhook name (1-80 characters)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        channel_id: { type: "string", description: "Channel id" },
+        name: { type: "string", description: "Webhook name (1-80 characters)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id', 'name'],
+      required: ["channel_id", "name"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_members`,
-    description: 'List members of a guild',
+    description: "List members of a guild",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        guild_id: { type: 'string', description: 'Guild id (uses DISCORD_GUILD_ID if omitted)' },
-        limit: { type: 'number', description: 'Max members to return (1-1000, default 100)' },
-        cursor: { type: 'string', description: 'Pagination cursor (user id to start after)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        guild_id: { type: "string", description: "Guild id (uses DISCORD_GUILD_ID if omitted)" },
+        limit: { type: "number", description: "Max members to return (1-1000, default 100)" },
+        cursor: { type: "string", description: "Pagination cursor (user id to start after)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_channel`,
-    description: 'Get detailed information about a channel',
+    description: "Get detailed information about a channel",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        channel_id: { type: "string", description: "Channel id" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id'],
+      required: ["channel_id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.edit_role`,
-    description: 'Edit an existing role in a guild',
+    description: "Edit an existing role in a guild",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        guild_id: { type: 'string', description: 'Guild id (uses DISCORD_GUILD_ID if omitted)' },
-        role_id: { type: 'string', description: 'Role id to edit' },
-        name: { type: 'string', description: 'New role name' },
-        color: { type: 'number', description: 'New RGB color value as integer' },
-        hoist: { type: 'boolean', description: 'Display role members separately in sidebar' },
-        mentionable: { type: 'boolean', description: 'Allow anyone to mention this role' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        guild_id: { type: "string", description: "Guild id (uses DISCORD_GUILD_ID if omitted)" },
+        role_id: { type: "string", description: "Role id to edit" },
+        name: { type: "string", description: "New role name" },
+        color: { type: "number", description: "New RGB color value as integer" },
+        hoist: { type: "boolean", description: "Display role members separately in sidebar" },
+        mentionable: { type: "boolean", description: "Allow anyone to mention this role" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['role_id'],
+      required: ["role_id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.delete_role`,
-    description: 'Delete a role from a guild (irreversible)',
+    description: "Delete a role from a guild (irreversible)",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        guild_id: { type: 'string', description: 'Guild id (uses DISCORD_GUILD_ID if omitted)' },
-        role_id: { type: 'string', description: 'Role id to delete' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        guild_id: { type: "string", description: "Guild id (uses DISCORD_GUILD_ID if omitted)" },
+        role_id: { type: "string", description: "Role id to delete" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['role_id'],
+      required: ["role_id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_webhooks`,
-    description: 'List all webhooks for a channel',
+    description: "List all webhooks for a channel",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        channel_id: { type: 'string', description: 'Channel id' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        channel_id: { type: "string", description: "Channel id" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['channel_id'],
+      required: ["channel_id"],
       additionalProperties: false,
     },
   },
@@ -904,16 +941,16 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
   },
   [`${CONNECTOR_PREFIX}.send_message`]: async (args) => {
     if (args.content && args.content.length > 2000) {
-      throw new Error('Message content exceeds Discord\'s 2000-character limit');
+      throw new Error("Message content exceeds Discord's 2000-character limit");
     }
     if (args.embeds && args.embeds.length > 10) {
-      throw new Error('A message can contain at most 10 embeds');
+      throw new Error("A message can contain at most 10 embeds");
     }
     const payload: Record<string, any> = {};
     if (args.content) payload.content = args.content;
     if (args.embeds) payload.embeds = args.embeds;
     if (!payload.content && !payload.embeds) {
-      throw new Error('At least one of content or embeds is required');
+      throw new Error("At least one of content or embeds is required");
     }
     const result = await client.sendMessage(args.channel_id, payload);
     return buildEnvelope(result, args.requestId);
@@ -923,8 +960,8 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
       const result = await client.getMessages(args.channel_id, args.limit, args.before, args.after);
       return buildEnvelope(result, args.requestId);
     } catch (err: any) {
-      const msg = err?.message || '';
-      if (msg.includes('Missing Access') || msg.includes('(403)') || msg.includes('code 50001')) {
+      const msg = err?.message || "";
+      if (msg.includes("Missing Access") || msg.includes("(403)") || msg.includes("code 50001")) {
         throw new Error(
           `${msg}. Hint: Reading message content requires the "Message Content Intent" to be enabled in your bot's settings at https://discord.com/developers/applications.`,
         );
@@ -972,8 +1009,8 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
       const result = await client.listMembers(guildId, args.limit, args.cursor);
       return buildEnvelope(result, args.requestId);
     } catch (err: any) {
-      const msg = err?.message || '';
-      if (msg.includes('Missing Access') || msg.includes('(403)') || msg.includes('code 50001')) {
+      const msg = err?.message || "";
+      if (msg.includes("Missing Access") || msg.includes("(403)") || msg.includes("code 50001")) {
         throw new Error(
           `${msg}. Hint: Listing guild members requires the "Server Members Intent" to be enabled in your bot's settings at https://discord.com/developers/applications.`,
         );
@@ -1020,8 +1057,8 @@ const toolProvider: ToolProvider = {
 };
 
 const serverInfo: MCPServerInfo = {
-  name: 'Discord Connector',
-  version: '0.1.0',
+  name: "Discord Connector",
+  version: "0.1.0",
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {
     tools: { listChanged: false },
@@ -1052,7 +1089,7 @@ function buildEnvelope(result: RequestResult, requestId?: string, warnings: stri
 function resolveGuildId(explicitId?: string): string {
   const guildId = explicitId || config.defaultGuildId;
   if (!guildId) {
-    throw new Error('guild_id is required (provide it in the request or set DISCORD_GUILD_ID)');
+    throw new Error("guild_id is required (provide it in the request or set DISCORD_GUILD_ID)");
   }
   return guildId;
 }

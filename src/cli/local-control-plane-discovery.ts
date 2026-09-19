@@ -204,6 +204,28 @@ function normalizeSettings(
 
 function decryptSecureSettings(row: SecureSettingsRow, userDataDir: string): string {
   const encryptedData = row.encrypted_data;
+  // Kept in lockstep with SecureSettingsRepository's formats. app2 derives the
+  // key from the machine ID with a per-record random salt; app (legacy) used an
+  // inverted PBKDF2 argument order with a path-derived fallback.
+  if (encryptedData.startsWith("app2:")) {
+    const parts = encryptedData.slice(5).split(":");
+    if (parts.length !== 4) throw new Error("Invalid app2-encrypted settings format");
+    const [saltBase64, ivBase64, authTagBase64, encrypted] = parts;
+    const machineId = readMachineIdentifierStrict(userDataDir);
+    const key = crypto.pbkdf2Sync(
+      machineId,
+      Buffer.from(saltBase64, "base64"),
+      210000,
+      32,
+      "sha512",
+    );
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivBase64, "base64"));
+    decipher.setAuthTag(Buffer.from(authTagBase64, "base64"));
+    let decrypted = decipher.update(encrypted, "base64", "utf8");
+    decrypted += decipher.final("utf8");
+    verifyChecksum(encryptedData, row.checksum, decrypted);
+    return decrypted;
+  }
   if (encryptedData.startsWith("app:")) {
     const parts = encryptedData.slice(4).split(":");
     if (parts.length !== 3) throw new Error("Invalid app-encrypted settings format");
@@ -213,7 +235,7 @@ function decryptSecureSettings(row: SecureSettingsRow, userDataDir: string): str
     decipher.setAuthTag(Buffer.from(authTagBase64, "base64"));
     let decrypted = decipher.update(encrypted, "base64", "utf8");
     decrypted += decipher.final("utf8");
-    verifyChecksum(decrypted, row.checksum);
+    verifyChecksum(encryptedData, row.checksum, decrypted);
     return decrypted;
   }
   if (encryptedData.startsWith("os:")) {
@@ -221,13 +243,31 @@ function decryptSecureSettings(row: SecureSettingsRow, userDataDir: string): str
       "settings are encrypted with the Electron OS keychain. Open CoWork OS settings and copy the Control Plane token once, or run `cowork login --token <token>`.",
     );
   }
-  verifyChecksum(encryptedData, row.checksum);
+  verifyChecksum(encryptedData, row.checksum, encryptedData);
   return encryptedData;
 }
 
-function verifyChecksum(data: string, expected: string): void {
-  const actual = crypto.createHash("sha256").update(data).digest("hex");
-  if (actual !== expected) throw new Error("settings checksum mismatch");
+/**
+ * The stored checksum covers the ciphertext for records written by current
+ * builds, and the plaintext for older ones. Accept either, mirroring
+ * SecureSettingsRepository.loadWithStatus.
+ */
+function verifyChecksum(ciphertext: string, expected: string, plaintext: string): void {
+  const sha256 = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
+  if (sha256(ciphertext) !== expected && sha256(plaintext) !== expected) {
+    throw new Error("settings checksum mismatch");
+  }
+}
+
+/**
+ * The machine ID is required for the app2 format — there is no path-derived
+ * fallback, by design.
+ */
+function readMachineIdentifierStrict(userDataDir: string): string {
+  const machineIdPath = path.join(userDataDir, MACHINE_ID_FILE);
+  const value = fs.readFileSync(machineIdPath, "utf8").trim();
+  if (!value) throw new Error("machine identifier file is empty");
+  return value;
 }
 
 function deriveAppKey(userDataDir: string): Buffer {

@@ -1,24 +1,24 @@
-import * as readline from 'readline';
+import * as readline from "readline";
 
 // ==================== MCP Types ====================
 
 type JSONRPCId = string | number;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   result?: any;
   error?: { code: number; message: string; data?: any };
@@ -38,7 +38,7 @@ type MCPTool = {
   name: string;
   description?: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties?: Record<string, MCPToolProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -54,14 +54,14 @@ type MCPServerInfo = {
   };
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+const PROTOCOL_VERSION = "2024-11-05";
 
 const MCP_METHODS = {
-  INITIALIZE: 'initialize',
-  INITIALIZED: 'notifications/initialized',
-  SHUTDOWN: 'shutdown',
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  INITIALIZE: "initialize",
+  INITIALIZED: "notifications/initialized",
+  SHUTDOWN: "shutdown",
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 } as const;
 
 const MCP_ERROR_CODES = {
@@ -75,14 +75,14 @@ const MCP_ERROR_CODES = {
 
 // ==================== Vercel Client ====================
 
-const VERCEL_BASE_URL = 'https://api.vercel.com';
+const VERCEL_BASE_URL = "https://api.vercel.com";
 
 class VercelClient {
   constructor(private token: string | undefined) {}
 
   private getAuthHeader(): string {
     if (!this.token?.trim()) {
-      throw new Error('VERCEL_TOKEN is required');
+      throw new Error("VERCEL_TOKEN is required");
     }
     return `Bearer ${this.token.trim()}`;
   }
@@ -94,11 +94,11 @@ class VercelClient {
     }
 
     const res = await fetch(url.toString(), {
-      method: 'GET',
+      method: "GET",
       headers: {
         Authorization: this.getAuthHeader(),
-        Accept: 'application/json',
-        'User-Agent': 'CoWork-Vercel-Connector/0.1.0',
+        Accept: "application/json",
+        "User-Agent": "CoWork-Vercel-Connector/0.1.0",
       },
     });
 
@@ -111,13 +111,13 @@ class VercelClient {
   }
 
   async health(): Promise<{ ok: boolean; data: any }> {
-    const user = await this.request<{ user: { username: string } }>('/v2/user');
+    const user = await this.request<{ user: { username: string } }>("/v2/user");
     return {
       ok: true,
       data: {
-        status: 'ok',
+        status: "ok",
         user: (user as any).user?.username,
-        connector: 'vercel',
+        connector: "vercel",
       },
     };
   }
@@ -126,11 +126,11 @@ class VercelClient {
     const params: Record<string, string> = {};
     if (limit != null) params.limit = String(limit);
     if (teamId) params.teamId = teamId;
-    const result = await this.request<any>('/v9/projects', params);
+    const result = await this.request<any>("/v9/projects", params);
     return {
       ok: true,
       data: result,
-      meta: { connector: 'vercel' },
+      meta: { connector: "vercel" },
     };
   }
 
@@ -141,7 +141,7 @@ class VercelClient {
     return {
       ok: true,
       data: result,
-      meta: { connector: 'vercel' },
+      meta: { connector: "vercel" },
     };
   }
 
@@ -150,22 +150,25 @@ class VercelClient {
     if (projectId) params.projectId = projectId;
     if (limit != null) params.limit = String(limit);
     if (teamId) params.teamId = teamId;
-    const result = await this.request<any>('/v6/deployments', params);
+    const result = await this.request<any>("/v6/deployments", params);
     return {
       ok: true,
       data: result,
-      meta: { connector: 'vercel' },
+      meta: { connector: "vercel" },
     };
   }
 
   async getDeployment(deploymentId: string, teamId?: string): Promise<any> {
     const params: Record<string, string> = {};
     if (teamId) params.teamId = teamId;
-    const result = await this.request<any>(`/v13/deployments/${encodeURIComponent(deploymentId)}`, params);
+    const result = await this.request<any>(
+      `/v13/deployments/${encodeURIComponent(deploymentId)}`,
+      params,
+    );
     return {
       ok: true,
       data: result,
-      meta: { connector: 'vercel' },
+      meta: { connector: "vercel" },
     };
   }
 }
@@ -183,7 +186,7 @@ class StdioMCPServer {
 
   constructor(
     private toolProvider: ToolProvider,
-    private serverInfo: MCPServerInfo
+    private serverInfo: MCPServerInfo,
   ) {}
 
   start(): void {
@@ -193,11 +196,11 @@ class StdioMCPServer {
       terminal: false,
     });
 
-    this.rl.on('line', (line) => this.handleLine(line));
-    this.rl.on('close', () => this.stop());
+    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("close", () => this.stop());
 
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    process.on("SIGINT", () => this.stop());
+    process.on("SIGTERM", () => this.stop());
   }
 
   stop(): void {
@@ -216,17 +219,17 @@ class StdioMCPServer {
       const message = JSON.parse(trimmed);
       this.handleMessage(message);
     } catch {
-      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, 'Parse error');
+      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
-    if ('id' in message && message.id !== null) {
+    if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
       return;
     }
 
-    if ('method' in message) {
+    if ("method" in message) {
       await this.handleNotification(message as JSONRPCNotification);
     }
   }
@@ -261,7 +264,7 @@ class StdioMCPServer {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
-        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || 'Internal error');
+        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
       }
     }
   }
@@ -274,7 +277,7 @@ class StdioMCPServer {
 
   private handleInitialize(_params: any): any {
     if (this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, 'Already initialized');
+      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, "Already initialized");
     }
     return {
       protocolVersion: PROTOCOL_VERSION,
@@ -290,27 +293,27 @@ class StdioMCPServer {
   private async handleToolsCall(params: any): Promise<any> {
     const { name, arguments: args } = params || {};
     if (!name) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, 'Tool name is required');
+      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, "Tool name is required");
     }
 
     try {
       const result = await this.toolProvider.executeTool(name, args || {});
 
-      if (typeof result === 'string') {
-        return { content: [{ type: 'text', text: result }] };
+      if (typeof result === "string") {
+        return { content: [{ type: "text", text: result }] };
       }
 
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
-      return { content: [{ type: 'text', text: String(result) }] };
+      return { content: [{ type: "text", text: String(result) }] };
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Error: ${error?.message || 'Tool failed'}` }],
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
         isError: true,
       };
     }
@@ -322,86 +325,90 @@ class StdioMCPServer {
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
-    this.sendMessage({ jsonrpc: '2.0', id, result });
+    this.sendMessage({ jsonrpc: "2.0", id, result });
   }
 
   private sendError(id: JSONRPCId, code: number, message: string, data?: any): void {
-    this.sendMessage({ jsonrpc: '2.0', id, error: { code, message, data } });
+    this.sendMessage({ jsonrpc: "2.0", id, error: { code, message, data } });
   }
 
   private sendMessage(message: any): void {
-    process.stdout.write(JSON.stringify(message) + '\n');
+    process.stdout.write(JSON.stringify(message) + "\n");
   }
 
   private requireInitialized(): void {
     if (!this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, 'Server not initialized');
+      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, "Server not initialized");
     }
   }
 
-  private createError(code: number, message: string, data?: any): { code: number; message: string; data?: any } {
+  private createError(
+    code: number,
+    message: string,
+    data?: any,
+  ): { code: number; message: string; data?: any } {
     return { code, message, data };
   }
 }
 
 // ==================== Tool Definitions ====================
 
-const CONNECTOR_PREFIX = 'vercel';
+const CONNECTOR_PREFIX = "vercel";
 
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
-    description: 'Check connector health and authentication status',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    description: "Check connector health and authentication status",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_projects`,
-    description: 'List Vercel projects',
+    description: "List Vercel projects",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        limit: { type: 'number', description: 'Max projects to return' },
-        teamId: { type: 'string', description: 'Team ID to filter by' },
+        limit: { type: "number", description: "Max projects to return" },
+        teamId: { type: "string", description: "Team ID to filter by" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_project`,
-    description: 'Get a project by ID or name',
+    description: "Get a project by ID or name",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        projectId: { type: 'string', description: 'Project ID or name' },
-        teamId: { type: 'string', description: 'Team ID' },
+        projectId: { type: "string", description: "Project ID or name" },
+        teamId: { type: "string", description: "Team ID" },
       },
-      required: ['projectId'],
+      required: ["projectId"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_deployments`,
-    description: 'List deployments',
+    description: "List deployments",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        projectId: { type: 'string', description: 'Filter by project ID' },
-        limit: { type: 'number', description: 'Max deployments to return' },
-        teamId: { type: 'string', description: 'Team ID' },
+        projectId: { type: "string", description: "Filter by project ID" },
+        limit: { type: "number", description: "Max deployments to return" },
+        teamId: { type: "string", description: "Team ID" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_deployment`,
-    description: 'Get a deployment by ID',
+    description: "Get a deployment by ID",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        deploymentId: { type: 'string', description: 'Deployment ID' },
-        teamId: { type: 'string', description: 'Team ID' },
+        deploymentId: { type: "string", description: "Deployment ID" },
+        teamId: { type: "string", description: "Team ID" },
       },
-      required: ['deploymentId'],
+      required: ["deploymentId"],
       additionalProperties: false,
     },
   },
@@ -433,8 +440,8 @@ const toolProvider: ToolProvider = {
 };
 
 const serverInfo: MCPServerInfo = {
-  name: 'Vercel Connector',
-  version: '0.1.0',
+  name: "Vercel Connector",
+  version: "0.1.0",
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {
     tools: { listChanged: false },

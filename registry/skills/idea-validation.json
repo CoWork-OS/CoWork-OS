@@ -20,9 +20,7 @@
       "dontUseWhen": "Don't use for ideas that are already validated or when the user just wants competitor research (use competitive-research instead).",
       "outputs": "Structured validation report with market sizing, competitor analysis, MVP definition, and go/no-go recommendation.",
       "successCriteria": "Provides a clear, data-informed recommendation with specific next steps.",
-      "expectedArtifacts": [
-        "idea-validation.md"
-      ],
+      "expectedArtifacts": ["idea-validation.md"],
       "examples": {
         "positive": [
           "Use the idea-validation skill for this request.",

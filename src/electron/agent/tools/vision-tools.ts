@@ -5,7 +5,6 @@ import { createHash } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
 import {
   BedrockRuntimeClient,
   BedrockRuntimeClientConfig,
@@ -655,8 +654,7 @@ export class VisionTools {
           const refreshToken = settings.openai?.refreshToken?.trim();
           const canUseOAuth = Boolean(accessToken && refreshToken);
           const useOAuth = settings.openai?.authMethod === "oauth" && canUseOAuth;
-          const model =
-            modelOverride || settings.openai?.model || (useOAuth ? "gpt-5.5" : "gpt-4o-mini");
+          const model = modelOverride || settings.openai?.model || "gpt-6-astra";
           this.assertNetworkAccess(
             useOAuth ? "https://chatgpt.com/backend-api" : "https://api.openai.com/v1",
             toolName,
@@ -1072,24 +1070,36 @@ export class VisionTools {
     mimeType: string;
     maxTokens: number;
   }): Promise<string> {
-    const client = new OpenAI({ apiKey: args.apiKey });
-    const url = `data:${args.mimeType};base64,${args.base64}`;
-
-    const response = await client.chat.completions.create({
+    const provider = new OpenAIProvider({
+      type: "openai",
       model: args.model,
-      max_tokens: args.maxTokens,
+      openaiApiKey: args.apiKey,
+    });
+    const response = await provider.createMessage({
+      model: args.model,
+      maxTokens: args.maxTokens,
+      system: "",
+      toolChoice: "none",
       messages: [
         {
           role: "user",
           content: [
             { type: "text", text: args.prompt },
-            { type: "image_url", image_url: { url } },
+            {
+              type: "image",
+              data: args.base64,
+              mimeType: args.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+            },
           ],
         },
       ],
     });
 
-    return response.choices?.[0]?.message?.content?.trim() || "";
+    return response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
   }
 
   private async analyzeWithOpenAIOAuth(args: {

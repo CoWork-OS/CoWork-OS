@@ -37,13 +37,13 @@ Comprehensive marketing strategy across 25 disciplines — positioning, copywrit
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| task | string | No | What to do (e.g., 'audit my landing page', 'write ad copy', 'build a GTM plan', 'improve SEO', 'create pricing strategy') |
-| channel | select | No | Focus channel or discipline |
-| stage | select | No | Business stage for tailored advice |
+| Name    | Type   | Required | Description                                                                                                               |
+| ------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------- |
+| task    | string | No       | What to do (e.g., 'audit my landing page', 'write ad copy', 'build a GTM plan', 'improve SEO', 'create pricing strategy') |
+| channel | select | No       | Focus channel or discipline                                                                                               |
+| stage   | select | No       | Business stage for tailored advice                                                                                        |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1200 characters.
-- Runtime prompt is defined directly in `../marketing-strategist.json`. 
+- Runtime prompt is defined directly in `../marketing-strategist.json`.

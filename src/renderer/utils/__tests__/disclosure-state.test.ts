@@ -18,6 +18,15 @@ describe("disclosure intent", () => {
     expect(resolveDisclosureExpanded({ intent: "expanded", isCurrent: false })).toBe(true);
   });
 
+  it("keeps the current summary-mode group collapsed until the user opens it", () => {
+    expect(
+      resolveDisclosureExpanded({ intent: "auto", isCurrent: true, defaultExpanded: false }),
+    ).toBe(false);
+    expect(
+      resolveDisclosureExpanded({ intent: "expanded", isCurrent: true, defaultExpanded: false }),
+    ).toBe(true);
+  });
+
   it("uses the same reducer for groups and individual activities", () => {
     const groupCollapsed = disclosureIntentReducer(EMPTY_DISCLOSURE_INTENT_STATE, {
       type: "toggle",
@@ -34,5 +43,16 @@ describe("disclosure intent", () => {
 
     expect(getDisclosureIntent(activityExpanded, "group", "group-1")).toBe("collapsed");
     expect(getDisclosureIntent(activityExpanded, "activity", "activity-1")).toBe("expanded");
+  });
+
+  it("opens a summary-mode current group on the first user toggle", () => {
+    const opened = disclosureIntentReducer(EMPTY_DISCLOSURE_INTENT_STATE, {
+      type: "toggle",
+      scope: "group",
+      id: "current-group",
+      isCurrent: false,
+    });
+
+    expect(getDisclosureIntent(opened, "group", "current-group")).toBe("expanded");
   });
 });

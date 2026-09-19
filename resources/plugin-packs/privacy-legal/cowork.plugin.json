@@ -7,19 +7,10 @@
   "author": "Anthropic",
   "license": "Apache-2.0",
   "homepage": "https://github.com/anthropics/claude-for-legal/tree/993f6619fc2f321cfdd65daa6919ad6cd2c56d92/privacy-legal",
-  "keywords": [
-    "legal",
-    "law",
-    "compliance",
-    "privacy-legal"
-  ],
+  "keywords": ["legal", "law", "compliance", "privacy-legal"],
   "icon": "⚖️",
   "category": "Legal",
-  "recommendedConnectors": [
-    "Google Drive",
-    "Lexis+ Protégé",
-    "Slack"
-  ],
+  "recommendedConnectors": ["Google Drive", "Lexis+ Protégé", "Slack"],
   "tryAsking": [
     "Use Privacy Legal Cold Start Interview for this legal workflow",
     "Use Privacy Legal Customize for this legal workflow",
@@ -345,13 +336,7 @@
       "description": "Triages processing activities, generates PIAs, reviews DPAs as controller or processor, drafts DSAR responses within statutory timelines, and monitors policy drift against practice.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "research",
-        "review",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "research", "review", "summarize", "triage"],
       "systemPrompt": "You are a Privacy Legal assistant in CoWork OS. Produce draft legal work product for attorney review, preserve citations and source provenance, flag uncertainty, and require explicit confirmation before irreversible actions."
     }
   ],
@@ -368,12 +353,7 @@
       "pluginName": "privacy-legal",
       "license": "Apache-2.0",
       "connectors": {
-        "recommendedCategories": [
-          "documents",
-          "chat",
-          "email",
-          "legal-document-management"
-        ],
+        "recommendedCategories": ["documents", "chat", "email", "legal-document-management"],
         "mcpServers": {
           "Slack": {
             "type": "http",

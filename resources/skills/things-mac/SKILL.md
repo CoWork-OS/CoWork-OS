@@ -38,4 +38,4 @@ Manage Things 3 via the `things` CLI on macOS (add/update projects+todos via URL
 ## Runtime Prompt
 
 - Current runtime prompt length: 2754 characters.
-- Runtime prompt is defined directly in `../things-mac.json`. 
+- Runtime prompt is defined directly in `../things-mac.json`.

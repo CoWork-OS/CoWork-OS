@@ -219,6 +219,11 @@ export function TaskAutomationModal({
             </button>
           </div>
         </header>
+        {task.agentConfig?.botConversation && !showTemplates && (
+          <p className="task-automation-bot-note">
+            Runs as this bot in a separate task. Review the instructions for each run.
+          </p>
+        )}
 
         {showTemplates ? (
           <div className="task-automation-template-grid">

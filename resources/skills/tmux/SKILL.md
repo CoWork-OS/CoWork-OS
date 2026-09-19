@@ -38,4 +38,4 @@ Remote-control tmux sessions for interactive CLIs by sending keystrokes and scra
 ## Runtime Prompt
 
 - Current runtime prompt length: 3942 characters.
-- Runtime prompt is defined directly in `../tmux.json`. 
+- Runtime prompt is defined directly in `../tmux.json`.

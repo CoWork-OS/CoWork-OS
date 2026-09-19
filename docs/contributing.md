@@ -117,6 +117,7 @@ Help reviewers evaluate your change efficiently:
 Before creating a bug report, please check existing issues to avoid duplicates.
 
 When filing a bug report, include:
+
 - A clear, descriptive title
 - Steps to reproduce the issue
 - Expected behavior vs actual behavior
@@ -127,6 +128,7 @@ When filing a bug report, include:
 ### Suggesting Features
 
 Feature suggestions are welcome! Please:
+
 - Check existing issues/discussions first
 - Provide a clear use case
 - Explain why this feature would be useful
@@ -135,6 +137,7 @@ Feature suggestions are welcome! Please:
 ### Code Contributions
 
 Areas where help is especially needed:
+
 - VM sandbox implementation using macOS Virtualization.framework
 - Additional MCP server integrations
 - Enhanced document creation (proper Excel/Word/PowerPoint libraries)
@@ -254,6 +257,7 @@ docs(readme): update installation instructions for M1 Macs
 ## Questions?
 
 Feel free to:
+
 - Open a [Discussion](https://github.com/CoWork-OS/CoWork-OS/discussions) for questions
 - Tag maintainers in issues for guidance
 

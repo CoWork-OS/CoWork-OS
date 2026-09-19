@@ -39,4 +39,4 @@ Analyze recent coding patterns and generate a personalized developer growth repo
 ## Runtime Prompt
 
 - Current runtime prompt length: 897 characters.
-- Runtime prompt is defined directly in `../developer-growth-analysis.json`. 
+- Runtime prompt is defined directly in `../developer-growth-analysis.json`.

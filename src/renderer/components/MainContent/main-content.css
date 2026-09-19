@@ -6124,9 +6124,11 @@
   padding: 0;
 }
 
+/* The framed terminal keeps its full border inside the events column — a negative
+   left margin pushed its rounded left edge under the action block and clipped it. */
 .action-block-events > .command-output-container {
-  margin-left: -4px;
-  margin-right: 4px;
+  margin-left: 0;
+  margin-right: 0;
   margin-bottom: 4px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
 }
@@ -7654,7 +7656,9 @@
   white-space: nowrap;
 }
 
-/* Ellipsis clips the label box; preserve a small left ink gutter for every file type. */
+/* Ellipsis clips the label box; preserve a small left ink gutter for every file type.
+   The gutter must stay inside the label's own clip box — a negative margin pushed it
+   under the card's rounded frame and shaved the first glyph. */
 .spreadsheet-artifact-name,
 .spreadsheet-artifact-meta,
 .document-artifact-name,
@@ -7663,7 +7667,7 @@
 .presentation-artifact-meta,
 .web-artifact-name,
 .web-artifact-meta {
-  margin-left: -4px;
+  margin-left: 0;
   padding-left: 4px;
 }
 
@@ -14123,7 +14127,7 @@
 /* --- Assistant message -------------------------------------------------- */
 
 .chat-message.assistant-message {
-  margin-bottom: 22px;
+  margin-bottom: 12px;
 }
 
 .chat-bubble.assistant-bubble {
@@ -14226,6 +14230,115 @@
   height: 1px;
   margin: 6px 0 10px;
   background: var(--color-border-subtle);
+}
+
+/* Verbose-off keeps each action segment to one quiet summary row; the complete
+   user-facing history remains one click away inside that row. */
+.action-block.minimal {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  margin-block: -2px;
+}
+
+.action-block.minimal .action-block-indicator {
+  display: none;
+}
+
+.action-block.minimal .action-block-header {
+  min-height: 26px;
+  padding: 3px 0;
+  gap: 8px;
+}
+
+.action-block.minimal .action-block-kind-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.62;
+}
+
+.action-block.minimal .action-block-kind-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.action-block-minimal-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-block-minimal-label.current {
+  background-image: linear-gradient(
+    105deg,
+    var(--color-text-muted) 28%,
+    var(--color-text-secondary) 48%,
+    var(--color-text-muted) 68%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: action-block-current-label-shimmer 2.1s ease-in-out infinite;
+}
+
+.action-block.minimal .action-block-chevron {
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 0;
+  opacity: 0.62;
+}
+
+.action-block.minimal .action-block-content {
+  padding: 0 0 6px;
+}
+
+.action-block.minimal .action-block-events {
+  padding-left: 0;
+  margin-top: 3px;
+}
+
+.action-block.minimal.replay .action-block-minimal-label.current {
+  background: none;
+  color: var(--color-text-secondary);
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+}
+
+@keyframes action-block-current-label-shimmer {
+  from {
+    background-position: 180% 0;
+  }
+  to {
+    background-position: -20% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-block.minimal .action-block-minimal-label.current,
+  .action-block.minimal.replay .action-block-minimal-label.current {
+    background: none;
+    color: var(--color-text-secondary);
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .action-block.minimal .action-block-minimal-label.current {
+    background: none;
+    color: CanvasText;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
 }
 
 /* --- Agent activity rows ------------------------------------------------ */

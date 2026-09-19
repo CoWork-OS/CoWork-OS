@@ -82,6 +82,7 @@ function failClosedPolicies(): AdminPolicies {
         defaultAction: "deny",
         allowedDomains: [],
         blockedDomains: [],
+        allowedInternalHosts: [],
         allowShellNetwork: false,
       },
       autoReview: { enabled: true },

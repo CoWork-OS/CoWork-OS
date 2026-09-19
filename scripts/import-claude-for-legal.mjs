@@ -148,7 +148,8 @@ function parseFrontmatter(markdown) {
         index += 1;
         lines.push(next.replace(/^\s{2}/, ""));
       }
-      frontmatter[key] = value === ">" ? lines.join(" ").replace(/\s+/g, " ").trim() : lines.join("\n");
+      frontmatter[key] =
+        value === ">" ? lines.join(" ").replace(/\s+/g, " ").trim() : lines.join("\n");
       continue;
     }
 
@@ -322,7 +323,8 @@ function buildSkill({ packName, displayName, sourcePath, pluginDir, skillDir, re
         useWhen: description,
         dontUseWhen:
           "Do not use when the task is not legal, compliance, legal-operations, law-student, or legal-research related.",
-        outputs: "Draft legal work product, research notes, review memo, checklist, or workflow summary for attorney review.",
+        outputs:
+          "Draft legal work product, research notes, review memo, checklist, or workflow summary for attorney review.",
         successCriteria:
           "Preserves source provenance, flags uncertainty, applies legal guardrails, and avoids irreversible actions without confirmation.",
       },
@@ -348,9 +350,15 @@ function buildPack({ root, marketplaceEntry, outRoot, ref }) {
   const pluginMeta = fs.existsSync(pluginJsonPath) ? readJson(pluginJsonPath) : {};
   const readme = readOptional(path.join(pluginDir, "README.md"));
   const skillDirs = listDirs(path.join(pluginDir, "skills"));
-  const agentFiles = listFiles(path.join(pluginDir, "agents")).filter((file) => file.endsWith(".md"));
+  const agentFiles = listFiles(path.join(pluginDir, "agents")).filter((file) =>
+    file.endsWith(".md"),
+  );
   const displayName = titleCaseSlug(packName);
-  const description = pluginMeta.description || marketplaceEntry.description || readme.split("\n").find(Boolean) || displayName;
+  const description =
+    pluginMeta.description ||
+    marketplaceEntry.description ||
+    readme.split("\n").find(Boolean) ||
+    displayName;
   const author = pluginMeta.author?.name || marketplaceEntry.author?.name || "Anthropic";
   const skills = [
     buildGuardrailSkill(packName, displayName, sourcePath, ref),
@@ -367,7 +375,12 @@ function buildPack({ root, marketplaceEntry, outRoot, ref }) {
     }));
   const connectors = connectorNames(pluginDir);
   const agentRoles = [
-    buildPrimaryAgentRole(packName, displayName, description, agentFiles.map((file) => path.basename(file, ".md"))),
+    buildPrimaryAgentRole(
+      packName,
+      displayName,
+      description,
+      agentFiles.map((file) => path.basename(file, ".md")),
+    ),
     ...agentFiles.map((agentFile) => buildAgentRoleFromFile(packName, pluginDir, agentFile)),
   ];
 
@@ -408,7 +421,10 @@ function buildPack({ root, marketplaceEntry, outRoot, ref }) {
   const outDir = path.join(outRoot, packName);
   fs.rmSync(outDir, { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(path.join(outDir, "cowork.plugin.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  fs.writeFileSync(
+    path.join(outDir, "cowork.plugin.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
 
   return {
     name: packName,

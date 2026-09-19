@@ -1,31 +1,31 @@
 /* eslint-disable no-console */
-const os = require('os');
-const path = require('path');
-const { execFileSync } = require('child_process');
+const os = require("os");
+const path = require("path");
+const { execFileSync } = require("child_process");
 
 const DB_PATH =
   process.env.COWORK_DB_PATH ||
-  path.join(os.homedir(), 'Library', 'Application Support', 'cowork-os', 'cowork-os.db');
+  path.join(os.homedir(), "Library", "Application Support", "cowork-os", "cowork-os.db");
 const SQLITE_BUSY_TIMEOUT_MS = Number(process.env.COWORK_SQLITE_BUSY_TIMEOUT_MS) || 15000;
 
 function parseArgs(argv) {
   const args = {
     windowDays: 30,
     limit: 200,
-    suiteName: 'reliability-regressions',
+    suiteName: "reliability-regressions",
   };
 
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
-    if ((arg === '--window-days' || arg === '--days') && argv[i + 1]) {
+    if ((arg === "--window-days" || arg === "--days") && argv[i + 1]) {
       args.windowDays = Number(argv[++i]) || args.windowDays;
       continue;
     }
-    if (arg === '--limit' && argv[i + 1]) {
+    if (arg === "--limit" && argv[i + 1]) {
       args.limit = Number(argv[++i]) || args.limit;
       continue;
     }
-    if (arg === '--suite' && argv[i + 1]) {
+    if (arg === "--suite" && argv[i + 1]) {
       args.suiteName = String(argv[++i] || args.suiteName);
       continue;
     }
@@ -42,23 +42,27 @@ function sqlEscape(value) {
 
 function ensureSqliteCli() {
   try {
-    execFileSync('sqlite3', ['--version'], { stdio: 'ignore' });
+    execFileSync("sqlite3", ["--version"], { stdio: "ignore" });
   } catch {
-    console.error('[eval-corpus] sqlite3 CLI not found. Install sqlite3 to run this script.');
+    console.error("[eval-corpus] sqlite3 CLI not found. Install sqlite3 to run this script.");
     process.exit(1);
   }
 }
 
 function sqlExec(sql) {
-  execFileSync('sqlite3', ['-cmd', `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`, DB_PATH, sql], {
-    encoding: 'utf8',
+  execFileSync("sqlite3", ["-cmd", `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`, DB_PATH, sql], {
+    encoding: "utf8",
   });
 }
 
 function sqlJson(sql) {
-  const out = execFileSync('sqlite3', ['-cmd', `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`, '-json', DB_PATH, sql], {
-    encoding: 'utf8',
-  }).trim();
+  const out = execFileSync(
+    "sqlite3",
+    ["-cmd", `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`, "-json", DB_PATH, sql],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
   if (!out) return [];
   return JSON.parse(out);
 }
@@ -68,19 +72,19 @@ function nowMs() {
 }
 
 function randomUuid() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-  const { randomUUID } = require('crypto');
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  const { randomUUID } = require("crypto");
   return randomUUID();
 }
 
 function sanitizeText(raw) {
-  if (!raw) return '';
+  if (!raw) return "";
   const patterns = [
-    [/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_API_KEY]'],
-    [/ghp_[A-Za-z0-9]{20,}/g, '[REDACTED_GITHUB_TOKEN]'],
-    [/xox[baprs]-[A-Za-z0-9-]{10,}/g, '[REDACTED_SLACK_TOKEN]'],
-    [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]'],
-    [/\b\d{3}[-.\s]?\d{2,3}[-.\s]?\d{4}\b/g, '[REDACTED_PHONE]'],
+    [/sk-[A-Za-z0-9_-]{12,}/g, "[REDACTED_API_KEY]"],
+    [/ghp_[A-Za-z0-9]{20,}/g, "[REDACTED_GITHUB_TOKEN]"],
+    [/xox[baprs]-[A-Za-z0-9-]{10,}/g, "[REDACTED_SLACK_TOKEN]"],
+    [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[REDACTED_EMAIL]"],
+    [/\b\d{3}[-.\s]?\d{2,3}[-.\s]?\d{4}\b/g, "[REDACTED_PHONE]"],
   ];
 
   let output = String(raw);
@@ -91,12 +95,12 @@ function sanitizeText(raw) {
 }
 
 function normalizeTerminalStatus(taskRow) {
-  const terminal = String(taskRow.terminal_status || '').trim();
-  if (terminal === 'ok' || terminal === 'partial_success' || terminal === 'failed') {
+  const terminal = String(taskRow.terminal_status || "").trim();
+  if (terminal === "ok" || terminal === "partial_success" || terminal === "failed") {
     return terminal;
   }
-  if (taskRow.status === 'completed') return 'ok';
-  return 'failed';
+  if (taskRow.status === "completed") return "ok";
+  return "failed";
 }
 
 function ensureEvalTables() {
@@ -128,7 +132,9 @@ function ensureEvalTables() {
 }
 
 function hasTasksTable() {
-  const rows = sqlJson("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tasks' LIMIT 1");
+  const rows = sqlJson(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tasks' LIMIT 1",
+  );
   return rows.length > 0;
 }
 
@@ -141,7 +147,7 @@ function getOrCreateSuite(suiteName) {
   if (existing && existing.id) {
     let caseIds = [];
     try {
-      caseIds = JSON.parse(existing.case_ids || '[]');
+      caseIds = JSON.parse(existing.case_ids || "[]");
     } catch {
       caseIds = [];
     }
@@ -169,7 +175,7 @@ function main() {
 
   if (!hasTasksTable()) {
     console.log(`[eval-corpus] db: ${DB_PATH}`);
-    console.log('[eval-corpus] tasks table not found. Nothing to extract.');
+    console.log("[eval-corpus] tasks table not found. Nothing to extract.");
     return;
   }
 
@@ -207,10 +213,10 @@ function main() {
 
     const caseId = randomUuid();
     const now = nowMs();
-    const sourcePrompt = String(task.raw_prompt || task.user_prompt || task.prompt || '');
+    const sourcePrompt = String(task.raw_prompt || task.user_prompt || task.prompt || "");
     const sanitizedPrompt = sanitizeText(sourcePrompt);
     const terminalStatus = normalizeTerminalStatus(task);
-    const assertions = JSON.stringify({ expectedTerminalStatus: 'ok' });
+    const assertions = JSON.stringify({ expectedTerminalStatus: "ok" });
     const metadata = JSON.stringify({
       extractedFromTaskStatus: task.status,
       extractedFromTerminalStatus: terminalStatus,
@@ -223,8 +229,8 @@ function main() {
          id, name, workspace_id, source_task_id, prompt, sanitized_prompt, assertions, metadata, created_at, updated_at
        ) VALUES (
          '${sqlEscape(caseId)}',
-         '${sqlEscape(`${String(task.title || 'task').slice(0, 100)} [${String(task.id).slice(0, 8)}]`)}',
-         ${task.workspace_id ? `'${sqlEscape(task.workspace_id)}'` : 'NULL'},
+         '${sqlEscape(`${String(task.title || "task").slice(0, 100)} [${String(task.id).slice(0, 8)}]`)}',
+         ${task.workspace_id ? `'${sqlEscape(task.workspace_id)}'` : "NULL"},
          '${sqlEscape(task.id)}',
          '${sqlEscape(sourcePrompt)}',
          '${sqlEscape(sanitizedPrompt)}',

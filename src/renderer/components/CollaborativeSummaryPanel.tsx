@@ -10,7 +10,7 @@ import { useEffect, useState, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { Loader2, ChevronDown, Check } from "lucide-react";
+import { Loader2, Check } from "lucide-react";
 import type { Task, AgentTeamRun, AgentThought, AgentTeamItem } from "../../shared/types";
 import type { TaskEvent } from "../../shared/types";
 import { SYNTHESIS_TASK_TITLE, isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
@@ -18,6 +18,7 @@ import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { normalizeMarkdownForCollab, fixUnclosedBold } from "../utils/markdown-inline-lists";
 import { replaceEmojisInChildren, stripLeadingEmoji } from "../utils/emoji-replacer";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { AgentRosterRow, type AgentRosterEntry } from "./timeline/AgentRosterRow";
 
 function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
@@ -68,7 +69,9 @@ export function CollaborativeSummaryPanel({
   const [phase, setPhase] = useState<string>(collaborativeRun.phase || "dispatch");
   const [spawnEvents, setSpawnEvents] = useState<Array<{ item: AgentTeamItem; ts: number }>>([]);
   const [expanded, setExpanded] = useState(true);
-  const [agentRoles, setAgentRoles] = useState<Map<string, { icon?: string }>>(new Map());
+  const [agentRoles, setAgentRoles] = useState<Map<string, { icon?: string; color?: string }>>(
+    new Map(),
+  );
 
   useEffect(() => {
     window.electronAPI
@@ -137,9 +140,9 @@ export function CollaborativeSummaryPanel({
   useEffect(() => {
     window.electronAPI
       .getAgentRoles(false)
-      .then((roles: Array<{ id: string; icon?: string }>) => {
-        const map = new Map<string, { icon?: string }>();
-        for (const r of roles) map.set(r.id, { icon: r.icon });
+      .then((roles: Array<{ id: string; icon?: string; color?: string }>) => {
+        const map = new Map<string, { icon?: string; color?: string }>();
+        for (const r of roles) map.set(r.id, { icon: r.icon, color: r.color });
         setAgentRoles(map);
       })
       .catch(() => {});
@@ -182,6 +185,17 @@ export function CollaborativeSummaryPanel({
     (t) => t.status === "executing" || t.status === "planning" || t.status === "interrupted",
   ).length;
   const allDone = completedCount === childTasks.length && childTasks.length > 0;
+
+  const rosterAgents: AgentRosterEntry[] = displayItems.map((item) => {
+    const roleId = item.taskId ? taskToRoleId.get(item.taskId) : undefined;
+    const role = roleId ? agentRoles.get(roleId) : undefined;
+    return {
+      id: item.id,
+      name: item.title,
+      icon: role?.icon,
+      color: role?.color,
+    };
+  });
 
   // Build chronological timeline
   const timeline = useMemo(() => {
@@ -344,19 +358,16 @@ export function CollaborativeSummaryPanel({
 
   return (
     <div className="collaborative-summary-panel">
-      <button
-        type="button"
-        className="collab-summary-heading"
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
-      >
-        <ChevronDown className={`collab-summary-chevron ${expanded ? "expanded" : ""}`} size={18} />
-        <span className="collab-summary-heading-text">
-          {allDone ? "Completed" : "In progress"} — {displayItems.length} agent
-          {displayItems.length !== 1 ? "s" : ""}
-        </span>
+      <div className="collab-summary-heading-row">
+        <AgentRosterRow
+          agents={rosterAgents}
+          state={allDone ? "finished" : "working"}
+          expandable
+          expanded={expanded}
+          onToggle={() => setExpanded(!expanded)}
+        />
         {allDone && <Check className="collab-summary-done-badge" size={18} strokeWidth={2.5} />}
-      </button>
+      </div>
 
       {expanded && (
         <div className="collab-summary-timeline">

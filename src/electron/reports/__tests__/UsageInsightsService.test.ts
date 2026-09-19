@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeLlmProviderType } from "../../../shared/llmProviderDisplay";
 import { LLM_PROVIDER_TYPES } from "../../../shared/types";
 import { usageLocalDateKey } from "../../../shared/usageInsightsDates";
@@ -48,6 +48,7 @@ function endOfLocalDay(timestamp: number): number {
 function defaultMockDb(overrides: {
   llmRows?: unknown[];
   globalLlmRows?: unknown[];
+  jevRows?: unknown[];
   toolRows?: unknown[];
   statusRows?: unknown[];
   personaRows?: unknown[];
@@ -63,6 +64,7 @@ function defaultMockDb(overrides: {
   const {
     llmRows = [],
     globalLlmRows = [],
+    jevRows = [],
     toolRows = [],
     statusRows = [],
     personaRows = [],
@@ -81,6 +83,9 @@ function defaultMockDb(overrides: {
     prepare: (sql: string) => {
       if (isPricingQuery(sql)) {
         return { all: () => pricingRows, get: () => ({ count: 0 }) };
+      }
+      if (sql.includes("FROM jev_call_events")) {
+        return { all: () => jevRows, get: () => ({ count: 0 }) };
       }
       if (sql.includes("GROUP BY status")) {
         return { all: () => statusRows, get: () => ({ count: 0 }) };
@@ -133,8 +138,35 @@ function defaultMockDb(overrides: {
 }
 
 describe("UsageInsightsService", () => {
-  afterEach(() => {
+  afterEach(async () => {
+    await UsageInsightsProjector.shutdown();
     (UsageInsightsProjector as unknown as { instance: unknown }).instance = null;
+  });
+
+  it("cancels deferred rollup flushes during shutdown", async () => {
+    vi.useFakeTimers();
+    const transaction = vi.fn();
+    const db = {
+      prepare: vi.fn((sql: string) => {
+        if (sql.includes("SELECT value FROM usage_insights_state WHERE key = ?")) {
+          return { get: vi.fn().mockReturnValue({ value: "1" }) };
+        }
+        return { get: vi.fn(), all: vi.fn(), run: vi.fn() };
+      }),
+      transaction,
+    };
+
+    const projector = UsageInsightsProjector.initialize(
+      db as ConstructorParameters<typeof UsageInsightsProjector.initialize>[0],
+    );
+    projector.enqueueTaskUpdate({ workspaceId: "ws-1", createdAt: Date.now() } as Any, undefined);
+
+    await UsageInsightsProjector.shutdown();
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(UsageInsightsProjector.getIfInitialized()).toBeNull();
+    vi.useRealTimers();
   });
 
   it("counts legacy completed tasks with NULL terminal_status as AWUs", () => {
@@ -427,6 +459,59 @@ describe("UsageInsightsService", () => {
     expect(insights.llmSummary.totalInputTokens).toBe(240);
     expect(insights.llmSummary.totalOutputTokens).toBe(80);
     expect(insights.providerBreakdown.some((p) => p.provider === "openai")).toBe(true);
+  });
+
+  it("keeps Jev provider usage separate from LLM usage", () => {
+    const db = defaultMockDb({
+      jevRows: [
+        {
+          task_id: "task-jev",
+          purpose: "tool-review",
+          input_tokens: 120,
+          output_tokens: 12,
+          cost: 0.0004,
+          latency_ms: 180,
+          from_cache: 0,
+          success: 1,
+        },
+        {
+          task_id: "task-jev",
+          purpose: "tool-review",
+          input_tokens: 0,
+          output_tokens: 0,
+          cost: 0,
+          latency_ms: 0,
+          from_cache: 1,
+          success: 1,
+        },
+      ],
+    });
+    const service = new UsageInsightsService(
+      db as ConstructorParameters<typeof UsageInsightsService>[0],
+    );
+    const insights = service.generate("ws-1", 7);
+
+    expect(insights.jevSummary).toMatchObject({
+      totalJevCalls: 2,
+      successfulCalls: 2,
+      totalInputTokens: 120,
+      totalOutputTokens: 12,
+      totalReportedCost: 0.0004,
+      avgLatencyMs: 90,
+      cacheHitRate: 50,
+      distinctTaskCount: 1,
+    });
+    expect(insights.jevSummary.byPurpose).toEqual([
+      {
+        purpose: "tool-review",
+        calls: 2,
+        inputTokens: 120,
+        outputTokens: 12,
+        reportedCost: 0.0004,
+      },
+    ]);
+    expect(insights.llmSummary.totalLlmCalls).toBe(0);
+    expect(insights.formatted).toContain("Jev usage (reported separately)");
   });
 
   it("tracks all registered provider types without collapsing them into unknown", () => {

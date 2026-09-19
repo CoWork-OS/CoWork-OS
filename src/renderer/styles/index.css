@@ -1607,6 +1607,42 @@ a,
   font-size: 11px;
 }
 
+.spawned-agent-sidebar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.spawned-agent-sidebar-controls button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.spawned-agent-sidebar-controls button:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.spawned-agent-sidebar-controls button.danger {
+  color: var(--color-error);
+}
+
+.spawned-agent-sidebar-control-error {
+  flex: 0 0 auto;
+  margin: 8px 12px 0;
+  color: var(--color-error);
+  font-size: 11px;
+}
+
 .spawned-agent-sidebar-status {
   display: inline-flex;
   align-items: center;
@@ -1707,6 +1743,20 @@ a,
   border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--color-error) 8%, transparent);
+}
+
+.spawned-agent-sidebar-send-status {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
 }
 
 .spawned-agent-sidebar-transcript {
@@ -2631,6 +2681,15 @@ a,
 
 .sidebar-virtual-list {
   height: 100%;
+}
+
+/* Row wrappers are layout primitives, not hierarchy levels. Reset them so a
+   project can never inherit indentation from a sibling task-tree surface. */
+.cli-task-list > div,
+.sidebar-virtual-list > div[role="listitem"] {
+  margin: 0 !important;
+  padding: 0 !important;
+  transform: none !important;
 }
 
 .cli-list-header {
@@ -15079,6 +15138,248 @@ a,
 }
 
 /* ============================================
+   Command Output — Minimal Style
+   Compact, chrome-free rendering of a shell step
+   (opt-in via Appearance → Command output style)
+   ============================================ */
+
+.command-output-minimal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  font-family: var(--font-mono);
+}
+
+.command-minimal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.command-minimal-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.command-minimal-summary:disabled {
+  cursor: default;
+}
+
+.command-minimal-summary:hover:not(:disabled) .command-minimal-command {
+  color: var(--color-text-primary);
+}
+
+.command-minimal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-text-muted);
+}
+
+.command-minimal-dot.running {
+  background: var(--color-accent);
+  animation: command-status-pulse 1.5s ease-in-out infinite;
+}
+
+.command-minimal-dot.success {
+  background: var(--color-success);
+}
+
+.command-minimal-dot.error {
+  background: var(--color-error);
+}
+
+.command-minimal-command {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  transition: color 0.15s ease;
+}
+
+.command-minimal-cwd {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.command-minimal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.command-output-minimal:hover .command-minimal-actions,
+.command-output-minimal:focus-within .command-minimal-actions,
+.command-output-minimal.running .command-minimal-actions,
+.command-output-minimal.error .command-minimal-actions {
+  opacity: 1;
+}
+
+.command-minimal-exit {
+  color: var(--color-error);
+  font-size: 11px;
+}
+
+.command-minimal-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.command-minimal-action:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.command-minimal-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding-left: 3px;
+  min-width: 0;
+}
+
+.command-minimal-gutter {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.6;
+}
+
+.command-minimal-output {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.command-minimal-scroll {
+  overflow: hidden;
+}
+
+.command-minimal-scroll.expanded {
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.command-minimal-scroll.expanded::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.command-minimal-scroll.expanded::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.command-minimal-scroll.expanded::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border-radius: 999px;
+}
+
+.command-minimal-scroll pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.command-minimal-more {
+  display: inline-block;
+  margin-top: 1px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.command-minimal-more:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+.command-minimal-stdin {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 14px;
+  margin-top: 2px;
+}
+
+.command-minimal-stdin-prompt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.command-minimal-stdin-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 8px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.command-minimal-stdin-input:focus {
+  border-color: var(--color-accent);
+}
+
+.command-minimal-stdin-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* ============================================
    Canvas Preview Styles
    ============================================ */
 .canvas-previews-container {
@@ -24300,6 +24601,293 @@ a,
   letter-spacing: 0.5px;
 }
 
+/* Workspace/project navigation in the Sessions surface. The hierarchy stays
+   intentionally quiet so pinned sessions and project names remain the visual
+   anchors, matching the native macOS sidebar reference. */
+.sidebar-navigation-section-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 9px 12px 4px 20px;
+  color: var(--color-text-muted, #6b7280);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.sidebar-navigation-section-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted, #6b7280);
+  cursor: pointer;
+}
+
+.sidebar-navigation-section-action:hover,
+.sidebar-navigation-section-action:focus-visible,
+.sidebar-navigation-section-action.active {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.06));
+  color: var(--color-text-secondary, #9ca3af);
+  outline: none;
+}
+
+.sidebar-workspace-section-menu {
+  top: calc(100% - 2px);
+  right: -12px;
+  min-width: 238px;
+  z-index: 230;
+}
+
+.sidebar-workspace-section-menu .sidebar-workspace-menu-option:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.sidebar-navigation-section-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 12px 10px 20px;
+  color: var(--color-text-secondary, #9ca3af);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.sidebar-navigation-section-empty small {
+  color: var(--color-text-muted, #6b7280);
+  font-size: 11px;
+}
+
+.sidebar-workspace-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  transform: none;
+}
+
+.sidebar-workspace-node.sidebar-workspace-menu-open {
+  z-index: 220;
+}
+
+.sidebar-workspace-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  box-sizing: border-box;
+  margin: 0 !important;
+  padding: 0 8px 0 12px !important;
+  border-radius: 7px;
+}
+
+.sidebar-workspace-row:hover,
+.sidebar-workspace-node.current .sidebar-workspace-row {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.sidebar-workspace-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  flex: 1;
+  height: 30px;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary, #9ca3af);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.sidebar-workspace-toggle:hover,
+.sidebar-workspace-toggle:focus-visible {
+  color: var(--color-text, #f3f4f6);
+  outline: none;
+}
+
+.sidebar-workspace-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex: 0 0 14px;
+  color: var(--color-text-muted, #6b7280);
+}
+
+.sidebar-workspace-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  color: var(--color-text-muted, #6b7280);
+}
+
+.sidebar-workspace-label {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-workspace-current-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  margin-left: 3px;
+  border-radius: 999px;
+  background: var(--color-accent, #7c3aed);
+}
+
+.sidebar-workspace-actions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.sidebar-workspace-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted, #6b7280);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.sidebar-workspace-row:hover .sidebar-workspace-more,
+.sidebar-workspace-more:focus-visible,
+.sidebar-workspace-menu-open .sidebar-workspace-more {
+  opacity: 1;
+}
+
+.sidebar-workspace-more:hover,
+.sidebar-workspace-more:focus-visible,
+.sidebar-workspace-more[aria-expanded="true"] {
+  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.08));
+  color: var(--color-text, #f3f4f6);
+  outline: none;
+}
+
+.sidebar-workspace-session-action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start !important;
+  width: 100%;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 2px 12px 2px 40px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted, #6b7280);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.sidebar-workspace-session-action:hover,
+.sidebar-workspace-session-action:focus-visible {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.04));
+  color: var(--color-text-secondary, #9ca3af);
+  outline: none;
+}
+
+.sidebar-workspace-menu {
+  min-width: 220px;
+  padding: 5px;
+  font-family: var(--font-ui);
+}
+
+.sidebar-workspace-menu-option {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 30px;
+  gap: 10px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-primary, #f3f4f6);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.sidebar-workspace-menu-option svg {
+  flex: 0 0 auto;
+  color: var(--color-text-muted, #9ca3af);
+}
+
+.sidebar-workspace-menu-option:hover:not(:disabled),
+.sidebar-workspace-menu-option:focus-visible:not(:disabled) {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.1));
+  outline: none;
+}
+
+.sidebar-workspace-menu-option:hover:not(:disabled) svg,
+.sidebar-workspace-menu-option:focus-visible:not(:disabled) svg {
+  color: currentColor;
+}
+
+.sidebar-workspace-menu-option-disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.sidebar-workspace-menu-option-danger {
+  color: var(--color-error, #ef4444);
+}
+
+.sidebar-workspace-menu-option-danger svg {
+  color: currentColor;
+}
+
+.sidebar-workspace-menu-chevron {
+  margin-left: auto;
+}
+
+.sidebar-workspace-menu-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--color-border-subtle, rgba(255, 255, 255, 0.1));
+}
+
 /* Focused mode sidebar empty state */
 .sidebar-empty-focused {
   display: flex;
@@ -25635,6 +26223,20 @@ a,
 .density-focused .cli-task-status.active,
 .density-focused .cli-task-status.awaiting {
   display: inline-flex;
+}
+
+/* Keep the active-session spinner in the leading gutter so its title aligns
+   with every other session in the focused sidebar. */
+.density-focused .cli-task-status-leading {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* Hide task numbering */
@@ -30150,6 +30752,13 @@ html:not(.theme-light) .selected-workspace-main-row {
 
 .sidebar-bot-field textarea {
   resize: vertical;
+}
+
+.sidebar-bot-field > small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
 }
 
 .sidebar-bot-field input:focus,

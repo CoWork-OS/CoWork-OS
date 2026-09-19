@@ -7,6 +7,4 @@ title = "CoWork OS gitleaks config"
 description = "Allowlist for known false positives"
 # LLM model name strings in schema.ts seed data (llm_pricing table) are not API keys
 regexTarget = "line"
-regexes = [
-  '''^\s*\{ key: "[a-z][a-z0-9._-]+"''',
-]
+regexes = ['''^\s*\{ key: "[a-z][a-z0-9._-]+"''']

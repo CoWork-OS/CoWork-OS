@@ -9,16 +9,16 @@ description: A fit-based comparison of CoWork OS and Claude Code for people who 
 
 CoWork OS is broader: a free, open-source AI super app whose agent harness covers code alongside documents, research, browser and desktop work, communication, automation, and long-running agents.
 
-| Fit question | Claude Code | CoWork OS |
-|---|---|---|
-| Primary experience | Claude-native coding agent | General AI workbench and agent runtime |
-| Model strategy | Anthropic-centered | Multiple supported account, API, gateway, cloud, and local routes |
-| Work surface | Codebase and terminal workflows | Code plus knowledge work, files, channels, agents, and automation |
-| Runtime ownership | Anthropic product and access terms | Open-source desktop, CLI, and headless runtime |
-| Task access | Product-defined coding permissions | Named profiles combine sandbox, approvals, command tools, filesystem, network, and domain scope |
+| Fit question       | Claude Code                        | CoWork OS                                                                                       |
+| ------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Primary experience | Claude-native coding agent         | General AI workbench and agent runtime                                                          |
+| Model strategy     | Anthropic-centered                 | Multiple supported account, API, gateway, cloud, and local routes                               |
+| Work surface       | Codebase and terminal workflows    | Code plus knowledge work, files, channels, agents, and automation                               |
+| Runtime ownership  | Anthropic product and access terms | Open-source desktop, CLI, and headless runtime                                                  |
+| Task access        | Product-defined coding permissions | Named profiles combine sandbox, approvals, command tools, filesystem, network, and domain scope |
 
 Choose Claude Code for a concentrated Claude coding experience. Choose CoWork OS when you want to keep Claude among your options while using one harness and task history across more of your work.
 
 The tools can also coexist: use Claude Code for its specialist workflow and CoWork OS as the wider operating layer. Provider plans, eligibility, and charges remain separate from CoWork OS.
 
-*Last reviewed: 2026-08-27. CoWork OS is not affiliated with Anthropic.*
+_Last reviewed: 2026-08-27. CoWork OS is not affiliated with Anthropic._

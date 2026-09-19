@@ -2,7 +2,15 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { BotsPane, filterBots, getBotHandle, getBotPreview, getBotRelativeTime } from "../BotsPane";
+import {
+  BotsPane,
+  filterBots,
+  getBotHandle,
+  getBotLatestTask,
+  getBotPreview,
+  getBotRelativeTime,
+  stripMarkdownForBotPreview,
+} from "../BotsPane";
 
 const bot = {
   id: "research-role",
@@ -33,6 +41,26 @@ describe("BotsPane", () => {
     expect(getBotPreview(task as Any)).toBe("Onboarding findings are ready");
   });
 
+  it("shows Markdown previews as plain text without formatting syntax", () => {
+    expect(
+      getBotPreview({
+        ...task,
+        resultSummary: "**Focus:** Turn `CoWork OS` forward.",
+      } as Any),
+    ).toBe("Focus: Turn CoWork OS forward.");
+    expect(
+      stripMarkdownForBotPreview(
+        "**Focus:** Turn `CoWork OS` forward. See [the plan](https://example.com).",
+      ),
+    ).toBe("Focus: Turn CoWork OS forward. See the plan.");
+    expect(stripMarkdownForBotPreview("## Exchange summary ## Key decisions")).toBe(
+      "Exchange summary Key decisions",
+    );
+    expect(stripMarkdownForBotPreview("> **One** result\n- Ship it\n1. Verify it")).toBe(
+      "One result Ship it Verify it",
+    );
+  });
+
   it("formats bot activity with compact relative units", () => {
     expect(getBotRelativeTime(10_000, 10_000 + 2 * 60 * 60 * 1000)).toBe("2h");
   });
@@ -42,7 +70,7 @@ describe("BotsPane", () => {
     expect(filterBots([bot], [task as Any], "billing")).toEqual([]);
   });
 
-  it("renders the roster row with its handle, preview, and timestamp", () => {
+  it("renders the roster row with its name, preview, and timestamp", () => {
     const markup = renderToStaticMarkup(
       React.createElement(BotsPane, {
         roles: [bot],
@@ -55,9 +83,94 @@ describe("BotsPane", () => {
     expect(markup).toContain("sidebar-bots-pane");
     expect(markup).toContain("Search bots...");
     expect(markup).toContain("Research Desk");
-    expect(markup).toContain("@research-desk");
+    expect(markup).not.toContain("sidebar-bot-handle");
+    expect(markup).not.toContain("@research-desk");
+    expect(markup).toContain('aria-label="Edit Research Desk"');
     expect(markup).toContain("Onboarding findings are ready");
     expect(markup).toMatch(/class="sidebar-bot-row selected\b/);
+  });
+
+  it("keeps a bot selected for an older bot conversation but ignores normal role tasks", () => {
+    const olderConversation = { ...task, id: "older-conversation", updatedAt: 1_500 };
+    const newerConversation = { ...task, id: "newer-conversation", updatedAt: 2_500 };
+    const normalRoleTask = {
+      ...task,
+      id: "normal-role-task",
+      agentConfig: { botConversation: false },
+      updatedAt: 3_500,
+    };
+    const olderMarkup = renderToStaticMarkup(
+      React.createElement(BotsPane, {
+        roles: [bot],
+        tasks: [olderConversation as Any, newerConversation as Any],
+        selectedTaskId: "older-conversation",
+        onSelectTask: () => {},
+      }),
+    );
+    expect(olderMarkup).toMatch(/class="sidebar-bot-row selected\b/);
+
+    const normalMarkup = renderToStaticMarkup(
+      React.createElement(BotsPane, {
+        roles: [bot],
+        tasks: [normalRoleTask as Any],
+        selectedTaskId: "normal-role-task",
+        onSelectTask: () => {},
+      }),
+    );
+    expect(normalMarkup).not.toMatch(/class="sidebar-bot-row selected\b/);
+  });
+
+  it("does not use side chat forks as a bot transcript preview", () => {
+    const sideChatTask = {
+      ...task,
+      id: "side-chat-fork",
+      source: "side_chat",
+      resultSummary: "Side chat should stay private",
+      updatedAt: 9_000,
+    };
+    expect(getBotPreview(getBotLatestTask([task as Any, sideChatTask as Any], bot.id))).toBe(
+      "Onboarding findings are ready",
+    );
+  });
+
+  it("does not resume an archived bot conversation from the roster", () => {
+    const archived = { ...task, id: "archived", updatedAt: 9_000, sessionArchived: true };
+    const active = { ...task, id: "active", updatedAt: 2_500, resultSummary: "Active preview" };
+    expect(getBotLatestTask([archived as Any, active as Any], bot.id)?.id).toBe("active");
+  });
+
+  it("prefers a prior transcript over a newer empty temp-workspace placeholder", () => {
+    const priorTranscript = {
+      ...task,
+      id: "prior-transcript",
+      workspaceId: "old-temp-workspace",
+      updatedAt: 1_500,
+      sidebarPromptPreview: "A real teammate observation",
+      resultSummary: undefined,
+    };
+    const emptyPlaceholder = {
+      ...task,
+      id: "new-placeholder",
+      workspaceId: "new-temp-workspace",
+      updatedAt: 9_000,
+      sidebarPromptPreview: "Start a conversation with Research Desk.",
+      resultSummary: undefined,
+      userPrompt: "Start chatting with Research Desk.",
+    };
+    expect(getBotLatestTask([emptyPlaceholder as Any, priorTranscript as Any], bot.id)?.id).toBe(
+      "prior-transcript",
+    );
+  });
+
+  it("does not expose the dormant bot seed prompt as a conversation preview", () => {
+    expect(
+      getBotPreview({
+        ...task,
+        resultSummary: undefined,
+        sidebarPromptPreview: "Start a conversation with Research Desk.",
+        userPrompt: "Start chatting with Research Desk.",
+      } as Any),
+    ).toBe("No messages yet");
   });
 
   it("shows a useful empty state when no bot roles exist", () => {

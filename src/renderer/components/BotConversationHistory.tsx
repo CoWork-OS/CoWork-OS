@@ -1,0 +1,143 @@
+import { Archive, Check, Clock3, MessageCircle, Plus } from "lucide-react";
+import { BotGlyph } from "./BotGlyph";
+import type { Task } from "../../shared/types";
+import { isBotConversation } from "../utils/bot-conversations";
+import "./BotConversationHistory.css";
+
+export interface BotConversationHistoryProps {
+  botName: string;
+  botRoleId?: string;
+  selectedConversationId?: string | null;
+  conversations: Task[];
+  loading?: boolean;
+  onSelectConversation?: (conversationId: string) => void | Promise<void>;
+  onNewConversation?: (botRoleId: string) => void | Promise<void>;
+}
+
+function isArchived(task: Task): boolean {
+  return task.sessionArchived === true;
+}
+
+function getConversationTitle(task: Task, index: number): string {
+  const title = String(task.title || "").trim();
+  if (title && !/^start chatting with /i.test(title)) return title;
+  const firstMessage = String(task.userPrompt || task.prompt || "").trim();
+  if (firstMessage && !/^start chatting with /i.test(firstMessage)) {
+    return firstMessage.length > 58 ? `${firstMessage.slice(0, 57).trimEnd()}…` : firstMessage;
+  }
+  return index === 0 ? "New conversation" : `Conversation ${index + 1}`;
+}
+
+function formatConversationDate(timestamp?: number): string {
+  if (!timestamp) return "";
+  try {
+    return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
+      new Date(timestamp),
+    );
+  } catch {
+    return "";
+  }
+}
+
+export function BotConversationHistory({
+  botName,
+  botRoleId,
+  selectedConversationId,
+  conversations,
+  loading = false,
+  onSelectConversation,
+  onNewConversation,
+}: BotConversationHistoryProps) {
+  const visible = conversations
+    .filter(
+      (task) =>
+        isBotConversation(task) &&
+        task.source !== "side_chat" &&
+        (!botRoleId || task.assignedAgentRoleId === botRoleId),
+    )
+    .sort(
+      (a, b) =>
+        (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt) || b.createdAt - a.createdAt,
+    );
+
+  return (
+    <section className="bot-conversation-history" aria-label={`${botName} conversation history`}>
+      <div className="bot-conversation-history-heading">
+        <h2 className="bot-conversation-history-title">
+          Conversation history
+          {visible.length > 0 ? (
+            <span className="bot-conversation-history-count">{visible.length}</span>
+          ) : null}
+        </h2>
+        {botRoleId && onNewConversation && (
+          <button
+            type="button"
+            className="bot-conversation-new-button"
+            onClick={() => void onNewConversation(botRoleId)}
+          >
+            <Plus size={14} strokeWidth={2.4} /> New
+          </button>
+        )}
+      </div>
+      {loading ? (
+        <div className="bot-conversation-history-empty" aria-busy="true">
+          Loading conversations…
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="bot-conversation-history-empty">
+          <span className="bot-conversation-history-empty-icon" aria-hidden="true">
+            <BotGlyph size={20} />
+          </span>
+          <span>No conversations yet. Start one to keep this bot’s work together.</span>
+        </div>
+      ) : (
+        <div className="bot-conversation-history-list" role="list">
+          {visible.map((conversation, index) => {
+            const archived = isArchived(conversation);
+            const selected = conversation.id === selectedConversationId;
+            return (
+              <button
+                type="button"
+                role="listitem"
+                key={conversation.id}
+                className={`bot-conversation-history-row ${selected ? "selected" : ""} ${archived ? "archived" : ""}`}
+                aria-current={selected ? "true" : undefined}
+                onClick={() => void onSelectConversation?.(conversation.id)}
+              >
+                <span className="bot-conversation-history-row-icon" aria-hidden="true">
+                  {archived ? (
+                    <Archive size={15} />
+                  ) : selected ? (
+                    <Check size={15} />
+                  ) : (
+                    <MessageCircle size={15} />
+                  )}
+                </span>
+                <span className="bot-conversation-history-row-copy">
+                  <strong>{getConversationTitle(conversation, index)}</strong>
+                  <span>
+                    {archived
+                      ? "Archived"
+                      : conversation.status === "completed"
+                        ? "Completed"
+                        : conversation.status}
+                    {formatConversationDate(conversation.updatedAt || conversation.createdAt)
+                      ? ` · ${formatConversationDate(conversation.updatedAt || conversation.createdAt)}`
+                      : ""}
+                  </span>
+                </span>
+                {conversation.status === "executing" || conversation.status === "planning" ? (
+                  <Clock3
+                    className="bot-conversation-history-running"
+                    size={14}
+                    aria-label="Running"
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}

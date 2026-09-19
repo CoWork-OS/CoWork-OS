@@ -42,12 +42,7 @@
       "type": "select",
       "description": "Primary ESG pillar to focus on",
       "required": true,
-      "options": [
-        "Environmental",
-        "Social",
-        "Governance",
-        "All"
-      ]
+      "options": ["Environmental", "Social", "Governance", "All"]
     }
   ],
   "enabled": true,

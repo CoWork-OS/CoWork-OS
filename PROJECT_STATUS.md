@@ -20,12 +20,14 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 ### 1. Core Architecture
 
 #### Database Layer
+
 - [x] SQLite schema with 6 tables (workspaces, tasks, events, artifacts, approvals, skills)
 - [x] Repository pattern for data access
 - [x] Type-safe database operations
 - [x] Located: `src/electron/database/`
 
 #### Agent System
+
 - [x] AgentDaemon - Main orchestrator
 - [x] TaskExecutor - Shared turn kernel, tool scheduler, verification, and delegated-work orchestration
 - [x] Tool Registry - Manages all available tools and scheduler metadata
@@ -36,6 +38,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/agent/`
 
 #### Multi-Provider LLM Support
+
 - [x] Anthropic (Claude models)
 - [x] Google Gemini
 - [x] OpenRouter (multi-model access)
@@ -47,6 +50,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/agent/llm/`
 
 #### Web Search Integration
+
 - [x] Tavily (AI-optimized)
 - [x] Brave Search
 - [x] SerpAPI (Google results)
@@ -55,6 +59,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/agent/search/`
 
 #### Browser Automation
+
 - [x] Playwright integration
 - [x] Navigation, screenshots, PDF export
 - [x] Click, fill, type, press keys
@@ -63,6 +68,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/agent/browser/`
 
 #### Channel Integrations
+
 - [x] WhatsApp bot with QR code pairing and self-chat mode
 - [x] Telegram bot with commands
 - [x] Discord bot with slash commands
@@ -72,6 +78,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/gateway/`
 
 #### Managed Devices & Remote Operations
+
 - [x] Devices tab for local + remote machine management
 - [x] Saved remote device inventory with connection state and summaries
 - [x] Remote task dispatch with device-specific execution options
@@ -81,6 +88,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/renderer/components/DevicesPanel.tsx`, `src/electron/control-plane/`
 
 #### Companies, Mission Control, and Self-Improve
+
 - [x] Companies tab for company metadata, goals, projects, issues, and linked operators
 - [x] Mission Control planner strip and Ops tab for company-run monitoring
 - [x] Company-linked digital twins shared across Companies, Digital Twins, and Mission Control
@@ -90,6 +98,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 ### 2. Tools & Skills
 
 #### File Operations (7 tools)
+
 - [x] read_file - Read file contents
 - [x] write_file - Create or overwrite files
 - [x] list_directory - List folder contents
@@ -99,12 +108,14 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] search_files - Search by name/content
 
 #### Document Skills (4 skills)
+
 - [x] Spreadsheet - Excel .xlsx (exceljs)
 - [x] Document - Word .docx and PDF (docx, pdfkit)
 - [x] Presentation - PowerPoint .pptx (pptxgenjs)
 - [x] Folder Organizer - By type/date
 
 #### Browser Tools (12 tools)
+
 - [x] browser_navigate
 - [x] browser_screenshot
 - [x] browser_save_pdf
@@ -119,18 +130,22 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] browser_wait
 
 #### Search Tools
+
 - [x] web_search - Multi-provider web search
 
 #### Code Tools (3 tools)
+
 - [x] glob - Fast pattern-based file search
 - [x] grep - Regex content search across files
 - [x] edit_file - Surgical file editing with find-and-replace
 
 #### Web Fetch Tools (2 tools)
+
 - [x] web_fetch - Fetch and parse web pages
 - [x] http_request - Full HTTP client (curl-like)
 
 #### Web Scraping Tools (5 tools, Scrapling integration)
+
 - [x] scrape_page - Anti-bot bypass scraping with TLS fingerprinting, Cloudflare bypass, stealth mode
 - [x] scrape_multiple - Batch scrape up to 20 URLs
 - [x] scrape_extract - Structured data extraction (tables, lists, headings, metadata, custom selectors)
@@ -144,9 +159,11 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/scraping/`, `src/electron/agent/tools/scraping-tools.ts`
 
 #### Shell Tools
+
 - [x] execute_command - Shell command execution (requires approval)
 
 #### System Tools
+
 - [x] take_screenshot - Full screen or specific windows
 - [x] clipboard_read / clipboard_write - Clipboard access
 - [x] open_application / open_url / open_path - Launch apps and URLs
@@ -154,6 +171,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] get_system_info - System information and environment
 
 #### Custom Skills
+
 - [x] User-defined reusable workflows
 - [x] YAML-based skill definitions
 - [x] Priority-based sorting
@@ -161,18 +179,21 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `~/Library/Application Support/cowork-os/skills/`
 
 #### Think With Me Mode
+
 - [x] Socratic brainstorming mode (`think` conversation mode)
 - [x] Auto-detection from brainstorm/trade-off/pros-and-cons patterns
 - [x] Read-only tool restriction in think mode
 - [x] "Think with me" toggle in task creation UI
 
 #### Problem Framing & Uncertainty
+
 - [x] Task complexity scoring (`low | medium | high`) on intent routes
 - [x] Pre-flight problem restatement for complex execution tasks
 - [x] Graceful uncertainty system prompt instructions
 - [x] Low-confidence amber indicator in assistant messages
 
 #### AI Playbook
+
 - [x] Auto-capture successful patterns (approach, outcome, tools used)
 - [x] Lesson capture from task failures with error classification (8 categories)
 - [x] Relevant playbook injection into system prompts (time-decayed relevance)
@@ -190,6 +211,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] **Evolution Metrics Service**: Computes correction rate trend, adaptation velocity, knowledge graph growth, task success rate, and style alignment. Produces 0–100 evolution score. Integrated into daily briefing as `evolution_metrics` section. Located: `src/electron/memory/EvolutionMetricsService.ts`
 
 #### Daily Briefing
+
 - [x] Morning briefing with task stats, memory highlights, goal-based priorities
 - [x] Evolution metrics section (correction rate, knowledge growth, style alignment score)
 - [x] Auto-created disabled cron job on first workspace load
@@ -197,6 +219,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/briefing/DailyBriefingService.ts`
 
 #### Build Mode
+
 - [x] Four-phase canvas workflow (Concept → Plan → Scaffold → Iterate)
 - [x] Named phase checkpoints with revert and diff support
 - [x] Build Mode orchestrator with session management
@@ -204,6 +227,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/canvas/build-mode-orchestrator.ts`
 
 #### Usage Insights
+
 - [x] Task metrics (created, completed, failed, avg completion time)
 - [x] Cost/token tracking by model
 - [x] Activity heatmap by day-of-week and hour
@@ -212,6 +236,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/reports/UsageInsightsService.ts`, `src/renderer/components/UsageInsightsPanel.tsx`
 
 #### Persistent Agent Teams
+
 - [x] Teams survive across sessions with `persistent` flag
 - [x] Default workspace assignment per team
 - [x] `listPersistent()` repository method
@@ -219,12 +244,14 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] UI toggle and badge in Agent Teams panel
 
 #### Adaptive Complexity
+
 - [x] Three-tier UI density (focused, standard, power)
 - [x] Focused mode hides advanced settings
 - [x] Power mode shows all settings and features
 - [x] Configurable in Settings > Appearance
 
 #### Infrastructure (Native Cloud Tools)
+
 - [x] Cloud sandboxes via E2B (create, exec, file read/write, list, delete, expose ports)
 - [x] Domain registration via Namecheap (search, register, DNS management)
 - [x] Built-in USDC wallet on Base (auto-generated, OS keychain encrypted, balance polling)
@@ -235,16 +262,19 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/infra/`
 
 #### Starter Missions & Skills
+
 - [x] 10 one-click starter mission templates with categories
 - [x] Displayed in onboarding and empty-state welcome screen
 - [x] Competitive research skill (`resources/skills/competitive-research.json`)
 - [x] Idea validation skill (`resources/skills/idea-validation.json`)
 
 #### Plain-Language Settings
+
 - [x] Renamed jargon labels in Settings sidebar
 - [x] Technical names preserved in tooltips
 
 #### Personality System
+
 - [x] 6 personality styles (professional, friendly, concise, creative, technical, casual)
 - [x] 9 persona overlays (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir)
 - [x] Response style options (emoji usage, response length, code comments, explanation depth)
@@ -254,6 +284,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Located: `src/electron/settings/personality-manager.ts`
 
 #### MCP (Model Context Protocol)
+
 - [x] MCP Client - Connect to external MCP servers
 - [x] MCP Host - Expose CoWork's tools as MCP server
 - [x] MCP Registry - One-click server installation
@@ -263,6 +294,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 ### 3. User Interface
 
 #### Main Components
+
 - [x] Workspace selector with folder picker
 - [x] Task list with status indicators
 - [x] Task detail view with timeline
@@ -274,6 +306,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Parallel task queue panel
 
 #### Settings UI
+
 - [x] LLM provider configuration
 - [x] Model selection
 - [x] Search provider configuration
@@ -290,6 +323,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 ### 4. Infrastructure
 
 #### Security
+
 - [x] Secure credential storage (safeStorage)
 - [x] Path traversal protection
 - [x] Content Security Policy
@@ -297,6 +331,7 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Approval flow for destructive operations
 
 #### Configurable Guardrails
+
 - [x] Token budget per task (1K - 10M)
 - [x] Cost budget per task ($0.01 - $100)
 - [x] Iteration limit (5 - 500)
@@ -306,24 +341,28 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Domain allowlist for browser
 
 #### Goal Mode & Re-planning
+
 - [x] Success criteria (shell commands or file checks)
 - [x] Auto-retry up to N attempts
 - [x] Dynamic re-planning mid-execution
 - [x] `revise_plan` tool for agent adaptation
 
 #### Parallel Task Queue
+
 - [x] Configurable concurrency (1-10)
 - [x] FIFO queue management
 - [x] Auto-start next task
 - [x] Queue persistence across restarts
 
 #### Auto-Update System
+
 - [x] Update checking
 - [x] Download progress
 - [x] One-click install
 - [x] GitHub releases integration
 
 #### Build System
+
 - [x] Electron + React + TypeScript
 - [x] Vite for development
 - [x] electron-builder for packaging
@@ -430,6 +469,7 @@ Operations Requiring Approval:
 ## What's NOT Implemented (Planned)
 
 ### VM Sandbox
+
 - **Status**: Stub implementation
 - **File**: `src/electron/agent/sandbox/runner.ts`
 - **What's needed**:
@@ -439,6 +479,7 @@ Operations Requiring Approval:
   - Network egress controls
 
 ### Sub-Agents
+
 - **Status**: Not started
 - **What's needed**:
   - Agent pool management
@@ -449,6 +490,7 @@ Operations Requiring Approval:
 ## Ready to Use
 
 ### You Can:
+
 1. Select workspaces and create tasks
 2. Use any configured LLM provider, including local Ollama and 30+ supported provider/gateway options
 3. Execute multi-step file operations
@@ -480,6 +522,7 @@ Operations Requiring Approval:
 29. Make x402 HTTP payments for API access and premium content
 
 ### You Cannot (Yet):
+
 1. Execute arbitrary code in a VM sandbox
 2. Run tasks with coordinated sub-agents
 3. Apply network egress controls
@@ -487,6 +530,7 @@ Operations Requiring Approval:
 ## Dependencies
 
 ### Production
+
 - `react` & `react-dom` - UI framework
 - `better-sqlite3` - Local database
 - `@anthropic-ai/sdk` - Anthropic API
@@ -505,6 +549,7 @@ Operations Requiring Approval:
 - `electron-updater` - Auto-updates
 
 ### Development
+
 - `electron` - Desktop framework
 - `vite` - Build tool
 - `typescript` - Type safety
@@ -519,11 +564,13 @@ Before first run, verify:
 - [ ] On macOS or Windows (required for Electron desktop features)
 
 Then run:
+
 ```bash
 npm run dev
 ```
 
 Expected behavior:
+
 1. Vite dev server starts (port 5173)
 2. Electron window opens
 3. DevTools open automatically
@@ -533,11 +580,13 @@ Expected behavior:
 ## Performance Characteristics
 
 ### Token Usage (varies by provider)
+
 - **Plan creation**: ~500-1000 tokens
 - **Step execution**: ~1000-3000 tokens per step
 - **Average task**: 5000-10000 tokens total
 
 ### Timing
+
 - **Plan creation**: 2-5 seconds
 - **Simple file operation**: 3-6 seconds per step
 - **Document creation**: 5-10 seconds
@@ -545,6 +594,7 @@ Expected behavior:
 - **Web search**: 1-3 seconds
 
 ### Resource Usage
+
 - **Memory**: ~200-400MB (Electron + Playwright when active)
 - **Database**: <1MB per task
 - **CPU**: Minimal (except during API calls)
@@ -554,6 +604,7 @@ Expected behavior:
 **CoWork OS is a production-ready, security-first, GUI-first local AI super app and everything app:**
 
 ### Core Strengths
+
 - **Security**: 4,932 automated tests across 390 test files, configurable guardrails, approval workflows, brute-force protection
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
 - **Multi-Provider**: 35 LLM provider options and compatible gateways, including Claude, GPT, Gemini, Bedrock, OpenRouter, Ollama, and Grok
@@ -562,6 +613,7 @@ Expected behavior:
 - **Extensible**: MCP support (Client, Host, Registry), 150 built-in skills, and plugin packs
 
 ### Feature Highlights
+
 - Everyday Office-style document creation and review (Excel, Word, PDF, PowerPoint)
 - Web search and browser automation
 - Code tools (glob, grep, edit_file)
@@ -577,6 +629,7 @@ Expected behavior:
 - Native infrastructure: cloud sandboxes, domain registration, wallet, x402 payments
 
 ### Planned
+
 - VM sandbox using macOS Virtualization.framework
 - Network egress controls with proxy
 - Linux desktop support

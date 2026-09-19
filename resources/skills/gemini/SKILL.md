@@ -38,4 +38,4 @@ Gemini CLI for one-shot Q&A, summaries, and generation.
 ## Runtime Prompt
 
 - Current runtime prompt length: 434 characters.
-- Runtime prompt is defined directly in `../gemini.json`. 
+- Runtime prompt is defined directly in `../gemini.json`.

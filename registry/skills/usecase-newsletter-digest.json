@@ -11,10 +11,7 @@
       "type": "select",
       "description": "Where the newsletter feed arrives",
       "required": true,
-      "options": [
-        "slack",
-        "email"
-      ]
+      "options": ["slack", "email"]
     },
     {
       "name": "chat_hint",
@@ -42,10 +39,7 @@
       "description": "How to format the digest",
       "required": false,
       "default": "bullets",
-      "options": [
-        "bullets",
-        "table"
-      ]
+      "options": ["bullets", "table"]
     }
   ],
   "enabled": true,

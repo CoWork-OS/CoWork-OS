@@ -115,24 +115,23 @@ export function listFilesRecursive(dirPath, options = {}) {
 }
 
 export function slugify(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/^[a-z]+:\/\//, "")
-    .replace(/[?#].*$/, "")
-    .replace(/\\/g, "/")
-    .replace(/\.git$/i, "")
-    .replace(/[^a-z0-9/_-]+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/-+/g, "-")
-    .replace(/^[-/]+|[-/]+$/g, "") || "item";
+  return (
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^[a-z]+:\/\//, "")
+      .replace(/[?#].*$/, "")
+      .replace(/\\/g, "/")
+      .replace(/\.git$/i, "")
+      .replace(/[^a-z0-9/_-]+/g, "-")
+      .replace(/\/+/g, "/")
+      .replace(/-+/g, "-")
+      .replace(/^[-/]+|[-/]+$/g, "") || "item"
+  );
 }
 
 export function getSafeFileStem(input, fallback = "item") {
-  const stem = slugify(input)
-    .split("/")
-    .filter(Boolean)
-    .slice(-1)[0];
+  const stem = slugify(input).split("/").filter(Boolean).slice(-1)[0];
   return stem || fallback;
 }
 
@@ -224,7 +223,9 @@ export function isoNow() {
 }
 
 export function inferSourceKind(source, explicitKind = "auto") {
-  const preferred = String(explicitKind || "auto").trim().toLowerCase();
+  const preferred = String(explicitKind || "auto")
+    .trim()
+    .toLowerCase();
   if (preferred && preferred !== "auto") {
     return preferred;
   }

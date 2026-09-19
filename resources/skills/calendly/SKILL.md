@@ -37,11 +37,11 @@ Manage Calendly scheduling via the v2 API. List event types, view scheduled even
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| query | string | No | What to check or manage (e.g., 'upcoming meetings', 'cancel 3pm tomorrow', 'my scheduling links') |
+| Name  | Type   | Required | Description                                                                                       |
+| ----- | ------ | -------- | ------------------------------------------------------------------------------------------------- |
+| query | string | No       | What to check or manage (e.g., 'upcoming meetings', 'cancel 3pm tomorrow', 'my scheduling links') |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 845 characters.
-- Runtime prompt is defined directly in `../calendly.json`. 
+- Runtime prompt is defined directly in `../calendly.json`.

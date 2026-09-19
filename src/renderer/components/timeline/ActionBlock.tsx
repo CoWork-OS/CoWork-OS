@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef } from "react";
 import type { TaskEvent } from "../../../shared/types";
 import type { LucideIcon } from "lucide-react";
 import {
-  Activity,
   ChevronDown,
   CircleCheck,
   Globe2,
+  ListChecks,
   PencilLine,
   Search,
   ShieldCheck,
@@ -13,6 +13,7 @@ import {
   SquareTerminal,
 } from "lucide-react";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
+import { useTaskDuration } from "../../hooks/useTaskDuration";
 import {
   friendlyToolLaneCompletedLabel,
   friendlyToolRunningLabel,
@@ -456,12 +457,18 @@ export function buildActionBlockSummary(
 }
 
 function formatDurationMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (!Number.isFinite(ms) || ms <= 0) return "";
   const seconds = Math.max(0, Math.floor(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
-  return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
+  if (minutes < 60) return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
 function formatTokenCount(count: number): string {
@@ -470,6 +477,20 @@ function formatTokenCount(count: number): string {
   if (count >= 10_000) return `${Math.round(count / 1_000)}k`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
   return count.toLocaleString();
+}
+
+function normalizeHeaderLabel(value: string): string {
+  return value
+    .trim()
+    .replace(/[.\u2026\s]+$/, "")
+    .toLowerCase();
+}
+
+/** Returns the muted latest-activity label, or "" when it would just repeat the state label. */
+function resolveSecondaryHeaderLabel(label: string | undefined, primaryLabel: string): string {
+  const trimmed = (label || "").trim();
+  if (!trimmed) return "";
+  return normalizeHeaderLabel(trimmed) === normalizeHeaderLabel(primaryLabel) ? "" : trimmed;
 }
 
 interface ActionBlockProps {
@@ -487,6 +508,8 @@ interface ActionBlockProps {
   showConnectorBelow?: boolean;
   /** Last step label shown centered in the header when collapsed */
   lastStepLabel?: string;
+  /** Timestamp used to keep the current block's duration live. */
+  startedAt?: number;
   replay?: boolean;
   children: React.ReactNode;
 }
@@ -500,7 +523,7 @@ const ACTION_BLOCK_ICONS: Record<ActionBlockIconKind, LucideIcon> = {
   verify: ShieldCheck,
   approval: CircleCheck,
   generate: Sparkles,
-  work: Activity,
+  work: ListChecks,
 };
 
 const ACTION_BLOCK_ICON_LABELS: Record<ActionBlockIconKind, string> = {
@@ -533,6 +556,7 @@ export function ActionBlock({
   showConnectorAbove = false,
   showConnectorBelow = false,
   lastStepLabel,
+  startedAt,
   replay = false,
   children,
 }: ActionBlockProps) {
@@ -541,8 +565,20 @@ export function ActionBlock({
   const contentRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLSpanElement>(null);
   const visibleExpanded = expanded;
-  const durationLabel = formatDurationMs(durationMs);
+  const hasLiveStartTimestamp =
+    typeof startedAt === "number" && Number.isFinite(startedAt) && startedAt > 0;
+  const liveDurationLabel = useTaskDuration(
+    hasLiveStartTimestamp ? startedAt : 0,
+    undefined,
+    isActive && !replay && hasLiveStartTimestamp,
+  );
+  const durationLabel =
+    isActive && !replay && hasLiveStartTimestamp ? liveDurationLabel : formatDurationMs(durationMs);
   const primaryLabel = isActive ? "Working" : summary;
+  // The header pairs a bold state label with a muted "latest activity" label. When the
+  // latest activity resolves to the same text (a running block whose newest event has no
+  // better label than "Working"), rendering both just repeats the state twice.
+  const secondaryLabel = resolveSecondaryHeaderLabel(lastStepLabel || summary, primaryLabel);
 
   const handleToggle = useCallback(() => {
     if (visibleExpanded) {
@@ -605,19 +641,23 @@ export function ActionBlock({
           <span className="action-block-chevron" aria-hidden="true">
             <ChevronDown size={14} strokeWidth={2.5} />
           </span>
-          <span
-            ref={labelRef}
-            className="action-block-last-step-label"
-            aria-label="Latest activity"
-          >
-            {lastStepLabel || summary}
-          </span>
-          <span
-            className="action-block-meta"
-            title={`${stepCount} activities, ${toolCallCount} tool calls, ${formatTokenCount(outputTokens)} output tokens`}
-          >
-            {durationLabel}
-          </span>
+          {secondaryLabel ? (
+            <span
+              ref={labelRef}
+              className="action-block-last-step-label"
+              aria-label="Latest activity"
+            >
+              {secondaryLabel}
+            </span>
+          ) : null}
+          {durationLabel ? (
+            <span
+              className="action-block-meta"
+              title={`Duration: ${durationLabel}; ${stepCount} activities, ${toolCallCount} tool calls, ${formatTokenCount(outputTokens)} output tokens`}
+            >
+              {durationLabel}
+            </span>
+          ) : null}
         </button>
         <span className="action-block-rule" aria-hidden="true" />
         <div ref={contentRef}>

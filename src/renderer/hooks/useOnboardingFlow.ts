@@ -162,6 +162,7 @@ interface OnboardingData {
   voiceEnabled: boolean | null;
   workStyle: "planner" | "flexible" | null;
   memoryEnabled: boolean;
+  pulseEnabled: boolean;
   selectedProvider: LLMProviderType | null;
   apiKey: string;
   ollamaUrl: string;
@@ -204,6 +205,7 @@ const INITIAL_ONBOARDING_DATA: OnboardingData = {
   voiceEnabled: null,
   workStyle: null,
   memoryEnabled: true,
+  pulseEnabled: false,
   selectedProvider: null,
   apiKey: "",
   ollamaUrl: "http://localhost:11434",
@@ -307,7 +309,7 @@ export function getOnboardingDefaultModel(provider: LLMProviderType): string {
     case "anthropic":
       return "sonnet-4";
     case "openai":
-      return "gpt-4o-mini";
+      return "gpt-6-astra";
     case "gemini":
       return "gemini-2.0-flash";
     case "ollama":
@@ -415,6 +417,23 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
   }));
   const asyncMutationTokenRef = useRef(0);
   const pendingLlmSettingsRef = useRef<Record<string, unknown> | null>(null);
+
+  // Preserve an existing explicit Pulse choice when onboarding is opened again.
+  useEffect(() => {
+    const getPulseSettings = window.electronAPI?.getPulseSettings;
+    if (typeof getPulseSettings !== "function") return;
+    let cancelled = false;
+    void getPulseSettings()
+      .then((settings) => {
+        if (!cancelled && settings.consentState !== "unset") {
+          setData((current) => ({ ...current, pulseEnabled: settings.enabled }));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Clear timeout on unmount
   useEffect(() => {
@@ -1171,7 +1190,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         return existingSettings.modelKey;
       }
       if (provider === "openai" && existingSettings.openai?.authMethod === "oauth") {
-        return "gpt-5.5";
+        return "gpt-6-astra";
       }
       if (provider === "ollama" && data.detectedOllamaModel) {
         return data.detectedOllamaModel;
@@ -1469,7 +1488,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         throw new Error("ChatGPT sign-in completed without onboarding credentials");
       }
 
-      const modelKey = existingSettings?.openai?.model || "gpt-5.5";
+      const modelKey = existingSettings?.openai?.model || "gpt-6-astra";
       const settings = buildSaveSettings("openai", "", {
         ...existingSettings,
         providerType: "openai",
@@ -1641,6 +1660,10 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           enabled: data.voiceEnabled,
           responseMode: "auto",
         });
+      }
+
+      if (window.electronAPI?.setPulseEnabled) {
+        await window.electronAPI.setPulseEnabled(data.pulseEnabled);
       }
 
       const pendingLlmSettings = pendingLlmSettingsRef.current;

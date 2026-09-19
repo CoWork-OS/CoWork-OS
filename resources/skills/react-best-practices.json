@@ -11,13 +11,7 @@
     "version": "1.0.0",
     "author": "Vercel",
     "repository": "https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices",
-    "tags": [
-      "react",
-      "nextjs",
-      "performance",
-      "frontend",
-      "vercel"
-    ],
+    "tags": ["react", "nextjs", "performance", "frontend", "vercel"],
     "routing": {
       "useWhen": "Use when a React or Next.js workspace needs implementation changes, enhancements, new features, refactors, reviews, data fetching, bundle optimization, rendering fixes, or performance improvements.",
       "dontUseWhen": "Do not use for React Native or Expo work, generic visual frontend design without React implementation concerns, backend-only tasks, or conceptual planning unrelated to React/Next.js code.",

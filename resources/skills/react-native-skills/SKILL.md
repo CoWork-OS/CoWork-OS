@@ -39,4 +39,4 @@ React Native and Expo best practices for performance, UI patterns, and native in
 ## Runtime Prompt
 
 - Current runtime prompt length: 4180 characters.
-- Runtime prompt is defined directly in `../react-native-skills.json`. 
+- Runtime prompt is defined directly in `../react-native-skills.json`.

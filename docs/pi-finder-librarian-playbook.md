@@ -46,4 +46,3 @@ GitHub discovery:
 ```bash
 pi --no-session --tools read,grep,find,ls,bash -e npm:pi-librarian -p "Use librarian to find robust webhook signature verification patterns in known OSS repos. Include cited files and line ranges."
 ```
-

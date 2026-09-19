@@ -38,4 +38,4 @@ Unity/C# development: MonoBehaviour lifecycle, ScriptableObjects, Addressables, 
 ## Runtime Prompt
 
 - Current runtime prompt length: 848 characters.
-- Runtime prompt is defined directly in `../unity-development.json`. 
+- Runtime prompt is defined directly in `../unity-development.json`.

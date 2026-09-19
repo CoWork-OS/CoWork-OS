@@ -53,7 +53,15 @@ type ProviderConfig = {
   id: ProviderId;
   displayName: string;
   envPrefix: string;
-  tools: Array<"health" | "search" | "get_company_profile" | "get_financials" | "get_market_data" | "get_news" | "get_documents">;
+  tools: Array<
+    | "health"
+    | "search"
+    | "get_company_profile"
+    | "get_financials"
+    | "get_market_data"
+    | "get_news"
+    | "get_documents"
+  >;
 };
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -75,23 +83,96 @@ const MCP_ERROR_CODES = {
 } as const;
 
 const PROVIDERS: Record<ProviderId, ProviderConfig> = {
-  daloopa: { id: "daloopa", displayName: "Daloopa", envPrefix: "DALOOPA", tools: ["health", "search", "get_financials", "get_documents"] },
-  morningstar: { id: "morningstar", displayName: "Morningstar", envPrefix: "MORNINGSTAR", tools: ["health", "search", "get_company_profile", "get_market_data", "get_financials"] },
-  spglobal: { id: "spglobal", displayName: "S&P Global", envPrefix: "SPGLOBAL", tools: ["health", "search", "get_company_profile", "get_financials", "get_market_data"] },
-  factset: { id: "factset", displayName: "FactSet", envPrefix: "FACTSET", tools: ["health", "search", "get_company_profile", "get_financials", "get_market_data", "get_news"] },
-  moodys: { id: "moodys", displayName: "Moody's", envPrefix: "MOODYS", tools: ["health", "search", "get_company_profile", "get_market_data", "get_documents"] },
-  mtnewswires: { id: "mtnewswires", displayName: "MT Newswires", envPrefix: "MTNEWSWIRES", tools: ["health", "search", "get_news"] },
-  aiera: { id: "aiera", displayName: "Aiera", envPrefix: "AIERA", tools: ["health", "search", "get_documents", "get_news"] },
-  lseg: { id: "lseg", displayName: "LSEG", envPrefix: "LSEG", tools: ["health", "search", "get_company_profile", "get_financials", "get_market_data", "get_news"] },
-  pitchbook: { id: "pitchbook", displayName: "PitchBook", envPrefix: "PITCHBOOK", tools: ["health", "search", "get_company_profile", "get_financials"] },
-  chronograph: { id: "chronograph", displayName: "Chronograph", envPrefix: "CHRONOGRAPH", tools: ["health", "search", "get_company_profile", "get_financials", "get_documents"] },
-  egnyte: { id: "egnyte", displayName: "Egnyte", envPrefix: "EGNYTE", tools: ["health", "search", "get_documents"] },
+  daloopa: {
+    id: "daloopa",
+    displayName: "Daloopa",
+    envPrefix: "DALOOPA",
+    tools: ["health", "search", "get_financials", "get_documents"],
+  },
+  morningstar: {
+    id: "morningstar",
+    displayName: "Morningstar",
+    envPrefix: "MORNINGSTAR",
+    tools: ["health", "search", "get_company_profile", "get_market_data", "get_financials"],
+  },
+  spglobal: {
+    id: "spglobal",
+    displayName: "S&P Global",
+    envPrefix: "SPGLOBAL",
+    tools: ["health", "search", "get_company_profile", "get_financials", "get_market_data"],
+  },
+  factset: {
+    id: "factset",
+    displayName: "FactSet",
+    envPrefix: "FACTSET",
+    tools: [
+      "health",
+      "search",
+      "get_company_profile",
+      "get_financials",
+      "get_market_data",
+      "get_news",
+    ],
+  },
+  moodys: {
+    id: "moodys",
+    displayName: "Moody's",
+    envPrefix: "MOODYS",
+    tools: ["health", "search", "get_company_profile", "get_market_data", "get_documents"],
+  },
+  mtnewswires: {
+    id: "mtnewswires",
+    displayName: "MT Newswires",
+    envPrefix: "MTNEWSWIRES",
+    tools: ["health", "search", "get_news"],
+  },
+  aiera: {
+    id: "aiera",
+    displayName: "Aiera",
+    envPrefix: "AIERA",
+    tools: ["health", "search", "get_documents", "get_news"],
+  },
+  lseg: {
+    id: "lseg",
+    displayName: "LSEG",
+    envPrefix: "LSEG",
+    tools: [
+      "health",
+      "search",
+      "get_company_profile",
+      "get_financials",
+      "get_market_data",
+      "get_news",
+    ],
+  },
+  pitchbook: {
+    id: "pitchbook",
+    displayName: "PitchBook",
+    envPrefix: "PITCHBOOK",
+    tools: ["health", "search", "get_company_profile", "get_financials"],
+  },
+  chronograph: {
+    id: "chronograph",
+    displayName: "Chronograph",
+    envPrefix: "CHRONOGRAPH",
+    tools: ["health", "search", "get_company_profile", "get_financials", "get_documents"],
+  },
+  egnyte: {
+    id: "egnyte",
+    displayName: "Egnyte",
+    envPrefix: "EGNYTE",
+    tools: ["health", "search", "get_documents"],
+  },
 };
 
 function getProviderFromArgs(): ProviderConfig {
   const providerArgIndex = process.argv.findIndex((arg) => arg === "--provider");
   const fromArgs = providerArgIndex >= 0 ? process.argv[providerArgIndex + 1] : undefined;
-  const providerId = (fromArgs || process.env.COWORK_FINANCE_PROVIDER || "").toLowerCase() as ProviderId;
+  const providerId = (
+    fromArgs ||
+    process.env.COWORK_FINANCE_PROVIDER ||
+    ""
+  ).toLowerCase() as ProviderId;
   const provider = PROVIDERS[providerId];
   if (!provider) {
     throw new Error(
@@ -111,7 +192,9 @@ class FinanceDataClient {
   private get baseUrl(): string {
     const value = envValue(this.provider, "BASE_URL")?.trim();
     if (!value) {
-      throw new Error(`${this.provider.envPrefix}_BASE_URL is required for ${this.provider.displayName}`);
+      throw new Error(
+        `${this.provider.envPrefix}_BASE_URL is required for ${this.provider.displayName}`,
+      );
     }
     return value.replace(/\/+$/, "");
   }
@@ -163,7 +246,9 @@ class FinanceDataClient {
     });
     const text = await res.text();
     if (!res.ok) {
-      throw new Error(`${this.provider.displayName} request failed (${res.status}): ${text || res.statusText}`);
+      throw new Error(
+        `${this.provider.displayName} request failed (${res.status}): ${text || res.statusText}`,
+      );
     }
     const data = text ? JSON.parse(text) : null;
     return {
@@ -202,8 +287,14 @@ class FinanceToolProvider {
         type: "object",
         additionalProperties: false,
         properties: {
-          query: { type: "string", description: "Search query, ticker, company, entity, document, or account identifier" },
-          companyId: { type: "string", description: "Provider-specific company or entity identifier" },
+          query: {
+            type: "string",
+            description: "Search query, ticker, company, entity, document, or account identifier",
+          },
+          companyId: {
+            type: "string",
+            description: "Provider-specific company or entity identifier",
+          },
           ticker: { type: "string", description: "Ticker or instrument identifier" },
           period: { type: "string", description: "Reporting period, date, quarter, or time range" },
           limit: { type: "number", description: "Maximum records to return" },
@@ -228,7 +319,11 @@ class StdioMCPServer {
   ) {}
 
   start(): void {
-    this.rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+    this.rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: false,
+    });
     this.rl.on("line", (line) => this.handleLine(line));
     this.rl.on("close", () => this.stop());
     process.on("SIGINT", () => this.stop());
@@ -286,10 +381,18 @@ class StdioMCPServer {
           setImmediate(() => this.stop());
           return;
         default:
-          this.sendError(request.id, MCP_ERROR_CODES.METHOD_NOT_FOUND, `Method not found: ${request.method}`);
+          this.sendError(
+            request.id,
+            MCP_ERROR_CODES.METHOD_NOT_FOUND,
+            `Method not found: ${request.method}`,
+          );
       }
     } catch (error: any) {
-      this.sendError(request.id, error?.code || MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
+      this.sendError(
+        request.id,
+        error?.code || MCP_ERROR_CODES.INTERNAL_ERROR,
+        error?.message || "Internal error",
+      );
     }
   }
 
@@ -305,14 +408,17 @@ class StdioMCPServer {
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (error: any) {
       return {
-        content: [{ type: "text", text: `Error: ${error?.message || "Finance data request failed"}` }],
+        content: [
+          { type: "text", text: `Error: ${error?.message || "Finance data request failed"}` },
+        ],
         isError: true,
       };
     }
   }
 
   private requireInitialized(): void {
-    if (!this.initialized) throw { code: MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, message: "Server not initialized" };
+    if (!this.initialized)
+      throw { code: MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, message: "Server not initialized" };
   }
 
   private sendResult(id: JSONRPCId, result: any): void {

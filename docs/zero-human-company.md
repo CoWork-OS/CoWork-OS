@@ -247,10 +247,10 @@ Operational sequence:
 5. You attach automation profiles to the operator roles that should become always-on.
 6. Heartbeat v3 runs only for those automation-profile participants and Dispatches only when justified.
 7. The strategic planner reviews goals, projects, and open issues.
-7. The planner creates or updates planner-managed issues.
-8. If auto-dispatch is enabled, issues become executable tasks.
-9. Agents execute the tasks through the normal runtime.
-10. Mission Control reflects the resulting tasks, issues, runs, and planner activity.
+8. The planner creates or updates planner-managed issues.
+9. If auto-dispatch is enabled, issues become executable tasks.
+10. Agents execute the tasks through the normal runtime.
+11. Mission Control reflects the resulting tasks, issues, runs, and planner activity.
 
 ---
 
@@ -266,12 +266,12 @@ This preset creates richer company-operating files than the default workspace ki
 
 The built-in operator templates cover a basic founder-led company loop:
 
-| Persona | Primary responsibility |
-|--------|-------------------------|
+| Persona                   | Primary responsibility                                           |
+| ------------------------- | ---------------------------------------------------------------- |
 | `Founder Office Operator` | Cross-functional operator, routing and escalation, founder proxy |
-| `Company Planner` | Translates goals into projects, issues, and follow-up work |
-| `Growth Operator` | Funnel, acquisition, experiments, and outbound opportunities |
-| `Customer Ops Lead` | Service quality, support load, and unresolved commitments |
+| `Company Planner`         | Translates goals into projects, issues, and follow-up work       |
+| `Growth Operator`         | Funnel, acquisition, experiments, and outbound opportunities     |
+| `Customer Ops Lead`       | Service quality, support load, and unresolved commitments        |
 
 ### Operational Autonomy Policy
 
@@ -389,11 +389,13 @@ Use this when you want the smallest setup that still demonstrates the full loop.
 11. Confirm both twins are linked to the selected company.
 12. Open `Mission Control` from the company page or from `Settings` -> `Mission Control`.
 13. In the planner strip:
-   - pick your company
-   - set planner agent to `Company Planner`
-   - enable planner scheduling
-   - enable auto-dispatch
-   - choose `founder_edge` approval preset
+
+- pick your company
+- set planner agent to `Company Planner`
+- enable planner scheduling
+- enable auto-dispatch
+- choose `founder_edge` approval preset
+
 14. Click `Run Planner`.
 
 Expected result:

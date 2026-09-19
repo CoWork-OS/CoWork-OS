@@ -1,13 +1,13 @@
 {
   "name": "@cowork-os/maps-mcp",
   "version": "0.1.0",
-  "description": "Maps and nearby places MCP connector for CoWork OS.",
   "private": true,
+  "description": "Maps and nearby places MCP connector for CoWork OS.",
+  "license": "MIT",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
-  "license": "MIT",
   "devDependencies": {
     "typescript": "^5.9.3"
   }

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Task, TaskEvent, Workspace } from "../../../shared/types";
 import { SessionRetentionService } from "../SessionRetentionService";
+import { QueuedAttachmentStore } from "../../agent/runtime/queued-attachment-store";
 
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {
@@ -210,14 +211,141 @@ describe("SessionRetentionService unit", () => {
     expect(result.sessions.map((session) => session.id)).toEqual(["openai-task"]);
     expect(tasks.map((task) => task.id).sort()).toEqual(["openai-task", "other-task"]);
   });
+
+  it("releases queued attachment bytes only after the task delete succeeds", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-retention-attachments-"));
+    const store = new QueuedAttachmentStore(path.join(root, "store"));
+    const task = makeTask({ id: "delete-with-attachment", status: "completed" });
+    const persisted = store.persist(task.id, "queued-image", [
+      { data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 },
+    ]);
+    const events = [makeAttachmentEvent(task.id, "queued-image", persisted.refs)];
+    const service = makeService([task], events, store);
+
+    const result = await service.pruneSessions({ all: true });
+
+    expect(result.deletedTaskIds).toEqual([task.id]);
+    expect(() => store.hydrate(task.id, "queued-image", persisted.refs)).toThrow(
+      /manifest is missing/i,
+    );
+    fs.rmSync(root, { recursive: true, force: true });
+
+    const retryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-retention-attachments-"));
+    const retryStore = new QueuedAttachmentStore(path.join(retryRoot, "store"));
+    const retryTask = makeTask({ id: "failed-delete-with-attachment", status: "completed" });
+    const retryPersisted = retryStore.persist(retryTask.id, "retry-image", [
+      { data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 },
+    ]);
+    const retryService = makeService(
+      [retryTask],
+      [makeAttachmentEvent(retryTask.id, "retry-image", retryPersisted.refs)],
+      retryStore,
+      new Error("database delete failed"),
+    );
+
+    await expect(retryService.pruneSessions({ all: true })).rejects.toThrow(
+      "database delete failed",
+    );
+    expect(() =>
+      retryStore.hydrate(retryTask.id, "retry-image", retryPersisted.refs),
+    ).not.toThrow();
+    fs.rmSync(retryRoot, { recursive: true, force: true });
+  });
+
+  it("garbage-collects only old records with no authoritative receipt reference", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-retention-orphans-"));
+    const store = new QueuedAttachmentStore(path.join(root, "store"));
+    const orphan = store.persist("crashed-task", "crashed-message", [
+      { data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 },
+    ]);
+    const referenced = store.persist("live-task", "live-message", [
+      { data: "d29ybGQ=", mimeType: "image/png", sizeBytes: 5 },
+    ]);
+    const referencedContentOnly = store.persist("live-content-task", "live-content-message", [
+      { data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 },
+    ]);
+    fs.unlinkSync(path.join(store.rootDir, `${referencedContentOnly.refs[0].key}.json`));
+    const oldSeconds = (Date.now() - 2 * 24 * 60 * 60 * 1000) / 1000;
+    for (const record of store.listRecords()) {
+      fs.utimesSync(record.manifestPath, oldSeconds, oldSeconds);
+      fs.utimesSync(record.contentPath, oldSeconds, oldSeconds);
+    }
+    fs.utimesSync(referencedContentOnly.images[0].filePath!, oldSeconds, oldSeconds);
+    const service = makeService(
+      [makeTask({ id: "live-task" }), makeTask({ id: "live-content-task" })],
+      [
+        makeAttachmentEvent("live-task", "live-message", referenced.refs),
+        makeAttachmentEvent(
+          "live-content-task",
+          "live-content-message",
+          referencedContentOnly.refs,
+        ),
+      ],
+      store,
+    );
+
+    expect(service.cleanupOrphanedQueuedAttachments()).toBe(1);
+    expect(() => store.hydrate("crashed-task", "crashed-message", orphan.refs)).toThrow(
+      /manifest is missing/i,
+    );
+    expect(() => store.hydrate("live-task", "live-message", referenced.refs)).not.toThrow();
+    expect(fs.existsSync(referencedContentOnly.images[0].filePath!)).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("takes one stable owner snapshot when more than 500 tasks exist", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-retention-pagination-"));
+    const store = new QueuedAttachmentStore(path.join(root, "store"));
+    const referencedTask = makeTask({ id: "referenced-after-page-boundary" });
+    const persisted = store.persist(referencedTask.id, "live-content-message", [
+      { data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 },
+    ]);
+    fs.unlinkSync(path.join(store.rootDir, `${persisted.refs[0].key}.json`));
+    const oldSeconds = (Date.now() - 2 * 24 * 60 * 60 * 1000) / 1000;
+    fs.utimesSync(persisted.images[0].filePath!, oldSeconds, oldSeconds);
+
+    const tasks = [
+      ...Array.from({ length: 500 }, (_, index) => makeTask({ id: `filler-${index}` })),
+      referencedTask,
+    ];
+    const calls: Array<[number, number]> = [];
+    const findAll = (limit: number, offset: number): Task[] => {
+      calls.push([limit, offset]);
+      if (limit === -1 && offset === 0) return [...tasks];
+      // This models the old offset loop after task ordering changes between
+      // page queries: the referenced owner is skipped from the second page.
+      if (offset === 0) return tasks.slice(0, 500);
+      return [];
+    };
+    const service = makeService(
+      tasks,
+      [makeAttachmentEvent(referencedTask.id, "live-content-message", persisted.refs)],
+      store,
+      undefined,
+      findAll,
+    );
+
+    expect(service.cleanupOrphanedQueuedAttachments()).toBe(0);
+    expect(calls).toEqual([[-1, 0]]);
+    expect(fs.existsSync(persisted.images[0].filePath!)).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
 
-function makeService(tasks: Task[], events: TaskEvent[] = []): SessionRetentionService {
+function makeService(
+  tasks: Task[],
+  events: TaskEvent[] = [],
+  queuedAttachmentStore?: QueuedAttachmentStore,
+  deleteError?: Error,
+  findAllOverride?: (limit: number, offset: number) => Task[],
+): SessionRetentionService {
   const taskRepo = {
-    findAll: () => [...tasks],
+    findAll: (limit = 100, offset = 0) =>
+      findAllOverride ? findAllOverride(limit, offset) : [...tasks],
     findBySessionId: (sessionId: string) => tasks.filter((task) => task.sessionId === sessionId),
     findById: (id: string) => tasks.find((task) => task.id === id),
     delete: (id: string) => {
+      if (deleteError) throw deleteError;
       const index = tasks.findIndex((task) => task.id === id);
       if (index >= 0) tasks.splice(index, 1);
     },
@@ -228,6 +356,7 @@ function makeService(tasks: Task[], events: TaskEvent[] = []): SessionRetentionS
         const effectiveType = event.legacyType || event.type;
         return taskIds.includes(event.taskId) && (!types?.length || types.includes(effectiveType));
       }),
+    findByTaskId: (taskId: string) => events.filter((event) => event.taskId === taskId),
   };
   const metadata = new Map<
     string,
@@ -269,6 +398,7 @@ function makeService(tasks: Task[], events: TaskEvent[] = []): SessionRetentionS
     eventRepo as never,
     metadataRepo as never,
     workspaceRepo as never,
+    queuedAttachmentStore,
   );
 }
 
@@ -297,5 +427,22 @@ function makeEvent(taskId: string, payload: Record<string, unknown>): TaskEvent 
     legacyType: "llm_usage",
     schemaVersion: 2,
     payload,
+  };
+}
+
+function makeAttachmentEvent(taskId: string, messageId: string, refs: unknown): TaskEvent {
+  return {
+    id: randomUUID(),
+    taskId,
+    timestamp: Date.now(),
+    type: "user_message",
+    legacyType: "user_message",
+    schemaVersion: 2,
+    payload: {
+      messageId,
+      deliveryMode: "message",
+      deliveryStatus: "queued",
+      queuedAttachmentRefs: refs,
+    },
   };
 }

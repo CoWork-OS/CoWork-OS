@@ -37,14 +37,14 @@ GitHub research subagent for Pi that uses gh workflows to find and cite relevant
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| query | string | Yes | What to research across GitHub repos |
-| repo_hints | string | No | Optional repo list hints, e.g. owner/repo pairs |
-| owner_hints | string | No | Optional owner/org hints |
-| max_search_results | number | No | Maximum gh search results to request |
+| Name               | Type   | Required | Description                                     |
+| ------------------ | ------ | -------- | ----------------------------------------------- |
+| query              | string | Yes      | What to research across GitHub repos            |
+| repo_hints         | string | No       | Optional repo list hints, e.g. owner/repo pairs |
+| owner_hints        | string | No       | Optional owner/org hints                        |
+| max_search_results | number | No       | Maximum gh search results to request            |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1003 characters.
-- Runtime prompt is defined directly in `../pi-librarian.json`. 
+- Runtime prompt is defined directly in `../pi-librarian.json`.

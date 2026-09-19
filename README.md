@@ -44,19 +44,21 @@
 </p>
 
 <!-- COWORK_PUBLIC_ADOPTION_STATS_START -->
+
 ### Public Adoption Signals
 
-| Signal | Current | All time |
-|---|---:|---:|
-| GitHub stars | 446 | n/a |
-| GitHub forks | 74 | n/a |
-| Installer/server downloads | 1,605 | 1,605 |
-| Download delta | +1 | n/a |
-| npm downloads | 598 (last week) | 7,847 |
-| GitHub views, last 14-ish days | 1,958 total / 511 unique | n/a |
-| GitHub clones, last 14-ish days | 1,487 total / 408 unique | n/a |
+| Signal                          |                  Current | All time |
+| ------------------------------- | -----------------------: | -------: |
+| GitHub stars                    |                      446 |      n/a |
+| GitHub forks                    |                       74 |      n/a |
+| Installer/server downloads      |                    1,605 |    1,605 |
+| Download delta                  |                       +1 |      n/a |
+| npm downloads                   |          598 (last week) |    7,847 |
+| GitHub views, last 14-ish days  | 1,958 total / 511 unique |      n/a |
+| GitHub clones, last 14-ish days | 1,487 total / 408 unique |      n/a |
 
 Generated 2026-09-04T07:56:59.495Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
+
 <!-- COWORK_PUBLIC_ADOPTION_STATS_END -->
 
 <p align="center">
@@ -121,10 +123,10 @@ The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/l
 
 Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest):
 
-| Platform | Download | Install |
-|----------|----------|---------|
-| **macOS 13 Ventura or later** | `.dmg` | Drag CoWork OS into Applications |
-| **Windows** | `.exe` (NSIS installer) | Run the installer and follow the prompts |
+| Platform                      | Download                | Install                                  |
+| ----------------------------- | ----------------------- | ---------------------------------------- |
+| **macOS 13 Ventura or later** | `.dmg`                  | Drag CoWork OS into Applications         |
+| **Windows**                   | `.exe` (NSIS installer) | Run the installer and follow the prompts |
 
 > **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.52` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
 
@@ -170,6 +172,7 @@ cowork run "who are you?"
 `cowork-os` launches the desktop GUI. `cowork` launches the terminal UI, `cowork run` starts a local one-shot task, and commands like `cowork status`, `cowork sessions list`, `cowork tools list`, `cowork mcp list`, `cowork backup create`, and `cowork security audit` manage the same local profile, provider settings, workspaces, skills, and MCP configuration. Use `--remote` only when intentionally calling a remote Control Plane endpoint.
 
 > **Windows npm install notes:**
+>
 > - Run `npm install -g cowork-os` / `npm uninstall -g cowork-os` from `%USERPROFILE%` (or another neutral directory), **not** from `%APPDATA%\npm\node_modules\cowork-os`, to avoid `EBUSY` lock errors.
 > - On Windows ARM64, first launch may take longer while native modules are rebuilt; this can run multiple fallback steps before the app opens.
 > - If native rebuild fails, install [Visual Studio Build Tools 2022 (C++)](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and Python 3, then retry.
@@ -282,17 +285,17 @@ Long-running tasks now have clearer operator handoffs and stronger recovery defa
 
 The top of this README is intentionally opinionated about what matters first. The broader surface area is still part of CoWork OS:
 
-| Area | Current coverage |
-|------|------------------|
-| **Agent runtime** | Chat, Execute, Plan, Analyze, Verified, Think With Me, Autonomous, Collaborative, Multi-LLM, `/multitask`, structured input cards, Side Chat, dynamic re-planning, workflow pipelines, agent comparison, performance reviews, shell-session continuity, completion/resume coherence, and runtime recovery |
-| **Agent operations** | Agents Hub, reusable managed agents, managed sessions, agent teams, Mission Control, visual boards, global queue visibility, task pinning, task wrap-up, sub-task navigation, external ACP/A2A delegation, restart-safe ACP tasks, remote cancel, and graph-backed orchestration |
-| **Developer workbench** | Repository work, real PTY terminal tabs, title-bar terminal/browser toggles, shell tools, git worktree isolation, Browser Workbench, Browser V2 automation, responsive viewport QA, diagnostics, screenshots, annotation, web page previews, Live Canvas, Build Mode, React/Next.js guidance, and high-agency frontend design |
-| **Knowledge work artifacts** | Editable document artifacts, spreadsheet artifacts, presentation artifacts, web page artifacts, paired LaTeX/PDF outputs, smart PDF attachments, format-aware file preview, designed editorial documents, generated images, generated videos, and programmatic Manim technical videos |
-| **Inbox and communications** | Inbox Agent, Classic and Today inbox modes, Ask Inbox, hybrid mailbox search, editable AI drafts, manual reply/reply-all/forward, sender cleanup, commitments, Gmail forwarding automations, `@Inbox` routing, voice mode, outbound calls, and 17 messaging channels |
-| **Automation and memory** | Main-screen Automation Studio with versioned structured flows, dry runs, variables, branches, approvals, cancellation, recovery, and activity; plus prompt-based Routines, scheduled tasks, webhooks, event triggers, Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, adaptive style learning, Usage Insights, persistent memory, Knowledge Graph, ChatGPT history import, durable runtime context, context compaction, Supermemory, and Chronicle |
-| **Integrations and extensibility** | Dozens of model routes, Mixture of Agents presets, ordered LLM/search fallback chains, provider-aware prompt caching, MCP connectors, native and MCP-backed Google Workspace coverage, bundled plugin packs and skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support |
-| **Operations and deployment** | Profiles, profile import/export, Devices, remote workspaces, remote task dispatch, remote file picking, Control Plane, Linux server package, self-hosting, Tailscale/SSH remote access, Zero-Human Company Ops, Digital Twin personas, company-linked operator agents, and best-fit Support/IT/Sales workflow packs |
-| **Safety and reliability** | Approval workflows, sandboxed execution, workspace/profile permission rules, network/sandbox policy controls, private-memory filtering, session-scoped location approvals, command/path containment, import scanning and quarantine, encrypted storage, local-first data handling, renderer event caps, off-main-thread memory recall, and long-session cleanup |
+| Area                               | Current coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Agent runtime**                  | Chat, Execute, Plan, Analyze, Verified, Think With Me, Autonomous, Collaborative, Multi-LLM, `/multitask`, structured input cards, Side Chat, dynamic re-planning, workflow pipelines, agent comparison, performance reviews, shell-session continuity, completion/resume coherence, and runtime recovery                                                                                                                                                                            |
+| **Agent operations**               | Agents Hub, reusable managed agents, managed sessions, agent teams, Mission Control, visual boards, global queue visibility, task pinning, task wrap-up, sub-task navigation, external ACP/A2A delegation, restart-safe ACP tasks, remote cancel, and graph-backed orchestration                                                                                                                                                                                                     |
+| **Developer workbench**            | Repository work, real PTY terminal tabs, title-bar terminal/browser toggles, shell tools, git worktree isolation, Browser Workbench, Browser V2 automation, responsive viewport QA, diagnostics, screenshots, annotation, web page previews, Live Canvas, Build Mode, React/Next.js guidance, and high-agency frontend design                                                                                                                                                        |
+| **Knowledge work artifacts**       | Editable document artifacts, spreadsheet artifacts, presentation artifacts, web page artifacts, paired LaTeX/PDF outputs, smart PDF attachments, format-aware file preview, designed editorial documents, generated images, generated videos, and programmatic Manim technical videos                                                                                                                                                                                                |
+| **Inbox and communications**       | Inbox Agent, Classic and Today inbox modes, Ask Inbox, hybrid mailbox search, editable AI drafts, manual reply/reply-all/forward, sender cleanup, commitments, Gmail forwarding automations, `@Inbox` routing, voice mode, outbound calls, and 17 messaging channels                                                                                                                                                                                                                 |
+| **Automation and memory**          | Main-screen Automation Studio with versioned structured flows, dry runs, variables, branches, approvals, cancellation, recovery, and activity; plus prompt-based Routines, scheduled tasks, webhooks, event triggers, Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, adaptive style learning, Usage Insights, persistent memory, Knowledge Graph, ChatGPT history import, durable runtime context, context compaction, Supermemory, and Chronicle |
+| **Integrations and extensibility** | Dozens of model routes, Mixture of Agents presets, ordered LLM/search fallback chains, provider-aware prompt caching, MCP connectors, native and MCP-backed Google Workspace coverage, bundled plugin packs and skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support                                                                                                                                                                  |
+| **Operations and deployment**      | Profiles, profile import/export, Devices, remote workspaces, remote task dispatch, remote file picking, Control Plane, Linux server package, self-hosting, Tailscale/SSH remote access, Zero-Human Company Ops, Digital Twin personas, company-linked operator agents, and best-fit Support/IT/Sales workflow packs                                                                                                                                                                  |
+| **Safety and reliability**         | Approval workflows, sandboxed execution, workspace/profile permission rules, network/sandbox policy controls, private-memory filtering, session-scoped location approvals, command/path containment, import scanning and quarantine, encrypted storage, local-first data handling, renderer event caps, off-main-thread memory recall, and long-session cleanup                                                                                                                      |
 
 ### Mission Control
 
@@ -467,11 +470,11 @@ Access from **Settings** > **Customize**. [Learn more](docs/plugin-packs.md)
 
 CoWork OS ships purpose-built packs and Tier-1 connectors for three operational lanes where governed AI delivery has the clearest ROI:
 
-| Lane | Pack | Connectors |
-|------|------|------------|
-| **Support Ops** | Customer Support Pack | Zendesk, ServiceNow |
-| **IT Ops** | DevOps Pack | ServiceNow, Jira, Linear |
-| **Sales Ops** | Sales CRM Pack | HubSpot, Salesforce |
+| Lane            | Pack                  | Connectors               |
+| --------------- | --------------------- | ------------------------ |
+| **Support Ops** | Customer Support Pack | Zendesk, ServiceNow      |
+| **IT Ops**      | DevOps Pack           | ServiceNow, Jira, Linear |
+| **Sales Ops**   | Sales CRM Pack        | HubSpot, Salesforce      |
 
 These are the workflows where approval gates, local data control, and measurable outcome delivery pay off most — and where CoWork OS is a vendor-swap-friendly alternative to point solutions or BPO tooling. [Learn more](docs/best-fit-workflows.md)
 
@@ -548,18 +551,18 @@ See [Architecture](docs/architecture.md) for the full technical deep-dive.
 - **Sandbox isolation**: macOS `sandbox-exec` (native), Docker containers, or process-level isolation on Windows
 - **Managed deployment hardening**: Headless Control Plane access is loopback-first and blocks unsafe public binds unless Tailscale, private container context, or an explicit break-glass override is configured
 - **Encrypted storage**: OS keychain + AES-256 fallback
-- **6,286 declared Vitest cases** across **589 tracked test files**, including **142** security cases under `tests/security/` and **405** control-plane/WebSocket-related cases
+- **7,913 declared Vitest cases** (**7,911 passing, 2 todo**) across **763 tracked test files**, including **142** security cases under `tests/security/` and **405** control-plane/WebSocket-related cases
 
 See [Security Guide](docs/security-guide.md) and [Security Architecture](docs/security/) for details.
 
 ## Deployment
 
-| Mode | Platform | Guide |
-|------|----------|-------|
-| **Desktop App** | macOS, Windows | [Getting Started](docs/getting-started.md) |
-| **Packaged Server** | Linux x64 VPS | [VPS Guide](docs/vps-linux.md) |
-| **Self-Hosted** | GitHub release tarball / Docker / systemd | [Self-Hosting](docs/self-hosting.md) |
-| **Remote Access** | Tailscale / SSH | [Remote Access](docs/remote-access.md) |
+| Mode                | Platform                                  | Guide                                      |
+| ------------------- | ----------------------------------------- | ------------------------------------------ |
+| **Desktop App**     | macOS, Windows                            | [Getting Started](docs/getting-started.md) |
+| **Packaged Server** | Linux x64 VPS                             | [VPS Guide](docs/vps-linux.md)             |
+| **Self-Hosted**     | GitHub release tarball / Docker / systemd | [Self-Hosting](docs/self-hosting.md)       |
+| **Remote Access**   | Tailscale / SSH                           | [Remote Access](docs/remote-access.md)     |
 
 ## Roadmap
 
@@ -573,74 +576,78 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 
 ## Documentation
 
-| Guide | Description |
-|-------|-------------|
-| [Getting Started](docs/getting-started.md) | First-time setup and usage |
-| [Beginner's Guide](docs/cowork-school.md) | Practical guide to what CoWork OS is for and which workflows to try first |
-| [Release Notes 0.5.52](docs/release-notes-0.5.52.md) | OpenRouter images, OpenCode/SearXNG/Atlas providers, Electron 44, and macOS support changes |
-| [Composer Mentions](docs/composer-mentions.md) | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing |
-| [Message Box Shortcuts](docs/message-box-shortcuts.md) | `/` picker for deterministic app commands and skill-backed workflow shortcuts |
-| [Side Chat](docs/side-chat.md) | Right-side read-only questions about an active running session without steering or stopping the parent task |
-| [Mixture of Agents](docs/mixture-of-agents.md) | Virtual LLM provider that runs advisor models before a final aggregator model answers |
-| [Claude-for-Legal Workflows](docs/claude-for-legal.md) | Bundled legal practice slash commands, editable picker selection, and main-view matter intake cards |
-| [Multitask Command](docs/multitask.md) | `/multitask [N] <task>` lane fan-out through collaborative team runs |
-| [Use Case Showcase](docs/showcase.md) | Comprehensive guide to what you can build and automate |
-| [Features](docs/features.md) | Complete feature reference |
-| [Desktop Location & Maps](docs/features.md#desktop-location) | Explicitly approved desktop location, geocoding, routes, and nearby-place workflows |
-| [Everything Workbench](docs/everything-workbench.md) | Unified in-app artifact model for docs, sheets, decks, web pages, PDFs, and live browser sessions |
-| [Video Attachments](docs/video-attachments.md) | Uploaded video analysis through extracted contact sheets, representative frames, and inline task timeline screenshots |
-| [Browser Workbench](docs/browser-workbench.md) | Visible in-app browser for website testing, responsive viewport QA, screenshots, annotation, diagnostics, and Browser V2 automation |
-| [Browser V2 Architecture](docs/browser-v2-architecture.md) | Unified browser session manager, adapters, snapshot refs, diagnostics, safety, and verification contract |
-| [Chat Mode](docs/chat-mode.md) | Direct chat mode, same-session follow-ups, and the narrow PDF-attachment read-only analysis exception |
-| [Long-Document Analysis](docs/document-analysis.md) | Bounded read-only review of named DOCX, PDF, Markdown, and text sources with complete coverage accounting |
-| [Platform Updates](docs/integration-skill-bootstrap-lifecycle.md) | Detailed implementation notes for integration setup, skill proposals, workspace-kit contracts, and bootstrap lifecycle |
-| [Channels](docs/channels.md) | Messaging channel setup (17 channels) |
-| [Channel User Guides](docs/channel-user-guides.md) | End-user features and best practices across all messaging channels |
-| [Dedicated Channel Guides](docs/channel-guides/index.md) | Separate user guide pages for WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, Signal, Email, and more |
-| [Gateway User Guide](docs/gateway-user-guide.md) | End-user guide and best practices for using CoWork from WhatsApp and other channels |
-| [Gateway Message Lifecycle](docs/gateway-message-lifecycle.md) | Remote command routing, active-task policy, skill slashes, delivery, and scheduled channel outputs |
-| [X Mention Triggers](docs/x-mention-triggers.md) | Configure `do:` mention-triggered task ingress on desktop and headless |
-| [Providers](docs/providers.md) | LLM and search provider configuration, costs, and fallback chains |
-| [MLX-LM Local Inference](docs/mlx-lm.md) | Apple Silicon setup, local API contract, runtime lifecycle, privacy, troubleshooting, and maintainer notes |
-| [Development](docs/development.md) | Build from source, project structure |
-| [Architecture](docs/architecture.md) | Technical architecture deep-dive |
-| [Access Profiles](docs/access-profiles.md) | Codex-style access choices, custom profile fields, inheritance, migration, and cross-surface enforcement |
-| [Skills Runtime Model](docs/skills-runtime-model.md) | Canonical prompt invariant, additive skill application, routing shortlist model, and `use_skill` contract |
-| [LLM Wiki](docs/llm-wiki.md) | First-class research vault workflow, slash syntax, vault layout, analyzer outputs, and Obsidian-friendly knowledge-base behavior |
-| [Kami Skill](docs/skills/kami.md) | Bundled editorial document workflow for resumes, one-pagers, white papers, diagrams, and slide decks |
-| [manim-video Skill](docs/skills/manim-video.md) | Bundled Manim CE workflow for technical animation, project scaffolding, and draft-to-production render flow |
-| [Architecture Design Skill](docs/skills/architecture-design.md) | Bundled Rhino, Blender, and ComfyUI orchestration workflow for concept architecture artifacts |
-| [React Best Practices Skill](docs/skills/react-best-practices.md) | Bundled React and Next.js guidance for feature work, refactors, reviews, data fetching, bundle size, and rendering performance |
-| [Unbroker Skill](docs/skills/unbroker.md) | Bundled consent-gated workflow for authorized data-broker and people-search opt-outs, local PII ledgers, and recurring privacy rechecks |
-| [Workflow Intelligence](docs/workflow-intelligence.md) | Memory + Heartbeat + Reflection + Dreaming + Suggestions model, reviewable outputs, and feedback learning |
-| [Dreaming](docs/dreaming.md) | Background memory curation, Dreaming runs/candidates, trigger sources, and review-first memory maintenance |
-| [Box Brain](docs/box-brain.md) | Box MCP connection, opt-in bounded background indexing, source-backed local recall, reviewable improvement, safety boundaries, and troubleshooting |
-| [Core Automation](docs/core-automation.md) | Runtime boundary for Workflow Intelligence, automation profiles, and the core harness |
-| [Automation Studio](docs/automation-studio.md) | Main-screen structured flow builder, runtime safety model, operations, approvals, recovery, troubleshooting, and developer contract |
-| [Task Automations](docs/task-automations.md) | Create task-sourced routines and scheduled thread follow-ups from a task's overflow menu |
-| [Heartbeat v3](docs/heartbeat-v3.md) | Default two-lane heartbeat architecture, signals, Pulse, Dispatch, and automation-profile-backed operator semantics |
-| [Security Guide](docs/security-guide.md) | Security model and best practices |
-| [Agent Security with Numbat](docs/agent-security-numbat.md) | Optional monitor/enforce security decisions, policy defaults, CLI operations, provenance, and retention |
-| [Enterprise Connectors](docs/enterprise-connectors.md) | MCP connector development |
-| [Secure MCP Tunnels](docs/secure-mcp-tunnels.md) | Self-hosted outbound-only private MCP access, relay setup, policy controls, and audit logs |
-| [Self-Hosting](docs/self-hosting.md) | Docker and systemd deployment |
-| [VPS/Linux](docs/vps-linux.md) | Headless server deployment |
-| [Remote Access](docs/remote-access.md) | Tailscale, SSH tunnels, WebSocket API |
-| [Knowledge Graph](docs/knowledge-graph.md) | Structured entity/relationship memory |
-| [Durable Runtime Context](docs/durable-runtime-context.md) | Opt-in active-task durable recall, `context_grep`, `context_describe`, summary DAGs, and testing prompts |
-| [Context Compaction](docs/context-compaction.md) | Proactive session compaction with structured summaries and chat-history summarization |
-| [Mission Control](docs/mission-control.md) | Agent orchestration dashboard |
-| [Subconscious Loop](docs/subconscious-loop.md) | Compatibility redirect for the former name of Workflow Intelligence |
-| [Zero-Human Company Ops](docs/zero-human-company.md) | Founder-directed company planning, operators, and Mission Control ops workflows |
-| [Plugin Packs](docs/plugin-packs.md) | Plugin platform, Customize panel, and Plugin Store |
-| [Skill Store & External Skills](docs/skill-store-and-external-skills.md) | ClawHub support, external skill imports, and managed-skill install flows |
-| [Best-Fit Workflows](docs/best-fit-workflows.md) | Support Ops, IT Ops, and Sales Ops — where CoWork OS delivers the strongest ROI |
-| [Admin Policies](docs/admin-policies.md) | Enterprise admin policies and organization pack management |
-| [Digital Twins](docs/digital-twins.md) | Optional role-based persona presets and cognitive offload without core-runtime ownership |
-| [Digital Twins Guide](docs/digital-twin-personas-guide.md) | Comprehensive guide with scenarios and expanded job areas |
-| [Windows npm Smoke Test](docs/windows-npm-smoke-test.md) | Clean Windows install/launch validation checklist for npm releases |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
-| [Uninstall](docs/uninstall.md) | Uninstall instructions |
+| Guide                                                                    | Description                                                                                                                                        |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Getting Started](docs/getting-started.md)                               | First-time setup and usage                                                                                                                         |
+| [Bots & Conversations](docs/bots-and-conversations.md)                    | Create reusable bot identities, use durable conversations, edit/deactivate profiles, and coordinate the persistent bot team                         |
+| [Beginner's Guide](docs/cowork-school.md)                                | Practical guide to what CoWork OS is for and which workflows to try first                                                                          |
+| [Release Notes 0.5.52](docs/release-notes-0.5.52.md)                     | OpenRouter images, OpenCode/SearXNG/Atlas providers, Electron 44, and macOS support changes                                                        |
+| [Composer Mentions](docs/composer-mentions.md)                           | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing                                          |
+| [Message Box Shortcuts](docs/message-box-shortcuts.md)                   | `/` picker for deterministic app commands and skill-backed workflow shortcuts                                                                      |
+| [Side Chat](docs/side-chat.md)                                           | Right-side read-only questions about an active running session without steering or stopping the parent task                                        |
+| [Mixture of Agents](docs/mixture-of-agents.md)                           | Virtual LLM provider that runs advisor models before a final aggregator model answers                                                              |
+| [Claude-for-Legal Workflows](docs/claude-for-legal.md)                   | Bundled legal practice slash commands, editable picker selection, and main-view matter intake cards                                                |
+| [Multitask Command](docs/multitask.md)                                   | `/multitask [N] <task>` lane fan-out through collaborative team runs                                                                               |
+| [Use Case Showcase](docs/showcase.md)                                    | Comprehensive guide to what you can build and automate                                                                                             |
+| [Features](docs/features.md)                                             | Complete feature reference                                                                                                                         |
+| [Desktop Location & Maps](docs/features.md#desktop-location)             | Explicitly approved desktop location, geocoding, routes, and nearby-place workflows                                                                |
+| [Everything Workbench](docs/everything-workbench.md)                     | Unified in-app artifact model for docs, sheets, decks, web pages, PDFs, and live browser sessions                                                  |
+| [Video Attachments](docs/video-attachments.md)                           | Uploaded video analysis through extracted contact sheets, representative frames, and inline task timeline screenshots                              |
+| [Browser Workbench](docs/browser-workbench.md)                           | Visible in-app browser for website testing, responsive viewport QA, screenshots, annotation, diagnostics, and Browser V2 automation                |
+| [Browser V2 Architecture](docs/browser-v2-architecture.md)               | Unified browser session manager, adapters, snapshot refs, diagnostics, safety, and verification contract                                           |
+| [Chat Mode](docs/chat-mode.md)                                           | Direct chat mode, same-session follow-ups, and the narrow PDF-attachment read-only analysis exception                                              |
+| [Long-Document Analysis](docs/document-analysis.md)                      | Bounded read-only review of named DOCX, PDF, Markdown, and text sources with complete coverage accounting                                          |
+| [Platform Updates](docs/integration-skill-bootstrap-lifecycle.md)        | Detailed implementation notes for integration setup, skill proposals, workspace-kit contracts, and bootstrap lifecycle                             |
+| [Channels](docs/channels.md)                                             | Messaging channel setup (17 channels)                                                                                                              |
+| [Channel User Guides](docs/channel-user-guides.md)                       | End-user features and best practices across all messaging channels                                                                                 |
+| [Dedicated Channel Guides](docs/channel-guides/index.md)                 | Separate user guide pages for WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, Signal, Email, and more                                      |
+| [Gateway User Guide](docs/gateway-user-guide.md)                         | End-user guide and best practices for using CoWork from WhatsApp and other channels                                                                |
+| [Gateway Message Lifecycle](docs/gateway-message-lifecycle.md)           | Remote command routing, active-task policy, skill slashes, delivery, and scheduled channel outputs                                                 |
+| [X Mention Triggers](docs/x-mention-triggers.md)                         | Configure `do:` mention-triggered task ingress on desktop and headless                                                                             |
+| [Providers](docs/providers.md)                                           | LLM and search provider configuration, costs, and fallback chains                                                                                  |
+| [MLX-LM Local Inference](docs/mlx-lm.md)                                 | Apple Silicon setup, local API contract, runtime lifecycle, privacy, troubleshooting, and maintainer notes                                         |
+| [Atomic Chat Inference](docs/atomic-chat.md)                             | Connect to an already-running Atomic Chat API, discover exact model IDs, troubleshoot typed connection states, and understand boundaries  |
+| [Local-Model Execution](docs/local-model-execution.md)                   | Opt-in bounded budgets, capability evidence, admission control, and qualification rules for local inference                                      |
+| [CoWork Pulse](docs/cowork-pulse.md)                                     | Opt-in usage aggregates, privacy boundaries, metric definitions, delivery limits, and production operations                                        |
+| [Development](docs/development.md)                                       | Build from source, project structure                                                                                                               |
+| [Architecture](docs/architecture.md)                                     | Technical architecture deep-dive                                                                                                                   |
+| [Access Profiles](docs/access-profiles.md)                               | Codex-style access choices, custom profile fields, inheritance, migration, and cross-surface enforcement                                           |
+| [Skills Runtime Model](docs/skills-runtime-model.md)                     | Canonical prompt invariant, additive skill application, routing shortlist model, and `use_skill` contract                                          |
+| [LLM Wiki](docs/llm-wiki.md)                                             | First-class research vault workflow, slash syntax, vault layout, analyzer outputs, and Obsidian-friendly knowledge-base behavior                   |
+| [Kami Skill](docs/skills/kami.md)                                        | Bundled editorial document workflow for resumes, one-pagers, white papers, diagrams, and slide decks                                               |
+| [manim-video Skill](docs/skills/manim-video.md)                          | Bundled Manim CE workflow for technical animation, project scaffolding, and draft-to-production render flow                                        |
+| [Architecture Design Skill](docs/skills/architecture-design.md)          | Bundled Rhino, Blender, and ComfyUI orchestration workflow for concept architecture artifacts                                                      |
+| [React Best Practices Skill](docs/skills/react-best-practices.md)        | Bundled React and Next.js guidance for feature work, refactors, reviews, data fetching, bundle size, and rendering performance                     |
+| [Unbroker Skill](docs/skills/unbroker.md)                                | Bundled consent-gated workflow for authorized data-broker and people-search opt-outs, local PII ledgers, and recurring privacy rechecks            |
+| [Workflow Intelligence](docs/workflow-intelligence.md)                   | Memory + Heartbeat + Reflection + Dreaming + Suggestions model, reviewable outputs, and feedback learning                                          |
+| [Dreaming](docs/dreaming.md)                                             | Background memory curation, Dreaming runs/candidates, trigger sources, and review-first memory maintenance                                         |
+| [Box Brain](docs/box-brain.md)                                           | Box MCP connection, opt-in bounded background indexing, source-backed local recall, reviewable improvement, safety boundaries, and troubleshooting |
+| [Core Automation](docs/core-automation.md)                               | Runtime boundary for Workflow Intelligence, automation profiles, and the core harness                                                              |
+| [Automation Studio](docs/automation-studio.md)                           | Main-screen structured flow builder, runtime safety model, operations, approvals, recovery, troubleshooting, and developer contract                |
+| [Task Automations](docs/task-automations.md)                             | Create task-sourced routines and scheduled thread follow-ups from a task's overflow menu                                                           |
+| [Heartbeat v3](docs/heartbeat-v3.md)                                     | Default two-lane heartbeat architecture, signals, Pulse, Dispatch, and automation-profile-backed operator semantics                                |
+| [Security Guide](docs/security-guide.md)                                 | Security model and best practices                                                                                                                  |
+| [Agent Security with Numbat](docs/agent-security-numbat.md)              | Optional monitor/enforce security decisions, policy defaults, CLI operations, provenance, and retention                                            |
+| [Enterprise Connectors](docs/enterprise-connectors.md)                   | MCP connector development                                                                                                                          |
+| [Secure MCP Tunnels](docs/secure-mcp-tunnels.md)                         | Self-hosted outbound-only private MCP access, relay setup, policy controls, and audit logs                                                         |
+| [Self-Hosting](docs/self-hosting.md)                                     | Docker and systemd deployment                                                                                                                      |
+| [VPS/Linux](docs/vps-linux.md)                                           | Headless server deployment                                                                                                                         |
+| [Remote Access](docs/remote-access.md)                                   | Tailscale, SSH tunnels, WebSocket API                                                                                                              |
+| [Knowledge Graph](docs/knowledge-graph.md)                               | Structured entity/relationship memory                                                                                                              |
+| [Durable Runtime Context](docs/durable-runtime-context.md)               | Opt-in active-task durable recall, `context_grep`, `context_describe`, summary DAGs, and testing prompts                                           |
+| [Context Compaction](docs/context-compaction.md)                         | Proactive session compaction with structured summaries and chat-history summarization                                                              |
+| [Mission Control](docs/mission-control.md)                               | Agent orchestration dashboard                                                                                                                      |
+| [Subconscious Loop](docs/subconscious-loop.md)                           | Compatibility redirect for the former name of Workflow Intelligence                                                                                |
+| [Zero-Human Company Ops](docs/zero-human-company.md)                     | Founder-directed company planning, operators, and Mission Control ops workflows                                                                    |
+| [Plugin Packs](docs/plugin-packs.md)                                     | Plugin platform, Customize panel, and Plugin Store                                                                                                 |
+| [Skill Store & External Skills](docs/skill-store-and-external-skills.md) | ClawHub support, external skill imports, and managed-skill install flows                                                                           |
+| [Best-Fit Workflows](docs/best-fit-workflows.md)                         | Support Ops, IT Ops, and Sales Ops — where CoWork OS delivers the strongest ROI                                                                    |
+| [Admin Policies](docs/admin-policies.md)                                 | Enterprise admin policies and organization pack management                                                                                         |
+| [Digital Twins](docs/digital-twins.md)                                   | Optional role-based persona presets and cognitive offload without core-runtime ownership                                                           |
+| [Digital Twins Guide](docs/digital-twin-personas-guide.md)               | Comprehensive guide with scenarios and expanded job areas                                                                                          |
+| [Windows npm Smoke Test](docs/windows-npm-smoke-test.md)                 | Clean Windows install/launch validation checklist for npm releases                                                                                 |
+| [Troubleshooting](docs/troubleshooting.md)                               | Common issues and fixes                                                                                                                            |
+| [Uninstall](docs/uninstall.md)                                           | Uninstall instructions                                                                                                                             |
 
 ## Data Handling
 

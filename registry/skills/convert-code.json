@@ -18,16 +18,7 @@
       "description": "Target programming language",
       "required": true,
       "default": "TypeScript",
-      "options": [
-        "TypeScript",
-        "JavaScript",
-        "Python",
-        "Go",
-        "Rust",
-        "Java",
-        "C#",
-        "Ruby"
-      ]
+      "options": ["TypeScript", "JavaScript", "Python", "Go", "Rust", "Java", "C#", "Ruby"]
     }
   ],
   "enabled": true,

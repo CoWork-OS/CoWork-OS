@@ -10,24 +10,24 @@ Admins can configure [Channel Specialization](channels.md#channel-specialization
 
 Use these dedicated guides when you want channel-specific details without scanning the full comparison page:
 
-| Channel | Dedicated guide |
-|---------|-----------------|
-| WhatsApp | [WhatsApp User Guide](channel-guides/whatsapp.md) |
-| Telegram | [Telegram User Guide](channel-guides/telegram.md) |
-| Discord | [Discord User Guide](channel-guides/discord.md) |
-| Slack | [Slack User Guide](channel-guides/slack.md) |
-| Microsoft Teams | [Microsoft Teams User Guide](channel-guides/microsoft-teams.md) |
-| Google Chat | [Google Chat User Guide](channel-guides/google-chat.md) |
-| Feishu / Lark | [Feishu / Lark User Guide](channel-guides/feishu-lark.md) |
-| WeCom | [WeCom User Guide](channel-guides/wecom.md) |
-| iMessage | [iMessage User Guide](channel-guides/imessage.md) |
-| Signal | [Signal User Guide](channel-guides/signal.md) |
-| Mattermost | [Mattermost User Guide](channel-guides/mattermost.md) |
-| Matrix | [Matrix User Guide](channel-guides/matrix.md) |
-| Twitch | [Twitch User Guide](channel-guides/twitch.md) |
-| LINE | [LINE User Guide](channel-guides/line.md) |
-| BlueBubbles | [BlueBubbles User Guide](channel-guides/bluebubbles.md) |
-| Email | [Email User Guide](channel-guides/email.md) |
+| Channel            | Dedicated guide                                                       |
+| ------------------ | --------------------------------------------------------------------- |
+| WhatsApp           | [WhatsApp User Guide](channel-guides/whatsapp.md)                     |
+| Telegram           | [Telegram User Guide](channel-guides/telegram.md)                     |
+| Discord            | [Discord User Guide](channel-guides/discord.md)                       |
+| Slack              | [Slack User Guide](channel-guides/slack.md)                           |
+| Microsoft Teams    | [Microsoft Teams User Guide](channel-guides/microsoft-teams.md)       |
+| Google Chat        | [Google Chat User Guide](channel-guides/google-chat.md)               |
+| Feishu / Lark      | [Feishu / Lark User Guide](channel-guides/feishu-lark.md)             |
+| WeCom              | [WeCom User Guide](channel-guides/wecom.md)                           |
+| iMessage           | [iMessage User Guide](channel-guides/imessage.md)                     |
+| Signal             | [Signal User Guide](channel-guides/signal.md)                         |
+| Mattermost         | [Mattermost User Guide](channel-guides/mattermost.md)                 |
+| Matrix             | [Matrix User Guide](channel-guides/matrix.md)                         |
+| Twitch             | [Twitch User Guide](channel-guides/twitch.md)                         |
+| LINE               | [LINE User Guide](channel-guides/line.md)                             |
+| BlueBubbles        | [BlueBubbles User Guide](channel-guides/bluebubbles.md)               |
+| Email              | [Email User Guide](channel-guides/email.md)                           |
 | X Mention Triggers | [X Mention Triggers User Guide](channel-guides/x-mention-triggers.md) |
 
 ## Shared Usage Model
@@ -300,7 +300,8 @@ Best practices:
 
 Watch-outs:
 
-- Requires correct Corp ID, Agent ID, Secret, token, and EncodingAESKey.
+- Requires correct Corp ID, Agent ID, Secret, token, and EncodingAESKey. The token is used
+  to verify the signature on every inbound callback.
 - Corporate admin policies may affect delivery and visibility.
 
 ## iMessage
@@ -565,17 +566,17 @@ Watch-outs:
 
 ## Choosing a Channel
 
-| Need | Best channel choices |
-|------|----------------------|
-| Personal mobile control | WhatsApp, Telegram, Signal, iMessage |
-| Workplace team chat | Slack, Teams, Google Chat, Mattermost |
-| Engineering/community workflows | Discord, Slack, Mattermost, Matrix |
-| Enterprise tenant chat | Teams, Google Chat, Feishu/Lark, WeCom |
-| Apple Messages workflows | iMessage, BlueBubbles |
-| Public interaction | Twitch, X mention triggers |
-| Asynchronous requests | Email |
-| Privacy-sensitive mobile chat | Signal |
-| Link research rooms | WhatsApp, Telegram |
+| Need                            | Best channel choices                   |
+| ------------------------------- | -------------------------------------- |
+| Personal mobile control         | WhatsApp, Telegram, Signal, iMessage   |
+| Workplace team chat             | Slack, Teams, Google Chat, Mattermost  |
+| Engineering/community workflows | Discord, Slack, Mattermost, Matrix     |
+| Enterprise tenant chat          | Teams, Google Chat, Feishu/Lark, WeCom |
+| Apple Messages workflows        | iMessage, BlueBubbles                  |
+| Public interaction              | Twitch, X mention triggers             |
+| Asynchronous requests           | Email                                  |
+| Privacy-sensitive mobile chat   | Signal                                 |
+| Link research rooms             | WhatsApp, Telegram                     |
 
 ## Operational Best Practices
 

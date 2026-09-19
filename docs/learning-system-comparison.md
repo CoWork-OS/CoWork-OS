@@ -18,16 +18,16 @@ That gives the product a stronger operating shape than a one-shot "improve yours
 
 ## What The Reflective Layer Adds
 
-| Area | CoWork OS |
-|---|---|
-| Durable evidence | Workspace artifacts plus indexed SQLite summaries |
-| Stable workflow identity | Workflow-intelligence targets across workspace, mailbox, schedule, trigger, briefing, and code targets |
-| Reflective stages | Evidence -> hypotheses -> critique -> winner -> Dreaming when memory drift exists -> backlog -> suggestion/action |
-| Output shape | Winner, rejected paths, backlog, suggestion, Dreaming candidate, feedback memory |
-| Coordination model | Global brain with namespaced target histories |
-| Dispatch behavior | Reviewable suggestion by default; guarded auto-create only when policy, trust, and risk allow it |
-| Code execution | Downstream executor with worktree isolation and verification |
-| Safety boundary | The task's [access profile](access-profiles.md), existing executor approvals, and policies; reflection is not a separate access grant |
+| Area                     | CoWork OS                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Durable evidence         | Workspace artifacts plus indexed SQLite summaries                                                                                     |
+| Stable workflow identity | Workflow-intelligence targets across workspace, mailbox, schedule, trigger, briefing, and code targets                                |
+| Reflective stages        | Evidence -> hypotheses -> critique -> winner -> Dreaming when memory drift exists -> backlog -> suggestion/action                     |
+| Output shape             | Winner, rejected paths, backlog, suggestion, Dreaming candidate, feedback memory                                                      |
+| Coordination model       | Global brain with namespaced target histories                                                                                         |
+| Dispatch behavior        | Reviewable suggestion by default; guarded auto-create only when policy, trust, and risk allow it                                      |
+| Code execution           | Downstream executor with worktree isolation and verification                                                                          |
+| Safety boundary          | The task's [access profile](access-profiles.md), existing executor approvals, and policies; reflection is not a separate access grant |
 
 ## Why This Matters
 

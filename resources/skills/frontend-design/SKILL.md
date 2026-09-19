@@ -39,4 +39,4 @@ Design and build production-grade frontends with bold, distinctive aesthetics.
 ## Runtime Prompt
 
 - Current runtime prompt length: 4071 characters.
-- Runtime prompt is defined directly in `../frontend-design.json`. 
+- Runtime prompt is defined directly in `../frontend-design.json`.

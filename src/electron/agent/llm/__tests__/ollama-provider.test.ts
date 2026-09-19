@@ -117,4 +117,61 @@ describe("OllamaProvider reasoning handling", () => {
       expect.objectContaining({ thinkingChars: 23, doneReason: "stop" }),
     );
   });
+
+  it("rejects malformed and non-object tool arguments while preserving valid siblings", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        mockOllamaResponse({
+          role: "assistant",
+          content: "Inspecting the files",
+          tool_calls: [
+            { function: { name: "write_file", arguments: "{" } },
+            { function: { name: "read_file", arguments: { path: "src/app.ts" } } },
+            { function: { name: "glob", arguments: "[]" } },
+            { function: { name: "list_dir", arguments: "{}" } },
+          ],
+        }),
+      ),
+    );
+    const provider = new OllamaProvider({ type: "ollama", model: "llama3.3:70b" });
+
+    const response = await provider.createMessage({ ...createRequest(), model: "llama3.3:70b" });
+
+    expect(response.stopReason).toBe("tool_use");
+    expect(response.content).toHaveLength(5);
+    expect(response.content[0]).toEqual({ type: "text", text: "Inspecting the files" });
+
+    const toolUses = response.content.filter((block) => block.type === "tool_use");
+    expect(toolUses).toHaveLength(4);
+    expect(toolUses.map((toolUse) => toolUse.name)).toEqual([
+      "write_file",
+      "read_file",
+      "glob",
+      "list_dir",
+    ]);
+
+    const malformed = toolUses[0];
+    expect(malformed.input).toEqual({});
+    expect(malformed.inputError).toEqual({
+      code: "malformed_json",
+      message: "Tool call arguments must be valid JSON.",
+    });
+
+    const nativeObject = toolUses[1];
+    expect(nativeObject.input).toEqual({ path: "src/app.ts" });
+    expect(nativeObject.inputError).toBeUndefined();
+
+    const array = toolUses[2];
+    expect(array.input).toEqual({});
+    expect(array.inputError).toEqual({
+      code: "invalid_shape",
+      message: "Tool call arguments must be a JSON object.",
+    });
+
+    const explicitEmptyObject = toolUses[3];
+    expect(explicitEmptyObject.input).toEqual({});
+    expect(explicitEmptyObject.inputError).toBeUndefined();
+  });
 });

@@ -21,7 +21,71 @@ const TERMINAL_WORK_EVENT_TYPES = new Set<EventType | "task_paused" | "task_canc
   "task_completed",
   "task_cancelled",
   "follow_up_completed",
+  "follow_up_failed",
 ]);
+
+function isBotChatConversation(task: Task): boolean {
+  return task.agentConfig?.botConversation === true;
+}
+
+/**
+ * Bot conversations intentionally return their persistent task row to
+ * `pending` after each turn so the next message can reuse it. A live event
+ * stream can still miss the synthetic `follow_up_completed` marker during a
+ * renderer refresh, while the assistant reply is already visible. Treat the
+ * reply as the end of that chat turn when it follows the latest user message;
+ * a newer user message or active signal keeps the composer working.
+ */
+function hasCompletedBotChatTurn(task: Task, events: TaskEvent[]): boolean {
+  if (!isBotChatConversation(task)) return false;
+
+  let latestUserTimestamp = -Infinity;
+  let latestAssistantTimestamp = -Infinity;
+  let latestActiveTimestamp = -Infinity;
+
+  for (const event of events) {
+    if (event.taskId !== task.id) continue;
+    const effectiveType = getEffectiveTaskEventType(event);
+    if (effectiveType === "user_message") {
+      latestUserTimestamp = Math.max(latestUserTimestamp, event.timestamp);
+    } else if (
+      effectiveType === "assistant_message" &&
+      event.payload?.internal !== true &&
+      (typeof event.payload?.message === "string" || typeof event.payload?.content === "string")
+    ) {
+      latestAssistantTimestamp = Math.max(latestAssistantTimestamp, event.timestamp);
+    } else if (isBotChatActiveWorkSignal(event, effectiveType)) {
+      latestActiveTimestamp = Math.max(latestActiveTimestamp, event.timestamp);
+    }
+  }
+
+  return (
+    latestAssistantTimestamp > -Infinity &&
+    latestAssistantTimestamp >= latestUserTimestamp &&
+    latestAssistantTimestamp >= latestActiveTimestamp
+  );
+}
+
+/**
+ * Timeline wrappers are also used for bookkeeping events such as
+ * `task_status`, `conversation_snapshot`, and `llm_usage`. Those events are
+ * not evidence that a newer bot turn is running, even though the generic
+ * working-state policy treats a timeline update as potentially active.
+ */
+function isBotChatActiveWorkSignal(event: TaskEvent, effectiveType: string): boolean {
+  if (
+    effectiveType === "user_message" ||
+    effectiveType === "assistant_message" ||
+    effectiveType === "conversation_snapshot" ||
+    effectiveType === "task_status" ||
+    effectiveType === "llm_usage" ||
+    effectiveType === "log" ||
+    TERMINAL_WORK_EVENT_TYPES.has(effectiveType as EventType | "task_paused" | "task_cancelled")
+  ) {
+    return false;
+  }
+  return isActiveWorkSignal(event, effectiveType);
+}
 
 function isActiveWorkSignal(event: TaskEvent, effectiveType: string): boolean {
   const isActiveProgressSignal =
@@ -49,6 +113,13 @@ export function isTaskActivelyWorking(
   if (!task) return false;
 
   if (task.status === "pending" && task.branchFromTaskId) {
+    return false;
+  }
+
+  if (
+    (task.status === "pending" || task.status === "queued") &&
+    hasCompletedBotChatTurn(task, events)
+  ) {
     return false;
   }
 

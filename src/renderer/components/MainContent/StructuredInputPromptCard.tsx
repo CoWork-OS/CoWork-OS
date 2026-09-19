@@ -195,8 +195,7 @@ export function StructuredInputPromptCard({
   return (
     <div
       className="input-request-composer-shell"
-      role="dialog"
-      aria-modal="true"
+      role="region"
       aria-label="Structured input required"
     >
       <div className="input-request-card input-request-card-inline">

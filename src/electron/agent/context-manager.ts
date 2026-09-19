@@ -20,6 +20,7 @@ const MODEL_LIMITS: Record<string, number> = {
   "gpt-4.1": 128000,
   "gpt-4.1-mini": 128000,
   "gpt-4-turbo": 128000,
+  "gpt-6-astra": 1_050_000,
   "gpt-3.5-turbo": 16000,
   default: 100000,
 };
@@ -27,6 +28,8 @@ const MODEL_LIMITS: Record<string, number> = {
 function inferModelLimit(modelKey: string): number | null {
   const key = modelKey.toLowerCase().trim();
   if (!key) return null;
+
+  if (key.includes("gpt-6-astra")) return 1_050_000;
 
   // Anthropic raw ids: e.g. "claude-3-5-sonnet-latest"
   if (
@@ -200,8 +203,10 @@ export function truncateToolResult(result: string): string {
     if (Array.isArray(parsed)) {
       const limited = parsed.slice(0, 50);
       const truncatedJson = JSON.stringify(limited, null, 2);
-      if (truncatedJson.length <= maxChars) {
-        return truncatedJson + `\n\n[... showing ${limited.length} of ${parsed.length} items ...]`;
+      const withNotice =
+        truncatedJson + `\n\n[... showing ${limited.length} of ${parsed.length} items ...]`;
+      if (withNotice.length <= maxChars) {
+        return withNotice;
       }
     }
 
@@ -211,7 +216,10 @@ export function truncateToolResult(result: string): string {
         ? Math.max(4000, tokenBudget - 1500)
         : Math.floor(tokenBudget / 2);
       parsed.content = truncateToTokens(parsed.content, contentBudget);
-      return JSON.stringify(parsed, null, 2);
+      const truncatedJson = JSON.stringify(parsed, null, 2);
+      // Metadata and JSON escaping also consume context. Fall back to a bounded
+      // excerpt when preserving the full structure still exceeds the budget.
+      if (truncatedJson.length <= maxChars) return truncatedJson;
     }
   }
 

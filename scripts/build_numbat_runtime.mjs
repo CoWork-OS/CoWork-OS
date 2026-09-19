@@ -76,7 +76,10 @@ function normalizeMacMachO(buffer) {
   for (let index = 0; index < commandCount; index += 1) {
     const command = buffer.readUInt32LE(offset);
     const commandSize = buffer.readUInt32LE(offset + 4);
-    if (command === 0x19 && buffer.toString("ascii", offset + 8, offset + 24).startsWith("__LINKEDIT")) {
+    if (
+      command === 0x19 &&
+      buffer.toString("ascii", offset + 8, offset + 24).startsWith("__LINKEDIT")
+    ) {
       buffer.fill(0, offset + 32, offset + 40);
       buffer.fill(0, offset + 48, offset + 56);
     }

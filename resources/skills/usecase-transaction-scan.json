@@ -11,11 +11,7 @@
       "type": "select",
       "description": "Where transaction alerts arrive",
       "required": true,
-      "options": [
-        "email",
-        "slack",
-        "imessage"
-      ]
+      "options": ["email", "slack", "imessage"]
     },
     {
       "name": "chat_hint",

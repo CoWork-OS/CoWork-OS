@@ -144,3 +144,13 @@ changed-file-set-review-artifact.pdf
 exact-changed-file-set.xlsx
 recovery/
 jsonl-preview.png
+
+# Release automation source (the generic release/ rule is for build outputs).
+!scripts/release/
+scripts/release/*
+!scripts/release/package-bundle.mjs
+!scripts/release/package-bundle.test.mjs
+!scripts/release/registry-publication.mjs
+!scripts/release/registry-publication.test.mjs
+!scripts/release/smoke-bundle.mjs
+!scripts/release/smoke-input.test.mjs

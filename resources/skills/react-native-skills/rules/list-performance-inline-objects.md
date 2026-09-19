@@ -25,7 +25,7 @@ function UserList({ users }: { users: User[] }) {
         />
       )}
     />
-  )
+  );
 }
 ```
 
@@ -53,7 +53,7 @@ function UserList({ users }: { users: User[] }) {
         <UserRow user={item} />
       )}
     />
-  )
+  );
 }
 ```
 

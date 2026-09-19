@@ -33,12 +33,7 @@
       "description": "Which side you represent",
       "required": false,
       "default": "seller",
-      "options": [
-        "seller",
-        "buyer",
-        "vendor",
-        "customer"
-      ]
+      "options": ["seller", "buyer", "vendor", "customer"]
     },
     {
       "name": "output_report_path",

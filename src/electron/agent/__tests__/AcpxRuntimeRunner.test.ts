@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   AcpxRuntimeRunner,
   AcpxRuntimeUnavailableError,
+  assertAcpxExecutionAuthority,
   getAcpxAgentDisplayName,
   buildAcpxBaseArgs,
   buildAcpxCommandArgs,
@@ -11,6 +12,46 @@ import {
   mapAcpxSessionUpdate,
   resetAcpxLauncherPreferenceForTests,
 } from "../AcpxRuntimeRunner";
+
+describe("ACP authority boundary", () => {
+  const permissions = {
+    read: true,
+    write: true,
+    delete: true,
+    shell: true,
+    network: true,
+    accessSandboxMode: "danger-full-access",
+    accessNetworkMode: "enabled",
+  } as const;
+  const policy = {
+    requireSandboxForShell: false,
+    network: {
+      defaultAction: "allow",
+      allowedDomains: [],
+      blockedDomains: [],
+    },
+  } as Any;
+  it("retains separately configured unrestricted external runtime authority", () => {
+    expect(() => assertAcpxExecutionAuthority(permissions, policy)).not.toThrow();
+  });
+  it.each([
+    { accessSandboxMode: "workspace-write" },
+    { accessSandboxMode: "read-only" },
+    { accessProfileScoped: true },
+    { shell: false },
+    { network: false },
+    { accessNetworkMode: "on-request" },
+  ])("cannot delegate a narrowed profile through ACP (%j)", (restriction) => {
+    expect(() =>
+      assertAcpxExecutionAuthority({ ...permissions, ...restriction } as Any, policy),
+    ).toThrow("cannot enforce");
+  });
+  it("honors administrative sandbox requirements", () => {
+    expect(() =>
+      assertAcpxExecutionAuthority(permissions, { ...policy, requireSandboxForShell: true }),
+    ).toThrow("cannot enforce");
+  });
+});
 
 const childProcessMocks = vi.hoisted(() => ({
   spawn: vi.fn(),

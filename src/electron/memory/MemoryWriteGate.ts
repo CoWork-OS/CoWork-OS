@@ -6,6 +6,7 @@ import {
   WorkspaceRepository,
 } from "../database/repositories";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
+import { approvalPromptsDisabled } from "../agent/approval-policy";
 import { createLogger } from "../utils/logger";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import type {
@@ -207,6 +208,39 @@ export class MemoryWriteGate {
     return this.toDisplayItem(rejected);
   }
 
+  /**
+   * Reject all queued writes without replaying any stored payload.
+   *
+   * The no-prompt migration uses this to clear an old review backlog safely:
+   * new writes use the default `off` mode and commit normally, while writes
+   * that were created under an earlier review policy are treated as stale and
+   * remain auditable as rejected rows. In-flight `applying` rows are left
+   * alone so a live replay cannot be interrupted by cleanup.
+   */
+  static rejectAllPending(
+    opts: {
+      workspaceId?: string;
+      reviewedBy?: string;
+      resolution?: string;
+    } = {},
+  ): number {
+    this.ensureInitialized();
+    const resolution =
+      opts.resolution ||
+      "Rejected by the no-prompt memory-write migration; stale queued data was not replayed.";
+    const count = this.pendingRepo.rejectPending({
+      workspaceId: opts.workspaceId,
+      reviewedBy: opts.reviewedBy || "system:no-prompt-migration",
+      resolution,
+    });
+    if (count > 0) {
+      logger.info(
+        `[MemoryWriteGate] Rejected ${count} pending memory write(s) without replaying payloads.`,
+      );
+    }
+    return count;
+  }
+
   static markFailed(id: string, resolution: string): PendingMemoryWrite | undefined {
     this.ensureInitialized();
     return (
@@ -217,6 +251,14 @@ export class MemoryWriteGate {
 
   private static shouldStage(request: MemoryWriteRequest): boolean {
     const envMode = this.normalizeMode(process.env.COWORK_MEMORY_WRITE_APPROVAL_MODE);
+    // The normal local runtime has no approval prompts. Treat the review queue
+    // as an explicit compatibility mode there, so an old saved review setting
+    // cannot silently recreate a second approval surface. Operators that need
+    // the queue for a controlled run can opt in through the dedicated
+    // COWORK_MEMORY_WRITE_APPROVAL_MODE environment variable.
+    if (!envMode && approvalPromptsDisabled()) {
+      return false;
+    }
     const mode = envMode || MemoryFeaturesManager.loadSettings().memoryWriteApprovalMode || "off";
     switch (mode) {
       case "all":

@@ -48,6 +48,59 @@ export interface RemoteGatewayClientOptions extends RemoteGatewayConfig {
 }
 
 /**
+ * Build a `checkServerIdentity` callback that pins the peer certificate to
+ * `expectedFingerprint` (SHA-256, with or without colons, any case).
+ *
+ * Node's contract for this callback is: return an Error to REJECT, and
+ * undefined to ACCEPT. Returning a boolean inverts both outcomes — `false` is
+ * falsy and reads as success, so a mismatched certificate would be accepted.
+ *
+ * Supplying this option also replaces Node's default hostname/SAN check
+ * entirely, so we must invoke `tls.checkServerIdentity` ourselves first.
+ * Otherwise enabling pinning would *weaken* verification rather than add to it.
+ */
+export function pinnedServerIdentity(
+  expectedFingerprint: string,
+): (hostname: string, cert: tls.PeerCertificate) => Error | undefined {
+  const expected = expectedFingerprint.toLowerCase().replace(/:/g, "");
+  return (hostname, cert) => {
+    const hostnameError = tls.checkServerIdentity(hostname, cert);
+    if (hostnameError) return hostnameError;
+
+    const actual = String(cert?.fingerprint256 || "")
+      .toLowerCase()
+      .replace(/:/g, "");
+    if (!actual) {
+      return new Error("Control Plane certificate has no SHA-256 fingerprint to pin against");
+    }
+    if (actual !== expected) {
+      return new Error(
+        "Control Plane certificate fingerprint does not match the pinned value. " +
+          "Update the pinned fingerprint if the server certificate was rotated.",
+      );
+    }
+    return undefined;
+  };
+}
+
+/**
+ * Bridge our tls-correct callback onto ws's option type.
+ *
+ * `@types/ws` declares `checkServerIdentity?(servername: string, cert: CertMeta): boolean`,
+ * but ws does not call this itself — it forwards the whole options object to
+ * `tls.connect`, where the parameter is a `PeerCertificate` and the contract is
+ * "return an Error to reject, undefined to accept". Following the declared
+ * boolean signature is what made the original pinning logic accept every
+ * mismatched certificate, so the cast is deliberate: the runtime contract wins
+ * over the (incorrect) type declaration.
+ */
+function asWsCheckServerIdentity(
+  callback: (hostname: string, cert: tls.PeerCertificate) => Error | undefined,
+): NonNullable<WebSocket.ClientOptions["checkServerIdentity"]> {
+  return callback as unknown as NonNullable<WebSocket.ClientOptions["checkServerIdentity"]>;
+}
+
+/**
  * Remote Gateway Client
  * Connects to a Control Plane server hosted elsewhere
  */
@@ -184,18 +237,9 @@ export class RemoteGatewayClient {
 
       // Apply TLS fingerprint validation for test connections too
       if (this.config.tlsFingerprint && this.config.url.startsWith("wss://")) {
-        const expectedFingerprint = this.config.tlsFingerprint.toLowerCase().replace(/:/g, "");
-        testOptions.checkServerIdentity = (_hostname: string, cert: unknown) => {
-          const peerCert =
-            typeof cert === "object" && cert !== null ? (cert as tls.PeerCertificate) : null;
-          if (!peerCert?.fingerprint256) return false;
-
-          const certFingerprint = String(peerCert.fingerprint256).toLowerCase().replace(/:/g, "");
-          if (certFingerprint !== expectedFingerprint) {
-            return false;
-          }
-          return true;
-        };
+        testOptions.checkServerIdentity = asWsCheckServerIdentity(
+          pinnedServerIdentity(this.config.tlsFingerprint),
+        );
       }
 
       const testWs = new WebSocket(this.config.url, testOptions);
@@ -319,18 +363,9 @@ export class RemoteGatewayClient {
 
         // TLS certificate fingerprint pinning for wss:// connections
         if (this.config.tlsFingerprint && this.config.url.startsWith("wss://")) {
-          const expectedFingerprint = this.config.tlsFingerprint.toLowerCase().replace(/:/g, "");
-          wsOptions.checkServerIdentity = (_hostname: string, cert: unknown) => {
-            const peerCert =
-              typeof cert === "object" && cert !== null ? (cert as tls.PeerCertificate) : null;
-            if (!peerCert?.fingerprint256) return false;
-
-            const certFingerprint = String(peerCert.fingerprint256).toLowerCase().replace(/:/g, "");
-            if (certFingerprint !== expectedFingerprint) {
-              return false;
-            }
-            return true;
-          };
+          wsOptions.checkServerIdentity = asWsCheckServerIdentity(
+            pinnedServerIdentity(this.config.tlsFingerprint),
+          );
         }
 
         this.ws = new WebSocket(this.config.url, wsOptions);

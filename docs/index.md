@@ -12,6 +12,9 @@ hero:
       text: Models & Access
       link: /providers
     - theme: alt
+      text: Jev Decision Support
+      link: /jev
+    - theme: alt
       text: MLX-LM Local Inference
       link: /mlx-lm
     - theme: alt
@@ -60,6 +63,9 @@ hero:
       text: Managed Agents
       link: /managed-agents
     - theme: alt
+      text: Bots & Conversations
+      link: /bots-and-conversations
+    - theme: alt
       text: Everyday Agent
       link: /everyday-agent
     - theme: alt
@@ -98,6 +104,9 @@ hero:
     - theme: alt
       text: Permission System
       link: /permission-system
+    - theme: alt
+      text: Security Hardening
+      link: /security-hardening
     - theme: alt
       text: Access Profiles
       link: /access-profiles

@@ -22,6 +22,7 @@ Keep these phases distinct and run them in linear order:
 Treat this skill as the top-level orchestrator for the four skills plus the final report assembly step. Do not collapse the phases together.
 
 For each phase:
+
 1. Read that phase's skill.
 2. Load only the inputs required for that phase.
 3. Complete that phase's workflow and checklist.
@@ -60,15 +61,23 @@ Follow this plan in order. Do not skip ahead to a later phase until the current 
 1. Resolve the Git-backed scan target, `repo_name`, `security_scans_dir`, `scan_id`, `scan_dir`, and `artifacts_dir` using `../../references/scan-artifacts.md`.
 2. Create or adopt the scan goal described in `Goal Setup`.
 3. Run `$threat-model` first.
-  - Copy the repository-scoped threat model to the per-scan threat model path without alteration for auditability.
-  - Treat the per-scan threat model path as the source of truth threat model for later phases.
+
+- Copy the repository-scoped threat model to the per-scan threat model path without alteration for auditability.
+- Treat the per-scan threat model path as the source of truth threat model for later phases.
+
 4. Run `$finding-discovery` as the second step, against the resolved diff and using the per-scan threat model as context.
-  - If discovery produces no technically plausible candidates, stop there, skip validation and attack-path analysis, and assemble the final markdown report immediately.
+
+- If discovery produces no technically plausible candidates, stop there, skip validation and attack-path analysis, and assemble the final markdown report immediately.
+
 5. Run `$validation` as the third step, for each candidate that came out of discovery.
-  - Pass the resolved diff scope, discovery notes, and candidate inventory to validation. Validation should preserve or suppress the provided instances; it should not independently broaden the review into a repository-wide scan.
-  - Each candidate finding's `findings/<candidate_id>/candidate_ledger.jsonl` is part of the validation input. Every candidate finding that came out of discovery must have a discovery receipt before validation starts and a validation receipt before the scan can proceed to final reporting.
+
+- Pass the resolved diff scope, discovery notes, and candidate inventory to validation. Validation should preserve or suppress the provided instances; it should not independently broaden the review into a repository-wide scan.
+- Each candidate finding's `findings/<candidate_id>/candidate_ledger.jsonl` is part of the validation input. Every candidate finding that came out of discovery must have a discovery receipt before validation starts and a validation receipt before the scan can proceed to final reporting.
+
 6. Run `$attack-path-analysis` as the fourth step, for findings that still need reportability, attack-path, and severity analysis after validation.
-  - Each candidate finding's `findings/<candidate_id>/candidate_ledger.jsonl` is part of the attack-path input. Every candidate finding that reaches attack-path analysis must have an attack-path receipt before final reporting, even when the final decision is `ignore`, suppressed, or deferred.
+
+- Each candidate finding's `findings/<candidate_id>/candidate_ledger.jsonl` is part of the attack-path input. Every candidate finding that reaches attack-path analysis must have an attack-path receipt before final reporting, even when the final decision is `ignore`, suppressed, or deferred.
+
 7. Assemble the final output last using `../../references/final-report.md` and the outputs of the earlier phases: finding discovery plus each candidate finding's validation and attack-path reports.
 
 ## Phase Scope

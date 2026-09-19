@@ -13,10 +13,10 @@ Both routes open Inbox Agent, switch the right sidebar to the **Ask Inbox** tab,
 
 Ask Inbox sits in the right Inbox Agent sidebar beside **Agent Rail**:
 
-| Tab | Purpose |
-|-----|---------|
+| Tab        | Purpose                                                                                               |
+| ---------- | ----------------------------------------------------------------------------------------------------- |
 | Agent Rail | Thread actions, cleanup, follow-up, compose, commitments, snippets, handoff, and thread intelligence. |
-| Ask Inbox | Mailbox questions, live agentic steps, final answers, and matched email evidence. |
+| Ask Inbox  | Mailbox questions, live agentic steps, final answers, and matched email evidence.                     |
 
 The left ask field remains a quick launcher. It does not own answer presentation. Submitting a question:
 

@@ -39,4 +39,4 @@ Apply production-ready Supabase SDK patterns for TypeScript and Python projects.
 ## Runtime Prompt
 
 - Current runtime prompt length: 949 characters.
-- Runtime prompt is defined directly in `../supabase-sdk-patterns.json`. 
+- Runtime prompt is defined directly in `../supabase-sdk-patterns.json`.

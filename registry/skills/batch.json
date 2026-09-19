@@ -18,14 +18,7 @@
       "description": "Task domain",
       "required": false,
       "default": "auto",
-      "options": [
-        "auto",
-        "code",
-        "research",
-        "operations",
-        "writing",
-        "general"
-      ]
+      "options": ["auto", "code", "research", "operations", "writing", "general"]
     },
     {
       "name": "parallel",
@@ -40,23 +33,14 @@
       "description": "Policy for external side effects",
       "required": false,
       "default": "confirm",
-      "options": [
-        "confirm",
-        "execute",
-        "none"
-      ]
+      "options": ["confirm", "execute", "none"]
     }
   ],
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "workflow",
-      "parallel",
-      "migration",
-      "cross-domain"
-    ],
+    "tags": ["workflow", "parallel", "migration", "cross-domain"],
     "routing": {
       "useWhen": "Use when the user asks to run parallelizable migrations or repeated transformations across many independent targets in any domain.",
       "dontUseWhen": "Do not use for single-target quality polishing (use simplify) or when the request is purely conceptual with no execution intent.",

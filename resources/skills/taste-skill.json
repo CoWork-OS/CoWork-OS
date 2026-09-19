@@ -12,22 +12,9 @@
     "author": "Leonxlnx",
     "repository": "https://github.com/Leonxlnx/taste-skill/tree/main/skills/taste-skill",
     "homepage": "https://tasteskill.dev",
-    "tags": [
-      "frontend",
-      "design",
-      "react",
-      "nextjs",
-      "tailwind",
-      "motion",
-      "ui"
-    ],
+    "tags": ["frontend", "design", "react", "nextjs", "tailwind", "motion", "ui"],
     "routing": {
-      "keywords": [
-        "taste-skill",
-        "taste skill",
-        "anti-slop frontend",
-        "high-agency frontend"
-      ],
+      "keywords": ["taste-skill", "taste skill", "anti-slop frontend", "high-agency frontend"],
       "useWhen": "Use when the user explicitly asks for Taste Skill, or wants a high-agency anti-slop frontend system with stronger motion, asymmetry, and stricter design rules than the default frontend skills.",
       "dontUseWhen": "Do not use for planning-only conversations, calm default premium frontend work better served by `frontend`, or minor UI cleanup that does not need a strong design-system override.",
       "outputs": "Taste Skill driven frontend code or redesign edits with concrete implementation choices, dependency checks, and follow-up action notes.",

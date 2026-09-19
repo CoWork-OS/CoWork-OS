@@ -37,11 +37,11 @@ Query Polymarket prediction markets — search events, check odds and prices, vi
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| query | string | No | What to search for or ask about (e.g., 'Trump election odds', 'trending crypto markets', 'AI predictions') |
+| Name  | Type   | Required | Description                                                                                                |
+| ----- | ------ | -------- | ---------------------------------------------------------------------------------------------------------- |
+| query | string | No       | What to search for or ask about (e.g., 'Trump election odds', 'trending crypto markets', 'AI predictions') |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 867 characters.
-- Runtime prompt is defined directly in `../polymarket.json`. 
+- Runtime prompt is defined directly in `../polymarket.json`.

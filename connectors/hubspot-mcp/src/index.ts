@@ -1,24 +1,24 @@
-import * as readline from 'readline';
+import * as readline from "readline";
 
 // ==================== MCP Types ====================
 
 type JSONRPCId = string | number;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   result?: any;
   error?: { code: number; message: string; data?: any };
@@ -38,7 +38,7 @@ type MCPTool = {
   name: string;
   description?: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties?: Record<string, MCPToolProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -54,14 +54,14 @@ type MCPServerInfo = {
   };
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+const PROTOCOL_VERSION = "2024-11-05";
 
 const MCP_METHODS = {
-  INITIALIZE: 'initialize',
-  INITIALIZED: 'notifications/initialized',
-  SHUTDOWN: 'shutdown',
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  INITIALIZE: "initialize",
+  INITIALIZED: "notifications/initialized",
+  SHUTDOWN: "shutdown",
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 } as const;
 
 const MCP_ERROR_CODES = {
@@ -99,57 +99,78 @@ class HubSpotClient {
   constructor(private config: HubSpotConfig) {}
 
   async health(): Promise<RequestResult> {
-    return this.requestJson('GET', 'account-info/v3/details');
+    return this.requestJson("GET", "account-info/v3/details");
   }
 
   async searchObjects(objectType: string, payload: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', `crm/v3/objects/${encodeURIComponent(objectType)}/search`, payload);
+    return this.requestJson(
+      "POST",
+      `crm/v3/objects/${encodeURIComponent(objectType)}/search`,
+      payload,
+    );
   }
 
-  async getObject(objectType: string, objectId: string, properties?: string[]): Promise<RequestResult> {
+  async getObject(
+    objectType: string,
+    objectId: string,
+    properties?: string[],
+  ): Promise<RequestResult> {
     const params = new URLSearchParams();
     if (properties && properties.length > 0) {
-      params.set('properties', properties.join(','));
+      params.set("properties", properties.join(","));
     }
     const query = params.toString();
-    return this.requestJson('GET', `crm/v3/objects/${encodeURIComponent(objectType)}/${encodeURIComponent(objectId)}${query ? `?${query}` : ''}`);
+    return this.requestJson(
+      "GET",
+      `crm/v3/objects/${encodeURIComponent(objectType)}/${encodeURIComponent(objectId)}${query ? `?${query}` : ""}`,
+    );
   }
 
   async createObject(objectType: string, properties: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', `crm/v3/objects/${encodeURIComponent(objectType)}`, { properties });
+    return this.requestJson("POST", `crm/v3/objects/${encodeURIComponent(objectType)}`, {
+      properties,
+    });
   }
 
-  async updateObject(objectType: string, objectId: string, properties: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('PATCH', `crm/v3/objects/${encodeURIComponent(objectType)}/${encodeURIComponent(objectId)}`, { properties });
+  async updateObject(
+    objectType: string,
+    objectId: string,
+    properties: Record<string, any>,
+  ): Promise<RequestResult> {
+    return this.requestJson(
+      "PATCH",
+      `crm/v3/objects/${encodeURIComponent(objectType)}/${encodeURIComponent(objectId)}`,
+      { properties },
+    );
   }
 
   private getBaseUrl(): string {
-    return this.config.baseUrl.replace(/\/$/, '');
+    return this.config.baseUrl.replace(/\/$/, "");
   }
 
   private getAuthHeader(): string {
     if (!this.config.accessToken) {
-      throw new Error('HUBSPOT_ACCESS_TOKEN is required');
+      throw new Error("HUBSPOT_ACCESS_TOKEN is required");
     }
     return `Bearer ${this.config.accessToken}`;
   }
 
   private async requestJson(method: string, path: string, body?: any): Promise<RequestResult> {
     const start = Date.now();
-    const url = `${this.getBaseUrl()}/${path.replace(/^\//, '')}`;
+    const url = `${this.getBaseUrl()}/${path.replace(/^\//, "")}`;
 
     const res = await fetch(url, {
       method,
       headers: {
         Authorization: await this.ensureAuthHeader(),
-        'Content-Type': 'application/json',
-        'User-Agent': 'CoWork-HubSpot-Connector/0.1.0',
+        "Content-Type": "application/json",
+        "User-Agent": "CoWork-HubSpot-Connector/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
     });
 
     const durationMs = Date.now() - start;
-    const vendorRequestId = res.headers.get('x-hubspot-request-id') || undefined;
+    const vendorRequestId = res.headers.get("x-hubspot-request-id") || undefined;
 
     if (res.status === 401 && this.canRefresh()) {
       await this.refreshAccessToken();
@@ -188,30 +209,30 @@ class HubSpotClient {
       return `Bearer ${this.config.accessToken}`;
     }
     if (!this.canRefresh()) {
-      throw new Error('HUBSPOT_ACCESS_TOKEN is required');
+      throw new Error("HUBSPOT_ACCESS_TOKEN is required");
     }
     await this.refreshAccessToken();
     if (!this.config.accessToken) {
-      throw new Error('Failed to refresh HubSpot access token');
+      throw new Error("Failed to refresh HubSpot access token");
     }
     return `Bearer ${this.config.accessToken}`;
   }
 
   private async refreshAccessToken(): Promise<void> {
     if (!this.canRefresh()) {
-      throw new Error('Missing HubSpot refresh credentials');
+      throw new Error("Missing HubSpot refresh credentials");
     }
 
     const params = new URLSearchParams({
-      grant_type: 'refresh_token',
+      grant_type: "refresh_token",
       client_id: this.config.clientId as string,
       client_secret: this.config.clientSecret as string,
       refresh_token: this.config.refreshToken as string,
     });
 
-    const res = await fetch('https://api.hubapi.com/oauth/v1/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    const res = await fetch("https://api.hubapi.com/oauth/v1/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
     });
 
@@ -222,7 +243,7 @@ class HubSpotClient {
 
     const data = await res.json();
     if (!data.access_token) {
-      throw new Error('HubSpot OAuth refresh returned no access_token');
+      throw new Error("HubSpot OAuth refresh returned no access_token");
     }
 
     this.config.accessToken = data.access_token;
@@ -245,7 +266,7 @@ class StdioMCPServer {
 
   constructor(
     private toolProvider: ToolProvider,
-    private serverInfo: MCPServerInfo
+    private serverInfo: MCPServerInfo,
   ) {}
 
   start(): void {
@@ -255,11 +276,11 @@ class StdioMCPServer {
       terminal: false,
     });
 
-    this.rl.on('line', (line) => this.handleLine(line));
-    this.rl.on('close', () => this.stop());
+    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("close", () => this.stop());
 
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    process.on("SIGINT", () => this.stop());
+    process.on("SIGTERM", () => this.stop());
   }
 
   stop(): void {
@@ -278,17 +299,17 @@ class StdioMCPServer {
       const message = JSON.parse(trimmed);
       this.handleMessage(message);
     } catch {
-      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, 'Parse error');
+      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
-    if ('id' in message && message.id !== null) {
+    if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
       return;
     }
 
-    if ('method' in message) {
+    if ("method" in message) {
       await this.handleNotification(message as JSONRPCNotification);
     }
   }
@@ -323,7 +344,7 @@ class StdioMCPServer {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
-        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || 'Internal error');
+        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
       }
     }
   }
@@ -338,11 +359,11 @@ class StdioMCPServer {
 
   private handleInitialize(_params: any): {
     protocolVersion: string;
-    capabilities: MCPServerInfo['capabilities'];
+    capabilities: MCPServerInfo["capabilities"];
     serverInfo: MCPServerInfo;
   } {
     if (this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, 'Already initialized');
+      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, "Already initialized");
     }
 
     return {
@@ -359,27 +380,27 @@ class StdioMCPServer {
   private async handleToolsCall(params: any): Promise<any> {
     const { name, arguments: args } = params || {};
     if (!name) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, 'Tool name is required');
+      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, "Tool name is required");
     }
 
     try {
       const result = await this.toolProvider.executeTool(name, args || {});
 
-      if (typeof result === 'string') {
-        return { content: [{ type: 'text', text: result }] };
+      if (typeof result === "string") {
+        return { content: [{ type: "text", text: result }] };
       }
 
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
-      return { content: [{ type: 'text', text: String(result) }] };
+      return { content: [{ type: "text", text: String(result) }] };
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Error: ${error?.message || 'Tool failed'}` }],
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
         isError: true,
       };
     }
@@ -391,13 +412,13 @@ class StdioMCPServer {
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
-    const response: JSONRPCResponse = { jsonrpc: '2.0', id, result };
+    const response: JSONRPCResponse = { jsonrpc: "2.0", id, result };
     this.sendMessage(response);
   }
 
   private sendError(id: JSONRPCId, code: number, message: string, data?: any): void {
     const response: JSONRPCResponse = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       error: { code, message, data },
     };
@@ -405,85 +426,113 @@ class StdioMCPServer {
   }
 
   private sendMessage(message: JSONRPCResponse | JSONRPCNotification): void {
-    process.stdout.write(JSON.stringify(message) + '\n');
+    process.stdout.write(JSON.stringify(message) + "\n");
   }
 
   private requireInitialized(): void {
     if (!this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, 'Server not initialized');
+      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, "Server not initialized");
     }
   }
 
-  private createError(code: number, message: string, data?: any): { code: number; message: string; data?: any } {
+  private createError(
+    code: number,
+    message: string,
+    data?: any,
+  ): { code: number; message: string; data?: any } {
     return { code, message, data };
   }
 }
 
 // ==================== Tool Definitions ====================
 
-const CONNECTOR_PREFIX = 'hubspot';
-const DEFAULT_BASE_URL = 'https://api.hubapi.com';
+const CONNECTOR_PREFIX = "hubspot";
+const DEFAULT_BASE_URL = "https://api.hubapi.com";
 
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
-    description: 'Check connector health and authentication status',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    description: "Check connector health and authentication status",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: `${CONNECTOR_PREFIX}.search_objects`,
-    description: 'Search CRM objects with HubSpot search API',
+    description: "Search CRM objects with HubSpot search API",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        objectType: { type: 'string', description: 'Object type (e.g., contacts, companies, deals)' },
-        filterGroups: { type: 'array', description: 'HubSpot filterGroups array', items: { type: 'object' } },
-        properties: { type: 'array', description: 'Properties to return', items: { type: 'string' } },
-        limit: { type: 'number', description: 'Max results' },
-        after: { type: 'string', description: 'Paging cursor' },
+        objectType: {
+          type: "string",
+          description: "Object type (e.g., contacts, companies, deals)",
+        },
+        filterGroups: {
+          type: "array",
+          description: "HubSpot filterGroups array",
+          items: { type: "object" },
+        },
+        properties: {
+          type: "array",
+          description: "Properties to return",
+          items: { type: "string" },
+        },
+        limit: { type: "number", description: "Max results" },
+        after: { type: "string", description: "Paging cursor" },
       },
-      required: ['objectType'],
+      required: ["objectType"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_object`,
-    description: 'Fetch a CRM object by ID',
+    description: "Fetch a CRM object by ID",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        objectType: { type: 'string', description: 'Object type (e.g., contacts, companies, deals)' },
-        id: { type: 'string', description: 'Object ID' },
-        properties: { type: 'array', description: 'Properties to return', items: { type: 'string' } },
+        objectType: {
+          type: "string",
+          description: "Object type (e.g., contacts, companies, deals)",
+        },
+        id: { type: "string", description: "Object ID" },
+        properties: {
+          type: "array",
+          description: "Properties to return",
+          items: { type: "string" },
+        },
       },
-      required: ['objectType', 'id'],
+      required: ["objectType", "id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_object`,
-    description: 'Create a CRM object',
+    description: "Create a CRM object",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        objectType: { type: 'string', description: 'Object type (e.g., contacts, companies, deals)' },
-        properties: { type: 'object', description: 'Properties for creation' },
+        objectType: {
+          type: "string",
+          description: "Object type (e.g., contacts, companies, deals)",
+        },
+        properties: { type: "object", description: "Properties for creation" },
       },
-      required: ['objectType', 'properties'],
+      required: ["objectType", "properties"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.update_object`,
-    description: 'Update a CRM object',
+    description: "Update a CRM object",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        objectType: { type: 'string', description: 'Object type (e.g., contacts, companies, deals)' },
-        id: { type: 'string', description: 'Object ID' },
-        properties: { type: 'object', description: 'Properties for update' },
+        objectType: {
+          type: "string",
+          description: "Object type (e.g., contacts, companies, deals)",
+        },
+        id: { type: "string", description: "Object ID" },
+        properties: { type: "object", description: "Properties for update" },
       },
-      required: ['objectType', 'id', 'properties'],
+      required: ["objectType", "id", "properties"],
       additionalProperties: false,
     },
   },
@@ -536,8 +585,8 @@ const toolProvider: ToolProvider = {
 };
 
 const serverInfo: MCPServerInfo = {
-  name: 'HubSpot Connector',
-  version: '0.1.0',
+  name: "HubSpot Connector",
+  version: "0.1.0",
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {
     tools: { listChanged: false },

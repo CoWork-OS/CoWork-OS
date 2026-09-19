@@ -46,7 +46,11 @@ function toNumber(value, fallback = Number.NaN) {
 }
 
 function isTruthyEnv(value) {
-  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+  return ["1", "true", "yes", "on"].includes(
+    String(value || "")
+      .trim()
+      .toLowerCase(),
+  );
 }
 
 function runSqlite(dbPath, sql) {
@@ -108,7 +112,10 @@ ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC;
 const result = runSqlite(resolvedDbPath, query);
 if (result.status !== 0) {
   const sqliteError = String(result.stderr || result.stdout || "").trim();
-  if (isTruthyEnv(process.env.COWORK_EVAL_ALLOW_EMPTY) && /no such table:\s*task_events/i.test(sqliteError)) {
+  if (
+    isTruthyEnv(process.env.COWORK_EVAL_ALLOW_EMPTY) &&
+    /no such table:\s*task_events/i.test(sqliteError)
+  ) {
     process.stdout.write(
       [
         "timeline-reliability-gate: summary",
@@ -153,8 +160,7 @@ const rows = lines.map((line) => {
     completionBlocksRaw,
     evidenceFailsRaw,
     telemetrySourceRaw,
-  ] =
-    line.split("\t");
+  ] = line.split("\t");
   return {
     taskId: taskId || "unknown-task",
     dropRate: toNumber(dropRateRaw),
@@ -203,7 +209,10 @@ const completionGateBlocksTotal = rowsToEnforce.reduce(
   (acc, row) => acc + Math.max(0, row.completionBlocks),
   0,
 );
-const evidenceGateFailsTotal = rowsToEnforce.reduce((acc, row) => acc + Math.max(0, row.evidenceFails), 0);
+const evidenceGateFailsTotal = rowsToEnforce.reduce(
+  (acc, row) => acc + Math.max(0, row.evidenceFails),
+  0,
+);
 
 const violations = [];
 if (maxDropRate >= thresholds.dropRateMax) {

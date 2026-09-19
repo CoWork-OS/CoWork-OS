@@ -52,46 +52,46 @@ scrubs env and redacts output, which breaks reading the dossier.
 
 ## Quick Reference
 
-| Command | Purpose |
-|---|---|
-| `$PDD setup --auto` | **Autonomous setup**: detect capabilities, pick the most autonomous valid config (no questions) |
-| `$PDD doctor` | Readiness check: config, broker count, and which upgrades are on/available |
-| `$PDD cdp [--check] [--print] [--port N]` | Launch/detect the operator's Chrome over CDP for Phase-2 browser + webmail (dedicated debug profile; the reliable way to send webmail and clear session-bound gates) |
-| `$PDD intake --full-name "..." [--alias ...] [--email ... --phone ...] [--city --state] [--prior-location "City,ST"] --consent` | Create a consenting subject; captures aliases + multiple emails/phones + prior locations; prints `subject_id` |
-| `$PDD next <subject>` | **The autonomous loop driver**: ordered agent actions right now + human digest + `next_wake_at` |
-| `$PDD brokers [--priority crucial]` | List the people-search broker database (curated + live) |
-| `$PDD refresh-brokers` | Pull the latest BADBOOL people-search list **and the CA Data Broker Registry** (`next` requeues this automatically when the cache is stale) |
-| `$PDD registry [--search NAME]` | State registry coverage (CA ~545 ingested; VT/OR/TX portals surfaced); the DROP/email lane, not scanned |
-| `$PDD drop <subject> [--filed]` | **The one-shot legal lever**: one CA DROP request deletes from ALL registered brokers; `--filed` records it |
-| `$PDD plan <subject> [--priority crucial]` | Per-broker tier + method + `search_vectors` + the exact fields to disclose |
-| `$PDD plan <subject> --batch` | **Reduce view**: overlays ledger state, groups brokers by next action (unscanned/found/indirect/blocked/in_progress/done), collapses ownership clusters, **orders `found` cluster-parents-first + emits a tailored `parent_playbook`**, prints `next_actions` |
-| `$PDD fanout <subject> [--priority crucial] [--size 5]` | Batch brokers into parallel CoWork subagent/multi-agent tasks when available (auto for large runs; batches of 5 - 8+ time out) |
-| `$PDD record <subject> <broker> <state> [--found true] [--evidence JSON] [--disclosed F --channel C] [--reason "..."]` | Update the ledger (validated state machine); **auto-stamps `next_recheck_at`** |
-| `$PDD show <subject> <broker>` | Read back a case's recorded state + evidence + disclosure log (so the parent re-verifies a subagent's `found` without re-deriving the listing URL) |
-| `$PDD send-email <subject> <broker> --listing <url> [--kind ccpa_indirect ...]` | Render + record the request (recipient locked to the broker's own address). **browser** mode returns a `compose` payload to send via webmail (no password); **programmatic** mode SMTP-sends |
-| `$PDD verify-link <subject> <broker> --text '<body>'` | **browser mode**: extract a broker's verification link from webmail text you read (anti-phishing scored) |
-| `$PDD poll-verification <subject> [--broker <id>]` | **programmatic mode**: poll IMAP for verification links (anti-phishing scored); auto-advances `submitted → verification_pending` |
-| `$PDD render-email <subject> <broker> --listing <url>` | Draft only (fallback when no email mode is configured) |
-| `$PDD due <subject>` | Cases whose recheck window arrived (the cron re-scan queue) |
-| `$PDD tasks <subject>` | ONE consolidated human-task digest (present at END of run) |
-| `$PDD status <subject>` | Markdown status report |
-| `$PDD report <subject> --sheets` | Rows for the Google Sheets tracker |
+| Command                                                                                                                         | Purpose                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$PDD setup --auto`                                                                                                             | **Autonomous setup**: detect capabilities, pick the most autonomous valid config (no questions)                                                                                                                                                               |
+| `$PDD doctor`                                                                                                                   | Readiness check: config, broker count, and which upgrades are on/available                                                                                                                                                                                    |
+| `$PDD cdp [--check] [--print] [--port N]`                                                                                       | Launch/detect the operator's Chrome over CDP for Phase-2 browser + webmail (dedicated debug profile; the reliable way to send webmail and clear session-bound gates)                                                                                          |
+| `$PDD intake --full-name "..." [--alias ...] [--email ... --phone ...] [--city --state] [--prior-location "City,ST"] --consent` | Create a consenting subject; captures aliases + multiple emails/phones + prior locations; prints `subject_id`                                                                                                                                                 |
+| `$PDD next <subject>`                                                                                                           | **The autonomous loop driver**: ordered agent actions right now + human digest + `next_wake_at`                                                                                                                                                               |
+| `$PDD brokers [--priority crucial]`                                                                                             | List the people-search broker database (curated + live)                                                                                                                                                                                                       |
+| `$PDD refresh-brokers`                                                                                                          | Pull the latest BADBOOL people-search list **and the CA Data Broker Registry** (`next` requeues this automatically when the cache is stale)                                                                                                                   |
+| `$PDD registry [--search NAME]`                                                                                                 | State registry coverage (CA ~545 ingested; VT/OR/TX portals surfaced); the DROP/email lane, not scanned                                                                                                                                                       |
+| `$PDD drop <subject> [--filed]`                                                                                                 | **The one-shot legal lever**: one CA DROP request deletes from ALL registered brokers; `--filed` records it                                                                                                                                                   |
+| `$PDD plan <subject> [--priority crucial]`                                                                                      | Per-broker tier + method + `search_vectors` + the exact fields to disclose                                                                                                                                                                                    |
+| `$PDD plan <subject> --batch`                                                                                                   | **Reduce view**: overlays ledger state, groups brokers by next action (unscanned/found/indirect/blocked/in_progress/done), collapses ownership clusters, **orders `found` cluster-parents-first + emits a tailored `parent_playbook`**, prints `next_actions` |
+| `$PDD fanout <subject> [--priority crucial] [--size 5]`                                                                         | Batch brokers into parallel CoWork subagent/multi-agent tasks when available (auto for large runs; batches of 5 - 8+ time out)                                                                                                                                |
+| `$PDD record <subject> <broker> <state> [--found true] [--evidence JSON] [--disclosed F --channel C] [--reason "..."]`          | Update the ledger (validated state machine); **auto-stamps `next_recheck_at`**                                                                                                                                                                                |
+| `$PDD show <subject> <broker>`                                                                                                  | Read back a case's recorded state + evidence + disclosure log (so the parent re-verifies a subagent's `found` without re-deriving the listing URL)                                                                                                            |
+| `$PDD send-email <subject> <broker> --listing <url> [--kind ccpa_indirect ...]`                                                 | Render + record the request (recipient locked to the broker's own address). **browser** mode returns a `compose` payload to send via webmail (no password); **programmatic** mode SMTP-sends                                                                  |
+| `$PDD verify-link <subject> <broker> --text '<body>'`                                                                           | **browser mode**: extract a broker's verification link from webmail text you read (anti-phishing scored)                                                                                                                                                      |
+| `$PDD poll-verification <subject> [--broker <id>]`                                                                              | **programmatic mode**: poll IMAP for verification links (anti-phishing scored); auto-advances `submitted → verification_pending`                                                                                                                              |
+| `$PDD render-email <subject> <broker> --listing <url>`                                                                          | Draft only (fallback when no email mode is configured)                                                                                                                                                                                                        |
+| `$PDD due <subject>`                                                                                                            | Cases whose recheck window arrived (the cron re-scan queue)                                                                                                                                                                                                   |
+| `$PDD tasks <subject>`                                                                                                          | ONE consolidated human-task digest (present at END of run)                                                                                                                                                                                                    |
+| `$PDD status <subject>`                                                                                                         | Markdown status report                                                                                                                                                                                                                                        |
+| `$PDD report <subject> --sheets`                                                                                                | Rows for the Google Sheets tracker                                                                                                                                                                                                                            |
 
 ## Batch operation (two-phase: crawl-all, then delete)
 
 For anything past a couple of brokers, run this as **map → reduce → act**, not broker-by-broker:
 
-- **Phase 1 - DISCOVER (read-only, parallel, idempotent).** Crawl *every* broker first and record a
+- **Phase 1 - DISCOVER (read-only, parallel, idempotent).** Crawl _every_ broker first and record a
   verdict for each (`found` / `not_found` / `indirect_exposure` / `blocked`). Scanning has no side
-  effects, so it is safe to parallelize and retry. Getting the full exposure map *before* acting is
+  effects, so it is safe to parallelize and retry. Getting the full exposure map _before_ acting is
   what unlocks cluster dedup and prioritization below. **Default: the parent drives CoWork web
   extraction/search probes directly** - most people-search sites render name/phone/address results as
   static HTML that can be read in seconds. Escalate to browser automation only for the few JS-only
-  sites, and to CoWork subagents only for genuinely *reasoning*-heavy work (large-scale namesake/relative
+  sites, and to CoWork subagents only for genuinely _reasoning_-heavy work (large-scale namesake/relative
   disambiguation). **Do NOT hand a browser-toolset subagent a big list of brokers to crawl** - in the
   field this timed out repeatedly (600s, ~5-6 brokers each, no summary) because browser navigation is
   heavy; the ledger writes that survived came at 10x the cost of parent web extraction. A `blocked`
-  (DataDome/Cloudflare/`antibot`) site is *not* a subagent job either: record `blocked` and requeue it
+  (DataDome/Cloudflare/`antibot`) site is _not_ a subagent job either: record `blocked` and requeue it
   for a stealth/cloud browser (Browserbase) pass. Subagent reports are self-reports - the parent
   re-fetches key URLs to confirm a `found` before trusting it (this cuts both ways: it caught a real
   listing the parent had wrongly assumed was a false positive).
@@ -125,7 +125,7 @@ For anything past a couple of brokers, run this as **map → reduce → act**, n
   submission after a correct answer (it is fingerprinting the automation). Third-party/indirect records
   are the exception - still confirm those before acting. Per-site game plans + the meta-search no-op
   skip-list are in `references/site-playbooks.md`; the full policy is in `references/methods.md`.
-- **PeopleConnect delete-wipes-suppression (permanent rule).** A PeopleConnect *deletion* wipes the
+- **PeopleConnect delete-wipes-suppression (permanent rule).** A PeopleConnect _deletion_ wipes the
   suppression and the subject re-lists across the whole affiliate cluster. If a "Your deletion request
   for PeopleConnect.us is Complete" email ever appears, the suppression is gone -> **re-run suppression
   and re-verify** the Control step reads "suppressed". Never leave this cluster on a completed deletion
@@ -147,7 +147,7 @@ recording `found` and before any deletion.
   a successful SMTP handoff is not proof of delivery; the due-queue re-scan is the real confirmation.
 - **Ledger writes are locked.** Concurrent runs (cron + manual) serialize safely; if you ever see a
   lock timeout, another run is mid-write - let it finish, don't delete the `.lock` by hand.
-- **Autonomy ≠ improvisation.** Full autonomy means not *asking* between steps; it does not loosen any
+- **Autonomy ≠ improvisation.** Full autonomy means not _asking_ between steps; it does not loosen any
   gate. If a broker demands MORE than the planned `disclosure_fields` mid-flow, stop that case and
   queue it (`human_task_queued --reason`) rather than deciding alone to disclose extra PII.
 - **Don't interrupt the run with questions.** Config choices are `setup --auto`'s job; human-only work
@@ -158,7 +158,7 @@ recording `found` and before any deletion.
   `$PDD setup --encryption age` - it generates a local `age` key and encrypts dossiers + ledgers (the
   audit log holds field names only and stays plaintext). It guards casual/backup/commit exposure, not
   a full runtime-home read; set `PDD_AGE_IDENTITY` to a separate volume for real key separation.
-  `$PDD doctor` shows whether encryption is *actually* engaged (not just whether `age` is installed).
+  `$PDD doctor` shows whether encryption is _actually_ engaged (not just whether `age` is installed).
 - **"Hidden from free search" ≠ deleted.** Only mark `confirmed_removed` after verifying the record is
   actually gone; note paid-tier retention in the report.
 - **Soft CAPTCHAs clear by default; don't fight the hard ones.** The default cloud browser passes
@@ -169,7 +169,7 @@ recording `found` and before any deletion.
   `references/brokers/` for re-verification instead of guessing.
 - **Verify non-field-verified records before submitting.** `confidence: auto` records came from
   parsing BADBOOL (read `optout.notes`/`optout.links`, confirm the real opt-out URL). `confidence:
-  documented` records (several people-search sites) carry the correct published opt-out URL but have
+documented` records (several people-search sites) carry the correct published opt-out URL but have
   **not** been field-verified (they 403 datacenter IPs), so confirm the live flow via the operator's
   residential browser on first use, then set `last_verified`. Field-verified curated records (no
   `confidence`, e.g. the cluster parents) have checked mechanics and take precedence.

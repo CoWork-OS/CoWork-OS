@@ -71,13 +71,13 @@ Workspace kit context still renders separately before memory sections, and only 
 
 Default runtime behavior:
 
-| Setting | Default |
-|---------|---------|
-| `L0 Identity` injection | `on` |
-| `L1 Essential Story` injection | `on` |
-| Archive memory injection | `off` (`defaultArchiveInjectionEnabled: false`) |
-| Quote/session/archive recall | tool-driven (`search_quotes`, `search_sessions`, `search_memories`) |
-| Topic packs | tool-driven (`memory_topics_load`) |
+| Setting                        | Default                                                             |
+| ------------------------------ | ------------------------------------------------------------------- |
+| `L0 Identity` injection        | `on`                                                                |
+| `L1 Essential Story` injection | `on`                                                                |
+| Archive memory injection       | `off` (`defaultArchiveInjectionEnabled: false`)                     |
+| Quote/session/archive recall   | tool-driven (`search_quotes`, `search_sessions`, `search_memories`) |
+| Topic packs                    | tool-driven (`memory_topics_load`)                                  |
 
 ### Curated-memory guardrails
 
@@ -96,13 +96,13 @@ Dreaming does not change what is injected into prompts by itself. Accepted candi
 
 The runtime now thinks about sources by wake-up layer instead of one flat synthesis list:
 
-| Layer | Sources |
-|------|---------|
-| **L0 Identity** | `CuratedMemoryService`, `UserProfileService`, `RelationshipMemoryService`, workspace-kit essentials |
+| Layer                  | Sources                                                                                                           |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **L0 Identity**        | `CuratedMemoryService`, `UserProfileService`, `RelationshipMemoryService`, workspace-kit essentials               |
 | **L1 Essential Story** | `PlaybookService`, `KnowledgeGraphService`, `DailyLogSummarizer`, optional archive fragments from `MemoryService` |
-| **L2 Topic Packs** | `memory_topics_load` over `.cowork/memory/topics/*.md` |
-| **L3 Deep Recall** | `search_quotes`, `search_sessions`, `search_memories` |
-| **Dreaming Evidence** | transcript spans, structured observations, curated hot memory, and heartbeat memory-drift signals |
+| **L2 Topic Packs**     | `memory_topics_load` over `.cowork/memory/topics/*.md`                                                            |
+| **L3 Deep Recall**     | `search_quotes`, `search_sessions`, `search_memories`                                                             |
+| **Dreaming Evidence**  | transcript spans, structured observations, curated hot memory, and heartbeat memory-drift signals                 |
 
 `daily_summary` fragments come from `.cowork/memory/summaries/<YYYY-MM-DD>.md` files produced by `DailyLogSummarizer`. Raw daily log files (`.cowork/memory/daily/`) are **never** injected into prompts.
 
@@ -161,10 +161,10 @@ The runtime now thinks about sources by wake-up layer instead of one flat synthe
 
 ### Configuration (GuardrailSettings → Behavior Adaptation)
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `adaptiveStyleEnabled` | `false` | Master enable — no observation or adaptation when off |
-| `adaptiveStyleMaxDriftPerWeek` | `1` | Max style-level shifts per 7-day period |
+| Setting                        | Default | Description                                           |
+| ------------------------------ | ------- | ----------------------------------------------------- |
+| `adaptiveStyleEnabled`         | `false` | Master enable — no observation or adaptation when off |
+| `adaptiveStyleMaxDriftPerWeek` | `1`     | Max style-level shifts per 7-day period               |
 
 The **Behavior Adaptation** section in Guardrail Settings exposes these toggles alongside a **Reset learned style** button that calls `AdaptiveStyleEngine.reset()` via the `kit:resetAdaptiveStyle` IPC channel.
 
@@ -196,6 +196,7 @@ When a playbook pattern is reinforced **3+ times** (configurable `threshold`), `
 The proposal enters the existing `SkillProposalService` governance workflow — an admin sees the evidence and approves or rejects with one click. No skill is created automatically.
 
 **Flow:**
+
 ```
 Task completes successfully
   → PlaybookService.reinforceEntry() writes reinforcement memory
@@ -212,11 +213,11 @@ Task completes successfully
 
 ### Configuration
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `DEFAULT_PROMOTION_THRESHOLD` | `3` | Min reinforcements before proposing |
-| `PROMOTION_COOLDOWN_MS` | `10 min` | Min time between checks per workspace |
-| `MAX_PROPOSALS_PER_CHECK` | `1` | Max new proposals per check |
+| Setting                       | Default  | Description                           |
+| ----------------------------- | -------- | ------------------------------------- |
+| `DEFAULT_PROMOTION_THRESHOLD` | `3`      | Min reinforcements before proposing   |
+| `PROMOTION_COOLDOWN_MS`       | `10 min` | Min time between checks per workspace |
+| `MAX_PROPOSALS_PER_CHECK`     | `1`      | Max new proposals per check           |
 
 ---
 
@@ -234,27 +235,27 @@ The agent connects to 15+ channels but delivers the same personality regardless 
 
 **Channel profiles:**
 
-| Channel | Length | Formatting | Emoji | Formal framing |
-|---------|--------|-----------|-------|----------------|
-| `slack` | Shorter | Structured | No | No |
-| `email` | Longer | Structured | No | Yes (greeting + sign-off) |
-| `whatsapp` | Shorter | Plain | Yes | No |
-| `imessage` | Shorter | Plain | Yes | No |
-| `signal` | Shorter | Plain | No | No |
-| `discord` | Normal | Structured + markdown | Yes | No |
-| `teams` | Normal | Structured | No | No |
-| `telegram` | Shorter | Minimal | No | No |
-| `mattermost` | Normal | Structured | No | No |
-| `matrix` | Normal | Structured | No | No |
-| `googlechat` | Shorter | Plain | No | No |
-| `twitch` | Shorter | Plain | Yes | No |
+| Channel      | Length  | Formatting            | Emoji | Formal framing            |
+| ------------ | ------- | --------------------- | ----- | ------------------------- |
+| `slack`      | Shorter | Structured            | No    | No                        |
+| `email`      | Longer  | Structured            | No    | Yes (greeting + sign-off) |
+| `whatsapp`   | Shorter | Plain                 | Yes   | No                        |
+| `imessage`   | Shorter | Plain                 | Yes   | No                        |
+| `signal`     | Shorter | Plain                 | No    | No                        |
+| `discord`    | Normal  | Structured + markdown | Yes   | No                        |
+| `teams`      | Normal  | Structured            | No    | No                        |
+| `telegram`   | Shorter | Minimal               | No    | No                        |
+| `mattermost` | Normal  | Structured            | No    | No                        |
+| `matrix`     | Normal  | Structured            | No    | No                        |
+| `googlechat` | Shorter | Plain                 | No    | No                        |
+| `twitch`     | Shorter | Plain                 | Yes   | No                        |
 
 **Group/public context overlay:** When `gatewayContext` is `"group"` or `"public"`, an additional privacy-aware directive is layered on (do not share sensitive information, be aware others are reading).
 
 ### Configuration (GuardrailSettings → Behavior Adaptation)
 
-| Setting | Default | Description |
-|---------|---------|-------------|
+| Setting                 | Default | Description                                |
+| ----------------------- | ------- | ------------------------------------------ |
 | `channelPersonaEnabled` | `false` | Enable channel-specific persona adaptation |
 
 This toggle is exposed in the same **Behavior Adaptation** section as Adaptive Style.
@@ -262,6 +263,7 @@ This toggle is exposed in the same **Behavior Adaptation** section as Adaptive S
 ### Integration
 
 `executor.ts` injects the channel directive when assembling the system prompt:
+
 ```typescript
 const channelDirective = ChannelPersonaAdapter.adaptForChannel(
   task.agentConfig.originChannel,
@@ -278,19 +280,19 @@ const channelDirective = ChannelPersonaAdapter.adaptForChannel(
 
 ### Problem
 
-CoWork OS tracks basic relationship stats (tasks completed, days together) but has no concept of measuring agent *improvement over time*. For enterprise buyers, quantifiable ROI is the difference between a tool and a strategic investment.
+CoWork OS tracks basic relationship stats (tasks completed, days together) but has no concept of measuring agent _improvement over time_. For enterprise buyers, quantifiable ROI is the difference between a tool and a strategic investment.
 
 ### Solution
 
 `EvolutionMetricsService.computeSnapshot()` computes 5 metrics on-demand from existing service data:
 
-| Metric ID | Label | Source | Interpretation |
-|-----------|-------|--------|----------------|
-| `correction_rate` | Correction Rate | PlaybookService (failure entries) | Lower this week vs. prior 3-week avg → "improving" |
-| `adaptation_velocity` | Style Adaptations | AdaptiveStyleEngine history | Any adaptations applied → agent is learning |
-| `knowledge_growth` | Knowledge Graph | KnowledgeGraphService.getStats() | Entity and relationship count |
-| `task_success_rate` | Task Success Rate | PlaybookService (success/failure entries) | Percentage of recorded tasks that succeeded |
-| `style_alignment` | Style Alignment | AdaptiveStyleEngine history | Ratio of proactive vs. feedback-driven adaptations |
+| Metric ID             | Label             | Source                                    | Interpretation                                     |
+| --------------------- | ----------------- | ----------------------------------------- | -------------------------------------------------- |
+| `correction_rate`     | Correction Rate   | PlaybookService (failure entries)         | Lower this week vs. prior 3-week avg → "improving" |
+| `adaptation_velocity` | Style Adaptations | AdaptiveStyleEngine history               | Any adaptations applied → agent is learning        |
+| `knowledge_growth`    | Knowledge Graph   | KnowledgeGraphService.getStats()          | Entity and relationship count                      |
+| `task_success_rate`   | Task Success Rate | PlaybookService (success/failure entries) | Percentage of recorded tasks that succeeded        |
+| `style_alignment`     | Style Alignment   | AdaptiveStyleEngine history               | Ratio of proactive vs. feedback-driven adaptations |
 
 Each metric includes a `trend` (`"improving"` / `"stable"` / `"declining"`) and a human-readable `detail` string.
 
@@ -301,6 +303,7 @@ Each metric includes a `trend` (`"improving"` / `"stable"` / `"declining"`) and 
 The `evolution_metrics` section is added to `BriefingSectionType` and enabled by default in `DEFAULT_BRIEFING_CONFIG`. `DailyBriefingService.buildEvolutionMetrics()` calls `EvolutionMetricsService.computeSnapshot()` and maps metrics to `BriefingItem[]`.
 
 Example briefing output:
+
 ```
 Agent Evolution (Day 45, 123 tasks completed):
   [+] Task Success Rate: 84% — 103 succeeded, 20 failed out of 123 recorded tasks
@@ -325,11 +328,11 @@ Provides structured per-day journaling as input for the summary-first memory pip
 
 ### When to write entries
 
-| Category | Trigger |
-|----------|---------|
-| `feedback` | User thumbs-up/down events |
-| `task` | Task completions |
-| `decision` | Notable agent decisions |
+| Category      | Trigger                                |
+| ------------- | -------------------------------------- |
+| `feedback`    | User thumbs-up/down events             |
+| `task`        | Task completions                       |
+| `decision`    | Notable agent decisions                |
 | `observation` | High-value memory saves or corrections |
 
 Raw log files are **never** injected into prompts directly. They exist only as input for `DailyLogSummarizer`.
@@ -338,6 +341,7 @@ Raw log files are **never** injected into prompts directly. They exist only as i
 
 ```md
 ## 2026-03-14T15:30:00.000Z
+
 source: user
 category: feedback
 taskId: task-abc123
@@ -392,28 +396,33 @@ day: 2026-03-14
 # Daily Summary
 
 ## Important Decisions
+
 - ...
 
 ## User Preferences Observed
+
 - ...
 
 ## Active Threads
+
 - ...
 
 ## Corrections / Lessons
+
 - ...
 
 ## Follow-ups
+
 - ...
 ```
 
 ### Retrieval ranking
 
-| Source | Base relevance | Notes |
-|--------|---------------|-------|
-| `user_profile` | 0.70 | Always somewhat relevant |
-| `daily_summary` | 0.55 × recency decay | Recency half-life = 7 days |
-| Raw daily logs | never returned | Not injected by this service |
+| Source          | Base relevance       | Notes                        |
+| --------------- | -------------------- | ---------------------------- |
+| `user_profile`  | 0.70                 | Always somewhat relevant     |
+| `daily_summary` | 0.55 × recency decay | Recency half-life = 7 days   |
+| Raw daily logs  | never returned       | Not injected by this service |
 
 ### Integration
 
@@ -422,7 +431,7 @@ day: 2026-03-14
 ### Helper
 
 ```ts
-DailyLogSummarizer.countRecentSummaries(workspacePath, 7)
+DailyLogSummarizer.countRecentSummaries(workspacePath, 7);
 // → number of summary files present in the last 7 days
 // Used by the Improvement Signals card
 ```
@@ -439,13 +448,13 @@ DailyLogSummarizer.countRecentSummaries(workspacePath, 7)
 
 The latest completed assistant message exposes 👍 / 👎 controls for message-level feedback. Thumbs-down uses the following structured reason vocabulary:
 
-| Reason key | Label |
-|-----------|-------|
-| `incorrect` | Incorrect |
-| `too_verbose` | Too verbose |
+| Reason key             | Label                |
+| ---------------------- | -------------------- |
+| `incorrect`            | Incorrect            |
+| `too_verbose`          | Too verbose          |
 | `ignored_instructions` | Ignored instructions |
-| `wrong_tone` | Wrong tone |
-| `unsafe` | Unsafe / unwanted |
+| `wrong_tone`           | Wrong tone           |
+| `unsafe`               | Unsafe / unwanted    |
 
 ### IPC payload
 
@@ -467,29 +476,29 @@ Feedback is routed to `UserProfileService.ingestUserFeedback()` and (via daemon)
 
 All improvements respect CoWork OS's security-first positioning:
 
-| Improvement | Guardrail flag | Default | Rate limit | Audit trail |
-|-------------|---------------|---------|------------|-------------|
-| Layered Memory Runtime | `defaultArchiveInjectionEnabled` controls archive injection; hot/structured memory default on | Curated + structured on, archive off | Token budgets per section | Source attribution by lane + tool-level recall traces |
-| Adaptive Style Engine | `adaptiveStyleEnabled` | Off | `adaptiveStyleMaxDriftPerWeek` (default 1) | `getAdaptationHistory()` |
-| Playbook-to-Skill | — | Always active (post-task hook) | 10 min cooldown, max 1/check | Full proposal review workflow |
-| Channel Persona | `channelPersonaEnabled` | Off | — | Visible in system prompt |
-| Evolution Metrics | — | Computed on-demand | — | Read-only, no mutations |
-| Daily Log | — | Available when a writer uses `DailyLogService` | File append only | Per-day markdown files |
-| Daily Summaries | — | Active when summary files exist | Token budget (ranked) | Summary files in `.cowork/memory/summaries/` |
-| Message Feedback | — | Always visible on completed messages | IPC: `limited` tier | Routed to UserProfileService |
+| Improvement            | Guardrail flag                                                                                | Default                                        | Rate limit                                 | Audit trail                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------ | ----------------------------------------------------- |
+| Layered Memory Runtime | `defaultArchiveInjectionEnabled` controls archive injection; hot/structured memory default on | Curated + structured on, archive off           | Token budgets per section                  | Source attribution by lane + tool-level recall traces |
+| Adaptive Style Engine  | `adaptiveStyleEnabled`                                                                        | Off                                            | `adaptiveStyleMaxDriftPerWeek` (default 1) | `getAdaptationHistory()`                              |
+| Playbook-to-Skill      | —                                                                                             | Always active (post-task hook)                 | 10 min cooldown, max 1/check               | Full proposal review workflow                         |
+| Channel Persona        | `channelPersonaEnabled`                                                                       | Off                                            | —                                          | Visible in system prompt                              |
+| Evolution Metrics      | —                                                                                             | Computed on-demand                             | —                                          | Read-only, no mutations                               |
+| Daily Log              | —                                                                                             | Available when a writer uses `DailyLogService` | File append only                           | Per-day markdown files                                |
+| Daily Summaries        | —                                                                                             | Active when summary files exist                | Token budget (ranked)                      | Summary files in `.cowork/memory/summaries/`          |
+| Message Feedback       | —                                                                                             | Always visible on completed messages           | IPC: `limited` tier                        | Routed to UserProfileService                          |
 
 ---
 
 ## Test Coverage
 
-| Service | Test file |
-|---------|-----------|
-| MemorySynthesizer | `src/electron/memory/__tests__/MemorySynthesizer.test.ts` |
-| CuratedMemoryService | `src/electron/memory/__tests__/CuratedMemoryService.test.ts` |
-| DreamingService | `src/electron/memory/__tests__/DreamingService.test.ts` |
-| SessionRecallService | `src/electron/memory/__tests__/SessionRecallService.test.ts` |
+| Service                   | Test file                                                         |
+| ------------------------- | ----------------------------------------------------------------- |
+| MemorySynthesizer         | `src/electron/memory/__tests__/MemorySynthesizer.test.ts`         |
+| CuratedMemoryService      | `src/electron/memory/__tests__/CuratedMemoryService.test.ts`      |
+| DreamingService           | `src/electron/memory/__tests__/DreamingService.test.ts`           |
+| SessionRecallService      | `src/electron/memory/__tests__/SessionRecallService.test.ts`      |
 | LayeredMemoryIndexService | `src/electron/memory/__tests__/LayeredMemoryIndexService.test.ts` |
-| AdaptiveStyleEngine | `src/electron/memory/__tests__/AdaptiveStyleEngine.test.ts` |
-| PlaybookSkillPromoter | `src/electron/memory/__tests__/PlaybookSkillPromoter.test.ts` |
-| ChannelPersonaAdapter | `src/electron/memory/__tests__/ChannelPersonaAdapter.test.ts` |
-| EvolutionMetricsService | `src/electron/memory/__tests__/EvolutionMetricsService.test.ts` |
+| AdaptiveStyleEngine       | `src/electron/memory/__tests__/AdaptiveStyleEngine.test.ts`       |
+| PlaybookSkillPromoter     | `src/electron/memory/__tests__/PlaybookSkillPromoter.test.ts`     |
+| ChannelPersonaAdapter     | `src/electron/memory/__tests__/ChannelPersonaAdapter.test.ts`     |
+| EvolutionMetricsService   | `src/electron/memory/__tests__/EvolutionMetricsService.test.ts`   |

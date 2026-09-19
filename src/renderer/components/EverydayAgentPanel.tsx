@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Ban,
-  Bot,
   CheckCircle2,
   CircleDot,
   Clock,
@@ -22,6 +21,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import { BotGlyph } from "./BotGlyph";
 import {
   EVERYDAY_AGENT_CAPABILITY_BUNDLES,
   EVERYDAY_AGENT_CONSENT_VERSION,
@@ -1600,7 +1600,7 @@ export function EverydayAgentPanel({
         <section className="ea-operator-card">
           <div className="ea-operator-main">
             <div className="ea-operator-icon">
-              <Bot size={20} />
+              <BotGlyph size={21} />
             </div>
             <div>
               <span>Current activity</span>

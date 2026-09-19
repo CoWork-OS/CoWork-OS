@@ -37,15 +37,15 @@ Portfolio risk analysis including Value at Risk (parametric, historical, Monte C
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| portfolio | string | Yes | Portfolio holdings with weights and/or dollar amounts (e.g., SPY 50%, TLT 30%, GLD 20%; $500K total) |
-| riskMetric | select | Yes | Primary risk metric to analyze |
-| question | string | Yes | Your specific risk analysis question |
-| confidence | select | Yes | Confidence level for VaR calculations |
-| horizon | select | Yes | Time horizon for risk measurement |
+| Name       | Type   | Required | Description                                                                                          |
+| ---------- | ------ | -------- | ---------------------------------------------------------------------------------------------------- |
+| portfolio  | string | Yes      | Portfolio holdings with weights and/or dollar amounts (e.g., SPY 50%, TLT 30%, GLD 20%; $500K total) |
+| riskMetric | select | Yes      | Primary risk metric to analyze                                                                       |
+| question   | string | Yes      | Your specific risk analysis question                                                                 |
+| confidence | select | Yes      | Confidence level for VaR calculations                                                                |
+| horizon    | select | Yes      | Time horizon for risk measurement                                                                    |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1139 characters.
-- Runtime prompt is defined directly in `../risk-analyzer.json`. 
+- Runtime prompt is defined directly in `../risk-analyzer.json`.

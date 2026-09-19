@@ -37,12 +37,12 @@ Convert code from one language to another
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the source file |
-| targetLanguage | select | Yes | Target programming language |
+| Name           | Type   | Required | Description                 |
+| -------------- | ------ | -------- | --------------------------- |
+| path           | string | Yes      | Path to the source file     |
+| targetLanguage | select | Yes      | Target programming language |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 409 characters.
-- Runtime prompt is defined directly in `../convert-code.json`. 
+- Runtime prompt is defined directly in `../convert-code.json`.

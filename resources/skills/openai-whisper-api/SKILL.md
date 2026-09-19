@@ -38,4 +38,4 @@ Transcribe audio via OpenAI Whisper, Atlas Cloud, or MuAPI speech-to-text APIs.
 ## Runtime Prompt
 
 - Current runtime prompt length: 1683 characters.
-- Runtime prompt is defined directly in `../openai-whisper-api.json`. 
+- Runtime prompt is defined directly in `../openai-whisper-api.json`.

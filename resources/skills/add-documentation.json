@@ -18,13 +18,7 @@
       "description": "Documentation style",
       "required": true,
       "default": "JSDoc",
-      "options": [
-        "JSDoc",
-        "TSDoc",
-        "Python docstring",
-        "Javadoc",
-        "XML comments"
-      ]
+      "options": ["JSDoc", "TSDoc", "Python docstring", "Javadoc", "XML comments"]
     }
   ],
   "enabled": true,
@@ -34,9 +28,7 @@
       "dontUseWhen": "Don't use for content translation or narrative changelogs.",
       "outputs": "Updated code artifacts with improved inline documentation.",
       "successCriteria": "Retains behavior while improving doc clarity and consistency.",
-      "expectedArtifacts": [
-        "documentation-summary.md"
-      ],
+      "expectedArtifacts": ["documentation-summary.md"],
       "examples": {
         "positive": [
           "Use the add-documentation skill for this request.",

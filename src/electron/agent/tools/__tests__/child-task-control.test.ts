@@ -192,7 +192,7 @@ describe("ToolRegistry child task control tools", () => {
 
     const daemon = {
       getTaskById: vi.fn().mockImplementation(async (id: string) => tasks.get(id)),
-      sendMessage: vi.fn().mockResolvedValue(undefined),
+      sendMessage: vi.fn().mockResolvedValue({ queued: true, deliveryMode: "message" }),
       logEvent: vi.fn(),
     } as Any;
 
@@ -208,9 +208,97 @@ describe("ToolRegistry child task control tools", () => {
     const ok = await registry.executeTool("send_agent_message", {
       task_id: "child-task",
       message: "hi",
+      message_id: "retry-message-1",
     });
     expect(ok.success).toBe(true);
-    expect(daemon.sendMessage).toHaveBeenCalledWith("child-task", "hi");
+    expect(daemon.sendMessage).toHaveBeenCalledWith(
+      "child-task",
+      "hi",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        messageSource: "agent",
+        senderTaskId: "parent-task",
+        messageId: "retry-message-1",
+        deliveryMode: "message",
+      }),
+    );
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "parent-task",
+      "agent_message",
+      expect.objectContaining({ status: "queued", targetTaskId: "child-task" }),
+    );
+  });
+
+  it("send_agent_message can address a verified bot teammate by handle", async () => {
+    const recipient: Task = {
+      id: "forge-task",
+      title: "Forge — Product Engineer",
+      prompt: "Start chatting with Forge.",
+      status: "pending",
+      workspaceId: workspace.id,
+      assignedAgentRoleId: "forge-role",
+      agentConfig: { botConversation: true, botTeamId: "bot-team-1" },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue(recipient),
+      resolveBotTeamPeer: vi.fn().mockResolvedValue({
+        ok: true,
+        task: recipient,
+        role: { id: "forge-role", name: "forge", displayName: recipient.title },
+      }),
+      sendMessage: vi.fn().mockResolvedValue({ queued: false, deliveryMode: "follow_up" }),
+      getTaskEvents: vi.fn().mockImplementation((_taskId: string, options?: { types?: string[] }) =>
+        options?.types?.includes("assistant_message")
+          ? [
+              {
+                timestamp: Date.now() + 1_000,
+                payload: { message: "I own product engineering." },
+              },
+            ]
+          : [],
+      ),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const registry = new ToolRegistry(workspace, daemon, "atlas-task");
+    const result = await registry.executeTool("send_agent_message", {
+      bot: "forge",
+      message: "Please check the failing build and report the first actionable error.",
+      message_id: "bot-message-1",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.teammate_reply).toBe("I own product engineering.");
+    expect(daemon.resolveBotTeamPeer).toHaveBeenCalledWith("atlas-task", {
+      botName: "forge",
+      taskId: undefined,
+    });
+    expect(daemon.sendMessage).toHaveBeenNthCalledWith(
+      1,
+      "forge-task",
+      "Please check the failing build and report the first actionable error.",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        messageSource: "agent",
+        senderTaskId: "atlas-task",
+      }),
+    );
+    expect(daemon.sendMessage.mock.calls[0][4]).not.toHaveProperty("deliveryMode");
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "atlas-task",
+      "user_message",
+      expect.objectContaining({
+        message: "Reply from Forge — Product Engineer: I own product engineering.",
+        messageSource: "agent",
+        messageId: "bot-message-1:reply",
+        senderTaskId: "forge-task",
+        deliveryStatus: "delivered",
+      }),
+    );
   });
 
   it("capture_agent_events returns summarized events", async () => {

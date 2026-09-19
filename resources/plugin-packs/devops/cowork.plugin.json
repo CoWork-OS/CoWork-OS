@@ -5,7 +5,19 @@
   "description": "Skills for deployment automation, monitoring, incident response, infrastructure-as-code, container orchestration, and cloud migration",
   "type": "pack",
   "author": "CoWork OS",
-  "keywords": ["devops", "deployment", "monitoring", "incident-response", "infrastructure", "terraform", "kubernetes", "k8s", "docker", "migration", "iac"],
+  "keywords": [
+    "devops",
+    "deployment",
+    "monitoring",
+    "incident-response",
+    "infrastructure",
+    "terraform",
+    "kubernetes",
+    "k8s",
+    "docker",
+    "migration",
+    "iac"
+  ],
   "icon": "⚙️",
   "category": "Engineering",
   "bestFitWorkflows": ["it_ops"],
@@ -36,8 +48,18 @@
       "category": "DevOps",
       "prompt": "Create an incident response plan for the following issue.\n\nIncident description: {{incident}}\nSeverity: {{severity}}\n\nPlease provide:\n1. Incident classification and severity assessment\n2. Immediate triage steps\n3. Communication template (internal and external)\n4. Escalation path\n5. Root cause investigation checklist\n6. Mitigation and rollback options\n7. Post-mortem outline template\n8. Follow-up action items",
       "parameters": [
-        { "name": "incident", "type": "string", "description": "Description of the incident", "required": true },
-        { "name": "severity", "type": "string", "description": "Severity level (SEV1-SEV4)", "required": false }
+        {
+          "name": "incident",
+          "type": "string",
+          "description": "Description of the incident",
+          "required": true
+        },
+        {
+          "name": "severity",
+          "type": "string",
+          "description": "Severity level (SEV1-SEV4)",
+          "required": false
+        }
       ],
       "enabled": true
     },
@@ -49,8 +71,18 @@
       "category": "DevOps",
       "prompt": "Create a deployment checklist for the following release.\n\nRelease details: {{release}}\nEnvironment: {{environment}}\n\nPlease provide:\n1. Pre-deployment checklist\n   - Code review status\n   - Test coverage verification\n   - Database migration review\n   - Configuration changes\n   - Dependency updates\n2. Deployment steps\n3. Post-deployment verification\n   - Health checks\n   - Smoke tests\n   - Monitoring alerts\n4. Rollback procedure\n5. Communication plan",
       "parameters": [
-        { "name": "release", "type": "string", "description": "Release details and changes", "required": true },
-        { "name": "environment", "type": "string", "description": "Target environment (staging, production)", "required": false }
+        {
+          "name": "release",
+          "type": "string",
+          "description": "Release details and changes",
+          "required": true
+        },
+        {
+          "name": "environment",
+          "type": "string",
+          "description": "Target environment (staging, production)",
+          "required": false
+        }
       ],
       "enabled": true
     },
@@ -62,7 +94,12 @@
       "category": "DevOps",
       "prompt": "Design a monitoring and alerting setup for the following system.\n\nSystem description: {{system}}\n\nPlease provide:\n1. Key metrics to monitor (latency, throughput, errors, saturation)\n2. Alert thresholds and escalation rules\n3. Dashboard layout recommendations\n4. Log aggregation strategy\n5. Health check endpoints\n6. On-call runbook entries\n7. SLO/SLA targets",
       "parameters": [
-        { "name": "system", "type": "string", "description": "System or service to monitor", "required": true }
+        {
+          "name": "system",
+          "type": "string",
+          "description": "System or service to monitor",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -74,7 +111,12 @@
       "category": "DevOps",
       "prompt": "Write a blameless post-mortem report for the following incident.\n\nIncident details: {{incident_details}}\n\nPlease format as:\n1. Incident Summary\n2. Timeline of Events\n3. Impact Assessment (duration, affected users, financial impact)\n4. Root Cause Analysis (5 Whys)\n5. Contributing Factors\n6. What Went Well\n7. What Could Be Improved\n8. Action Items (with owners and deadlines)\n9. Lessons Learned",
       "parameters": [
-        { "name": "incident_details", "type": "string", "description": "Full incident details and timeline", "required": true }
+        {
+          "name": "incident_details",
+          "type": "string",
+          "description": "Full incident details and timeline",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -86,7 +128,12 @@
       "category": "DevOps",
       "prompt": "Analyze the following Terraform configuration or plan output.\n\nConfiguration: {{config}}\n\nPlease provide:\n1. Resource summary (what will be created/modified/destroyed)\n2. Cost impact estimate\n3. Security implications (open ports, public access, IAM permissions)\n4. Dependency analysis\n5. Suggested improvements (best practices, naming, tagging)\n6. Rollback considerations\n7. State management notes",
       "parameters": [
-        { "name": "config", "type": "string", "description": "Terraform config, plan output, or description of desired infrastructure", "required": true }
+        {
+          "name": "config",
+          "type": "string",
+          "description": "Terraform config, plan output, or description of desired infrastructure",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -98,7 +145,12 @@
       "category": "DevOps",
       "prompt": "Generate Kubernetes manifests for the following workload.\n\nWorkload description: {{workload}}\n\nPlease provide:\n1. Deployment manifest with resource limits, probes, and labels\n2. Service manifest (ClusterIP or LoadBalancer as appropriate)\n3. Ingress manifest if external access is needed\n4. ConfigMap/Secret for configuration\n5. HPA if auto-scaling is appropriate\n6. Namespace definition\n7. Notes on RBAC requirements\n8. Helm values.yaml if requested",
       "parameters": [
-        { "name": "workload", "type": "string", "description": "Description of the workload to deploy (app name, replicas, ports, resources)", "required": true }
+        {
+          "name": "workload",
+          "type": "string",
+          "description": "Description of the workload to deploy (app name, replicas, ports, resources)",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -110,8 +162,18 @@
       "category": "DevOps",
       "prompt": "Assess the following workloads for cloud migration.\n\nWorkload details: {{workloads}}\nTarget cloud: {{target}}\n\nPlease provide:\n1. Per-workload 6 Rs classification (Rehost, Replatform, Refactor, Repurchase, Retain, Retire)\n2. Dependency map between workloads\n3. Recommended migration wave grouping\n4. Risk assessment per workload\n5. Estimated effort (low/medium/high) per workload\n6. Landing zone requirements\n7. Data migration strategy\n8. Cutover plan outline\n9. Cost comparison (current vs projected)",
       "parameters": [
-        { "name": "workloads", "type": "string", "description": "Description of workloads to migrate (servers, databases, services)", "required": true },
-        { "name": "target", "type": "string", "description": "Target cloud provider (AWS, GCP, Azure)", "required": false }
+        {
+          "name": "workloads",
+          "type": "string",
+          "description": "Description of workloads to migrate (servers, databases, services)",
+          "required": true
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "description": "Target cloud provider (AWS, GCP, Azure)",
+          "required": false
+        }
       ],
       "enabled": true
     },
@@ -123,7 +185,12 @@
       "category": "DevOps",
       "prompt": "Generate a Docker Compose configuration for the following application.\n\nApplication description: {{application}}\n\nPlease provide:\n1. docker-compose.yml with all services, networks, and volumes\n2. Health checks for each service\n3. Environment variable configuration (.env file)\n4. Dockerfile for custom services (multi-stage if appropriate)\n5. docker-compose.override.yml for development\n6. docker-compose.prod.yml for production\n7. .dockerignore recommendations\n8. Notes on persistent storage and backup",
       "parameters": [
-        { "name": "application", "type": "string", "description": "Description of the application stack (services, databases, caches, queues)", "required": true }
+        {
+          "name": "application",
+          "type": "string",
+          "description": "Description of the application stack (services, databases, caches, queues)",
+          "required": true
+        }
       ],
       "enabled": true
     }

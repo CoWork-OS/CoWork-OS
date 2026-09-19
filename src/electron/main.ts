@@ -3,7 +3,7 @@ import os from "os";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import { randomUUID } from "crypto";
-import { pathToFileURL } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import {
   app,
   BrowserWindow,
@@ -17,6 +17,7 @@ import {
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
+import { installGracefulShutdown } from "./utils/graceful-shutdown";
 import { DatabaseManager } from "./database/schema";
 import {
   SecureSettingsRepository,
@@ -44,12 +45,14 @@ import { ComparisonService } from "./git/ComparisonService";
 import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
 import { StandupReportService } from "./reports/StandupReportService";
 import { UsageInsightsProjector } from "./reports/UsageInsightsProjector";
+import { PulseService } from "./telemetry/pulse-service";
 import {
   HeartbeatService,
   HeartbeatServiceDeps,
   setHeartbeatService,
 } from "./agents/HeartbeatService";
 import { AgentRoleRepository } from "./agents/AgentRoleRepository";
+import { ensureDefaultBotRoles, ensureDefaultBotTeam } from "./agents/bot-team";
 import { MentionRepository } from "./agents/MentionRepository";
 import { ActivityRepository } from "./activity/ActivityRepository";
 import { WorkingStateRepository } from "./agents/WorkingStateRepository";
@@ -62,6 +65,7 @@ import { AutomationOutcomeService } from "./automation/AutomationOutcomeService"
 import { RecurringApprovalService } from "./security/recurring-approval-service";
 import { ProactiveSuggestionsService } from "./agent/ProactiveSuggestionsService";
 import { AgentDaemon } from "./agent/daemon";
+import { approvalPromptsDisabled } from "./agent/approval-policy";
 import { CoreMemoryCandidateRepository } from "./core/CoreMemoryCandidateRepository";
 import { CoreMemoryCandidateService } from "./core/CoreMemoryCandidateService";
 import { CoreMemoryDistillRunRepository } from "./core/CoreMemoryDistillRunRepository";
@@ -142,6 +146,8 @@ import {
   resolveEffectiveAccessProfile,
 } from "./security/access-profile-resolver";
 import { PermissionSettingsManager } from "./security/permission-settings-manager";
+import { openExternalIfSafe } from "./security/safe-external-url";
+import { MCPRegistryManager } from "./mcp/registry/MCPRegistryManager";
 import {
   ChronicleCaptureService,
   ChronicleMemoryService,
@@ -198,6 +204,7 @@ import { DailyBriefingService } from "./briefing/DailyBriefingService";
 import { syncDailyBriefingCronJob, DAILY_BRIEFING_MARKER } from "./briefing/briefing-scheduler";
 import { CouncilService } from "./council/CouncilService";
 import { setCouncilService } from "./council";
+import { mergeCouncilCronAgentConfig } from "./council/cron-bridge";
 import {
   readWorkspaceOpenLoops,
   readWorkspacePriorities,
@@ -490,6 +497,9 @@ function ensureCoreAutomationProfiles(): void {
   const agentRoleRepo = new AgentRoleRepository(db);
   const automationProfileRepo = new AutomationProfileRepository(db);
 
+  // Seed the Grok-style custom bot roster before creating automation profiles
+  // so the new roles participate in the same lifecycle as built-in agents.
+  ensureDefaultBotRoles(db);
   const addedAgents = agentRoleRepo.syncNewDefaults();
   if (addedAgents.length > 0) {
     logger.info(`Added ${addedAgents.length} new default agent(s)`);
@@ -543,6 +553,25 @@ function ensureCoreAutomationProfiles(): void {
   });
 }
 
+function ensureCoreBotTeams(): void {
+  const db = dbManager.getDatabase();
+  const workspaceRepo = new WorkspaceRepository(db);
+  // Roles are global; the team is workspace-scoped. Seed the most recently
+  // used workspace only and let bot conversation creation seed later
+  // workspaces lazily. This avoids filling old/temporary QA workspaces with
+  // duplicate team records.
+  const workspace = workspaceRepo.findAll()[0];
+  if (!workspace) return;
+  try {
+    ensureDefaultBotTeam(db, workspace.id);
+  } catch (error) {
+    logger.warn("Unable to seed the CoWork bot team for workspace", {
+      workspaceId: workspace.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 app.on("web-contents-created", (_event, contents) => {
   contents.on("will-attach-webview", (event, webPreferences, params) => {
     delete (webPreferences as Record<string, unknown>).preload;
@@ -587,6 +616,97 @@ function getDevServerUrl(): string {
 
   const port = String(process.env.COWORK_DEV_SERVER_PORT || "5173").trim() || "5173";
   return `http://127.0.0.1:${port}`;
+}
+
+/**
+ * Ask the user to approve the launch command of an MCP server that came from
+ * the remote registry, showing the exact command and arguments.
+ *
+ * Installing such an entry spawns whatever command the registry response
+ * supplied, in the main process's environment — so this is a code-execution
+ * decision. It is also reachable without any UI, via the agent's
+ * `integration_setup` tool, which prompt injection can trigger; routing both
+ * paths through this dialog is the point.
+ */
+function installMcpInstallConfirmationHandler(): void {
+  MCPRegistryManager.setInstallConfirmationHandler(async (request) => {
+    const lines = [
+      `Publisher: ${request.publisher || "unknown"}`,
+      `Transport: ${request.transport}`,
+    ];
+    if (request.command) {
+      lines.push("", "Command that will run:", `  ${request.command} ${request.args.join(" ")}`);
+    }
+    if (request.url) {
+      lines.push("", `Endpoint: ${request.url}`);
+    }
+    if (request.envKeys.length > 0) {
+      lines.push("", `Environment variables set: ${request.envKeys.join(", ")}`);
+    }
+    lines.push(
+      "",
+      "This command comes from the online MCP registry, not from CoWork OS, and will run with the same privileges as the app.",
+    );
+
+    const parentWindow = BrowserWindow.getFocusedWindow() || mainWindow || undefined;
+    const options: Electron.MessageBoxOptions = {
+      type: "warning",
+      buttons: ["Cancel", "Install and run"],
+      defaultId: 0,
+      cancelId: 0,
+      title: "Confirm MCP server installation",
+      message: `Install "${request.name}" from the online registry?`,
+      detail: lines.join("\n"),
+      noLink: true,
+    };
+
+    const result = parentWindow
+      ? await dialog.showMessageBox(parentWindow, options)
+      : await dialog.showMessageBox(options);
+    return result.response === 1;
+  });
+}
+
+/**
+ * True when `url` belongs to the app's own renderer bundle or dev server.
+ *
+ * Compares parsed origins and requires a path-separator boundary rather than a
+ * bare string prefix: `startsWith("http://localhost:5173")` also matches
+ * `http://localhost:5173.attacker.tld`, and a `file://.../renderer` prefix also
+ * matches a sibling `.../renderer-evil/` directory.
+ *
+ * The file: branch converts via `fileURLToPath`, not
+ * `path.resolve(decodeURIComponent(pathname))`. On Windows a file URL's
+ * pathname is `/C:/…`, which `path.win32.resolve` treats as drive-less and
+ * prefixes with the cwd's drive (`C:\C:\…`) — so the app's own page would fail
+ * containment and `will-navigate` would push it out to the system browser.
+ */
+function isAppOwnedUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  if (process.env.NODE_ENV === "development") {
+    try {
+      return parsed.origin === new URL(getDevServerUrl()).origin;
+    } catch {
+      return false;
+    }
+  }
+
+  if (parsed.protocol !== "file:") return false;
+  let target: string;
+  try {
+    target = path.resolve(fileURLToPath(parsed));
+  } catch {
+    return false;
+  }
+  const rendererRoot = path.resolve(__dirname, "../../renderer");
+  const relative = path.relative(rendererRoot, target);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function applyStableUserDataPath(): string {
@@ -921,6 +1041,7 @@ const TASK_DEEPLINK_PROTOCOL = "cowork";
 const TASK_DEEPLINK_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let pendingTaskDeeplinkId: string | null = null;
+let pendingBotDeeplink: { botId: string; conversationId?: string } | null = null;
 
 function parseTaskDeeplink(value: string): string | null {
   const raw = String(value || "").trim();
@@ -943,10 +1064,42 @@ function parseTaskDeeplink(value: string): string | null {
   }
 }
 
+function parseBotDeeplink(value: string): { botId: string; conversationId?: string } | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== `${TASK_DEEPLINK_PROTOCOL}:` || parsed.hostname !== "bots") {
+      return null;
+    }
+    const parts = parsed.pathname
+      .split("/")
+      .filter(Boolean)
+      .map((part) => decodeURIComponent(part));
+    const botId = parts[0] || "";
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(botId)) return null;
+    if (parts.length === 1) return { botId };
+    if (parts.length !== 3 || parts[1] !== "conversations") return null;
+    const conversationId = parts[2];
+    if (!TASK_DEEPLINK_UUID_RE.test(conversationId)) return null;
+    return { botId, conversationId };
+  } catch {
+    return null;
+  }
+}
+
 function extractTaskDeeplinkArg(argv: string[]): string | null {
   for (const arg of argv) {
     const taskId = parseTaskDeeplink(arg);
     if (taskId) return taskId;
+  }
+  return null;
+}
+
+function extractBotDeeplinkArg(argv: string[]): { botId: string; conversationId?: string } | null {
+  for (const arg of argv) {
+    const parsed = parseBotDeeplink(arg);
+    if (parsed) return parsed;
   }
   return null;
 }
@@ -1144,6 +1297,13 @@ if (isCliDirectRunMode()) {
       mainWindow.webContents.send(IPC_CHANNELS.NAVIGATE_TO_TASK, taskId);
     }
 
+    function flushPendingBotDeeplink(): void {
+      const route = pendingBotDeeplink;
+      if (!route || !mainWindow || mainWindow.isDestroyed()) return;
+      pendingBotDeeplink = null;
+      mainWindow.webContents.send(IPC_CHANNELS.NAVIGATE_TO_BOT_CONVERSATION, route);
+    }
+
     function openTaskDeeplink(taskId: string): void {
       if (HEADLESS) return;
       pendingTaskDeeplinkId = taskId;
@@ -1158,14 +1318,34 @@ if (isCliDirectRunMode()) {
       flushPendingTaskDeeplink();
     }
 
+    function openBotDeeplink(route: { botId: string; conversationId?: string }): void {
+      if (HEADLESS) return;
+      pendingBotDeeplink = route;
+      if (!revealWindow(mainWindow)) {
+        createWindow();
+        return;
+      }
+      if (mainWindow?.webContents.isLoadingMainFrame()) {
+        mainWindow.webContents.once("did-finish-load", flushPendingBotDeeplink);
+        return;
+      }
+      flushPendingBotDeeplink();
+    }
+
     app.on("open-url", (event, url) => {
       event.preventDefault();
       const taskId = parseTaskDeeplink(url);
       if (taskId) {
         openTaskDeeplink(taskId);
+        return;
+      }
+      const botRoute = parseBotDeeplink(url);
+      if (botRoute) {
+        openBotDeeplink(botRoute);
       }
     });
     pendingTaskDeeplinkId = extractTaskDeeplinkArg(process.argv);
+    pendingBotDeeplink = extractBotDeeplinkArg(process.argv);
 
     app.on("second-instance", (_event, argv) => {
       if (HEADLESS) return;
@@ -1177,6 +1357,11 @@ if (isCliDirectRunMode()) {
       const taskId = extractTaskDeeplinkArg(argv);
       if (taskId) {
         openTaskDeeplink(taskId);
+        return;
+      }
+      const botRoute = extractBotDeeplinkArg(argv);
+      if (botRoute) {
+        openBotDeeplink(botRoute);
         return;
       }
       // Focus the existing window instead of starting a second instance.
@@ -1330,6 +1515,7 @@ if (isCliDirectRunMode()) {
         rendererRecoveryAttempts = 0;
         logStartupLane("first_window_startup", { event: "did_finish_load" });
         flushPendingTaskDeeplink();
+        flushPendingBotDeeplink();
       });
 
       mainWindow.webContents.on(
@@ -1360,27 +1546,26 @@ if (isCliDirectRunMode()) {
 
       // Open external links in the system browser instead of inside the app
       mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        // Open all new window requests in external browser
-        shell.openExternal(url);
+        // Scheme-checked: renderer content includes unsanitized .docx hyperlink
+        // targets (mammoth does no href validation), so an unfiltered
+        // openExternal here would launch smb://, file://, or any registered
+        // protocol handler on one click.
+        void openExternalIfSafe(url);
         return { action: "deny" };
       });
 
       mainWindow.webContents.on("will-navigate", (event, url) => {
         // Allow navigation to the app itself (dev server or file://), block external URLs
-        const appUrl =
-          process.env.NODE_ENV === "development"
-            ? getDevServerUrl()
-            : `file://${path.join(__dirname, "../../renderer")}`;
-
-        if (!url.startsWith(appUrl)) {
+        if (!isAppOwnedUrl(url)) {
           event.preventDefault();
-          shell.openExternal(url);
+          void openExternalIfSafe(url);
         }
       });
     }
 
     app.whenReady().then(async () => {
       getDesktopLocationService().installPermissionHandlers();
+      installMcpInstallConfirmationHandler();
       const startupStartedAt = Date.now();
       startupLaneStartedAt = startupStartedAt;
       logStartupLane("blocking_startup", { event: "start" });
@@ -1514,6 +1699,10 @@ if (isCliDirectRunMode()) {
       // This MUST be done before provider factories so they can migrate legacy settings
       new SecureSettingsRepository(dbManager.getDatabase());
       logger.info("SecureSettingsRepository initialized");
+      new PulseService(dbManager.getDatabase(), {
+        version: app.getVersion(),
+        runtime: "desktop",
+      }).start();
       healResettableSecureSettings();
       {
         const workspaceRepo = new WorkspaceRepository(dbManager.getDatabase());
@@ -1537,6 +1726,7 @@ if (isCliDirectRunMode()) {
       }
       normalizeTwinCoreBoundary();
       ensureCoreAutomationProfiles();
+      ensureCoreBotTeams();
       try {
         const db = dbManager.getDatabase();
         const automationProfileRepo = new AutomationProfileRepository(db);
@@ -1666,6 +1856,24 @@ if (isCliDirectRunMode()) {
       // can immediately resume queued tasks, and their early timeline events capture to memory.
       try {
         MemoryWriteGate.initialize(dbManager);
+        const configuredMemoryReviewMode = String(
+          process.env.COWORK_MEMORY_WRITE_APPROVAL_MODE || "",
+        )
+          .trim()
+          .toLowerCase();
+        if (
+          approvalPromptsDisabled() &&
+          (!configuredMemoryReviewMode || configuredMemoryReviewMode === "off")
+        ) {
+          const rejected = MemoryWriteGate.rejectAllPending({
+            reviewedBy: "system:no-prompt-migration",
+            resolution:
+              "Rejected by the no-prompt memory-write migration; stale queued data was not replayed.",
+          });
+          if (rejected > 0) {
+            logger.info(`Cleared ${rejected} stale pending memory write(s) during startup.`);
+          }
+        }
         MemoryService.initialize(dbManager);
         CuratedMemoryService.initialize(dbManager);
 
@@ -2047,10 +2255,14 @@ if (isCliDirectRunMode()) {
                 title: preparedCouncilTask.title,
                 prompt: preparedCouncilTask.prompt,
                 workspaceId: preparedCouncilTask.workspaceId,
-                agentConfig: {
-                  ...preparedCouncilTask.agentConfig,
-                  ...(params.jobId ? { scheduledJobId: params.jobId } : {}),
-                },
+                ...(params.assignedAgentRoleId
+                  ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
+                  : {}),
+                agentConfig: mergeCouncilCronAgentConfig(
+                  params.agentConfig,
+                  preparedCouncilTask.agentConfig,
+                  params.jobId,
+                ),
                 source: "cron",
               });
               councilService?.bindRunTask(preparedCouncilTask.runId, task.id);
@@ -2067,6 +2279,9 @@ if (isCliDirectRunMode()) {
               title: params.title,
               prompt: params.prompt,
               workspaceId: params.workspaceId,
+              ...(params.assignedAgentRoleId
+                ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
+                : {}),
               agentConfig: mergedAgentConfig,
               source: "cron",
             });
@@ -3306,6 +3521,9 @@ if (isCliDirectRunMode()) {
               title: params.title,
               prompt: params.prompt,
               workspaceId: params.workspaceId,
+              ...(params.assignedAgentRoleId
+                ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
+                : {}),
               agentConfig: params.agentConfig,
               source: params.source,
             });
@@ -3931,144 +4149,142 @@ if (isCliDirectRunMode()) {
       }
     }
 
-    app.on("before-quit", async () => {
-      NumbatService.getInstance()?.shutdown();
-      clearInterval(managedBriefingCleanupTimer);
-      if (tempWorkspacePruneTimer) {
-        clearInterval(tempWorkspacePruneTimer);
-        tempWorkspacePruneTimer = null;
-      }
-      if (tempSandboxProfilePruneTimer) {
-        clearInterval(tempSandboxProfilePruneTimer);
-        tempSandboxProfilePruneTimer = null;
-      }
-
-      // Destroy tray
-      trayManager.destroy();
-
-      routineService?.stopWorkflowRuntime();
-      workflowStarterWatcher?.stop();
-      workflowStarterWatcher = null;
-
-      // Stop cron service (async to properly shutdown webhook server)
-      if (cronService) {
-        await cronService.stop();
-        setCronService(null);
-      }
-      if (ambientMonitoringService) {
-        await ambientMonitoringService.stop();
-        ambientMonitoringService = null;
-      }
-      if (mailboxForwardingService) {
-        mailboxForwardingService.stop();
-        mailboxForwardingService = null;
-        setMailboxForwardingServiceInstance(null);
-      }
-      if (awarenessService) {
-        await awarenessService.stop();
-        awarenessService = null;
-      }
-      if (autonomyEngine) {
-        await autonomyEngine.stop();
-        autonomyEngine = null;
-      }
-      if (strategicPlannerService) {
-        try {
-          strategicPlannerService.stop();
-        } catch (error) {
-          console.error("[Main] Failed to stop Strategic Planner:", error);
-        }
-        strategicPlannerService = null;
-        setStrategicPlannerService(null);
-      }
-      if (symphonyService) {
-        try {
-          symphonyService.stop();
-        } catch (error) {
-          console.error("[Main] Failed to stop Symphony service:", error);
-        }
-        symphonyService = null;
-        setSymphonyService(null);
-      }
-
-      if (xMentionBridgeService) {
-        try {
-          xMentionBridgeService.stop();
-        } catch (error) {
-          console.error("[Main] Failed to stop X mention bridge service:", error);
-        }
-        xMentionBridgeService = null;
-      }
-
-      if (subconsciousLoopService) {
-        try {
-          subconsciousLoopService.stop();
-        } catch (error) {
-          console.error("[Main] Failed to stop SubconsciousLoopService:", error);
-        }
-        subconsciousLoopService = null;
-      }
-
-      // Cleanup canvas manager (close all windows and watchers)
-      await cleanupCanvasHandlers();
-
-      // Shutdown control plane (WebSocket gateway and Tailscale)
-      await shutdownControlPlane();
-
-      if (channelGateway) {
-        await channelGateway.shutdown();
-      }
-
-      // Stop lore service to flush any debounced workspace history updates
-      if (loreService) {
-        try {
-          await loreService.stop();
-        } catch (error) {
-          console.error("[Main] Failed to shutdown LoreService:", error);
-        }
-        loreService = null;
-      }
-
-      // Disconnect all MCP servers
-      try {
-        BoxBrainService.getInstance().stop();
-      } catch (error) {
-        console.error("[Main] Failed to stop Box Brain Service:", error);
-      }
-      try {
-        const mcpClientManager = MCPClientManager.getInstance();
-        await mcpClientManager.shutdown();
-      } catch (error) {
-        console.error("[Main] Failed to shutdown MCP servers:", error);
-      }
-      // Shutdown Memory Service
-      try {
-        MemoryService.shutdown();
-      } catch (error) {
-        console.error("[Main] Failed to shutdown Memory Service:", error);
-      }
-
-      try {
-        await getLocalPreviewProcessService().stopAll();
-      } catch (error) {
-        console.error("[Main] Failed to stop local preview processes:", error);
-      }
-
-      if (dbManager) {
-        dbManager.close();
-      }
-      if (agentDaemon) {
-        agentDaemon.shutdown();
-      }
-      if (detachTaskLifecycleSync) {
-        try {
-          detachTaskLifecycleSync();
-        } catch (error) {
-          console.error("[Main] Failed to detach task lifecycle sync:", error);
-        }
-        detachTaskLifecycleSync = null;
-      }
-    });
+    installGracefulShutdown(
+      app,
+      [
+        { name: "security monitor", run: () => NumbatService.getInstance()?.shutdown() },
+        {
+          name: "cleanup timers",
+          run: () => {
+            clearInterval(managedBriefingCleanupTimer);
+            if (tempWorkspacePruneTimer) {
+              clearInterval(tempWorkspacePruneTimer);
+              tempWorkspacePruneTimer = null;
+            }
+            if (tempSandboxProfilePruneTimer) {
+              clearInterval(tempSandboxProfilePruneTimer);
+              tempSandboxProfilePruneTimer = null;
+            }
+          },
+        },
+        { name: "tray", run: () => trayManager.destroy() },
+        { name: "workflow runtime", run: () => routineService?.stopWorkflowRuntime() },
+        {
+          name: "workflow watcher",
+          run: () => {
+            workflowStarterWatcher?.stop();
+            workflowStarterWatcher = null;
+          },
+        },
+        {
+          name: "cron",
+          run: async () => {
+            await cronService?.stop();
+            setCronService(null);
+          },
+        },
+        {
+          name: "ambient monitoring",
+          run: async () => {
+            await ambientMonitoringService?.stop();
+            ambientMonitoringService = null;
+          },
+        },
+        {
+          name: "mailbox forwarding",
+          run: () => {
+            mailboxForwardingService?.stop();
+            mailboxForwardingService = null;
+            setMailboxForwardingServiceInstance(null);
+          },
+        },
+        {
+          name: "awareness",
+          run: async () => {
+            await awarenessService?.stop();
+            awarenessService = null;
+          },
+        },
+        {
+          name: "autonomy",
+          run: async () => {
+            await autonomyEngine?.stop();
+            autonomyEngine = null;
+          },
+        },
+        {
+          name: "strategic planner",
+          run: () => {
+            strategicPlannerService?.stop();
+            strategicPlannerService = null;
+            setStrategicPlannerService(null);
+          },
+        },
+        {
+          name: "symphony",
+          run: () => {
+            symphonyService?.stop();
+            symphonyService = null;
+            setSymphonyService(null);
+          },
+        },
+        {
+          name: "X mention bridge",
+          run: () => {
+            xMentionBridgeService?.stop();
+            xMentionBridgeService = null;
+          },
+        },
+        {
+          name: "subconscious loop",
+          run: () => {
+            subconsciousLoopService?.stop();
+            subconsciousLoopService = null;
+          },
+        },
+        { name: "canvas", run: () => cleanupCanvasHandlers() },
+        { name: "control plane", run: () => shutdownControlPlane() },
+        {
+          name: "event triggers",
+          run: async () => {
+            await eventTriggerService?.stop();
+            eventTriggerService = null;
+          },
+        },
+        { name: "channel gateway", run: () => channelGateway?.shutdown() },
+        { name: "box brain", run: () => BoxBrainService.getInstance().stop() },
+        // Keep lifecycle listeners, MCP, memory, and storage alive until tasks settle.
+        { name: "agent daemon", run: () => agentDaemon?.shutdown() },
+        {
+          name: "task lifecycle sync",
+          run: () => {
+            detachTaskLifecycleSync?.();
+            detachTaskLifecycleSync = null;
+          },
+        },
+        {
+          name: "usage insights",
+          requiresQuiescence: true,
+          run: () => UsageInsightsProjector.shutdown(),
+        },
+        {
+          name: "lore",
+          run: async () => {
+            await loreService?.stop();
+            loreService = null;
+          },
+        },
+        {
+          name: "MCP servers",
+          requiresQuiescence: true,
+          run: () => MCPClientManager.getInstance().shutdown(),
+        },
+        { name: "memory", requiresQuiescence: true, run: () => MemoryService.shutdown() },
+        { name: "local previews", run: () => getLocalPreviewProcessService().stopAll() },
+        { name: "database", requiresQuiescence: true, run: () => dbManager?.close() },
+      ],
+      (name, error) => console.error(`[Main] Failed to stop ${name}:`, error),
+    );
 
     // Window control handlers (used by custom title bar buttons on Windows)
     ipcMain.handle(IPC_CHANNELS.WINDOW_MINIMIZE, () => {

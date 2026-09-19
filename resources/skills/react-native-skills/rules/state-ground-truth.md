@@ -15,37 +15,37 @@ visual values from state using computation or interpolation.
 **Incorrect (storing the visual output):**
 
 ```tsx
-const scale = useSharedValue(1)
+const scale = useSharedValue(1);
 
 const tap = Gesture.Tap()
   .onBegin(() => {
-    scale.set(withTiming(0.95))
+    scale.set(withTiming(0.95));
   })
   .onFinalize(() => {
-    scale.set(withTiming(1))
-  })
+    scale.set(withTiming(1));
+  });
 
 const animatedStyle = useAnimatedStyle(() => ({
   transform: [{ scale: scale.get() }],
-}))
+}));
 ```
 
 **Correct (storing the state, deriving the visual):**
 
 ```tsx
-const pressed = useSharedValue(0) // 0 = not pressed, 1 = pressed
+const pressed = useSharedValue(0); // 0 = not pressed, 1 = pressed
 
 const tap = Gesture.Tap()
   .onBegin(() => {
-    pressed.set(withTiming(1))
+    pressed.set(withTiming(1));
   })
   .onFinalize(() => {
-    pressed.set(withTiming(0))
-  })
+    pressed.set(withTiming(0));
+  });
 
 const animatedStyle = useAnimatedStyle(() => ({
   transform: [{ scale: interpolate(pressed.get(), [0, 1], [1, 0.95]) }],
-}))
+}));
 ```
 
 **Why this matters:**
@@ -65,16 +65,16 @@ result.
 
 ```tsx
 // Incorrect: storing derived values
-const [isExpanded, setIsExpanded] = useState(false)
-const [height, setHeight] = useState(0)
+const [isExpanded, setIsExpanded] = useState(false);
+const [height, setHeight] = useState(0);
 
 useEffect(() => {
-  setHeight(isExpanded ? 200 : 0)
-}, [isExpanded])
+  setHeight(isExpanded ? 200 : 0);
+}, [isExpanded]);
 
 // Correct: derive from state
-const [isExpanded, setIsExpanded] = useState(false)
-const height = isExpanded ? 200 : 0
+const [isExpanded, setIsExpanded] = useState(false);
+const height = isExpanded ? 200 : 0;
 ```
 
 State is the minimal truth. Everything else is derived.

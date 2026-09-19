@@ -1,0 +1,137 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  fetch: vi.fn(),
+  pulseConsent: vi.fn(),
+}));
+
+vi.mock("electron", () => ({
+  app: {
+    getVersion: () => "0.5.51",
+    isPackaged: true,
+    getAppPath: () => "/Applications/CoWork OS.app",
+    relaunch: vi.fn(),
+    exit: vi.fn(),
+  },
+  net: { fetch: mocks.fetch },
+  BrowserWindow: class {},
+}));
+
+vi.mock("../../telemetry/pulse-service", () => ({
+  isPulseConsentGranted: mocks.pulseConsent,
+}));
+
+import { UpdateManager } from "../update-manager";
+
+const GITHUB_RELEASES_URL = "https://api.github.com/repos/CoWork-OS/CoWork-OS/releases/latest";
+
+function githubResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      tag_name: "v0.5.52",
+      name: "0.5.52",
+      body: "Release notes",
+      html_url: "https://example.com/release",
+      published_at: "2026-08-27T00:00:00Z",
+      assets: [],
+      ...overrides,
+    }),
+  };
+}
+
+function newManager() {
+  const manager = new UpdateManager("linux", () => "6.8.0");
+  vi.spyOn(manager, "getVersionInfo").mockResolvedValue({
+    version: "0.5.51",
+    isDev: false,
+    isGitRepo: false,
+    isNpmGlobal: false,
+  });
+  return manager;
+}
+
+describe("update check release resolution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // NODE_ENV is "test" under vitest, which already short-circuits the Pulse
+    // branch, so assert on the consent gate rather than on the request itself
+    // where the environment guard would hide a regression.
+    mocks.pulseConsent.mockReturnValue(false);
+    mocks.fetch.mockResolvedValue(githubResponse());
+  });
+
+  it("never contacts the Pulse collector when consent was not granted", async () => {
+    await newManager().checkForUpdates();
+
+    const urls = mocks.fetch.mock.calls.map((call) => String(call[0]));
+    expect(urls.some((url) => url.includes("pulse.coworkosapp.com"))).toBe(false);
+    expect(urls).toContain(GITHUB_RELEASES_URL);
+  });
+
+  it("treats a 404 from the releases endpoint as 'up to date', not an error", async () => {
+    // A repository with no published release (or one renamed/made private) is
+    // a valid answer. Surfacing it as a failed check breaks the update panel.
+    mocks.fetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+
+    await expect(newManager().checkForUpdates()).resolves.toMatchObject({
+      available: false,
+      currentVersion: "0.5.51",
+      latestVersion: "0.5.51",
+      supported: true,
+    });
+  });
+
+  it("still surfaces a genuine API failure", async () => {
+    mocks.fetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+
+    await expect(newManager().checkForUpdates()).rejects.toThrow("GitHub API error: 500");
+  });
+
+  it("accepts a release whose body is null", async () => {
+    // GitHub returns body: null for a release published without notes.
+    mocks.fetch.mockResolvedValue(githubResponse({ body: null }));
+
+    await expect(newManager().checkForUpdates()).resolves.toMatchObject({
+      available: true,
+      latestVersion: "0.5.52",
+      releaseNotes: undefined,
+    });
+  });
+});
+
+describe("downloaded artifact signature lookup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.pulseConsent.mockReturnValue(false);
+  });
+
+  it("derives the .sig asset from the file that was actually downloaded", async () => {
+    // A release can carry several artifacts for one platform; `files[0]` is not
+    // necessarily the one electron-updater chose, and verifying one asset's
+    // signature against another's bytes always fails.
+    const manager = newManager() as never as {
+      pendingUpdateInfo: { latestVersion: string } | null;
+      verifyDownloadedArtifact: (event: unknown) => Promise<{ verified: boolean }>;
+    };
+    manager.pendingUpdateInfo = { latestVersion: "0.5.52" };
+
+    const signature = await import("../release-signature");
+    const fetchSignature = vi
+      .spyOn(signature, "fetchArtifactSignature")
+      .mockResolvedValue(undefined);
+    vi.spyOn(signature, "isReleaseSignatureEnforced").mockReturnValue(true);
+    vi.spyOn(signature, "verifyReleaseArtifact").mockResolvedValue({ status: "verified" });
+
+    await manager.verifyDownloadedArtifact({
+      downloadedFile: "/tmp/updates/CoWork-OS-0.5.52-arm64.zip",
+      version: "0.5.52",
+      files: [{ url: "CoWork-OS-0.5.52-arm64.dmg" }, { url: "CoWork-OS-0.5.52-arm64.zip" }],
+    });
+
+    expect(fetchSignature).toHaveBeenCalledWith(
+      "https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.5.52/CoWork-OS-0.5.52-arm64.zip",
+    );
+  });
+});

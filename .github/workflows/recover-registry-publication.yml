@@ -1,0 +1,87 @@
+name: Recover registry publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag with a retained registry bundle (vX.Y.Z)
+        required: true
+        type: string
+      source_sha:
+        description: Full original source commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.repository }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover verified registry packages
+    # Use maintained recovery code; never execute code from the supplied tag.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_SHA: ${{ inputs.source_sha }}
+      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Restore exact registry packages
+        run: node scripts/release/package-bundle.mjs restore
+      - name: Verify original hardening, platform, and package smoke evidence
+        run: node scripts/release/package-bundle.mjs verify-evidence
+      - name: Select recovery distribution tag
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          import { readBundle } from './scripts/release/package-bundle.mjs';
+          const manifest = readBundle(process.env.RELEASE_BUNDLE_DIR, {
+            tag: process.env.RELEASE_TAG, sha: process.env.RELEASE_SHA,
+          });
+          // A historical recovery must not roll the registry's latest channel backward.
+          fs.appendFileSync(process.env.GITHUB_ENV, `RELEASE_DIST_TAG=recovery-${manifest.version.replace(/\+/g, '-')}\n`);
+          NODE
+      - name: Publish or verify npm package
+        run: node scripts/release/registry-publication.mjs publish
+        env:
+          RELEASE_TARGET: npm
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish or verify GitHub package
+        run: node scripts/release/registry-publication.mjs publish
+        env:
+          RELEASE_TARGET: github
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify npm publication
+        run: node scripts/release/registry-publication.mjs verify
+        env:
+          RELEASE_TARGET: npm
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Verify GitHub Packages publication
+        run: node scripts/release/registry-publication.mjs verify
+        env:
+          RELEASE_TARGET: github
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Recheck tag and original release evidence
+        run: |
+          node scripts/release/package-bundle.mjs restore
+          node scripts/release/package-bundle.mjs verify-evidence
+      - name: Publish verified GitHub release
+        run: |
+          set -euo pipefail
+          if [ "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh release edit "$RELEASE_TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          fi

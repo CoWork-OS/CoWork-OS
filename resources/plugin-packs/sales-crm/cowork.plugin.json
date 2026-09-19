@@ -32,8 +32,18 @@
       "category": "Sales",
       "prompt": "Research the following prospect/company and compile a detailed briefing for sales outreach.\n\nCompany: {{company}}\nContact: {{contact}}\n\nPlease provide:\n1. Company overview (size, industry, recent news)\n2. Key decision makers and their roles\n3. Potential pain points and needs\n4. Suggested talking points for outreach\n5. Any recent funding, partnerships, or product launches",
       "parameters": [
-        { "name": "company", "type": "string", "description": "Company name to research", "required": true },
-        { "name": "contact", "type": "string", "description": "Contact name (optional)", "required": false }
+        {
+          "name": "company",
+          "type": "string",
+          "description": "Company name to research",
+          "required": true
+        },
+        {
+          "name": "contact",
+          "type": "string",
+          "description": "Contact name (optional)",
+          "required": false
+        }
       ],
       "enabled": true
     },
@@ -47,7 +57,12 @@
       "parameters": [
         { "name": "contact", "type": "string", "description": "Contact name", "required": true },
         { "name": "company", "type": "string", "description": "Company name", "required": true },
-        { "name": "context", "type": "string", "description": "Previous interaction notes", "required": true }
+        {
+          "name": "context",
+          "type": "string",
+          "description": "Previous interaction notes",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -59,7 +74,12 @@
       "category": "Sales",
       "prompt": "Review the current sales pipeline and generate a comprehensive status update.\n\nPipeline data:\n{{pipeline_data}}\n\nPlease provide:\n1. Pipeline summary (total deals, total value, weighted value)\n2. Deals by stage breakdown\n3. Top 3 deals most likely to close this month\n4. Deals at risk and recommended actions\n5. Specific action items for this week",
       "parameters": [
-        { "name": "pipeline_data", "type": "string", "description": "Pipeline data or notes to analyze", "required": true }
+        {
+          "name": "pipeline_data",
+          "type": "string",
+          "description": "Pipeline data or notes to analyze",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -71,8 +91,18 @@
       "category": "Sales",
       "prompt": "Generate response strategies for the following sales objection.\n\nObjection: {{objection}}\nProduct/Service: {{product}}\n\nFor each response strategy, provide:\n1. Acknowledge the concern\n2. Reframe the objection\n3. Provide evidence or social proof\n4. Bridge to value proposition\n5. Suggest a next step",
       "parameters": [
-        { "name": "objection", "type": "string", "description": "The customer objection to address", "required": true },
-        { "name": "product", "type": "string", "description": "Product or service name", "required": false }
+        {
+          "name": "objection",
+          "type": "string",
+          "description": "The customer objection to address",
+          "required": true
+        },
+        {
+          "name": "product",
+          "type": "string",
+          "description": "Product or service name",
+          "required": false
+        }
       ],
       "enabled": true
     }

@@ -31,8 +31,7 @@ export function parseRetentionConfig(env = process.env) {
       DEFAULT_DEV_LOG_RETENTION_DAYS,
     ),
     minRuns: parsePositiveInteger(env.COWORK_DEV_LOG_MIN_RUNS, DEFAULT_DEV_LOG_MIN_RUNS),
-    maxBytes:
-      parsePositiveInteger(env.COWORK_DEV_LOG_MAX_MB, DEFAULT_DEV_LOG_MAX_MB) * 1024 * 1024,
+    maxBytes: parsePositiveInteger(env.COWORK_DEV_LOG_MAX_MB, DEFAULT_DEV_LOG_MAX_MB) * 1024 * 1024,
   };
 }
 
@@ -47,14 +46,8 @@ export function redactDevLogLine(line) {
     /\b((?:[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|CLIENT_SECRET|ACCESS_TOKEN|REFRESH_TOKEN)[A-Z0-9_]*)\s*[:=]\s*)(["']?)[^"',;\s]+(["']?)/gi,
     (_match, prefix, openQuote, closeQuote) => `${prefix}${openQuote}${SECRET_VALUE}${closeQuote}`,
   );
-  redacted = redacted.replace(
-    /\b((?:sk|pk|rk|sess|org|proj)-[A-Za-z0-9_-]{16,})\b/g,
-    SECRET_VALUE,
-  );
-  redacted = redacted.replace(
-    /\b(xox(?:b|p|a|r|s)-[A-Za-z0-9-]{16,})\b/g,
-    SECRET_VALUE,
-  );
+  redacted = redacted.replace(/\b((?:sk|pk|rk|sess|org|proj)-[A-Za-z0-9_-]{16,})\b/g, SECRET_VALUE);
+  redacted = redacted.replace(/\b(xox(?:b|p|a|r|s)-[A-Za-z0-9-]{16,})\b/g, SECRET_VALUE);
   redacted = redacted.replace(/(https?:\/\/)([^/\s:@]+):([^/\s@]+)@/gi, `$1${SECRET_VALUE}@`);
   return redacted;
 }
@@ -141,7 +134,8 @@ export function createDevLogEvent({ timestamp, runId, line, stream = "stdout", o
     rawLine,
   };
 
-  if (overrides.component || parsed.component) event.component = overrides.component || parsed.component;
+  if (overrides.component || parsed.component)
+    event.component = overrides.component || parsed.component;
   if (ids.taskId) event.taskId = ids.taskId;
   if (ids.workspaceId) event.workspaceId = ids.workspaceId;
   if (level === "error") event.error = { message: event.message || rawLine };
@@ -270,7 +264,11 @@ export function applyDevLogRetention(logsDir, config = parseRetentionConfig()) {
   }
 
   let totalBytes = retained.reduce((sum, run) => sum + run.byteSize, 0);
-  for (let index = retained.length - 1; index >= config.minRuns && totalBytes > config.maxBytes; index -= 1) {
+  for (
+    let index = retained.length - 1;
+    index >= config.minRuns && totalBytes > config.maxBytes;
+    index -= 1
+  ) {
     const [run] = retained.splice(index, 1);
     deleted.push(run);
     totalBytes -= run.byteSize;

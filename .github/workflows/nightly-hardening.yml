@@ -2,15 +2,15 @@ name: Nightly Hardening
 
 on:
   schedule:
-    - cron: '0 3 * * *'
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:
   hardening:
-    name: Eval + Battery (Node 24)
+    name: Deterministic Harness + Optional Live Battery (Node 24)
     runs-on: ubuntu-latest
     env:
-      HARDENING_REQUIRED_AFTER_UTC: '2026-03-14T00:00:00Z'
+      HARDENING_REQUIRED_AFTER_UTC: "2026-03-14T00:00:00Z"
 
     steps:
       - name: Checkout code
@@ -19,8 +19,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -33,23 +33,18 @@ jobs:
       - name: Prepare artifact directory
         run: mkdir -p .artifacts/hardening
 
-      - name: Build eval corpus
-        id: build_eval_corpus
-        continue-on-error: true
-        run: |
-          npm run qa:eval:build -- --window-days 30 --limit 300 --suite reliability-regressions \
-            | tee .artifacts/hardening/build-eval-corpus.log
+      - name: Prepare native harness test dependency
+        run: npm rebuild better-sqlite3 --ignore-scripts=false --no-audit --no-fund
 
-      - name: Run deterministic eval suite
+      - name: Run deterministic harness regressions
         id: run_eval_suite
         continue-on-error: true
         run: |
-          npm run qa:eval:run -- --suite reliability-regressions --mode deterministic \
+          set -euo pipefail
+          npm run qa:harness \
             | tee .artifacts/hardening/eval-suite.log
-        env:
-          COWORK_EVAL_ALLOW_EMPTY: '1'
 
-      - name: Run battery suite when hooks are configured
+      - name: Run optional live battery when hooks are configured
         id: run_battery
         continue-on-error: true
         env:
@@ -57,11 +52,17 @@ jobs:
           COWORK_HOOKS_TOKEN: ${{ secrets.COWORK_HOOKS_TOKEN }}
           COWORK_DB_PATH: ${{ secrets.COWORK_DB_PATH }}
         run: |
-          if [ -n "${COWORK_HOOKS_ORIGIN}" ] && [ -n "${COWORK_HOOKS_TOKEN}" ] && [ -n "${COWORK_DB_PATH}" ]; then
+          set -euo pipefail
+          echo "coverage=failed" >> "$GITHUB_OUTPUT"
+          if [ -z "${COWORK_HOOKS_ORIGIN}" ] && [ -z "${COWORK_HOOKS_TOKEN}" ] && [ -z "${COWORK_DB_PATH}" ]; then
+            echo "coverage=not_configured" >> "$GITHUB_OUTPUT"
+            echo "Optional live battery not configured; no live battery coverage claimed." | tee .artifacts/hardening/battery.log
+          elif [ -n "${COWORK_HOOKS_ORIGIN}" ] && [ -n "${COWORK_HOOKS_TOKEN}" ] && [ -n "${COWORK_DB_PATH}" ]; then
             node scripts/qa/run_battery.cjs | tee .artifacts/hardening/battery.log
+            echo "coverage=completed" >> "$GITHUB_OUTPUT"
           else
-            echo "Battery skipped: set COWORK_HOOKS_ORIGIN, COWORK_HOOKS_TOKEN, and COWORK_DB_PATH secrets." \
-              | tee .artifacts/hardening/battery.log
+            echo "Incomplete live battery configuration: all three hook/database secrets are required." | tee .artifacts/hardening/battery.log
+            exit 1
           fi
 
       - name: Build grouped hardening summary
@@ -70,10 +71,9 @@ jobs:
           {
             echo "# Nightly Hardening Summary"
             echo
-            echo "## Eval Corpus"
-            tail -n 40 .artifacts/hardening/build-eval-corpus.log || true
+            echo "Production corpus replay is not configured on this fresh runner; no production coverage claimed."
             echo
-            echo "## Eval Suite"
+            echo "## Deterministic Harness Regressions and Replay Fixtures"
             tail -n 80 .artifacts/hardening/eval-suite.log || true
             echo
             echo "## Battery"
@@ -83,18 +83,19 @@ jobs:
       - name: Build machine-readable hardening report
         if: always()
         env:
-          BUILD_EVAL_OUTCOME: ${{ steps.build_eval_corpus.outcome }}
           RUN_EVAL_OUTCOME: ${{ steps.run_eval_suite.outcome }}
           RUN_BATTERY_OUTCOME: ${{ steps.run_battery.outcome }}
+          BATTERY_COVERAGE: ${{ steps.run_battery.outputs.coverage }}
         run: |
           cat > .artifacts/hardening/report.json <<JSON
           {
             "requiredAfterUtc": "${HARDENING_REQUIRED_AFTER_UTC}",
             "generatedAtUtc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "steps": {
-              "buildEvalCorpus": "${BUILD_EVAL_OUTCOME}",
               "runEvalSuite": "${RUN_EVAL_OUTCOME}",
-              "runBattery": "${RUN_BATTERY_OUTCOME}"
+              "runBattery": "${RUN_BATTERY_OUTCOME}",
+              "optionalBatteryCoverage": "${BATTERY_COVERAGE}",
+              "productionCorpusCoverage": "not_configured"
             }
           }
           JSON
@@ -102,9 +103,9 @@ jobs:
       - name: Enforce hardening gate after stability window
         if: always()
         env:
-          BUILD_EVAL_OUTCOME: ${{ steps.build_eval_corpus.outcome }}
           RUN_EVAL_OUTCOME: ${{ steps.run_eval_suite.outcome }}
           RUN_BATTERY_OUTCOME: ${{ steps.run_battery.outcome }}
+          BATTERY_COVERAGE: ${{ steps.run_battery.outputs.coverage }}
         run: |
           set -euo pipefail
           now_epoch="$(date -u +%s)"
@@ -115,19 +116,19 @@ jobs:
           fi
 
           echo "Hardening strict mode: ${strict_mode} (cutoff: ${HARDENING_REQUIRED_AFTER_UTC})"
-          echo "Outcomes: build=${BUILD_EVAL_OUTCOME} eval=${RUN_EVAL_OUTCOME} battery=${RUN_BATTERY_OUTCOME}"
+          echo "Outcomes: deterministic_harness=${RUN_EVAL_OUTCOME} optional_battery=${RUN_BATTERY_OUTCOME} coverage=${BATTERY_COVERAGE}"
 
           if [ "${strict_mode}" != "true" ]; then
             echo "Stability window active. Failures are non-blocking."
             exit 0
           fi
 
-          if [ "${RUN_EVAL_OUTCOME}" != "success" ] || [ "${RUN_BATTERY_OUTCOME}" != "success" ]; then
+          if [ "${RUN_EVAL_OUTCOME}" != "success" ] || [ "${RUN_BATTERY_OUTCOME}" != "success" ] || { [ "${BATTERY_COVERAGE}" != "completed" ] && [ "${BATTERY_COVERAGE}" != "not_configured" ]; }; then
             echo "Hardening gate failed after stability window."
             exit 1
           fi
 
-          echo "Hardening gate passed."
+          echo "Deterministic harness gate passed. Optional live battery coverage: ${BATTERY_COVERAGE}."
 
       - name: Upload hardening artifacts
         if: always()

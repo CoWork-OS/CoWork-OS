@@ -19,14 +19,7 @@
       "description": "Task domain",
       "required": false,
       "default": "auto",
-      "options": [
-        "auto",
-        "code",
-        "research",
-        "operations",
-        "writing",
-        "general"
-      ]
+      "options": ["auto", "code", "research", "operations", "writing", "general"]
     },
     {
       "name": "scope",
@@ -34,23 +27,14 @@
       "description": "Simplification scope",
       "required": false,
       "default": "current",
-      "options": [
-        "current",
-        "workspace",
-        "path"
-      ]
+      "options": ["current", "workspace", "path"]
     }
   ],
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "workflow",
-      "quality",
-      "optimization",
-      "cross-domain"
-    ],
+    "tags": ["workflow", "quality", "optimization", "cross-domain"],
     "routing": {
       "useWhen": "Use when the user asks to simplify or tighten existing outputs, code, docs, reports, plans, or runbooks without changing core intent.",
       "dontUseWhen": "Do not use when the user requests net-new content generation from scratch or asks for parallel migrations across many independent targets (use batch).",

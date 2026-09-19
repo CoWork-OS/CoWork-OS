@@ -2,10 +2,10 @@
 
 Analyze stocks, ETFs, indices, and crypto using free public APIs. Two data sources:
 
-| Source | Auth | Best For |
-|--------|------|----------|
-| **Yahoo Finance** (via curl or yfinance) | None | Real-time quotes, charts, fundamentals, options, news |
-| **Alpha Vantage** | Free API key | Technical indicators, historical data, forex, screening |
+| Source                                   | Auth         | Best For                                                |
+| ---------------------------------------- | ------------ | ------------------------------------------------------- |
+| **Yahoo Finance** (via curl or yfinance) | None         | Real-time quotes, charts, fundamentals, options, news   |
+| **Alpha Vantage**                        | Free API key | Technical indicators, historical data, forex, screening |
 
 ---
 
@@ -253,6 +253,7 @@ for quote in result.get('quotes', [])[:15]:
 Get a free key at https://www.alphavantage.co/support/#api-key
 
 Store it:
+
 ```bash
 mkdir -p ~/.config/alphavantage
 echo "YOUR_KEY" > ~/.config/alphavantage/api_key
@@ -385,22 +386,23 @@ else: print(f'RSI: Neutral')
 
 When asked to score or rate a stock, evaluate across these 8 dimensions:
 
-| # | Dimension | Key Metrics | Weight |
-|---|-----------|-------------|--------|
-| 1 | **Valuation** | P/E, Fwd P/E, PEG, P/S, P/B, EV/EBITDA | 15% |
-| 2 | **Profitability** | Profit margin, ROE, ROA, operating margin | 15% |
-| 3 | **Growth** | Revenue growth, EPS growth, earnings surprise | 15% |
-| 4 | **Financial Health** | Debt/equity, current ratio, free cash flow, interest coverage | 12.5% |
-| 5 | **Technical Momentum** | RSI, MACD, SMA crossovers, 52-week position | 12.5% |
-| 6 | **Dividend Quality** | Yield, payout ratio, growth history, consistency | 10% |
-| 7 | **Analyst Sentiment** | Buy/hold/sell ratings, price target vs current, upgrades/downgrades | 10% |
-| 8 | **Risk** | Beta, short interest, volatility, sector risk | 10% |
+| #   | Dimension              | Key Metrics                                                         | Weight |
+| --- | ---------------------- | ------------------------------------------------------------------- | ------ |
+| 1   | **Valuation**          | P/E, Fwd P/E, PEG, P/S, P/B, EV/EBITDA                              | 15%    |
+| 2   | **Profitability**      | Profit margin, ROE, ROA, operating margin                           | 15%    |
+| 3   | **Growth**             | Revenue growth, EPS growth, earnings surprise                       | 15%    |
+| 4   | **Financial Health**   | Debt/equity, current ratio, free cash flow, interest coverage       | 12.5%  |
+| 5   | **Technical Momentum** | RSI, MACD, SMA crossovers, 52-week position                         | 12.5%  |
+| 6   | **Dividend Quality**   | Yield, payout ratio, growth history, consistency                    | 10%    |
+| 7   | **Analyst Sentiment**  | Buy/hold/sell ratings, price target vs current, upgrades/downgrades | 10%    |
+| 8   | **Risk**               | Beta, short interest, volatility, sector risk                       | 10%    |
 
 Score each dimension 1-10. Provide an overall weighted score.
 
 ### Scoring guidelines
 
 **Valuation (1-10):**
+
 - 9-10: Deeply undervalued (P/E < 10, PEG < 0.5)
 - 7-8: Moderately undervalued
 - 5-6: Fairly valued
@@ -408,6 +410,7 @@ Score each dimension 1-10. Provide an overall weighted score.
 - 1-2: Extremely overvalued (P/E > 50, PEG > 3)
 
 **Profitability (1-10):**
+
 - 9-10: Exceptional (ROE > 30%, margins > 25%)
 - 7-8: Strong
 - 5-6: Average
@@ -415,6 +418,7 @@ Score each dimension 1-10. Provide an overall weighted score.
 - 1-2: Unprofitable
 
 **Growth (1-10):**
+
 - 9-10: Hyper growth (>30% revenue + earnings growth)
 - 7-8: Strong growth (15-30%)
 - 5-6: Moderate (5-15%)
@@ -422,6 +426,7 @@ Score each dimension 1-10. Provide an overall weighted score.
 - 1-2: Declining
 
 **Financial Health (1-10):**
+
 - 9-10: Fortress balance sheet (D/E < 0.3, strong FCF)
 - 7-8: Healthy
 - 5-6: Adequate
@@ -508,15 +513,15 @@ Score each dimension 1-10. Provide an overall weighted score.
 
 ## Common Ticker Formats
 
-| Type | Format | Example |
-|------|--------|----------|
-| US Stock | `AAPL` | Apple Inc. |
-| ETF | `SPY` | S&P 500 ETF |
-| Index | `^GSPC` | S&P 500 |
-| Crypto | `BTC-USD` | Bitcoin |
-| Forex | `EURUSD=X` | EUR/USD |
-| Intl Stock | `7203.T` | Toyota (Tokyo) |
-| UK Stock | `SHEL.L` | Shell (London) |
+| Type       | Format     | Example        |
+| ---------- | ---------- | -------------- |
+| US Stock   | `AAPL`     | Apple Inc.     |
+| ETF        | `SPY`      | S&P 500 ETF    |
+| Index      | `^GSPC`    | S&P 500        |
+| Crypto     | `BTC-USD`  | Bitcoin        |
+| Forex      | `EURUSD=X` | EUR/USD        |
+| Intl Stock | `7203.T`   | Toyota (Tokyo) |
+| UK Stock   | `SHEL.L`   | Shell (London) |
 
 ---
 

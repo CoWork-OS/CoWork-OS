@@ -34,6 +34,7 @@ Use the hosted Box MCP server for bounded Box content workflows, including searc
 - Draft a generic project brief without Box sources.
 
 ## Runtime Prompt
+
 - Current runtime prompt is defined directly in `../box.json`.
 - The runtime prompt covers Box setup, identity verification, bounded retrieval, citations, safe writes, Box AI, Hubs, and plan or permission limitations.
 

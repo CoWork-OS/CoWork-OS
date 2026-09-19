@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
   type AccessProfileDefinition,
+  resolveAccessProfileDefinitionWithStatus,
 } from "../../../shared/access-profiles";
 import type { PermissionSettingsData, Workspace } from "../../../shared/types";
+import { PermissionEngine } from "../../agent/runtime/PermissionEngine";
 import {
   applyDefaultAccessProfile,
   applyAccessProfileToWorkspace,
@@ -87,6 +89,10 @@ describe("access profile resolver", () => {
       { accessProfileId: "  ", allowUserInput: true },
       { ...settings, defaultAccessProfileId: BUILTIN_ACCESS_PROFILE_IDS.approveForMe },
     );
+    const explicitProfile = applyDefaultAccessProfile(
+      { accessProfileId: "custom-profile", allowUserInput: true },
+      { ...settings, defaultAccessProfileId: BUILTIN_ACCESS_PROFILE_IDS.approveForMe },
+    );
     const legacyShell = applyDefaultAccessProfile({ shellAccess: false }, settings);
     const legacyMode = applyDefaultAccessProfile({ permissionMode: "plan" }, settings);
 
@@ -97,6 +103,10 @@ describe("access profile resolver", () => {
     expect(blankProfile).toEqual({
       allowUserInput: true,
       accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.approveForMe,
+    });
+    expect(explicitProfile).toEqual({
+      allowUserInput: true,
+      accessProfileId: "custom-profile",
     });
     expect(legacyShell).toEqual({ shellAccess: false });
     expect(legacyMode).toEqual({ permissionMode: "plan" });
@@ -115,6 +125,52 @@ describe("access profile resolver", () => {
     expect(profile.permissionMode).toBe("dangerous_only");
     expect(profile.sandboxMode).toBe("workspace-write");
     expect(profile.requiresSandbox).toBe(true);
+  });
+
+  it("does not leave named profile metadata on a legacy compatibility workspace", () => {
+    const legacy = resolveEffectiveAccessProfile({
+      task: { agentConfig: { permissionMode: "default" } },
+      workspace,
+      settings: { ...settings, defaultAccessProfileId: undefined },
+    });
+    const applied = applyAccessProfileToWorkspace(workspace, legacy);
+
+    expect(legacy.requestedId).toBeUndefined();
+    expect(applied.permissions).toMatchObject({
+      accessProfileId: undefined,
+      accessSandboxMode: undefined,
+      accessApprovalPolicy: undefined,
+      accessReviewer: undefined,
+      accessNetworkMode: undefined,
+      accessWorkspaceRoots: undefined,
+      accessFilesystemRules: undefined,
+      accessDomainRules: undefined,
+    });
+  });
+
+  it("fails closed when runtime profile inheritance widens a parent", () => {
+    const unsafe: AccessProfileDefinition = {
+      id: "runtime_unsafe",
+      label: "Runtime unsafe",
+      description: "Wider than the bounded parent.",
+      sandbox: "danger-full-access",
+      approval: "never",
+      reviewer: "none",
+      network: "enabled",
+      extends: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+    };
+
+    expect(resolveAccessProfileDefinitionWithStatus(unsafe.id, [unsafe])).toMatchObject({
+      status: "invalid",
+      profileId: unsafe.id,
+    });
+    const effective = resolveEffectiveAccessProfile({
+      task: { agentConfig: { accessProfileId: unsafe.id } },
+      workspace,
+      settings: withProfiles([unsafe]),
+    });
+    expect(effective.profileUnavailable).toBe(true);
+    expect(effective.definition.sandbox).toBe("read-only");
   });
 
   it("lets an explicit built-in profile provide command tools without a workspace shell toggle", () => {
@@ -250,6 +306,160 @@ describe("access profile resolver", () => {
     expect(applied.permissions.sandboxType).toBe("none");
   });
 
+  it("overlays a read-only verifier boundary onto broad custom profiles", () => {
+    const broad: AccessProfileDefinition = {
+      id: "broad_custom",
+      label: "Broad custom",
+      description: "A profile that would otherwise allow unrestricted actions.",
+      sandbox: "danger-full-access",
+      approval: "never",
+      reviewer: "none",
+      network: "enabled",
+      workspaceRoots: ["../shared-docs"],
+      filesystemRules: [{ path: "../shared-docs", access: "read" }],
+      domainRules: [{ pattern: "example.com", access: "allow" }],
+    };
+    const profile = resolveEffectiveAccessProfile({
+      task: {
+        workerRole: "verifier",
+        agentConfig: {
+          accessProfileId: broad.id,
+          permissionMode: "bypass_permissions",
+          shellAccess: true,
+        },
+      },
+      workspace,
+      settings: withProfiles([broad]),
+    });
+    const applied = applyAccessProfileToWorkspace(workspace, profile);
+
+    expect(profile).toMatchObject({
+      permissionMode: "plan",
+      sandboxMode: "read-only",
+      shellEnabled: false,
+      networkEnabled: false,
+      definition: {
+        sandbox: "read-only",
+        network: "disabled",
+        shellAccess: false,
+        workspaceRoots: ["../shared-docs"],
+        filesystemRules: [{ path: "../shared-docs", access: "read" }],
+        domainRules: [{ pattern: "example.com", access: "allow" }],
+      },
+    });
+    expect(applied.permissions).toMatchObject({
+      write: false,
+      delete: false,
+      network: false,
+      shell: false,
+      accessWorkspaceRoots: ["/tmp/shared-docs"],
+    });
+    expect(applied.permissions.unrestrictedFileAccess).toBe(false);
+
+    // A permissive session rule must not re-enable an unknown MCP/external
+    // tool after the verifier overlay has disabled the network capability.
+    const mcpEvaluation = PermissionEngine.evaluate({
+      workspace: applied,
+      toolName: "mcp_external_mutator",
+      mode: profile.permissionMode,
+      rules: [
+        {
+          source: "session",
+          effect: "allow",
+          scope: { kind: "tool", toolName: "mcp_external_mutator" },
+        },
+      ],
+    });
+    expect(mcpEvaluation.decision).toBe("deny");
+    expect(mcpEvaluation.reason).toMatchObject({
+      type: "workspace_capability",
+      capability: "network",
+    });
+  });
+
+  it("overlays the read-only helper flag for researcher children before allow rules", () => {
+    const broad: AccessProfileDefinition = {
+      id: "broad_helper_custom",
+      label: "Broad helper custom",
+      description: "A broad profile supplied by the parent task.",
+      sandbox: "danger-full-access",
+      approval: "never",
+      reviewer: "none",
+      network: "enabled",
+    };
+    const profile = resolveEffectiveAccessProfile({
+      task: {
+        workerRole: "researcher",
+        agentConfig: {
+          readOnlyExecution: true,
+          accessProfileId: broad.id,
+          permissionMode: "bypass_permissions",
+          shellAccess: true,
+        },
+      },
+      workspace,
+      settings: withProfiles([broad]),
+    });
+    const applied = applyAccessProfileToWorkspace(workspace, profile);
+
+    expect(profile).toMatchObject({
+      permissionMode: "plan",
+      sandboxMode: "read-only",
+      shellEnabled: false,
+      networkEnabled: false,
+      definition: {
+        sandbox: "read-only",
+        network: "disabled",
+        shellAccess: false,
+      },
+    });
+    expect(applied.permissions).toMatchObject({
+      write: false,
+      delete: false,
+      network: false,
+      shell: false,
+      unrestrictedFileAccess: false,
+    });
+
+    const shellEvaluation = PermissionEngine.evaluate({
+      workspace: applied,
+      toolName: "run_command",
+      approvalType: "run_command",
+      command: "echo safe",
+      mode: profile.permissionMode,
+      rules: [
+        {
+          source: "session",
+          effect: "allow",
+          scope: { kind: "command_prefix", prefix: "echo" },
+        },
+      ],
+    });
+    expect(shellEvaluation.decision).toBe("deny");
+    expect(shellEvaluation.reason).toMatchObject({
+      type: "workspace_capability",
+      capability: "shell",
+    });
+
+    const mcpEvaluation = PermissionEngine.evaluate({
+      workspace: applied,
+      toolName: "mcp_external_mutator",
+      mode: profile.permissionMode,
+      rules: [
+        {
+          source: "session",
+          effect: "allow",
+          scope: { kind: "tool", toolName: "mcp_external_mutator" },
+        },
+      ],
+    });
+    expect(mcpEvaluation.decision).toBe("deny");
+    expect(mcpEvaluation.reason).toMatchObject({
+      type: "workspace_capability",
+      capability: "network",
+    });
+  });
+
   it("forces scoped danger-full profiles through a sandbox and honors shell denial", () => {
     const custom: AccessProfileDefinition = {
       id: "scoped_full",
@@ -281,6 +491,37 @@ describe("access profile resolver", () => {
     expect(applied.permissions.unrestrictedFileAccess).toBe(false);
     expect(applied.permissions.sandboxType).toBe("auto");
     expect(applied.permissions.shell).toBe(false);
+  });
+
+  it("keeps the sandbox and the file boundary for a danger-full profile that still asks", () => {
+    const custom: AccessProfileDefinition = {
+      id: "danger_full_on_request",
+      label: "Danger full on request",
+      description: "Unbounded local execution with explicit external consent.",
+      sandbox: "danger-full-access",
+      approval: "on-request",
+      reviewer: "user",
+      network: "enabled",
+    };
+    const profile = resolveEffectiveAccessProfile({
+      task: { agentConfig: { accessProfileId: custom.id } },
+      workspace,
+      settings: withProfiles([custom]),
+    });
+    const applied = applyAccessProfileToWorkspace(workspace, profile);
+
+    // Both dimensions have to line up before the boundary comes off. Deriving
+    // this from `sandbox` alone silently turned the profile's "on-request"
+    // into "never ask": every path outside the workspace resolved to
+    // `allow / unrestricted_file_access`, so reads of ~/.ssh/id_rsa never
+    // raised an external_file_access approval.
+    expect(profile.requiresSandbox).toBe(true);
+    expect(applied.permissions).toMatchObject({
+      accessSandboxMode: "danger-full-access",
+      accessApprovalPolicy: "on-request",
+      unrestrictedFileAccess: false,
+      sandboxType: "auto",
+    });
   });
 
   it("keeps an explicitly disabled network off for a full-access filesystem profile", () => {

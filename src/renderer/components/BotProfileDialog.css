@@ -1,0 +1,353 @@
+.bot-profile-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(5 8 18 / 62%);
+}
+.sidebar-bot-row-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.sidebar-bot-row-wrap .sidebar-bot-row {
+  flex: 1;
+  padding-right: 34px;
+}
+.sidebar-bot-edit-button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 25px;
+  height: 25px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.sidebar-bot-edit-button:hover,
+.sidebar-bot-edit-button:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.bot-profile-dialog {
+  width: min(480px, 100%);
+  max-height: min(720px, calc(100dvh - 40px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-bg-primary);
+  color: var(--color-text);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 35%);
+}
+.bot-profile-dialog-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 20px 4px;
+  scrollbar-gutter: stable;
+}
+.bot-profile-dialog-header,
+.bot-profile-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bot-profile-dialog-header {
+  flex: 0 0 auto;
+  padding: 20px 20px 0;
+  margin-bottom: 14px;
+}
+.bot-profile-dialog-header h2 {
+  margin: 3px 0 0;
+  font-size: 19px;
+}
+.bot-profile-eyebrow {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.bot-profile-dialog-header button {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.bot-profile-dialog label {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.bot-profile-dialog input,
+.bot-profile-dialog textarea,
+.bot-profile-dialog select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font: inherit;
+}
+.bot-profile-dialog textarea {
+  resize: vertical;
+}
+.bot-profile-dialog small {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+/* Icon and Color used to sit side by side, which left their labels on
+   different baselines and squeezed Color into 90px. Stack them instead. */
+.bot-profile-appearance {
+  display: grid;
+  gap: 14px;
+}
+.bot-profile-field {
+  position: relative;
+  min-width: 0;
+}
+.bot-profile-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.bot-profile-icon-trigger {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: var(--color-bg-input);
+  font-size: 13px;
+  cursor: pointer;
+}
+.bot-profile-icon-trigger:hover {
+  border-color: var(--color-border-light);
+}
+/* Direct child only: the selected icon lives inside the swatch span, and a
+   descendant selector here dragged it off-centre and recoloured it. */
+.bot-profile-icon-trigger > svg {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+.bot-profile-icon-trigger-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The swatch carries the bot's colour so the trigger previews exactly what the
+   icon will look like once saved. */
+.bot-profile-icon-swatch {
+  display: grid;
+  place-items: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--bot-profile-color, var(--color-accent));
+}
+/* Always white — the palette is dark enough that a white glyph stays legible on
+   every swatch, and inheriting the text colour made it vanish on some. */
+.bot-profile-icon-swatch > svg {
+  color: #fff;
+}
+.bot-profile-icon-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 248px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+.bot-profile-icon-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--color-text);
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.bot-profile-icon-menu-item > svg:first-child {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+.bot-profile-icon-menu-item > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bot-profile-icon-menu-item:hover {
+  background: var(--color-bg-hover);
+}
+.bot-profile-icon-menu-item.selected {
+  color: var(--bot-profile-color, var(--color-accent));
+  background: color-mix(in srgb, var(--bot-profile-color, var(--color-accent)) 12%, transparent);
+}
+.bot-profile-icon-menu-item.selected > svg:first-child {
+  color: inherit;
+}
+
+/* Colour swatches, replacing the bare <input type="color"> block. */
+.bot-profile-color-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bot-profile-color-swatch {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bot-profile-swatch);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+.bot-profile-color-swatch:hover {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bot-profile-swatch) 28%, transparent);
+}
+.bot-profile-color-swatch.selected {
+  box-shadow:
+    0 0 0 2px var(--color-bg-primary),
+    0 0 0 4px var(--bot-profile-swatch);
+}
+.bot-profile-color-swatch:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+.bot-profile-dialog .bot-profile-color-custom {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px dashed var(--color-border-light);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.bot-profile-color-custom::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.bot-profile-color-custom::-webkit-color-swatch {
+  border: 0;
+  border-radius: 50%;
+}
+.bot-profile-note {
+  margin: 0 0 14px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.bot-profile-error {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin: 12px 0;
+  color: var(--color-danger, #ef4444);
+  font-size: 12px;
+}
+.bot-profile-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin-top: 14px;
+  padding: 14px 20px 20px;
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-primary);
+}
+.bot-profile-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.bot-profile-actions .bot-profile-delete-button {
+  margin-right: auto;
+  border-color: color-mix(in srgb, var(--color-danger, #ef4444) 55%, var(--color-border));
+  color: var(--color-danger, #ef4444);
+}
+.bot-profile-actions .bot-profile-delete-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger, #ef4444) 10%, transparent);
+}
+.bot-profile-actions button[type="submit"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: white;
+}
+.bot-profile-actions button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.bot-profile-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 0;
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 520px) {
+  .bot-profile-dialog-backdrop {
+    padding: 12px;
+  }
+
+  .bot-profile-dialog {
+    max-height: calc(100dvh - 24px);
+  }
+
+  .bot-profile-actions {
+    flex-wrap: wrap;
+  }
+
+  .bot-profile-actions .bot-profile-delete-button {
+    flex: 1 0 100%;
+    justify-content: center;
+    margin-right: 0;
+  }
+
+  .bot-profile-actions button:not(.bot-profile-delete-button) {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+}

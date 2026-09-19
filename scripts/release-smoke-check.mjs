@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 
-const pkgDir = path.resolve(process.cwd(), "node_modules/cowork-os");
+const packageName = process.env.COWORK_RELEASE_PACKAGE_NAME || "cowork-os";
+if (!["cowork-os", "@cowork-os/cowork-os"].includes(packageName)) {
+  throw new Error("Unexpected release package name.");
+}
+const pkgDir = path.resolve(process.cwd(), "node_modules", packageName);
 const pkgJsonPath = path.join(pkgDir, "package.json");
 
 if (!fs.existsSync(pkgJsonPath)) {

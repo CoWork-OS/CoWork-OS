@@ -37,11 +37,11 @@ Improve existing work quality while preserving intent and behavior.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| objective | string | No | What to simplify; if empty, use current task context |
-| domain | select | No | Task domain |
-| scope | select | No | Simplification scope |
+| Name      | Type   | Required | Description                                          |
+| --------- | ------ | -------- | ---------------------------------------------------- |
+| objective | string | No       | What to simplify; if empty, use current task context |
+| domain    | select | No       | Task domain                                          |
+| scope     | select | No       | Simplification scope                                 |
 
 ## Guidance
 

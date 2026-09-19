@@ -6,16 +6,11 @@ function isSourceCheckout(rootDir) {
 }
 
 function getNpmInstallModeArgs(rootDir) {
-  return isSourceCheckout(rootDir)
-    ? ["--include=dev"]
-    : ["--omit=dev", "--package-lock=false"];
+  return isSourceCheckout(rootDir) ? ["--include=dev"] : ["--omit=dev", "--package-lock=false"];
 }
 
 function getRuntimeDependencyRepairArgs(rootDir, missingSpecs) {
-  return [
-    ...getNpmInstallModeArgs(rootDir),
-    ...(isSourceCheckout(rootDir) ? [] : missingSpecs),
-  ];
+  return [...getNpmInstallModeArgs(rootDir), ...(isSourceCheckout(rootDir) ? [] : missingSpecs)];
 }
 
 module.exports = {

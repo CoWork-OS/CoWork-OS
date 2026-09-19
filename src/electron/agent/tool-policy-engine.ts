@@ -11,6 +11,7 @@ import {
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
 } from "../../shared/human-input-policy";
+import { isCanonicalWriteToolName } from "./tool-semantics";
 
 export type ToolLane =
   | "core"
@@ -610,6 +611,12 @@ function isMutatingGitTool(toolName: string): boolean {
 }
 
 function isMutatingTool(toolName: string): boolean {
+  // Canonical taxonomy first, so this classifier cannot disagree with
+  // TOOL_GROUPS. ALWAYS_MUTATING and MUTATING_PREFIXES are hand-maintained and
+  // missed several group:write tools (organize_folder, compile_latex,
+  // monty_transform_file, batch_image_process, scratchpad_write), which let
+  // them through applyModeGate in Plan mode.
+  if (isCanonicalWriteToolName(toolName)) return true;
   if (ALWAYS_MUTATING.has(toolName)) return true;
   if (isMutatingGitTool(toolName)) return true;
   if (toolName.endsWith("_action")) return true;

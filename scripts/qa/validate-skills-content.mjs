@@ -29,7 +29,10 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const result = validateSkillsContent({ skillsDir: args.skillsDir, enforcePaths: args.enforcePaths });
+const result = validateSkillsContent({
+  skillsDir: args.skillsDir,
+  enforcePaths: args.enforcePaths,
+});
 printValidationSummary(result);
 
 if (result.errors.length > 0) {

@@ -37,12 +37,12 @@ Generate JSDoc/docstrings for functions
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the file to document |
-| style | select | Yes | Documentation style |
+| Name  | Type   | Required | Description                  |
+| ----- | ------ | -------- | ---------------------------- |
+| path  | string | Yes      | Path to the file to document |
+| style | select | Yes      | Documentation style          |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 523 characters.
-- Runtime prompt is defined directly in `../add-documentation.json`. 
+- Runtime prompt is defined directly in `../add-documentation.json`.

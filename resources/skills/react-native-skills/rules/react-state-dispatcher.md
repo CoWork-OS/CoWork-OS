@@ -15,29 +15,29 @@ latest value.
 **Incorrect (reads state directly):**
 
 ```tsx
-const [size, setSize] = useState<Size | undefined>(undefined)
+const [size, setSize] = useState<Size | undefined>(undefined);
 
 const onLayout = (e: LayoutChangeEvent) => {
-  const { width, height } = e.nativeEvent.layout
+  const { width, height } = e.nativeEvent.layout;
   // size may be stale in this closure
   if (size?.width !== width || size?.height !== height) {
-    setSize({ width, height })
+    setSize({ width, height });
   }
-}
+};
 ```
 
 **Correct (dispatch updater):**
 
 ```tsx
-const [size, setSize] = useState<Size | undefined>(undefined)
+const [size, setSize] = useState<Size | undefined>(undefined);
 
 const onLayout = (e: LayoutChangeEvent) => {
-  const { width, height } = e.nativeEvent.layout
+  const { width, height } = e.nativeEvent.layout;
   setSize((prev) => {
-    if (prev?.width === width && prev?.height === height) return prev
-    return { width, height }
-  })
-}
+    if (prev?.width === width && prev?.height === height) return prev;
+    return { width, height };
+  });
+};
 ```
 
 Returning the previous value from the updater skips the re-render.
@@ -48,23 +48,23 @@ re-render.
 **Incorrect (unnecessary comparison for primitive state):**
 
 ```tsx
-const [size, setSize] = useState<Size | undefined>(undefined)
+const [size, setSize] = useState<Size | undefined>(undefined);
 
 const onLayout = (e: LayoutChangeEvent) => {
-  const { width, height } = e.nativeEvent.layout
-  setSize((prev) => (prev === width ? prev : width))
-}
+  const { width, height } = e.nativeEvent.layout;
+  setSize((prev) => (prev === width ? prev : width));
+};
 ```
 
 **Correct (sets primitive state directly):**
 
 ```tsx
-const [size, setSize] = useState<Size | undefined>(undefined)
+const [size, setSize] = useState<Size | undefined>(undefined);
 
 const onLayout = (e: LayoutChangeEvent) => {
-  const { width, height } = e.nativeEvent.layout
-  setSize(width)
-}
+  const { width, height } = e.nativeEvent.layout;
+  setSize(width);
+};
 ```
 
 However, if the next state depends on the current state, you should still use a
@@ -73,19 +73,19 @@ dispatch updater.
 **Incorrect (reads state directly from the callback):**
 
 ```tsx
-const [count, setCount] = useState(0)
+const [count, setCount] = useState(0);
 
 const onTap = () => {
-  setCount(count + 1)
-}
+  setCount(count + 1);
+};
 ```
 
 **Correct (dispatch updater):**
 
 ```tsx
-const [count, setCount] = useState(0)
+const [count, setCount] = useState(0);
 
 const onTap = () => {
-  setCount((prev) => prev + 1)
-}
+  setCount((prev) => prev + 1);
+};
 ```

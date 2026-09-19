@@ -1,13 +1,13 @@
 {
   "name": "@cowork-os/finance-data-mcp",
   "version": "0.1.0",
-  "description": "Shared read-only finance data MCP connector presets for CoWork OS.",
   "private": true,
+  "description": "Shared read-only finance data MCP connector presets for CoWork OS.",
+  "license": "MIT",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
-  "license": "MIT",
   "devDependencies": {
     "typescript": "^5.9.3"
   }

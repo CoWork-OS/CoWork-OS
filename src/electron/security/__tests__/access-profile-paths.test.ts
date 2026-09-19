@@ -3,9 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  authorizeToolActionWithFallback,
+  assertWorkspaceReadableFileAccessWithApproval,
+  canonicalizeAccessPath,
   evaluateWorkspaceFilesystemAccess,
   isAccessPathWithin,
   resolveWorkspaceFilesystemAccessWithApproval,
+  resolveWorkspaceFilesystemAccessesWithApproval,
 } from "../access-profile-paths";
 import type { Workspace } from "../../../shared/types";
 
@@ -109,6 +113,197 @@ describe("workspace access-profile path evaluation", () => {
 
     expect(result).toMatchObject({ decision: "allow", reason: "external_approval" });
     expect(requests).toEqual([{ path: externalFile, operation: "write" }]);
+  });
+
+  it("uses one scoped request for a multi-path external filesystem operation", async () => {
+    const workspace = makeWorkspace({ isTemp: false });
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-access-external-"));
+    cleanupPaths.push(externalRoot);
+    const source = path.join(externalRoot, "source.txt");
+    const destination = path.join(externalRoot, "destination.txt");
+    fs.writeFileSync(source, "source", "utf8");
+    const canonicalSource = canonicalizeAccessPath(source);
+    const canonicalDestination = canonicalizeAccessPath(destination);
+    const requests: Array<{
+      path: string;
+      paths?: string[];
+      pathOperations?: Array<{ path: string; operation: string }>;
+    }> = [];
+
+    const results = await resolveWorkspaceFilesystemAccessesWithApproval(
+      workspace,
+      [
+        { rawPath: source, operation: "read", label: "source file" },
+        { rawPath: destination, operation: "write", label: "destination file" },
+      ],
+      {
+        request: async (request) => {
+          requests.push(request);
+          return true;
+        },
+      },
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.decision === "allow")).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      path: canonicalSource,
+      paths: [canonicalSource, canonicalDestination],
+      pathOperations: [
+        { path: canonicalSource, operation: "read" },
+        { path: canonicalDestination, operation: "write" },
+      ],
+    });
+  });
+
+  it("rejects an external target rebound to another canonical file while approval is pending", async () => {
+    const workspace = makeWorkspace({ isTemp: false });
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-access-rebind-"));
+    cleanupPaths.push(externalRoot);
+    const candidate = path.join(externalRoot, "candidate.txt");
+    const replacement = path.join(externalRoot, "replacement.txt");
+    fs.writeFileSync(candidate, "candidate", "utf8");
+    fs.writeFileSync(replacement, "replacement", "utf8");
+
+    const result = await resolveWorkspaceFilesystemAccessWithApproval(
+      workspace,
+      candidate,
+      "read",
+      "external file",
+      {
+        request: async () => {
+          fs.unlinkSync(candidate);
+          fs.symlinkSync(replacement, candidate);
+          return true;
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      decision: "deny",
+      reason: "path_changed_after_approval",
+      externalApprovalGranted: false,
+    });
+  });
+
+  it("rechecks internal targets while a different external path awaits approval", async () => {
+    const workspace = makeWorkspace({ isTemp: false });
+    const internal = path.join(workspace.path, "internal.txt");
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-access-rebind-"));
+    cleanupPaths.push(externalRoot);
+    const replacement = path.join(externalRoot, "replacement.txt");
+    const externalDestination = path.join(externalRoot, "destination.txt");
+    fs.writeFileSync(internal, "internal", "utf8");
+    fs.writeFileSync(replacement, "replacement", "utf8");
+
+    const results = await resolveWorkspaceFilesystemAccessesWithApproval(
+      workspace,
+      [
+        { rawPath: internal, operation: "read", label: "internal file" },
+        { rawPath: externalDestination, operation: "write", label: "external destination" },
+      ],
+      {
+        request: async () => {
+          fs.unlinkSync(internal);
+          fs.symlinkSync(replacement, internal);
+          return true;
+        },
+      },
+    );
+
+    expect(results[0]).toMatchObject({
+      decision: "deny",
+      reason: "path_changed_after_approval",
+      externalApprovalGranted: false,
+    });
+  });
+
+  it("rejects a readable file whose canonical target changes during approval", async () => {
+    const workspace = makeWorkspace({ isTemp: false });
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-access-rebind-"));
+    cleanupPaths.push(externalRoot);
+    const candidate = path.join(externalRoot, "candidate.txt");
+    const replacement = path.join(externalRoot, "replacement.txt");
+    fs.writeFileSync(candidate, "candidate", "utf8");
+    fs.writeFileSync(replacement, "replacement", "utf8");
+
+    await expect(
+      assertWorkspaceReadableFileAccessWithApproval(workspace, candidate, "external file", {
+        request: async () => {
+          fs.unlinkSync(candidate);
+          fs.symlinkSync(replacement, candidate);
+          return true;
+        },
+      }),
+    ).rejects.toThrow("path_changed_after_approval");
+  });
+
+  it("fails closed without prompting when the legacy policy evaluator denies", async () => {
+    let requestCount = 0;
+    const approved = await authorizeToolActionWithFallback(
+      {
+        evaluateToolPermission: () => ({ decision: "deny" }),
+        requestApproval: async () => {
+          requestCount += 1;
+          return true;
+        },
+      },
+      "task-never",
+      {
+        toolName: "run_command",
+        approvalType: "run_command",
+      },
+    );
+
+    expect(approved).toBe(false);
+    expect(requestCount).toBe(0);
+  });
+
+  it("preserves explicit consent when a legacy evaluator allows the resource", async () => {
+    const requests: unknown[] = [];
+    const allowed = await authorizeToolActionWithFallback(
+      {
+        evaluateToolPermission: () => ({ decision: "allow" }),
+        requestApproval: async (...args: unknown[]) => {
+          requests.push(args);
+          return false;
+        },
+      },
+      "task-consent",
+      {
+        toolName: "delete_file",
+        approvalType: "delete_file",
+        requireExplicitApproval: true,
+      },
+    );
+    expect(allowed).toBe(false);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("preserves explicit consent when auto-approval is disabled", async () => {
+    const requestApproval = vi.fn(async () => false);
+    const allowed = await authorizeToolActionWithFallback(
+      {
+        evaluateToolPermission: () => ({ decision: "allow" }),
+        requestApproval,
+      },
+      "task-consent",
+      {
+        toolName: "delete_file",
+        approvalType: "delete_file",
+        allowAutoApprove: false,
+      },
+    );
+
+    expect(allowed).toBe(false);
+    expect(requestApproval).toHaveBeenCalledWith(
+      "task-consent",
+      "delete_file",
+      expect.any(String),
+      {},
+      expect.objectContaining({ allowAutoApprove: false }),
+    );
   });
 
   it("does not turn a profile deny into an approval prompt", async () => {
@@ -219,5 +414,116 @@ describe("workspace access-profile path evaluation", () => {
       externalApprovalGranted: false,
     });
     expect(requestCount).toBe(0);
+  });
+});
+
+describe("protected in-workspace paths", () => {
+  const protectedTargets = [
+    [".cowork/policy/permissions.json", "permission mirror"],
+    [".cowork/policy/tools.monty", "tool-policy script"],
+    [".cowork/policy", "policy directory itself"],
+    [".git/hooks/pre-commit", "git hook"],
+    [".git/config", "git config"],
+    ["vendor/dep/.git/hooks/pre-commit", "nested repository hook"],
+  ] as const;
+
+  for (const [relative, label] of protectedTargets) {
+    it(`denies writes to the ${label}`, () => {
+      const workspace = makeWorkspace();
+      const target = path.join(workspace.path, relative);
+
+      expect(evaluateWorkspaceFilesystemAccess(workspace, target, "write")).toMatchObject({
+        decision: "deny",
+        reason: "protected_path",
+      });
+    });
+
+    it(`denies deletes of the ${label}`, () => {
+      const workspace = makeWorkspace({
+        permissions: {
+          read: true,
+          write: true,
+          delete: true,
+          shell: false,
+          network: false,
+          unrestrictedFileAccess: true,
+          allowedPaths: [],
+        },
+      });
+      const target = path.join(workspace.path, relative);
+
+      expect(evaluateWorkspaceFilesystemAccess(workspace, target, "delete")).toMatchObject({
+        decision: "deny",
+        reason: "protected_path",
+      });
+    });
+
+    it(`still allows reads of the ${label}`, () => {
+      const workspace = makeWorkspace();
+      const target = path.join(workspace.path, relative);
+
+      expect(evaluateWorkspaceFilesystemAccess(workspace, target, "read").decision).toBe("allow");
+    });
+  }
+
+  it("matches protected segments case-insensitively", () => {
+    const workspace = makeWorkspace();
+    const target = path.join(workspace.path, ".GIT", "hooks", "pre-commit");
+
+    expect(evaluateWorkspaceFilesystemAccess(workspace, target, "write")).toMatchObject({
+      decision: "deny",
+      reason: "protected_path",
+    });
+  });
+
+  it("denies a write laundered through a symlink into .git", () => {
+    const workspace = makeWorkspace();
+    fs.mkdirSync(path.join(workspace.path, ".git", "hooks"), { recursive: true });
+    const link = path.join(workspace.path, "innocent");
+    fs.symlinkSync(path.join(workspace.path, ".git", "hooks"), link, "dir");
+
+    expect(
+      evaluateWorkspaceFilesystemAccess(workspace, path.join(link, "pre-commit"), "write"),
+    ).toMatchObject({ decision: "deny", reason: "protected_path" });
+  });
+
+  it("allows writing .git/info/exclude, which CoWork maintains itself", () => {
+    const workspace = makeWorkspace();
+    const target = path.join(workspace.path, ".git", "info", "exclude");
+
+    expect(evaluateWorkspaceFilesystemAccess(workspace, target, "write").decision).toBe("allow");
+  });
+
+  it("keeps the .git/info/exclude carve-out to that exact path", () => {
+    const workspace = makeWorkspace();
+
+    for (const relative of [
+      ".git/info/exclude-evil",
+      ".git/info/exclude/nested",
+      ".git/info/config",
+      ".git/info",
+    ]) {
+      expect(
+        evaluateWorkspaceFilesystemAccess(workspace, path.join(workspace.path, relative), "write"),
+      ).toMatchObject({ decision: "deny", reason: "protected_path" });
+    }
+  });
+
+  it("does not over-match ordinary workspace paths", () => {
+    const workspace = makeWorkspace();
+
+    for (const relative of [
+      ".cowork/tmp/scratch.txt",
+      ".cowork/automated-outputs/report.md",
+      ".github/workflows/ci.yml",
+      "src/.gitignore",
+      "gitignore-notes.md",
+      "policy/notes.md",
+    ]) {
+      expect(
+        evaluateWorkspaceFilesystemAccess(workspace, path.join(workspace.path, relative), "write")
+          .decision,
+      ).toBe("allow");
+    }
   });
 });

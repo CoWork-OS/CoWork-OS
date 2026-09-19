@@ -61,7 +61,14 @@ const DEFAULT_BRIDGE_URL = "http://127.0.0.1:17641";
 const CONNECTOR = "rhino";
 const DEFAULT_BRIDGE_TIMEOUT_MS = 120_000;
 const HEALTH_TIMEOUT_MS = 5_000;
-const PATH_FIELD_NAMES = new Set(["filePath", "imagePath", "modelPath", "outputPath", "projectPath", "scenePath"]);
+const PATH_FIELD_NAMES = new Set([
+  "filePath",
+  "imagePath",
+  "modelPath",
+  "outputPath",
+  "projectPath",
+  "scenePath",
+]);
 
 const MCP_METHODS = {
   INITIALIZE: "initialize",
@@ -90,7 +97,11 @@ class StdioMCPServer {
   ) {}
 
   start(): void {
-    this.rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+    this.rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: false,
+    });
     this.rl.on("line", (line) => this.handleLine(line));
     this.rl.on("close", () => this.stop());
     process.on("SIGINT", () => this.stop());
@@ -143,11 +154,19 @@ class StdioMCPServer {
           setImmediate(() => this.stop());
           break;
         default:
-          throw { code: MCP_ERROR_CODES.METHOD_NOT_FOUND, message: `Method not found: ${request.method}` };
+          throw {
+            code: MCP_ERROR_CODES.METHOD_NOT_FOUND,
+            message: `Method not found: ${request.method}`,
+          };
       }
       this.sendResult(request.id, result);
     } catch (error: any) {
-      this.sendError(request.id, error?.code || MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error", error?.data);
+      this.sendError(
+        request.id,
+        error?.code || MCP_ERROR_CODES.INTERNAL_ERROR,
+        error?.message || "Internal error",
+        error?.data,
+      );
     }
   }
 
@@ -155,9 +174,18 @@ class StdioMCPServer {
     if (notification.method === MCP_METHODS.INITIALIZED) this.initialized = true;
   }
 
-  private handleInitialize(): { protocolVersion: string; capabilities: MCPServerInfo["capabilities"]; serverInfo: MCPServerInfo } {
-    if (this.initialized) throw { code: MCP_ERROR_CODES.INVALID_REQUEST, message: "Already initialized" };
-    return { protocolVersion: PROTOCOL_VERSION, capabilities: this.serverInfo.capabilities, serverInfo: this.serverInfo };
+  private handleInitialize(): {
+    protocolVersion: string;
+    capabilities: MCPServerInfo["capabilities"];
+    serverInfo: MCPServerInfo;
+  } {
+    if (this.initialized)
+      throw { code: MCP_ERROR_CODES.INVALID_REQUEST, message: "Already initialized" };
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: this.serverInfo.capabilities,
+      serverInfo: this.serverInfo,
+    };
   }
 
   private async handleToolsCall(params: any): Promise<any> {
@@ -167,12 +195,16 @@ class StdioMCPServer {
       const result = await this.toolProvider.executeTool(name, args || {});
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (error: any) {
-      return { content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }], isError: true };
+      return {
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
+        isError: true,
+      };
     }
   }
 
   private requireInitialized(): void {
-    if (!this.initialized) throw { code: MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, message: "Server not initialized" };
+    if (!this.initialized)
+      throw { code: MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, message: "Server not initialized" };
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
@@ -214,7 +246,9 @@ function bridgeTimeoutMs(endpoint: string): number {
 function projectRoot(): string {
   const raw = process.env.COWORK_ARCH_PROJECT_ROOT || process.env.COWORK_WORKSPACE_ROOT || "";
   if (!raw.trim()) {
-    throw new Error("COWORK_ARCH_PROJECT_ROOT or COWORK_WORKSPACE_ROOT is required for Rhino file path tools.");
+    throw new Error(
+      "COWORK_ARCH_PROJECT_ROOT or COWORK_WORKSPACE_ROOT is required for Rhino file path tools.",
+    );
   }
   return path.resolve(raw);
 }
@@ -237,9 +271,10 @@ function normalizePathArgs(value: unknown, keyName = ""): unknown {
   if (!value || typeof value !== "object") return value;
   const next: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    next[key] = PATH_FIELD_NAMES.has(key) || /(?:Path|Dir|Directory)$/.test(key)
-      ? normalizeProjectPath(item, key)
-      : normalizePathArgs(item, key);
+    next[key] =
+      PATH_FIELD_NAMES.has(key) || /(?:Path|Dir|Directory)$/.test(key)
+        ? normalizeProjectPath(item, key)
+        : normalizePathArgs(item, key);
   }
   return next;
 }
@@ -290,7 +325,11 @@ function objectSchema(description: string): MCPToolProperty {
 }
 
 const tools: MCPTool[] = [
-  { name: "rhino.health", description: "Check Rhino bridge availability", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+  {
+    name: "rhino.health",
+    description: "Check Rhino bridge availability",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
   {
     name: "rhino.create_project",
     description: "Create a Rhino architecture project workspace",
@@ -329,17 +368,131 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
-  { name: "rhino.read_layers", description: "Read Rhino layer/object summary", inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"], additionalProperties: false } },
-  { name: "rhino.create_site_terrain", description: "Create terrain/topography from site parameters", inputSchema: { type: "object", properties: { projectId: { type: "string" }, terrain: objectSchema("Terrain parameters") }, required: ["projectId", "terrain"], additionalProperties: false } },
-  { name: "rhino.create_setback_curves", description: "Create zoning/setback curves", inputSchema: { type: "object", properties: { projectId: { type: "string" }, setbacks: objectSchema("Setback definitions") }, required: ["projectId", "setbacks"], additionalProperties: false } },
-  { name: "rhino.generate_massing", description: "Generate building massing from the brief and constraints", inputSchema: { type: "object", properties: { projectId: { type: "string" }, brief: objectSchema("Architecture brief"), constraints: objectSchema("Site and zoning constraints") }, required: ["projectId", "brief"], additionalProperties: false } },
-  { name: "rhino.generate_floor_plan", description: "Generate floor plan rooms, circulation, and labels", inputSchema: { type: "object", properties: { projectId: { type: "string" }, floors: { type: "number" }, program: objectSchema("Room program") }, required: ["projectId", "program"], additionalProperties: false } },
-  { name: "rhino.place_doors_windows", description: "Place doors/windows/openings in the active model", inputSchema: { type: "object", properties: { projectId: { type: "string" }, openings: objectSchema("Opening placement parameters") }, required: ["projectId"], additionalProperties: false } },
-  { name: "rhino.place_pool", description: "Place or revise pool geometry", inputSchema: { type: "object", properties: { projectId: { type: "string" }, pool: objectSchema("Pool parameters") }, required: ["projectId", "pool"], additionalProperties: false } },
-  { name: "rhino.validate_model", description: "Validate layer, geometry, and architectural constraints", inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"], additionalProperties: false } },
-  { name: "rhino.export_model", description: "Export model for Blender or delivery", inputSchema: { type: "object", properties: { projectId: { type: "string" }, outputPath: { type: "string" }, format: { type: "string", enum: ["3dm", "obj", "fbx", "glb", "usd"] } }, required: ["projectId", "outputPath", "format"], additionalProperties: false } },
-  { name: "rhino.capture_viewport", description: "Capture the active Rhino viewport to an image", inputSchema: { type: "object", properties: { projectId: { type: "string" }, outputPath: { type: "string" } }, required: ["projectId", "outputPath"], additionalProperties: false } },
-  { name: "rhino.save_project", description: "Save the active Rhino project", inputSchema: { type: "object", properties: { projectId: { type: "string" }, filePath: { type: "string" } }, required: ["projectId"], additionalProperties: false } },
+  {
+    name: "rhino.read_layers",
+    description: "Read Rhino layer/object summary",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" } },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.create_site_terrain",
+    description: "Create terrain/topography from site parameters",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, terrain: objectSchema("Terrain parameters") },
+      required: ["projectId", "terrain"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.create_setback_curves",
+    description: "Create zoning/setback curves",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, setbacks: objectSchema("Setback definitions") },
+      required: ["projectId", "setbacks"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.generate_massing",
+    description: "Generate building massing from the brief and constraints",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        brief: objectSchema("Architecture brief"),
+        constraints: objectSchema("Site and zoning constraints"),
+      },
+      required: ["projectId", "brief"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.generate_floor_plan",
+    description: "Generate floor plan rooms, circulation, and labels",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        floors: { type: "number" },
+        program: objectSchema("Room program"),
+      },
+      required: ["projectId", "program"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.place_doors_windows",
+    description: "Place doors/windows/openings in the active model",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        openings: objectSchema("Opening placement parameters"),
+      },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.place_pool",
+    description: "Place or revise pool geometry",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, pool: objectSchema("Pool parameters") },
+      required: ["projectId", "pool"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.validate_model",
+    description: "Validate layer, geometry, and architectural constraints",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" } },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.export_model",
+    description: "Export model for Blender or delivery",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        outputPath: { type: "string" },
+        format: { type: "string", enum: ["3dm", "obj", "fbx", "glb", "usd"] },
+      },
+      required: ["projectId", "outputPath", "format"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.capture_viewport",
+    description: "Capture the active Rhino viewport to an image",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, outputPath: { type: "string" } },
+      required: ["projectId", "outputPath"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rhino.save_project",
+    description: "Save the active Rhino project",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, filePath: { type: "string" } },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
+  },
 ];
 const DECLARED_TOOL_NAMES = new Set(tools.map((tool) => tool.name));
 
@@ -348,7 +501,13 @@ async function health(): Promise<any> {
     const data = await requestBridge("health");
     return { ok: true, connector: CONNECTOR, bridgeUrl: bridgeBaseUrl(), bridge: data };
   } catch (error: any) {
-    return { ok: false, connector: CONNECTOR, bridgeUrl: safeBridgeBaseUrl(), status: "unavailable", error: error?.message || String(error) };
+    return {
+      ok: false,
+      connector: CONNECTOR,
+      bridgeUrl: safeBridgeBaseUrl(),
+      status: "unavailable",
+      error: error?.message || String(error),
+    };
   }
 }
 

@@ -37,11 +37,11 @@ Load a CSV and provide insights
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the CSV file |
+| Name | Type   | Required | Description          |
+| ---- | ------ | -------- | -------------------- |
+| path | string | Yes      | Path to the CSV file |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 499 characters.
-- Runtime prompt is defined directly in `../analyze-csv.json`. 
+- Runtime prompt is defined directly in `../analyze-csv.json`.

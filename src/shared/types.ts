@@ -20,6 +20,13 @@ export type AccentColor =
 export const UI_DENSITIES = ["focused", "full", "power"] as const;
 export type UiDensity = (typeof UI_DENSITIES)[number];
 export type TimelineVerbosity = "summary" | "verbose";
+/**
+ * How shell command output is rendered in the step feed.
+ * "terminal" = classic window with traffic lights and a fixed-height scrollback.
+ * "minimal"  = compact single-line command with collapsible output.
+ */
+export const COMMAND_OUTPUT_STYLES = ["terminal", "minimal"] as const;
+export type CommandOutputStyle = (typeof COMMAND_OUTPUT_STYLES)[number];
 
 export interface AppearanceSettings {
   themeMode: ThemeMode;
@@ -28,6 +35,7 @@ export interface AppearanceSettings {
   transparencyEffectsEnabled?: boolean;
   uiDensity?: UiDensity;
   timelineVerbosity?: TimelineVerbosity;
+  commandOutputStyle?: CommandOutputStyle;
   devRunLoggingEnabled?: boolean; // Persist npm run dev stdout/stderr to logs/
   homeResearchVaultEnabled?: boolean;
   homeNextActionsEnabled?: boolean;
@@ -94,7 +102,7 @@ export interface MemoryFeaturesSettings {
   topicMemoryEnabled?: boolean;
   /** Keep legacy archive memory out of default prompt injection. */
   defaultArchiveInjectionEnabled?: boolean;
-  /** Require approval before durable memory writes are committed. */
+  /** Optional review mode for durable memory writes; normal no-prompt runs commit immediately. */
   memoryWriteApprovalMode?: "off" | "curated_only" | "external_only" | "background_only" | "all";
   /** Promote only explicit/high-signal facts into curated memory. */
   autoPromoteToCuratedMemoryEnabled?: boolean;
@@ -847,12 +855,20 @@ export type EventType =
   // LLM usage tracking (tokens/cost)
   | "llm_usage"
   | "llm_error"
+  // Persisted Jev decision telemetry (hidden from the primary renderer timeline)
+  | "jev_decision"
   // Real-time streaming progress (ephemeral, not persisted to DB)
   | "llm_streaming"
   // Sub-Agent / Parallel Agent events
   | "agent_spawned" // Parent spawned a child agent
+  | "agent_spawn_requested" // Parent requested a child agent; dispatch is not confirmed yet
   | "agent_completed" // Child agent completed successfully
   | "agent_failed" // Child agent failed
+  | "agent_message" // A human or agent sent a message to another task
+  | "agent_follow_up_scheduled" // A queued follow-up was accepted for a later turn
+  | "agent_follow_up_started" // A queued follow-up was incorporated at a turn boundary
+  | "agent_interrupt_requested" // A user or controller requested interruption
+  | "agent_interrupt_confirmed" // The runtime confirmed interruption
   | "sub_agent_result" // Result summary from child agent
   // Unified orchestration graph events
   | "orchestration_run_created"
@@ -1151,6 +1167,7 @@ export type ToolPolicyStage =
   | "workspace_script"
   | "agent_security"
   | "permissions"
+  | "semantic_review"
   | "approval";
 
 export type ToolPolicyStageDecision = "allow" | "defer" | "deny" | "require_approval" | "skip";
@@ -1399,8 +1416,38 @@ export interface PersistedPermissionRule extends PermissionRule {
   workspaceId?: string;
 }
 
+/**
+ * The durable representation kept with migrated permission settings.  The
+ * previous value is intentionally bounded to the policy fields that existed
+ * before the access-profile migration so a failed rollout can be diagnosed or
+ * restored without replaying arbitrary renderer input.
+ */
+export interface PermissionSettingsMigrationSnapshot {
+  version: number;
+  defaultMode?: PermissionMode;
+  defaultShellEnabled?: boolean;
+  defaultPermissionAccess?: "default" | "full";
+  defaultAccessProfileId?: AccessProfileId;
+  accessProfiles?: AccessProfileDefinition[];
+  rules?: PermissionRule[];
+}
+
+export interface PermissionSettingsMigration {
+  version: 2;
+  sourceVersion: number;
+  migratedAt: number;
+  previous: PermissionSettingsMigrationSnapshot;
+  /** How the new default was selected; useful for safe rollback/auditing. */
+  defaultProvenance:
+    | "existing_profile"
+    | "legacy_mode"
+    | "legacy_full_access"
+    | "fail_closed_unknown_profile";
+}
+
 export interface PermissionSettingsData {
-  version: 1;
+  /** Version 1 remains accepted at the IPC boundary for older renderers. */
+  version: 1 | 2;
   defaultMode: PermissionMode;
   /** @deprecated Legacy workspace baseline; command tools are profile-controlled. */
   defaultShellEnabled: boolean;
@@ -1410,6 +1457,8 @@ export interface PermissionSettingsData {
   /** User-defined named access profiles. Built-ins are always available. */
   accessProfiles?: AccessProfileDefinition[];
   rules: PermissionRule[];
+  /** Present after the one-time v1 -> v2 migration. */
+  migration?: PermissionSettingsMigration;
 }
 
 export type ToolResultEnvelopeStatus =
@@ -2251,6 +2300,8 @@ export interface AgentConfig {
   chronicleMode?: ChronicleTaskMode;
   /** @deprecated Legacy task capability override; prefer accessProfileId. */
   shellAccess?: boolean;
+  /** Internal daemon-only contract for child helpers that must remain read-only. */
+  readOnlyExecution?: boolean;
   /** Require git worktree isolation for this task and fail fast if unavailable. */
   requireWorktree?: boolean;
   /**
@@ -2282,15 +2333,16 @@ export interface AgentConfig {
   conversationMode?: ConversationMode;
   /** Dedicated bot conversation surface: persistent identity, message-only transcript. */
   botConversation?: boolean;
+  /** Workspace-scoped persistent bot team used for verified peer messaging. */
+  botTeamId?: string;
   /**
    * Execution mode gate:
    * - execute: tools may mutate state (default)
    * - plan: planning/read-only guidance, no mutating tools
    * - analyze: strict analysis/read-only mode
    */
-  executionMode?: ExecutionMode;
-  /** Simplified user-facing interaction mode. */
   interactionMode?: import("./interaction-mode").InteractionModeSelection;
+  executionMode?: ExecutionMode;
   /** Source of the current execution mode selection. */
   executionModeSource?: ExecutionModeSource;
   /**
@@ -2531,6 +2583,8 @@ export interface Task {
   comparisonSessionId?: string; // If this task is part of a comparison session
   // Session lineage fields
   sessionId?: string; // Stable lineage/session identifier shared across continued tasks
+  /** True when the task's shared session metadata is archived. */
+  sessionArchived?: boolean;
   branchFromTaskId?: string; // Parent task used as the branch origin
   branchFromEventId?: string; // Specific event to branch from when forking a session
   branchLabel?: string; // Human label for the branch shown in UI/debug surfaces
@@ -3204,6 +3258,8 @@ export interface QuotedAssistantMessage {
 
 /** Follow-up payload sent to an existing task. */
 export interface TaskFollowUpInput {
+  /** Captured user preference, applied at a turn boundary. */
+  interactionMode?: import("./interaction-mode").InteractionModeSelection;
   message: string;
   /** Optional optimistic-concurrency guard for steering the active turn. */
   expectedTurnId?: string;
@@ -3218,9 +3274,51 @@ export interface TaskFollowUpInput {
    * permissionMode/shellAccess, this must not be written back to the task.
    */
   agentConfigOverride?: AgentConfig;
-  /** Captured user preference, applied at a turn boundary. */
-  interactionMode?: import("./interaction-mode").InteractionModeSelection;
   integrationMentions?: IntegrationMentionSelection[];
+  /**
+   * Controls whether this input only queues a message or starts/continues a
+   * worker turn. Existing callers omit this and retain follow-up behavior.
+   */
+  deliveryMode?: "message" | "follow_up";
+  /** Internal provenance for messages sent between parent and child tasks. */
+  messageSource?: "user" | "agent";
+  /** Stable ID used to correlate an agent message with its delivery event. */
+  messageId?: string;
+  /** Parent/agent task that authored an agent message. */
+  senderTaskId?: string;
+  senderLabel?: string;
+}
+
+export type AgentMessageDeliveryStatus = "accepted" | "queued" | "delivered" | "failed";
+
+export interface AgentMessageSendResult {
+  queued: boolean;
+  duplicate?: boolean;
+  messageId?: string;
+  deliveryMode?: "message" | "follow_up";
+  deliveryStatus?: AgentMessageDeliveryStatus;
+  acceptedAt?: number;
+  queuedAt?: number;
+  deliveredAt?: number;
+}
+
+export interface AgentMessagePayload {
+  messageId: string;
+  targetTaskId: string;
+  message: string;
+  status: AgentMessageDeliveryStatus;
+  senderType: "human" | "agent";
+  senderTaskId?: string;
+  senderLabel?: string;
+  recipientLabel?: string;
+  duplicate?: boolean;
+  deliveryMode?: "message" | "follow_up";
+  correlationId?: string;
+  acceptedAt?: number;
+  queuedAt?: number;
+  deliveredAt?: number;
+  failedAt?: number;
+  error?: string;
 }
 
 export interface TaskEvent {
@@ -4013,6 +4111,9 @@ export interface TaskStatusStripViewModel {
   verificationLabel?: string;
   blockingLabel?: string;
   blockingEventId?: string;
+  newActivityCount?: number;
+  hasUnreadActivity?: boolean;
+  latestActivityId?: string;
   updatedAt: number;
 }
 
@@ -4346,7 +4447,7 @@ export interface EvalSuite {
 export interface EvalRun {
   id: string;
   suiteId: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "skipped";
   startedAt: number;
   completedAt?: number;
   passCount: number;
@@ -4420,6 +4521,30 @@ export interface TaskExportJson {
   exportedAt: number;
   query: TaskExportQuery;
   tasks: TaskExportItem[];
+}
+
+/** Query used by the bot workspace/history surface. */
+export interface BotConversationListQuery {
+  workspaceId: string;
+  /** Include bot transcripts from prior temporary UI workspaces. */
+  includeAllWorkspaces?: boolean;
+  agentRoleId?: string;
+  includeArchivedSessions?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface BotNotificationPolicy {
+  agentRoleId: string;
+  onFinish: boolean;
+  onInputRequired: boolean;
+  updatedAt: number;
+}
+
+export interface UpdateBotNotificationPolicyRequest {
+  agentRoleId: string;
+  onFinish?: boolean;
+  onInputRequired?: boolean;
 }
 
 export interface Artifact {
@@ -8428,6 +8553,14 @@ export const IPC_CHANNELS = {
   TASK_GET: "task:get",
   TASK_LIST: "task:list",
   TASK_LIST_SIDEBAR: "task:listSidebar",
+  BOT_CONVERSATIONS_LIST: "bot:conversationsList",
+  COMPOSER_DRAFT_GET: "composerDraft:get",
+  COMPOSER_DRAFT_UPSERT: "composerDraft:upsert",
+  COMPOSER_DRAFT_CLEAR: "composerDraft:clear",
+  COMPOSER_DRAFT_REKEY: "composerDraft:rekey",
+  COMPOSER_DRAFT_ATTACHMENT_PUT: "composerDraftAttachment:put",
+  COMPOSER_DRAFT_ATTACHMENT_RESOLVE: "composerDraftAttachment:resolve",
+  COMPOSER_DRAFT_ATTACHMENT_RELEASE: "composerDraftAttachment:release",
   TASK_TIMELINE_PAGE: "task:timelinePage",
   TASK_EVENT_DETAIL: "task:eventDetail",
   SESSION_PROGRESS_GET: "session:progressGet",
@@ -8578,6 +8711,8 @@ export const IPC_CHANNELS = {
   AGENT_ROLE_GET_DEFAULTS: "agentRole:getDefaults",
   AGENT_ROLE_SEED_DEFAULTS: "agentRole:seedDefaults",
   AGENT_ROLE_SYNC_DEFAULTS: "agentRole:syncDefaults",
+  BOT_NOTIFICATION_GET: "bot:notificationGet",
+  BOT_NOTIFICATION_UPDATE: "bot:notificationUpdate",
 
   // Activity Feed
   ACTIVITY_LIST: "activity:list",
@@ -8946,6 +9081,7 @@ export const IPC_CHANNELS = {
   LLM_GET_GEMINI_MODELS: "llm:getGeminiModels",
   LLM_GET_OPENROUTER_MODELS: "llm:getOpenRouterModels",
   LLM_GET_OPENROUTER_IMAGE_MODELS: "llm:getOpenRouterImageModels",
+  JEV_TEST_PROVIDER: "jev:testProvider",
   LLM_GET_DEEPSEEK_MODELS: "llm:getDeepSeekModels",
   LLM_GET_OPENAI_MODELS: "llm:getOpenAIModels",
   LLM_GET_GROQ_MODELS: "llm:getGroqModels",
@@ -8963,6 +9099,7 @@ export const IPC_CHANNELS = {
   LOCAL_AI_GET_SERVER_STATUS: "localai:getServerStatus",
   LOCAL_AI_GET_SERVER_LOG: "localai:getServerLog",
   LLM_REFRESH_CUSTOM_PROVIDER_MODELS: "llm:refreshCustomProviderModels",
+  LLM_DISCOVER_ATOMIC_CHAT_MODELS: "llm:discoverAtomicChatModels",
   LLM_OPENAI_OAUTH_START: "llm:openaiOAuthStart",
   LLM_OPENAI_OAUTH_LOGOUT: "llm:openaiOAuthLogout",
   LLM_GET_BEDROCK_MODELS: "llm:getBedrockModels",
@@ -9092,6 +9229,13 @@ export const IPC_CHANNELS = {
   APP_UPDATE_DOWNLOADED: "app:updateDownloaded",
   APP_UPDATE_ERROR: "app:updateError",
   SYSTEM_OPEN_SETTINGS: "system:openSettings",
+
+  // CoWork Pulse (explicit opt-in, content-free daily usage aggregates)
+  PULSE_GET_SETTINGS: "pulse:getSettings",
+  PULSE_SET_ENABLED: "pulse:setEnabled",
+  PULSE_RESET_IDENTITY: "pulse:resetIdentity",
+  PULSE_DELETE_REMOTE_DATA: "pulse:deleteRemoteData",
+  PULSE_FLUSH: "pulse:flush",
 
   // Guardrails
   GUARDRAIL_GET_SETTINGS: "guardrail:getSettings",
@@ -9257,6 +9401,7 @@ export const IPC_CHANNELS = {
   NOTIFICATION_DELETE_ALL: "notification:deleteAll",
   NOTIFICATION_EVENT: "notification:event",
   NAVIGATE_TO_TASK: "navigate-to-task",
+  NAVIGATE_TO_BOT_CONVERSATION: "navigate-to-bot-conversation",
 
   // Hooks (Webhooks & Gmail Pub/Sub)
   HOOKS_GET_SETTINGS: "hooks:getSettings",
@@ -9699,6 +9844,7 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "kimi-code",
   "kimi-coding",
   "anthropic-compatible",
+  "atomic-chat",
   "hf-agents",
   "mlx",
 ] as const;
@@ -9739,6 +9885,7 @@ export const MULTI_LLM_PROVIDER_DISPLAY: Record<
     icon: "\u{1F517}",
     color: "#64748b",
   },
+  "atomic-chat": { name: "Atomic Chat", icon: "\u{269B}\uFE0F", color: "#0f766e" },
   moa: { name: "Mixture of Agents", icon: "\u{2699}\uFE0F", color: "#0f766e" },
   "nano-gpt": { name: "NanoGPT", icon: "\u{2728}", color: "#22c55e" },
   opencode: { name: "OpenCode Zen", icon: "\u{1F517}", color: "#111827" },
@@ -9832,12 +9979,67 @@ export interface PromptCachingSettings {
   };
 }
 
+export type JevDecisionProvider = "typesafe" | "openrouter";
+
+export type JevToolReviewMode = "off" | "observe" | "active";
+
+export interface JevProviderSettings {
+  apiKey?: string;
+  /** Renderer-only presence flag; the stored credential itself never leaves the main process. */
+  apiKeyConfigured?: boolean;
+  /** Transient save instruction used to clear a stored credential. */
+  clearApiKey?: boolean;
+  baseUrl?: string;
+  model?: string;
+}
+
+/** Structured-decision settings for TypeSafe Jev and its OpenRouter route. */
+export interface JevSettingsData {
+  enabled?: boolean;
+  provider?: JevDecisionProvider;
+  typesafe?: JevProviderSettings;
+  openrouter?: JevProviderSettings & {
+    /** Reuse the separately stored main OpenRouter credential when enabled. */
+    reuseOpenRouterKey?: boolean;
+  };
+  /** Opt-in use of Jev for structured agent-team selection. */
+  teamSelectionEnabled?: boolean;
+  /** Opt-in use of Jev as a tool-review and harness-decision layer. */
+  harnessEnabled?: boolean;
+  /** Whether the optional harness observes decisions or actively escalates them. */
+  toolReviewMode?: JevToolReviewMode;
+  /** Opt-in adaptive cheap/strong model-profile routing in active harness mode. */
+  modelRoutingEnabled?: boolean;
+  /** Opt-in Jev selection of single-agent, team, multitask, or verification strategy. */
+  adaptiveStrategyEnabled?: boolean;
+  /** Opt-in filtering of browser action batches using the latest snapshot. */
+  browserActionSelectionEnabled?: boolean;
+  /** Opt-in Jev advice at bounded no-progress/loop checkpoints. */
+  loopControlEnabled?: boolean;
+  /** Opt-in Jev retention advice when deterministic context compaction is required. */
+  contextCompactionEnabled?: boolean;
+  /** Opt-in Jev reranking of already-eligible skills and tool families. */
+  skillToolSelectionEnabled?: boolean;
+  /** Opt-in Jev review of candidate final output and trace evidence. */
+  outputGuardrailsEnabled?: boolean;
+  timeoutMs?: number;
+  maxRetries?: number;
+}
+
+/** Transient renderer-to-main-process request for testing Jev settings. */
+export interface JevTestProviderRequest {
+  settings: JevSettingsData;
+  /** The unsaved main OpenRouter key from the adjacent provider settings form. */
+  mainOpenRouterApiKey?: string;
+}
+
 export interface LLMSettingsData {
   providerType: LLMProviderType;
   modelKey: string;
   fallbackProviders?: LLMProviderFallbackConfig[];
   failoverPrimaryRetryCooldownSeconds?: number;
   promptCaching?: PromptCachingSettings;
+  jev?: JevSettingsData;
   anthropic?: {
     apiKey?: string;
     subscriptionToken?: string;
@@ -10049,6 +10251,8 @@ export interface LLMProviderInfo {
 }
 
 export interface LLMModelInfo {
+  /** Active OpenAI access route, used for subscription-specific display labels. */
+  openaiAuthMethod?: "api_key" | "oauth";
   key: string;
   displayName: string;
   description: string;

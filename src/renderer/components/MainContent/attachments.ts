@@ -18,6 +18,9 @@ export type SelectedFileInfo = {
 export type PendingAttachment = SelectedFileInfo & {
   id: string;
   dataBase64?: string;
+  draftRefId?: string;
+  draftSha256?: string;
+  status?: "available" | "unavailable";
 };
 
 export type ImportedAttachment = {

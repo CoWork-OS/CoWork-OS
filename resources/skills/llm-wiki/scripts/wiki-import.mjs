@@ -60,8 +60,7 @@ async function fetchRemoteSource(source) {
   const response = await fetch(source, {
     headers: {
       "user-agent": "cowork-os-llm-wiki-import/1.0",
-      accept:
-        "text/html, text/markdown, text/plain, application/json, image/*;q=0.8, */*;q=0.1",
+      accept: "text/html, text/markdown, text/plain, application/json, image/*;q=0.8, */*;q=0.1",
     },
   });
   if (!response.ok) {
@@ -194,10 +193,7 @@ async function importStructuredSource({ vaultPath, kind, source, title, bodyFile
   const ext = isTextExtension(path.extname(source).toLowerCase())
     ? path.extname(source).toLowerCase()
     : guessTextExtensionFromContentType(fetched.contentType);
-  const body =
-    ext === ".json"
-      ? fetched.bytes.toString("utf8")
-      : fetched.bytes.toString("utf8");
+  const body = ext === ".json" ? fetched.bytes.toString("utf8") : fetched.bytes.toString("utf8");
   const targetPath = writeTextCapture(targetDir, "capture", ext || ".txt", body, {
     ...metadata,
     sourceType: "url",

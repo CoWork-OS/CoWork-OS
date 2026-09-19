@@ -409,6 +409,91 @@ describe("normalizeTaskEvents — agent cards", () => {
       expect(result[0].actor).toBe("Research");
     }
   });
+
+  it("represents delegated lifecycle and message events", () => {
+    resetSeq();
+    const result = normalizeTaskEvents([
+      makeEvent("agent_spawn_requested", { childTaskTitle: "Research" }),
+      makeEvent("agent_message", {
+        recipientLabel: "Research",
+        message: "Check the migration first",
+        status: "queued",
+      }),
+      makeEvent("agent_failed", { childTaskTitle: "Research", error: "timeout" }),
+    ]);
+
+    expect(result[0]).toMatchObject({ kind: "agent", summary: "Starting Research" });
+    expect(result[1]).toMatchObject({
+      kind: "summary",
+      summary: "Messaged Research",
+      status: "running",
+      actionKind: "agent.message",
+    });
+    expect(result[2]).toMatchObject({ kind: "agent", summary: "Research failed", status: "error" });
+  });
+
+  it("uses the persisted delivery status when the legacy status field is absent", () => {
+    resetSeq();
+    const result = normalizeTaskEvents([
+      makeEvent("agent_message", {
+        recipientLabel: "Research",
+        message: "The worker incorporated this instruction",
+        deliveryStatus: "delivered",
+      }),
+    ]);
+
+    expect(result[0]).toMatchObject({
+      kind: "summary",
+      actionKind: "agent.message",
+      status: "success",
+    });
+  });
+
+  it("projects explicit follow-up lifecycle events", () => {
+    resetSeq();
+    const result = normalizeTaskEvents([
+      makeEvent("agent_follow_up_scheduled", {
+        recipientLabel: "Research",
+        deliveryStatus: "queued",
+      }),
+      makeEvent("agent_follow_up_started", {
+        recipientLabel: "Research",
+        deliveryStatus: "delivered",
+      }),
+    ]);
+
+    expect(result[0]).toMatchObject({
+      kind: "summary",
+      summary: "Queued follow-up for Research",
+      status: "running",
+      actionKind: "agent.message",
+    });
+    expect(result[1]).toMatchObject({
+      kind: "summary",
+      summary: "Started follow-up for Research",
+      status: "success",
+      actionKind: "agent.message",
+    });
+  });
+
+  it("projects interruption request and confirmation as agent stop events", () => {
+    resetSeq();
+    const result = normalizeTaskEvents([
+      makeEvent("agent_interrupt_requested", { actor: "user" }),
+      makeEvent("agent_interrupt_confirmed", { actor: "user" }),
+    ]);
+
+    expect(result[0]).toMatchObject({
+      kind: "agent",
+      summary: "Interruption requested",
+      status: "running",
+    });
+    expect(result[1]).toMatchObject({
+      kind: "agent",
+      summary: "Interruption confirmed",
+      status: "success",
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -38,4 +38,4 @@ Monitor blogs and RSS/Atom feeds for updates using the blogwatcher CLI.
 ## Runtime Prompt
 
 - Current runtime prompt length: 832 characters.
-- Runtime prompt is defined directly in `../blogwatcher.json`. 
+- Runtime prompt is defined directly in `../blogwatcher.json`.

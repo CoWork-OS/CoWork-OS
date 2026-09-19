@@ -429,6 +429,10 @@ export function selectVisibleTaskFeedRows(
     const visibleContentRows = visibleRows.filter((row) => row.kind !== "history-control").length;
     return Math.max(0, totalContentRows - visibleContentRows);
   };
+  // The history control stays pinned in every mode: bounded transcripts still need a
+  // way to reach steps that were never paged into the renderer.
+  const historyControlIndex = feedRows.findIndex((row) => row.kind === "history-control");
+  const historyControlRow = historyControlIndex >= 0 ? feedRows[historyControlIndex] : null;
 
   if (transcriptMode === "delivery") {
     const eventStream = collectTaskFeedRowEventStream(feedRows);
@@ -485,9 +489,13 @@ export function selectVisibleTaskFeedRows(
         return true;
       });
 
+    const deliveryRows = historyControlRow
+      ? [historyControlRow, ...visibleFeedRows]
+      : visibleFeedRows;
+
     return {
-      visibleFeedRows,
-      hiddenLiveFeedRowCount: getHiddenContentRowCount(visibleFeedRows),
+      visibleFeedRows: deliveryRows,
+      hiddenLiveFeedRowCount: getHiddenContentRowCount(deliveryRows),
     };
   }
 
@@ -495,7 +503,7 @@ export function selectVisibleTaskFeedRows(
     return { visibleFeedRows: feedRows, hiddenLiveFeedRowCount: 0 };
   }
   if (feedRows.length <= 8) {
-    const visibleFeedRows = feedRows.filter((row) => row.kind !== "history-control");
+    const visibleFeedRows = feedRows;
     return {
       visibleFeedRows,
       hiddenLiveFeedRowCount: getHiddenContentRowCount(visibleFeedRows),
@@ -529,12 +537,16 @@ export function selectVisibleTaskFeedRows(
   keepLastMatch((row) => isUserFacingLiveStatusRow(row));
   keepLastMatch((row) => isUrgentLiveTranscriptRow(row));
 
-  const visibleIndexes = [...keepIndexes].sort((a, b) => a - b);
+  const visibleIndexes = [...keepIndexes]
+    .sort((a, b) => a - b)
+    .filter((index) => index !== historyControlIndex);
   const cappedIndexes =
     visibleIndexes.length > LIVE_TRANSCRIPT_MAX_VISIBLE_ROWS
       ? visibleIndexes.slice(-LIVE_TRANSCRIPT_MAX_VISIBLE_ROWS)
       : visibleIndexes;
   const cappedKeepIndexes = new Set(cappedIndexes);
+  // Pinned on top of the row cap so it never costs a step its slot.
+  if (historyControlIndex >= 0) cappedKeepIndexes.add(historyControlIndex);
   const visibleFeedRows = feedRows.filter((_, index) => cappedKeepIndexes.has(index));
   return {
     visibleFeedRows,

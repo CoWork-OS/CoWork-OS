@@ -18,14 +18,14 @@ When enabled, `AdaptiveStyleEngine` observes user messages and feedback to nudge
 
 **Signals that drive adaptation:**
 
-| Signal | Detected by | Effect |
-|--------|-------------|--------|
-| Short messages | Rolling average of last 50 lengths | Shifts `responseLength` → `terse` |
-| Emoji in messages | Fraction of emoji-containing messages | Shifts `emojiUsage` → `moderate` |
-| Technical vocabulary | Density of tech terms | Shifts `explanationDepth` → `expert` |
-| "too verbose" feedback | Reason field match | Shifts `responseLength` → `terse` |
-| "more detail" feedback | Reason field match | Shifts `responseLength` → `detailed` |
-| "no emoji" feedback | Reason field match | Shifts `emojiUsage` → `none` |
+| Signal                 | Detected by                           | Effect                               |
+| ---------------------- | ------------------------------------- | ------------------------------------ |
+| Short messages         | Rolling average of last 50 lengths    | Shifts `responseLength` → `terse`    |
+| Emoji in messages      | Fraction of emoji-containing messages | Shifts `emojiUsage` → `moderate`     |
+| Technical vocabulary   | Density of tech terms                 | Shifts `explanationDepth` → `expert` |
+| "too verbose" feedback | Reason field match                    | Shifts `responseLength` → `terse`    |
+| "more detail" feedback | Reason field match                    | Shifts `responseLength` → `detailed` |
+| "no emoji" feedback    | Reason field match                    | Shifts `emojiUsage` → `none`         |
 
 **Audit:** Every adaptation is recorded with dimension, from/to values, reason, and timestamp. Retrieve via `AdaptiveStyleEngine.getAdaptationHistory()`.
 
@@ -43,16 +43,16 @@ When enabled, `ChannelPersonaAdapter` appends a channel-specific communication d
 
 **Supported channels:**
 
-| Channel | Length | Formatting | Emoji | Formal |
-|---------|--------|-----------|-------|--------|
-| `slack` | Shorter | Structured | No | No |
-| `email` | Longer | Structured | No | Yes |
-| `whatsapp` | Shorter | Plain | Yes | No |
-| `imessage` | Shorter | Plain | Yes | No |
-| `discord` | Normal | Markdown | Yes | No |
-| `teams` | Normal | Structured | No | No |
-| `telegram` | Shorter | Minimal | No | No |
-| `signal` | Shorter | Plain | No | No |
+| Channel    | Length  | Formatting | Emoji | Formal |
+| ---------- | ------- | ---------- | ----- | ------ |
+| `slack`    | Shorter | Structured | No    | No     |
+| `email`    | Longer  | Structured | No    | Yes    |
+| `whatsapp` | Shorter | Plain      | Yes   | No     |
+| `imessage` | Shorter | Plain      | Yes   | No     |
+| `discord`  | Normal  | Markdown   | Yes   | No     |
+| `teams`    | Normal  | Structured | No    | No     |
+| `telegram` | Shorter | Minimal    | No    | No     |
+| `signal`   | Shorter | Plain      | No    | No     |
 
 **Group/public overlay:** When the task's `gatewayContext` is `"group"` or `"public"`, an additional privacy directive is added regardless of channel.
 
@@ -66,12 +66,12 @@ These controls sit in Guardrail Settings because they govern agent behavior, but
 
 ## Integration points
 
-| Component | Role |
-|-----------|------|
-| `src/electron/memory/AdaptiveStyleEngine.ts` | Observation, drift, state |
-| `src/electron/memory/ChannelPersonaAdapter.ts` | Channel directive generation |
-| `src/electron/agent/executor.ts` | Injects channel directive into system prompt |
-| `src/electron/agent/daemon.ts` | Calls `observe()` and `observeFeedback()` |
-| `src/renderer/components/GuardrailSettings.tsx` | Settings UI (Behavior Adaptation section) |
-| `src/electron/ipc/handlers.ts` | `kit:resetAdaptiveStyle` and `kit:submitMessageFeedback` handlers |
-| `src/shared/types.ts` | Shared IPC channel constants for behavior-adaptation and feedback wiring |
+| Component                                       | Role                                                                     |
+| ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `src/electron/memory/AdaptiveStyleEngine.ts`    | Observation, drift, state                                                |
+| `src/electron/memory/ChannelPersonaAdapter.ts`  | Channel directive generation                                             |
+| `src/electron/agent/executor.ts`                | Injects channel directive into system prompt                             |
+| `src/electron/agent/daemon.ts`                  | Calls `observe()` and `observeFeedback()`                                |
+| `src/renderer/components/GuardrailSettings.tsx` | Settings UI (Behavior Adaptation section)                                |
+| `src/electron/ipc/handlers.ts`                  | `kit:resetAdaptiveStyle` and `kit:submitMessageFeedback` handlers        |
+| `src/shared/types.ts`                           | Shared IPC channel constants for behavior-adaptation and feedback wiring |

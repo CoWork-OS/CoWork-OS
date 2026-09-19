@@ -8,24 +8,24 @@ Admins can also use [Channel Specialization](../channels.md#channel-specializati
 
 ## Guides
 
-| Channel | Guide |
-|---------|-------|
-| WhatsApp | [WhatsApp User Guide](whatsapp.md) |
-| Telegram | [Telegram User Guide](telegram.md) |
-| Discord | [Discord User Guide](discord.md) |
-| Slack | [Slack User Guide](slack.md) |
-| Microsoft Teams | [Microsoft Teams User Guide](microsoft-teams.md) |
-| Google Chat | [Google Chat User Guide](google-chat.md) |
-| Feishu / Lark | [Feishu / Lark User Guide](feishu-lark.md) |
-| WeCom | [WeCom User Guide](wecom.md) |
-| iMessage | [iMessage User Guide](imessage.md) |
-| Signal | [Signal User Guide](signal.md) |
-| Mattermost | [Mattermost User Guide](mattermost.md) |
-| Matrix | [Matrix User Guide](matrix.md) |
-| Twitch | [Twitch User Guide](twitch.md) |
-| LINE | [LINE User Guide](line.md) |
-| BlueBubbles | [BlueBubbles User Guide](bluebubbles.md) |
-| Email | [Email User Guide](email.md) |
+| Channel            | Guide                                                  |
+| ------------------ | ------------------------------------------------------ |
+| WhatsApp           | [WhatsApp User Guide](whatsapp.md)                     |
+| Telegram           | [Telegram User Guide](telegram.md)                     |
+| Discord            | [Discord User Guide](discord.md)                       |
+| Slack              | [Slack User Guide](slack.md)                           |
+| Microsoft Teams    | [Microsoft Teams User Guide](microsoft-teams.md)       |
+| Google Chat        | [Google Chat User Guide](google-chat.md)               |
+| Feishu / Lark      | [Feishu / Lark User Guide](feishu-lark.md)             |
+| WeCom              | [WeCom User Guide](wecom.md)                           |
+| iMessage           | [iMessage User Guide](imessage.md)                     |
+| Signal             | [Signal User Guide](signal.md)                         |
+| Mattermost         | [Mattermost User Guide](mattermost.md)                 |
+| Matrix             | [Matrix User Guide](matrix.md)                         |
+| Twitch             | [Twitch User Guide](twitch.md)                         |
+| LINE               | [LINE User Guide](line.md)                             |
+| BlueBubbles        | [BlueBubbles User Guide](bluebubbles.md)               |
+| Email              | [Email User Guide](email.md)                           |
 | X Mention Triggers | [X Mention Triggers User Guide](x-mention-triggers.md) |
 
 ## Shared Commands

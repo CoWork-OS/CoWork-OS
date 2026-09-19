@@ -299,6 +299,7 @@ describe("External integration approval workflows", () => {
           operation: "read",
           tool: "google_drive",
         }),
+        expect.objectContaining({ allowAutoApprove: true }),
       );
       expect(daemon.requestApproval).toHaveBeenCalledWith(
         taskId,

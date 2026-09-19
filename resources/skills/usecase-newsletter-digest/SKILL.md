@@ -37,15 +37,15 @@ Summarize newsletter/email feed messages from the last N hours and propose follo
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| channel | select | Yes | Where the newsletter feed arrives |
-| chat_hint | string | Yes | Name/keyword to identify the chat in channel_list_chats results |
-| since | string | No | Time window (e.g., "24h") |
-| message_limit | number | No | How many messages to fetch |
-| output_format | select | No | How to format the digest |
+| Name          | Type   | Required | Description                                                     |
+| ------------- | ------ | -------- | --------------------------------------------------------------- |
+| channel       | select | Yes      | Where the newsletter feed arrives                               |
+| chat_hint     | string | Yes      | Name/keyword to identify the chat in channel_list_chats results |
+| since         | string | No       | Time window (e.g., "24h")                                       |
+| message_limit | number | No       | How many messages to fetch                                      |
+| output_format | select | No       | How to format the digest                                        |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 882 characters.
-- Runtime prompt is defined directly in `../usecase-newsletter-digest.json`. 
+- Runtime prompt is defined directly in `../usecase-newsletter-digest.json`.

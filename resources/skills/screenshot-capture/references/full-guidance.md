@@ -17,10 +17,12 @@ When reporting results, always include the saved file path.
 Prefer tool-specific screenshot capabilities when available.
 
 Examples:
+
 - Use a Figma MCP/skill for Figma files.
 - Use Playwright or other browser tools for browser or Electron apps.
 
 Use this skill when:
+
 - The user explicitly asks for screenshots.
 - You need a whole-system desktop capture.
 - A tool-specific capture cannot get what you need.

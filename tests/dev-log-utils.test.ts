@@ -96,8 +96,9 @@ describe("dev-log-utils", () => {
         "stderr",
       ),
     ).toBe("warn");
-    expect(inferDevLogLevel("    at process.processTimers (node:internal/timers:541:7)", "stderr"))
-      .toBe("warn");
+    expect(
+      inferDevLogLevel("    at process.processTimers (node:internal/timers:541:7)", "stderr"),
+    ).toBe("warn");
   });
 
   it("keeps transient IMAP fetch timeouts as warnings", () => {
@@ -112,8 +113,11 @@ describe("dev-log-utils", () => {
         "[electron] 2026-05-25 10:11:41.912 Electron[11303:37884501] representedObject is not a WeakPtrToElectronMenuModelAsNSObject",
       ),
     ).toBe(true);
-    expect(isIgnorableDevLogLine("[electron] Uncaught ReferenceError: selectedTaskSwitchId is not defined"))
-      .toBe(false);
+    expect(
+      isIgnorableDevLogLine(
+        "[electron] Uncaught ReferenceError: selectedTaskSwitchId is not defined",
+      ),
+    ).toBe(false);
   });
 
   it("still classifies real stderr failures as errors", () => {
@@ -157,9 +161,9 @@ describe("dev-log-utils", () => {
 
     expect(result.deletedRunIds).toHaveLength(5);
     expect(fs.readdirSync(tempDir).filter((file) => /^dev-.*\.log$/.test(file))).toHaveLength(20);
-    expect(JSON.parse(fs.readFileSync(path.join(tempDir, "dev-runs.json"), "utf8")).runs).toHaveLength(
-      20,
-    );
+    expect(
+      JSON.parse(fs.readFileSync(path.join(tempDir, "dev-runs.json"), "utf8")).runs,
+    ).toHaveLength(20);
     expect(fs.existsSync(path.join(tempDir, "dev-20260425-100000.log"))).toBe(true);
     expect(fs.existsSync(path.join(tempDir, "dev-20260401-100000.log"))).toBe(false);
   });

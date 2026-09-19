@@ -37,11 +37,11 @@ Remove unused imports from files
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to file or folder |
+| Name | Type   | Required | Description            |
+| ---- | ------ | -------- | ---------------------- |
+| path | string | Yes      | Path to file or folder |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 367 characters.
-- Runtime prompt is defined directly in `../clean-imports.json`. 
+- Runtime prompt is defined directly in `../clean-imports.json`.

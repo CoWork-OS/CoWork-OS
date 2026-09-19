@@ -183,6 +183,7 @@ export function buildTaskRoutineCreate({
         sourceTaskId: task.id,
         sourceTaskTitle: task.title,
         automationRunMode: effectiveTargetMode,
+        ...(task.assignedAgentRoleId ? { assignedAgentRoleId: task.assignedAgentRoleId } : {}),
         ...(effectiveTargetMode === "thread_follow_up"
           ? {
               runMode: "thread_follow_up",
@@ -253,6 +254,7 @@ export function buildTaskAutomationCronJobCreate({
     workspaceId,
     taskTitle: task.title,
     taskPrompt: buildTaskAutomationPrompt(prompt, task, deeplink),
+    assignedAgentRoleId: task.assignedAgentRoleId,
     runMode: effectiveTargetMode,
     targetTaskId: effectiveTargetMode === "thread_follow_up" ? task.id : undefined,
     threadAutomation:

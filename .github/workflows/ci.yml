@@ -7,7 +7,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege by default; jobs that need more request it explicitly.
+permissions:
+  contents: read
+
 jobs:
+  registry-publication-tests:
+    name: Registry publication recovery tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: node --test scripts/release/*.test.mjs
+
   documentation-versions:
     name: Documentation Version Policy
     runs-on: ubuntu-latest
@@ -15,7 +29,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
       - run: node --test scripts/qa/validate-doc-versions.test.mjs
       - run: npm run qa:docs-versions
 
@@ -33,6 +47,13 @@ jobs:
         run: |
           set -euo pipefail
           version="8.30.1"
+          # TODO(security): pin this download by sha256 before relying on it.
+          # GitHub permits deleting and re-uploading a release asset under the
+          # same name, so the version tag alone does not identify these bytes,
+          # and this binary is installed onto PATH and executed on every push
+          # to main. Fill in the digest from
+          #   https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_checksums.txt
+          # then add:  echo "${sha256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo install /tmp/gitleaks /usr/local/bin/gitleaks
@@ -83,7 +104,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
 
       - name: Enforce production-failure eval regression policy
         run: npm run qa:eval:enforce-regressions
@@ -99,8 +120,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -123,8 +144,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -157,13 +178,24 @@ jobs:
             agent:
               - 'src/electron/agent/**'
               - 'src/electron/agent/tools/**'
+              - 'src/electron/sessions/**'
+              - 'src/electron/eval/**'
+              - 'src/electron/memory/TranscriptStore.ts'
+              - 'src/electron/database/**'
+              - 'src/shared/**'
+              - 'scripts/qa/**'
+              - 'tests/qa-*.test.ts'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'vitest.config.ts'
+              - '.github/workflows/ci.yml'
 
       - name: Setup Node.js
         if: steps.changes.outputs.agent == 'true'
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Install dependencies
         if: steps.changes.outputs.agent == 'true'
@@ -175,19 +207,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sqlite3
 
-      - name: Run targeted deterministic eval suite
+      - name: Prepare native harness test dependency
         if: steps.changes.outputs.agent == 'true'
-        run: npm run qa:eval:run -- --suite reliability-regressions --mode deterministic
-        env:
-          COWORK_DB_PATH: ${{ runner.temp }}/cowork-eval.db
-          COWORK_EVAL_ALLOW_EMPTY: '1'
+        run: npm rebuild better-sqlite3 --ignore-scripts=false --no-audit --no-fund
 
-      - name: Enforce timeline reliability thresholds
+      - name: Run deterministic harness regressions
         if: steps.changes.outputs.agent == 'true'
-        run: npm run qa:timeline:enforce
-        env:
-          COWORK_DB_PATH: ${{ runner.temp }}/cowork-eval.db
-          COWORK_EVAL_ALLOW_EMPTY: '1'
+        run: npm run qa:harness
 
       - name: Skip notice
         if: steps.changes.outputs.agent != 'true'
@@ -209,8 +235,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci

@@ -38,4 +38,4 @@ Summarize or extract text/transcripts from URLs, podcasts, and local files (grea
 ## Runtime Prompt
 
 - Current runtime prompt length: 1616 characters.
-- Runtime prompt is defined directly in `../summarize.json`. 
+- Runtime prompt is defined directly in `../summarize.json`.

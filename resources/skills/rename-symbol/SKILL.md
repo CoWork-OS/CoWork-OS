@@ -37,12 +37,12 @@ Rename a variable/function across files
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| oldName | string | Yes | Current name of the symbol |
-| newName | string | Yes | New name for the symbol |
+| Name    | Type   | Required | Description                |
+| ------- | ------ | -------- | -------------------------- |
+| oldName | string | Yes      | Current name of the symbol |
+| newName | string | Yes      | New name for the symbol    |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 545 characters.
-- Runtime prompt is defined directly in `../rename-symbol.json`. 
+- Runtime prompt is defined directly in `../rename-symbol.json`.

@@ -31,43 +31,43 @@ The selected profile is the task-level authority. Workspace booleans and legacy 
 
 ### Approval System
 
-Many sensitive operations require explicit user approval before execution, depending on the effective profile and policy:
-
-- **Command tools**: You see the exact command before it runs when the profile/policy requires review
-- **File deletion**: Confirmation required before removing files
-- **External writes and data export**: Review is required for outbound mutations and file/image transfers
-- **Location access**: One-time operating-system consent is always required
-
-You can approve or deny each request individually. An approval cannot widen a finite profile scope or repair an unavailable profile.
+The default local runtime does not open popup approval dialogs. Allowed operations run silently.
+When policy still returns `ask`, CoWork posts an assistant message and a durable inline **Deny** /
+**Allow once** input card for interactive tasks. This includes command and file boundary
+exceptions, credentials, external writes and data export, MCP/connector side effects, and eligible
+outside-workspace paths. Automated tasks without a human-input channel fail closed. An assistant
+approval cannot widen a finite profile scope or repair an unavailable profile. Location access may
+still show the operating system's native one-time consent flow; that is separate from CoWork's
+approval surface.
 
 ### Configurable Guardrails
 
 CoWork OS includes configurable guardrails in **Settings > Guardrails** to limit what the agent can do:
 
-| Guardrail | Description | Default |
-|-----------|-------------|---------|
-| **Token Budget** | Max tokens (input + output) per task | 100,000 (enabled) |
-| **Cost Budget** | Max estimated cost (USD) per task | $1.00 (disabled) |
-| **Iteration Limit** | Max LLM calls per task | 50 (enabled) |
-| **Dangerous Commands** | Block command tools matching dangerous patterns | Enabled |
-| **File Size Limit** | Max file size the agent can write | 50 MB (enabled) |
-| **Domain Rules** | Profile- and administrator-controlled destination allow/deny rules | Profile-controlled |
+| Guardrail              | Description                                                        | Default            |
+| ---------------------- | ------------------------------------------------------------------ | ------------------ |
+| **Token Budget**       | Max tokens (input + output) per task                               | 100,000 (enabled)  |
+| **Cost Budget**        | Max estimated cost (USD) per task                                  | $1.00 (disabled)   |
+| **Iteration Limit**    | Max LLM calls per task                                             | 50 (enabled)       |
+| **Dangerous Commands** | Block command tools matching dangerous patterns                    | Enabled            |
+| **File Size Limit**    | Max file size the agent can write                                  | 50 MB (enabled)    |
+| **Domain Rules**       | Profile- and administrator-controlled destination allow/deny rules | Profile-controlled |
 
 #### Dangerous Command Blocking
 
 The following command patterns are blocked by default:
 
-| Pattern | Risk |
-|---------|------|
-| `sudo` | Elevated privileges |
-| `rm -rf /` or `rm -rf ~` | Mass deletion |
-| `mkfs` | Filesystem formatting |
-| `dd if=` | Direct disk writes |
-| Fork bombs | Process exhaustion |
+| Pattern                  | Risk                  |
+| ------------------------ | --------------------- | ---------------- |
+| `sudo`                   | Elevated privileges   |
+| `rm -rf /` or `rm -rf ~` | Mass deletion         |
+| `mkfs`                   | Filesystem formatting |
+| `dd if=`                 | Direct disk writes    |
+| Fork bombs               | Process exhaustion    |
 | `curl\|bash`, `wget\|sh` | Remote code execution |
-| `chmod 777` | Overly permissive |
-| `> /dev/sd` | Direct device writes |
-| `:(){ :|:& };:` | Fork bomb syntax |
+| `chmod 777`              | Overly permissive     |
+| `> /dev/sd`              | Direct device writes  |
+| `:(){ :                  | :& };:`               | Fork bomb syntax |
 
 Commands are blocked **before** reaching the approval dialog. You can add custom patterns in Settings.
 
@@ -88,14 +88,15 @@ Arbitrary subprocess networking is not domain-aware and fails closed when a prof
 
 ### File System Access
 
-| Scope | Access Level |
-|-------|--------------|
-| Workspace directories | Read/Write according to the effective profile and workspace capabilities |
-| Profile-declared roots | Access only under matching profile filesystem rules |
-| Outside profile scope | **No access**; finite profile scopes cannot be widened by approval |
-| Protected system files | **No mutation access** |
+| Scope                  | Access Level                                                             |
+| ---------------------- | ------------------------------------------------------------------------ |
+| Workspace directories  | Read/Write according to the effective profile and workspace capabilities |
+| Profile-declared roots | Access only under matching profile filesystem rules                      |
+| Outside profile scope  | **No access**; finite profile scopes cannot be widened by approval       |
+| Protected system files | **No mutation access**                                                   |
 
 **Technical details**:
+
 - Path traversal protection and profile path rules prevent access outside the effective scope
 - **Symlink escape detection**: File tools resolve symlinks via `realpath()` and verify the resolved path remains within the workspace boundary. Symlinks that point outside the workspace are rejected before any read/write operation.
 - Implementation: `src/electron/agent/tools/file-tools.ts`
@@ -109,6 +110,7 @@ If a workspace contains a `.cowork/projects/<projectId>/ACCESS.md` file, built-i
 - Deny wins over allow.
 
 Enforcement applies to:
+
 - File/edit/grep/search tools when the path is inside `.cowork/projects/<projectId>/...`
 - Workspace-kit context injection (denied projects are excluded from injected context)
 
@@ -118,13 +120,13 @@ Important: project-role rules are one layer of policy. Command tools are exposed
 
 When command tools are exposed by the active access profile:
 
-| Aspect | Implementation |
-|--------|----------------|
-| Working directory | Restricted to the active workspace and profile-approved roots |
-| Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR) |
-| API keys | **Never passed** to subprocesses |
-| Timeout | Maximum 5 minutes |
-| Output limit | 100KB (truncated if exceeded) |
+| Aspect                | Implementation                                                |
+| --------------------- | ------------------------------------------------------------- |
+| Working directory     | Restricted to the active workspace and profile-approved roots |
+| Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR)     |
+| API keys              | **Never passed** to subprocesses                              |
+| Timeout               | Maximum 5 minutes                                             |
+| Output limit          | 100KB (truncated if exceeded)                                 |
 
 **Security note**: Your API keys and secrets are never exposed to command tools. The app creates a minimal, safe environment for each command.
 
@@ -132,13 +134,13 @@ When command tools are exposed by the active access profile:
 
 The app includes Playwright for web automation:
 
-| Capability | Details |
-|------------|---------|
-| Navigate to URLs | Destinations allowed by the active profile, administrator network policy, and browser rules |
-| Fill forms | As directed by task |
-| Take screenshots | Saved to workspace |
-| Execute JavaScript | Within page context only |
-| Mode | Headless by default; visible workbench actions remain separately gated |
+| Capability         | Details                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| Navigate to URLs   | Destinations allowed by the active profile, administrator network policy, and browser rules |
+| Fill forms         | As directed by task                                                                         |
+| Take screenshots   | Saved to workspace                                                                          |
+| Execute JavaScript | Within page context only                                                                    |
+| Mode               | Headless by default; visible workbench actions remain separately gated                      |
 
 **User agent**: `CoWork OS Browser Automation`
 
@@ -150,36 +152,37 @@ The app includes Playwright for web automation:
 
 The app connects to these services based on your configuration:
 
-| Provider | Endpoint | When Used |
-|----------|----------|-----------|
-| Anthropic | `api.anthropic.com` | Claude models |
-| AWS Bedrock | `bedrock-runtime.*.amazonaws.com` | Bedrock models |
-| Google AI | `generativelanguage.googleapis.com` | Gemini models |
-| OpenRouter | `openrouter.ai` | OpenRouter models |
-| Ollama | `localhost:11434` (default) | Local models |
+| Provider    | Endpoint                            | When Used         |
+| ----------- | ----------------------------------- | ----------------- |
+| Anthropic   | `api.anthropic.com`                 | Claude models     |
+| AWS Bedrock | `bedrock-runtime.*.amazonaws.com`   | Bedrock models    |
+| Google AI   | `generativelanguage.googleapis.com` | Gemini models     |
+| OpenRouter  | `openrouter.ai`                     | OpenRouter models |
+| Ollama      | `localhost:11434` (default)         | Local models      |
 
 ### Search Providers (DuckDuckGo built-in; others optional)
 
-| Provider | Endpoint | When Used |
-|----------|----------|-----------|
-| DuckDuckGo | `html.duckduckgo.com` | Free built-in web search (no API key) |
-| Tavily | `api.tavily.com` | Web search (API key required) |
-| Brave Search | `api.search.brave.com` | Web search (API key required) |
-| SerpAPI | `serpapi.com` | Web search (API key required) |
-| Google Custom Search | `customsearch.googleapis.com` | Web search (API key required) |
+| Provider             | Endpoint                      | When Used                             |
+| -------------------- | ----------------------------- | ------------------------------------- |
+| DuckDuckGo           | `html.duckduckgo.com`         | Free built-in web search (no API key) |
+| Tavily               | `api.tavily.com`              | Web search (API key required)         |
+| Brave Search         | `api.search.brave.com`        | Web search (API key required)         |
+| SerpAPI              | `serpapi.com`                 | Web search (API key required)         |
+| Google Custom Search | `customsearch.googleapis.com` | Web search (API key required)         |
 
 ### Other Connections
 
-| Destination | Purpose |
-|-------------|---------|
-| `api.github.com` | Update checks |
-| `api.telegram.org` | Telegram bot (if configured) |
-| Discord API | Discord bot (if configured) |
+| Destination             | Purpose                                   |
+| ----------------------- | ----------------------------------------- |
+| `api.github.com`        | Update checks                             |
+| `api.telegram.org`      | Telegram bot (if configured)              |
+| Discord API             | Discord bot (if configured)               |
 | Signal (via signal-cli) | Signal bot (if configured, local process) |
 
 ### No Telemetry
 
 CoWork OS does **not**:
+
 - Send usage analytics
 - Track user behavior
 - Phone home to any server
@@ -195,13 +198,14 @@ Your data stays on your machine and only goes to the LLM provider you explicitly
 
 All settings are now stored encrypted in the database using the `SecureSettingsRepository`:
 
-| Data | Location | Encryption |
-|------|----------|------------|
-| All Settings | `app.getPath('userData')/cowork-os.db` | OS Keychain + AES-256 |
-| Database | `app.getPath('userData')/cowork-os.db` | Settings encrypted per-category |
-| Machine ID | `app.getPath('userData')/.cowork-machine-id` | Stable identifier for encryption |
+| Data         | Location                                     | Encryption                       |
+| ------------ | -------------------------------------------- | -------------------------------- |
+| All Settings | `app.getPath('userData')/cowork-os.db`       | OS Keychain + AES-256            |
+| Database     | `app.getPath('userData')/cowork-os.db`       | Settings encrypted per-category  |
+| Machine ID   | `app.getPath('userData')/.cowork-machine-id` | Stable identifier for encryption |
 
 Typical `userData` locations:
+
 - macOS: `~/Library/Application Support/cowork-os/`
 - Linux: `~/.config/cowork-os/`
 - Windows: `%APPDATA%\\cowork-os\\`
@@ -209,11 +213,13 @@ Typical `userData` locations:
 ### Encryption Layers
 
 **Primary: OS Keychain (when available)**
+
 - macOS: Keychain Services
 - Windows: DPAPI (Data Protection API)
 - Linux: libsecret
 
 **Fallback: App-Level Encryption**
+
 - AES-256-GCM encryption
 - Key derived via PBKDF2 (100,000 iterations, SHA-512)
 - Stable machine ID prevents key changes on hostname updates
@@ -222,27 +228,28 @@ Typical `userData` locations:
 
 All these are stored encrypted in the database:
 
-| Category | Contents |
-|----------|----------|
-| `voice` | Voice settings, TTS/STT API keys |
-| `llm` | LLM provider settings, API keys |
-| `search` | Search provider settings, API keys |
-| `appearance` | Theme, accent color preferences |
-| `personality` | Agent personality settings |
-| `guardrails` | Safety limits and blocked patterns |
-| `permissions` | Default access profile, custom profiles, and permission rules |
-| `hooks` | Automation hooks configuration |
-| `mcp` | MCP server configurations |
-| `controlplane` | Control plane settings |
-| `channels` | Channel/gateway configurations |
-| `builtintools` | Built-in tool settings |
-| `tailscale` | Tailscale integration settings |
-| `queue` | Task queue settings |
-| `tray` | Menu bar/tray settings |
+| Category       | Contents                                                      |
+| -------------- | ------------------------------------------------------------- |
+| `voice`        | Voice settings, TTS/STT API keys                              |
+| `llm`          | LLM provider settings, API keys                               |
+| `search`       | Search provider settings, API keys                            |
+| `appearance`   | Theme, accent color preferences                               |
+| `personality`  | Agent personality settings                                    |
+| `guardrails`   | Safety limits and blocked patterns                            |
+| `permissions`  | Default access profile, custom profiles, and permission rules |
+| `hooks`        | Automation hooks configuration                                |
+| `mcp`          | MCP server configurations                                     |
+| `controlplane` | Control plane settings                                        |
+| `channels`     | Channel/gateway configurations                                |
+| `builtintools` | Built-in tool settings                                        |
+| `tailscale`    | Tailscale integration settings                                |
+| `queue`        | Task queue settings                                           |
+| `tray`         | Menu bar/tray settings                                        |
 
 ### Data Integrity
 
 Each stored setting includes:
+
 - SHA-256 checksum for integrity verification
 - Creation and update timestamps
 - Automatic corruption detection on load
@@ -260,6 +267,7 @@ Everything is stored **locally** on your machine. CoWork OS does not upload your
 ### API Key Security
 
 Your API keys are:
+
 1. Encrypted using OS Keychain when available (macOS Keychain, Windows DPAPI, Linux libsecret)
 2. Fallback to AES-256 app-level encryption with stable machine-derived key
 3. Decrypted only when needed for API calls
@@ -273,11 +281,11 @@ Your API keys are:
 
 ### Security Settings
 
-| Setting | Value | Purpose |
-|---------|-------|---------|
-| `nodeIntegration` | `false` | Prevents renderer from accessing Node.js |
-| `contextIsolation` | `true` | Isolates preload scripts from page context |
-| `sandbox` | Default | Uses Chromium sandbox |
+| Setting            | Value   | Purpose                                    |
+| ------------------ | ------- | ------------------------------------------ |
+| `nodeIntegration`  | `false` | Prevents renderer from accessing Node.js   |
+| `contextIsolation` | `true`  | Isolates preload scripts from page context |
+| `sandbox`          | Default | Uses Chromium sandbox                      |
 
 ### Content Security Policy (Production)
 
@@ -294,13 +302,13 @@ form-action 'self';
 
 ### macOS Entitlements
 
-| Entitlement | Purpose |
-|-------------|---------|
-| `allow-jit` | Required for V8 JavaScript engine |
-| `allow-unsigned-executable-memory` | Required for Electron |
-| `allow-dyld-environment-variables` | Loading native modules |
-| `files.user-selected.read-write` | Access to user-selected folders |
-| `network.client` | Connect to LLM APIs |
+| Entitlement                        | Purpose                           |
+| ---------------------------------- | --------------------------------- |
+| `allow-jit`                        | Required for V8 JavaScript engine |
+| `allow-unsigned-executable-memory` | Required for Electron             |
+| `allow-dyld-environment-variables` | Loading native modules            |
+| `files.user-selected.read-write`   | Access to user-selected folders   |
+| `network.client`                   | Connect to LLM APIs               |
 
 **Not requested automatically**: Camera, microphone, contacts, or other sensitive permissions. Location is requested only when a task explicitly uses the location tool and must be approved through the operating system.
 
@@ -312,11 +320,11 @@ If you use the gateway feature to connect messaging bots (Telegram, Discord, Sla
 
 ### Security Modes
 
-| Mode | Description | Recommendation |
-|------|-------------|----------------|
-| **Open** | Anyone can use the bot | Not recommended for production |
-| **Allowlist** | Only pre-approved user IDs | Good for known users |
-| **Pairing** | Users must enter a code from the app | Best for security |
+| Mode          | Description                          | Recommendation                 |
+| ------------- | ------------------------------------ | ------------------------------ |
+| **Open**      | Anyone can use the bot               | Not recommended for production |
+| **Allowlist** | Only pre-approved user IDs           | Good for known users           |
+| **Pairing**   | Users must enter a code from the app | Best for security              |
 
 ### Best Practices
 
@@ -332,25 +340,28 @@ If you use the gateway feature to connect messaging bots (Telegram, Discord, Sla
 ### How Updates Work
 
 For **git clones** (development):
+
 1. Checks GitHub API for new releases/commits
 2. User initiates update manually
 3. Runs: `git pull`, `npm run setup`, `npm run build`
 4. Requires app restart
 
 For **packaged builds**:
+
 1. Uses electron-updater with GitHub releases
 2. Downloads signed releases from official repo
 3. Verifies integrity before installing
 
 ### Supply Chain Considerations
 
-| Risk | Mitigation |
-|------|------------|
-| Malicious code in update | Updates are user-initiated, not automatic |
-| Compromised dependencies | Dependencies from reputable sources only |
-| npm install risks | Third-party lifecycle scripts disabled via `.npmrc`; `npm run setup` handles native rebuilds explicitly |
+| Risk                     | Mitigation                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Malicious code in update | Updates are user-initiated, not automatic                                                               |
+| Compromised dependencies | Dependencies from reputable sources only                                                                |
+| npm install risks        | Third-party lifecycle scripts disabled via `.npmrc`; `npm run setup` handles native rebuilds explicitly |
 
 **Note**: If you're security-conscious, review changes before updating:
+
 ```bash
 git fetch origin
 git diff HEAD..origin/main
@@ -389,25 +400,25 @@ git diff HEAD..origin/main
 
 ### What CoWork OS Protects Against
 
-| Threat | Protection |
-|--------|------------|
-| Path traversal | Path normalization and validation |
-| Symlink escape | `realpath()` resolution with workspace boundary check |
-| Command injection | Profile-gated command tools, dangerous-pattern blocking, and approval where required |
-| API key leakage | Encrypted storage, minimal env |
-| XSS attacks | Content Security Policy |
-| Unauthorized bot access | Multiple auth modes |
-| Malicious skill IDs | Input validation and sanitization |
-| Binary name injection | Shell metacharacter filtering |
+| Threat                  | Protection                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| Path traversal          | Path normalization and validation                                                    |
+| Symlink escape          | `realpath()` resolution with workspace boundary check                                |
+| Command injection       | Profile-gated command tools, dangerous-pattern blocking, and approval where required |
+| API key leakage         | Encrypted storage, minimal env                                                       |
+| XSS attacks             | Content Security Policy                                                              |
+| Unauthorized bot access | Multiple auth modes                                                                  |
+| Malicious skill IDs     | Input validation and sanitization                                                    |
+| Binary name injection   | Shell metacharacter filtering                                                        |
 
 ### What Requires User Vigilance
 
-| Risk | User Responsibility |
-|------|---------------------|
-| Approving malicious commands | Review before approving |
-| Workspace selection | Don't add sensitive directories |
-| Bot token security | Keep tokens private |
-| Update verification | Review changes if concerned |
+| Risk                         | User Responsibility             |
+| ---------------------------- | ------------------------------- |
+| Approving malicious commands | Review before approving         |
+| Workspace selection          | Don't add sensitive directories |
+| Bot token security           | Keep tokens private             |
+| Update verification          | Review changes if concerned     |
 
 ### Out of Scope
 
@@ -423,6 +434,7 @@ git diff HEAD..origin/main
 ### Check Access Profiles And Workspace Permissions
 
 In the app, open **Settings > System & Security > Permissions** to review:
+
 - the default and selected access profile
 - sandbox, approval/reviewer, command-tool, network, filesystem, and domain scope
 - legacy workspace capability flags and workspace-local rules
@@ -434,16 +446,17 @@ Profiles](docs/access-profiles.md).
 ### Audit Connected Users (Bots)
 
 In the Gateway settings, you can:
+
 - View all connected users
 - Revoke access for specific users
 - Generate new pairing codes
 
 ### Review Pending Approvals
 
-The app shows a notification badge when approvals are pending. Always review:
-- The exact command to be executed
-- The file to be deleted
-- Any other sensitive operation
+Review unresolved decisions in the task timeline's assistant message and inline input card before
+choosing **Allow once**, checking the exact operation, destination, and scope. The legacy popup
+queue is available only when `COWORK_APPROVAL_PROMPTS=on` is explicitly enabled for diagnostics.
+Pending approval state fails closed on restart; retry the operation for a fresh decision.
 
 ---
 
@@ -467,13 +480,13 @@ CoWork OS includes a comprehensive security framework inspired by formal verific
 
 Tools are categorized by risk level for policy-based access control:
 
-| Risk Level | Tools | Description |
-|------------|-------|-------------|
-| **Read** | `read_file`, `list_directory`, `search_files` | Low risk, read-only operations |
-| **Write** | `write_file`, `copy_file`, `create_directory` | Medium risk, creates/modifies files |
-| **Destructive** | `delete_file`, `run_command` | High risk, exposed and approved according to the access profile and policy |
-| **System** | `read_clipboard`, `take_screenshot`, `open_application` | System-level access |
-| **Network** | `web_search`, `browser_*` | External network operations |
+| Risk Level      | Tools                                                   | Description                                                                |
+| --------------- | ------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **Read**        | `read_file`, `list_directory`, `search_files`           | Low risk, read-only operations                                             |
+| **Write**       | `write_file`, `copy_file`, `create_directory`           | Medium risk, creates/modifies files                                        |
+| **Destructive** | `delete_file`, `run_command`                            | High risk, exposed and approved according to the access profile and policy |
+| **System**      | `read_clipboard`, `take_screenshot`, `open_application` | System-level access                                                        |
+| **Network**     | `web_search`, `browser_*`                               | External network operations                                                |
 
 ### Monotonic Policy Precedence (Deny-Wins)
 
@@ -491,11 +504,11 @@ Security policies are evaluated across multiple layers in order:
 
 When tasks originate from gateway bots (WhatsApp/Telegram/Discord/Slack/iMessage/Signal), tools are restricted based on context:
 
-| Context | Restrictions |
-|---------|-------------|
-| **Private** | Target access profile with no additional channel restriction |
-| **Group** | Target profile plus memory-tool restrictions and any configured destructive-tool restrictions |
-| **Public** | Target profile plus the strongest configured channel restrictions; system/destructive operations may be blocked |
+| Context     | Restrictions                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------- |
+| **Private** | Target access profile with no additional channel restriction                                                    |
+| **Group**   | Target profile plus memory-tool restrictions and any configured destructive-tool restrictions                   |
+| **Public**  | Target profile plus the strongest configured channel restrictions; system/destructive operations may be blocked |
 
 This prevents accidental exposure of sensitive data in shared contexts.
 
@@ -503,25 +516,26 @@ This prevents accidental exposure of sensitive data in shared contexts.
 
 Critical operations use mutex locks and idempotency guarantees to prevent race conditions:
 
-| Operation | Protection |
-|-----------|------------|
+| Operation                 | Protection                            |
+| ------------------------- | ------------------------------------- |
 | Pairing code verification | Mutex per channel + idempotency check |
-| Approval responses | Idempotency prevents double-approval |
-| Task creation | Deduplication via idempotency keys |
+| Approval responses        | Idempotency prevents double-approval  |
+| Task creation             | Deduplication via idempotency keys    |
 
 ### Brute-Force Protection
 
 Pairing code verification includes protection against brute-force attacks:
 
-| Feature | Value | Description |
-|---------|-------|-------------|
-| Max attempts | 5 | Failed attempts before lockout |
-| Lockout duration | 15 minutes | Time before retry allowed |
-| Code charset | 32 characters | Excludes ambiguous chars (I, O, 1, 0) |
-| Code length | 6 characters | ~1 billion combinations |
-| Estimated crack time | >1000 years | With lockout enabled |
+| Feature              | Value         | Description                           |
+| -------------------- | ------------- | ------------------------------------- |
+| Max attempts         | 5             | Failed attempts before lockout        |
+| Lockout duration     | 15 minutes    | Time before retry allowed             |
+| Code charset         | 32 characters | Excludes ambiguous chars (I, O, 1, 0) |
+| Code length          | 6 characters  | ~1 billion combinations               |
+| Estimated crack time | >1000 years   | With lockout enabled                  |
 
 When a user exceeds the maximum attempts:
+
 1. Account is locked for 15 minutes
 2. User sees remaining lockout time
 3. Attempts counter resets after lockout expires
@@ -548,25 +562,28 @@ in-process.
 
 SkillHub includes multiple security measures to prevent attacks via malicious skills:
 
-| Protection | Description |
-|------------|-------------|
-| **Skill ID Validation** | IDs must match `^[a-z0-9_-]+$` pattern (lowercase alphanumeric, hyphens, underscores) |
-| **Path Traversal Prevention** | IDs containing `..`, `/`, or `\` are rejected |
-| **Binary Name Sanitization** | Binary names in `requires.bins` must match `^[a-zA-Z0-9._-]+$` |
-| **Command Injection Prevention** | Shell metacharacters in binary names are blocked before `which` execution |
-| **Debounced Reloading** | Rapid skill reloads are debounced (100ms) to prevent race conditions |
+| Protection                       | Description                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------------- |
+| **Skill ID Validation**          | IDs must match `^[a-z0-9_-]+$` pattern (lowercase alphanumeric, hyphens, underscores) |
+| **Path Traversal Prevention**    | IDs containing `..`, `/`, or `\` are rejected                                         |
+| **Binary Name Sanitization**     | Binary names in `requires.bins` must match `^[a-zA-Z0-9._-]+$`                        |
+| **Command Injection Prevention** | Shell metacharacters in binary names are blocked before `which` execution             |
+| **Debounced Reloading**          | Rapid skill reloads are debounced (100ms) to prevent race conditions                  |
 
 **Rejected inputs (skill IDs)**:
+
 - `../../../etc/passwd` - Path traversal
 - `foo/bar` - Contains path separator
 - `skill;rm -rf /` - Special characters
 
 **Rejected inputs (binary names)**:
+
 - `node; rm -rf /` - Shell metacharacters
 - `$(whoami)` - Command substitution
 - `` `whoami` `` - Backtick execution
 
 **Implementation**:
+
 - `src/electron/agent/skill-registry.ts` (skill ID validation)
 - `src/electron/agent/skill-eligibility.ts` (binary name sanitization)
 
@@ -579,6 +596,7 @@ npm run test:coverage       # With coverage report
 ```
 
 Test files:
+
 - `tests/security/tool-groups.test.ts` - Tool categorization tests
 - `tests/security/policy-manager.test.ts` - Policy evaluation tests
 - `tests/security/concurrency.test.ts` - Mutex and idempotency tests
@@ -591,31 +609,33 @@ Test files:
 
 CoWork OS is designed with security in mind:
 
-| Aspect | Status |
-|--------|--------|
-| API key storage | Encrypted (OS keychain) |
-| File access | Bounded by the selected access profile and workspace |
-| Command execution | Exposed by the selected profile; sandboxed/approval-gated according to policy |
-| Network access | Profile- and administrator-controlled; export-sensitive actions remain separately reviewed |
-| Telemetry | None |
-| Electron security | Best practices followed |
-| Guardrails | Configurable limits on tokens, cost, iterations, commands, file size, and domains |
-| Policy system | Monotonic deny-wins precedence |
-| Gateway security | Context-aware tool isolation |
-| Concurrency | Mutex locks + idempotency guarantees |
-| Skill security | Input validation, path traversal protection, binary sanitization |
+| Aspect            | Status                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| API key storage   | Encrypted (OS keychain)                                                                    |
+| File access       | Bounded by the selected access profile and workspace                                       |
+| Command execution | Exposed by the selected profile; sandboxed/approval-gated according to policy              |
+| Network access    | Profile- and administrator-controlled; export-sensitive actions remain separately reviewed |
+| Telemetry         | None                                                                                       |
+| Electron security | Best practices followed                                                                    |
+| Guardrails        | Configurable limits on tokens, cost, iterations, commands, file size, and domains          |
+| Policy system     | Monotonic deny-wins precedence                                                             |
+| Gateway security  | Context-aware tool isolation                                                               |
+| Concurrency       | Mutex locks + idempotency guarantees                                                       |
+| Skill security    | Input validation, path traversal protection, binary sanitization                           |
 
 **The security model is transparent and profile-governed.** You remain in control of what the AI can do on your machine through the selected profile, approvals, administrator policy, and hard guardrails.
 
 ### Guardrails Settings Location
 
 All guardrail settings can be configured at:
+
 - **Database**: Stored encrypted in `app.getPath('userData')/cowork-os.db` (category: `guardrails`)
 - **UI**: Settings (gear icon) → Guardrails tab
 
 ### Settings Migration
 
 Legacy JSON settings files are automatically migrated to the encrypted database:
+
 - Migration creates a `.migration-backup` file before proceeding
 - On successful migration, both backup and original are deleted
 - On failed migration, backup is preserved for recovery

@@ -37,13 +37,13 @@ Turn a messy household message into Notion tasks + optional reminders.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| notion_database_id | string | Yes | Target Notion database_id where tasks should be created |
-| tasks | string | Yes | Paste the raw household tasks text here |
-| create_reminders | boolean | No | Also create reminders for due tasks |
+| Name               | Type    | Required | Description                                             |
+| ------------------ | ------- | -------- | ------------------------------------------------------- |
+| notion_database_id | string  | Yes      | Target Notion database_id where tasks should be created |
+| tasks              | string  | Yes      | Paste the raw household tasks text here                 |
+| create_reminders   | boolean | No       | Also create reminders for due tasks                     |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1062 characters.
-- Runtime prompt is defined directly in `../usecase-household-capture.json`. 
+- Runtime prompt is defined directly in `../usecase-household-capture.json`.

@@ -18,6 +18,77 @@ import {
 
 const logger = createLogger("openai-compat");
 
+export interface OpenAICompatibleToolArgumentParseResult {
+  input: Record<string, Any>;
+  inputError?: {
+    code: "malformed_json" | "invalid_shape";
+    message: string;
+  };
+}
+
+function isToolArgumentObject(value: unknown): value is Record<string, Any> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Parse provider function arguments without ever turning malformed output
+ * into an executable default. Providers must send an explicit `{}` for a
+ * no-argument tool; blank/missing values are retained as rejection markers.
+ */
+export function parseOpenAICompatibleToolArguments(
+  value: unknown,
+): OpenAICompatibleToolArgumentParseResult {
+  if (value === undefined || (typeof value === "string" && value.trim().length === 0)) {
+    return {
+      input: {},
+      inputError: {
+        code: "malformed_json",
+        message:
+          "Tool call arguments are missing; provide a JSON object (use {} for no arguments).",
+      },
+    };
+  }
+
+  if (isToolArgumentObject(value)) {
+    return { input: value };
+  }
+
+  if (typeof value !== "string") {
+    return {
+      input: {},
+      inputError: {
+        code: "invalid_shape",
+        message: "Tool call arguments must be a JSON object.",
+      },
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return {
+      input: {},
+      inputError: {
+        code: "malformed_json",
+        message: "Tool call arguments must be valid JSON.",
+      },
+    };
+  }
+
+  if (!isToolArgumentObject(parsed)) {
+    return {
+      input: {},
+      inputError: {
+        code: "invalid_shape",
+        message: "Tool call arguments must be a JSON object.",
+      },
+    };
+  }
+
+  return { input: parsed };
+}
+
 export interface OpenAICompatibleMessageOptions {
   /** Set to false to replace image blocks with text fallback (default: false) */
   supportsImages?: boolean;
@@ -288,11 +359,13 @@ export function fromOpenAICompatibleResponse(response: Any): LLMResponse {
   if (message?.tool_calls) {
     for (const toolCall of message.tool_calls) {
       if (toolCall.type === "function") {
+        const parsedArguments = parseOpenAICompatibleToolArguments(toolCall.function?.arguments);
         content.push({
           type: "tool_use",
           id: toolCall.id,
-          name: toolCall.function.name,
-          input: JSON.parse(toolCall.function.arguments || "{}"),
+          name: toolCall.function?.name,
+          input: parsedArguments.input,
+          ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
         });
       }
     }

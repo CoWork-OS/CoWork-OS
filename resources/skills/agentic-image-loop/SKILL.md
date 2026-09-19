@@ -38,4 +38,4 @@ Generate -> annotate -> refine -> repeat using generate_image + Visual Annotator
 ## Runtime Prompt
 
 - Current runtime prompt length: 2117 characters.
-- Runtime prompt is defined directly in `../agentic-image-loop.json`. 
+- Runtime prompt is defined directly in `../agentic-image-loop.json`.

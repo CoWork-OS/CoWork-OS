@@ -11,13 +11,7 @@
     "version": "1.0.0",
     "author": "Leonxlnx",
     "homepage": "https://github.com/Leonxlnx/taste-skill/blob/main/skills/imagegen-frontend-web/SKILL.md",
-    "tags": [
-      "image-generation",
-      "frontend",
-      "web-design",
-      "landing-pages",
-      "art-direction"
-    ],
+    "tags": ["image-generation", "frontend", "web-design", "landing-pages", "art-direction"],
     "routing": {
       "keywords": [
         "imagegen-frontend-web",

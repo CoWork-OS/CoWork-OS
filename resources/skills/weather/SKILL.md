@@ -38,4 +38,4 @@ Get current weather and forecasts (no API key required).
 ## Runtime Prompt
 
 - Current runtime prompt length: 958 characters.
-- Runtime prompt is defined directly in `../weather.json`. 
+- Runtime prompt is defined directly in `../weather.json`.

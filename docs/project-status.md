@@ -24,6 +24,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 ### 1. Core Architecture
 
 #### Reliability Flywheel (Eval + Risk Gates)
+
 - [x] Eval corpus extraction from failed/partial tasks (`scripts/qa/build_eval_corpus.cjs`)
 - [x] Deterministic eval suite replay runner (`scripts/qa/run_eval_suite.cjs`)
 - [x] Eval schema and task metadata (`eval_cases`, `eval_suites`, `eval_runs`, `eval_case_runs`, task risk/eval columns)
@@ -42,12 +43,14 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Reference: `docs/reliability-flywheel.md`
 
 #### Database Layer
+
 - [x] SQLite schema with 6 tables (workspaces, tasks, events, artifacts, approvals, skills)
 - [x] Repository pattern for data access
 - [x] Type-safe database operations
 - [x] Located: `src/electron/database/`
 
 #### Agent System
+
 - [x] AgentDaemon - Main orchestrator with worktree isolation and collaborative mode
 - [x] TaskExecutor - Shared turn kernel, metadata-driven tool scheduler, delegated-work orchestration, and terminal-state-safe completion/resume handoff
 - [x] SessionRuntime - Canonical owner for task-session state, session checklists, snapshots, recovery, and task projection
@@ -66,6 +69,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `src/electron/agent/`
 
 #### Multi-Provider LLM Support
+
 - [x] Anthropic (Claude models)
 - [x] Google Gemini
 - [x] OpenRouter (multi-model access, including Pareto Code and Pareto Code Nitro coding routers)
@@ -79,6 +83,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `src/electron/agent/llm/`
 
 #### Web Search Integration
+
 - [x] DuckDuckGo (free built-in, no API key — automatic last-resort fallback)
 - [x] Tavily (AI-optimized)
 - [x] Brave Search
@@ -89,6 +94,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `src/electron/agent/search/`
 
 #### Browser Automation
+
 - [x] Browser V2 session manager with visible workbench default and responsive viewport testing
 - [x] Electron Workbench CDP control through renderer-owned webview
 - [x] Playwright local fallback for forced headless/background runs
@@ -106,6 +112,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `src/electron/browser/`, `src/electron/agent/browser/`, and `src/electron/agent/tools/browser-tools.ts`
 
 #### Channel Integrations
+
 - [x] WhatsApp bot with QR code pairing and self-chat mode
 - [x] Telegram bot with commands
 - [x] Discord bot with slash commands
@@ -115,6 +122,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `src/electron/gateway/`
 
 #### Composer Routing
+
 - [x] Grouped `@` autocomplete for Agents, Integrations, and Files
 - [x] Configured integration mention resolver with Google Workspace split into service-specific Gmail, Google Drive, Google Calendar, Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat entries when native or MCP-backed tools are available, including merged native/MCP Google Calendar routing
 - [ ] **Google OAuth verification (in progress)**: bundled OAuth client submitted for Gmail-only scopes (`gmail.readonly`, `gmail.send`, `gmail.modify`, `gmail.labels`). Awaiting Google approval and CASA security assessment. Until verified, Gmail Only mode requires a custom OAuth client; Full Workspace mode remains available. Privacy Policy and Terms of Service updated with Limited Use compliance, encryption details, and data retention clauses.
@@ -126,6 +134,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `src/renderer/components/PromptComposerInput.tsx`, `src/electron/integrations/`
 
 #### Managed Agents
+
 - [x] Agents Hub for managed-agent discovery, template-backed creation, draft editing, governance, channels, skills, runtime tools, memory, files, schedules, and deployment posture
 - [x] Single-pane clicked-agent detail view with no local assistant sidebar or bottom ask box
 - [x] Test, preview, and starter-prompt actions create runtime managed sessions and open their backing tasks in the main task window
@@ -135,6 +144,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 ### 2. Tools & Skills
 
 #### File Operations (7 tools)
+
 - [x] read_file - Read file contents
 - [x] write_file - Create or overwrite files
 - [x] list_directory - List folder contents
@@ -144,6 +154,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] search_files - Search by name/content
 
 #### Document Tools and Skills
+
 - [x] Everything Workbench - shared task-output model for generated docs, sheets, decks, web pages, PDFs, and previews with compact cards, sidebar/fullscreen artifact workspaces, follow-up composer context, refresh-after-edit behavior, and external app actions for advanced native workflows
 - [x] Spreadsheet - Excel .xlsx (exceljs) generation and structured preview extraction
 - [x] Spreadsheet artifact workbench - compact task cards, resizable sidebar viewer, fullscreen editable grid, selection/copy/save/zoom, and follow-up composer controls
@@ -157,6 +168,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Kami - Editorial PDFs, resumes, one-pagers, diagrams, and slide decks with workspace-local scaffolding
 
 #### Browser Tools (34 tools)
+
 - [x] browser_navigate
 - [x] browser_snapshot
 - [x] browser_screenshot
@@ -193,26 +205,32 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] browser_close
 
 #### Search Tools
+
 - [x] web_search - Multi-provider web search
 
 #### Code Tools (3 tools)
+
 - [x] glob - Fast pattern-based file search
 - [x] grep - Regex content search across files
 - [x] edit_file - Surgical file editing with find-and-replace
 
 #### Git Tools (3 tools)
+
 - [x] git_commit - Commit changes in workspace or worktree
 - [x] git_diff - View staged/unstaged changes
 - [x] git_branch - List, create, or switch branches
 
 #### Web Fetch Tools (2 tools)
+
 - [x] web_fetch - Fetch and parse web pages
 - [x] http_request - Full HTTP client (curl-like)
 
 #### Command Tools
+
 - [x] execute_command - Command-tool execution (profile-governed and approval-aware)
 
 #### System Tools
+
 - [x] take_screenshot - Full screen or specific windows
 - [x] clipboard_read / clipboard_write - Clipboard access
 - [x] open_application / open_url / open_path - Launch apps and URLs
@@ -220,6 +238,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] get_system_info - System information and environment
 
 #### Custom Skills
+
 - [x] User-defined reusable workflows
 - [x] YAML-based skill definitions
 - [x] Priority-based sorting
@@ -228,6 +247,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `~/Library/Application Support/cowork-os/skills/`
 
 #### Research Vault Workflow
+
 - [x] First-class bundled `llm-wiki` skill
 - [x] Workspace-local markdown vault structure with `SCHEMA.md`, `index.md`, `log.md`, `inbox.md`, and durable `raw/` captures
 - [x] Obsidian-friendly note/link conventions
@@ -236,6 +256,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `resources/skills/llm-wiki.json` and `resources/skills/llm-wiki/`
 
 #### Personality System
+
 - [x] 6 personality styles (professional, friendly, concise, creative, technical, casual)
 - [x] 9 persona overlays (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir)
 - [x] Response style options (emoji usage, response length, code comments, explanation depth)
@@ -245,6 +266,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Located: `src/electron/settings/personality-manager.ts`
 
 #### MCP (Model Context Protocol)
+
 - [x] MCP Client - Connect to external MCP servers
 - [x] MCP Host - Expose CoWork's tools as MCP server
 - [x] MCP Registry - One-click server installation
@@ -254,6 +276,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 ### 3. User Interface
 
 #### Main Components
+
 - [x] Workspace selector with folder picker
 - [x] Task list with status indicators and task pinning
 - [x] Task detail view with timeline and scroll-to-bottom button
@@ -282,6 +305,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Workflow Intelligence settings - heartbeat-triggered reflection, target kinds, last winner visibility, namespaced backlog, suggestion output, and dispatch history
 
 #### Settings UI
+
 - [x] LLM provider configuration
 - [x] Model selection
 - [x] Search provider configuration
@@ -302,6 +326,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 ### 4. Infrastructure
 
 #### Security
+
 - [x] Secure credential storage (safeStorage)
 - [x] Path traversal protection
 - [x] Content Security Policy
@@ -309,6 +334,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Approval flow for destructive operations
 
 #### Configurable Guardrails
+
 - [x] Token budget per task (1K - 10M)
 - [x] Cost budget per task ($0.01 - $100)
 - [x] Iteration limit (5 - 500)
@@ -318,24 +344,28 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Profile and legacy domain rules for browser
 
 #### Goal Mode & Re-planning
+
 - [x] Success criteria (shell commands or file checks)
 - [x] Auto-retry up to N attempts
 - [x] Dynamic re-planning mid-execution
 - [x] `revise_plan` tool for agent adaptation
 
 #### Parallel Task Queue
+
 - [x] Configurable concurrency (1-10)
 - [x] FIFO queue management
 - [x] Auto-start next task
 - [x] Queue persistence across restarts
 
 #### Auto-Update System
+
 - [x] Update checking
 - [x] Download progress
 - [x] One-click install
 - [x] GitHub releases integration
 
 #### Build System
+
 - [x] Electron + React + TypeScript
 - [x] Vite for development
 - [x] electron-builder for packaging
@@ -428,12 +458,12 @@ cowork-os/
 
 Access profiles are now the task-level source of truth:
 
-| Profile | Default posture |
-|---|---|
-| Ask for approval | Workspace-write sandbox, on-request approvals, user review, on-request network |
-| Approve for me | Workspace-write sandbox, on-request approvals, automatic safety review, on-request network |
-| Full access | Danger-full-access sandbox, no normal approval prompt, enabled network, still subject to hard guardrails and administrator policy |
-| Custom | Validated named combination of sandbox, approval, reviewer, network, filesystem, and domain rules |
+| Profile          | Default posture                                                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Ask for approval | Workspace-write sandbox, on-request approvals, user review, on-request network                                                    |
+| Approve for me   | Workspace-write sandbox, on-request approvals, automatic safety review, on-request network                                        |
+| Full access      | Danger-full-access sandbox, no normal approval prompt, enabled network, still subject to hard guardrails and administrator policy |
+| Custom           | Validated named combination of sandbox, approval, reviewer, network, filesystem, and domain rules                                 |
 
 Command tools are derived from the selected profile. There is no separate shell enable/disable
 control for new tasks. Legacy `shellAccess`, workspace permission booleans, `allowedPaths`, and
@@ -449,6 +479,7 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
 ## What's NOT Implemented (Planned)
 
 ### Agent Integrity and Trap Defense
+
 - **Status**: Planned
 - **Spec**: `docs/agent-integrity-and-trap-defense-spec.md`
 - **Why it matters**:
@@ -462,6 +493,7 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
   - Phase 5: integrity dashboard plus eval and red-team coverage for agent-trap scenarios
 
 ### VM Sandbox
+
 - **Status**: Stub implementation
 - **File**: `src/electron/agent/sandbox/runner.ts`
 - **What's needed**:
@@ -471,6 +503,7 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
   - Network egress controls
 
 ### Sub-Agents / Multi-Agent Collaboration
+
 - **Status**: Implemented (Collaborative Mode, `/multitask`, Multi-LLM Mode, Agent Comparison)
 - **What's built**:
   - Collaborative Mode: ephemeral multi-agent teams with real-time thought sharing
@@ -483,6 +516,7 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
 ## Ready to Use
 
 ### You Can:
+
 1. Select workspaces and create tasks
 2. Use a configured model route, including supported provider accounts, APIs, compatible gateways, cloud credentials, local Ollama models, or MLX-LM on native Apple Silicon
 3. Execute multi-step file operations
@@ -511,12 +545,14 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
 26. Use git tools (commit, diff, branch) within tasks
 
 ### You Cannot (Yet):
+
 1. Execute arbitrary code in a VM sandbox
 2. Apply network egress controls
 
 ## Dependencies
 
 ### Production
+
 - `react` & `react-dom` - UI framework
 - `better-sqlite3` - Local database
 - `@anthropic-ai/sdk` - Anthropic API
@@ -533,6 +569,7 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
 - `electron-updater` - Auto-updates
 
 ### Development
+
 - `electron` - Desktop framework
 - `vite` - Build tool
 - `typescript` - Type safety
@@ -547,11 +584,13 @@ Before first run, verify:
 - [ ] On macOS or Windows (required for Electron desktop features)
 
 Then run:
+
 ```bash
 npm run dev
 ```
 
 Expected behavior:
+
 1. Vite dev server starts (port 5173)
 2. Electron window opens
 3. DevTools open automatically
@@ -561,11 +600,13 @@ Expected behavior:
 ## Performance Characteristics
 
 ### Token Usage (varies by provider)
+
 - **Plan creation**: ~500-1000 tokens
 - **Step execution**: ~1000-3000 tokens per step
 - **Average task**: 5000-10000 tokens total
 
 ### Timing
+
 - **Plan creation**: 2-5 seconds
 - **Simple file operation**: 3-6 seconds per step
 - **Document creation**: 5-10 seconds
@@ -573,6 +614,7 @@ Expected behavior:
 - **Web search**: 1-3 seconds
 
 ### Resource Usage
+
 - **Memory**: ~200-400MB (Electron + Playwright when active)
 - **Database**: <1MB per task
 - **CPU**: Minimal (except during API calls)
@@ -582,6 +624,7 @@ Expected behavior:
 **CoWork OS is a production-ready, free, open-source, security-first, GUI-first, CLI-capable AI super app and everything app:**
 
 ### Core Strengths
+
 - **Security**: Extensive automated test coverage, configurable guardrails, layered permission rules, approval workflows, and brute-force protection
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
 - **Multi-Provider**: Supported account connections, APIs, compatible gateways, cloud credentials, local inference, ordered fallback routes, and Mixture of Agents presets
@@ -590,6 +633,7 @@ Expected behavior:
 - **Extensible**: MCP support (Client, Host, Registry), bundled and installable skills, and plugin packs
 
 ### Feature Highlights
+
 - Everyday Office-style document creation and review (Excel, Word, PDF, PowerPoint)
 - Web search and browser automation
 - Code tools (glob, grep, edit_file) and git tools (commit, diff, branch)
@@ -604,6 +648,7 @@ Expected behavior:
 - Remote access (Tailscale, SSH, WebSocket API)
 
 ### Planned
+
 - Agent Integrity and Trap Defense runtime across ingestion, memory, approvals, and delegation
 - VM sandbox using macOS Virtualization.framework
 - Network egress controls with proxy

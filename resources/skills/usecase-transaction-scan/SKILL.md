@@ -37,15 +37,15 @@ Scan recent messages/emails for card transactions and flag suspicious charges.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| channel | select | Yes | Where transaction alerts arrive |
-| chat_hint | string | No | Issuer/merchant keyword to identify the feed (e.g., "Amex", "Wise", "Chase") |
-| since | string | No | Time window (e.g., "24h", "7d") |
-| message_limit | number | No | How many messages to fetch |
-| amount_threshold | number | No | Flag transactions at or above this amount |
+| Name             | Type   | Required | Description                                                                  |
+| ---------------- | ------ | -------- | ---------------------------------------------------------------------------- |
+| channel          | select | Yes      | Where transaction alerts arrive                                              |
+| chat_hint        | string | No       | Issuer/merchant keyword to identify the feed (e.g., "Amex", "Wise", "Chase") |
+| since            | string | No       | Time window (e.g., "24h", "7d")                                              |
+| message_limit    | number | No       | How many messages to fetch                                                   |
+| amount_threshold | number | No       | Flag transactions at or above this amount                                    |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1202 characters.
-- Runtime prompt is defined directly in `../usecase-transaction-scan.json`. 
+- Runtime prompt is defined directly in `../usecase-transaction-scan.json`.

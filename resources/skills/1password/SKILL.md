@@ -38,4 +38,4 @@ Set up and use 1Password CLI (op). Use when installing the CLI, enabling desktop
 ## Runtime Prompt
 
 - Current runtime prompt length: 1978 characters.
-- Runtime prompt is defined directly in `../1password.json`. 
+- Runtime prompt is defined directly in `../1password.json`.

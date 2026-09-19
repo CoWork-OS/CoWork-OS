@@ -12,11 +12,7 @@
       "description": "What operation to run (`price`, `balance`, or `order`).",
       "required": true,
       "default": "price",
-      "options": [
-        "price",
-        "balance",
-        "order"
-      ]
+      "options": ["price", "balance", "order"]
     },
     {
       "name": "exchange",
@@ -37,10 +33,7 @@
       "type": "select",
       "description": "Order direction for the order action",
       "required": false,
-      "options": [
-        "buy",
-        "sell"
-      ]
+      "options": ["buy", "sell"]
     },
     {
       "name": "order_type",
@@ -48,10 +41,7 @@
       "description": "Order type for the order action",
       "required": false,
       "default": "market",
-      "options": [
-        "market",
-        "limit"
-      ]
+      "options": ["market", "limit"]
     },
     {
       "name": "amount",
@@ -68,12 +58,8 @@
   ],
   "enabled": true,
   "requires": {
-    "tools": [
-      "run_command"
-    ],
-    "bins": [
-      "python3"
-    ]
+    "tools": ["run_command"],
+    "bins": ["python3"]
   },
   "metadata": {
     "routing": {

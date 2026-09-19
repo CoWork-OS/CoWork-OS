@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cowork-pulse",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "pulse.coworkosapp.com/*", "zone_name": "coworkosapp.com" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cowork-pulse",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "triggers": { "crons": ["17 3 * * *"] },
+  "observability": { "enabled": false },
+}

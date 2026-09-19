@@ -15,6 +15,7 @@ Pairing mode requires users to enter a code to connect:
 5. User sends the code as a message to pair
 
 **Configuration:**
+
 ```
 Security Mode: Pairing
 Pairing Code TTL: 300 seconds (default)
@@ -30,6 +31,7 @@ Allowlist mode pre-approves specific users:
 3. Add user IDs to the **Allowed Users** list
 
 **Finding User IDs:**
+
 - Telegram: Use @userinfobot
 - Discord: Enable Developer Mode, right-click user
 - Slack: User profile > More > Copy member ID
@@ -42,6 +44,7 @@ Open mode allows anyone to interact:
 2. Set **Security Mode** to "Open"
 
 **When to use:**
+
 - Private channels only you can access
 - Testing environments
 - Controlled internal deployments
@@ -60,21 +63,21 @@ Configure different settings for DMs vs groups:
 
 **Recommended Configuration:**
 
-| Context | Security Mode | Tool Restrictions |
-|---------|---------------|-------------------|
-| DMs | Pairing | None |
-| Groups | Pairing | Memory tools (clipboard) |
+| Context | Security Mode | Tool Restrictions        |
+| ------- | ------------- | ------------------------ |
+| DMs     | Pairing       | None                     |
+| Groups  | Pairing       | Memory tools (clipboard) |
 
 ### Tool Restrictions
 
 Restrict tool groups per context:
 
-| Tool Group | Description | Default in Groups |
-|------------|-------------|-------------------|
-| Memory Tools | Clipboard read/write | Denied |
-| System Tools | Screenshot, app launch | Allowed |
-| Network Tools | Browser, web access | Allowed |
-| Destructive Tools | Delete, command tools | Allowed (with approval and profile controls) |
+| Tool Group        | Description            | Default in Groups                            |
+| ----------------- | ---------------------- | -------------------------------------------- |
+| Memory Tools      | Clipboard read/write   | Denied                                       |
+| System Tools      | Screenshot, app launch | Allowed                                      |
+| Network Tools     | Browser, web access    | Allowed                                      |
+| Destructive Tools | Delete, command tools  | Allowed (with approval and profile controls) |
 
 ## Channel Specialization Policy
 
@@ -108,13 +111,13 @@ modern profile selector. For a task with a named profile, the profile's effectiv
 and filesystem policy is applied before per-request rules. For an older unprofiled task, the legacy
 fields continue to preserve its prior behavior.
 
-| Permission | Description | Modern profile behavior |
-|------------|-------------|-------------------------|
-| Read | Read files | Still required by the effective profile |
-| Write | Create/modify files | Still required; a read-only profile removes writes |
-| Delete | Delete files | Separate destructive capability; a `write` profile rule never grants delete |
-| `shell` | Legacy command-tool capability bit | Consulted for unprofiled legacy tasks; named profiles derive command access; not a new-task toggle |
-| Network | Coarse network capability | The profile chooses disabled/on-request/enabled, subject to admin policy and export rules |
+| Permission | Description                        | Modern profile behavior                                                                            |
+| ---------- | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Read       | Read files                         | Still required by the effective profile                                                            |
+| Write      | Create/modify files                | Still required; a read-only profile removes writes                                                 |
+| Delete     | Delete files                       | Separate destructive capability; a `write` profile rule never grants delete                        |
+| `shell`    | Legacy command-tool capability bit | Consulted for unprofiled legacy tasks; named profiles derive command access; not a new-task toggle |
+| Network    | Coarse network capability          | The profile chooses disabled/on-request/enabled, subject to admin policy and export rules          |
 
 ### Paths and unrestricted-file compatibility
 
@@ -145,13 +148,18 @@ For explicit tool, domain, path, command-prefix, and MCP-server rules:
 
 Available rule scopes:
 
-| Scope | What it matches | Typical use |
-|-------|------------------|-------------|
-| `tool` | One tool name | Always ask or always allow a specific tool |
-| `domain` | A destination hostname, optionally for one tool | Allow `web_fetch` or `http_request` only for `api.example.com` |
-| `path` | Absolute path prefix, optionally for one tool | Allow a tool only under a shared folder |
-| `command_prefix` | Normalized shell prefix | Auto-approve trusted read/test commands |
-| `mcp_server` | One MCP backend | Narrow access to a specific connector/server |
+| Scope            | What it matches                                 | Typical use                                                    |
+| ---------------- | ----------------------------------------------- | -------------------------------------------------------------- |
+| `tool`           | One tool name                                   | Always ask or always allow a specific tool                     |
+| `domain`         | A destination hostname, optionally for one tool | Allow `web_fetch` or `http_request` only for `api.example.com` |
+| `path`           | Absolute path prefix, optionally for one tool   | Allow a tool only under a shared folder                        |
+| `command_prefix` | Normalized shell prefix                         | Auto-approve trusted read/test commands                        |
+| `mcp_server`     | One MCP backend                                 | Narrow access to a specific connector/server                   |
+
+Legacy permission-mode choices apply only to older profile-less tasks and compatibility callers.
+New tasks should use a named [access profile](../access-profiles.md), which allows ordinary work
+inside its boundary without an approval lifecycle and fails closed when required authority is
+missing.
 
 Legacy permission-mode choices:
 
@@ -195,12 +203,12 @@ guardrails or profile rules.
 
 Choose the sandbox implementation for the effective profile:
 
-| Type | Platforms | Features |
-|------|-----------|----------|
-| Auto | All | Best available for platform |
-| macOS | macOS only | Native sandbox-exec |
-| Docker | All | Container isolation |
-| None | All | No isolation (not recommended) |
+| Type   | Platforms  | Features                       |
+| ------ | ---------- | ------------------------------ |
+| Auto   | All        | Best available for platform    |
+| macOS  | macOS only | Native sandbox-exec            |
+| Docker | All        | Container isolation            |
+| None   | All        | No isolation (not recommended) |
 
 ### Docker Configuration
 
@@ -214,6 +222,7 @@ Network Mode: none (default) or bridge
 ```
 
 **Prerequisites:**
+
 - Docker must be installed and running
 - User must have permission to create containers
 
@@ -222,17 +231,20 @@ Network Mode: none (default) or bridge
 ### Command Blocking
 
 Built-in blocked patterns:
+
 - `sudo` - Privilege escalation
 - `rm -rf /` - Destructive deletions
 - `curl | bash` - Remote code execution
 
 Add custom blocked patterns:
+
 1. Go to **Settings > Guardrails**
 2. Add patterns to **Custom Blocked Patterns**
 
 ### Trusted Commands
 
 Trusted commands feed the permission engine as compatibility rules:
+
 1. Go to **Settings > Guardrails**
 2. Enable **Auto-approve Trusted Commands**
 3. Default includes: npm/yarn test, git status, ls, etc.
@@ -243,6 +255,7 @@ an explicit deny rule or a higher-priority hard restriction.
 ### Budget Limits
 
 Set limits per task:
+
 - **Max Tokens**: Limit API token usage
 - **Max Cost**: Limit spending per task
 - **Max Iterations**: Limit planning loops
@@ -251,15 +264,16 @@ Set limits per task:
 
 Rate limits are automatic and not configurable:
 
-| Operation | Limit |
-|-----------|-------|
+| Operation               | Limit     |
+| ----------------------- | --------- |
 | Expensive (LLM, search) | 10/minute |
-| Standard | 60/minute |
-| Settings changes | 5/minute |
+| Standard                | 60/minute |
+| Settings changes        | 5/minute  |
 
 ## Audit Logging
 
 All messages and actions are logged automatically:
+
 - Location: `~/Library/Application Support/cowork-os/`
 - Database: `cowork-os.db`
 - Tables: `audit_log`, `channel_messages`

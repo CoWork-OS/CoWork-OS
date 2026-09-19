@@ -82,7 +82,9 @@ function countOccurrences(haystack, needle) {
 }
 
 function extractSnippet(text, terms) {
-  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  const normalized = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!normalized) return "";
   let firstHit = -1;
   for (const term of terms) {
@@ -139,7 +141,8 @@ function collectFiles(vaultPath, scope) {
     const relPath = normalizeRelativePath(path.relative(vaultPath, filePath));
     const title = getTitleFromMarkdown(filePath);
     const ext = path.extname(filePath).toLowerCase();
-    const bodyText = ext === ".html" || ext === ".htm" ? stripHtml(rawText) : parsed.body || rawText;
+    const bodyText =
+      ext === ".html" || ext === ".htm" ? stripHtml(rawText) : parsed.body || rawText;
     return {
       filePath,
       relPath,

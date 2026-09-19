@@ -316,6 +316,35 @@ describeWithSqlite("RoutineService", () => {
     expect(runs[0]?.status).toBe("queued");
   });
 
+  it("propagates a source task agent role when creating a new routine task", async () => {
+    const createTask = vi.fn().mockResolvedValue({ id: "new-task" });
+    routineService = new RoutineServiceCtor({
+      db,
+      getCronService: () => cronService as Any,
+      getEventTriggerService: () => eventTriggerService,
+      loadHooksSettings: () => hooksSettings,
+      saveHooksSettings: () => undefined,
+      createTask,
+      now: () => 1_779_000_000_000,
+    });
+
+    const routine = await routineService.create({
+      name: "Bot check",
+      enabled: true,
+      workspaceId: "ws-1",
+      prompt: "Check the latest status.",
+      connectors: [],
+      contextBindings: { metadata: { assignedAgentRoleId: "agent-1" } },
+      triggers: [{ id: "manual-1", type: "manual", enabled: true }],
+    });
+
+    await routineService.runNow(routine.id);
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ assignedAgentRoleId: "agent-1" }),
+    );
+  });
+
   it("refreshes a manual run without creating duplicate run rows", async () => {
     let now = 1_779_000_000_000;
     routineService = new RoutineServiceCtor({

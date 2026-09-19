@@ -468,9 +468,14 @@ export class ControlPlaneSettingsManager {
   }
 
   /**
-   * Get settings for display
+   * Load settings including plaintext secrets.
+   *
+   * This does NOT redact anything, despite what a "for display" name would
+   * imply. Callers that expose the result beyond the local renderer must run
+   * it through `redactObjectSecrets` first — `token` and `nodeToken` are
+   * live credentials, and `nodeToken` is issued to read-scoped clients.
    */
-  static getSettingsForDisplay(): ControlPlaneSettings {
+  static loadSettingsWithSecrets(): ControlPlaneSettings {
     return this.loadSettings();
   }
 

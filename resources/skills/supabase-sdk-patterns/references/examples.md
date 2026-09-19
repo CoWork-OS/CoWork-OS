@@ -1,6 +1,7 @@
 # Examples
 
 ### Factory Pattern (Multi-tenant)
+
 ```typescript
 const clients = new Map<string, SupabaseClient>();
 
@@ -14,6 +15,7 @@ export function getClientForTenant(tenantId: string): SupabaseClient {
 ```
 
 ### Python Context Manager
+
 ```python
 from contextlib import asynccontextmanager
 from supabase import SupabaseClient
@@ -28,12 +30,13 @@ async def get_supabase_client():
 ```
 
 ### Zod Validation
+
 ```typescript
-import { z } from 'zod';
+import { z } from "zod";
 
 const supabaseResponseSchema = z.object({
   id: z.string(),
-  status: z.enum(['active', 'inactive']),
+  status: z.enum(["active", "inactive"]),
   createdAt: z.string().datetime(),
 });
 ```

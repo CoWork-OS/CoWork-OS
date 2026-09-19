@@ -25,6 +25,7 @@ Bundled skills such as [`manim-video`](skills/manim-video.md), [`kami`](skills/k
 The Skills settings page includes the **CoWork Registry** tab for curated skills distributed through CoWork’s own registry flow.
 
 Use this when:
+
 - You want the built-in, curated catalog.
 - You want skills presented in CoWork’s native registry format.
 
@@ -33,6 +34,7 @@ Use this when:
 CoWork OS has first-class ClawHub support in the GUI.
 
 Supported ClawHub flows:
+
 - Search ClawHub skills directly from the **ClawHub** tab.
 - See the top 10 most-downloaded public ClawHub skills when the tab opens with an empty query.
 - View live ClawHub stats in result cards:
@@ -45,6 +47,7 @@ Supported ClawHub flows:
 - Import using a `clawhub:slug`-style identifier internally.
 
 How ClawHub installs work:
+
 - CoWork resolves the ClawHub skill metadata.
 - It resolves a downloadable version.
 - It downloads the skill ZIP bundle from ClawHub.
@@ -58,12 +61,14 @@ ClawHub installs are treated as managed skills after import, not as a separate r
 CoWork OS can install a skill from a Git repository through the external import field.
 
 Supported Git-style inputs:
+
 - `https://github.com/org/repo`
 - `https://github.com/org/repo.git`
 - `git@host:org/repo.git`
 - `github:org/repo`
 
 Repository support works when the repo contains either:
+
 - a `SKILL.md` bundle, or
 - a compatible JSON custom skill manifest
 
@@ -82,6 +87,7 @@ Use this when an external store or repo exposes a single downloadable skill mani
 CoWork OS can import a raw `SKILL.md` URL directly.
 
 This is useful when:
+
 - a skill is published as documentation-first bundle content
 - the store exposes a raw `SKILL.md`
 - you want to import a skill bundle without cloning a repository manually
@@ -93,10 +99,12 @@ This path is weaker for multi-file bundles because it stages the markdown entry 
 CoWork OS does support other external skill stores, but usually through **generic import paths** rather than a first-class browse/search integration.
 
 Today, first-class marketplace search/install exists for:
+
 - CoWork Registry
 - ClawHub
 
 Other external stores are supported when they expose at least one of these install surfaces:
+
 - a Git repository
 - a raw JSON skill manifest URL
 - a raw `SKILL.md` URL
@@ -116,6 +124,7 @@ Go to:
 - **Settings → Skills → Skill Store**
 
 From there, users can:
+
 - browse the CoWork Registry
 - browse ClawHub
 - paste an external source into the import field
@@ -126,12 +135,14 @@ From there, users can:
 Imported and installed external skills are stored in CoWork’s managed skills directory.
 
 The managed install flow is now:
+
 - stage the manifest and any bundled support files in a temp location
 - run structural checks, content heuristics, and package-intelligence lookups where applicable
 - install the skill as managed content if the result is clean or warning-only
 - quarantine the import instead of activating it when the scan returns a blocking finding
 
 Each managed import keeps a sidecar security report so CoWork can:
+
 - show warning badges in the Skills UI
 - keep a review trail for imported bundles
 - detect if a managed import changes after install and re-quarantine it on the next load
@@ -141,16 +152,19 @@ Each managed import keeps a sidecar security report so CoWork can:
 CoWork OS can also load additional skill folders without importing them into the managed directory.
 
 Use this when:
+
 - your team already keeps shared skills in a Git checkout or synced folder
 - you want CoWork to read those skills without taking ownership of the files
 
 How it works:
+
 - add one or more absolute directory paths in **Settings → Skills**
 - CoWork loads matching skill manifests from those folders as **external** skills
 - external skills are **read-only** in the app
 - managed installs still go into CoWork’s managed skills directory
 
 Precedence order:
+
 - workspace skills
 - managed skills
 - external skill directories
@@ -159,10 +173,12 @@ Precedence order:
 This means a local workspace override or a managed install can replace a shared external skill with the same ID.
 
 Default locations:
+
 - macOS: `~/Library/Application Support/cowork-os/skills/`
 - Windows: `%APPDATA%\\cowork-os\\skills\\`
 
 Each managed skill typically includes:
+
 - a JSON manifest in the managed skills root
 - an optional companion directory containing `SKILL.md`, `references/`, `scripts/`, and other bundled files
 
@@ -171,6 +187,7 @@ Each managed skill typically includes:
 CoWork preserves external skill identity carefully so installed skills can be recognized correctly in the UI.
 
 For ClawHub specifically:
+
 - the installed skill is tracked using the ClawHub page slug
 - older ClawHub installs can also be recognized via their stored `homepage` or `repository` URL metadata
 
@@ -181,6 +198,7 @@ This matters because many external ecosystems have different internal names, dis
 After installation, external skills appear as managed skills in the Skills settings area.
 
 They can then be:
+
 - listed in the **Installed** tab
 - checked for requirements and readiness
 - uninstalled from the GUI
@@ -190,6 +208,7 @@ They can then be:
 ClawHub-originated skills are also labeled as **ClawHub** in the relevant UI surfaces.
 
 If CoWork blocks an imported skill, it now appears in a **Quarantined Imports** section instead of the active installed list. From there, users can:
+
 - view the stored scan findings
 - retry the scan later
 - remove the quarantined import entirely
@@ -214,6 +233,7 @@ External skill support is powerful, but it is also a trust boundary.
 CoWork treats external skills as imported content, not as implicitly trusted built-ins.
 
 Important safeguards and behaviors:
+
 - skill IDs are sanitized before installation
 - imported bundles are staged and scanned before activation rather than executed in place from remote sources
 - ClawHub ZIP extraction skips unsafe path traversal content
@@ -233,11 +253,13 @@ Bundled privacy-sensitive workflows can also carry their own domain guardrails. 
 ## Current Scope and Limits
 
 Current scope:
+
 - first-class GUI browse/search/install for ClawHub
 - first-class GUI browse/search/install for CoWork Registry
 - generic GUI import for Git, raw JSON, and raw `SKILL.md`
 
 Current limits:
+
 - only ClawHub has dedicated third-party marketplace browsing inside the GUI today
 - other external skill stores do not yet have dedicated search adapters unless added explicitly
 - compatibility depends on the store exposing installable skill artifacts in a format CoWork can import
@@ -250,6 +272,7 @@ Current limits:
 ## Why This Capability Matters
 
 This gives CoWork OS an important ecosystem advantage:
+
 - users can start with bundled skills
 - bundled examples now include workflows such as `llm-wiki`, `kami`, `react-best-practices`, `unbroker`, and `taste-skill`
 - adopt curated CoWork registry skills

@@ -37,12 +37,12 @@ Compare two files and show differences
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| file1 | string | Yes | Path to the first file |
-| file2 | string | Yes | Path to the second file |
+| Name  | Type   | Required | Description             |
+| ----- | ------ | -------- | ----------------------- |
+| file1 | string | Yes      | Path to the first file  |
+| file2 | string | Yes      | Path to the second file |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 477 characters.
-- Runtime prompt is defined directly in `../compare-files.json`. 
+- Runtime prompt is defined directly in `../compare-files.json`.

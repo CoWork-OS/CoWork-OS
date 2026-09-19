@@ -3,6 +3,27 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskRepository } from "../repositories";
 
 describe("TaskRepository.findAll", () => {
+  it("preserves the user preference independently of inferred execution in sidebar rows", () => {
+    const { repository, all, prepare } = createRepository();
+    all.mockReturnValue([
+      {
+        id: "task-1",
+        title: "Proposal",
+        status: "completed",
+        workspace_id: "workspace-1",
+        created_at: 1,
+        agent_config_interaction_mode: JSON.stringify({ mode: "smart" }),
+        agent_config_execution_mode: "plan",
+        agent_config_execution_mode_source: "user",
+      } as Any,
+    ]);
+    const task = repository.findSidebarSummaries(10, 0)[0];
+    expect(task.agentConfig).toMatchObject({
+      interactionMode: { mode: "smart" },
+      executionMode: "plan",
+    });
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("'$.interactionMode'"));
+  });
   it("uses latest-activity-first order by default", () => {
     const { repository, prepare, all } = createRepository();
 
@@ -39,6 +60,21 @@ describe("TaskRepository.findAll", () => {
     expect(sql).toContain("archived_at IS NOT NULL");
     expect(sql).toContain("COALESCE(NULLIF(tasks.session_id, ''), tasks.id)");
     expect(all).toHaveBeenCalledWith(25, 0);
+  });
+
+  it("can query bot conversations by workspace and assigned role", () => {
+    const { repository, prepare, all } = createRepository();
+
+    repository.findAll(10, 0, {
+      botConversation: { workspaceId: "workspace-1", agentRoleId: "agent-1" },
+      includeArchivedSessions: false,
+    });
+
+    const sql = prepare.mock.calls[0]?.[0] || "";
+    expect(sql).toContain("assigned_agent_role_id = ?");
+    expect(sql).toContain("json_extract(agent_config, '$.botConversation') = 1");
+    expect(sql).toContain("task_session_metadata");
+    expect(all).toHaveBeenCalledWith("workspace-1", "agent-1", 10, 0);
   });
 
   it("touches a task updated timestamp", () => {

@@ -39,4 +39,4 @@ Keep execution scoped, simple, and verifiable for coding, debugging, review, ref
 ## Runtime Prompt
 
 - Current runtime prompt length: 621 characters.
-- Runtime prompt is defined directly in `../karpathy-guidelines.json`. 
+- Runtime prompt is defined directly in `../karpathy-guidelines.json`.

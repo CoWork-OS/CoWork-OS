@@ -15,26 +15,31 @@ CoWork OS is a security-first, GUI-first local AI super app and everything app t
 If you're already using messaging channels with another AI platform, you can reuse most of your existing setup:
 
 #### WhatsApp
+
 - **Same phone**: CoWork OS uses Web WhatsApp (Baileys library), just like other platforms
 - **New QR scan**: You'll need to scan a new QR code in CoWork OS Settings
 - **Note**: WhatsApp allows multiple linked devices, so you can run both platforms during transition
 
 #### Telegram
+
 - **Same bot or new**: You can create a new bot via @BotFather, or reuse your existing bot token
 - **If reusing token**: Make sure to disable the old platform first to avoid conflicts
 - **Recommendation**: Create a new bot for cleaner separation
 
 #### Discord
+
 - **Same application**: You can reuse your Discord application and bot token
 - **Guild commands**: If using guild-specific commands, update the Guild IDs in CoWork OS
 - **Note**: Only one client can connect with the same token at a time
 
 #### Slack
+
 - **Same app tokens**: You can reuse your Slack app's Bot Token and App-Level Token
 - **Socket Mode**: CoWork OS uses Socket Mode, same as most other platforms
 - **Note**: Only one connection per token is allowed
 
 #### iMessage
+
 - **macOS only**: iMessage integration requires macOS and the `imsg` CLI tool
 - **Setup**: Install via `brew install steipete/tap/imsg`
 - **Unique to CoWork OS**: Most platforms don't support iMessage
@@ -47,26 +52,26 @@ Moving to CoWork OS provides several advantages:
 
 ### Security Features
 
-| Feature | Benefit |
-|---------|---------|
-| **Configurable guardrails** | Set token/cost budgets, iteration limits |
+| Feature                        | Benefit                                            |
+| ------------------------------ | -------------------------------------------------- |
+| **Configurable guardrails**    | Set token/cost budgets, iteration limits           |
 | **Dangerous command blocking** | Built-in + custom patterns to block risky commands |
-| **Approval workflows** | Human-in-the-loop for destructive operations |
-| **Brute-force protection** | Lockout after failed pairing attempts |
-| **Context-aware isolation** | Different tool access for local vs remote use |
+| **Approval workflows**         | Human-in-the-loop for destructive operations       |
+| **Brute-force protection**     | Lockout after failed pairing attempts              |
+| **Context-aware isolation**    | Different tool access for local vs remote use      |
 
 ### Additional Capabilities
 
-| Feature | Benefit |
-|---------|---------|
-| **30+ LLM providers** | Built-in + compatible gateways with BYOK flexibility |
-| **Local LLM support** | Run completely free and offline with Ollama |
-| **Native desktop app** | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows) |
+| Feature                        | Benefit                                                                                                                           |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| **30+ LLM providers**          | Built-in + compatible gateways with BYOK flexibility                                                                              |
+| **Local LLM support**          | Run completely free and offline with Ollama                                                                                       |
+| **Native desktop app**         | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows)                                                  |
 | **GUI-first agent management** | Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub and Mission Control |
-| **Real-time timeline** | See exactly what the agent is doing |
-| **Document creation** | Excel, Word, PDF, PowerPoint built-in |
-| **Personality system** | Customize how your AI communicates |
-| **MCP support** | Extend with external tool servers |
+| **Real-time timeline**         | See exactly what the agent is doing                                                                                               |
+| **Document creation**          | Excel, Word, PDF, PowerPoint built-in                                                                                             |
+| **Personality system**         | Customize how your AI communicates                                                                                                |
+| **MCP support**                | Extend with external tool servers                                                                                                 |
 
 ---
 
@@ -74,21 +79,21 @@ Moving to CoWork OS provides several advantages:
 
 ### Architecture
 
-| Aspect | CoWork OS | Typical CLI Platform |
-|--------|-----------|---------------------|
-| **Form factor** | Desktop app (Electron) | CLI + daemon |
-| **Primary platform** | macOS + Windows | Cross-platform |
-| **Installation** | `npm install` + `npm run dev` | `npm install -g` |
-| **Configuration** | GUI Settings panel | Config files / CLI flags |
+| Aspect               | CoWork OS                     | Typical CLI Platform     |
+| -------------------- | ----------------------------- | ------------------------ |
+| **Form factor**      | Desktop app (Electron)        | CLI + daemon             |
+| **Primary platform** | macOS + Windows               | Cross-platform           |
+| **Installation**     | `npm install` + `npm run dev` | `npm install -g`         |
+| **Configuration**    | GUI Settings panel            | Config files / CLI flags |
 
 ### Security Model
 
-| Aspect | CoWork OS |
-|--------|-----------|
-| **Default mode** | Pairing (most restrictive) |
-| **Sandbox** | Workspace boundaries (VM planned) |
-| **Approval** | GUI dialogs |
-| **Guardrails** | Configurable in Settings UI |
+| Aspect           | CoWork OS                         |
+| ---------------- | --------------------------------- |
+| **Default mode** | Pairing (most restrictive)        |
+| **Sandbox**      | Workspace boundaries (VM planned) |
+| **Approval**     | GUI dialogs                       |
+| **Guardrails**   | Configurable in Settings UI       |
 
 ---
 
@@ -165,6 +170,7 @@ During transition, you may want to run both platforms:
 ### Can I import my skills/prompts from another platform?
 
 CoWork OS uses a JSON-based skill format. If your existing platform exports skills, you may need to convert them. Skills are stored in:
+
 ```
 macOS: ~/Library/Application Support/cowork-os/skills/
 Windows: %APPDATA%\cowork-os\skills\

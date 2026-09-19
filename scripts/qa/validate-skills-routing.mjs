@@ -1,21 +1,21 @@
 #!/usr/bin/env node
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
-const skillsDir = path.join(process.cwd(), 'resources', 'skills');
+const skillsDir = path.join(process.cwd(), "resources", "skills");
 const files = fs
   .readdirSync(skillsDir)
-  .filter((name) => name.endsWith('.json'))
+  .filter((name) => name.endsWith(".json"))
   .sort();
 
 const warnings = [];
 const errors = [];
 
-const has = (value) => typeof value === 'string' && value.trim().length > 0;
+const has = (value) => typeof value === "string" && value.trim().length > 0;
 
 for (const file of files) {
   const filePath = path.join(skillsDir, file);
-  const raw = fs.readFileSync(filePath, 'utf8');
+  const raw = fs.readFileSync(filePath, "utf8");
   let skill;
 
   try {
@@ -30,12 +30,12 @@ for (const file of files) {
     errors.push({
       file,
       issue:
-        'metadata.routing is missing. All skills should define routing metadata to support deterministic use_skill selection.',
+        "metadata.routing is missing. All skills should define routing metadata to support deterministic use_skill selection.",
     });
     continue;
   }
 
-  const prompt = String(skill.prompt || '');
+  const prompt = String(skill.prompt || "");
   const expectedArtifacts = Array.isArray(routing.expectedArtifacts)
     ? routing.expectedArtifacts
     : [];
@@ -51,35 +51,35 @@ for (const file of files) {
   }
 
   if (!has(routing.useWhen)) {
-    errors.push({ file, issue: 'metadata.routing.useWhen must be a non-empty string.' });
+    errors.push({ file, issue: "metadata.routing.useWhen must be a non-empty string." });
   }
 
   if (!has(routing.dontUseWhen)) {
-    warnings.push({ file, issue: 'metadata.routing.dontUseWhen is missing or empty.' });
+    warnings.push({ file, issue: "metadata.routing.dontUseWhen is missing or empty." });
   }
 
   if (!has(routing.outputs)) {
-    warnings.push({ file, issue: 'metadata.routing.outputs is missing or empty.' });
+    warnings.push({ file, issue: "metadata.routing.outputs is missing or empty." });
   }
 
   if (!has(routing.successCriteria)) {
-    warnings.push({ file, issue: 'metadata.routing.successCriteria is missing or empty.' });
+    warnings.push({ file, issue: "metadata.routing.successCriteria is missing or empty." });
   }
 
   if (expectedArtifacts.length === 0) {
-    if (prompt.includes('{artifactDir}')) {
+    if (prompt.includes("{artifactDir}")) {
       warnings.push({
         file,
         issue:
-          'Prompt references {artifactDir} but expectedArtifacts is not declared. Consider adding artifact names.',
+          "Prompt references {artifactDir} but expectedArtifacts is not declared. Consider adding artifact names.",
       });
     }
   } else {
-    if (prompt.includes('{artifactDir}') === false) {
+    if (prompt.includes("{artifactDir}") === false) {
       warnings.push({
         file,
         issue:
-          'expectedArtifacts is set but prompt has no {artifactDir} reference. Ensure this is intentional.',
+          "expectedArtifacts is set but prompt has no {artifactDir} reference. Ensure this is intentional.",
       });
     }
 
@@ -111,7 +111,7 @@ for (const file of files) {
 }
 
 if (errors.length === 0 && warnings.length === 0) {
-  console.log('[skills-routing] OK: 0 errors, 0 warnings');
+  console.log("[skills-routing] OK: 0 errors, 0 warnings");
   process.exit(0);
 }
 

@@ -7,19 +7,10 @@
   "author": "Anthropic",
   "license": "Apache-2.0",
   "homepage": "https://github.com/anthropics/claude-for-legal/tree/993f6619fc2f321cfdd65daa6919ad6cd2c56d92/regulatory-legal",
-  "keywords": [
-    "legal",
-    "law",
-    "compliance",
-    "regulatory-legal"
-  ],
+  "keywords": ["legal", "law", "compliance", "regulatory-legal"],
   "icon": "⚖️",
   "category": "Legal",
-  "recommendedConnectors": [
-    "Google Drive",
-    "Lexis+ Protégé",
-    "Slack"
-  ],
+  "recommendedConnectors": ["Google Drive", "Lexis+ Protégé", "Slack"],
   "tryAsking": [
     "Use Regulatory Legal Cold Start Interview for this legal workflow",
     "Use Regulatory Legal Comments for this legal workflow",
@@ -345,13 +336,7 @@
       "description": "Watches regulatory feeds, diffs new rules against your policy library, tracks comment deadlines and open gaps, and writes the digest your team reads Monday morning.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "research",
-        "review",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "research", "review", "summarize", "triage"],
       "systemPrompt": "You are a Regulatory Legal assistant in CoWork OS. Produce draft legal work product for attorney review, preserve citations and source provenance, flag uncertainty, and require explicit confirmation before irreversible actions. This pack also includes upstream scheduled-agent workflows: Reg Change Monitor. In CoWork OS, keep those recurring workflows opt-in through routines or automation profiles."
     },
     {
@@ -360,12 +345,7 @@
       "description": "Scheduled agent that checks regulatory feeds and posts a filtered digest. Runs per the cadence in ~/.claude/plugins/config/claude-for-legal/regulatory-legal/CLAUDE.md. Filters by materiality threshold so the digest is signal, not noise. Trigger: \"reg digest\", \"what's new from regulators\", or on schedule.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "monitor",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "monitor", "summarize", "triage"],
       "systemPrompt": "CoWork OS adaptation of the upstream regulatory-legal/reg-change-monitor scheduled agent.\n\nRecurring execution is opt-in. Use CoWork routines or automation profiles when the user asks to schedule this workflow.\n\n# Reg Change Monitor Agent\n\n## Purpose\n\nNobody reads the Federal Register cover to cover. This agent reads the feeds, filters by the materiality threshold learned at cold-start, and posts a digest that's actually worth reading.\n\n## Schedule\n\nPer `~/.claude/plugins/config/claude-for-legal/regulatory-legal/CLAUDE.md` → Feed configuration → Check cadence. Default weekly; daily if the regulatory environment is active.\n\n## What it does\n\n1. Read `~/.claude/plugins/config/claude-for-legal/regulatory-legal/CLAUDE.md` → watchlist, materiality threshold.\n2. Run reg-feed-watcher: pull each feed, filter.\n3. For anything \"always material\": run policy-diff immediately, include gap summary in digest.\n4. Post digest.\n\n## Output\n\n```\n📋 **Regulatory digest — [date]**\n\n🔴 **Material (action likely needed)**\n• [Regulator] — [title] — [one line] — [link]\n  → Gap check: [policy X may need update — see diff]\n\n🟡 **Review-worthy**\n• [Regulator] — [title] — [one line] — [link]\n\n📝 **FYI** — [N] items — [expandable list]\n\n**Open gaps:** [N] — oldest [days]\n```\n\nIf nothing material, short all-clear with FYI count.\n\n## What it does NOT do\n\n- Update policies — flags gaps, human updates\n- Make materiality calls on edge cases — filters by the threshold, borderline items go in \"review-worthy\""
     }
   ],

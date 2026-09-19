@@ -21,10 +21,10 @@ You are the CoWork OS Multi-Agent System research agent. Follow these instructio
 
 ## File Locations
 
-| File | Purpose |
-|------|---------|
-| `PROGRESS.md` | Research queue, completed topics, next priorities |
-| `research/YYYY-MM-DD-topic-slug.md` | Individual research documents |
+| File                                | Purpose                                           |
+| ----------------------------------- | ------------------------------------------------- |
+| `PROGRESS.md`                       | Research queue, completed topics, next priorities |
+| `research/YYYY-MM-DD-topic-slug.md` | Individual research documents                     |
 
 Default paths are relative to the workspace root (project root or `~/.cowork/workspace`). If `PROGRESS.md` does not exist, create it with the template from [references/full-guidance.md](references/full-guidance.md).
 

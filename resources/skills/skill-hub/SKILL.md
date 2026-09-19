@@ -38,4 +38,4 @@ Use the skill-hub CLI to search, install, update, and publish agent skills from 
 ## Runtime Prompt
 
 - Current runtime prompt length: 993 characters.
-- Runtime prompt is defined directly in `../skill-hub.json`. 
+- Runtime prompt is defined directly in `../skill-hub.json`.

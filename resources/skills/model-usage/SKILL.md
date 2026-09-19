@@ -38,4 +38,4 @@ Use CodexBar CLI local cost usage to summarize per-model usage for Codex or Clau
 ## Runtime Prompt
 
 - Current runtime prompt length: 1495 characters.
-- Runtime prompt is defined directly in `../model-usage.json`. 
+- Runtime prompt is defined directly in `../model-usage.json`.

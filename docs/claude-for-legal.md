@@ -34,11 +34,11 @@ Some Claude-for-Legal workflows need structured matter context before the agent 
 
 Current behavior:
 
-| Workflow shape | Main-view UI |
-|----------------|--------------|
-| `/litigation-legal-demand-intake ...` | A demand-letter intake card with matter title, demand type, parties, tone, response window, settlement marking, facts, basis, outcome, delivery, signer, seed docs, and strategy notes |
-| Other legal workflow commands that benefit from matter context | A generic legal workflow details card with matter title, jurisdiction, role/side, objective, facts, documents, deadlines, stakeholders, assumptions, and output preferences |
-| Legal pack management commands | No matter-intake card; commands such as `/legal-builder-hub-disable` are operational controls, not legal work-product workflows |
+| Workflow shape                                                 | Main-view UI                                                                                                                                                                           |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/litigation-legal-demand-intake ...`                          | A demand-letter intake card with matter title, demand type, parties, tone, response window, settlement marking, facts, basis, outcome, delivery, signer, seed docs, and strategy notes |
+| Other legal workflow commands that benefit from matter context | A generic legal workflow details card with matter title, jurisdiction, role/side, objective, facts, documents, deadlines, stakeholders, assumptions, and output preferences            |
+| Legal pack management commands                                 | No matter-intake card; commands such as `/legal-builder-hub-disable` are operational controls, not legal work-product workflows                                                        |
 
 Submitting a card sends a follow-up message to the same task. Blank fields are preserved as `[not provided]` so the skill can flag missing inputs before relying on them.
 

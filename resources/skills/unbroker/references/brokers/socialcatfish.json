@@ -3,20 +3,13 @@
   "name": "Social Catfish",
   "category": "people_search",
   "priority": "standard",
-  "jurisdictions": [
-    "US"
-  ],
+  "jurisdictions": ["US"],
   "search": {
     "method": "url_pattern",
     "url": "https://socialcatfish.com/",
     "fetch": "browser",
     "match_signal": "result",
-    "by": [
-      "name",
-      "email",
-      "phone",
-      "image"
-    ],
+    "by": ["name", "email", "phone", "image"],
     "url_format_quirks": [
       "Reverse-lookup site (name / email / phone / image / username). Subject exposure is usually an INDIRECT one (an email/phone data point), not a full profile -- verify what is actually shown before choosing a lane."
     ]
@@ -34,10 +27,7 @@
       "phone_callback": false,
       "payment": false
     },
-    "inputs": [
-      "full_name",
-      "contact_email"
-    ],
+    "inputs": ["full_name", "contact_email"],
     "notes": "Automation-HOSTILE opt-out form: in the field the form filled correctly but the submission was automation-defeated, so it lands as a 2-click human task rather than a hands-off submit. Decision order per the blocked-form rule (methods.md): try the in-browser form on the operator's residential browser first; if it will not go through, fall back to the rights-request EMAIL address cited on the Social Catfish privacy policy / opt-out page (confirm the current address before sending -- do NOT use an address sourced from a third-party blog), disclosing name + contact email only. If neither is possible, queue a human_task with the exact end-state.",
     "quirks": [
       "Form defeats automation even when fields are filled correctly -> treat as a 2-click human task or use the cited rights-email fallback.",

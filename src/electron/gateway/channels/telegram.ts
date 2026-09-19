@@ -1581,14 +1581,19 @@ export class TelegramAdapter implements ChannelAdapter {
 
       // Webhook endpoint
       if (req.method === "POST" && url === webhookPath) {
-        // Validate secret token if configured
-        if (secretToken) {
-          const requestToken = req.headers["x-telegram-bot-api-secret-token"];
-          if (requestToken !== secretToken) {
-            res.writeHead(401, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Unauthorized" }));
-            return;
-          }
+        // Fail closed. Inbound updates reach the router and can start agent
+        // tasks with an attacker-chosen sender id, and this server binds all
+        // interfaces, so an unset secret token must not mean "accept anything".
+        if (!secretToken) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Webhook secret token is not configured" }));
+          return;
+        }
+        const requestToken = req.headers["x-telegram-bot-api-secret-token"];
+        if (requestToken !== secretToken) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Unauthorized" }));
+          return;
         }
 
         // Handle webhook callback

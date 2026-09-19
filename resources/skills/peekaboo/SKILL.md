@@ -38,4 +38,4 @@ Capture and automate macOS UI with the Peekaboo CLI.
 ## Runtime Prompt
 
 - Current runtime prompt length: 832 characters.
-- Runtime prompt is defined directly in `../peekaboo.json`. 
+- Runtime prompt is defined directly in `../peekaboo.json`.

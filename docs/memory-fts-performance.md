@@ -41,14 +41,14 @@ A dedicated `searchForPromptRecallFast()` method replaces the general-purpose `s
 
 ### What It Skips
 
-| Component | General `search()` | Fast prompt recall |
-|-----------|--------------------|--------------------|
-| Imported-global FTS | 2 queries (raw + relaxed) | Skipped entirely |
-| Hybrid semantic scoring | Embedding + cosine similarity | Skipped (BM25 only) |
-| Double `getFullDetails` | 2 round-trips | 0 (content carried inline) |
-| Tier tracking (`recordReference`) | N sync UPDATEs per search | Skipped (automatic recall shouldn't inflate counts) |
-| Relaxed FTS token cap | 8 tokens | 5 tokens |
-| Result limit | 10–20 | 5 |
+| Component                         | General `search()`            | Fast prompt recall                                  |
+| --------------------------------- | ----------------------------- | --------------------------------------------------- |
+| Imported-global FTS               | 2 queries (raw + relaxed)     | Skipped entirely                                    |
+| Hybrid semantic scoring           | Embedding + cosine similarity | Skipped (BM25 only)                                 |
+| Double `getFullDetails`           | 2 round-trips                 | 0 (content carried inline)                          |
+| Tier tracking (`recordReference`) | N sync UPDATEs per search     | Skipped (automatic recall shouldn't inflate counts) |
+| Relaxed FTS token cap             | 8 tokens                      | 5 tokens                                            |
+| Result limit                      | 10–20                         | 5                                                   |
 
 ### New Repository Method
 
@@ -63,21 +63,21 @@ A dedicated `searchForPromptRecallFast()` method replaces the general-purpose `s
 
 `MemoryService.searchForPromptRecallFast()` caches results per `{workspaceId, prompt[:500]}`:
 
-| Parameter | Value |
-|-----------|-------|
-| Max entries | 32 |
-| TTL | 5 minutes |
-| Cache key | `${workspaceId}:${query.slice(0, 500)}` |
+| Parameter   | Value                                   |
+| ----------- | --------------------------------------- |
+| Max entries | 32                                      |
+| TTL         | 5 minutes                               |
+| Cache key   | `${workspaceId}:${query.slice(0, 500)}` |
 
 Cache hits return immediately with zero DB work. The cache is cleared via `MemoryService.clearPromptRecallCache()`.
 
 ### Callers Updated
 
-| File | Call site | Before | After |
-|------|-----------|--------|-------|
-| `src/electron/memory/MemorySynthesizer.ts` | `extractArchiveFragments()` | `searchForPromptRecall()` | `searchForPromptRecallFast()` |
-| `src/electron/memory/MemoryService.ts` | `getContextForInjection()` | `searchForPromptRecall()` | `searchForPromptRecallFast()` |
-| `src/electron/agent/executor.ts` | Inline memory context builder | `searchForPromptRecall()` | `searchForPromptRecallFast()` |
+| File                                       | Call site                     | Before                    | After                         |
+| ------------------------------------------ | ----------------------------- | ------------------------- | ----------------------------- |
+| `src/electron/memory/MemorySynthesizer.ts` | `extractArchiveFragments()`   | `searchForPromptRecall()` | `searchForPromptRecallFast()` |
+| `src/electron/memory/MemoryService.ts`     | `getContextForInjection()`    | `searchForPromptRecall()` | `searchForPromptRecallFast()` |
+| `src/electron/agent/executor.ts`           | Inline memory context builder | `searchForPromptRecall()` | `searchForPromptRecallFast()` |
 
 ---
 
@@ -103,16 +103,16 @@ Background services (Subconscious loop, ProactiveSuggestionsService, EvolutionMe
 
 ### Callers Migrated
 
-| File | Method | Marker | Limit |
-|------|--------|--------|-------|
-| `ProactiveSuggestionsService.ts` | `loadAll()` | `[SUGGESTION]` | 50 |
-| `ProactiveSuggestionsService.ts` | `actOn()` | `[SUGGESTION]` | 50 |
-| `ProactiveSuggestionsService.ts` | `detectRecurringPatterns()` | `[PLAYBOOK] Task succeeded` | 50 |
-| `ProactiveSuggestionsService.ts` | `findSuggestionById()` | `[SUGGESTION]` | 50 |
-| `SubconsciousLoopService.ts` | `countAcceptedSuggestionPatterns()` | `[suggestion-feedback:acted_on]` | 20 |
-| `EvolutionMetricsService.ts` | `computeCorrectionRate()` | `[PLAYBOOK] Task failed` | 100 |
-| `EvolutionMetricsService.ts` | `computeTaskSuccessRate()` | `[PLAYBOOK] Task` | 100 |
-| `PlaybookSkillPromoter.ts` | `findCandidates()` | `[PLAYBOOK] Reinforced pattern` | 100 |
+| File                             | Method                              | Marker                           | Limit |
+| -------------------------------- | ----------------------------------- | -------------------------------- | ----- |
+| `ProactiveSuggestionsService.ts` | `loadAll()`                         | `[SUGGESTION]`                   | 50    |
+| `ProactiveSuggestionsService.ts` | `actOn()`                           | `[SUGGESTION]`                   | 50    |
+| `ProactiveSuggestionsService.ts` | `detectRecurringPatterns()`         | `[PLAYBOOK] Task succeeded`      | 50    |
+| `ProactiveSuggestionsService.ts` | `findSuggestionById()`              | `[SUGGESTION]`                   | 50    |
+| `SubconsciousLoopService.ts`     | `countAcceptedSuggestionPatterns()` | `[suggestion-feedback:acted_on]` | 20    |
+| `EvolutionMetricsService.ts`     | `computeCorrectionRate()`           | `[PLAYBOOK] Task failed`         | 100   |
+| `EvolutionMetricsService.ts`     | `computeTaskSuccessRate()`          | `[PLAYBOOK] Task`                | 100   |
+| `PlaybookSkillPromoter.ts`       | `findCandidates()`                  | `[PLAYBOOK] Reinforced pattern`  | 100   |
 
 ---
 
@@ -124,15 +124,15 @@ This covers the `getRecentForWorkspace()` query which previously relied on separ
 
 ### All Memory Indexes
 
-| Index | Columns |
-|-------|---------|
-| `idx_memories_workspace` | `(workspace_id)` |
-| `idx_memories_task` | `(task_id)` |
-| `idx_memories_type` | `(type)` |
-| `idx_memories_created` | `(created_at)` |
-| `idx_memories_compressed` | `(is_compressed)` |
-| `idx_memories_tier` | `(workspace_id, tier, reference_count DESC)` |
-| **`idx_memories_workspace_recent`** | **`(workspace_id, created_at DESC)`** ← new |
+| Index                               | Columns                                      |
+| ----------------------------------- | -------------------------------------------- |
+| `idx_memories_workspace`            | `(workspace_id)`                             |
+| `idx_memories_task`                 | `(task_id)`                                  |
+| `idx_memories_type`                 | `(type)`                                     |
+| `idx_memories_created`              | `(created_at)`                               |
+| `idx_memories_compressed`           | `(is_compressed)`                            |
+| `idx_memories_tier`                 | `(workspace_id, tier, reference_count DESC)` |
+| **`idx_memories_workspace_recent`** | **`(workspace_id, created_at DESC)`** ← new  |
 
 ---
 
@@ -141,11 +141,13 @@ This covers the `getRecentForWorkspace()` query which previously relied on separ
 `MemoryRepository.runMemoryFtsQuery()` now logs richer context on slow queries (≥250ms):
 
 **Before**:
+
 ```
 Slow memory FTS query label=local-relaxed elapsedMs=1548 queryChars=12
 ```
 
 **After**:
+
 ```
 Slow memory FTS query label=local-relaxed elapsedMs=1548 queryChars=12 tokens=2 rows=50 limit=50 workspace=ws_abc123
 ```
@@ -169,18 +171,18 @@ After applying fixes, re-running the same "what new in gemini based on google IO
 
 ## Files Modified
 
-| File | Changes |
-|------|---------|
-| `src/electron/database/repositories.ts` | Added `searchLocalForPromptRecall()`, `searchByContentMarker()`, `PROMPT_RECALL_FTS_MAX_TOKENS`, enhanced `runMemoryFtsQuery()` instrumentation, parameterized `buildRelaxedFtsQuery()` max tokens |
-| `src/electron/database/schema.ts` | Added `idx_memories_workspace_recent` composite index |
-| `src/electron/memory/MemoryService.ts` | Added `searchForPromptRecallFast()` with LRU cache, `searchByContentMarker()`, `clearPromptRecallCache()`, switched `search()` to batched `recordReferenceBatch` |
-| `src/electron/memory/MemoryTierService.ts` | Added `recordReferenceBatch()` |
-| `src/electron/memory/MemorySynthesizer.ts` | Switched to `searchForPromptRecallFast()` |
-| `src/electron/agent/executor.ts` | Switched to `searchForPromptRecallFast()` |
-| `src/electron/agent/ProactiveSuggestionsService.ts` | Switched to `searchByContentMarker()` |
-| `src/electron/subconscious/SubconsciousLoopService.ts` | Switched to `searchByContentMarker()` |
-| `src/electron/memory/EvolutionMetricsService.ts` | Switched to `searchByContentMarker()` |
-| `src/electron/memory/PlaybookSkillPromoter.ts` | Switched to `searchByContentMarker()` |
+| File                                                   | Changes                                                                                                                                                                                            |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/electron/database/repositories.ts`                | Added `searchLocalForPromptRecall()`, `searchByContentMarker()`, `PROMPT_RECALL_FTS_MAX_TOKENS`, enhanced `runMemoryFtsQuery()` instrumentation, parameterized `buildRelaxedFtsQuery()` max tokens |
+| `src/electron/database/schema.ts`                      | Added `idx_memories_workspace_recent` composite index                                                                                                                                              |
+| `src/electron/memory/MemoryService.ts`                 | Added `searchForPromptRecallFast()` with LRU cache, `searchByContentMarker()`, `clearPromptRecallCache()`, switched `search()` to batched `recordReferenceBatch`                                   |
+| `src/electron/memory/MemoryTierService.ts`             | Added `recordReferenceBatch()`                                                                                                                                                                     |
+| `src/electron/memory/MemorySynthesizer.ts`             | Switched to `searchForPromptRecallFast()`                                                                                                                                                          |
+| `src/electron/agent/executor.ts`                       | Switched to `searchForPromptRecallFast()`                                                                                                                                                          |
+| `src/electron/agent/ProactiveSuggestionsService.ts`    | Switched to `searchByContentMarker()`                                                                                                                                                              |
+| `src/electron/subconscious/SubconsciousLoopService.ts` | Switched to `searchByContentMarker()`                                                                                                                                                              |
+| `src/electron/memory/EvolutionMetricsService.ts`       | Switched to `searchByContentMarker()`                                                                                                                                                              |
+| `src/electron/memory/PlaybookSkillPromoter.ts`         | Switched to `searchByContentMarker()`                                                                                                                                                              |
 
 ## Future Work
 

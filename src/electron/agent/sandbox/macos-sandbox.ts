@@ -12,6 +12,7 @@ import { spawn, ChildProcess, SpawnOptions } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import * as crypto from "crypto";
 import { Workspace } from "../../../shared/types";
 import {
   ISandbox,
@@ -23,6 +24,7 @@ import {
 import {
   evaluateWorkspaceFilesystemAccess,
   hasEffectiveFilesystemScope,
+  isAccessPathWithin,
   resolveAccessControlledPath,
 } from "../../security/access-profile-paths";
 import {
@@ -98,6 +100,16 @@ export class MacOSSandbox implements ISandbox {
       };
     }
     this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts);
+    if (!this.sandboxProfile) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "macOS sandbox profile unavailable; refusing unsandboxed execution.",
+        killed: false,
+        timedOut: false,
+        error: "Sandbox profile unavailable",
+      };
+    }
 
     // Validate working directory is within allowed paths
     if (!this.isPathAllowed(cwd, "read")) {
@@ -122,22 +134,15 @@ export class MacOSSandbox implements ISandbox {
       stdio: ["pipe", "pipe", "pipe"],
     };
 
-    if (this.sandboxProfile) {
-      // Use sandbox-exec on macOS
-      const { profilePath, cleanup } = this.writeTempProfile();
-      proc =
-        args.length > 0
-          ? spawn("sandbox-exec", ["-f", profilePath, command, ...args], spawnOptions)
-          : spawn("sandbox-exec", ["-f", profilePath, "/bin/sh", "-c", command], spawnOptions);
-      proc.on("close", cleanup);
-      proc.on("error", cleanup);
-    } else {
-      // Fallback without sandbox profile
-      proc =
-        args.length > 0
-          ? spawn(command, args, spawnOptions)
-          : spawn("/bin/sh", ["-c", command], spawnOptions);
-    }
+    // Use sandbox-exec on macOS. There is intentionally no unsandboxed fallback
+    // here: callers that explicitly choose NoSandbox are handled by the factory.
+    const { profilePath, cleanup } = this.writeTempProfile();
+    proc =
+      args.length > 0
+        ? spawn("sandbox-exec", ["-f", profilePath, command, ...args], spawnOptions)
+        : spawn("sandbox-exec", ["-f", profilePath, "/bin/sh", "-c", command], spawnOptions);
+    proc.on("close", cleanup);
+    proc.on("error", cleanup);
     opts.onProcess?.(proc);
 
     return new Promise((resolve) => {
@@ -216,6 +221,9 @@ export class MacOSSandbox implements ISandbox {
     }
 
     this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts);
+    if (!this.sandboxProfile) {
+      throw new Error("macOS sandbox profile unavailable; refusing unsandboxed execution.");
+    }
     const { profilePath, cleanup: cleanupProfile } = this.writeTempProfile();
     const env = this.buildSafeEnvironment(opts.envPassthrough);
     const proc = spawn("sandbox-exec", ["-f", profilePath, command, ...args], {
@@ -242,11 +250,12 @@ export class MacOSSandbox implements ISandbox {
    */
   async executeCode(code: string, language: "python" | "javascript"): Promise<SandboxResult> {
     const ext = language === "python" ? ".py" : ".js";
-    const { filePath, cleanup } = createSecureTempFile(ext, code);
+    const { filePath, cleanup } = this.createRuntimeCodeFile(ext, code);
 
     try {
       const interpreter = language === "python" ? "python3" : "node";
       return await this.execute(interpreter, [filePath], {
+        cwd: this.workspace.path,
         timeout: 60 * 1000,
         allowNetwork: false,
         allowedReadPaths: [filePath],
@@ -359,11 +368,23 @@ export class MacOSSandbox implements ISandbox {
       return false;
     }
 
+    // Capability denials are authoritative. In particular, do not let the
+    // temporary-path or system-read compatibility exceptions turn a disabled
+    // workspace read/write bit into an implicit grant.
+    if (access.reason === "access_profile_unavailable" || access.reason.endsWith("_disabled")) {
+      return false;
+    }
+
+    const normalizedTarget = path.resolve(targetPath);
+    // A workspace may itself live below the OS temp directory. Keep that
+    // workspace boundary ahead of the host-temp compatibility exception.
+    if (isAccessPathWithin(this.workspace.path, normalizedTarget)) return false;
+
     if (this.isRuntimeTemporaryPath(targetPath)) return true;
 
     // A finite profile gets a private implementation temp directory below;
     // the host temp tree must not become an implicit shell escape hatch.
-    if (hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)) {
+    if (this.hasBoundedFilesystemScope()) {
       return false;
     }
 
@@ -378,8 +399,7 @@ export class MacOSSandbox implements ISandbox {
         os.tmpdir(),
       ];
       for (const sysPath of systemReadPaths) {
-        const resolvedTarget = path.resolve(targetPath);
-        if (this.isPathWithin(sysPath, resolvedTarget)) {
+        if (this.isPathWithin(sysPath, normalizedTarget)) {
           return true;
         }
       }
@@ -426,7 +446,7 @@ export class MacOSSandbox implements ISandbox {
    */
   private generateSandboxProfile(allowNetwork: boolean, options: SandboxOptions = {}): string {
     const permissions = this.workspace.permissions;
-    const finiteFilesystemScope = hasEffectiveFilesystemScope(this.workspace.path, permissions);
+    const finiteFilesystemScope = this.hasBoundedFilesystemScope();
     const tempDir = finiteFilesystemScope ? this.getRuntimeTempDir() : os.tmpdir();
 
     // Validate and escape workspace path
@@ -549,7 +569,13 @@ ${tempWriteRules}
       profile += `
 ; Deny network access (except localhost)
 (deny network*)
-(allow network* (local ip "localhost:*"))
+; Keep the localhost exception scoped to outbound loopback sockets. An
+; unrestricted network* allow with a (local ip ...) filter is treated as
+; a broad network grant by seatbelt on current macOS releases.
+(allow network-outbound
+  (remote tcp "localhost:*")
+  (remote udp "localhost:*")
+)
 `;
     }
 
@@ -624,15 +650,27 @@ ${tempWriteRules}
     return resolveAccessControlledPath(this.workspace.path, rawPath);
   }
 
+  /**
+   * Named read-only/workspace-write profiles are bounded even when they do
+   * not carry explicit filesystem rules or extra workspace roots. Keep the
+   * legacy unscoped behavior for persisted permissions without an access
+   * sandbox mode (and for explicit danger-full-access).
+   */
+  private hasBoundedFilesystemScope(): boolean {
+    return (
+      hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions) ||
+      this.workspace.permissions.accessSandboxMode === "workspace-write" ||
+      this.workspace.permissions.accessSandboxMode === "read-only"
+    );
+  }
+
   private isPathWithin(parentPath: string, candidatePath: string): boolean {
     const relative = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
     return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
   }
 
   private getRuntimeTempDirIfScoped(): string {
-    return hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)
-      ? this.getRuntimeTempDir()
-      : os.tmpdir();
+    return this.hasBoundedFilesystemScope() ? this.getRuntimeTempDir() : os.tmpdir();
   }
 
   private getRuntimeTempDir(): string {
@@ -642,11 +680,40 @@ ${tempWriteRules}
     return this.runtimeTempDir;
   }
 
+  private createRuntimeCodeFile(
+    extension: string,
+    content: string,
+  ): { filePath: string; cleanup: () => void } {
+    const runtimeTempDir = this.getRuntimeTempDir();
+    const filename = `cowork_${crypto.randomBytes(16).toString("hex")}${extension}`;
+    const filePath = path.join(runtimeTempDir, filename);
+    const fd = fs.openSync(
+      filePath,
+      fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+      0o600,
+    );
+    try {
+      fs.writeSync(fd, content, 0, "utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+    return {
+      filePath,
+      cleanup: () => {
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          // Best-effort cleanup; the runtime temp directory is private.
+        }
+      },
+    };
+  }
+
   private isExplicitTemporaryOptionPath(
     targetPath: string,
     candidates: readonly string[] | undefined,
   ): boolean {
-    if (!hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)) return false;
+    if (!this.hasBoundedFilesystemScope()) return false;
     if (!candidates || candidates.length === 0) return false;
     const target = path.resolve(targetPath);
     const tempAliases = this.getMacOSPathAliases(os.tmpdir());
@@ -659,12 +726,7 @@ ${tempWriteRules}
 
   private isRuntimeTemporaryPath(targetPath: string): boolean {
     if (this.isPathWithin(this.workspace.path, targetPath)) return false;
-    const runtimeTempDir = hasEffectiveFilesystemScope(
-      this.workspace.path,
-      this.workspace.permissions,
-    )
-      ? this.runtimeTempDir
-      : os.tmpdir();
+    const runtimeTempDir = this.hasBoundedFilesystemScope() ? this.runtimeTempDir : os.tmpdir();
     if (!runtimeTempDir) return false;
     return this.getMacOSPathAliases(runtimeTempDir).some((alias) =>
       this.isPathWithin(alias, targetPath),

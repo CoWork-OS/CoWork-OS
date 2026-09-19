@@ -38,4 +38,4 @@ Use when you need to control Slack from CoWork-OSS via the slack tool, including
 ## Runtime Prompt
 
 - Current runtime prompt length: 2221 characters.
-- Runtime prompt is defined directly in `../slack.json`. 
+- Runtime prompt is defined directly in `../slack.json`.

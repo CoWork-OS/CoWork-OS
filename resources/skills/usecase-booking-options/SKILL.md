@@ -37,16 +37,16 @@ Find booking openings in a time window, cross-check calendar, propose 3 options.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| url | string | Yes | Booking URL (OpenTable/Calendly/spa/etc.) |
-| expected_name | string | No | Optional venue/service name to verify after navigation |
-| party_size | number | No | Party size |
-| days_ahead | number | No | How many days ahead to check |
-| start_time | string | No | Start time (e.g., "18:30") |
-| end_time | string | No | End time (e.g., "20:30") |
+| Name          | Type   | Required | Description                                            |
+| ------------- | ------ | -------- | ------------------------------------------------------ |
+| url           | string | Yes      | Booking URL (OpenTable/Calendly/spa/etc.)              |
+| expected_name | string | No       | Optional venue/service name to verify after navigation |
+| party_size    | number | No       | Party size                                             |
+| days_ahead    | number | No       | How many days ahead to check                           |
+| start_time    | string | No       | Start time (e.g., "18:30")                             |
+| end_time      | string | No       | End time (e.g., "20:30")                               |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1416 characters.
-- Runtime prompt is defined directly in `../usecase-booking-options.json`. 
+- Runtime prompt is defined directly in `../usecase-booking-options.json`.

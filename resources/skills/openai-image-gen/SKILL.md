@@ -38,4 +38,4 @@ Batch-generate images via OpenAI Images API. Random prompt sampler + `index.html
 ## Runtime Prompt
 
 - Current runtime prompt length: 2643 characters.
-- Runtime prompt is defined directly in `../openai-image-gen.json`. 
+- Runtime prompt is defined directly in `../openai-image-gen.json`.

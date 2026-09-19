@@ -37,12 +37,12 @@ Plan and execute repeatable work across many independent targets in parallel.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| objective | string | Yes | Batch objective to execute across multiple targets |
-| domain | select | No | Task domain |
-| parallel | number | No | Maximum parallel workers (1-8) |
-| external | select | No | Policy for external side effects |
+| Name      | Type   | Required | Description                                        |
+| --------- | ------ | -------- | -------------------------------------------------- |
+| objective | string | Yes      | Batch objective to execute across multiple targets |
+| domain    | select | No       | Task domain                                        |
+| parallel  | number | No       | Maximum parallel workers (1-8)                     |
+| external  | select | No       | Policy for external side effects                   |
 
 ## Guidance
 

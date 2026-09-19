@@ -39,9 +39,7 @@
       "dontUseWhen": "Don't use for translating source code identifiers or binary formats.",
       "outputs": "Locale-specific content file(s).",
       "successCriteria": "Preserves meaning and structure with style-appropriate phrasing.",
-      "expectedArtifacts": [
-        "{{language}}.md"
-      ],
+      "expectedArtifacts": ["{{language}}.md"],
       "examples": {
         "positive": [
           "Use the translate skill for this request.",

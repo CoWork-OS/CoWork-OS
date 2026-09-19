@@ -13,6 +13,21 @@ export { DeepSeekProvider } from "./deepseek-provider";
 export { AnthropicCompatibleProvider } from "./anthropic-compatible-provider";
 export { GitHubCopilotProvider } from "./github-copilot-provider";
 export { OpenCodeProvider, OpenCodeGoProvider } from "./opencode-go-provider";
+export {
+  AtomicChatProvider,
+  AtomicChatProviderError,
+  atomicChatCapabilityRegistry,
+} from "./atomic-chat-provider";
+export type {
+  AtomicChatErrorCode,
+  AtomicChatDiscoveryStatus,
+  AtomicChatModelDiscoveryResult,
+} from "./openai-compatible-provider";
+export {
+  ModelCapabilityRegistry,
+  createUnknownModelCapabilityProfile,
+  modelCapabilityKey,
+} from "./model-capability-profile";
 export { OpenAIOAuth, OpenAIOAuthTokens } from "./openai-oauth";
 export { XAIOAuth, XAIOAuthTokens } from "./xai-oauth";
 export { LLMProviderFactory, LLMSettings, CachedModelInfo } from "./provider-factory";

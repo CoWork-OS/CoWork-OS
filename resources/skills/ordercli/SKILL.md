@@ -38,4 +38,4 @@ Foodora-only CLI for checking past orders and active order status (Deliveroo WIP
 ## Runtime Prompt
 
 - Current runtime prompt length: 1606 characters.
-- Runtime prompt is defined directly in `../ordercli.json`. 
+- Runtime prompt is defined directly in `../ordercli.json`.

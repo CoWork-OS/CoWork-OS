@@ -119,6 +119,19 @@ export class UsageInsightsProjector {
     return UsageInsightsProjector.instance;
   }
 
+  static async shutdown(): Promise<void> {
+    const instance = UsageInsightsProjector.instance;
+    if (!instance) return;
+
+    try {
+      await instance.stop();
+    } finally {
+      if (UsageInsightsProjector.instance === instance) {
+        UsageInsightsProjector.instance = null;
+      }
+    }
+  }
+
   /**
    * The projector is process-global, but its rollups and cache are tied to the
    * database connection it was initialized with. Callers that own another
@@ -135,10 +148,12 @@ export class UsageInsightsProjector {
   private backfillPromise: Promise<void> | null = null;
   private backfillCompleteKnown = false;
   private backfillComplete = false;
+  private shuttingDown = false;
 
   private constructor(private db: Database.Database) {}
 
   warm(): void {
+    if (this.shuttingDown) return;
     this.scheduleBackfill();
   }
 
@@ -186,11 +201,13 @@ export class UsageInsightsProjector {
   }
 
   invalidate(): void {
+    if (this.shuttingDown) return;
     this.version += 1;
     this.cache.clear();
   }
 
   scheduleBackfill(): void {
+    if (this.shuttingDown) return;
     if (this.isBackfillComplete() || this.backfillPromise) {
       return;
     }
@@ -206,6 +223,7 @@ export class UsageInsightsProjector {
   }
 
   enqueueTaskCreate(task: Task): void {
+    if (this.shuttingDown) return;
     this.invalidate();
     if (!this.isBackfillComplete()) {
       this.scheduleBackfill();
@@ -218,6 +236,7 @@ export class UsageInsightsProjector {
   }
 
   enqueueTaskUpdate(before: Task | undefined, after: Task | undefined): void {
+    if (this.shuttingDown) return;
     this.invalidate();
     if (!this.isBackfillComplete()) {
       this.scheduleBackfill();
@@ -243,6 +262,7 @@ export class UsageInsightsProjector {
   }
 
   enqueueTaskEvent(workspaceId: string | null | undefined, event: TaskEvent): void {
+    if (this.shuttingDown) return;
     this.invalidate();
     const effectiveType = getEffectiveEventType(event);
     if (!workspaceId || !RELEVANT_EVENT_TYPES.has(effectiveType)) {
@@ -256,6 +276,7 @@ export class UsageInsightsProjector {
   }
 
   enqueueLlmTelemetry(workspaceId: string | null | undefined, timestampMs: number): void {
+    if (this.shuttingDown) return;
     this.invalidate();
     if (!workspaceId) return;
     if (!this.isBackfillComplete()) {
@@ -266,6 +287,7 @@ export class UsageInsightsProjector {
   }
 
   flushPendingRefreshes(): void {
+    if (this.shuttingDown) return;
     if (!this.isBackfillComplete() || this.pendingRefreshes.size === 0) {
       return;
     }
@@ -276,13 +298,12 @@ export class UsageInsightsProjector {
 
     const pairs = Array.from(this.pendingRefreshes);
     this.pendingRefreshes.clear();
-    const tx = this.db.transaction((items: Array<{ workspaceId: string; dateKey: string }>) => {
-      for (const item of items) {
-        this.rebuildWorkspaceDate(item.workspaceId, item.dateKey);
-      }
-    });
-
     try {
+      const tx = this.db.transaction((items: Array<{ workspaceId: string; dateKey: string }>) => {
+        for (const item of items) {
+          this.rebuildWorkspaceDate(item.workspaceId, item.dateKey);
+        }
+      });
       tx(
         pairs.map((pair) => {
           const [workspaceId, dateKey] = pair.split("|");
@@ -300,11 +321,22 @@ export class UsageInsightsProjector {
   }
 
   private scheduleFlush(): void {
-    if (this.refreshTimer) return;
+    if (this.shuttingDown || this.refreshTimer) return;
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
       this.flushPendingRefreshes();
     }, 250);
+  }
+
+  private async stop(): Promise<void> {
+    this.shuttingDown = true;
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.pendingRefreshes.clear();
+    await this.backfillPromise;
+    this.backfillPromise = null;
   }
 
   private getState(key: string): string | null {

@@ -341,36 +341,156 @@
     }
   ],
   "slashCommands": [
-    { "name": "smb-onboard", "description": "Set up the SMB Complete business profile", "skillId": "smb-onboard" },
-    { "name": "plan-payroll", "description": "Build a 30-day payroll cash forecast and invoice follow-up plan", "skillId": "smb-plan-payroll" },
-    { "name": "month-heads-up", "description": "Find next-month cash pressure and watch items", "skillId": "smb-month-heads-up" },
-    { "name": "close-month", "description": "Prepare a month-end close packet", "skillId": "smb-close-month" },
-    { "name": "price-check", "description": "Analyze margins and pricing scenarios", "skillId": "smb-price-check" },
-    { "name": "tax-prep", "description": "Organize estimated-tax or 1099 prep materials", "skillId": "smb-tax-prep" },
-    { "name": "cash-flow-snapshot", "description": "Build a 30/60/90-day cash-flow forecast", "skillId": "smb-cash-flow-snapshot" },
-    { "name": "invoice-chase", "description": "Rank overdue invoices and draft reminders", "skillId": "smb-invoice-chase" },
-    { "name": "margin-analyzer", "description": "Analyze margins with break-even math", "skillId": "smb-margin-analyzer" },
-    { "name": "month-end-prep", "description": "Reconcile month-end records and flag exceptions", "skillId": "smb-month-end-prep" },
-    { "name": "tax-season-organizer", "description": "Build a tax-season support packet", "skillId": "smb-tax-season-organizer" },
-    { "name": "call-list", "description": "Prioritize leads and write call cards", "skillId": "smb-call-list" },
-    { "name": "sales-brief", "description": "Summarize sellers and draft a content plan", "skillId": "smb-sales-brief" },
-    { "name": "run-campaign", "description": "Plan and stage a campaign", "skillId": "smb-run-campaign" },
-    { "name": "lead-triage", "description": "Score leads and recommend next actions", "skillId": "smb-lead-triage" },
-    { "name": "content-strategy", "description": "Draft a sales-backed content plan", "skillId": "smb-content-strategy" },
-    { "name": "canva-creator", "description": "Stage campaign creative and copy", "skillId": "smb-canva-creator" },
-    { "name": "handle-complaint", "description": "Draft a customer complaint reply", "skillId": "smb-handle-complaint" },
-    { "name": "customer-pulse-check", "description": "Group customer issues into themes", "skillId": "smb-customer-pulse-check" },
-    { "name": "crm-cleanup", "description": "Audit stale deals, duplicates, and missing fields", "skillId": "smb-crm-cleanup" },
-    { "name": "review-contract", "description": "Summarize and flag a business contract", "skillId": "smb-review-contract" },
-    { "name": "ticket-deflector", "description": "Draft a customer-support response", "skillId": "smb-ticket-deflector" },
-    { "name": "customer-pulse", "description": "Analyze customer themes and fixable problems", "skillId": "smb-customer-pulse" },
-    { "name": "crm-maintenance", "description": "Propose CRM hygiene fixes", "skillId": "smb-crm-maintenance" },
-    { "name": "contract-review", "description": "Review a contract for owner and counsel review", "skillId": "smb-contract-review" },
-    { "name": "monday-brief", "description": "Create a start-of-week business brief", "skillId": "smb-monday-brief" },
-    { "name": "friday-brief", "description": "Create an end-of-week business brief", "skillId": "smb-friday-brief" },
-    { "name": "quarterly-review", "description": "Write a quarterly business review", "skillId": "smb-quarterly-review" },
-    { "name": "business-pulse", "description": "Summarize current business health", "skillId": "smb-business-pulse" },
-    { "name": "job-post-builder", "description": "Draft hiring materials for a role", "skillId": "smb-job-post-builder" }
+    {
+      "name": "smb-onboard",
+      "description": "Set up the SMB Complete business profile",
+      "skillId": "smb-onboard"
+    },
+    {
+      "name": "plan-payroll",
+      "description": "Build a 30-day payroll cash forecast and invoice follow-up plan",
+      "skillId": "smb-plan-payroll"
+    },
+    {
+      "name": "month-heads-up",
+      "description": "Find next-month cash pressure and watch items",
+      "skillId": "smb-month-heads-up"
+    },
+    {
+      "name": "close-month",
+      "description": "Prepare a month-end close packet",
+      "skillId": "smb-close-month"
+    },
+    {
+      "name": "price-check",
+      "description": "Analyze margins and pricing scenarios",
+      "skillId": "smb-price-check"
+    },
+    {
+      "name": "tax-prep",
+      "description": "Organize estimated-tax or 1099 prep materials",
+      "skillId": "smb-tax-prep"
+    },
+    {
+      "name": "cash-flow-snapshot",
+      "description": "Build a 30/60/90-day cash-flow forecast",
+      "skillId": "smb-cash-flow-snapshot"
+    },
+    {
+      "name": "invoice-chase",
+      "description": "Rank overdue invoices and draft reminders",
+      "skillId": "smb-invoice-chase"
+    },
+    {
+      "name": "margin-analyzer",
+      "description": "Analyze margins with break-even math",
+      "skillId": "smb-margin-analyzer"
+    },
+    {
+      "name": "month-end-prep",
+      "description": "Reconcile month-end records and flag exceptions",
+      "skillId": "smb-month-end-prep"
+    },
+    {
+      "name": "tax-season-organizer",
+      "description": "Build a tax-season support packet",
+      "skillId": "smb-tax-season-organizer"
+    },
+    {
+      "name": "call-list",
+      "description": "Prioritize leads and write call cards",
+      "skillId": "smb-call-list"
+    },
+    {
+      "name": "sales-brief",
+      "description": "Summarize sellers and draft a content plan",
+      "skillId": "smb-sales-brief"
+    },
+    {
+      "name": "run-campaign",
+      "description": "Plan and stage a campaign",
+      "skillId": "smb-run-campaign"
+    },
+    {
+      "name": "lead-triage",
+      "description": "Score leads and recommend next actions",
+      "skillId": "smb-lead-triage"
+    },
+    {
+      "name": "content-strategy",
+      "description": "Draft a sales-backed content plan",
+      "skillId": "smb-content-strategy"
+    },
+    {
+      "name": "canva-creator",
+      "description": "Stage campaign creative and copy",
+      "skillId": "smb-canva-creator"
+    },
+    {
+      "name": "handle-complaint",
+      "description": "Draft a customer complaint reply",
+      "skillId": "smb-handle-complaint"
+    },
+    {
+      "name": "customer-pulse-check",
+      "description": "Group customer issues into themes",
+      "skillId": "smb-customer-pulse-check"
+    },
+    {
+      "name": "crm-cleanup",
+      "description": "Audit stale deals, duplicates, and missing fields",
+      "skillId": "smb-crm-cleanup"
+    },
+    {
+      "name": "review-contract",
+      "description": "Summarize and flag a business contract",
+      "skillId": "smb-review-contract"
+    },
+    {
+      "name": "ticket-deflector",
+      "description": "Draft a customer-support response",
+      "skillId": "smb-ticket-deflector"
+    },
+    {
+      "name": "customer-pulse",
+      "description": "Analyze customer themes and fixable problems",
+      "skillId": "smb-customer-pulse"
+    },
+    {
+      "name": "crm-maintenance",
+      "description": "Propose CRM hygiene fixes",
+      "skillId": "smb-crm-maintenance"
+    },
+    {
+      "name": "contract-review",
+      "description": "Review a contract for owner and counsel review",
+      "skillId": "smb-contract-review"
+    },
+    {
+      "name": "monday-brief",
+      "description": "Create a start-of-week business brief",
+      "skillId": "smb-monday-brief"
+    },
+    {
+      "name": "friday-brief",
+      "description": "Create an end-of-week business brief",
+      "skillId": "smb-friday-brief"
+    },
+    {
+      "name": "quarterly-review",
+      "description": "Write a quarterly business review",
+      "skillId": "smb-quarterly-review"
+    },
+    {
+      "name": "business-pulse",
+      "description": "Summarize current business health",
+      "skillId": "smb-business-pulse"
+    },
+    {
+      "name": "job-post-builder",
+      "description": "Draft hiring materials for a role",
+      "skillId": "smb-job-post-builder"
+    }
   ],
   "agentRoles": [
     {
@@ -379,7 +499,14 @@
       "description": "Runs small-business finance, sales, marketing, customer, contract, and hiring workflows with review gates before consequential actions.",
       "icon": "SMB",
       "color": "#0f766e",
-      "capabilities": ["finance", "sales", "marketing", "customer-support", "operations", "drafting"],
+      "capabilities": [
+        "finance",
+        "sales",
+        "marketing",
+        "customer-support",
+        "operations",
+        "drafting"
+      ],
       "systemPrompt": "You are an SMB operator in CoWork OS. Help the user run practical small-business workflows across accounting, payments, CRM, design, contracts, email, files, and calendar. Keep numbers source-backed, stage all external actions for approval, and clearly separate facts, assumptions, recommendations, and owner decisions."
     }
   ],

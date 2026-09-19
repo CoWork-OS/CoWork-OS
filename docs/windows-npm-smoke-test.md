@@ -29,6 +29,7 @@ del /Q "%APPDATA%\npm\coworkd-node.cmd" 2>NUL
 ```
 
 Pass criteria:
+
 - No running CoWork/Electron/Node processes remain.
 - No stale global install directory remains.
 
@@ -41,6 +42,7 @@ npm ls -g cowork-os --depth=0
 ```
 
 Pass criteria:
+
 - Install succeeds.
 - Reported version matches intended release tag.
 
@@ -52,6 +54,7 @@ cowork-os
 ```
 
 Pass criteria:
+
 - Setup completes without exiting to prompt with `Native setup failed`.
 - If on ARM64, fallback logs may appear, but launch still succeeds.
 - No `ERR_FILE_NOT_FOUND ... dist/renderer/index.html`.
@@ -59,20 +62,24 @@ Pass criteria:
 ## 4. Basic UI Smoke
 
 Check manually:
+
 - Main window renders (no permanent black/blank screen).
 - Top bar action icons are in expected location on Windows.
 - You can create a new session/task.
 - Settings screen opens.
 
 Pass criteria:
+
 - UI is interactive and stable for at least 2 minutes.
 
 ## 5. Functional Task Smoke
 
 Run one simple prompt in a test workspace, for example:
+
 - "Create a file named `smoke-test.txt` with text `ok`."
 
 Pass criteria:
+
 - Task executes and completes.
 - File is created in the selected workspace.
 
@@ -87,6 +94,7 @@ cowork-os
 ```
 
 Pass criteria:
+
 - App reopens successfully.
 - Previous session/task list still loads.
 
@@ -100,12 +108,14 @@ cowork-os
 ```
 
 Pass criteria:
+
 - Uninstall does not fail with `EBUSY`.
 - Reinstall and relaunch both succeed.
 
 ## 8. Record Results
 
 Capture in release notes/PR comment:
+
 - Windows version + CPU architecture (x64/ARM64)
 - Node and npm versions (`node -v`, `npm -v`)
 - Installed `cowork-os` version

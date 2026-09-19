@@ -24,10 +24,10 @@ Heartbeat can also trigger Dreaming when the signal ledger contains memory-speci
 
 Heartbeat v3 separates cheap awareness from expensive action.
 
-| Lane | Purpose | LLM? | Can create tasks? |
-|------|---------|------|-------------------|
-| `Pulse` | Deterministic state reduction and gating | No | No |
-| `Dispatch` | Escalation into visible work only when Pulse justifies it | Sometimes | Yes |
+| Lane       | Purpose                                                   | LLM?      | Can create tasks? |
+| ---------- | --------------------------------------------------------- | --------- | ----------------- |
+| `Pulse`    | Deterministic state reduction and gating                  | No        | No                |
+| `Dispatch` | Escalation into visible work only when Pulse justifies it | Sometimes | Yes               |
 
 `Pulse` runs on a cadence or via a manual override. It reads the current heartbeat state and returns one of:
 
@@ -90,11 +90,11 @@ Digital Twin activation does not create an automation profile automatically. Twi
 
 Execution behavior is controlled by `heartbeatProfile`, not `autonomyLevel`.
 
-| Profile | Behavior |
-|---------|----------|
-| `observer` | Awareness only. Does not execute checklist maintenance. |
-| `operator` | Awareness plus checklist and proactive review. Can surface suggestions and run light maintenance paths. |
-| `dispatcher` | Full escalation profile. Can create heartbeat tasks, runbooks, and cron handoffs. |
+| Profile      | Behavior                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------- |
+| `observer`   | Awareness only. Does not execute checklist maintenance.                                                 |
+| `operator`   | Awareness plus checklist and proactive review. Can surface suggestions and run light maintenance paths. |
+| `dispatcher` | Full escalation profile. Can create heartbeat tasks, runbooks, and cron handoffs.                       |
 
 This also controls whether `.cowork/HEARTBEAT.md` is actionable. The file is a recurring maintenance checklist input, not general task context.
 
@@ -111,10 +111,10 @@ Each proactive task can declare:
 
 Execution modes are:
 
-| Mode | Meaning |
-|------|---------|
-| `pulse_only` | Cheap maintenance review surfaced by Pulse without heavy escalation |
-| `dispatch` | Requires Dispatch before visible work happens |
+| Mode           | Meaning                                                                |
+| -------------- | ---------------------------------------------------------------------- |
+| `pulse_only`   | Cheap maintenance review surfaced by Pulse without heavy escalation    |
+| `dispatch`     | Requires Dispatch before visible work happens                          |
 | `cron_handoff` | Should be handed off to an exact-time or heavyweight scheduler/runbook |
 
 `.cowork/HEARTBEAT.md` is parsed into structured checklist items and cached by workspace revision. Pulse evaluates the cached checklist state instead of reparsing the file on every run.

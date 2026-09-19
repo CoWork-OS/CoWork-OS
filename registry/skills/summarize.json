@@ -8,12 +8,8 @@
   "parameters": [],
   "enabled": true,
   "requires": {
-    "bins": [
-      "summarize"
-    ],
-    "tools": [
-      "run_command"
-    ]
+    "bins": ["summarize"],
+    "tools": ["run_command"]
   },
   "metadata": {
     "routing": {

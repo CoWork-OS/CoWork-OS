@@ -47,11 +47,7 @@
       "description": "How aggressively to package the finished book",
       "required": false,
       "default": "epub+pdf+manuscript",
-      "options": [
-        "manuscript-only",
-        "epub+manuscript",
-        "epub+pdf+manuscript"
-      ]
+      "options": ["manuscript-only", "epub+manuscript", "epub+pdf+manuscript"]
     },
     {
       "name": "canon_mode",
@@ -59,11 +55,7 @@
       "description": "How to treat existing franchises or universes",
       "required": false,
       "default": "fanfiction",
-      "options": [
-        "original",
-        "fanfiction",
-        "inspired-by"
-      ]
+      "options": ["original", "fanfiction", "inspired-by"]
     }
   ],
   "enabled": true,

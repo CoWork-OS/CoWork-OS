@@ -1,0 +1,39 @@
+{
+  "id": "workspace-approval-boundary-2026-09-18",
+  "title": "Authorized workspace work does not interrupt for approval",
+  "source": {
+    "incident": "routine-workspace-write-approval"
+  },
+  "scenarios": [
+    "Create and update scribe-conversation.md inside a temporary UI session with each built-in profile",
+    "Run a routine command inside an enforced workspace sandbox",
+    "Deny protected paths, symlink escapes, and unsupported sandbox backends",
+    "Request one scoped exception for eligible external access",
+    "Deny missing authority without prompts when approval policy is never",
+    "Invalidate an outstanding grant when policy or operation arguments change",
+    "Reject symlink replacement during consent and mutation baseline capture",
+    "Isolate default bounded command scratch files from sibling temporary sessions",
+    "Preserve selected profiles through Council scheduled-task creation"
+  ],
+  "assertions": {
+    "allowedWorkspaceApprovalCalls": 0,
+    "allowedWorkspaceApprovalEvents": 0,
+    "allowedWorkspaceBlockedStates": 0,
+    "hardDenialsRemainAuthoritative": true,
+    "neverCreatesApprovalRequests": false
+  },
+  "executableCoverage": [
+    "scripts/qa/approval-boundary-smoke.cjs",
+    "src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts",
+    "src/electron/agent/runtime/__tests__/PermissionEngine.test.ts",
+    "src/electron/agent/__tests__/tool-policy-pipeline.test.ts",
+    "src/electron/agent/__tests__/daemon-approval.test.ts",
+    "src/electron/security/__tests__/authorization-identity.test.ts",
+    "tests/tools/shell-tools.test.ts",
+    "src/electron/agent/__tests__/approval-entrypoint-contract.test.ts",
+    "src/electron/security/__tests__/access-profile-paths.test.ts",
+    "src/electron/agent/sandbox/__tests__/macos-sandbox.test.ts",
+    "src/electron/agent/tools/__tests__/edit-tools.test.ts"
+  ],
+  "notes": "Specification plus executable regression coverage. This JSON is not itself an executed eval; run qa:approval-boundaries and the platform sandbox smoke tests."
+}

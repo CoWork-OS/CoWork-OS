@@ -99,7 +99,7 @@ describe("filesystem approval entrypoint contracts", () => {
     fs.writeFileSync(targetPath, "remove", "utf8");
     const daemon = {
       logEvent: vi.fn(),
-      evaluateToolPermission: vi.fn(() => ({ decision: "allow" })),
+      authorizeToolAction: vi.fn().mockResolvedValue(true),
       requestApproval: vi.fn(),
     } as Any;
     const fileTools = new FileTools(makeWorkspace(workspacePath), daemon, "delete-contract-task");
@@ -107,11 +107,12 @@ describe("filesystem approval entrypoint contracts", () => {
     await expect(fileTools.deleteFile("delete-me.txt")).resolves.toEqual({ success: true });
 
     expect(daemon.requestApproval).not.toHaveBeenCalled();
-    expect(daemon.evaluateToolPermission).toHaveBeenCalledWith(
+    expect(daemon.authorizeToolAction).toHaveBeenCalledWith(
       "delete-contract-task",
       expect.objectContaining({
         toolName: "delete_file",
         approvalType: "delete_file",
+        allowAutoApprove: false,
       }),
     );
     expect(fs.existsSync(targetPath)).toBe(false);

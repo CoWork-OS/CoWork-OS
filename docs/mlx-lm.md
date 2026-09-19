@@ -25,16 +25,16 @@ Apple Silicon kernels while CoWork retains its existing OpenAI-compatible provid
 
 ## Support and requirements
 
-| Requirement | Current behavior |
-|-------------|------------------|
-| Operating system | CoWork-supported macOS 13 Ventura or later |
-| Hardware | Native Apple Silicon (`arm64`) Mac |
-| Python command | `python3` must be visible to the CoWork desktop process |
-| Python package | `mlx-lm`, including importable `mlx_lm` and `mlx.core` modules |
-| Model format | A compatible MLX model or Hugging Face repository with the required MLX files |
-| First run | The model may be downloaded from Hugging Face before the server becomes ready |
-| API key | Not required for the local server |
-| Other platforms | Intel Macs, Windows, and Linux are rejected by the MLX provider readiness gate |
+| Requirement      | Current behavior                                                               |
+| ---------------- | ------------------------------------------------------------------------------ |
+| Operating system | CoWork-supported macOS 13 Ventura or later                                     |
+| Hardware         | Native Apple Silicon (`arm64`) Mac                                             |
+| Python command   | `python3` must be visible to the CoWork desktop process                        |
+| Python package   | `mlx-lm`, including importable `mlx_lm` and `mlx.core` modules                 |
+| Model format     | A compatible MLX model or Hugging Face repository with the required MLX files  |
+| First run        | The model may be downloaded from Hugging Face before the server becomes ready  |
+| API key          | Not required for the local server                                              |
+| Other platforms  | Intel Macs, Windows, and Linux are rejected by the MLX provider readiness gate |
 
 CoWork requires the process itself to report `darwin` and `arm64`. An Apple Silicon Mac running
 the app under an x86/Rosetta process is treated as unsupported for this route because the
@@ -89,11 +89,11 @@ server is already running and the provider is configured to reach it.
 
 The catalog includes these starting points:
 
-| Model ID | Suggested use |
-|----------|---------------|
-| `mlx-community/Qwen3-8B-4bit` | Smaller and faster starting point |
-| `mlx-community/Qwen3-14B-4bit` | Balanced local coding and knowledge work |
-| `mlx-community/Qwen3-30B-A3B-4bit` | Larger mixture-of-experts option when memory allows |
+| Model ID                                 | Suggested use                                                                                                                                                |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mlx-community/Qwen3-8B-4bit`            | Smaller and faster starting point                                                                                                                            |
+| `mlx-community/Qwen3-14B-4bit`           | Balanced local coding and knowledge work                                                                                                                     |
+| `mlx-community/Qwen3-30B-A3B-4bit`       | Larger mixture-of-experts option when memory allows                                                                                                          |
 | `mlx-community/Qwen3.6-35B-A3B-4bit-DWQ` | Larger Qwen3.6 option for higher-memory Apple Silicon systems; see the [model card](https://huggingface.co/mlx-community/Qwen3.6-35B-A3B-4bit-DWQ/tree/main) |
 
 These are selectable examples, not a guarantee that every model will fit every Mac. Model
@@ -117,10 +117,10 @@ python3 -m mlx_lm.server \
 
 The server contract used by CoWork is:
 
-| Request | Purpose |
-|---------|---------|
-| `GET http://localhost:8080/v1/models` | Readiness probe and model discovery |
-| `POST http://localhost:8080/v1/chat/completions` | Normal and agentic model requests |
+| Request                                          | Purpose                             |
+| ------------------------------------------------ | ----------------------------------- |
+| `GET http://localhost:8080/v1/models`            | Readiness probe and model discovery |
+| `POST http://localhost:8080/v1/chat/completions` | Normal and agentic model requests   |
 
 The provider sends OpenAI-compatible chat messages and can include tool definitions for
 agentic tasks. MLX-LM and the selected model must support the relevant chat template and tool

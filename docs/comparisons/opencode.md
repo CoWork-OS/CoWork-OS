@@ -9,16 +9,16 @@ description: A fit-based comparison of two open-source, provider-flexible agent 
 
 CoWork OS shares the openness and provider-choice philosophy, but extends it into a super app for coding, knowledge work, files, browser and desktop tasks, communication, agents, and automation.
 
-| Fit question | OpenCode | CoWork OS |
-|---|---|---|
-| Product center | Coding agent | AI super app and agent runtime |
-| Openness | Open-source | Open-source |
-| Model approach | Multi-provider | Multi-provider plus account, gateway, cloud, and local access taxonomy |
-| Interfaces | Coding-focused terminal/app surfaces | Desktop, CLI, headless daemon, and messaging channels |
-| Task access | Coding-agent runtime controls | Named profiles combine sandbox, approvals, command tools, filesystem, network, and domain scope |
+| Fit question   | OpenCode                             | CoWork OS                                                                                       |
+| -------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Product center | Coding agent                         | AI super app and agent runtime                                                                  |
+| Openness       | Open-source                          | Open-source                                                                                     |
+| Model approach | Multi-provider                       | Multi-provider plus account, gateway, cloud, and local access taxonomy                          |
+| Interfaces     | Coding-focused terminal/app surfaces | Desktop, CLI, headless daemon, and messaging channels                                           |
+| Task access    | Coding-agent runtime controls        | Named profiles combine sandbox, approvals, command tools, filesystem, network, and domain scope |
 
 Choose OpenCode when you want a lean open coding agent. Choose CoWork OS when you want that model freedom to continue into non-coding work and visual agent operations.
 
 The projects are peers, not enemies. CoWork OS also supports OpenCode Zen and Go routes where configured. External services may apply separate pricing and eligibility.
 
-*Last reviewed: 2026-08-27. CoWork OS is not affiliated with OpenCode.*
+_Last reviewed: 2026-08-27. CoWork OS is not affiliated with OpenCode._

@@ -14,6 +14,7 @@ The **Ideas** tab in the sidebar shows use case prompts that use built-in capabi
 ## Use Case Coverage (High Level)
 
 Use cases:
+
 - Stay on top of messages (reply drafting + send-on-confirmation)
 - Monitor things (newsletters, transactions)
 - Household logistics (capture tasks, keep you on track)
@@ -28,6 +29,7 @@ Use cases:
 - Inbox-aware briefing and Heartbeat follow-up
 - Chief-of-staff briefing (morning executive brief)
 - Dev task queue management (agent-ready backlog execution)
+- Jev-guided collaborative work (team composition for coding, research, design, documentation, and operations)
 - Turn a successful one-off task into a recurring same-thread follow-up from the task menu
 - Founder-directed autonomous company operations ("zero-human company" loop)
 - Everything Workbench for generated docs, sheets, decks, web pages, PDFs, and previews
@@ -38,6 +40,7 @@ Use cases:
 - Location-aware local errands, nearby services, and walking route planning
 
 Cowork OS supports these via:
+
 - Channels: Slack, iMessage, WhatsApp, Telegram, Email, etc.
 - Scheduling: `/schedule ...`, `/schedule here ...`, `schedule_task`, and task view `... > Add automation...`
 - Inbox + briefing commands: `/inbox`, `/brief [morning|today|tomorrow|week]`
@@ -58,15 +61,27 @@ For live website testing inside the app, see [Browser Workbench](browser-workben
 For turning existing tasks into recurring thread follow-ups or standalone scheduled checks, see [Task Automations](task-automations.md).
 For message-box app commands and skill-backed workflow shortcuts, see [Message Box Shortcuts](message-box-shortcuts.md).
 
+## Jev-guided collaborative work
+
+When configured in [Jev Decision Support](jev.md), Jev is useful for tasks
+where a primary specialist should lead while complementary roles review,
+research, test, design, or verify the work. Good candidates include repository
+changes that need implementation plus review, evidence-based comparisons,
+product/UI work, long-form documentation, and rollout planning. Use
+**Collaborative** mode or `/multitask`; keep simple summaries and deterministic
+single-agent requests on the normal chat path.
+
 ## Test Prompts (Copy/Paste)
 
 Notes:
+
 - If you don't know a chat ID, the prompt below instructs the agent to use `channel_list_chats` first and ask you to pick a `chat_id`.
 - For “stop before sending/booking”, the prompts explicitly force a confirmation gate.
 
 ### 1) Stay On Top Of Messages (Draft Reply, Ask Before Sending)
 
 Prompt:
+
 ```
 Use channel_list_chats for channel "imessage" (since "7d", limit 20). Show me the list and ask me which chat_id corresponds to the person I mean.
 After I pick a chat_id, use channel_history (limit 40) to pull the recent conversation, summarize it, and draft 2 reply options.
@@ -74,6 +89,7 @@ STOP before sending. Ask me whether to send A, send B, or edit.
 ```
 
 Variant (Slack):
+
 ```
 Use channel_list_chats for channel "slack" (since "24h", limit 20). Ask me to pick the chat_id for the thread/channel I care about.
 Then pull channel_history (limit 80) and draft a crisp reply (2 variants).
@@ -83,6 +99,7 @@ STOP before sending and ask me to confirm.
 ### 2) Monitor Things (Newsletter Digest)
 
 Prompt:
+
 ```
 Use channel_list_chats for channel "slack" (since "24h", limit 20). Ask me to pick the chat_id where newsletters arrive (Substack/email feed).
 Then pull channel_history (limit 150, since "24h") and produce a digest: title/link (if present) + 1-2 sentence summary each.
@@ -90,6 +107,7 @@ Propose follow-ups, but do not take external actions unless I confirm.
 ```
 
 Scheduled version (daily 8am):
+
 ```
 /schedule here daily 8am Summarize new newsletter items from the last 24h in this chat: {{chat_messages}}. Output a digest with links and 1-2 sentence summaries.
 ```
@@ -97,6 +115,7 @@ Scheduled version (daily 8am):
 ### 3) Monitor Things (Transaction Scan / Fraud Triage)
 
 Prompt (email channel):
+
 ```
 Use channel_list_chats for channel "email" (since "14d", limit 20). Ask me to pick the chat_id for my card/bank notifications.
 Then pull channel_history (limit 200, since "14d") and extract transactions (date, merchant, amount, currency).
@@ -105,6 +124,7 @@ Do not contact anyone or send messages unless I confirm.
 ```
 
 Prompt (Gmail integration, if configured):
+
 ```
 Search my Gmail for transaction notifications from the last 14 days (Amex/bank keywords). Extract transactions into a table and flag suspicious charges.
 Do not send emails or contact anyone unless I confirm.
@@ -113,6 +133,7 @@ Do not send emails or contact anyone unless I confirm.
 ### 4) Household Logistics (Capture To Notion + Reminders)
 
 Prompt:
+
 ```
 Turn this into tasks in my Notion database (ask me for the database_id if you don't already have it):
 
@@ -128,6 +149,7 @@ Return the created Notion page IDs/URLs and reminder IDs.
 ### 5) Booking + Forms (Find Availability, Cross-check Calendar, Stop Before Submit)
 
 Prompt (OpenTable-style):
+
 ```
 Open this URL and verify the venue name is correct:
 https://www.opentable.com/r/amorim-luxury-group-lisboa
@@ -142,6 +164,7 @@ STOP before final booking and ask me to confirm.
 ### 6) Visibility For Others (Daily Digest Draft, Ask Before Sending)
 
 Prompt:
+
 ```
 Create a daily digest for "tomorrow" with:
 - Calendar events (times + titles)
@@ -154,6 +177,7 @@ STOP before sending and ask me to confirm the final message and where to send it
 ### 7) Inbox Autopilot (Triage + Drafts + Cleanup, Ask Before Acting)
 
 Prompt:
+
 ```
 Run inbox triage in Inbox Agent for the last 24h.
 Prefer gmail_action; if unavailable use email_imap_unread; if unavailable use Email channel history.
@@ -171,6 +195,7 @@ Ask me what to execute.
 ```
 
 Command shortcut:
+
 ```
 /inbox autopilot 180
 ```
@@ -178,6 +203,7 @@ Command shortcut:
 ### 7A) Inbox Sent-Mail Review
 
 Prompt:
+
 ```
 Open Inbox Agent and switch to Sent view.
 Inspect the selected sent thread, show the email body, summarize what was sent, and list any implied follow-ups or commitments.
@@ -188,6 +214,7 @@ Do not send, archive, or delete anything. Ask me what action to take next.
 ### 7A.1) Inbox Today Mode Review
 
 Prompt:
+
 ```
 Open Inbox Agent and switch to Today mode.
 Review Needs action, Happening today, Good to know, and More to browse.
@@ -198,6 +225,7 @@ Do not archive, mark done, send, or trash anything. Ask me which lane to work th
 ### 7A.2) Ask Inbox Evidence Search
 
 Prompt:
+
 ```
 Use Ask Inbox to find the invoice, receipt, contract, or attachment I mention below.
 Search broadly first, including local mailbox FTS, semantic mailbox matches, provider-native search if available, attachment filenames, and indexed attachment text.
@@ -208,6 +236,7 @@ Query: <describe what to find>
 ```
 
 Main-composer shortcut:
+
 ```
 @inbox when do I need to make payment for my QNB credit card?
 ```
@@ -215,6 +244,7 @@ Main-composer shortcut:
 ### 7A.3) Manual Reply Or Forward
 
 Prompt:
+
 ```
 Open the selected Inbox Agent thread.
 Use the manual email composer, not an AI-generated draft.
@@ -225,6 +255,7 @@ STOP before sending so I can review the exact message.
 ### 7B) Inbox Commitments And Follow-Ups
 
 Prompt:
+
 ```
 Open Inbox Agent and find the threads with open commitments or overdue follow-ups.
 For each one, extract the commitment, due date, owner, and source email.
@@ -240,6 +271,7 @@ STOP before changing any commitment state. Ask me which commitments to update.
 ### 7C) Inbox Knowledge Graph Enrichment
 
 Prompt:
+
 ```
 Open Inbox Agent and review the current thread and its related contact info.
 Extract people, companies, and projects mentioned in the thread and suggest what should be linked or updated in the Knowledge Graph.
@@ -250,6 +282,7 @@ Do not make graph changes automatically. Ask me to confirm any updates.
 ### 7D) Inbox Briefing And Heartbeat
 
 Prompt:
+
 ```
 Open Inbox Agent and build an inbox-first briefing for today.
 Include unread mail, action-needed mail, overdue commitments, drafts in progress, and sensitive threads.
@@ -260,6 +293,7 @@ Do not send anything externally. Use the result as a briefing item only.
 ### 7E) Inbox Cleanup And Bulk Triage
 
 Prompt:
+
 ```
 Open Inbox Agent and identify low-value threads that are safe to bulk archive or trash.
 Group them by sender or type, explain why each group is a cleanup candidate, and recommend the safest bulk action.
@@ -269,6 +303,7 @@ STOP before applying changes. Ask me which groups to execute.
 ### 7F) Cross-Channel Reply From Inbox
 
 Prompt:
+
 ```
 Open Inbox Agent and select the current thread.
 If the contact is active on Slack, Teams, WhatsApp, Signal, or iMessage, show the best reply target first and draft a reply for that channel.
@@ -279,6 +314,7 @@ STOP before sending and ask me to confirm the channel and message.
 ### 7G) Mission Control Handoff
 
 Prompt:
+
 ```
 Open Inbox Agent and hand this thread off to Mission Control.
 Build a preview with the recommended company, operator, issue title, and issue summary.
@@ -289,6 +325,7 @@ After creation, show the linked handoff record and the issue id.
 ### 7H) Manual Identity Review
 
 Prompt:
+
 ```
 Open Settings > Integrations > Identity.
 Search for a contact by name, email, phone, handle, or CRM id.
@@ -299,6 +336,7 @@ Do not auto-link ambiguous matches.
 ### 8) Morning Briefing Agent (Chief Of Staff)
 
 Prompt:
+
 ```
 Create my morning chief-of-staff brief.
 Include:
@@ -314,6 +352,7 @@ Format for mobile reading.
 ```
 
 Command shortcuts:
+
 ```
 /brief morning
 /brief schedule morning weekdays 08:00
@@ -322,6 +361,7 @@ Command shortcuts:
 ### 9) Smart Home Brain (Integration-First, Confirm Before State Changes)
 
 Prompt:
+
 ```
 Act as a smart-home orchestrator for this request: "Set evening mode at home".
 First discover available smart-home integrations/tools.
@@ -334,6 +374,7 @@ If integrations are missing, give me a setup checklist and fallback manual steps
 ### 10) Dev Task Queue Agent (Queue + Parallel Execution + Progress)
 
 Prompt:
+
 ```
 Build a dev task queue for repo owner/repo from open high-priority issues.
 For each item include acceptance criteria, dependencies, risk, and suggested owner (agent or human).
@@ -350,6 +391,7 @@ Shortcut form for one-shot lane fan-out:
 ### 11) "Figure It Out" Agent (Fallback Orchestration)
 
 Prompt:
+
 ```
 Objective: book a table for 2 next week between 7pm-8:30pm and avoid calendar conflicts.
 
@@ -367,12 +409,14 @@ STOP before irreversible external actions and ask for confirmation.
 ### 12) Deterministic Slash Workflows (`/simplify`, `/batch`, and `/llm-wiki`)
 
 Prompt:
+
 ```
 Run /simplify this migration summary for readability and concision while preserving intent.
 Simplify to a concise format suitable for handoff.
 ```
 
 Batch transform pattern:
+
 ```
 Run /batch update docs and code references that refer to the old "execution pipeline" term:
 - Keep behavior unchanged.
@@ -381,6 +425,7 @@ Run /batch update docs and code references that refer to the old "execution pipe
 ```
 
 Command variants:
+
 ```
 /simplify review this plan for clarity and edge-case coverage.
 /batch migrate markdown architecture docs to the new naming standard --parallel 4 --domain writing --external confirm
@@ -390,6 +435,7 @@ Command variants:
 ### 13) Legal Deal Defense (Contract + Demand Letter + Counterpositions)
 
 Prompt:
+
 ```
 Use the legal-contract-negotiation-review skill with:
 - agreement_path: "docs/purchase-agreement.docx"
@@ -402,6 +448,7 @@ Write the final report to artifacts/legal/negotiation-analysis.md.
 ```
 
 Prompt (demand letter response draft):
+
 ```
 Use the legal-demand-letter-response-draft skill with:
 - agreement_path: "docs/services-agreement.docx"
@@ -413,6 +460,7 @@ Use the legal-demand-letter-response-draft skill with:
 ```
 
 Prompt (verified legal research memo):
+
 ```
 Use the legal-verified-research-memo skill with:
 - question: "What U.S. federal and state licensing issues apply to operating a custodial crypto wallet product for consumers?"
@@ -425,6 +473,7 @@ Require primary authority first and include a claim-level verification log.
 ### 14) Programmatic Technical Video (Manim)
 
 Prompt:
+
 ```
 Use the manim-video skill to create a 75-second 3Blue1Brown-style explainer for gradient descent aimed at software engineers.
 
@@ -441,6 +490,7 @@ If dependencies are missing, stop after scaffolding and tell me exactly what is 
 ```
 
 Prompt (algorithm visualization):
+
 ```
 Use the manim-video skill to build a Manim animation that visualizes Dijkstra's algorithm step by step.
 
@@ -451,6 +501,7 @@ Draft first, production later.
 ```
 
 Prompt (architecture walkthrough):
+
 ```
 Use the manim-video skill to create an animated architecture diagram for our request path:
 browser -> CDN -> API gateway -> app server -> database.
@@ -462,6 +513,7 @@ Scaffold the local Manim project and produce a render checklist, but do not atte
 ### 15) Designed Editorial Documents (Kami)
 
 Prompt:
+
 ```
 Use the kami skill to turn notes/company-overview.md into a polished English one-pager.
 
@@ -472,6 +524,7 @@ If rendering tools are missing, stop after editing the source and tell me exactl
 ```
 
 Prompt (resume refresh):
+
 ```
 Use the kami skill to build a resume PDF from docs/resume-notes.md.
 
@@ -482,6 +535,7 @@ Write the editable source files plus a rendered PDF when possible.
 ```
 
 Prompt (slides):
+
 ```
 Use the kami skill to create a restrained slide deck for our product brief from docs/briefing.md.
 
@@ -496,6 +550,7 @@ After the task completes, open `output.pptx` from the task output card or Files 
 ### 16) Everything Workbench: Generated Web Page Review
 
 Prompt:
+
 ```
 Create a polished single-page HTML status dashboard for our launch checklist.
 
@@ -505,6 +560,7 @@ Make it readable on desktop and mobile.
 ```
 
 Prompt (React build output):
+
 ```
 Create a small React/Vite prototype for a customer intake flow.
 
@@ -517,6 +573,7 @@ After the task completes, open the generated `.html` file or built `dist/index.h
 ### 17) Everything Workbench: LaTeX Paper with Compiled PDF
 
 Prompt:
+
 ```
 Write a LaTeX paper explaining how our app-server request path works.
 
@@ -535,6 +592,7 @@ Expected behavior:
 ### 18) Architecture Concept Workflow (Rhino + Blender + ComfyUI)
 
 Prompt:
+
 ```
 Use the architecture-design skill to create a concept workflow for a two-story courtyard house.
 
@@ -545,6 +603,7 @@ Stop before any long render or source CAD overwrite unless I approve it.
 ```
 
 Prompt (site reference to render):
+
 ```
 Use architecture-design to turn references/site-plan.png into a rough Rhino massing and Blender render.
 
@@ -564,6 +623,7 @@ Expected behavior:
 ### 19) Nearby Errand Run (Location + Maps)
 
 Prompt:
+
 ```
 My kid just fell into the duck pond and the wedding starts in 30 minutes.
 Where can I walk and buy her a new dress?
@@ -573,6 +633,7 @@ Rank them by walking time, show opening hours if available, and give me turn-by-
 ```
 
 Variant (pharmacy run):
+
 ```
 I need to pick up allergy medication before the office closes at 6pm.
 Use get_current_location, find pharmacies within a 10-minute walk, and rank them by walking time.
@@ -582,6 +643,7 @@ Show which ones are still open and give me walking directions to the closest ope
 ### 19) Location-Aware Restaurant Booking
 
 Prompt:
+
 ```
 Find restaurants within walking distance that have availability for 2 people tonight between 7pm and 8:30pm.
 Use get_current_location first, then search nearby restaurants.
@@ -591,6 +653,7 @@ STOP before booking and ask me to confirm.
 ```
 
 Variant (lunch meeting):
+
 ```
 I have a lunch meeting in 45 minutes and need a quiet café nearby for it.
 Use get_current_location, search for cafés within a 5-minute walk that are good for meetings.
@@ -600,6 +663,7 @@ Show me the top 3 options with walking directions.
 ### 20) Multi-Stop Walking Errand Planner
 
 Prompt:
+
 ```
 I need to hit the post office, pick up dry cleaning, and grab groceries before heading home.
 Use get_current_location and find the nearest location for each errand.
@@ -610,6 +674,7 @@ Show total walking time and a leg-by-leg breakdown.
 ### 21) Urgent Local Service Finder
 
 Prompt:
+
 ```
 I locked myself out. Find locksmiths near me that offer emergency service right now.
 Use get_current_location, search for locksmiths within 2km, and show phone numbers and estimated arrival times if available.
@@ -618,6 +683,7 @@ Do not call anyone unless I confirm.
 ```
 
 Variant (urgent medical):
+
 ```
 Find the nearest urgent care clinic or walk-in doctor's office that is open right now.
 Use get_current_location, rank by walking or driving distance, and show opening hours.
@@ -626,6 +692,7 @@ Use get_current_location, rank by walking or driving distance, and show opening 
 ### 22) Authorized Data Broker Cleanup (Unbroker)
 
 Prompt:
+
 ```
 Use the unbroker skill to remove my personal data from data brokers and people-search sites.
 
@@ -638,6 +705,7 @@ At the end, give me the status report, one consolidated human-task digest, and t
 ```
 
 Variant (recurring monitoring):
+
 ```
 Use unbroker to set up recurring monitoring for my own broker exposure after the initial removals.
 Record consent, explain where local data will be stored, and schedule only the recheck flow after the first status report.

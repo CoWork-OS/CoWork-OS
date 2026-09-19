@@ -44,12 +44,12 @@ Browser V2 has four cooperating layers:
 
 Browser V2 normalizes four backend kinds behind one conceptual session interface:
 
-| Backend | Purpose | Default? | Notes |
-|---------|---------|----------|-------|
-| `electron-workbench` | Visible in-app browser surface controlled through Electron `webContents.debugger` / CDP | Yes | Primary user/agent shared browser. Renderer owns UX; main process owns automation. |
-| `playwright-local` | Background/headless/headed fallback for CI-like or non-visible runs | No | Used when no renderer is available or the user explicitly requests forced headless/background browser work. |
-| `external-cdp` | Explicit attach to user Chrome/Edge via DevTools URL | No | Requires real-browser consent and should show the target browser/profile/tab/domain before control. |
-| `browser-use-cloud` | Explicit Browser Use Cloud stealth browser session controlled through CDP | No | Requires Browser Use credentials and explicit `browser_provider: "browser-use-cloud"`. Localhost/private/file targets stay on the default workbench. Sessions must be stopped on `browser_close` to avoid leaking remote browser runtime. |
+| Backend              | Purpose                                                                                 | Default? | Notes                                                                                                                                                                                                                                     |
+| -------------------- | --------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `electron-workbench` | Visible in-app browser surface controlled through Electron `webContents.debugger` / CDP | Yes      | Primary user/agent shared browser. Renderer owns UX; main process owns automation.                                                                                                                                                        |
+| `playwright-local`   | Background/headless/headed fallback for CI-like or non-visible runs                     | No       | Used when no renderer is available or the user explicitly requests forced headless/background browser work.                                                                                                                               |
+| `external-cdp`       | Explicit attach to user Chrome/Edge via DevTools URL                                    | No       | Requires real-browser consent and should show the target browser/profile/tab/domain before control.                                                                                                                                       |
+| `browser-use-cloud`  | Explicit Browser Use Cloud stealth browser session controlled through CDP               | No       | Requires Browser Use credentials and explicit `browser_provider: "browser-use-cloud"`. Localhost/private/file targets stay on the default workbench. Sessions must be stopped on `browser_close` to avoid leaking remote browser runtime. |
 
 The tool layer keeps old options such as `headless`, `profile`, `browser_channel`, and `debugger_url` for compatibility. Browser V2 treats `headless` as compatibility-only; `force_headless`, explicit profile/browser-channel options, explicit attach requests, or explicit `browser_provider` requests are what move work away from the visible workbench.
 

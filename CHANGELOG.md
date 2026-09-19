@@ -7,15 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.53] - 2026-09-20
+
 ### Added
 
-- **MLX-LM local inference**: added a first-class Apple Silicon `mlx` provider with native-platform and Python-runtime checks, quantized-model quick picks, local `mlx_lm.server` lifecycle controls, OpenAI-compatible `/v1` routing, legacy endpoint normalization, and a complete [MLX-LM Local Inference guide](docs/mlx-lm.md).
-- **Codex-style approval boundaries**: added named access profiles and documented routine in-scope work, scoped exceptions, fail-closed `approval: never` behavior, and bounded ACP execution requirements.
+- **Profile-first approvals**: added Ask for approval, Approve for me, Full access, and Custom profiles with fail-closed boundaries and inline Deny/Allow-once decisions.
+- **Local inference and Jev**: added Apple Silicon MLX-LM, Atomic Chat, the bounded `local-balanced-v1` execution profile, typed Jev decision support, separate Jev telemetry, and a headless validation harness.
+- **Durable WorkSessions**: added canonical lifecycle contracts, activity leases, projections, replay evaluation, rollout controls, turn guards, and control-plane/daemon integration.
+- **Collaboration surfaces**: added persistent bot profiles and conversations, team messaging, agent rosters, local previews, session dashboards, and richer task/activity state.
+- **Box Brain and CoWork Pulse**: added Box-backed memory/search integration and an explicitly opt-in, content-free Pulse collector with consent and deletion controls.
+- **Skills and connectors**: expanded bundled/registry-managed skills, including Box and TypeSafe AI entries, architecture-design workflows, and plugin-pack validation.
 
 ### Changed
 
-- **No-popup approval handling**: default local runs now execute allowed operations silently and turn unresolved approval decisions—including network, credential, export, MCP/external-side-effect, and eligible outside-workspace requests—into assistant messages with inline **Deny** / **Allow once** cards. Legacy popup approvals are opt-in diagnostics via `COWORK_APPROVAL_PROMPTS=on`, and pending approval state fails closed on restart.
-- **Memory write migration**: durable memory writes now auto-commit in the default no-prompt runtime; explicit review modes remain available for controlled runs, while stale queued writes are rejected without replay.
+- **No-popup, profile-driven execution**: allowed in-scope work runs silently, unresolved requests become durable inline decisions, and legacy popup prompts are opt-in diagnostics via `COWORK_APPROVAL_PROMPTS=on`.
+- **Task and artifact surfaces**: improved composer drafts/attachments, timeline projection, task selection, disclosure, session progress, artifact previews, and large-session rendering/replay stability.
+- **Provider and runtime tooling**: added MLX/Atomic Chat routing, MuAPI transcription, OpenRouter onboarding recovery, Vite 8/Vitest upgrades, and documentation-version validation in the build.
+- **Release and QA workflows**: added registry-publication recovery, bundle/smoke helpers, detached updater-signature verification, approval-boundary and replay harnesses, and expanded platform metadata checks.
+- **Documentation and skills distribution**: refreshed security, local execution, WorkSession, bot, Pulse, Box Brain, provider, channel, artifact, self-hosting, and release guidance.
+
+### Security
+
+- **Execution boundaries**: protected policy/Git paths, principal capabilities, identity/address checks, safe external URLs, protected credentials, recurring approvals, shell/network policy, and task entrypoints are centralized and regression-tested.
+- **Transport and data protection**: hardened remote MCP provenance, webhook authentication, internal-address blocking across redirects, SSH tunnel arguments, settings encryption migration, renderer HTML previews, LaTeX, image processing, connector cursors, and control-plane secret redaction.
+- **Release integrity**: added detached updater signature verification and stronger package, registry, and artifact validation.
+
+### Fixed
+
+- **Approval and memory migration**: routine authorization no longer creates unnecessary approval rows, stale queued memory writes are rejected without replay, trusted command matching cannot span shell operators, and approval reuse cannot cross unrelated programs.
+- **Runtime lifecycle**: preserved terminal outcomes, normalized tool results, isolated projections by database, guarded stale session messages, improved graceful shutdown, and repaired legacy migration edge cases.
+- **Provider and mailbox resilience**: improved provider onboarding/routing, transcription responses, mailbox retries, automation recovery, and local-model admission failures.
+
+See [Release Notes 0.5.53](docs/release-notes-0.5.53.md) for the complete summary and release checklist.
 
 ## [0.5.52] - 2026-08-27
 
@@ -1857,7 +1880,8 @@ This release is the first recommended Windows install baseline for normal users 
 | 0.1.0   | 2025-01-24 | First public release with core features                                                                                                                                                                           |
 | 0.0.1   | 2025-01-20 | Initial development setup                                                                                                                                                                                         |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.52...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.53...HEAD
+[0.5.53]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.52...v0.5.53
 [0.5.52]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...v0.5.52
 [0.5.51]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.50...v0.5.51
 [0.5.50]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.49...v0.5.50

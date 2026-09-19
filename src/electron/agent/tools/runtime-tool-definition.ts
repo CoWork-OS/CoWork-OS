@@ -120,6 +120,10 @@ const ALWAYS_EXPOSE_TOOLS = new Set([
   "supermemory_search",
   "supermemory_remember",
   "supermemory_forget",
+  // Keep bot-to-bot handoffs discoverable for persistent bot conversations.
+  // Runtime policy still gates execution; deferring this tool makes delegation
+  // silently unavailable when the prompt omits the exact tool name.
+  "send_agent_message",
 ]);
 
 function inferCapabilityTags(toolName: string): RuntimeToolCapabilityTag[] {

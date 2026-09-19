@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, UserPlus, Users } from "lucide-react";
+import { Check, ChevronDown, Copy, UserPlus, Users } from "lucide-react";
 import type { SessionHumanRole, SessionShareSnapshot, Task } from "../../shared/types";
+import { hasSharedSessionActivity } from "../utils/session-sidebar-visibility";
 
 interface SessionMembersCardProps {
   task?: Task;
@@ -31,9 +32,12 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [loadedTaskId, setLoadedTaskId] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
+    if (task?.id && loadedTaskId !== task.id) setLoadedTaskId(undefined);
     if (!task?.id || !window.electronAPI?.getSessionMembers) {
       setSnapshot(undefined);
       return;
@@ -42,18 +46,45 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
     void window.electronAPI
       .getSessionMembers({ taskId: task.id })
       .then((next) => {
-        if (!cancelled) setSnapshot(next);
+        if (!cancelled) {
+          setSnapshot(next);
+          setLoadedTaskId(task.id);
+        }
       })
       .catch((cause) => {
-        if (!cancelled)
+        if (!cancelled) {
           setError(cause instanceof Error ? cause.message : "Unable to load members.");
+          setLoadedTaskId(task.id);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [task?.id, refreshKey]);
 
+  useEffect(() => {
+    setExpanded(false);
+  }, [task?.id]);
+
   if (!task) return null;
+  if (loadedTaskId !== task.id) return null;
+
+  const sharedSessionActive = snapshot ? hasSharedSessionActivity(snapshot) : false;
+
+  if (snapshot && !sharedSessionActive && !expanded) {
+    return (
+      <button
+        type="button"
+        className="session-members-card-trigger"
+        onClick={() => setExpanded(true)}
+        aria-expanded={false}
+      >
+        <Users size={13} aria-hidden="true" />
+        <span>Share session</span>
+        <ChevronDown size={12} aria-hidden="true" />
+      </button>
+    );
+  }
 
   const acceptInvite = async () => {
     if (!inviteTokenInput.trim() || !displayName.trim() || busy) return;
@@ -171,10 +202,15 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
   return (
     <section className="session-members-card" aria-label="Session members">
       <div className="session-members-card-header">
-        <span className="session-members-card-label">
+        <button
+          type="button"
+          className="session-members-card-toggle"
+          onClick={() => setExpanded(false)}
+          aria-expanded={true}
+        >
           <Users size={13} aria-hidden="true" />
           Shared session
-        </span>
+        </button>
         <span className="session-members-card-count">
           {snapshot.members.filter((member) => member.status === "active").length} members
         </span>

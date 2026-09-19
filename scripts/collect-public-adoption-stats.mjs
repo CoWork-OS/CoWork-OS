@@ -7,7 +7,8 @@ const repoOwner = process.env.ADOPTION_STATS_REPO_OWNER || "CoWork-OS";
 const repoName = process.env.ADOPTION_STATS_REPO_NAME || "CoWork-OS";
 const npmPackage = process.env.ADOPTION_STATS_NPM_PACKAGE || "cowork-os";
 const args = new Set(process.argv.slice(2));
-const resetBaseline = args.has("--reset-baseline") || process.env.ADOPTION_STATS_RESET_BASELINE === "1";
+const resetBaseline =
+  args.has("--reset-baseline") || process.env.ADOPTION_STATS_RESET_BASELINE === "1";
 const repoRoot = process.cwd();
 const dataDir = path.join(repoRoot, "data", "adoption");
 const latestPath = path.join(dataDir, "public-stats-latest.json");
@@ -40,11 +41,18 @@ function numberOrNull(value) {
 
 function pickAssetPlatform(name) {
   const lower = name.toLowerCase();
-  if (lower.endsWith(".sha256") || lower.endsWith(".blockmap") || lower.endsWith(".yml")) return "metadata";
-  if (lower.includes("server") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) return "server";
+  if (lower.endsWith(".sha256") || lower.endsWith(".blockmap") || lower.endsWith(".yml"))
+    return "metadata";
+  if (lower.includes("server") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz"))
+    return "server";
   if (lower.includes("mac") || lower.endsWith(".dmg")) return "macos";
   if (lower.includes("win") || lower.endsWith(".exe") || lower.endsWith(".msi")) return "windows";
-  if (lower.includes("linux") || lower.endsWith(".appimage") || lower.endsWith(".deb") || lower.endsWith(".rpm")) {
+  if (
+    lower.includes("linux") ||
+    lower.endsWith(".appimage") ||
+    lower.endsWith(".deb") ||
+    lower.endsWith(".rpm")
+  ) {
     return "linux";
   }
   if (lower.endsWith(".zip")) return "archive";
@@ -118,7 +126,9 @@ async function fetchGitHubReleases() {
     fetchedReleases.push(...(pageRows || []));
     if (!Array.isArray(pageRows) || pageRows.length < 100) break;
   }
-  const releases = (fetchedReleases || []).filter((release) => !release.draft && release.published_at);
+  const releases = (fetchedReleases || []).filter(
+    (release) => !release.draft && release.published_at,
+  );
   const assetRows = [];
   let totalAssetDownloadCount = 0;
   let totalInstallAssetDownloadCount = 0;
@@ -148,7 +158,9 @@ async function fetchGitHubReleases() {
   }
 
   assetRows.sort((a, b) => {
-    const releaseSort = String(b.releasePublishedAt || "").localeCompare(String(a.releasePublishedAt || ""));
+    const releaseSort = String(b.releasePublishedAt || "").localeCompare(
+      String(a.releasePublishedAt || ""),
+    );
     if (releaseSort !== 0) return releaseSort;
     return String(a.assetName).localeCompare(String(b.assetName));
   });
@@ -181,7 +193,9 @@ async function fetchTrafficMetric(pathname) {
   try {
     return {
       status: "available",
-      data: await fetchJson(`https://api.github.com/repos/${repoOwner}/${repoName}/traffic/${pathname}`),
+      data: await fetchJson(
+        `https://api.github.com/repos/${repoOwner}/${repoName}/traffic/${pathname}`,
+      ),
     };
   } catch (error) {
     return {
@@ -221,7 +235,9 @@ async function fetchNpmPoint(period) {
 
 async function fetchNpmStats(generatedDay) {
   const [metadata, lastDay, lastWeek, lastMonth, allTimeRange] = await Promise.all([
-    fetchJson(`https://registry.npmjs.org/${npmPackage}`, { headers: { Accept: "application/json" } }).catch((error) => ({
+    fetchJson(`https://registry.npmjs.org/${npmPackage}`, {
+      headers: { Accept: "application/json" },
+    }).catch((error) => ({
       error: error?.message || String(error),
     })),
     fetchNpmPoint("last-day"),
@@ -257,7 +273,9 @@ function buildAssetDownloadDelta(previous, current) {
     const key = `${asset.releaseTag}::${asset.assetName}`;
     const previousDownloadCount = previousByKey.get(key);
     const deltaSincePreviousSnapshot =
-      typeof previousDownloadCount === "number" ? asset.downloadCount - previousDownloadCount : null;
+      typeof previousDownloadCount === "number"
+        ? asset.downloadCount - previousDownloadCount
+        : null;
     return {
       ...asset,
       previousDownloadCount: previousDownloadCount ?? null,
@@ -276,7 +294,8 @@ function summarizeReleaseDownloadDeltas(assets) {
     if (asset.deltaSincePreviousSnapshot == null) continue;
     hasDelta = true;
     totalDelta += asset.deltaSincePreviousSnapshot;
-    byPlatform[asset.platform] = (byPlatform[asset.platform] || 0) + asset.deltaSincePreviousSnapshot;
+    byPlatform[asset.platform] =
+      (byPlatform[asset.platform] || 0) + asset.deltaSincePreviousSnapshot;
   }
 
   return {

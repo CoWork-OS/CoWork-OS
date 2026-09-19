@@ -15,19 +15,15 @@ JS thread round-trip for press animations.
 **Incorrect (Pressable with JS thread callbacks):**
 
 ```tsx
-import { Pressable } from 'react-native'
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-} from 'react-native-reanimated'
+import { Pressable } from "react-native";
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
 
 function AnimatedButton({ onPress }: { onPress: () => void }) {
-  const scale = useSharedValue(1)
+  const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
-  }))
+  }));
 
   return (
     <Pressable
@@ -39,43 +35,41 @@ function AnimatedButton({ onPress }: { onPress: () => void }) {
         <Text>Press me</Text>
       </Animated.View>
     </Pressable>
-  )
+  );
 }
 ```
 
 **Correct (GestureDetector with UI thread worklets):**
 
 ```tsx
-import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   interpolate,
   runOnJS,
-} from 'react-native-reanimated'
+} from "react-native-reanimated";
 
 function AnimatedButton({ onPress }: { onPress: () => void }) {
   // Store the press STATE (0 = not pressed, 1 = pressed)
-  const pressed = useSharedValue(0)
+  const pressed = useSharedValue(0);
 
   const tap = Gesture.Tap()
     .onBegin(() => {
-      pressed.set(withTiming(1))
+      pressed.set(withTiming(1));
     })
     .onFinalize(() => {
-      pressed.set(withTiming(0))
+      pressed.set(withTiming(0));
     })
     .onEnd(() => {
-      runOnJS(onPress)()
-    })
+      runOnJS(onPress)();
+    });
 
   // Derive visual values from the state
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: interpolate(withTiming(pressed.get()), [0, 1], [1, 0.95]) },
-    ],
-  }))
+    transform: [{ scale: interpolate(withTiming(pressed.get()), [0, 1], [1, 0.95]) }],
+  }));
 
   return (
     <GestureDetector gesture={tap}>
@@ -83,7 +77,7 @@ function AnimatedButton({ onPress }: { onPress: () => void }) {
         <Text>Press me</Text>
       </Animated.View>
     </GestureDetector>
-  )
+  );
 }
 ```
 

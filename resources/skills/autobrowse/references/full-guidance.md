@@ -96,9 +96,9 @@ description: "<what this workflow reliably does>"
 
 ## Inputs
 
-| Name | Required | Description |
-|---|---|---|
-| query | Yes | <example> |
+| Name  | Required | Description |
+| ----- | -------- | ----------- |
+| query | Yes      | <example>   |
 
 ## Workflow
 

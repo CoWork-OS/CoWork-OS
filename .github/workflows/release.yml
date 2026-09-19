@@ -38,6 +38,9 @@ jobs:
       - name: Test registry publication recovery
         run: node --test scripts/release/*.test.mjs
 
+      - name: Check documentation version policy
+        run: npm run qa:docs-versions
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 

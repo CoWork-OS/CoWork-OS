@@ -68,6 +68,91 @@ const INLINE_TOOL_JSON_PATTERNS: RegExp[] = [
   /\{\s*"tool_name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*"(?:\\.|[^"])*"\s*\}/gi,
 ];
 
+const STRUCTURED_TOOL_CALL_PREFIX =
+  /\b(?:search_web|web_search|web_fetch|browser_search|browser_navigate|tool_call)\s*:\s*\d+/gi;
+const TOOL_CALL_EXPLANATION_CONTEXT =
+  /\b(?:example|examples|syntax|format|literal|e\.g\.?|for instance|such as|means|looks like|represented by)\b/i;
+
+function maskMarkdownCodeExamples(input: string): string {
+  const lines = input.split(/\r?\n/);
+  let inFence = false;
+
+  return lines
+    .map((line) => {
+      if (/^\s*(`{3,}|~{3,})/.test(line)) {
+        inFence = !inFence;
+        return " ".repeat(line.length);
+      }
+      if (inFence) return " ".repeat(line.length);
+
+      // Mask inline code, including an unfinished span while a response is streaming.
+      return line.replace(/`[^`\n]*(?:`|$)/g, (match) => " ".repeat(match.length));
+    })
+    .join("\n");
+}
+
+function isToolCallExplanationContext(input: string, matchIndex: number): boolean {
+  const lineStart = Math.max(0, input.lastIndexOf("\n", Math.max(0, matchIndex - 1)) + 1);
+  return TOOL_CALL_EXPLANATION_CONTEXT.test(input.slice(lineStart, matchIndex));
+}
+
+function hasStructuredToolCallPrefix(input: string, allowPartial: boolean): boolean {
+  STRUCTURED_TOOL_CALL_PREFIX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = STRUCTURED_TOOL_CALL_PREFIX.exec(input)) !== null) {
+    if (isToolCallExplanationContext(input, match.index)) continue;
+
+    const suffix = input.slice(match.index + match[0].length);
+    if (allowPartial ? /^\s*(?:\{|\[|$)/.test(suffix) : /^\s*(?:\{|\[)/.test(suffix)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasStructuredInvokeCall(input: string): boolean {
+  const openIndex = input.search(/<invoke\b/i);
+  if (openIndex < 0 || isToolCallExplanationContext(input, openIndex)) return false;
+
+  const rest = input.slice(openIndex);
+  const openTag = rest.match(/^<invoke\b[^>]*(?:>|$)/i)?.[0] || rest;
+  const hasNameAttribute = /\bname\s*=\s*(?:["'][^"']*["']|[^\s>]+)/i.test(openTag);
+  if (hasNameAttribute) {
+    return true;
+  }
+
+  // Name-less invoke markup is accepted only when it contains an explicit
+  // structured body, avoiding matches for prose that merely mentions the tag.
+  return /<invoke\b[^>]*>[\s\S]*?<\/?(?:parameter|argument|input)\b[\s\S]*?<\/invoke\s*>/i.test(
+    rest,
+  );
+}
+
+export interface UnexecutedToolCallDetectionOptions {
+  /** Allow a still-growing stream prefix such as `search_web:0`. */
+  allowPartial?: boolean;
+}
+
+/**
+ * Detect tool-call syntax that a model emitted as assistant text instead of
+ * returning a structured tool call. Markdown code examples are ignored so a
+ * user can ask the assistant to explain a tool-call format without triggering
+ * the guard.
+ */
+export function responseLooksLikeUnexecutedToolCall(
+  raw: string,
+  options: UnexecutedToolCallDetectionOptions = {},
+): boolean {
+  const input = String(raw || "");
+  if (!input.trim()) return false;
+
+  const masked = maskMarkdownCodeExamples(input);
+  return (
+    hasStructuredToolCallPrefix(masked, options.allowPartial === true) ||
+    hasStructuredInvokeCall(masked)
+  );
+}
+
 function looksLikePlainToolTranscript(input: string): boolean {
   const lower = input.toLowerCase();
   const hasTranscriptLead =

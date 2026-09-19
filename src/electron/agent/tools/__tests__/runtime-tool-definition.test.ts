@@ -18,6 +18,13 @@ describe("runtime tool definition metadata", () => {
     expect(metadata.approvalKind).toBe("shell_sensitive");
   });
 
+  it("keeps bot-team handoffs discoverable without prompt wording", () => {
+    const metadata = getDefaultRuntimeToolMetadata("send_agent_message");
+    expect(metadata.alwaysExpose).toBe(true);
+    expect(metadata.concurrencyClass).toBe("exclusive");
+    expect(metadata.readOnly).toBe(false);
+  });
+
   it("preserves explicit metadata overrides", () => {
     const tool = withRuntimeToolMetadata(
       {

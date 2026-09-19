@@ -1,7 +1,9 @@
 import fsSync from "fs";
 import fs from "fs/promises";
+import os from "os";
 import path from "path";
 import { createHash, randomUUID } from "crypto";
+import BetterSqlite3 from "better-sqlite3";
 import type { TaskEvent } from "../../shared/types";
 import { DatabaseManager } from "../database/schema";
 
@@ -120,6 +122,211 @@ function taskPreviousCheckpointPath(workspacePath: string, taskId: string): stri
   return path.join(checkpointsDir(workspacePath), `${taskId}.previous.json`);
 }
 
+const CHECKPOINT_LOCK_ROOT_ENV = "COWORK_CHECKPOINT_LOCK_ROOT";
+
+function configuredCheckpointLockRoot(): string {
+  const override = process.env[CHECKPOINT_LOCK_ROOT_ENV];
+  if (typeof override === "string" && override.trim().length > 0) {
+    return path.resolve(override);
+  }
+  return path.join(os.homedir(), ".cowork", "checkpoint-locks");
+}
+
+async function taskCheckpointLockPath(workspacePath: string, taskId: string): Promise<string> {
+  const lockRoot = configuredCheckpointLockRoot();
+  await fs.mkdir(lockRoot, { recursive: true, mode: 0o700 });
+  // Keep the lock root private even when it was created by an older client.
+  await fs.chmod(lockRoot, 0o700).catch(() => undefined);
+  let canonicalWorkspacePath: string;
+  try {
+    canonicalWorkspacePath = await fs.realpath(workspacePath);
+  } catch {
+    canonicalWorkspacePath = normalizeWorkspacePath(workspacePath);
+  }
+  const lockKey = createHash("sha256")
+    .update(`${canonicalWorkspacePath}\u0000${taskId}`)
+    .digest("hex");
+  return path.join(lockRoot, `${lockKey}.sqlite`);
+}
+
+const CHECKPOINT_LOCK_RETRY_MS = 25;
+const CHECKPOINT_LOCK_MAX_WAIT_MS = 30_000;
+
+interface CheckpointLockHandle {
+  db: import("better-sqlite3").Database;
+}
+
+interface CheckpointCandidate {
+  path: string;
+  checkpoint: TranscriptCheckpointPayload;
+  generation: number;
+}
+
+function sleepFor(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireCheckpointLock(lockPath: string): Promise<CheckpointLockHandle> {
+  const deadline = Date.now() + CHECKPOINT_LOCK_MAX_WAIT_MS;
+  for (;;) {
+    let db: import("better-sqlite3").Database | undefined;
+    try {
+      db = new BetterSqlite3(lockPath);
+      // BEGIN IMMEDIATE obtains an OS-backed SQLite write reservation.  A
+      // killed holder closes its descriptor and releases the reservation.
+      db.pragma("busy_timeout = 0");
+      db.exec(
+        "CREATE TABLE IF NOT EXISTS checkpoint_lock (id INTEGER PRIMARY KEY CHECK (id = 1));",
+      );
+      db.exec("BEGIN IMMEDIATE");
+      return { db };
+    } catch (error: unknown) {
+      if (db) {
+        try {
+          db.close();
+        } catch {
+          // A failed BEGIN/DDL attempt is discarded before retrying.
+        }
+      }
+      const code = String((error as { code?: unknown })?.code || "");
+      if (!code.startsWith("SQLITE_BUSY") && !code.startsWith("SQLITE_LOCKED")) {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out acquiring checkpoint lock: ${lockPath}`);
+      }
+      await sleepFor(CHECKPOINT_LOCK_RETRY_MS);
+    }
+  }
+}
+
+async function releaseCheckpointLock(lock: CheckpointLockHandle): Promise<void> {
+  try {
+    // Rollback releases BEGIN IMMEDIATE before close.  The database file is
+    // deliberately retained so future writers share the same OS lock object.
+    lock.db.exec("ROLLBACK");
+  } catch {
+    // The process may already have left the transaction after a failed write.
+  }
+  try {
+    lock.db.close();
+  } catch {
+    // Closing an already-closed handle is harmless during error unwinding.
+  }
+}
+
+async function syncDirectory(directoryPath: string): Promise<void> {
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    // Directory fsync is supported by the local filesystems used by Electron.
+    // Some platforms/filesystems reject opening a directory; file durability
+    // remains valid there and the directory sync is best effort.
+    handle = await fs.open(directoryPath, "r");
+    await handle.sync();
+  } catch {
+    // Best effort: do not make a valid atomic checkpoint write fail solely
+    // because directory handles cannot be synced on the target filesystem.
+  } finally {
+    if (handle) await handle.close().catch(() => undefined);
+  }
+}
+
+async function copyCheckpointDurably(
+  sourcePath: string,
+  destinationPath: string,
+  directoryPath: string,
+): Promise<void> {
+  const tempPath = `${destinationPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    await fs.copyFile(sourcePath, tempPath);
+    handle = await fs.open(tempPath, "r");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await fs.rename(tempPath, destinationPath);
+    await syncDirectory(directoryPath);
+  } finally {
+    if (handle) await handle.close().catch(() => undefined);
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
+  }
+}
+
+function checkpointTimestamp(checkpoint: TranscriptCheckpointPayload): number | null {
+  if (
+    typeof checkpoint.sourceTimestamp === "number" &&
+    Number.isFinite(checkpoint.sourceTimestamp)
+  ) {
+    return checkpoint.sourceTimestamp;
+  }
+  return typeof checkpoint.timestamp === "number" && Number.isFinite(checkpoint.timestamp)
+    ? checkpoint.timestamp
+    : null;
+}
+
+function checkpointMeaningfulExchangeCount(checkpoint: TranscriptCheckpointPayload): number | null {
+  const raw = checkpoint.sourceMetadata?.meaningfulExchangeCount;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function checkpointMessageCount(checkpoint: TranscriptCheckpointPayload): number | null {
+  const raw = checkpoint.messageCount;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function compareCheckpointFreshness(
+  left: TranscriptCheckpointPayload,
+  right: TranscriptCheckpointPayload,
+): number {
+  const leftTimestamp = checkpointTimestamp(left);
+  const rightTimestamp = checkpointTimestamp(right);
+  if (leftTimestamp !== null && rightTimestamp !== null && leftTimestamp !== rightTimestamp) {
+    return leftTimestamp - rightTimestamp;
+  }
+
+  const leftExchangeCount = checkpointMeaningfulExchangeCount(left);
+  const rightExchangeCount = checkpointMeaningfulExchangeCount(right);
+  if (
+    leftExchangeCount !== null &&
+    rightExchangeCount !== null &&
+    leftExchangeCount !== rightExchangeCount
+  ) {
+    return leftExchangeCount - rightExchangeCount;
+  }
+
+  const leftMessageCount = checkpointMessageCount(left);
+  const rightMessageCount = checkpointMessageCount(right);
+  if (
+    leftMessageCount !== null &&
+    rightMessageCount !== null &&
+    leftMessageCount !== rightMessageCount
+  ) {
+    return leftMessageCount - rightMessageCount;
+  }
+  return 0;
+}
+
+function compareCheckpointCandidates(
+  left: CheckpointCandidate,
+  right: CheckpointCandidate,
+): number {
+  return (
+    compareCheckpointFreshness(left.checkpoint, right.checkpoint) ||
+    left.generation - right.generation
+  );
+}
+
+async function readCheckpointCandidate(candidatePath: string): Promise<CheckpointCandidate | null> {
+  try {
+    const checkpoint = parseCheckpoint(await fs.readFile(candidatePath, "utf8"));
+    return checkpoint
+      ? { path: candidatePath, checkpoint, generation: checkpointGeneration(checkpoint) }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function checkpointChecksum(payload: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
@@ -220,10 +427,15 @@ function shouldPersistSpan(type: string): boolean {
     "tool_call",
     "tool_result",
     "tool_error",
+    "step_feedback",
     "task_completed",
     "task_status",
     "task_paused",
     "task_resumed",
+    "context_compaction_started",
+    "context_compaction_completed",
+    "context_compaction_failed",
+    "context_summarized",
     "conversation_snapshot",
   ].includes(type);
 }
@@ -242,6 +454,7 @@ function safeParseLine(line: string): TranscriptSpanRecord | null {
 export class TranscriptStore {
   private static dbOverride: TranscriptDatabase | null | undefined;
   private static dbSchemaReady = false;
+  private static readonly checkpointWriteTails = new Map<string, Promise<void>>();
 
   static setDatabaseForTests(db: TranscriptDatabase | null): void {
     this.dbOverride = db;
@@ -279,7 +492,9 @@ export class TranscriptStore {
     checkpoint: TranscriptCheckpointPayload,
   ): Promise<void> {
     if (!workspacePath || !taskId || !isSafeTaskId(taskId)) return;
-    await this.ensureLayout(workspacePath);
+    // Capture the request's logical time before waiting for another writer.
+    // This lets the freshness check reject an older async snapshot that only
+    // reaches the filesystem after a newer snapshot has committed.
     const basePayload: Record<string, unknown> = {
       ...checkpoint,
       timestamp: checkpoint.timestamp ?? Date.now(),
@@ -287,49 +502,86 @@ export class TranscriptStore {
     };
     delete basePayload.checkpointIntegrity;
 
-    const currentPath = taskCheckpointPath(workspacePath, taskId);
-    const previousPath = taskPreviousCheckpointPath(workspacePath, taskId);
-    const existingGenerations = await Promise.all(
-      [currentPath, previousPath].map(async (candidatePath) => {
-        try {
-          return checkpointGeneration(parseCheckpoint(await fs.readFile(candidatePath, "utf8")));
-        } catch {
-          return 0;
-        }
-      }),
-    );
-    const payload: TranscriptCheckpointPayload = {
-      ...(basePayload as TranscriptCheckpointPayload),
-      checkpointIntegrity: {
-        algorithm: "sha256",
-        generation: Math.max(...existingGenerations, 0) + 1,
-        checksum: checkpointChecksum(basePayload),
-      },
-    };
-    const serialized = JSON.stringify(payload, null, 2);
-    const tempPath = `${currentPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-    try {
-      handle = await fs.open(tempPath, "w");
-      await handle.writeFile(serialized, "utf8");
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
+    const lockKey = `${normalizeWorkspacePath(workspacePath)}\u0000${taskId}`;
+    const previous = this.checkpointWriteTails.get(lockKey) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queued = previous.then(() => gate);
+    this.checkpointWriteTails.set(lockKey, queued);
 
-      // Preserve the last known-good generation before replacing the current
-      // file.  A crash before rename therefore leaves a recoverable previous
-      // checkpoint; rename itself is atomic on the target filesystem.
+    await previous;
+    let checkpointLock: CheckpointLockHandle | undefined;
+    try {
+      await this.ensureLayout(workspacePath);
+      checkpointLock = await acquireCheckpointLock(
+        await taskCheckpointLockPath(workspacePath, taskId),
+      );
+
+      const currentPath = taskCheckpointPath(workspacePath, taskId);
+      const previousPath = taskPreviousCheckpointPath(workspacePath, taskId);
+      const existingCandidates = (
+        await Promise.all([currentPath, previousPath].map(readCheckpointCandidate))
+      ).filter((candidate): candidate is CheckpointCandidate => candidate !== null);
+      const latestCandidate = existingCandidates.reduce<CheckpointCandidate | null>(
+        (latest, candidate) =>
+          !latest || compareCheckpointCandidates(candidate, latest) > 0 ? candidate : latest,
+        null,
+      );
+
+      // A late writer may hold an older event snapshot.  Preserve the newer
+      // committed state and leave its generation untouched when freshness is
+      // known.  Equal/unknown freshness retains legacy write-through behavior.
+      if (
+        latestCandidate &&
+        compareCheckpointFreshness(
+          basePayload as TranscriptCheckpointPayload,
+          latestCandidate.checkpoint,
+        ) < 0
+      ) {
+        return;
+      }
+
+      const payload: TranscriptCheckpointPayload = {
+        ...(basePayload as TranscriptCheckpointPayload),
+        checkpointIntegrity: {
+          algorithm: "sha256",
+          generation:
+            Math.max(0, ...existingCandidates.map((candidate) => candidate.generation)) + 1,
+          checksum: checkpointChecksum(basePayload),
+        },
+      };
+      const serialized = JSON.stringify(payload, null, 2);
+      const tempPath = `${currentPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+      let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
       try {
-        await fs.copyFile(currentPath, previousPath);
-      } catch (error: Any) {
-        if (error?.code !== "ENOENT") throw error;
+        handle = await fs.open(tempPath, "w");
+        await handle.writeFile(serialized, "utf8");
+        await handle.sync();
+        await handle.close();
+        handle = undefined;
+
+        // Preserve the freshest known-good generation before replacing the
+        // current file.  If current is corrupt while previous is valid, do not
+        // copy the corrupt bytes over the only recovery generation.
+        if (latestCandidate?.path === currentPath) {
+          await copyCheckpointDurably(currentPath, previousPath, checkpointsDir(workspacePath));
+        }
+        await fs.rename(tempPath, currentPath);
+        await syncDirectory(checkpointsDir(workspacePath));
+      } finally {
+        if (handle) {
+          await handle.close().catch(() => undefined);
+        }
+        await fs.rm(tempPath, { force: true }).catch(() => undefined);
       }
-      await fs.rename(tempPath, currentPath);
     } finally {
-      if (handle) {
-        await handle.close().catch(() => undefined);
+      if (checkpointLock) await releaseCheckpointLock(checkpointLock);
+      release();
+      if (this.checkpointWriteTails.get(lockKey) === queued) {
+        this.checkpointWriteTails.delete(lockKey);
       }
-      await fs.rm(tempPath, { force: true }).catch(() => undefined);
     }
   }
 
@@ -343,23 +595,13 @@ export class TranscriptStore {
       taskCheckpointPath(workspacePath, taskId),
       taskPreviousCheckpointPath(workspacePath, taskId),
     ];
-    const validCandidates: Array<{
-      checkpoint: TranscriptCheckpointPayload;
-      generation: number;
-    }> = [];
+    const validCandidates: CheckpointCandidate[] = [];
     for (const candidatePath of candidates) {
       if (!allowsRead(readGuard, candidatePath)) continue;
-      try {
-        const parsed = parseCheckpoint(await fs.readFile(candidatePath, "utf8"));
-        if (parsed) {
-          validCandidates.push({ checkpoint: parsed, generation: checkpointGeneration(parsed) });
-        }
-      } catch {
-        // Try the previous generation when the newest file is truncated or
-        // otherwise unreadable.
-      }
+      const candidate = await readCheckpointCandidate(candidatePath);
+      if (candidate) validCandidates.push(candidate);
     }
-    validCandidates.sort((a, b) => b.generation - a.generation);
+    validCandidates.sort((a, b) => compareCheckpointCandidates(b, a));
     return validCandidates[0]?.checkpoint || null;
   }
 
@@ -373,23 +615,24 @@ export class TranscriptStore {
       taskCheckpointPath(workspacePath, taskId),
       taskPreviousCheckpointPath(workspacePath, taskId),
     ];
-    const validCandidates: Array<{
-      checkpoint: TranscriptCheckpointPayload;
-      generation: number;
-    }> = [];
+    const validCandidates: CheckpointCandidate[] = [];
     for (const candidatePath of candidates) {
       if (!allowsRead(readGuard, candidatePath)) continue;
       try {
         const parsed = parseCheckpoint(fsSync.readFileSync(candidatePath, "utf8"));
         if (parsed) {
-          validCandidates.push({ checkpoint: parsed, generation: checkpointGeneration(parsed) });
+          validCandidates.push({
+            path: candidatePath,
+            checkpoint: parsed,
+            generation: checkpointGeneration(parsed),
+          });
         }
       } catch {
         // Try the previous generation when the newest file is truncated or
         // otherwise unreadable.
       }
     }
-    validCandidates.sort((a, b) => b.generation - a.generation);
+    validCandidates.sort((a, b) => compareCheckpointCandidates(b, a));
     return validCandidates[0]?.checkpoint || null;
   }
 

@@ -152,6 +152,29 @@ describe("MacOSSandbox", () => {
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("scopes the localhost network exception to loopback outbound sockets", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+    const sandbox = new MacOSSandbox(makeWorkspace());
+
+    const resultPromise = sandbox.execute("echo ok", [], {
+      cwd: "/tmp/cowork workspace",
+      timeout: 1000,
+    });
+
+    const [, args] = spawnMock.mock.calls[0];
+    const profile = fs.readFileSync(args[1], "utf8");
+    expect(profile).toContain('(allow network-outbound\n  (remote tcp "localhost:*")');
+    expect(profile).toContain('(remote udp "localhost:*")');
+    expect(profile).not.toContain('(allow network* (local ip "localhost:*"))');
+
+    proc.emit("close", 0, null);
+    await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
+  });
+
   it("reports nonzero sandbox process exits", async () => {
     spawnMock.mockImplementationOnce(() =>
       makeChildProcess({ closeCode: 2, stderr: "command failed\n" }),
@@ -180,6 +203,47 @@ describe("MacOSSandbox", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe("spawn failed");
     expect(result.error).toBe("spawn failed");
+  });
+
+  it("does not let a disabled read capability fall through to host temp access", async () => {
+    const workspace = makeWorkspace({
+      permissions: {
+        ...makeWorkspace().permissions,
+        read: false,
+      },
+    });
+    const sandbox = new MacOSSandbox(workspace);
+
+    const result = await sandbox.execute("echo ok", [], {
+      cwd: os.tmpdir(),
+      timeout: 1000,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 1,
+      error: "Path access denied",
+    });
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses execution when no sandbox profile is available", async () => {
+    const sandbox = new MacOSSandbox(makeWorkspace());
+    const internals = sandbox as unknown as {
+      generateSandboxProfile: () => string | undefined;
+    };
+    internals.generateSandboxProfile = () => undefined;
+
+    const result = await sandbox.execute("echo should-not-run", [], {
+      cwd: "/tmp/cowork workspace",
+      timeout: 1000,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 1,
+      error: "Sandbox profile unavailable",
+    });
+    expect(result.stderr).toContain("refusing unsandboxed execution");
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it("rejects a denied profile path before spawning sandbox-exec", async () => {
@@ -267,5 +331,69 @@ describe("MacOSSandbox", () => {
     } finally {
       fs.rmSync(scriptPath, { force: true });
     }
+  });
+
+  it.each(["workspace-write", "read-only"] as const)(
+    "bounds host temp access for the %s named sandbox mode",
+    async (accessSandboxMode) => {
+      const proc = new EventEmitter() as ChildProcess;
+      proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+      proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+      proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+      spawnMock.mockImplementationOnce(() => proc);
+
+      const workspace = makeWorkspace({
+        permissions: {
+          ...makeWorkspace().permissions,
+          accessProfileId: `named-${accessSandboxMode}`,
+          accessSandboxMode,
+        },
+      });
+      const sandbox = new MacOSSandbox(workspace);
+      const resultPromise = sandbox.execute("echo ok", [], {
+        cwd: workspace.path,
+        timeout: 1000,
+      });
+
+      const [, args] = spawnMock.mock.calls[0];
+      const profile = fs.readFileSync(args[1], "utf8");
+      expect(profile).not.toContain('  (subpath "/private/tmp")');
+      expect(profile).not.toContain('  (subpath "/private/var/folders")');
+      expect(profile).toContain("cowork-sandbox-");
+
+      proc.emit("close", 0, null);
+      await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
+      sandbox.cleanup();
+    },
+  );
+
+  it("places executeCode sources in the private runtime temp directory", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+
+    const workspace = makeWorkspace({
+      permissions: {
+        ...makeWorkspace().permissions,
+        accessProfileId: "named-workspace-write",
+        accessSandboxMode: "workspace-write",
+      },
+    });
+    const sandbox = new MacOSSandbox(workspace);
+    const resultPromise = sandbox.executeCode("print('ok')", "python");
+
+    const [, args] = spawnMock.mock.calls[0];
+    const profile = fs.readFileSync(args[1], "utf8");
+    const sourcePath = args[3] as string;
+    expect(sourcePath).toContain("cowork-sandbox-");
+    expect(profile).toContain(sourcePath);
+
+    proc.stdout?.emit("data", Buffer.from("ok\n"));
+    proc.emit("close", 0, null);
+    await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
+    expect(fs.existsSync(sourcePath)).toBe(false);
+    sandbox.cleanup();
   });
 });

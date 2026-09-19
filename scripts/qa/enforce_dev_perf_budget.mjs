@@ -5,13 +5,11 @@ import path from "path";
 const repoRoot = process.cwd();
 const cliArgs = process.argv.slice(2);
 const logArg = cliArgs.find((arg) => !arg.startsWith("--"));
-const logPath = logArg
-  ? path.resolve(logArg)
-  : path.join(repoRoot, "logs", "dev-latest.jsonl");
-const allowEmpty =
-  cliArgs.includes("--allow-empty") || process.env.COWORK_PERF_ALLOW_EMPTY === "1";
+const logPath = logArg ? path.resolve(logArg) : path.join(repoRoot, "logs", "dev-latest.jsonl");
+const allowEmpty = cliArgs.includes("--allow-empty") || process.env.COWORK_PERF_ALLOW_EMPTY === "1";
 const minSamples = readBudget("COWORK_PERF_MIN_SAMPLES", 1);
-const maxAgeMs = readOptionalNumberArg("--max-age-ms") ?? readOptionalBudget("COWORK_PERF_LOG_MAX_AGE_MS");
+const maxAgeMs =
+  readOptionalNumberArg("--max-age-ms") ?? readOptionalBudget("COWORK_PERF_LOG_MAX_AGE_MS");
 
 const budget = {
   sidebarReceiveP95Ms: readBudget("COWORK_PERF_SIDEBAR_RECEIVE_P95_MS", 250),
@@ -19,8 +17,14 @@ const budget = {
   timelineDataReceivedP95Ms: readBudget("COWORK_PERF_TIMELINE_DATA_RECEIVED_P95_MS", 900),
   timelineFirstRowsP95Ms: readBudget("COWORK_PERF_TIMELINE_FIRST_ROWS_P95_MS", 1200),
   timelinePageDbP95Ms: readBudget("COWORK_PERF_TIMELINE_PAGE_DB_P95_MS", 150),
-  timelinePageSerializedP95Bytes: readBudget("COWORK_PERF_TIMELINE_PAGE_SERIALIZED_P95_BYTES", 768 * 1024),
-  timelinePageSerializedMaxBytes: readBudget("COWORK_PERF_TIMELINE_PAGE_SERIALIZED_MAX_BYTES", 1024 * 1024),
+  timelinePageSerializedP95Bytes: readBudget(
+    "COWORK_PERF_TIMELINE_PAGE_SERIALIZED_P95_BYTES",
+    768 * 1024,
+  ),
+  timelinePageSerializedMaxBytes: readBudget(
+    "COWORK_PERF_TIMELINE_PAGE_SERIALIZED_MAX_BYTES",
+    1024 * 1024,
+  ),
 };
 
 function readBudget(name, fallback) {
@@ -75,7 +79,9 @@ function enforceFreshLog(filePath) {
     );
     return;
   }
-  console.error(`[perf-budget] log is stale: ${filePath} is ${Math.round(ageMs)}ms old, max ${maxAgeMs}ms`);
+  console.error(
+    `[perf-budget] log is stale: ${filePath} is ${Math.round(ageMs)}ms old, max ${maxAgeMs}ms`,
+  );
   process.exit(1);
 }
 
@@ -144,7 +150,9 @@ const rendererIpcByChannel = new Map();
 for (const row of rows) {
   const message = String(row.message ?? row.rawLine ?? "");
 
-  const markMatch = message.match(/\[Mark\]\s+([a-zA-Z0-9_.:-]+)\s+at\s+([\d.]+)ms(?:\s+(\{.*\}))?/);
+  const markMatch = message.match(
+    /\[Mark\]\s+([a-zA-Z0-9_.:-]+)\s+at\s+([\d.]+)ms(?:\s+(\{.*\}))?/,
+  );
   if (markMatch) {
     let details = {};
     if (markMatch[3]) {
@@ -191,7 +199,8 @@ const switchRowsMs = [];
 for (const marks of marksBySwitch.values()) {
   const startedAt = marks.task_switch_start;
   if (!Number.isFinite(startedAt)) continue;
-  if (Number.isFinite(marks.task_header_ready)) switchHeaderMs.push(marks.task_header_ready - startedAt);
+  if (Number.isFinite(marks.task_header_ready))
+    switchHeaderMs.push(marks.task_header_ready - startedAt);
   if (Number.isFinite(marks.timeline_data_received)) {
     switchTimelineMs.push(marks.timeline_data_received - startedAt);
   }
@@ -218,7 +227,12 @@ addFailure(failures, "sidebar receive", sidebarReceiveMs, budget.sidebarReceiveP
 addFailure(failures, "task header ready", switchHeaderMs, budget.taskHeaderReadyP95Ms);
 addFailure(failures, "timeline data received", switchTimelineMs, budget.timelineDataReceivedP95Ms);
 addFailure(failures, "timeline first rows ready", switchRowsMs, budget.timelineFirstRowsP95Ms);
-addFailure(failures, "timeline page db", timelinePageMetrics.get("dbMs") ?? [], budget.timelinePageDbP95Ms);
+addFailure(
+  failures,
+  "timeline page db",
+  timelinePageMetrics.get("dbMs") ?? [],
+  budget.timelinePageDbP95Ms,
+);
 addFailure(
   failures,
   "timeline page serialized",

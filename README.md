@@ -35,7 +35,7 @@
   <a href="docs/terminal-tabs.md">Terminal Tabs</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.52.md">Release Notes 0.5.52</a> &middot;
+  <a href="docs/release-notes-0.5.53.md">Release Notes 0.5.53</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -113,7 +113,7 @@ See [Everyday Agent](docs/everyday-agent.md), [Workflow Intelligence](docs/workf
 
 ### Latest Release
 
-**`0.5.52`** adds OpenRouter image generation, OpenCode Zen and Go routes, guarded SearXNG search, Atlas Cloud transcription, Browser Use Cloud V4 defaults, and a broader open-source multi-provider AI super app surface. It also upgrades the desktop runtime to Electron 44 and raises the macOS minimum to **macOS 13 Ventura**, with compatibility-aware updates and reliability hardening. macOS 12 Monterey users should remain on `0.5.51`. Start with [Release Notes 0.5.52](docs/release-notes-0.5.52.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
+**`0.5.53`** adds profile-first approval boundaries, MLX-LM and Atomic Chat local execution, Jev decision support, durable WorkSessions, bot collaboration, Box Brain, CoWork Pulse, and broad security/release hardening. Electron 44 and the macOS 13 Ventura minimum remain in force. macOS 12 Monterey users should remain on `0.5.51`. Start with [Release Notes 0.5.53](docs/release-notes-0.5.53.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
 
 The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox compose/send upgrades, runtime network/sandbox policy controls, Dreaming memory curation, and `/multitask` lane fan-out. See [Release Notes 0.5.45](docs/release-notes-0.5.45.md), [Managed Agents](docs/managed-agents.md), [Claude-for-Legal Workflows](docs/claude-for-legal.md), [Multitask Command](docs/multitask.md), and [Dreaming](docs/dreaming.md).
 
@@ -128,7 +128,7 @@ Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/
 | **macOS 13 Ventura or later** | `.dmg`                  | Drag CoWork OS into Applications         |
 | **Windows**                   | `.exe` (NSIS installer) | Run the installer and follow the prompts |
 
-> **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.52` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
+> **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.53` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
 
 #### macOS unsigned app workaround
 
@@ -581,6 +581,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Getting Started](docs/getting-started.md)                               | First-time setup and usage                                                                                                                         |
 | [Bots & Conversations](docs/bots-and-conversations.md)                    | Create reusable bot identities, use durable conversations, edit/deactivate profiles, and coordinate the persistent bot team                         |
 | [Beginner's Guide](docs/cowork-school.md)                                | Practical guide to what CoWork OS is for and which workflows to try first                                                                          |
+| [Release Notes 0.5.53](docs/release-notes-0.5.53.md)                     | Approval boundaries, local MLX/Atomic Chat/Jev execution, WorkSessions, bots, Box Brain, Pulse, and security/release hardening                              |
 | [Release Notes 0.5.52](docs/release-notes-0.5.52.md)                     | OpenRouter images, OpenCode/SearXNG/Atlas providers, Electron 44, and macOS support changes                                                        |
 | [Composer Mentions](docs/composer-mentions.md)                           | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing                                          |
 | [Message Box Shortcuts](docs/message-box-shortcuts.md)                   | `/` picker for deterministic app commands and skill-backed workflow shortcuts                                                                      |

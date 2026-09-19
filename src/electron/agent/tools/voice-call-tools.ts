@@ -2,6 +2,7 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { VoiceSettingsManager } from "../../voice/voice-settings-manager";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { assertResolvedHostAllowed } from "../../security/address-classes";
 
 const ELEVENLABS_API_BASE = "https://api.elevenlabs.io/v1";
 const E164_REGEX = /^\+[1-9]\d{1,14}$/;
@@ -96,7 +97,7 @@ export class VoiceCallTools {
     return key;
   }
 
-  private ensureDomainAllowed(url: string): void {
+  private async ensureDomainAllowed(url: string): Promise<void> {
     const decision = evaluateNetworkPolicy({
       url,
       toolName: "voice_call",
@@ -105,7 +106,11 @@ export class VoiceCallTools {
       profileDomainRules: this.workspace.permissions?.accessDomainRules,
     });
     this.daemon.logEvent(this.taskId, "network_policy_decision", decision);
-    if (decision.action === "allow") return;
+    if (decision.action === "allow") {
+      // The policy above only inspects the literal host; resolve the name too.
+      await assertResolvedHostAllowed(new URL(url).hostname);
+      return;
+    }
     if (decision.reason === "legacy_guardrail_domain_denied") {
       throw new Error(`Domain not allowed: "${url}"`);
     }
@@ -187,7 +192,7 @@ export class VoiceCallTools {
       url.searchParams.set(key, String(value));
     }
 
-    this.ensureDomainAllowed(url.toString());
+    await this.ensureDomainAllowed(url.toString());
 
     const response = await fetch(url.toString(), {
       method: params.method,

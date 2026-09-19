@@ -9,7 +9,7 @@ This integration is intentionally modeled after the Hermes-style provider shape:
 - explicit external memory tools
 - optional prompt-time profile injection
 - optional background mirroring of local memory writes
-- optional Memory Write Approval gating before external writes commit
+- optional explicit Memory Write review gating before external writes commit
 - guarded failure behavior so provider outages do not break the main agent loop
 
 Supermemory does **not** replace CoWork's local memory system. CoWork keeps its own archive memory, curated hot memory, workspace kit files, transcript recall, and knowledge graph. Supermemory is an additional external memory lane.
@@ -17,9 +17,12 @@ Supermemory does **not** replace CoWork's local memory system. CoWork keeps its 
 The task's [access profile](access-profiles.md) remains the ceiling for this
 integration. Profile network and connector rules apply before Supermemory
 searches, profile injection, external remembers, forgets, or background
-mirrors. Memory Write Approval is a separate durable-write gate: it can add a
-review step, but it cannot grant a denied profile, expand a domain or
-filesystem scope, or turn an unavailable profile into an executable one.
+mirrors. Memory Write review is a separate durable-write gate: it can add a
+review step when explicitly enabled, but it cannot grant a denied profile,
+expand a domain or filesystem scope, or turn an unavailable profile into an
+executable one. The normal no-prompt runtime commits ordinary memory writes
+without opening an approval popup. A task-level policy decision still uses the
+assistant message/input flow.
 
 ---
 
@@ -49,7 +52,8 @@ Supermemory write paths also participate in Memory Write Governance. If Memory H
 4. Paste your Supermemory API key.
 5. Leave the default base URL unless you are self-hosting.
 6. Choose a container-tag template.
-7. Choose whether Memory Write Approval should govern external writes.
+7. Optionally choose a Memory Write review mode for a controlled run. The
+   normal no-prompt runtime leaves new writes on the immediate-commit path.
 8. Save settings.
 9. Click **Test Connection**.
 
@@ -95,8 +99,8 @@ CoWork treats Supermemory results as **soft context**:
 
 Write behavior is governed separately from read behavior. `supermemory_profile` and `supermemory_search` read from the external lane when enabled. `supermemory_remember` and mirror writes can be:
 
-- committed immediately when Memory Write Approval is `off`
-- staged in `pending_memory_writes` when the mode covers external/background writes
+- committed immediately in the normal no-prompt runtime
+- staged in `pending_memory_writes` only when an explicit review mode is enabled
 - blocked before staging when the payload contains obvious secrets such as API keys, tokens, credentials, bearer tokens, or private keys
 
 ---
@@ -123,7 +127,9 @@ The injected block is wrapped as pinned profile-style context, but it remains ad
 
 If **Mirror Memory Writes** is enabled, CoWork mirrors non-private archive-memory captures into Supermemory.
 Structured observation metadata remains local-first and authoritative for privacy decisions.
-If Memory Write Approval covers background or external writes, a mirror attempt is staged in the approval queue and only sent after approval.
+If an explicit Memory Write review mode covers background or external writes, a
+mirror attempt is staged in the review queue and only sent after review. The
+queue is opt-in and does not open a popup in the normal runtime.
 
 Current mirroring source:
 
@@ -188,7 +194,11 @@ Use it for:
 - project facts
 - stable context worth keeping outside the local machine
 
-If Memory Write Approval covers external writes, the tool returns a pending approval id instead of creating the external memory immediately. If the payload contains obvious secrets, CoWork blocks the write rather than persisting it to the approval queue.
+If an explicit Memory Write review mode covers external writes, the tool
+returns a pending approval id instead of creating the external memory
+immediately. Otherwise it commits the write directly. If the payload contains
+obvious secrets, CoWork blocks the write rather than persisting it to the
+approval queue.
 
 ### `supermemory_forget`
 
@@ -236,7 +246,7 @@ Current safeguards:
 - short request timeout
 - best-effort prompt injection
 - best-effort background mirroring
-- approval staging for external/background writes when Memory Write Approval is enabled
+- approval staging for external/background writes when an explicit Memory Write review mode is enabled
 - pre-queue blocking for sensitive external-memory payloads
 - circuit breaker after repeated request failures
 

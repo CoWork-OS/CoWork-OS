@@ -506,11 +506,15 @@ interface ActionBlockProps {
   onToggle: () => void;
   showConnectorAbove?: boolean;
   showConnectorBelow?: boolean;
-  /** Last step label shown centered in the header when collapsed */
+  /** Latest concrete step label used for the active compact header. */
   lastStepLabel?: string;
+  /** Completed activity summary used by the compact historical row. */
+  compactLabel?: string;
   /** Timestamp used to keep the current block's duration live. */
   startedAt?: number;
   replay?: boolean;
+  /** Compact progressive-disclosure header used when Verbose is off. */
+  minimal?: boolean;
   children: React.ReactNode;
 }
 
@@ -540,7 +544,8 @@ const ACTION_BLOCK_ICON_LABELS: Record<ActionBlockIconKind, string> = {
 
 /**
  * Collapsible block for actions (tool calls, steps) between assistant messages.
- * Cursor-style: expanded while active, collapsed when next assistant message arrives.
+ * Verbose mode may auto-open the current block; summary mode keeps it compact
+ * until the user asks to inspect the action history.
  */
 export function ActionBlock({
   blockId,
@@ -558,6 +563,8 @@ export function ActionBlock({
   lastStepLabel,
   startedAt,
   replay = false,
+  minimal = false,
+  compactLabel,
   children,
 }: ActionBlockProps) {
   const ActivityIcon = ACTION_BLOCK_ICONS[iconKind];
@@ -575,6 +582,19 @@ export function ActionBlock({
   const durationLabel =
     isActive && !replay && hasLiveStartTimestamp ? liveDurationLabel : formatDurationMs(durationMs);
   const primaryLabel = isActive ? "Working" : summary;
+  const compactSummary = compactLabel?.trim() || "";
+  const usefulLastStepLabel =
+    lastStepLabel &&
+    !["working", "thinking", "activity", "activity complete"].includes(
+      normalizeHeaderLabel(lastStepLabel),
+    )
+      ? lastStepLabel
+      : "";
+  const minimalLabel =
+    (isActive && usefulLastStepLabel) ||
+    (!isActive && compactSummary) ||
+    usefulLastStepLabel ||
+    (isActive ? "Thinking" : summary || "Activity");
   // The header pairs a bold state label with a muted "latest activity" label. When the
   // latest activity resolves to the same text (a running block whose newest event has no
   // better label than "Working"), rendering both just repeats the state twice.
@@ -605,12 +625,12 @@ export function ActionBlock({
       { duration: 110, easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
     );
     return () => animation.cancel();
-  }, [lastStepLabel, replay]);
+  }, [lastStepLabel, minimalLabel, replay]);
 
   return (
     <div
       id={`activity-group-${blockId}`}
-      className={`action-block timeline-event ${visibleExpanded ? "expanded" : "collapsed"} ${isActive ? "active" : ""}`}
+      className={`action-block timeline-event ${visibleExpanded ? "expanded" : "collapsed"} ${isActive ? "active" : ""} ${minimal ? "minimal" : ""} ${replay ? "replay" : ""}`}
     >
       <div className="event-indicator action-block-indicator">
         {showConnectorAbove && (
@@ -637,29 +657,41 @@ export function ActionBlock({
           >
             <ActivityIcon size={16} strokeWidth={1.8} aria-hidden="true" />
           </span>
-          <span className="action-block-worked">{primaryLabel}</span>
+          {minimal ? (
+            <span
+              ref={labelRef}
+              className={`action-block-minimal-label ${isActive ? "current" : ""}`}
+              aria-label={minimalLabel}
+            >
+              {minimalLabel}
+            </span>
+          ) : (
+            <>
+              <span className="action-block-worked">{primaryLabel}</span>
+              {secondaryLabel ? (
+                <span
+                  ref={labelRef}
+                  className="action-block-last-step-label"
+                  aria-label={secondaryLabel}
+                >
+                  {secondaryLabel}
+                </span>
+              ) : null}
+              {durationLabel ? (
+                <span
+                  className="action-block-meta"
+                  title={`Duration: ${durationLabel}; ${stepCount} activities, ${toolCallCount} tool calls, ${formatTokenCount(outputTokens)} output tokens`}
+                >
+                  {durationLabel}
+                </span>
+              ) : null}
+            </>
+          )}
           <span className="action-block-chevron" aria-hidden="true">
             <ChevronDown size={14} strokeWidth={2.5} />
           </span>
-          {secondaryLabel ? (
-            <span
-              ref={labelRef}
-              className="action-block-last-step-label"
-              aria-label="Latest activity"
-            >
-              {secondaryLabel}
-            </span>
-          ) : null}
-          {durationLabel ? (
-            <span
-              className="action-block-meta"
-              title={`Duration: ${durationLabel}; ${stepCount} activities, ${toolCallCount} tool calls, ${formatTokenCount(outputTokens)} output tokens`}
-            >
-              {durationLabel}
-            </span>
-          ) : null}
         </button>
-        <span className="action-block-rule" aria-hidden="true" />
+        {!minimal && <span className="action-block-rule" aria-hidden="true" />}
         <div ref={contentRef}>
           <AnimatedDisclosure
             id={`action-block-content-${blockId}`}

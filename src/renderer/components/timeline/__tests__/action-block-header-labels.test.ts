@@ -56,4 +56,56 @@ describe("ActionBlock header labels", () => {
 
     expect(markup).not.toContain("action-block-last-step-label");
   });
+
+  it("uses the latest activity as the only visible label in minimal mode", () => {
+    const markup = renderHeader({ minimal: true, lastStepLabel: "Reading App.tsx" });
+
+    expect(markup).toContain('class="action-block timeline-event');
+    expect(markup).toContain(" minimal");
+    expect(markup).toContain("action-block-minimal-label");
+    expect(markup).toContain(">Reading App.tsx<");
+    expect(markup).not.toContain(">Working<");
+    expect(markup).not.toContain("action-block-meta");
+  });
+
+  it("uses Thinking when a running group has no more specific activity label", () => {
+    const markup = renderHeader({ minimal: true, lastStepLabel: "Working" });
+
+    expect(markup).toContain(">Thinking<");
+    expect(markup).not.toContain(">Working<");
+  });
+
+  it("shows the last completed step in a collapsed minimal group", () => {
+    const markup = renderHeader({
+      minimal: true,
+      isActive: false,
+      summary: "Read 3 files, ran 1 command",
+      lastStepLabel: "Ran command",
+      compactLabel: "Read 3 files, ran 1 command",
+    });
+
+    expect(markup).toContain(">Read 3 files, ran 1 command<");
+    expect(markup).not.toContain("action-block-minimal-label current");
+  });
+
+  it("keeps the concrete latest step for an active minimal group", () => {
+    const markup = renderHeader({
+      minimal: true,
+      compactLabel: "Reading files…",
+      lastStepLabel: "Reading App.tsx",
+    });
+
+    expect(markup).toContain(">Reading App.tsx<");
+    expect(markup).not.toContain(">Reading files…<");
+  });
+
+  it("falls back to the completed summary when no step label exists", () => {
+    const markup = renderHeader({
+      minimal: true,
+      isActive: false,
+      summary: "Read 3 files, ran 1 command",
+    });
+
+    expect(markup).toContain(">Read 3 files, ran 1 command<");
+  });
 });

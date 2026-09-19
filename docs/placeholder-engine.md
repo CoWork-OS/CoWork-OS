@@ -24,39 +24,39 @@ src/renderer/styles/index.css             -- .cli-rotating-placeholder
 
 The engine is lazy-imported from `MainContent.tsx` to keep the initial bundle small. It exports three functions and one type:
 
-| Export | Purpose |
-|---|---|
-| `detectPersonas(signals)` | Score each persona from user data |
-| `buildDynamicPrompts(signals)` | Generate personalised prompts from goals/tasks |
-| `buildPlaceholders(personaResult, dynamicPrompts, pluginPrompts)` | Produce the final ordered playlist |
-| `UserSignals` | Type describing the input data shape |
+| Export                                                            | Purpose                                        |
+| ----------------------------------------------------------------- | ---------------------------------------------- |
+| `detectPersonas(signals)`                                         | Score each persona from user data              |
+| `buildDynamicPrompts(signals)`                                    | Generate personalised prompts from goals/tasks |
+| `buildPlaceholders(personaResult, dynamicPrompts, pluginPrompts)` | Produce the final ordered playlist             |
+| `UserSignals`                                                     | Type describing the input data shape           |
 
 ## Persona Taxonomy
 
 The engine defines 20 persona categories:
 
-| Persona | Example keywords |
-|---|---|
-| `universal` | *(always shown)* |
-| `engineering` | code, deploy, api, test, docker, git, ci/cd |
-| `trading` | stock, portfolio, earnings, dcf, options, backtest |
-| `education` | lesson, curriculum, rubric, quiz, student, grading |
-| `marketing` | campaign, seo, funnel, conversion, ad copy, content |
-| `design` | figma, wireframe, wcag, typography, component |
-| `product` | prd, roadmap, backlog, sprint, user story, okr |
-| `founder` | startup, pitch, fundraise, term sheet, runway, tam |
-| `sales` | prospect, pipeline, rfp, demo, crm, outreach |
-| `hr` | hire, recruit, onboarding, performance review, dei |
-| `legal` | contract, compliance, gdpr, nda, privacy policy |
-| `data` | sql, dashboard, etl, tableau, anomaly, forecast |
-| `research` | paper, hypothesis, literature review, methodology |
-| `operations` | sop, supply chain, vendor, capacity, postmortem |
-| `support` | ticket, knowledge base, escalation, csat, sla |
-| `personal` | travel, meal plan, budget, fitness, reading list |
-| `healthcare` | patient, clinical, treatment, ehr, care plan |
-| `realestate` | property, listing, mortgage, comps, cap rate |
-| `creative` | video, podcast, storyboard, script, thumbnail |
-| `writing` | blog, article, draft, proofread, newsletter |
+| Persona       | Example keywords                                    |
+| ------------- | --------------------------------------------------- |
+| `universal`   | _(always shown)_                                    |
+| `engineering` | code, deploy, api, test, docker, git, ci/cd         |
+| `trading`     | stock, portfolio, earnings, dcf, options, backtest  |
+| `education`   | lesson, curriculum, rubric, quiz, student, grading  |
+| `marketing`   | campaign, seo, funnel, conversion, ad copy, content |
+| `design`      | figma, wireframe, wcag, typography, component       |
+| `product`     | prd, roadmap, backlog, sprint, user story, okr      |
+| `founder`     | startup, pitch, fundraise, term sheet, runway, tam  |
+| `sales`       | prospect, pipeline, rfp, demo, crm, outreach        |
+| `hr`          | hire, recruit, onboarding, performance review, dei  |
+| `legal`       | contract, compliance, gdpr, nda, privacy policy     |
+| `data`        | sql, dashboard, etl, tableau, anomaly, forecast     |
+| `research`    | paper, hypothesis, literature review, methodology   |
+| `operations`  | sop, supply chain, vendor, capacity, postmortem     |
+| `support`     | ticket, knowledge base, escalation, csat, sla       |
+| `personal`    | travel, meal plan, budget, fitness, reading list    |
+| `healthcare`  | patient, clinical, treatment, ehr, care plan        |
+| `realestate`  | property, listing, mortgage, comps, cap rate        |
+| `creative`    | video, podcast, storyboard, script, thumbnail       |
+| `writing`     | blog, article, draft, proofread, newsletter         |
 
 ## Tagged Placeholder Pool
 
@@ -85,13 +85,13 @@ The pool contains **~160 entries** across all 20 personas. Entries tagged `"univ
 
 The engine collects five signal sources in parallel on mount:
 
-| # | Source | API | Weight |
-|---|---|---|---|
-| 1 | **User profile facts** | `getUserProfile()` | 1x (goal/work facts get 3x) |
-| 2 | **Recent completed tasks** | `listActivities({ activityType: "task_completed", limit: 15 })` | 1x |
-| 3 | **Top skills used** | `getUsageInsights(workspaceId, 30).topSkills` | 1x |
-| 4 | **Plugin pack prompts** | `listPluginPacks()` | 1x |
-| 5 | **Open commitments** | `getOpenCommitments(5)` | 1x |
+| #   | Source                     | API                                                             | Weight                      |
+| --- | -------------------------- | --------------------------------------------------------------- | --------------------------- |
+| 1   | **User profile facts**     | `getUserProfile()`                                              | 1x (goal/work facts get 3x) |
+| 2   | **Recent completed tasks** | `listActivities({ activityType: "task_completed", limit: 15 })` | 1x                          |
+| 3   | **Top skills used**        | `getUsageInsights(workspaceId, 30).topSkills`                   | 1x                          |
+| 4   | **Plugin pack prompts**    | `listPluginPacks()`                                             | 1x                          |
+| 5   | **Open commitments**       | `getOpenCommitments(5)`                                         | 1x                          |
 
 ### Scoring algorithm
 
@@ -145,12 +145,12 @@ Non-matching persona placeholders are **excluded entirely** -- a trader never se
 
 Dynamic prompts are generated from the user's own data and placed **first** in the rotation:
 
-| Source | Prompt template |
-|---|---|
-| Profile goals | `Help me make progress on: {goal}` |
+| Source             | Prompt template                            |
+| ------------------ | ------------------------------------------ |
+| Profile goals      | `Help me make progress on: {goal}`         |
 | Profile work facts | `Anything new I should know about {work}?` |
-| Open commitments | `Follow up on: {commitment}` |
-| Recent tasks | `Continue from: {task title}` |
+| Open commitments   | `Follow up on: {commitment}`               |
+| Recent tasks       | `Continue from: {task title}`              |
 
 These are deduplicated against the static pool to avoid repeats.
 
@@ -183,6 +183,7 @@ To add placeholders, edit the `POOL` array in `placeholderEngine.ts`:
 ```
 
 Guidelines:
+
 - Keep text under ~60 characters so it fits the input box
 - Tag with `"universal"` only if it makes sense for **every** user
 - Cross-tag when relevant (e.g. financial model → `["trading", "founder"]`)

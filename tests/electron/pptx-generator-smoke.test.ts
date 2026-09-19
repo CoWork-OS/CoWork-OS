@@ -50,7 +50,9 @@ describe("pptx-generator smoke", () => {
     expect(fs.existsSync(outputPath)).toBe(true);
 
     const zip = await JSZip.loadAsync(fs.readFileSync(outputPath));
-    const slideFiles = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
+    const slideFiles = Object.keys(zip.files).filter((name) =>
+      /^ppt\/slides\/slide\d+\.xml$/.test(name),
+    );
     expect(slideFiles).toHaveLength(4);
   }, 60_000);
 });

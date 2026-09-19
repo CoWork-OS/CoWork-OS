@@ -1,3 +1,5 @@
+import { TOOL_GROUPS } from "../../shared/types";
+
 export type ToolArtifactKind = "none" | "document" | "spreadsheet" | "presentation" | "file";
 
 export interface ToolSemantics {
@@ -166,6 +168,24 @@ export function getToolSemantics(toolName: string): ToolSemantics | null {
 
 export function canonicalizeToolName(toolName: string): string {
   return normalizeToolName(toolName).canonicalName;
+}
+
+/**
+ * Tool names the app's own taxonomy classifies as writing or destructive.
+ *
+ * Derived from TOOL_GROUPS so it cannot drift from the group definitions the
+ * rest of the app uses for access control. This is the primary source for
+ * "does this tool mutate?"; the hand-maintained tables in this file and in
+ * tool-policy-engine.ts are fallbacks for names the groups do not list.
+ */
+const CANONICAL_WRITE_TOOL_NAMES: Set<string> = new Set(
+  [...(TOOL_GROUPS["group:write"] || []), ...(TOOL_GROUPS["group:destructive"] || [])].map((name) =>
+    canonicalizeToolName(name),
+  ),
+);
+
+export function isCanonicalWriteToolName(toolName: string): boolean {
+  return CANONICAL_WRITE_TOOL_NAMES.has(canonicalizeToolName(toolName));
 }
 
 export function isFileMutationToolName(toolName: string): boolean {

@@ -11,14 +11,7 @@
     "version": "0.4.3",
     "author": "HeyGen",
     "homepage": "https://github.com/heygen-com/hyperframes",
-    "tags": [
-      "video",
-      "registry",
-      "components",
-      "blocks",
-      "html",
-      "creative"
-    ],
+    "tags": ["video", "registry", "components", "blocks", "html", "creative"],
     "routing": {
       "keywords": [
         "hyperframes add",

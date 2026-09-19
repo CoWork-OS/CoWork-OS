@@ -80,4 +80,30 @@ describe("ToolBatchExecutor", () => {
       },
     ]);
   });
+
+  it("reorders deferred and executed results to the assistant tool-use order", () => {
+    const executor = new ToolBatchExecutor();
+    const messages = [
+      {
+        role: "assistant" as const,
+        content: [
+          { type: "tool_use" as const, id: "tool-0", name: "web_search", input: {} },
+          { type: "tool_use" as const, id: "tool-1", name: "edit_file", input: {} },
+          { type: "tool_use" as const, id: "tool-2", name: "web_search", input: {} },
+        ],
+      },
+    ];
+
+    executor.appendOrderedToolResults(messages, [
+      { type: "tool_result" as const, tool_use_id: "tool-1", content: "deferred" },
+      { type: "tool_result" as const, tool_use_id: "tool-2", content: "second" },
+      { type: "tool_result" as const, tool_use_id: "tool-0", content: "first" },
+    ]);
+
+    expect((messages[1]?.content as Any[]).map((result) => result.tool_use_id)).toEqual([
+      "tool-0",
+      "tool-1",
+      "tool-2",
+    ]);
+  });
 });

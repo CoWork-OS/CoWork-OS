@@ -30,12 +30,7 @@ const ELECTRON_APP = path.resolve(
   "Electron.app",
 );
 
-const ENTITLEMENTS = path.resolve(
-  import.meta.dirname,
-  "..",
-  "build",
-  "entitlements.mac.plist",
-);
+const ENTITLEMENTS = path.resolve(import.meta.dirname, "..", "build", "entitlements.mac.plist");
 
 function log(msg) {
   process.stdout.write(`[codesign-dev] ${msg}\n`);
@@ -46,17 +41,18 @@ export function detectIdentity(env = process.env) {
 }
 
 export function isSigningEnabled(env = process.env) {
-  const raw = String(env.COWORK_CODESIGN_ENABLE || "").trim().toLowerCase();
+  const raw = String(env.COWORK_CODESIGN_ENABLE || "")
+    .trim()
+    .toLowerCase();
   return ["1", "true", "yes", "on"].includes(raw) || Boolean(detectIdentity(env));
 }
 
 function isSignatureValid() {
   try {
-    execFileSync(
-      "codesign",
-      ["--verify", "--deep", "--strict", ELECTRON_APP],
-      { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
-    );
+    execFileSync("codesign", ["--verify", "--deep", "--strict", ELECTRON_APP], {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     return true;
   } catch {
     return false;
@@ -152,9 +148,8 @@ export function main(env = process.env) {
     return 0;
   }
 
-  const entitlementsArgs = plan.useEntitlements && existsSync(ENTITLEMENTS)
-    ? ["--entitlements", ENTITLEMENTS]
-    : [];
+  const entitlementsArgs =
+    plan.useEntitlements && existsSync(ENTITLEMENTS) ? ["--entitlements", ENTITLEMENTS] : [];
   const timestampArgs = plan.timestamp ? ["--timestamp"] : [];
 
   try {

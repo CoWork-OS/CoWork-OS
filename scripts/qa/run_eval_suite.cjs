@@ -14,6 +14,11 @@ const DB_PATH =
 const HOOKS_ORIGIN = process.env.COWORK_HOOKS_ORIGIN || "http://127.0.0.1:9877";
 const HOOKS_TOKEN = process.env.COWORK_HOOKS_TOKEN || "qa-token";
 const SQLITE_BUSY_TIMEOUT_MS = Number(process.env.COWORK_SQLITE_BUSY_TIMEOUT_MS) || 15000;
+const HOOKS_HTTP_TIMEOUT_MS = (() => {
+  const configured = Number(process.env.COWORK_EVAL_HTTP_TIMEOUT_MS);
+  if (!Number.isFinite(configured) || configured <= 0) return 15_000;
+  return Math.min(Math.max(Math.round(configured), 100), 60_000);
+})();
 
 function parseArgs(argv) {
   const args = {
@@ -21,30 +26,86 @@ function parseArgs(argv) {
     mode: "deterministic",
     timeoutMs: 6 * 60 * 1000,
     allowEmpty: process.env.COWORK_EVAL_ALLOW_EMPTY === "1",
+    autoApprove: false,
+    fixturesOnly: false,
+    suiteExplicit: false,
+    modeExplicit: false,
+    timeoutExplicit: false,
+    allowEmptyExplicit: false,
+    error: null,
   };
 
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
-    if ((arg === "--suite" || arg === "--suite-id") && argv[i + 1]) {
-      args.suite = String(argv[++i] || args.suite);
+    if (arg === "--suite" || arg === "--suite-id") {
+      const value = argv[i + 1];
+      if (!value || value.startsWith("--")) {
+        args.error = args.error || `missing value for ${arg}`;
+      } else {
+        args.suite = String(argv[++i]);
+        args.suiteExplicit = true;
+      }
       continue;
     }
-    if (arg === "--mode" && argv[i + 1]) {
-      args.mode = String(argv[++i] || args.mode);
+    if (arg === "--mode") {
+      const value = argv[i + 1];
+      if (!value || value.startsWith("--")) {
+        args.error = args.error || `missing value for ${arg}`;
+      } else {
+        args.mode = String(argv[++i]);
+        args.modeExplicit = true;
+        if (!["deterministic", "hooks"].includes(args.mode)) {
+          args.error = args.error || `unsupported mode: ${args.mode}`;
+        }
+      }
       continue;
     }
     if (arg === "--allow-empty") {
       args.allowEmpty = true;
+      args.allowEmptyExplicit = true;
       continue;
     }
-    if (arg === "--timeout-ms" && argv[i + 1]) {
-      args.timeoutMs = Number(argv[++i]) || args.timeoutMs;
+    if (arg === "--auto-approve") {
+      args.autoApprove = true;
       continue;
     }
+    if (arg === "--fixtures-only") {
+      args.fixturesOnly = true;
+      continue;
+    }
+    if (arg === "--timeout-ms") {
+      const value = argv[i + 1];
+      const configured = Number(value);
+      args.timeoutExplicit = true;
+      if (!value || value.startsWith("--") || !Number.isFinite(configured) || configured <= 0) {
+        args.error = args.error || "--timeout-ms must be a positive number";
+      } else {
+        i += 1;
+        args.timeoutMs = configured;
+      }
+      continue;
+    }
+    args.error =
+      args.error ||
+      (arg.startsWith("-") ? `unknown option: ${arg}` : `unexpected argument: ${arg}`);
   }
 
   args.timeoutMs = Math.min(Math.max(Math.round(args.timeoutMs), 30_000), 30 * 60 * 1000);
-  args.mode = args.mode === "hooks" ? "hooks" : "deterministic";
+  if (
+    args.fixturesOnly &&
+    (args.suiteExplicit ||
+      args.modeExplicit ||
+      args.timeoutExplicit ||
+      args.allowEmptyExplicit ||
+      args.autoApprove)
+  ) {
+    args.error =
+      args.error ||
+      "--fixtures-only cannot be combined with --suite, --mode, --timeout-ms, --allow-empty, or --auto-approve";
+  }
+  if (args.autoApprove && args.mode !== "hooks") {
+    args.error = args.error || "--auto-approve requires --mode hooks";
+  }
   return args;
 }
 
@@ -205,32 +266,51 @@ function loadReplayEvents(taskRow) {
   return { events: eventRowsToEvents(legacyRows), source: "legacy" };
 }
 
-async function postJson(pathname, body) {
-  const response = await fetch(`${HOOKS_ORIGIN}${pathname}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${HOOKS_TOKEN}`,
-    },
-    body: JSON.stringify(body),
-  });
-  const text = await response.text();
-  let json;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = { raw: text };
+async function postJson(pathname, body, deadlineAt = Number.POSITIVE_INFINITY) {
+  const requestTimeoutMs = Math.min(HOOKS_HTTP_TIMEOUT_MS, deadlineAt - Date.now());
+  if (requestTimeoutMs <= 0) {
+    return { status: 408, json: { error: "case_deadline_exceeded" } };
   }
-  return { status: response.status, json };
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetch(`${HOOKS_ORIGIN}${pathname}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${HOOKS_TOKEN}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let json;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = { raw: text };
+    }
+    return { status: response.status, json };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      return {
+        status: 408,
+        json: { error: `request_timeout_after_${requestTimeoutMs}ms` },
+      };
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForTerminalTask(taskId, timeoutMs) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
+async function waitForTerminalTask(taskId, timeoutMs, { autoApprove = false } = {}) {
+  const deadlineAt = Date.now() + timeoutMs;
+  while (Date.now() < deadlineAt) {
     const task = sqlJson(
       `SELECT id, status, terminal_status, result_summary, workspace_id FROM tasks WHERE id='${sqlEscape(taskId)}' LIMIT 1`,
     )[0];
@@ -241,15 +321,39 @@ async function waitForTerminalTask(taskId, timeoutMs) {
       `SELECT id FROM approvals WHERE task_id='${sqlEscape(taskId)}' AND status='pending' ORDER BY requested_at ASC`,
     );
 
+    if (approvals.length > 0 && !autoApprove) {
+      return {
+        ok: false,
+        reason: "pending_approval",
+        approvalIds: approvals.map((approval) => approval.id),
+      };
+    }
+
     for (const approval of approvals) {
-      await postJson("/hooks/approval/respond", { approvalId: approval.id, approved: true });
+      const response = await postJson(
+        "/hooks/approval/respond",
+        {
+          approvalId: approval.id,
+          approved: true,
+        },
+        deadlineAt,
+      );
+      if (response.status >= 400) {
+        return {
+          ok: false,
+          reason: "approval_response_failed",
+          approvalId: approval.id,
+          httpStatus: response.status,
+          response: response.json,
+        };
+      }
     }
 
     if (["completed", "failed", "cancelled", "paused"].includes(task.status)) {
       return { ok: true, task };
     }
 
-    await sleep(1000);
+    await sleep(Math.max(0, Math.min(1000, deadlineAt - Date.now())));
   }
 
   return { ok: false, reason: "timeout" };
@@ -304,20 +408,6 @@ function ensureEvalTables() {
   `);
 }
 
-function getOrCreateSuiteByName(suiteName) {
-  const safeSuiteName = sqlEscape(suiteName);
-  const existing = sqlJson(`SELECT * FROM eval_suites WHERE name='${safeSuiteName}' LIMIT 1`)[0];
-  if (existing) return existing;
-
-  const id = crypto.randomUUID();
-  const now = Date.now();
-  sqlExec(
-    `INSERT INTO eval_suites (id, name, description, case_ids, created_at, updated_at)
-     VALUES ('${sqlEscape(id)}', '${safeSuiteName}', 'Auto-created placeholder suite', '[]', ${now}, ${now})`,
-  );
-  return sqlJson(`SELECT * FROM eval_suites WHERE id='${sqlEscape(id)}' LIMIT 1`)[0];
-}
-
 function resolveSuite(suiteSelector) {
   const byId = sqlJson(
     `SELECT * FROM eval_suites WHERE id='${sqlEscape(suiteSelector)}' LIMIT 1`,
@@ -329,22 +419,59 @@ function resolveSuite(suiteSelector) {
   return byName || null;
 }
 
+function parseSuiteCaseIds(value) {
+  if (typeof value !== "string" || !value.trim()) return { caseIds: [] };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return { error: "suite case_ids is not valid JSON" };
+  }
+
+  if (!Array.isArray(parsed)) return { error: "suite case_ids must be an array" };
+
+  const caseIds = [];
+  for (const value of parsed) {
+    if (typeof value !== "string" || !value.trim()) {
+      return { error: "suite case_ids must contain non-empty string IDs" };
+    }
+    caseIds.push(value.trim());
+  }
+
+  const duplicates = caseIds.filter((id, index) => caseIds.indexOf(id) !== index);
+  if (duplicates.length > 0) {
+    return { error: `suite case_ids contains duplicate ID: ${duplicates[0]}` };
+  }
+
+  return { caseIds };
+}
+
 function loadCases(caseIds) {
-  if (!Array.isArray(caseIds) || caseIds.length === 0) return [];
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return { cases: [], missingCaseIds: [] };
   const idsSql = caseIds.map((id) => `'${sqlEscape(id)}'`).join(",");
   const rows = sqlJson(`SELECT * FROM eval_cases WHERE id IN (${idsSql})`);
   const byId = new Map(rows.map((row) => [row.id, row]));
-  return caseIds.map((id) => byId.get(id)).filter(Boolean);
+  const missingCaseIds = caseIds.filter((id) => !byId.has(id));
+  return {
+    cases: caseIds.map((id) => byId.get(id)).filter(Boolean),
+    missingCaseIds,
+  };
 }
 
-async function executeCaseHooksMode(evalCase, timeoutMs, runId) {
-  const trigger = await postJson("/hooks/agent", {
-    message: evalCase.sanitized_prompt || evalCase.prompt,
-    name: `eval-${String(evalCase.id).slice(0, 8)}`,
-    wakeMode: "now",
-    workspaceId: evalCase.workspace_id || undefined,
-    deliver: false,
-  });
+async function executeCaseHooksMode(evalCase, timeoutMs, runId, { autoApprove = false } = {}) {
+  const deadlineAt = Date.now() + timeoutMs;
+  const trigger = await postJson(
+    "/hooks/agent",
+    {
+      message: evalCase.sanitized_prompt || evalCase.prompt,
+      name: `eval-${String(evalCase.id).slice(0, 8)}`,
+      wakeMode: "now",
+      workspaceId: evalCase.workspace_id || undefined,
+      deliver: false,
+    },
+    deadlineAt,
+  );
 
   if (trigger.status >= 400 || !trigger.json || !trigger.json.taskId) {
     return {
@@ -354,7 +481,9 @@ async function executeCaseHooksMode(evalCase, timeoutMs, runId) {
   }
 
   const replayTaskId = trigger.json.taskId;
-  const wait = await waitForTerminalTask(replayTaskId, timeoutMs);
+  const wait = await waitForTerminalTask(replayTaskId, Math.max(0, deadlineAt - Date.now()), {
+    autoApprove,
+  });
   if (!wait.ok) {
     return {
       status: "fail",
@@ -369,7 +498,7 @@ async function executeCaseHooksMode(evalCase, timeoutMs, runId) {
 
   const replay = evaluateIsolatedEvents(replaySource.events, {
     taskRow,
-    assertions: safeJsonParse(evalCase.assertions, {}),
+    assertions: evalCase.assertions ? JSON.parse(evalCase.assertions) : {},
   });
 
   sqlExec(
@@ -408,7 +537,7 @@ function executeCaseDeterministicMode(evalCase) {
   // invariants are derived from the isolated replay.
   const replay = evaluateIsolatedEvents(replaySource.events, {
     taskRow,
-    assertions: safeJsonParse(evalCase.assertions, {}),
+    assertions: evalCase.assertions ? JSON.parse(evalCase.assertions) : {},
   });
 
   if (!replay.passed) {
@@ -424,15 +553,73 @@ function executeCaseDeterministicMode(evalCase) {
   };
 }
 
+function printFixtureResults(fixtureResults) {
+  const fixtureFailures = fixtureResults.filter((result) => !result.passed);
+  const fixturePasses = fixtureResults.length - fixtureFailures.length;
+  console.log(`[eval-run] fixtures: ${fixtureResults.length}`);
+  for (const result of fixtureResults) {
+    console.log(`- ${result.passed ? "PASS" : "FAIL"} fixture ${result.fixtureId}`);
+    if (!result.passed) console.log(`  ${result.failures.join("; ") || "projection mismatch"}`);
+  }
+  return { fixturePasses, fixtureFailures };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
+  if (args.error) {
+    console.error(`[eval-run] ${args.error}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Fixture mode is deliberately independent of the application database.
+  // It is a deterministic projection check, not selected-corpus coverage.
+  if (args.fixturesOnly) {
+    const fixtureResults = runDeterministicReplayFixtures();
+    const { fixturePasses, fixtureFailures } = printFixtureResults(fixtureResults);
+    const runStatus = fixtureFailures.length > 0 ? "failed" : "completed";
+    console.log("[eval-run] summary");
+    console.log("- scope: fixtures-only");
+    console.log("- selected cases: 0");
+    console.log(`- fixture pass: ${fixturePasses}`);
+    console.log(`- fixture fail: ${fixtureFailures.length}`);
+    console.log("- selected pass: 0");
+    console.log("- selected fail: 0");
+    console.log("- selected skipped: 0");
+    console.log("- selected executed: 0");
+    console.log("- selected coverage: 0/0 (fixtures-only)");
+    console.log(`- status: ${runStatus}`);
+    if (runStatus === "failed") process.exitCode = 1;
+    return;
+  }
+
   ensureSqliteCli();
 
   ensureEvalTables();
 
-  const suite = resolveSuite(args.suite) || getOrCreateSuiteByName(args.suite);
-  const caseIds = safeJsonParse(suite.case_ids, []);
-  const cases = loadCases(caseIds);
+  const suite = resolveSuite(args.suite);
+  if (!suite) {
+    console.error(`[eval-run] suite not found: ${args.suite}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const parsedCaseIds = parseSuiteCaseIds(suite.case_ids);
+  if (parsedCaseIds.error) {
+    console.error(`[eval-run] invalid suite ${suite.name}: ${parsedCaseIds.error}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const loadedCases = loadCases(parsedCaseIds.caseIds);
+  if (loadedCases.missingCaseIds.length > 0) {
+    console.error(
+      `[eval-run] suite ${suite.name} references missing eval case(s): ${loadedCases.missingCaseIds.join(", ")}`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const cases = loadedCases.cases;
 
   const runId = crypto.randomUUID();
   const startedAt = Date.now();
@@ -447,31 +634,27 @@ async function main() {
        0,
        0,
        0,
-       '${sqlEscape(JSON.stringify({ mode: args.mode, suiteName: suite.name, caseCount: cases.length }))}'
+       '${sqlEscape(
+         JSON.stringify({
+           mode: args.mode,
+           suiteName: suite.name,
+           selectedCaseCount: cases.length,
+           autoApprove: args.autoApprove,
+         }),
+       )}'
      )`,
   );
 
-  let passCount = 0;
-  let failCount = 0;
-  let skippedCount = 0;
+  let selectedPassCount = 0;
+  let selectedFailCount = 0;
+  let selectedSkippedCount = 0;
 
   console.log(`[eval-run] suite: ${suite.name} (${suite.id})`);
   console.log(`[eval-run] mode: ${args.mode}`);
-  console.log(`[eval-run] cases: ${cases.length}`);
-
-  const fixtureResults = runDeterministicReplayFixtures();
-  const fixtureFailures = fixtureResults.filter((result) => !result.passed);
-  const fixturePasses = fixtureResults.length - fixtureFailures.length;
-  console.log(`[eval-run] isolated fixtures: ${fixtureResults.length}`);
-  for (const result of fixtureResults) {
-    console.log(`- ${result.passed ? "PASS" : "FAIL"} fixture ${result.fixtureId}`);
-    if (!result.passed) console.log(`  ${result.failures.join("; ") || "projection mismatch"}`);
+  console.log(`[eval-run] selected cases: ${cases.length}`);
+  if (args.mode === "hooks") {
+    console.log(`[eval-run] auto-approve: ${args.autoApprove ? "enabled" : "disabled"}`);
   }
-  // Fixtures are first-class replay cases. Count them in the run summary so a
-  // clean database still reports meaningful coverage instead of looking like
-  // an empty/allowed evaluation run.
-  passCount += fixturePasses;
-  failCount += fixtureFailures.length;
 
   for (const evalCase of cases) {
     const caseStartedAt = Date.now();
@@ -480,7 +663,9 @@ async function main() {
     try {
       verdict =
         args.mode === "hooks"
-          ? await executeCaseHooksMode(evalCase, args.timeoutMs, runId)
+          ? await executeCaseHooksMode(evalCase, args.timeoutMs, runId, {
+              autoApprove: args.autoApprove,
+            })
           : executeCaseDeterministicMode(evalCase);
     } catch (error) {
       verdict = {
@@ -489,9 +674,9 @@ async function main() {
       };
     }
 
-    if (verdict.status === "pass") passCount += 1;
-    if (verdict.status === "fail") failCount += 1;
-    if (verdict.status === "skipped") skippedCount += 1;
+    if (verdict.status === "pass") selectedPassCount += 1;
+    if (verdict.status === "fail") selectedFailCount += 1;
+    if (verdict.status === "skipped") selectedSkippedCount += 1;
 
     sqlExec(
       `INSERT INTO eval_case_runs (
@@ -516,33 +701,42 @@ async function main() {
     }
   }
 
-  const executedCount = passCount + failCount;
+  const selectedExecutedCount = selectedPassCount + selectedFailCount;
   const completedAt = Date.now();
   const runStatus =
-    failCount > 0 || (executedCount === 0 && !args.allowEmpty) ? "failed" : "completed";
+    selectedFailCount > 0 || (selectedSkippedCount > 0 && selectedExecutedCount > 0)
+      ? "failed"
+      : selectedExecutedCount === 0
+        ? args.allowEmpty
+          ? "skipped"
+          : "failed"
+        : "completed";
 
   sqlExec(
     `UPDATE eval_runs
      SET status='${sqlEscape(runStatus)}',
          completed_at=${completedAt},
-         pass_count=${passCount},
-         fail_count=${failCount},
-         skipped_count=${skippedCount}
+         pass_count=${selectedPassCount},
+         fail_count=${selectedFailCount},
+         skipped_count=${selectedSkippedCount}
      WHERE id='${sqlEscape(runId)}'`,
   );
 
   console.log("[eval-run] summary");
   console.log(`- runId: ${runId}`);
-  console.log(`- pass: ${passCount}`);
-  console.log(`- fail: ${failCount}`);
-  console.log(`- skipped: ${skippedCount}`);
-  console.log(`- executed: ${executedCount}`);
+  console.log(`- selected cases: ${cases.length}`);
+  console.log(`- selected pass: ${selectedPassCount}`);
+  console.log(`- selected fail: ${selectedFailCount}`);
+  console.log(`- selected skipped: ${selectedSkippedCount}`);
+  console.log(`- selected executed: ${selectedExecutedCount}`);
+  console.log(`- selected coverage: ${selectedExecutedCount}/${cases.length}`);
+  console.log("- fixtures: 0 (use --fixtures-only)");
   console.log(`- status: ${runStatus}`);
-  if (executedCount === 0) {
+  if (selectedExecutedCount === 0) {
     console.log(
       args.allowEmpty
-        ? "- reason: no eval cases were executed (all skipped or suite empty, allowed by configuration)"
-        : "- reason: no eval cases were executed (all skipped or suite empty)",
+        ? "- reason: no selected eval cases were executed (explicitly allowed; no evaluated coverage)"
+        : "- reason: no selected eval cases were executed (all skipped or suite empty)",
     );
   }
 
@@ -551,7 +745,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("[eval-run] fatal:", error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("[eval-run] fatal:", error);
+    process.exit(1);
+  });
+}
+
+module.exports = { postJson };

@@ -13,7 +13,6 @@ import * as fsSync from "fs";
 import { execFile, spawn as spawnProcess } from "child_process";
 import { promisify } from "util";
 import { promises as dns } from "dns";
-import { isIP } from "net";
 import mime from "mime-types";
 import { z } from "zod";
 import { getUserDataDir } from "../utils/user-data-dir";
@@ -82,12 +81,76 @@ function optionalString(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
+function validateComposerDraftOwner(
+  value: unknown,
+): import("../../shared/composer-drafts").ComposerDraftGetRequest {
+  const request = (value && typeof value === "object" ? value : {}) as Partial<
+    import("../../shared/composer-drafts").ComposerDraftGetRequest
+  >;
+  const scope = request.scope === "remote" || request.scope === "local" ? request.scope : null;
+  if (!scope) throw new Error("Invalid composer draft scope.");
+  const workspaceId = requireString(request.workspaceId, "workspaceId");
+  if (workspaceId.length > 256) throw new Error("workspaceId is too long.");
+  const surface =
+    request.surface === "side-chat" || request.surface === "main" ? request.surface : null;
+  if (!surface) throw new Error("Invalid composer draft surface.");
+  const taskId = optionalString(request.taskId) ?? null;
+  const remoteDeviceId = optionalString(request.remoteDeviceId);
+  if (taskId && taskId.length > 256) throw new Error("taskId is too long.");
+  if (remoteDeviceId && remoteDeviceId.length > 256) {
+    throw new Error("remoteDeviceId is too long.");
+  }
+  if (scope === "local" && remoteDeviceId) {
+    throw new Error("Local composer drafts cannot include a remote device.");
+  }
+  if (scope === "remote" && (!remoteDeviceId || !taskId)) {
+    throw new Error("Remote composer drafts require a device and task.");
+  }
+  const draftKey = requireString(request.draftKey, "draftKey");
+  if (draftKey.length > 1024) throw new Error("draftKey is too long.");
+  const expectedKey = buildComposerDraftKey({
+    scope,
+    workspaceId,
+    taskId,
+    surface,
+    remoteDeviceId,
+  });
+  if (draftKey !== expectedKey) throw new Error("Composer draft key does not match its owner.");
+  return {
+    draftKey,
+    scope,
+    workspaceId,
+    surface,
+    taskId,
+    ...(remoteDeviceId ? { remoteDeviceId } : {}),
+  };
+}
+
+function validateComposerDraft(
+  value: unknown,
+): import("../../shared/composer-drafts").ComposerDraft {
+  const draft = normalizeComposerDraft(value);
+  if (!draft) throw new Error("Invalid composer draft.");
+  const scope = draft.remoteDeviceId ? "remote" : "local";
+  const expectedKey = buildComposerDraftKey({
+    scope,
+    workspaceId: draft.workspaceId,
+    taskId: draft.taskId,
+    surface: draft.surface,
+    remoteDeviceId: draft.remoteDeviceId,
+  });
+  if (draft.draftKey !== expectedKey)
+    throw new Error("Composer draft key does not match its payload.");
+  return draft;
+}
+
 import { DatabaseManager } from "../database/schema";
 import {
   WorkspaceRepository,
   TaskRepository,
   TaskEventRepository,
   TaskSessionMetadataRepository,
+  BotNotificationPreferenceRepository,
   TaskTraceRepository,
   ArtifactRepository,
   SkillRepository,
@@ -96,6 +159,8 @@ import {
   ChannelSpecializationRepository,
   ApprovalRepository,
 } from "../database/repositories";
+import { ComposerDraftRepository } from "../database/composer-draft-repository";
+import { ComposerDraftAttachmentStore } from "../agent/runtime/composer-draft-attachment-store";
 import { SessionRetentionService } from "../sessions/SessionRetentionService";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
 import { ActivityRepository } from "../activity/ActivityRepository";
@@ -110,12 +175,19 @@ import { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
 import { MultitaskLanePlanner } from "../agents/MultitaskLanePlanner";
 import { buildSubagentDisplayName } from "../agents/subagent-display-names";
 import { selectAgentsForTask } from "../agents/capabilityMatcher";
+import { createDecisionService } from "../agent/decisions";
 import { TaskLabelRepository } from "../database/TaskLabelRepository";
 import { WorkingStateRepository } from "../agents/WorkingStateRepository";
 import { WorkContextService } from "../workspaces/WorkContextService";
 import { SessionMembershipService } from "../workspaces/SessionMembershipService";
 import { RecurringApprovalService } from "../security/recurring-approval-service";
 import { ProtectedCredentialService } from "../security/protected-credential-service";
+import { openExternalIfSafe } from "../security/safe-external-url";
+import {
+  isLoopbackAddress,
+  isPrivateOrLoopbackAddress,
+  normalizeHostname,
+} from "../security/address-classes";
 import { getLocalPreviewProcessService } from "../preview/LocalPreviewProcessService";
 import { getBrowserWorkbenchService } from "../browser/browser-workbench-service";
 import type { LocalPreviewStartRequest } from "../../shared/local-preview";
@@ -172,7 +244,18 @@ import {
   TaskEventDetailRequest,
   TaskEventDetailResult,
   TaskTimelinePageRequest,
+  BotConversationListQuery,
+  BotNotificationPolicy,
+  UpdateBotNotificationPolicyRequest,
 } from "../../shared/types";
+import {
+  buildComposerDraftKey,
+  COMPOSER_DRAFT_MAX_ATTACHMENTS,
+  COMPOSER_DRAFT_MAX_ATTACHMENT_SIZE,
+  COMPOSER_DRAFT_MAX_ATTACHMENT_TOTAL_BYTES,
+  composerDraftMatchesOwner,
+  normalizeComposerDraft,
+} from "../../shared/composer-drafts";
 import { isTerminalTaskStatus } from "../../shared/task-status";
 import type { MailboxCommitmentState } from "../../shared/mailbox";
 import * as os from "os";
@@ -186,6 +269,11 @@ import {
   OpenAIOAuth,
   XAIOAuth,
 } from "../agent/llm";
+import {
+  createConfiguredJevProvider,
+  isJevActiveHarnessEnabled,
+  testJevProvider,
+} from "../agent/jev";
 import { SearchProviderFactory, SearchSettings, SearchProviderType } from "../agent/search";
 import { ShellSessionManager } from "../agent/tools/shell-session-manager";
 import { GitHubReviewService } from "../git/GitHubReviewService";
@@ -227,6 +315,7 @@ import {
   ApprovalResponseSchema,
   InputRequestResponseSchema,
   LLMSettingsSchema,
+  JevTestProviderRequestSchema,
   SearchSettingsSchema,
   XSettingsSchema,
   NotionSettingsSchema,
@@ -839,66 +928,6 @@ const BLOCKED_OPENAI_COMPATIBLE_IPS = new Set([
   "169.254.169.254", // AWS/GCP/Azure instance metadata pattern
 ]);
 
-function normalizeHostname(hostname: string): string {
-  const trimmed = String(hostname || "")
-    .trim()
-    .toLowerCase();
-  const unwrapped =
-    trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed.slice(1, -1) : trimmed;
-  return unwrapped.endsWith(".") ? unwrapped.slice(0, -1) : unwrapped;
-}
-
-function isPrivateIpv4Address(address: string): boolean {
-  const parts = address.split(".").map((p) => Number(p));
-  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
-    return false;
-  }
-
-  const [a, b] = parts;
-  if (a === 10 || a === 127 || a === 0) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
-  return false;
-}
-
-function isPrivateIpv6Address(address: string): boolean {
-  const normalized = normalizeHostname(address);
-  if (!normalized || normalized === "::" || normalized === "::1") return true;
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // unique local
-  if (
-    normalized.startsWith("fe8") ||
-    normalized.startsWith("fe9") ||
-    normalized.startsWith("fea") ||
-    normalized.startsWith("feb")
-  ) {
-    return true; // link-local fe80::/10
-  }
-  return false;
-}
-
-function isPrivateOrLoopbackAddress(address: string): boolean {
-  const normalized = normalizeHostname(address);
-  const family = isIP(normalized);
-  if (family === 4) return isPrivateIpv4Address(normalized);
-  if (family === 6) return isPrivateIpv6Address(normalized);
-  return false;
-}
-
-function isLoopbackAddress(address: string): boolean {
-  const normalized = normalizeHostname(address);
-  if (normalized === "localhost") return true;
-  const family = isIP(normalized);
-  if (family === 4) {
-    return normalized.split(".")[0] === "127";
-  }
-  if (family === 6) {
-    return normalized === "::1";
-  }
-  return false;
-}
-
 async function validateOpenAICompatibleBaseUrl(
   baseUrl: string,
   options: { allowLoopback?: boolean } = {},
@@ -983,6 +1012,43 @@ async function validateOptionalProviderBaseUrl(
   });
 }
 
+async function validateJevBaseUrl(
+  baseUrl: string | undefined,
+  options: { providerLabel: "TypeSafe" | "OpenRouter"; reuseMainOpenRouterKey?: boolean },
+): Promise<string | undefined> {
+  const validated = await validateOptionalProviderBaseUrl(baseUrl, {
+    providerLabel: options.providerLabel,
+  });
+  if (!validated) return undefined;
+
+  const parsed = new URL(validated);
+  if (parsed.protocol !== "https:") {
+    throw new Error(`${options.providerLabel} Jev base URL must use HTTPS.`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`${options.providerLabel} Jev base URL must not include embedded credentials.`);
+  }
+  const expectedHostname =
+    options.providerLabel === "OpenRouter" ? "openrouter.ai" : "api.typesafe.ai";
+  if (
+    parsed.hostname.toLowerCase() !== expectedHostname ||
+    (parsed.port !== "" && parsed.port !== "443")
+  ) {
+    throw new Error(`${options.providerLabel} Jev base URL must use the official provider host.`);
+  }
+  if (
+    options.providerLabel === "OpenRouter" &&
+    options.reuseMainOpenRouterKey === true &&
+    (parsed.hostname.toLowerCase() !== "openrouter.ai" ||
+      (parsed.port !== "" && parsed.port !== "443"))
+  ) {
+    throw new Error(
+      "The saved main OpenRouter key may only be reused with the official https://openrouter.ai endpoint.",
+    );
+  }
+  return validated;
+}
+
 // Configure rate limits for sensitive channels
 rateLimiter.configure(IPC_CHANNELS.TASK_CREATE, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.TASK_SEND_MESSAGE, RATE_LIMIT_CONFIGS.expensive);
@@ -1004,6 +1070,7 @@ rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ACT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.JEV_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_ANTHROPIC_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_GEMINI_MODELS, RATE_LIMIT_CONFIGS.standard);
@@ -1018,6 +1085,7 @@ rateLimiter.configure(IPC_CHANNELS.LLM_GET_KIMI_MODELS, RATE_LIMIT_CONFIGS.stand
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_PI_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_PI_PROVIDERS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_OPENAI_COMPATIBLE_MODELS, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.LLM_DISCOVER_ATOMIC_CHAT_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.SEARCH_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.GATEWAY_ADD_CHANNEL, RATE_LIMIT_CONFIGS.limited);
@@ -1357,6 +1425,45 @@ async function completeTerminalInput(params: {
 
 async function planMultitaskLanes(prompt: string, laneCount: number) {
   try {
+    const settings = LLMProviderFactory.loadSettings();
+    if (settings.jev && isJevActiveHarnessEnabled(settings.jev)) {
+      let resolution: ReturnType<typeof createConfiguredJevProvider> = null;
+      try {
+        resolution = createConfiguredJevProvider(settings);
+      } catch (error) {
+        logger.warn(
+          "[TASK_CREATE] Active Jev lane planning unavailable, using deterministic lanes:",
+          error,
+        );
+      }
+      const decisionService = resolution
+        ? createDecisionService(resolution.provider, {
+            model: resolution.model,
+            providerType: resolution.providerType,
+            telemetryContext: { sourceKind: "multitask-lane-planning" },
+            timeoutMs: Math.min(settings.jev?.timeoutMs ?? 1_500, 1_500),
+            maxRetries: 0,
+            maxCalls: 1,
+            maxConcurrent: 1,
+            cache: { enabled: true, ttlMs: 5_000, maxEntries: 4 },
+          })
+        : undefined;
+      return await MultitaskLanePlanner.plan(prompt, {
+        requestedLaneCount: laneCount,
+        ...(resolution
+          ? {
+              decisionProvider: resolution.provider,
+              decisionModel: resolution.model,
+              decisionService,
+            }
+          : {}),
+      });
+    }
+  } catch (error) {
+    logger.warn("[TASK_CREATE] Jev harness settings unavailable for lane planning:", error);
+  }
+
+  try {
     const selection = LLMProviderFactory.resolveTaskModelSelection(undefined, {
       forceProfile: "cheap",
     });
@@ -1400,7 +1507,34 @@ export async function setupIpcHandlers(
   const workspaceRepo = new WorkspaceRepository(db);
   const taskRepo = new TaskRepository(db);
   const taskEventRepo = new TaskEventRepository(db);
+  const composerDraftRepo = new ComposerDraftRepository(db);
+  const composerDraftAttachmentStore = new ComposerDraftAttachmentStore(
+    path.join(getUserDataDir(), "composer-draft-attachments"),
+  );
+  const expiredComposerDrafts = composerDraftRepo.listExpired();
+  composerDraftRepo.pruneExpired();
+  await Promise.all(
+    expiredComposerDrafts.map((draft) =>
+      composerDraftAttachmentStore.releaseDraft(draft.draftKey, draft.workspaceId),
+    ),
+  );
+  await composerDraftAttachmentStore.reconcile(composerDraftRepo.listLiveAttachmentRefs());
+  const assertComposerDraftOwner = (
+    owner: import("../../shared/composer-drafts").ComposerDraftGetRequest,
+  ): void => {
+    if (owner.scope !== "local") return;
+    if (!workspaceRepo.findById(owner.workspaceId)) {
+      throw new Error("Composer draft workspace does not exist.");
+    }
+    if (owner.taskId) {
+      const task = taskRepo.findById(owner.taskId);
+      if (!task || task.workspaceId !== owner.workspaceId) {
+        throw new Error("Composer draft task does not belong to its workspace.");
+      }
+    }
+  };
   const taskSessionMetadataRepo = new TaskSessionMetadataRepository(db);
+  const botNotificationPreferenceRepo = new BotNotificationPreferenceRepository(db);
   const approvalRepo = new ApprovalRepository(db);
   const workContextService = new WorkContextService(db);
   const sessionMembershipService = new SessionMembershipService(db);
@@ -1558,9 +1692,60 @@ export async function setupIpcHandlers(
   agentRoleRepo.seedDefaults();
   setupTaskTraceHandlers({ taskTraceRepo });
 
-  // Helper to validate path is within workspace (prevent path traversal attacks)
+  // Helper to validate path is within workspace (prevent path traversal attacks).
+  // Sibling handlers such as FILE_IMPORT_TO_WORKSPACE resolve the root from the
+  // workspace record; the viewer handlers used to take the caller's path on
+  // trust, which is what resolveRegisteredWorkspaceRoot below closes.
+  //
+  // Memoized because containment is checked once per candidate path and the
+  // lookup scans all workspaces.
+  //
+  // Entries expire rather than being invalidated by hand: workspaces are
+  // created and removed through several paths (IPC, daemon, control plane),
+  // and a memo that is only cleared by whichever call sites we remembered to
+  // hook would keep treating a deregistered workspace as an accepted root for
+  // the rest of the session. A short TTL is correct for every path.
+  const REGISTERED_WORKSPACE_ROOT_TTL_MS = 30_000;
+  const registeredWorkspaceRootCache = new Map<string, { root: string; cachedAt: number }>();
+
+  /**
+   * Resolve a renderer-supplied workspace path to a registered workspace root,
+   * or `null` when it is not one.
+   *
+   * Returns null rather than throwing: callers use this inside containment
+   * checks whose contract is a boolean, and an exception there escapes loops
+   * that are written to fall through to the next candidate.
+   */
+  const resolveRegisteredWorkspaceRoot = (workspacePath: string): string | null => {
+    const trimmed = String(workspacePath || "").trim();
+    if (!trimmed) return null;
+    const requested = path.resolve(trimmed);
+    const cached = registeredWorkspaceRootCache.get(requested);
+    if (cached && Date.now() - cached.cachedAt < REGISTERED_WORKSPACE_ROOT_TTL_MS) {
+      return cached.root;
+    }
+
+    const match = workspaceRepo
+      .findAll()
+      .find((workspace) => path.resolve(workspace.path) === requested);
+    if (!match) {
+      registeredWorkspaceRootCache.delete(requested);
+      return null;
+    }
+
+    const resolved = path.resolve(match.path);
+    registeredWorkspaceRootCache.set(requested, { root: resolved, cachedAt: Date.now() });
+    return resolved;
+  };
+
   const isPathWithinWorkspace = (filePath: string, workspacePath: string): boolean => {
-    const normalizedWorkspace = path.resolve(workspacePath);
+    // Resolve against a verified workspace root, not the caller's claim.
+    // Without this, containment is self-referential: the caller picks both the
+    // file and the root it is checked against, so passing `workspacePath: "/"`
+    // (or any ancestor of the target) satisfies containment for any file on
+    // disk. An unregistered root is simply "not contained".
+    const normalizedWorkspace = resolveRegisteredWorkspaceRoot(workspacePath);
+    if (!normalizedWorkspace) return false;
     const normalizedFile = path.resolve(normalizedWorkspace, filePath);
     const relative = path.relative(normalizedWorkspace, normalizedFile);
     // If relative path starts with '..' or is absolute, it's outside workspace
@@ -2034,7 +2219,7 @@ export async function setupIpcHandlers(
     } else {
       logger.debug(line);
     }
-    return { success: true };
+    return true;
   });
 
   // File handlers - open files and show in Finder
@@ -2274,15 +2459,10 @@ export async function setupIpcHandlers(
 
   // Open external URL in system browser
   ipcMain.handle(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, async (_, url: string) => {
-    // Validate URL to prevent security issues
-    try {
-      const parsedUrl = new URL(url);
-      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-        throw new Error("Only http and https URLs are allowed");
-      }
-      await shell.openExternal(url);
-    } catch (error: Any) {
-      throw new Error(`Failed to open URL: ${error.message}`);
+    // Shared with main.ts's setWindowOpenHandler / will-navigate paths so the
+    // scheme allowlist cannot drift between them.
+    if (!(await openExternalIfSafe(url))) {
+      throw new Error("Failed to open URL: only http, https, and mailto URLs are allowed");
     }
   });
 
@@ -4572,11 +4752,38 @@ export async function setupIpcHandlers(
             typeof normalizedAgentConfig?.multitaskLaneCount === "number"
               ? normalizedAgentConfig.multitaskLaneCount
               : undefined;
-          const { members, leader } = await selectAgentsForTask(
+          const selection = await selectAgentsForTask(
             fullText,
             activeRoles,
             isMultitask ? multitaskLaneCount : (requestedCount ?? undefined),
+            {
+              workspaceId: task.workspaceId,
+              taskId: task.id,
+              sourceKind: "team-selection",
+            },
           );
+          const { members, leader } = selection;
+          const selectedAgentNames = members.map((member) => member.displayName).join(", ");
+          const selectionMessage =
+            selection.source === "jev"
+              ? `Jev selected ${members.length} agents for this team: ${selectedAgentNames}.`
+              : selection.source === "chat_model"
+                ? `Chat-model fallback selected ${members.length} agents after Jev was unavailable or declined the task: ${selectedAgentNames}.`
+                : selection.source === "keyword_active"
+                  ? `Active Jev harness used deterministic capability matching after Jev was unavailable or declined the task: ${selectedAgentNames}.`
+                  : `Keyword fallback selected ${members.length} agents after Jev and chat-model selection were unavailable: ${selectedAgentNames}.`;
+          agentDaemon.logEvent(task.id, "timeline_step_updated", {
+            stepId: "collaboration:team-selection",
+            status: "completed",
+            actor: "system",
+            legacyType: "progress_update",
+            message: selectionMessage,
+            selectionSource: selection.source,
+            selectionModel: selection.decisionModel,
+            selectedAgentCount: members.length,
+            selectedAgentRoleIds: members.map((member) => member.id),
+            leaderAgentRoleId: leader.id,
+          });
 
           if (isMultitask && looksLikeCodeMultitaskRequest(fullText)) {
             const workspace = workspaceRepo.findById(workspaceId);
@@ -4787,6 +4994,171 @@ export async function setupIpcHandlers(
     return task;
   });
 
+  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_GET, async (_, request: unknown) => {
+    const owner = validateComposerDraftOwner(request);
+    assertComposerDraftOwner(owner);
+    return composerDraftRepo.get(owner.draftKey, owner);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_UPSERT, async (_, value: unknown) => {
+    const draft = validateComposerDraft(value);
+    const owner = validateComposerDraftOwner({
+      draftKey: draft.draftKey,
+      scope: draft.remoteDeviceId ? "remote" : "local",
+      workspaceId: draft.workspaceId,
+      taskId: draft.taskId,
+      surface: draft.surface,
+      remoteDeviceId: draft.remoteDeviceId,
+    });
+    if (!composerDraftMatchesOwner(draft, owner)) {
+      throw new Error("Composer draft ownership validation failed.");
+    }
+    assertComposerDraftOwner(owner);
+    const accepted = composerDraftRepo.upsertIfNewer(draft);
+    return { accepted, draft: composerDraftRepo.get(draft.draftKey, owner) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_CLEAR, async (_, request: unknown) => {
+    const owner = validateComposerDraftOwner(request);
+    assertComposerDraftOwner(owner);
+    const revision =
+      request &&
+      typeof request === "object" &&
+      typeof (request as { revision?: unknown }).revision === "number"
+        ? (request as { revision: number }).revision
+        : undefined;
+    const cleared = composerDraftRepo.clear(owner.draftKey, revision);
+    const releasedAttachments = cleared
+      ? await composerDraftAttachmentStore.releaseDraft(owner.draftKey, owner.workspaceId)
+      : 0;
+    return { cleared, releasedAttachments };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_REKEY, async (_, request: unknown) => {
+    const owner = validateComposerDraftOwner(request);
+    assertComposerDraftOwner(owner);
+    const value = (request && typeof request === "object" ? request : {}) as {
+      nextDraftKey?: unknown;
+      nextTaskId?: unknown;
+      nextRemoteDeviceId?: unknown;
+    };
+    const nextTaskId = optionalString(value.nextTaskId) ?? null;
+    const nextRemoteDeviceId = optionalString(value.nextRemoteDeviceId);
+    if (owner.scope === "remote" && (!nextTaskId || !nextRemoteDeviceId)) {
+      throw new Error("Remote composer drafts require a destination device and task.");
+    }
+    const nextDraftKey = requireString(value.nextDraftKey, "nextDraftKey");
+    const expectedNextKey = buildComposerDraftKey({
+      scope: owner.scope,
+      workspaceId: owner.workspaceId,
+      taskId: nextTaskId,
+      surface: owner.surface,
+      remoteDeviceId: nextRemoteDeviceId,
+    });
+    if (nextDraftKey !== expectedNextKey) {
+      throw new Error("Composer draft rekey must stay within the same workspace and surface.");
+    }
+    assertComposerDraftOwner({
+      ...owner,
+      taskId: nextTaskId,
+      ...(nextRemoteDeviceId ? { remoteDeviceId: nextRemoteDeviceId } : {}),
+    });
+    if (
+      !composerDraftRepo.get(owner.draftKey, owner) ||
+      !composerDraftRepo.canRekey(owner.draftKey, nextDraftKey)
+    ) {
+      return { rekeyed: false, rekeyedAttachmentCount: 0 };
+    }
+    const movedAttachmentCount = await composerDraftAttachmentStore.rekeyDraft(
+      owner.draftKey,
+      nextDraftKey,
+      owner.workspaceId,
+    );
+    try {
+      const rekeyed = composerDraftRepo.rekey(owner.draftKey, nextDraftKey, {
+        taskId: nextTaskId,
+        ...(nextRemoteDeviceId ? { remoteDeviceId: nextRemoteDeviceId } : {}),
+      });
+      if (!rekeyed && movedAttachmentCount > 0) {
+        await composerDraftAttachmentStore.rekeyDraft(
+          nextDraftKey,
+          owner.draftKey,
+          owner.workspaceId,
+        );
+      }
+      return {
+        rekeyed,
+        rekeyedAttachmentCount: rekeyed ? movedAttachmentCount : 0,
+      };
+    } catch (error) {
+      if (movedAttachmentCount > 0) {
+        await composerDraftAttachmentStore
+          .rekeyDraft(nextDraftKey, owner.draftKey, owner.workspaceId)
+          .catch(() => undefined);
+      }
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_ATTACHMENT_PUT, async (_, request: unknown) => {
+    const value = (request && typeof request === "object" ? request : {}) as Partial<
+      import("../../shared/composer-drafts").ComposerDraftAttachmentPutRequest
+    >;
+    const owner = validateComposerDraftOwner(value);
+    assertComposerDraftOwner(owner);
+    const usage = await composerDraftAttachmentStore.getDraftUsage(
+      owner.draftKey,
+      owner.workspaceId,
+    );
+    if (usage.count >= COMPOSER_DRAFT_MAX_ATTACHMENTS) {
+      throw new Error(`You can attach up to ${COMPOSER_DRAFT_MAX_ATTACHMENTS} files.`);
+    }
+    const requestedSize =
+      typeof value.size === "number" && Number.isFinite(value.size) ? Math.floor(value.size) : 0;
+    if (requestedSize > COMPOSER_DRAFT_MAX_ATTACHMENT_SIZE) {
+      throw new Error("Draft attachment exceeds the 25 MB limit.");
+    }
+    const ref = await composerDraftAttachmentStore.put({
+      draftKey: owner.draftKey,
+      workspaceId: owner.workspaceId,
+      name: requireString(value.name, "name"),
+      ...(optionalString(value.mimeType) ? { mimeType: optionalString(value.mimeType) } : {}),
+      ...(optionalString(value.dataBase64) ? { dataBase64: optionalString(value.dataBase64) } : {}),
+      ...(optionalString(value.sourcePath) ? { sourcePath: optionalString(value.sourcePath) } : {}),
+    });
+    if (usage.bytes + ref.size > COMPOSER_DRAFT_MAX_ATTACHMENT_TOTAL_BYTES) {
+      await composerDraftAttachmentStore.release(owner.draftKey, owner.workspaceId, ref.refId);
+      throw new Error("Draft attachments exceed the 100 MB per-draft limit.");
+    }
+    return ref;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_ATTACHMENT_RESOLVE, async (_, request: unknown) => {
+    const value = (request && typeof request === "object" ? request : {}) as Partial<
+      import("../../shared/composer-drafts").ComposerDraftAttachmentResolveRequest
+    >;
+    const owner = validateComposerDraftOwner(value);
+    assertComposerDraftOwner(owner);
+    const refId = requireString(value.refId, "refId");
+    return composerDraftAttachmentStore.resolve(owner.draftKey, owner.workspaceId, refId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_ATTACHMENT_RELEASE, async (_, request: unknown) => {
+    const value = (request && typeof request === "object" ? request : {}) as Partial<
+      import("../../shared/composer-drafts").ComposerDraftAttachmentReleaseRequest
+    >;
+    const owner = validateComposerDraftOwner(value);
+    assertComposerDraftOwner(owner);
+    const refId = requireString(value.refId, "refId");
+    return {
+      released: await composerDraftAttachmentStore.release(
+        owner.draftKey,
+        owner.workspaceId,
+        refId,
+      ),
+    };
+  });
+
   ipcMain.handle(IPC_CHANNELS.SESSION_PROGRESS_GET, async (_, taskId: string) => {
     const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
     if (!normalizedTaskId || normalizedTaskId.length > 128) return undefined;
@@ -4817,6 +5189,7 @@ export async function setupIpcHandlers(
         offset?: number;
         prioritizeSidebar?: boolean;
         includeArchivedSessions?: boolean;
+        botConversation?: { workspaceId: string; agentRoleId: string };
         excludeSources?: Array<NonNullable<Task["source"]>>;
         cursor?: {
           id?: string;
@@ -4829,10 +5202,22 @@ export async function setupIpcHandlers(
     ) => {
       const limit = typeof opts?.limit === "number" && opts.limit > 0 ? opts.limit : 100;
       const offset = typeof opts?.offset === "number" && opts.offset >= 0 ? opts.offset : 0;
+      const botConversation =
+        opts?.botConversation === undefined
+          ? undefined
+          : validateInput(
+              z.object({
+                workspaceId: WorkspaceIdSchema,
+                agentRoleId: z.string().trim().min(1).max(128),
+              }),
+              opts.botConversation,
+              "bot conversation filter",
+            );
       const startedAt = Date.now();
       const tasks = taskRepo.findAll(limit, offset, {
         prioritizeSidebar: opts?.prioritizeSidebar === true,
         includeArchivedSessions: opts?.includeArchivedSessions !== false,
+        botConversation,
         excludeSources: opts?.excludeSources,
         cursor: opts?.cursor,
       });
@@ -4860,6 +5245,7 @@ export async function setupIpcHandlers(
         offset?: number;
         prioritizeSidebar?: boolean;
         includeArchivedSessions?: boolean;
+        excludeBotConversations?: boolean;
         excludeSources?: Array<NonNullable<Task["source"]>>;
         cursor?: {
           id?: string;
@@ -4876,6 +5262,7 @@ export async function setupIpcHandlers(
       const tasks = taskRepo.findSidebarSummaries(limit, offset, {
         prioritizeSidebar: opts?.prioritizeSidebar === true,
         includeArchivedSessions: opts?.includeArchivedSessions === true,
+        excludeBotConversations: opts?.excludeBotConversations !== false,
         excludeSources: opts?.excludeSources,
         cursor: opts?.cursor,
       });
@@ -4891,6 +5278,31 @@ export async function setupIpcHandlers(
         serializedBytes,
       });
       return tasks;
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.BOT_CONVERSATIONS_LIST,
+    async (_, rawQuery?: Partial<BotConversationListQuery>) => {
+      const query = validateInput(
+        z.object({
+          workspaceId: WorkspaceIdSchema,
+          includeAllWorkspaces: z.boolean().optional(),
+          agentRoleId: z.string().trim().min(1).max(128).optional(),
+          includeArchivedSessions: z.boolean().optional(),
+          limit: z.number().int().positive().max(500).optional(),
+          offset: z.number().int().nonnegative().optional(),
+        }),
+        rawQuery,
+        "bot conversation query",
+      );
+      return taskRepo.findBotConversations(query.workspaceId, {
+        includeAllWorkspaces: query.includeAllWorkspaces === true,
+        agentRoleId: query.agentRoleId,
+        includeArchivedSessions: query.includeArchivedSessions !== false,
+        limit: query.limit,
+        offset: query.offset,
+      });
     },
   );
 
@@ -5147,6 +5559,10 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, id: string) => {
     const existingTask = taskRepo.findById(id);
+    // Capture only validated durable refs while the receipt events still
+    // exist. Release them after the DB delete succeeds so a failed delete
+    // leaves the task and its attachments retryable.
+    const queuedAttachmentRefs = agentDaemon.captureQueuedAttachmentRefsForTask(id);
 
     // Cancel the task if it's running
     await agentDaemon.cancelTask(id);
@@ -5162,6 +5578,7 @@ export async function setupIpcHandlers(
 
     // Delete from database
     taskRepo.delete(id);
+    agentDaemon.releaseCapturedQueuedAttachmentRefs(id, queuedAttachmentRefs);
   });
 
   // ============ Sub-Agent / Parallel Agent Handlers ============
@@ -5511,6 +5928,8 @@ export async function setupIpcHandlers(
         {
           ...(validated.expectedTurnId ? { expectedTurnId: validated.expectedTurnId } : {}),
           ...(validated.interactionMode ? { interactionMode: validated.interactionMode } : {}),
+          ...(validated.deliveryMode ? { deliveryMode: validated.deliveryMode } : {}),
+          ...(validated.messageId ? { messageId: validated.messageId } : {}),
           ...(validated.permissionMode ? { permissionMode: validated.permissionMode } : {}),
           ...(validated.shellAccess !== undefined ? { shellAccess: validated.shellAccess } : {}),
           ...(validated.accessProfileId ? { accessProfileId: validated.accessProfileId } : {}),
@@ -5521,7 +5940,7 @@ export async function setupIpcHandlers(
       );
       // If the message was queued for a running executor, the executor owns
       // the image data now — skip temp file cleanup so it can read them later.
-      if (!result.queued) {
+      if (!result.queued || result.duplicate) {
         await cleanupTaskImageTempFiles(validatedImages);
       }
       sessionMembershipService.recordTaskAction(
@@ -6445,13 +6864,57 @@ export async function setupIpcHandlers(
   });
 
   // LLM Settings handlers
+  const redactJevSettingsForRenderer = (
+    settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
+  ) => {
+    if (!settings.jev) return settings;
+    const redactProvider = (provider: typeof settings.jev.typesafe) =>
+      provider
+        ? {
+            ...provider,
+            apiKey: undefined,
+            apiKeyConfigured: Boolean(provider.apiKey),
+          }
+        : undefined;
+    return {
+      ...settings,
+      jev: {
+        ...settings.jev,
+        typesafe: redactProvider(settings.jev.typesafe),
+        openrouter: redactProvider(settings.jev.openrouter),
+      },
+    };
+  };
+
   ipcMain.handle(IPC_CHANNELS.LLM_GET_SETTINGS, async () => {
-    return LLMProviderFactory.loadSettings();
+    return redactJevSettingsForRenderer(LLMProviderFactory.loadSettings());
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_SAVE_SETTINGS, async (_, settings) => {
     checkRateLimit(IPC_CHANNELS.LLM_SAVE_SETTINGS);
-    const validated = validateInput(LLMSettingsSchema, settings, "LLM settings");
+    let validated = validateInput(LLMSettingsSchema, settings, "LLM settings");
+
+    if (validated.jev) {
+      const typesafeBaseUrl = await validateJevBaseUrl(validated.jev.typesafe?.baseUrl, {
+        providerLabel: "TypeSafe",
+      });
+      const openrouterBaseUrl = await validateJevBaseUrl(validated.jev.openrouter?.baseUrl, {
+        providerLabel: "OpenRouter",
+        reuseMainOpenRouterKey: validated.jev.openrouter?.reuseOpenRouterKey === true,
+      });
+      validated = {
+        ...validated,
+        jev: {
+          ...validated.jev,
+          typesafe: validated.jev.typesafe
+            ? { ...validated.jev.typesafe, baseUrl: typesafeBaseUrl }
+            : undefined,
+          openrouter: validated.jev.openrouter
+            ? { ...validated.jev.openrouter, baseUrl: openrouterBaseUrl }
+            : undefined,
+        },
+      };
+    }
 
     // Load existing settings to preserve cached models and OAuth tokens
     const existingSettings = LLMProviderFactory.loadSettings();
@@ -6704,6 +7167,65 @@ export async function setupIpcHandlers(
     return LLMProviderFactory.testProvider(providerConfig);
   });
 
+  ipcMain.handle(IPC_CHANNELS.JEV_TEST_PROVIDER, async (_, config: Any) => {
+    checkRateLimit(IPC_CHANNELS.JEV_TEST_PROVIDER);
+    const validatedRequest = validateInput(
+      JevTestProviderRequestSchema,
+      config,
+      "Jev test settings",
+    );
+    const validated = validatedRequest.settings;
+    const savedSettings = LLMProviderFactory.loadSettings();
+    const savedJev = savedSettings.jev;
+    const draftOpenRouter = validated.openrouter;
+    const effectiveJevSettings = {
+      ...savedJev,
+      ...validated,
+      // A test request must opt in on this request; never inherit the reuse
+      // decision from persisted settings when the renderer omits it.
+      openrouter: {
+        ...savedJev?.openrouter,
+        ...draftOpenRouter,
+        reuseOpenRouterKey: draftOpenRouter?.reuseOpenRouterKey === true,
+        apiKey:
+          draftOpenRouter?.clearApiKey === true
+            ? undefined
+            : draftOpenRouter?.apiKey ||
+              (draftOpenRouter?.reuseOpenRouterKey === true
+                ? undefined
+                : savedJev?.openrouter?.apiKey),
+      },
+      typesafe: {
+        ...savedJev?.typesafe,
+        ...validated.typesafe,
+        apiKey:
+          validated.typesafe?.clearApiKey === true
+            ? undefined
+            : validated.typesafe?.apiKey || savedJev?.typesafe?.apiKey,
+      },
+    };
+    const typesafeBaseUrl = await validateJevBaseUrl(effectiveJevSettings.typesafe?.baseUrl, {
+      providerLabel: "TypeSafe",
+    });
+    const openrouterBaseUrl = await validateJevBaseUrl(effectiveJevSettings.openrouter?.baseUrl, {
+      providerLabel: "OpenRouter",
+      reuseMainOpenRouterKey: effectiveJevSettings.openrouter?.reuseOpenRouterKey === true,
+    });
+    const validatedJevSettings = {
+      ...effectiveJevSettings,
+      typesafe: effectiveJevSettings.typesafe
+        ? { ...effectiveJevSettings.typesafe, baseUrl: typesafeBaseUrl }
+        : undefined,
+      openrouter: effectiveJevSettings.openrouter
+        ? { ...effectiveJevSettings.openrouter, baseUrl: openrouterBaseUrl }
+        : undefined,
+    };
+    return testJevProvider(
+      validatedJevSettings,
+      validatedRequest.mainOpenRouterApiKey || savedSettings.openrouter?.apiKey,
+    );
+  });
+
   ipcMain.handle(IPC_CHANNELS.LLM_GET_MODELS, async () => {
     // Get models from database
     const dbModels = llmModelRepo.findAll();
@@ -6755,6 +7277,23 @@ export async function setupIpcHandlers(
         validatedProviderType as Any,
         validatedOverrides,
       );
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.LLM_DISCOVER_ATOMIC_CHAT_MODELS,
+    async (_, overrides?: { apiKey?: string; baseUrl?: string }) => {
+      checkRateLimit(IPC_CHANNELS.LLM_DISCOVER_ATOMIC_CHAT_MODELS);
+      const validatedOverrides = overrides
+        ? {
+            apiKey: validateOptionalProviderApiKey(overrides.apiKey, "Atomic Chat"),
+            baseUrl: await validateOptionalProviderBaseUrl(overrides.baseUrl, {
+              providerLabel: "Atomic Chat",
+              allowLoopback: true,
+            }),
+          }
+        : undefined;
+      return LLMProviderFactory.getAtomicChatModelsDetailed(validatedOverrides);
     },
   );
 
@@ -8660,6 +9199,28 @@ export async function setupIpcHandlers(
     return agentRoleRepo.findById(validated);
   });
 
+  ipcMain.handle(IPC_CHANNELS.BOT_NOTIFICATION_GET, async (_, rawRoleId: string) => {
+    const agentRoleId = validateInput(UUIDSchema, rawRoleId, "agent role ID");
+    if (!agentRoleRepo.findById(agentRoleId)) throw new Error("Agent role not found");
+    return botNotificationPreferenceRepo.findByAgentRoleId(agentRoleId) as BotNotificationPolicy;
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.BOT_NOTIFICATION_UPDATE,
+    async (_, request: UpdateBotNotificationPolicyRequest) => {
+      checkRateLimit(IPC_CHANNELS.BOT_NOTIFICATION_UPDATE);
+      const agentRoleId = validateInput(UUIDSchema, request?.agentRoleId, "agent role ID");
+      if (!agentRoleRepo.findById(agentRoleId)) throw new Error("Agent role not found");
+      const onFinish = request?.onFinish === undefined ? undefined : Boolean(request.onFinish);
+      const onInputRequired =
+        request?.onInputRequired === undefined ? undefined : Boolean(request.onInputRequired);
+      return botNotificationPreferenceRepo.upsert(agentRoleId, {
+        onFinish,
+        onInputRequired,
+      }) as BotNotificationPolicy;
+    },
+  );
+
   ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_CREATE, async (_, request) => {
     checkRateLimit(IPC_CHANNELS.AGENT_ROLE_CREATE);
     // Validate name format (lowercase, alphanumeric, hyphens)
@@ -8701,7 +9262,7 @@ export async function setupIpcHandlers(
     if (!success) {
       throw new Error("Agent role not found or cannot be deleted");
     }
-    return { success: true };
+    return true;
   });
 
   ipcMain.handle(
@@ -9595,6 +10156,42 @@ export async function setupIpcHandlers(
     const { UsageInsightsService } = await import("../reports/UsageInsightsService");
     const service = new UsageInsightsService(db);
     return service.getEarliestActivityMs(validatedWorkspaceId);
+  });
+
+  // CoWork Pulse. The service never receives renderer-provided identifiers or payloads;
+  // all aggregates are derived in the trusted main process from the local database.
+  // Built once: the constructor runs ensureSchema() and the instance holds the
+  // preview memo, both of which are wasted if every IPC call gets a new service.
+  let pulseService: import("../telemetry/pulse-service").PulseService | null = null;
+  const getPulseService = async () => {
+    if (pulseService) return pulseService;
+    const { PulseService } = await import("../telemetry/pulse-service");
+    const { app } = await import("electron");
+    pulseService = new PulseService(db, { version: app.getVersion(), runtime: "desktop" });
+    return pulseService;
+  };
+  ipcMain.handle(IPC_CHANNELS.PULSE_GET_SETTINGS, async () => {
+    checkRateLimit(IPC_CHANNELS.PULSE_GET_SETTINGS);
+    return (await getPulseService()).getSettings();
+  });
+  ipcMain.handle(IPC_CHANNELS.PULSE_SET_ENABLED, async (_, enabled: boolean) => {
+    checkRateLimit(IPC_CHANNELS.PULSE_SET_ENABLED);
+    if (typeof enabled !== "boolean") throw new Error("Invalid Pulse enabled value");
+    return (await getPulseService()).setEnabled(enabled);
+  });
+  ipcMain.handle(IPC_CHANNELS.PULSE_RESET_IDENTITY, async () => {
+    checkRateLimit(IPC_CHANNELS.PULSE_RESET_IDENTITY);
+    return (await getPulseService()).resetIdentity();
+  });
+  ipcMain.handle(IPC_CHANNELS.PULSE_DELETE_REMOTE_DATA, async () => {
+    checkRateLimit(IPC_CHANNELS.PULSE_DELETE_REMOTE_DATA);
+    return (await getPulseService()).deleteRemoteData();
+  });
+  ipcMain.handle(IPC_CHANNELS.PULSE_FLUSH, async () => {
+    checkRateLimit(IPC_CHANNELS.PULSE_FLUSH);
+    const service = await getPulseService();
+    await service.flush();
+    return service.getSettings();
   });
 
   // Daily Briefing

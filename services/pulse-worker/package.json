@@ -1,0 +1,14 @@
+{
+  "name": "@cowork-os/pulse-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --config wrangler.jsonc",
+    "deploy": "wrangler deploy --config wrangler.jsonc",
+    "migrate:local": "wrangler d1 migrations apply cowork-pulse --local --config wrangler.jsonc",
+    "migrate:remote": "wrangler d1 migrations apply cowork-pulse --remote --config wrangler.jsonc"
+  },
+  "devDependencies": {
+    "wrangler": "^3.99.0"
+  }
+}

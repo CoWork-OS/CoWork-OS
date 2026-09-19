@@ -1,5 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { ArrowUp, ExternalLink, Loader2, MessageSquarePlus, X } from "lucide-react";
+import type { ComposerDraft } from "../../shared/composer-drafts";
 import type { Task, TaskEvent } from "../../shared/types";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -11,7 +12,11 @@ type SideChatPanelProps = {
   events: TaskEvent[];
   loading?: boolean;
   sending?: boolean;
-  onSendMessage: (message: string) => void | Promise<void>;
+  onSendMessage: (message: string) => void | boolean | Promise<void | boolean>;
+  draftValue?: string;
+  draftRevision?: number;
+  onDraftValueChange?: (value: string) => ComposerDraft | void;
+  onDraftAccepted?: (revision: number) => void | boolean | Promise<void | boolean>;
   onClose: () => void;
   onOpenSideTask?: (taskId: string) => void;
 };
@@ -94,15 +99,20 @@ export const SideChatPanel = memo(function SideChatPanel({
   loading = false,
   sending = false,
   onSendMessage,
+  draftValue = "",
+  draftRevision = 0,
+  onDraftValueChange,
+  onDraftAccepted,
   onClose,
   onOpenSideTask,
 }: SideChatPanelProps) {
-  const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const draftRevisionRef = useRef(draftRevision);
+  draftRevisionRef.current = draftRevision;
   const messages = useMemo(() => deriveMessages(events), [events]);
   const parentStatus = getTaskStatusLabel(parentTask);
   const sideStatus = getTaskStatusLabel(sideTask);
-  const canSend = draft.trim().length > 0 && !sending && !!sideTask;
+  const canSend = draftValue.trim().length > 0 && !sending && !!sideTask;
   const headerStatus = sideTask ? sideStatus : loading ? "Opening" : "Unavailable";
 
   useEffect(() => {
@@ -112,12 +122,22 @@ export const SideChatPanel = memo(function SideChatPanel({
   }, [messages.length, loading, sending]);
 
   const submit = () => {
-    const message = draft.trim();
+    const message = draftValue.trim();
     if (!message || !sideTask || sending) return;
-    setDraft("");
-    void Promise.resolve(onSendMessage(message)).catch(() => {
-      setDraft((current) => (current.trim().length > 0 ? current : message));
-    });
+    const submittedRevision = draftRevisionRef.current;
+    void Promise.resolve(onSendMessage(message))
+      .then(async (sent) => {
+        if (sent === false || draftRevisionRef.current !== submittedRevision) return;
+        const accepted = await onDraftAccepted?.(submittedRevision);
+        if (accepted === false) return;
+        // The accepted callback owns the durable draft deletion. Its store
+        // emission drives the controlled value to empty; updating it again
+        // here would recreate a new empty draft row.
+        if (!onDraftAccepted) onDraftValueChange?.("");
+      })
+      .catch(() => {
+        // Keep the controlled draft intact so a failed side send is retryable.
+      });
   };
 
   return (
@@ -205,8 +225,11 @@ export const SideChatPanel = memo(function SideChatPanel({
 
       <footer className="side-chat-composer">
         <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          value={draftValue}
+          onChange={(event) => {
+            const draft = onDraftValueChange?.(event.target.value);
+            if (draft) draftRevisionRef.current = draft.revision;
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();

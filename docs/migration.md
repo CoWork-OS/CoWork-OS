@@ -28,12 +28,12 @@ See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 
 ### What Improves After Cutover
 
-| Area | What to expect in CoWork OS |
-|---|---|
-| Operations | Desktop control plane plus headless runtime options |
-| Safety | Approval-gated destructive actions and configurable command blocking |
-| Governance | Token/cost/iteration guardrails per task |
-| Reach | Desktop, CLI, daemon, and messaging-channel delivery |
+| Area         | What to expect in CoWork OS                                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Operations   | Desktop control plane plus headless runtime options                                                                      |
+| Safety       | Approval-gated destructive actions and configurable command blocking                                                     |
+| Governance   | Token/cost/iteration guardrails per task                                                                                 |
+| Reach        | Desktop, CLI, daemon, and messaging-channel delivery                                                                     |
 | Data control | Local-first persistence, explicit remote-service boundaries, and optional local Ollama or Apple Silicon MLX-LM inference |
 
 ---
@@ -56,12 +56,12 @@ See [Compare CoWork OS](comparisons/index.md) for fit-based guides covering Clau
 CoWork uses a named [access profile](access-profiles.md) as the task-level authority. The closest
 starting points for common legacy setups are:
 
-| Previous setup | CoWork migration |
-|---|---|
-| Shell/command tools disabled | Select **Ask for approval** and keep command-tool use at the profile/approval boundary; do not add a shell toggle |
-| Shell enabled with prompts | Select **Ask for approval** or **Approve for me**, depending on whether automatic review is appropriate |
-| Unrestricted trusted local execution | Select **Full access** only for a trusted workspace and review admin, guardrail, export, and protected-path limits |
-| Custom config file | Recreate the policy as a validated Custom profile in **Settings → System & Security → Permissions**; CoWork stores it in encrypted settings |
+| Previous setup                       | CoWork migration                                                                                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shell/command tools disabled         | Select **Ask for approval** and keep command-tool use at the profile/approval boundary; do not add a shell toggle                           |
+| Shell enabled with prompts           | Select **Ask for approval** or **Approve for me**, depending on whether automatic review is appropriate                                     |
+| Unrestricted trusted local execution | Select **Full access** only for a trusted workspace and review admin, guardrail, export, and protected-path limits                          |
+| Custom config file                   | Recreate the policy as a validated Custom profile in **Settings → System & Security → Permissions**; CoWork stores it in encrypted settings |
 
 The CLI equivalent is `--access-profile <id>`. Existing CoWork tasks and managed environments may
 retain `shellAccess`, `enableShell`, or legacy permission modes for compatibility, but new and
@@ -76,26 +76,31 @@ edited resources should set `accessProfileId`. See [Access Profiles](access-prof
 If you're already using messaging channels with another AI platform, you can reuse most of your existing setup:
 
 #### WhatsApp
+
 - **Same phone**: CoWork OS uses Web WhatsApp (Baileys library), just like other platforms
 - **New QR scan**: You'll need to scan a new QR code in CoWork OS Settings
 - **Note**: WhatsApp allows multiple linked devices, so you can run both platforms during transition
 
 #### Telegram
+
 - **Same bot or new**: You can create a new bot via @BotFather, or reuse your existing bot token
 - **If reusing token**: Make sure to disable the old platform first to avoid conflicts
 - **Recommendation**: Create a new bot for cleaner separation
 
 #### Discord
+
 - **Same application**: You can reuse your Discord application and bot token
 - **Guild commands**: If using guild-specific commands, update the Guild IDs in CoWork OS
 - **Note**: Only one client can connect with the same token at a time
 
 #### Slack
+
 - **Same app tokens**: You can reuse your Slack app's Bot Token and App-Level Token
 - **Socket Mode**: CoWork OS uses Socket Mode, same as most other platforms
 - **Note**: Only one connection per token is allowed
 
 #### iMessage
+
 - **macOS only**: iMessage integration requires macOS and the `imsg` CLI tool
 - **Setup**: Install via `brew install steipete/tap/imsg`
 - **Unique to CoWork OS**: Most platforms don't support iMessage
@@ -108,27 +113,27 @@ Moving to CoWork OS provides several advantages:
 
 ### Security Features
 
-| Feature | Benefit |
-|---------|---------|
-| **Configurable guardrails** | Set token/cost budgets, iteration limits |
-| **Dangerous command blocking** | Built-in + custom patterns to block risky commands |
-| **Approval workflows** | Human-in-the-loop for destructive operations |
-| **Access profiles** | One named policy for sandbox, approvals, reviewer behavior, command tools, filesystem, network, and domain scope |
-| **Brute-force protection** | Lockout after failed pairing attempts |
-| **Context-aware isolation** | Different tool access for local vs remote use |
+| Feature                        | Benefit                                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| **Configurable guardrails**    | Set token/cost budgets, iteration limits                                                                         |
+| **Dangerous command blocking** | Built-in + custom patterns to block risky commands                                                               |
+| **Approval workflows**         | Human-in-the-loop for destructive operations                                                                     |
+| **Access profiles**            | One named policy for sandbox, approvals, reviewer behavior, command tools, filesystem, network, and domain scope |
+| **Brute-force protection**     | Lockout after failed pairing attempts                                                                            |
+| **Context-aware isolation**    | Different tool access for local vs remote use                                                                    |
 
 ### Additional Capabilities
 
-| Feature | Benefit |
-|---------|---------|
-| **Dozens of model routes** | Built-in providers, compatible gateways, supported account connections, local runtimes, and Mixture of Agents presets |
-| **Local LLM support** | Run supported models locally with Ollama or MLX-LM on native Apple Silicon; model availability and hardware needs vary. See [MLX-LM Local Inference](mlx-lm.md) |
-| **Native desktop app** | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows) |
-| **GUI-first agent management** | Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub and Mission Control |
-| **Real-time timeline** | See exactly what the agent is doing |
-| **Everyday document work** | Excel, Word, PDF, and PowerPoint-style outputs built into the task workspace |
-| **Personality system** | Customize how your AI communicates |
-| **MCP support** | Extend with external tool servers |
+| Feature                        | Benefit                                                                                                                                                         |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dozens of model routes**     | Built-in providers, compatible gateways, supported account connections, local runtimes, and Mixture of Agents presets                                           |
+| **Local LLM support**          | Run supported models locally with Ollama or MLX-LM on native Apple Silicon; model availability and hardware needs vary. See [MLX-LM Local Inference](mlx-lm.md) |
+| **Native desktop app**         | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows)                                                                                |
+| **GUI-first agent management** | Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub and Mission Control                               |
+| **Real-time timeline**         | See exactly what the agent is doing                                                                                                                             |
+| **Everyday document work**     | Excel, Word, PDF, and PowerPoint-style outputs built into the task workspace                                                                                    |
+| **Personality system**         | Customize how your AI communicates                                                                                                                              |
+| **MCP support**                | Extend with external tool servers                                                                                                                               |
 
 ---
 
@@ -136,21 +141,21 @@ Moving to CoWork OS provides several advantages:
 
 ### Architecture
 
-| Aspect | CoWork OS | Typical CLI Platform |
-|--------|-----------|---------------------|
-| **Form factor** | Desktop app (Electron) | CLI + daemon |
-| **Primary platform** | macOS + Windows | Cross-platform |
-| **Installation** | `npm install` + `npm run dev` | `npm install -g` |
-| **Configuration** | GUI Settings panel | Config files / CLI flags |
+| Aspect               | CoWork OS                     | Typical CLI Platform     |
+| -------------------- | ----------------------------- | ------------------------ |
+| **Form factor**      | Desktop app (Electron)        | CLI + daemon             |
+| **Primary platform** | macOS + Windows               | Cross-platform           |
+| **Installation**     | `npm install` + `npm run dev` | `npm install -g`         |
+| **Configuration**    | GUI Settings panel            | Config files / CLI flags |
 
 ### Security Model
 
-| Aspect | CoWork OS |
-|--------|-----------|
-| **Default task access** | Ask for approval profile; channel pairing remains a separate channel-security setting |
-| **Sandbox** | Workspace boundaries (VM planned) |
-| **Approval** | GUI dialogs |
-| **Guardrails** | Configurable in Settings UI |
+| Aspect                  | CoWork OS                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| **Default task access** | Bounded access profile with the local approval queue disabled by default; channel pairing remains a separate channel-security setting |
+| **Sandbox**             | Workspace boundaries (VM planned)                                                     |
+| **Approval**            | Optional GUI dialogs when `COWORK_APPROVAL_PROMPTS=on`; ordinary local decisions run in-process by default |
+| **Guardrails**          | Configurable in Settings UI                                                           |
 
 ---
 
@@ -195,9 +200,12 @@ For each channel you want to use:
 3. Enable dangerous command blocking
 4. Add custom blocked patterns if needed
 
-Also open **Settings → System & Security → Permissions**, keep **Ask for approval** as the default
-access profile while validating the migration, and create narrower custom profiles only after the
-workspace roots, domain rules, and approval behavior are understood.
+Also open **Settings → System & Security → Permissions** and review the selected access profile.
+The local runtime does not open the legacy approval queue unless
+`COWORK_APPROVAL_PROMPTS=on` is set. If a policy decision still requires consent, an interactive
+task receives an assistant message and inline **Deny** / **Allow once** card; automated tasks fail
+closed. Create narrower custom profiles when the workspace roots or domain rules need tighter
+bounds. Pending approval state is not resumed after restart.
 
 ### 5. Add Workspaces
 
@@ -231,6 +239,7 @@ During transition, you may want to run both platforms:
 ### Can I import my skills/prompts from another platform?
 
 CoWork OS uses a JSON-based skill format. If your existing platform exports skills, you may need to convert them. Skills are stored in:
+
 ```
 ~/Library/Application Support/cowork-os/skills/
 ```

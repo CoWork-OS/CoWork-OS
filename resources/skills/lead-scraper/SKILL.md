@@ -37,11 +37,11 @@ Extract business and contact information from directory pages and company websit
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| url | string | Yes | URL of directory page or company website |
+| Name | Type   | Required | Description                              |
+| ---- | ------ | -------- | ---------------------------------------- |
+| url  | string | Yes      | URL of directory page or company website |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 959 characters.
-- Runtime prompt is defined directly in `../lead-scraper.json`. 
+- Runtime prompt is defined directly in `../lead-scraper.json`.

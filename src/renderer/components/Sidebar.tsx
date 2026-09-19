@@ -15,7 +15,15 @@ import {
   EyeOff,
   AppWindow,
   Bell,
+  Archive,
+  Folder,
+  FolderOpen,
+  GitBranch,
   HardDrive,
+  ListTree,
+  Pencil,
+  Pin,
+  PinOff,
   Rows3,
   Search,
   Server,
@@ -31,22 +39,35 @@ import {
   Plus,
   Sparkles,
   Repeat2,
+  X,
 } from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
-import { Task, Workspace, UiDensity, InfraStatus, UpdateInfo } from "../../shared/types";
+import {
+  Task,
+  Workspace,
+  UiDensity,
+  InfraStatus,
+  UpdateInfo,
+  isTempWorkspaceId,
+} from "../../shared/types";
 import type { MailboxDigestSnapshot, MailboxSyncStatus } from "../../shared/mailbox";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 import { BotsPane, type BotRole } from "./BotsPane";
+import { BOT_PROFILE_DELETED_EVENT, BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
 
 const SIDEBAR_ITEM_HEIGHT = 22;
 const SIDEBAR_DATE_HEADER_HEIGHT = 20;
 const SIDEBAR_FOCUSED_ITEM_HEIGHT = 28;
 const SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT = 26;
 const SIDEBAR_AUTOMATED_HEADER_HEIGHT = 30;
+const SIDEBAR_SECTION_HEADER_HEIGHT = 30;
+const SIDEBAR_WORKSPACE_HEADER_HEIGHT = 30;
+const SIDEBAR_WORKSPACE_SESSION_ACTION_HEIGHT = 28;
+const SIDEBAR_WORKSPACE_SESSION_PREVIEW_COUNT = 6;
 const SIDEBAR_LOAD_MORE_HEIGHT = 32;
 const SIDEBAR_VIRTUALIZATION_MIN_ROWS = 30;
 const SIDEBAR_LOAD_MORE_THRESHOLD_PX = 320;
@@ -73,7 +94,9 @@ export function formatRelativeShort(timestamp?: number): string {
 interface SidebarProps {
   workspace: Workspace | null;
   tasks: Task[];
+  botTasks?: Task[];
   selectedTaskId: string | null;
+  isBotViewActive?: boolean;
   isAutomationsActive?: boolean;
   isIdeasActive?: boolean;
   isInboxAgentActive?: boolean;
@@ -90,6 +113,8 @@ interface SidebarProps {
   onOpenInboxAgent?: () => void;
   onOpenAgents?: () => void;
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
+  onBotUpdated?: (bot: BotRole) => void | Promise<void>;
+  onBotDeleted?: (botId: string) => void | Promise<void>;
   onOpenEverydayAgent?: () => void;
   onOpenHealth?: () => void;
   onNewSession?: () => void;
@@ -541,6 +566,34 @@ export type SidebarVirtualRow =
       label: string;
     }
   | {
+      kind: "section-header";
+      id: string;
+      label: string;
+      action?: "add-workspace";
+    }
+  | {
+      kind: "workspace-empty";
+      id: string;
+    }
+  | {
+      kind: "workspace-session-action";
+      id: string;
+      workspaceId: string;
+      expanded: boolean;
+      remainingCount: number;
+    }
+  | {
+      kind: "workspace-header";
+      id: string;
+      workspaceId: string;
+      label: string;
+      path?: string;
+      pinned: boolean;
+      recent: boolean;
+      current: boolean;
+      expanded: boolean;
+    }
+  | {
       kind: "automated-header";
       id: string;
       count: number;
@@ -551,12 +604,28 @@ export type SidebarVirtualRow =
       kind: "task";
       row: SidebarVisibleRow;
       section?: "user" | "automated";
+      grouped?: boolean;
     }
   | {
       kind: "load-more";
       id: string;
       loading: boolean;
     };
+
+export function getSidebarProjectSessionPreview<T>(
+  items: readonly T[],
+  showAll: boolean,
+): { visibleItems: T[]; hasMore: boolean; remainingCount: number } {
+  const visibleItems = showAll
+    ? [...items]
+    : items.slice(0, SIDEBAR_WORKSPACE_SESSION_PREVIEW_COUNT);
+  const remainingCount = Math.max(0, items.length - visibleItems.length);
+  return {
+    visibleItems,
+    hasMore: remainingCount > 0,
+    remainingCount,
+  };
+}
 
 export function flattenVisibleTaskRows(
   nodes: TaskTreeNode[],
@@ -630,10 +699,131 @@ function getSidebarTaskListSignature(tasks: Task[]): string {
   return `${tasks.length}|${parts.join(",")}`;
 }
 
+export interface SidebarWorkspaceSettings {
+  visibleWorkspaceIds: string[];
+  pinnedWorkspaceIds: string[];
+  expandedWorkspaceIds: string[];
+  collapsedWorkspaceIds: string[];
+  labels: Record<string, string>;
+}
+
+const SIDEBAR_WORKSPACE_SETTINGS_KEY = "cowork.sidebar.workspace-settings.v1";
+
+const EMPTY_SIDEBAR_WORKSPACE_SETTINGS: SidebarWorkspaceSettings = {
+  visibleWorkspaceIds: [],
+  pinnedWorkspaceIds: [],
+  expandedWorkspaceIds: [],
+  collapsedWorkspaceIds: [],
+  labels: {},
+};
+
+function readSidebarWorkspaceSettings(): SidebarWorkspaceSettings {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return EMPTY_SIDEBAR_WORKSPACE_SETTINGS;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_WORKSPACE_SETTINGS_KEY);
+    if (!raw) return EMPTY_SIDEBAR_WORKSPACE_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<SidebarWorkspaceSettings>;
+    const pinnedWorkspaceIds = Array.isArray(parsed.pinnedWorkspaceIds)
+      ? parsed.pinnedWorkspaceIds.filter((value): value is string => typeof value === "string")
+      : [];
+    return {
+      // Older versions only persisted hidden projects, so there was no safe
+      // way to know which projects the user explicitly wanted in the sidebar.
+      // Start those users with an empty project section and preserve any
+      // projects they had explicitly pinned.
+      visibleWorkspaceIds: Array.isArray(parsed.visibleWorkspaceIds)
+        ? parsed.visibleWorkspaceIds.filter((value): value is string => typeof value === "string")
+        : pinnedWorkspaceIds,
+      pinnedWorkspaceIds,
+      expandedWorkspaceIds: Array.isArray(parsed.expandedWorkspaceIds)
+        ? parsed.expandedWorkspaceIds.filter((value): value is string => typeof value === "string")
+        : [],
+      collapsedWorkspaceIds: Array.isArray(parsed.collapsedWorkspaceIds)
+        ? parsed.collapsedWorkspaceIds.filter((value): value is string => typeof value === "string")
+        : [],
+      labels:
+        parsed.labels && typeof parsed.labels === "object"
+          ? Object.fromEntries(
+              Object.entries(parsed.labels).filter(
+                ([key, value]) => typeof key === "string" && typeof value === "string",
+              ),
+            )
+          : {},
+    };
+  } catch {
+    return EMPTY_SIDEBAR_WORKSPACE_SETTINGS;
+  }
+}
+
+export function getSidebarWorkspaceSelection(
+  settings: Pick<SidebarWorkspaceSettings, "visibleWorkspaceIds" | "pinnedWorkspaceIds">,
+): Set<string> {
+  return new Set([...settings.visibleWorkspaceIds, ...settings.pinnedWorkspaceIds]);
+}
+
+function writeSidebarWorkspaceSettings(settings: SidebarWorkspaceSettings): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(SIDEBAR_WORKSPACE_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // Sidebar organization is a convenience preference. Keep the in-memory
+    // state working if storage is unavailable or has been disabled.
+  }
+}
+
+interface SidebarWorkspaceGroup {
+  workspace?: Workspace;
+  workspaceId: string;
+  label: string;
+  path?: string;
+  nodes: TaskTreeNode[];
+  pinned: boolean;
+  recent: boolean;
+  current: boolean;
+}
+
+/**
+ * Workspaces created for short-lived sessions can be persisted in the
+ * database without carrying the temp-workspace flag. Keep those folders out
+ * of the durable Projects section as well.
+ */
+export function isSidebarRecentWorkspace(workspace: Workspace): boolean {
+  if (workspace.isTemp || isTempWorkspaceId(workspace.id)) return true;
+
+  const normalizedPath = workspace.path.replaceAll("\\", "/").replace(/\/+$/, "");
+  return /(?:^|\/)tmp(?:\/|$)|(?:^|\/)temp(?:\/|$)|(?:^|\/)temporary(?:\/|$)|(?:^|\/)cowork-os-temp(?:\/|$)/i.test(
+    normalizedPath,
+  );
+}
+
+const sidebarWorkspaceCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
+export function compareSidebarWorkspaceGroups(
+  left: SidebarWorkspaceGroup,
+  right: SidebarWorkspaceGroup,
+): number {
+  if (left.current !== right.current) return left.current ? -1 : 1;
+
+  const labelComparison = sidebarWorkspaceCollator.compare(left.label, right.label);
+  if (labelComparison !== 0) return labelComparison;
+
+  const pathComparison = sidebarWorkspaceCollator.compare(left.path || "", right.path || "");
+  if (pathComparison !== 0) return pathComparison;
+
+  return sidebarWorkspaceCollator.compare(left.workspaceId, right.workspaceId);
+}
+
 function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
   return (
     prev.workspace?.id === next.workspace?.id &&
     prev.selectedTaskId === next.selectedTaskId &&
+    prev.isBotViewActive === next.isBotViewActive &&
     prev.isAutomationsActive === next.isAutomationsActive &&
     prev.isIdeasActive === next.isIdeasActive &&
     prev.isInboxAgentActive === next.isInboxAgentActive &&
@@ -647,11 +837,15 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.hasMoreTasks === next.hasMoreTasks &&
     prev.uiDensity === next.uiDensity &&
     getSidebarTaskListSignature(prev.tasks) === getSidebarTaskListSignature(next.tasks) &&
+    getSidebarTaskListSignature(prev.botTasks || []) ===
+      getSidebarTaskListSignature(next.botTasks || []) &&
     (prev.completionAttentionTaskIds || []).join(",") ===
       (next.completionAttentionTaskIds || []).join(",") &&
     prev.updateInfo?.latestVersion === next.updateInfo?.latestVersion &&
     prev.onSelectTask === next.onSelectTask &&
     prev.onOpenBot === next.onOpenBot &&
+    prev.onBotUpdated === next.onBotUpdated &&
+    prev.onBotDeleted === next.onBotDeleted &&
     prev.onTasksChanged === next.onTasksChanged &&
     prev.onOpenSettings === next.onOpenSettings &&
     prev.onOpenMissionControl === next.onOpenMissionControl
@@ -661,7 +855,9 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
 function SidebarComponent({
   workspace,
   tasks,
+  botTasks: botTasksOverride,
   selectedTaskId,
+  isBotViewActive = false,
   isAutomationsActive = false,
   isIdeasActive = false,
   isInboxAgentActive = false,
@@ -692,6 +888,8 @@ function SidebarComponent({
   uiDensity = "focused",
   updateInfo,
   onViewUpdate,
+  onBotUpdated,
+  onBotDeleted,
 }: SidebarProps) {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
@@ -702,7 +900,9 @@ function SidebarComponent({
   const [sidebarTab, setSidebarTab] = useState<"sessions" | "bots">("sessions");
   const [isLoadingBots, setIsLoadingBots] = useState(false);
   const [botsError, setBotsError] = useState<string | null>(null);
-  const [showFailedSessions, setShowFailedSessions] = useState(false);
+  // Keep the full session history visible by default. Users can still hide
+  // failed/cancelled roots from the optional session filter panel.
+  const [showFailedSessions, setShowFailedSessions] = useState(true);
   const [showAutomatedSessions, setShowAutomatedSessions] = useState(false);
   const [showSessionSearch, setShowSessionSearch] = useState(false);
   const [showSessionFilters, setShowSessionFilters] = useState(false);
@@ -713,12 +913,24 @@ function SidebarComponent({
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
   const [moreCollapsed, setMoreCollapsed] = useState(true);
   const [sessionSearch, setSessionSearch] = useState("");
+  const [sidebarWorkspaces, setSidebarWorkspaces] = useState<Workspace[]>([]);
+  const [workspaceNavSettings, setWorkspaceNavSettings] = useState<SidebarWorkspaceSettings>(() =>
+    readSidebarWorkspaceSettings(),
+  );
+  const [workspaceMenuOpenId, setWorkspaceMenuOpenId] = useState<string | null>(null);
+  const [workspaceSessionListsExpanded, setWorkspaceSessionListsExpanded] = useState<Set<string>>(
+    new Set(),
+  );
+  const [workspaceSectionMenuOpen, setWorkspaceSectionMenuOpen] = useState(false);
+  const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   // Automated sessions folder is collapsed by default to keep the sidebar clean
   const [automatedFolderCollapsed, setAutomatedFolderCollapsed] = useState(true);
   const [mailboxDigest, setMailboxDigest] = useState<MailboxDigestSnapshot | null>(null);
   const [mailboxStatus, setMailboxStatus] = useState<MailboxSyncStatus | null>(null);
   const pinActionErrorTimeoutRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
+  const workspaceSectionMenuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const renameInputRef = useRef<HTMLInputElement>(null);
   const taskListRef = useRef<HTMLDivElement>(null);
@@ -734,6 +946,263 @@ function SidebarComponent({
   const hasSessionSearch = normalizedSessionSearch.length > 0;
   const isMoreActive = isMissionControlActive || isHealthActive || isIdeasActive;
   const isMoreExpanded = isMoreActive || !moreCollapsed;
+
+  const loadSidebarWorkspaces = useCallback(async () => {
+    if (!window.electronAPI?.listWorkspaces) return;
+    try {
+      const loaded = await window.electronAPI.listWorkspaces();
+      setSidebarWorkspaces(Array.isArray(loaded) ? loaded : []);
+    } catch (error) {
+      console.error("Failed to load sidebar workspaces:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSidebarWorkspaces();
+  }, [loadSidebarWorkspaces, workspace?.id]);
+
+  const updateWorkspaceNavSettings = useCallback(
+    (update: (current: SidebarWorkspaceSettings) => SidebarWorkspaceSettings) => {
+      setWorkspaceNavSettings((current) => {
+        const next = update(current);
+        writeSidebarWorkspaceSettings(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const knownSidebarWorkspaces = useMemo(() => {
+    const byId = new Map(sidebarWorkspaces.map((candidate) => [candidate.id, candidate]));
+    if (workspace && !workspace.isTemp && !isTempWorkspaceId(workspace.id)) {
+      byId.set(workspace.id, workspace);
+    }
+    return Array.from(byId.values()).filter(
+      (candidate) => !candidate.isTemp && !isTempWorkspaceId(candidate.id),
+    );
+  }, [sidebarWorkspaces, workspace]);
+
+  const workspaceById = useMemo(
+    () => new Map(knownSidebarWorkspaces.map((candidate) => [candidate.id, candidate])),
+    [knownSidebarWorkspaces],
+  );
+
+  const sidebarWorkspaceIds = useMemo(
+    () => getSidebarWorkspaceSelection(workspaceNavSettings),
+    [workspaceNavSettings],
+  );
+
+  const isWorkspaceExpanded = useCallback(
+    (workspaceId: string) => {
+      if (workspaceNavSettings.expandedWorkspaceIds.includes(workspaceId)) return true;
+      if (workspaceNavSettings.collapsedWorkspaceIds.includes(workspaceId)) return false;
+      return workspace?.id === workspaceId;
+    },
+    [
+      workspace?.id,
+      workspaceNavSettings.collapsedWorkspaceIds,
+      workspaceNavSettings.expandedWorkspaceIds,
+    ],
+  );
+
+  const getWorkspaceLabel = useCallback(
+    (candidate: Workspace) => workspaceNavSettings.labels[candidate.id]?.trim() || candidate.name,
+    [workspaceNavSettings.labels],
+  );
+
+  const handleAddWorkspace = useCallback(async () => {
+    const api = window.electronAPI;
+    if (!api?.selectFolder || !api?.listWorkspaces || !api?.createWorkspace) return;
+
+    try {
+      const folderPath = await api.selectFolder();
+      if (!folderPath) return;
+
+      const existingWorkspaces = await api.listWorkspaces();
+      let addedWorkspace = existingWorkspaces.find((candidate) => candidate.path === folderPath);
+      if (!addedWorkspace) {
+        const folderName = folderPath.split(/[\\/]/).filter(Boolean).pop() || "Workspace";
+        addedWorkspace = await api.createWorkspace({
+          name: folderName,
+          path: folderPath,
+          permissions: {
+            read: true,
+            write: true,
+            delete: true,
+            network: true,
+            shell: false,
+          },
+        });
+      }
+
+      setSidebarWorkspaces((current) => {
+        const next = current.filter((candidate) => candidate.id !== addedWorkspace!.id);
+        return [addedWorkspace!, ...next];
+      });
+      updateWorkspaceNavSettings((current) => ({
+        ...current,
+        visibleWorkspaceIds: Array.from(
+          new Set([...current.visibleWorkspaceIds, addedWorkspace!.id]),
+        ),
+        collapsedWorkspaceIds: current.collapsedWorkspaceIds.filter(
+          (workspaceId) => workspaceId !== addedWorkspace!.id,
+        ),
+        expandedWorkspaceIds: Array.from(
+          new Set([...current.expandedWorkspaceIds, addedWorkspace!.id]),
+        ),
+      }));
+      setWorkspaceActionError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not add that folder.";
+      console.error("Failed to add sidebar workspace:", error);
+      setWorkspaceActionError(message);
+    }
+  }, [updateWorkspaceNavSettings]);
+
+  const handleAddAllWorkspaces = useCallback(() => {
+    const workspaceIds = knownSidebarWorkspaces
+      .filter((candidate) => !isSidebarRecentWorkspace(candidate))
+      .map((candidate) => candidate.id);
+    updateWorkspaceNavSettings((current) => ({
+      ...current,
+      visibleWorkspaceIds: Array.from(new Set([...current.visibleWorkspaceIds, ...workspaceIds])),
+    }));
+    setWorkspaceSectionMenuOpen(false);
+    setWorkspaceActionError(null);
+  }, [knownSidebarWorkspaces, updateWorkspaceNavSettings]);
+
+  const handleRemoveAllWorkspaces = useCallback(() => {
+    updateWorkspaceNavSettings((current) => ({
+      ...current,
+      visibleWorkspaceIds: [],
+      pinnedWorkspaceIds: [],
+      expandedWorkspaceIds: [],
+      collapsedWorkspaceIds: [],
+    }));
+    setWorkspaceSessionListsExpanded(new Set());
+    setWorkspaceSectionMenuOpen(false);
+    setWorkspaceMenuOpenId(null);
+    setWorkspaceActionError(null);
+  }, [updateWorkspaceNavSettings]);
+
+  const handleToggleWorkspacePin = useCallback(
+    (workspaceId: string) => {
+      updateWorkspaceNavSettings((current) => {
+        const pinned = new Set(current.pinnedWorkspaceIds);
+        if (pinned.has(workspaceId)) {
+          pinned.delete(workspaceId);
+        } else {
+          pinned.add(workspaceId);
+        }
+        return { ...current, pinnedWorkspaceIds: Array.from(pinned) };
+      });
+      setWorkspaceMenuOpenId(null);
+    },
+    [updateWorkspaceNavSettings],
+  );
+
+  const handleToggleWorkspaceExpanded = useCallback(
+    (workspaceId: string) => {
+      const currentlyExpanded = isWorkspaceExpanded(workspaceId);
+      updateWorkspaceNavSettings((current) => {
+        const expanded = new Set(current.expandedWorkspaceIds);
+        const collapsed = new Set(current.collapsedWorkspaceIds);
+        expanded.delete(workspaceId);
+        collapsed.delete(workspaceId);
+        (currentlyExpanded ? collapsed : expanded).add(workspaceId);
+        return {
+          ...current,
+          expandedWorkspaceIds: Array.from(expanded),
+          collapsedWorkspaceIds: Array.from(collapsed),
+        };
+      });
+    },
+    [isWorkspaceExpanded, updateWorkspaceNavSettings],
+  );
+
+  const handleToggleWorkspaceSessionList = useCallback((workspaceId: string) => {
+    setWorkspaceSessionListsExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(workspaceId)) {
+        next.delete(workspaceId);
+      } else {
+        next.add(workspaceId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleEditWorkspace = useCallback(
+    (candidate: Workspace) => {
+      const currentLabel = getWorkspaceLabel(candidate);
+      const nextLabel = window.prompt("Rename project", currentLabel)?.trim();
+      if (!nextLabel || nextLabel === currentLabel) {
+        setWorkspaceMenuOpenId(null);
+        return;
+      }
+      updateWorkspaceNavSettings((current) => ({
+        ...current,
+        labels: { ...current.labels, [candidate.id]: nextLabel },
+      }));
+      setWorkspaceMenuOpenId(null);
+    },
+    [getWorkspaceLabel, updateWorkspaceNavSettings],
+  );
+
+  const handleRevealWorkspace = useCallback(async (candidate: Workspace) => {
+    setWorkspaceMenuOpenId(null);
+    if (!window.electronAPI?.showInFinder) return;
+    try {
+      await window.electronAPI.showInFinder(".", candidate.path);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not reveal that folder.";
+      console.error("Failed to reveal sidebar workspace:", error);
+      setWorkspaceActionError(message);
+    }
+  }, []);
+
+  const handleArchiveWorkspace = useCallback(
+    async (workspaceId: string) => {
+      setWorkspaceMenuOpenId(null);
+      setWorkspaceActionError(null);
+      const taskIds = tasks
+        .filter((task) => task.workspaceId === workspaceId && !task.parentTaskId)
+        .map((task) => task.id);
+      if (taskIds.length === 0 || !window.electronAPI?.archiveTask) return;
+
+      const results = await Promise.allSettled(
+        taskIds.map((taskId) => window.electronAPI.archiveTask(taskId)),
+      );
+      if (results.some((result) => result.status === "rejected")) {
+        setWorkspaceActionError("Some project sessions could not be archived.");
+      }
+      if (tasks.some((task) => task.workspaceId === workspaceId && task.id === selectedTaskId)) {
+        onSelectTask(null);
+      }
+      onTasksChanged();
+    },
+    [onSelectTask, onTasksChanged, selectedTaskId, tasks],
+  );
+
+  const handleRemoveWorkspace = useCallback(
+    (workspaceId: string) => {
+      updateWorkspaceNavSettings((current) => ({
+        ...current,
+        visibleWorkspaceIds: current.visibleWorkspaceIds.filter((id) => id !== workspaceId),
+        pinnedWorkspaceIds: current.pinnedWorkspaceIds.filter((id) => id !== workspaceId),
+        expandedWorkspaceIds: current.expandedWorkspaceIds.filter((id) => id !== workspaceId),
+        collapsedWorkspaceIds: current.collapsedWorkspaceIds.filter((id) => id !== workspaceId),
+      }));
+      setWorkspaceSessionListsExpanded((current) => {
+        if (!current.has(workspaceId)) return current;
+        const next = new Set(current);
+        next.delete(workspaceId);
+        return next;
+      });
+      setWorkspaceMenuOpenId(null);
+    },
+    [updateWorkspaceNavSettings],
+  );
 
   const loadAgentRoles = useCallback(async () => {
     if (!window.electronAPI?.getAgentRoles) return;
@@ -775,6 +1244,16 @@ function SidebarComponent({
   }, [loadAgentRoles]);
 
   useEffect(() => {
+    const refreshRoles = () => void loadAgentRoles();
+    window.addEventListener(BOT_PROFILE_UPDATED_EVENT, refreshRoles);
+    window.addEventListener(BOT_PROFILE_DELETED_EVENT, refreshRoles);
+    return () => {
+      window.removeEventListener(BOT_PROFILE_UPDATED_EVENT, refreshRoles);
+      window.removeEventListener(BOT_PROFILE_DELETED_EVENT, refreshRoles);
+    };
+  }, [loadAgentRoles]);
+
+  useEffect(() => {
     if (sidebarTab !== "bots") return;
     void loadAgentRoles();
   }, [loadAgentRoles, sidebarTab]);
@@ -783,6 +1262,18 @@ function SidebarComponent({
     () => Array.from(agentRoles.values()).filter(isUserCreatedBotRole),
     [agentRoles],
   );
+  const botTasks = useMemo(
+    () =>
+      botTasksOverride ??
+      tasks.filter(
+        (task) =>
+          task.workspaceId === workspace?.id &&
+          task.agentConfig?.botConversation === true &&
+          task.source !== "side_chat",
+      ),
+    [botTasksOverride, tasks, workspace?.id],
+  );
+  const visibleSidebarTab = isBotViewActive ? "bots" : sidebarTab;
 
   const handleBotCreated = useCallback((bot: BotRole) => {
     if (bot.isSystem) return;
@@ -1058,50 +1549,217 @@ function SidebarComponent({
     };
   }, []);
 
-  const virtualizedTaskRows = useMemo(
-    () => flattenVisibleTaskRows(filteredTaskTree, effectiveCollapsedTasks),
-    [effectiveCollapsedTasks, filteredTaskTree],
+  const pinnedTaskTree = useMemo(
+    () =>
+      [...filteredTaskTree, ...filteredAutomatedTaskTree]
+        .filter((node) => node.task.pinned)
+        .sort(compareTaskTreeNodes),
+    [filteredAutomatedTaskTree, filteredTaskTree],
   );
-  const automatedTaskRows = useMemo(
-    () => flattenVisibleTaskRows(visibleAutomatedTaskTree, effectiveCollapsedTasks),
-    [effectiveCollapsedTasks, visibleAutomatedTaskTree],
+  const unpinnedTaskTree = useMemo(
+    () => filteredTaskTree.filter((node) => !node.task.pinned),
+    [filteredTaskTree],
+  );
+  const unpinnedAutomatedTaskTree = useMemo(
+    () => visibleAutomatedTaskTree.filter((node) => !node.task.pinned),
+    [visibleAutomatedTaskTree],
+  );
+
+  const workspaceGroups = useMemo(() => {
+    const nodesByWorkspaceId = new Map<string, TaskTreeNode[]>();
+    const recentNodes: TaskTreeNode[] = [];
+
+    for (const node of unpinnedTaskTree) {
+      const workspaceId = node.task.workspaceId;
+      const knownWorkspace = workspaceById.get(workspaceId);
+      if (
+        !knownWorkspace ||
+        isSidebarRecentWorkspace(knownWorkspace) ||
+        !sidebarWorkspaceIds.has(workspaceId)
+      ) {
+        recentNodes.push(node);
+        continue;
+      }
+      const nodes = nodesByWorkspaceId.get(workspaceId) || [];
+      nodes.push(node);
+      nodesByWorkspaceId.set(workspaceId, nodes);
+    }
+
+    const shouldHideEmptyGroups = hasSessionSearch || activeModeFilters.size > 0;
+    const pinnedWorkspaceOrder = new Map(
+      workspaceNavSettings.pinnedWorkspaceIds.map((workspaceId, index) => [workspaceId, index]),
+    );
+    const groups: SidebarWorkspaceGroup[] = knownSidebarWorkspaces
+      .filter(
+        (candidate) =>
+          sidebarWorkspaceIds.has(candidate.id) && !isSidebarRecentWorkspace(candidate),
+      )
+      .map((candidate) => {
+        const nodes = nodesByWorkspaceId.get(candidate.id) || [];
+        return {
+          workspace: candidate,
+          workspaceId: candidate.id,
+          label: getWorkspaceLabel(candidate),
+          path: candidate.path,
+          nodes,
+          pinned: workspaceNavSettings.pinnedWorkspaceIds.includes(candidate.id),
+          recent: false,
+          current: candidate.id === workspace?.id,
+        };
+      })
+      .filter((group) => !shouldHideEmptyGroups || group.nodes.length > 0)
+      .sort((left, right) => {
+        if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+        if (left.pinned && right.pinned) {
+          const leftOrder = pinnedWorkspaceOrder.get(left.workspaceId) ?? Number.MAX_SAFE_INTEGER;
+          const rightOrder = pinnedWorkspaceOrder.get(right.workspaceId) ?? Number.MAX_SAFE_INTEGER;
+          if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+        }
+        return compareSidebarWorkspaceGroups(left, right);
+      });
+
+    return {
+      groups,
+      recentNodes: recentNodes.sort((a, b) => compareTaskTreeNodes(a, b)),
+    };
+  }, [
+    activeModeFilters.size,
+    getWorkspaceLabel,
+    hasSessionSearch,
+    knownSidebarWorkspaces,
+    sidebarWorkspaceIds,
+    unpinnedTaskTree,
+    workspace,
+    workspaceById,
+    workspaceNavSettings.pinnedWorkspaceIds,
+  ]);
+
+  const pinnedWorkspaceGroups = useMemo(
+    () => workspaceGroups.groups.filter((group) => group.pinned),
+    [workspaceGroups.groups],
+  );
+  const regularWorkspaceGroups = useMemo(
+    () => workspaceGroups.groups.filter((group) => !group.pinned),
+    [workspaceGroups.groups],
   );
   const automatedRowsExpanded = hasSessionSearch || !automatedFolderCollapsed;
   const sidebarVirtualRows = useMemo(() => {
     const rows: SidebarVirtualRow[] = [];
-    if (visibleAutomatedTaskTree.length > 0) {
+
+    const appendTaskRows = (
+      nodes: TaskTreeNode[],
+      section: "user" | "automated",
+      grouped = false,
+      maxRows?: number,
+    ): number => {
+      const taskRows = flattenVisibleTaskRows(nodes, effectiveCollapsedTasks);
+      const visibleTaskRows =
+        maxRows === undefined
+          ? taskRows
+          : getSidebarProjectSessionPreview(taskRows, false).visibleItems;
+      rows.push(
+        ...visibleTaskRows.map(
+          (row): SidebarVirtualRow => ({ kind: "task", row, section, grouped }),
+        ),
+      );
+      return taskRows.length;
+    };
+
+    const appendWorkspaceGroup = (group: SidebarWorkspaceGroup) => {
+      const expanded = isWorkspaceExpanded(group.workspaceId);
+      const showAllSessions = workspaceSessionListsExpanded.has(group.workspaceId);
       rows.push({
-        kind: "automated-header",
-        id: "automated-header",
-        count: visibleAutomatedTaskTree.length,
-        expanded: automatedRowsExpanded,
-        hasActive: visibleAutomatedTaskTree.some((node) => isActiveSessionStatus(node.task.status)),
+        kind: "workspace-header",
+        id: `workspace:${group.workspaceId}`,
+        workspaceId: group.workspaceId,
+        label: group.label,
+        path: group.path,
+        pinned: group.pinned,
+        recent: group.recent,
+        current: group.current,
+        expanded,
       });
-      if (automatedRowsExpanded) {
-        rows.push(
-          ...automatedTaskRows.map(
-            (row): SidebarVirtualRow => ({ kind: "task", row, section: "automated" }),
-          ),
-        );
+      if (!expanded) return;
+
+      const totalTaskRows = appendTaskRows(
+        group.nodes,
+        "user",
+        true,
+        showAllSessions ? undefined : SIDEBAR_WORKSPACE_SESSION_PREVIEW_COUNT,
+      );
+      if (totalTaskRows > SIDEBAR_WORKSPACE_SESSION_PREVIEW_COUNT) {
+        rows.push({
+          kind: "workspace-session-action",
+          id: `workspace-session-action:${group.workspaceId}`,
+          workspaceId: group.workspaceId,
+          expanded: showAllSessions,
+          remainingCount: Math.max(0, totalTaskRows - SIDEBAR_WORKSPACE_SESSION_PREVIEW_COUNT),
+        });
+      }
+    };
+
+    if (pinnedTaskTree.length > 0 || pinnedWorkspaceGroups.length > 0) {
+      rows.push({ kind: "section-header", id: "section:pinned", label: "Pinned" });
+      appendTaskRows(pinnedTaskTree, "user");
+      for (const group of pinnedWorkspaceGroups) appendWorkspaceGroup(group);
+    }
+
+    const shouldShowProjectsSection =
+      regularWorkspaceGroups.length > 0 ||
+      (pinnedWorkspaceGroups.length === 0 && !hasSessionSearch && activeModeFilters.size === 0);
+
+    if (shouldShowProjectsSection) {
+      rows.push({
+        kind: "section-header",
+        id: "section:projects",
+        label: "Projects",
+        action: "add-workspace",
+      });
+      for (const group of regularWorkspaceGroups) appendWorkspaceGroup(group);
+      if (pinnedWorkspaceGroups.length === 0 && regularWorkspaceGroups.length === 0) {
+        rows.push({ kind: "workspace-empty", id: "workspace-empty" });
       }
     }
-    rows.push(
-      ...buildSidebarVirtualRows(virtualizedTaskRows, {
-        showDateHeaders: uiDensity === "focused",
-      }),
-    );
-    if (hasMoreTasks) {
+
+    const hasRecentContent =
+      workspaceGroups.recentNodes.length > 0 || unpinnedAutomatedTaskTree.length > 0;
+    if (hasRecentContent) {
+      rows.push({ kind: "section-header", id: "section:recents", label: "Recents" });
+      if (unpinnedAutomatedTaskTree.length > 0) {
+        rows.push({
+          kind: "automated-header",
+          id: "automated-header",
+          count: unpinnedAutomatedTaskTree.length,
+          expanded: automatedRowsExpanded,
+          hasActive: unpinnedAutomatedTaskTree.some((node) =>
+            isActiveSessionStatus(node.task.status),
+          ),
+        });
+        if (automatedRowsExpanded) {
+          appendTaskRows(unpinnedAutomatedTaskTree, "automated", true);
+        }
+      }
+      appendTaskRows(workspaceGroups.recentNodes, "user", true);
+    }
+
+    if (hasMoreTasks && (!hasSessionSearch || rows.length > 0)) {
       rows.push({ kind: "load-more", id: "load-more", loading: isLoadingMoreTasks });
     }
     return rows;
   }, [
     automatedRowsExpanded,
-    automatedTaskRows,
+    effectiveCollapsedTasks,
     hasMoreTasks,
+    hasSessionSearch,
+    activeModeFilters.size,
     isLoadingMoreTasks,
-    uiDensity,
-    virtualizedTaskRows,
-    visibleAutomatedTaskTree,
+    isWorkspaceExpanded,
+    pinnedTaskTree,
+    pinnedWorkspaceGroups,
+    regularWorkspaceGroups,
+    workspaceSessionListsExpanded,
+    unpinnedAutomatedTaskTree,
+    workspaceGroups.recentNodes,
   ]);
 
   const useVirtualizedTaskRows = sidebarVirtualRows.length > SIDEBAR_VIRTUALIZATION_MIN_ROWS;
@@ -1201,8 +1859,14 @@ function SidebarComponent({
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (menuRef.current && !menuRef.current.contains(target)) {
+      if (!menuRef.current?.contains(target)) {
         setMenuOpenTaskId(null);
+      }
+      if (!workspaceMenuRef.current?.contains(target)) {
+        setWorkspaceMenuOpenId(null);
+      }
+      if (!workspaceSectionMenuRef.current?.contains(target)) {
+        setWorkspaceSectionMenuOpen(false);
       }
     };
     document.addEventListener("click", handleClickOutside);
@@ -1219,6 +1883,7 @@ function SidebarComponent({
 
   const handleMenuToggle = (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation();
+    setWorkspaceMenuOpenId(null);
     setMenuOpenTaskId(menuOpenTaskId === taskId ? null : taskId);
   };
 
@@ -1563,6 +2228,7 @@ function SidebarComponent({
     rootIndex: number,
     depth: number = 0,
     isLast: boolean = true,
+    grouped = false,
   ): React.ReactNode => {
     const { task, children } = node;
     const hasChildren = children.length > 0;
@@ -1611,7 +2277,7 @@ function SidebarComponent({
         {menuOpenTaskId === task.id && (
           <div
             id={`task-menu-${task.id}`}
-            className="task-item-menu cli-task-menu"
+            className="task-item-menu sidebar-workspace-menu sidebar-session-menu"
             role="menu"
             aria-label="Session actions"
             onClick={(e) => e.stopPropagation()}
@@ -1619,7 +2285,7 @@ function SidebarComponent({
           >
             <button
               type="button"
-              className="task-item-menu-option cli-menu-option"
+              className="sidebar-workspace-menu-option"
               role="menuitem"
               data-menu-option="rename"
               onMouseDown={(e) => {
@@ -1636,12 +2302,12 @@ function SidebarComponent({
                 handleMenuItemKeyDown(e, task.id);
               }}
             >
-              <span className="cli-menu-prefix">&gt;</span>
-              rename
+              <Pencil size={16} />
+              <span>Rename</span>
             </button>
             <button
               type="button"
-              className="task-item-menu-option cli-menu-option"
+              className="sidebar-workspace-menu-option"
               role="menuitem"
               data-menu-option="pin"
               onMouseDown={(e) => {
@@ -1658,12 +2324,13 @@ function SidebarComponent({
                 handleMenuItemKeyDown(e, task.id);
               }}
             >
-              <span className="cli-menu-prefix">&gt;</span>
-              {task.pinned ? "unpin" : "pin"}
+              {task.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+              <span>{task.pinned ? "Unpin" : "Pin"}</span>
             </button>
+            <div className="sidebar-workspace-menu-separator" role="separator" />
             <button
               type="button"
-              className="task-item-menu-option task-item-menu-option-danger cli-menu-option cli-menu-danger"
+              className="sidebar-workspace-menu-option sidebar-workspace-menu-option-danger"
               role="menuitem"
               data-menu-option="archive"
               onMouseDown={(e) => {
@@ -1680,8 +2347,8 @@ function SidebarComponent({
                 handleMenuItemKeyDown(e, task.id);
               }}
             >
-              <span className="cli-menu-prefix">&gt;</span>
-              archive
+              <Archive size={16} />
+              <span>Archive</span>
             </button>
           </div>
         )}
@@ -1699,7 +2366,12 @@ function SidebarComponent({
         }}
         style={
           {
-            "--cli-task-padding-left": depth === 0 ? "12px" : `${4 + depth * 12}px`,
+            "--cli-task-padding-left":
+              depth === 0
+                ? grouped
+                  ? "28px"
+                  : "12px"
+                : `${4 + depth * 12 + (grouped ? 16 : 0)}px`,
           } as React.CSSProperties
         }
         title={taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined}
@@ -1713,7 +2385,7 @@ function SidebarComponent({
 
         {!isAwaitingSession && (
           <span
-            className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)}`}
+            className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)} ${isActiveSessionStatus(task.status) ? "cli-task-status-leading" : ""}`}
           >
             {getStatusIndicator(task.status, showCompletionAttention)}
           </span>
@@ -1872,9 +2544,251 @@ function SidebarComponent({
     );
   };
 
+  const renderWorkspaceMenu = (workspaceId: string): React.ReactNode => {
+    const candidate = workspaceById.get(workspaceId);
+    if (!candidate || workspaceMenuOpenId !== workspaceId) return null;
+    const isPinned = workspaceNavSettings.pinnedWorkspaceIds.includes(workspaceId);
+
+    return (
+      <div
+        ref={workspaceMenuRef}
+        className="task-item-menu sidebar-workspace-menu"
+        role="menu"
+        aria-label={`${getWorkspaceLabel(candidate)} project actions`}
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="sidebar-workspace-menu-option"
+          role="menuitem"
+          data-menu-option="pin"
+          onClick={() => handleToggleWorkspacePin(workspaceId)}
+        >
+          {isPinned ? <PinOff size={16} /> : <Pin size={16} />}
+          <span>{isPinned ? "Unpin" : "Pin"}</span>
+        </button>
+        <button
+          type="button"
+          className="sidebar-workspace-menu-option"
+          role="menuitem"
+          data-menu-option="edit"
+          onClick={() => handleEditWorkspace(candidate)}
+        >
+          <Pencil size={16} />
+          <span>Edit</span>
+        </button>
+        <div className="sidebar-workspace-menu-separator" role="separator" />
+        <button
+          type="button"
+          className="sidebar-workspace-menu-option sidebar-workspace-menu-option-disabled"
+          role="menuitem"
+          data-menu-option="section"
+          disabled
+          title="Sections are not available for folders yet"
+        >
+          <ListTree size={16} />
+          <span>Section</span>
+          <ChevronRight size={15} className="sidebar-workspace-menu-chevron" />
+        </button>
+        <button
+          type="button"
+          className="sidebar-workspace-menu-option"
+          role="menuitem"
+          data-menu-option="reveal"
+          onClick={() => void handleRevealWorkspace(candidate)}
+        >
+          <FolderOpen size={16} />
+          <span>Reveal in Finder</span>
+        </button>
+        <button
+          type="button"
+          className="sidebar-workspace-menu-option sidebar-workspace-menu-option-disabled"
+          role="menuitem"
+          data-menu-option="worktree"
+          disabled
+          title="Permanent worktrees are created from a session's worktree controls"
+        >
+          <GitBranch size={16} />
+          <span>Create permanent worktree</span>
+        </button>
+        <div className="sidebar-workspace-menu-separator" role="separator" />
+        <button
+          type="button"
+          className="sidebar-workspace-menu-option"
+          role="menuitem"
+          data-menu-option="archive"
+          onClick={() => void handleArchiveWorkspace(workspaceId)}
+        >
+          <Archive size={16} />
+          <span>Archive chats</span>
+        </button>
+        <div className="sidebar-workspace-menu-separator" role="separator" />
+        <button
+          type="button"
+          className="sidebar-workspace-menu-option sidebar-workspace-menu-option-danger"
+          role="menuitem"
+          data-menu-option="remove"
+          onClick={() => handleRemoveWorkspace(workspaceId)}
+        >
+          <X size={16} />
+          <span>Remove project</span>
+        </button>
+      </div>
+    );
+  };
+
   const renderSidebarVirtualRow = (row: SidebarVirtualRow): React.ReactNode => {
     if (row.kind === "date-header") {
       return <div className="sidebar-date-group">{row.label}</div>;
+    }
+    if (row.kind === "section-header") {
+      return (
+        <div
+          ref={row.action === "add-workspace" ? workspaceSectionMenuRef : undefined}
+          className="sidebar-navigation-section-header"
+        >
+          <span>{row.label}</span>
+          {row.action === "add-workspace" && (
+            <>
+              <button
+                type="button"
+                className={`sidebar-navigation-section-action ${workspaceSectionMenuOpen ? "active" : ""}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setWorkspaceMenuOpenId(null);
+                  setWorkspaceSectionMenuOpen((current) => !current);
+                }}
+                title="Organize projects"
+                aria-label="Organize projects"
+                aria-haspopup="menu"
+                aria-expanded={workspaceSectionMenuOpen}
+              >
+                <Plus size={15} strokeWidth={2.1} />
+              </button>
+              {workspaceSectionMenuOpen && (
+                <div
+                  className="task-item-menu sidebar-workspace-section-menu"
+                  role="menu"
+                  aria-label="Project sidebar actions"
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className="sidebar-workspace-menu-option"
+                    role="menuitem"
+                    data-menu-option="add-folder"
+                    onClick={() => {
+                      setWorkspaceSectionMenuOpen(false);
+                      void handleAddWorkspace();
+                    }}
+                  >
+                    <Folder size={16} />
+                    <span>Add folder or project</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-workspace-menu-option"
+                    role="menuitem"
+                    data-menu-option="add-all"
+                    onClick={handleAddAllWorkspaces}
+                  >
+                    <ListTree size={16} />
+                    <span>Add all worked-on projects</span>
+                  </button>
+                  <div className="sidebar-workspace-menu-separator" role="separator" />
+                  <button
+                    type="button"
+                    className="sidebar-workspace-menu-option sidebar-workspace-menu-option-danger"
+                    role="menuitem"
+                    data-menu-option="remove-all"
+                    onClick={handleRemoveAllWorkspaces}
+                    disabled={sidebarWorkspaceIds.size === 0}
+                  >
+                    <X size={16} />
+                    <span>Remove all projects from sidebar</span>
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      );
+    }
+    if (row.kind === "workspace-empty") {
+      return (
+        <div className="sidebar-navigation-section-empty">
+          <span>No projects added</span>
+          <small>Use + to add a folder or all worked-on projects.</small>
+        </div>
+      );
+    }
+    if (row.kind === "workspace-session-action") {
+      const label = row.expanded
+        ? "Show less"
+        : row.remainingCount > 0
+          ? `Show more (${row.remainingCount})`
+          : "Show more";
+      return (
+        <button
+          type="button"
+          className="sidebar-workspace-session-action"
+          onClick={() => handleToggleWorkspaceSessionList(row.workspaceId)}
+          aria-expanded={row.expanded}
+          aria-label={`${label} sessions`}
+        >
+          <span>{label}</span>
+        </button>
+      );
+    }
+    if (row.kind === "workspace-header") {
+      const workspaceMenuOpen = workspaceMenuOpenId === row.workspaceId;
+      return (
+        <div
+          className={`sidebar-workspace-node ${workspaceMenuOpen ? "sidebar-workspace-menu-open" : ""} ${row.current ? "current" : ""}`}
+        >
+          <div className="sidebar-workspace-row">
+            <button
+              type="button"
+              className="sidebar-workspace-toggle"
+              onClick={() => handleToggleWorkspaceExpanded(row.workspaceId)}
+              aria-expanded={row.expanded}
+              title={row.path || row.label}
+            >
+              <span className="sidebar-workspace-chevron" aria-hidden="true">
+                {row.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </span>
+              <span className="sidebar-workspace-icon" aria-hidden="true">
+                {row.expanded ? <FolderOpen size={16} /> : <Folder size={16} />}
+              </span>
+              <span className="sidebar-workspace-label">{row.label}</span>
+              {row.current && (
+                <span className="sidebar-workspace-current-dot" aria-label="Current project" />
+              )}
+            </button>
+            <div className="sidebar-workspace-actions">
+              <button
+                type="button"
+                className="sidebar-workspace-more"
+                aria-haspopup="menu"
+                aria-expanded={workspaceMenuOpen}
+                aria-label={`Project actions for ${row.label}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMenuOpenTaskId(null);
+                  setWorkspaceMenuOpenId((current) =>
+                    current === row.workspaceId ? null : row.workspaceId,
+                  );
+                }}
+              >
+                <EllipsisVertical size={15} strokeWidth={2.2} />
+              </button>
+              {renderWorkspaceMenu(row.workspaceId)}
+            </div>
+          </div>
+        </div>
+      );
     }
     if (row.kind === "automated-header") {
       return (
@@ -1925,7 +2839,7 @@ function SidebarComponent({
       <div
         className={`task-tree-node ${row.row.depth > 0 ? "task-tree-node-child" : ""} ${row.section === "automated" ? "task-tree-node-automated" : ""} ${menuOpenTaskId === row.row.node.task.id ? "task-item-menu-open" : ""}`}
       >
-        {renderTaskRow(row.row.node, row.row.rootIndex, row.row.depth, row.row.isLast)}
+        {renderTaskRow(row.row.node, row.row.rootIndex, row.row.depth, row.row.isLast, row.grouped)}
       </div>
     );
   };
@@ -2288,8 +3202,8 @@ function SidebarComponent({
             <button
               type="button"
               role="tab"
-              className={`sidebar-session-tab ${sidebarTab === "sessions" ? "active" : ""}`}
-              aria-selected={sidebarTab === "sessions"}
+              className={`sidebar-session-tab ${visibleSidebarTab === "sessions" ? "active" : ""}`}
+              aria-selected={visibleSidebarTab === "sessions"}
               onClick={() => setSidebarTab("sessions")}
             >
               Sessions
@@ -2297,18 +3211,18 @@ function SidebarComponent({
             <button
               type="button"
               role="tab"
-              className={`sidebar-session-tab ${sidebarTab === "bots" ? "active" : ""}`}
-              aria-selected={sidebarTab === "bots"}
+              className={`sidebar-session-tab ${visibleSidebarTab === "bots" ? "active" : ""}`}
+              aria-selected={visibleSidebarTab === "bots"}
               onClick={() => setSidebarTab("bots")}
             >
               Bots
             </button>
           </div>
 
-          {sidebarTab === "bots" ? (
+          {visibleSidebarTab === "bots" ? (
             <BotsPane
               roles={botRoles}
-              tasks={tasks}
+              tasks={botTasks}
               selectedTaskId={selectedTaskId}
               isLoading={isLoadingBots}
               error={botsError}
@@ -2317,6 +3231,22 @@ function SidebarComponent({
               onOpenBot={onOpenBot}
               onOpenAgents={onOpenAgents}
               onBotCreated={handleBotCreated}
+              onBotUpdated={async (bot) => {
+                setAgentRoles((current) => {
+                  const next = new Map(current);
+                  next.set(bot.id, { ...bot, color: bot.color || "#6366f1" });
+                  return next;
+                });
+                await onBotUpdated?.(bot);
+              }}
+              onBotDeleted={async (botId) => {
+                setAgentRoles((current) => {
+                  const next = new Map(current);
+                  next.delete(botId);
+                  return next;
+                });
+                await onBotDeleted?.(botId);
+              }}
             />
           ) : (
             <>
@@ -2379,13 +3309,13 @@ function SidebarComponent({
                   </div>
                 </div>
 
-                {(pinActionError || archiveActionError) && (
+                {(pinActionError || archiveActionError || workspaceActionError) && (
                   <div
                     className="cli-sidebar-error"
                     role="alert"
                     style={{ marginTop: "4px", marginLeft: "4px", marginRight: "4px" }}
                   >
-                    {pinActionError || archiveActionError}
+                    {pinActionError || archiveActionError || workspaceActionError}
                   </div>
                 )}
 
@@ -2470,7 +3400,7 @@ function SidebarComponent({
               >
                 {!sessionsCollapsed && (
                   <>
-                    {filteredTaskTree.length === 0 && visibleAutomatedTaskTree.length === 0 ? (
+                    {sidebarVirtualRows.length === 0 ? (
                       isLoadingSessions && !hasSessionSearch && activeModeFilters.size === 0 ? (
                         <div className="sidebar-session-skeleton" aria-label="Loading sessions">
                           <span className="sidebar-session-skeleton-line" />
@@ -2516,17 +3446,25 @@ function SidebarComponent({
                           return row.id;
                         }}
                         getItemHeight={(row) =>
-                          row.kind === "date-header"
-                            ? uiDensity === "focused"
-                              ? SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT
-                              : SIDEBAR_DATE_HEADER_HEIGHT
-                            : row.kind === "automated-header"
-                              ? SIDEBAR_AUTOMATED_HEADER_HEIGHT
-                              : row.kind === "load-more"
-                                ? SIDEBAR_LOAD_MORE_HEIGHT
-                                : uiDensity === "focused"
-                                  ? SIDEBAR_FOCUSED_ITEM_HEIGHT
-                                  : SIDEBAR_ITEM_HEIGHT
+                          row.kind === "section-header"
+                            ? SIDEBAR_SECTION_HEADER_HEIGHT
+                            : row.kind === "workspace-empty"
+                              ? SIDEBAR_SECTION_HEADER_HEIGHT + 20
+                              : row.kind === "workspace-session-action"
+                                ? SIDEBAR_WORKSPACE_SESSION_ACTION_HEIGHT
+                                : row.kind === "workspace-header"
+                                  ? SIDEBAR_WORKSPACE_HEADER_HEIGHT
+                                  : row.kind === "date-header"
+                                    ? uiDensity === "focused"
+                                      ? SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT
+                                      : SIDEBAR_DATE_HEADER_HEIGHT
+                                    : row.kind === "automated-header"
+                                      ? SIDEBAR_AUTOMATED_HEADER_HEIGHT
+                                      : row.kind === "load-more"
+                                        ? SIDEBAR_LOAD_MORE_HEIGHT
+                                        : uiDensity === "focused"
+                                          ? SIDEBAR_FOCUSED_ITEM_HEIGHT
+                                          : SIDEBAR_ITEM_HEIGHT
                         }
                         renderItem={(row) => renderSidebarVirtualRow(row)}
                         estimatedItemHeight={
@@ -2536,6 +3474,7 @@ function SidebarComponent({
                         }
                         overscan={10}
                         enabled
+                        suppressAutoScrollOnItemsChange
                         className="sidebar-virtual-list"
                         style={{ height: "100%" }}
                         role="list"

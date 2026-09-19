@@ -17,14 +17,7 @@
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "prediction-markets",
-      "odds",
-      "polymarket",
-      "betting",
-      "probabilities",
-      "events"
-    ],
+    "tags": ["prediction-markets", "odds", "polymarket", "betting", "probabilities", "events"],
     "routing": {
       "useWhen": "User asks about prediction markets, betting odds, event probabilities, Polymarket data, what markets think about something, or wants to check odds on any topic",
       "dontUseWhen": "User is asking about stock market prices, crypto token prices (not prediction markets), or wants to place actual trades",

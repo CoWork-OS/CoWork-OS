@@ -421,6 +421,29 @@ export function replayWorkSessionItems(items: WorkSessionItem[]): WorkSessionRep
     .reduce(reduceWorkSessionReplayState, createEmptyWorkSessionReplayState());
 }
 
+export function validateReplayAssertions(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return ["invalid_assertions:expected_object"];
+  }
+  const assertions = value as Record<string, unknown>;
+  const findings: string[] = [];
+  for (const [key, entry] of Object.entries(assertions)) {
+    if (key === "expectedTerminalStatus") {
+      if (typeof entry !== "string" || !normalizeReplayTerminalStatus(entry)) {
+        findings.push("invalid_assertion:expectedTerminalStatus");
+      }
+    } else if (key === "mustContainAll" || key === "mustCreatePaths") {
+      if (!Array.isArray(entry) || entry.some((item) => typeof item !== "string" || !item.trim())) {
+        findings.push(`invalid_assertion:${key}`);
+      }
+    } else {
+      findings.push(`unsupported_assertion:${key}`);
+    }
+  }
+  return findings;
+}
+
 export function evaluateIsolatedReplay(
   items: WorkSessionItem[],
   fixtureOrOptions?: string | WorkSessionReplayEvaluationOptions,
@@ -443,7 +466,7 @@ export function evaluateIsolatedReplay(
   const full = replayWorkSessionItems(ordered);
   const incrementalChecksum = workSessionProjectionChecksum(projectionState(incrementalFinal));
   const fullRebuildChecksum = workSessionProjectionChecksum(projectionState(full));
-  const findings = [...new Set(full.findings)];
+  const findings = [...new Set(full.findings), ...validateReplayAssertions(options.assertions)];
   if (ordered.length === 0) findings.push("missing_replay_items");
 
   const assertions = options.assertions || {};
@@ -525,8 +548,20 @@ export function createDeterministicWorkSessionReplayFixtures(): WorkSessionRepla
     ]),
     make("compaction-recovery", "compaction", [
       fixtureItem("compaction-recovery", 1, "message", "assistant_message", { text: "checkpoint" }),
-      fixtureItem("compaction-recovery", 2, "compaction", "context_compaction_started"),
+      fixtureItem("compaction-recovery", 2, "compaction", "context_compaction_started", {
+        compactionId: "compaction-recovery:compaction:1",
+        status: "started",
+        trigger: "automatic",
+        phase: "pre_turn",
+        historyGenerationBefore: 1,
+      }),
       fixtureItem("compaction-recovery", 3, "compaction", "context_compaction_completed", {
+        compactionId: "compaction-recovery:compaction:1",
+        status: "completed",
+        trigger: "automatic",
+        phase: "pre_turn",
+        historyGenerationBefore: 1,
+        historyGenerationAfter: 2,
         preserved: true,
       }),
       fixtureItem("compaction-recovery", 4, "evidence", "verification_passed"),

@@ -19,25 +19,25 @@ network scope, suppress a required approval, or repair an unavailable profile.
 
 A JSON manifest (`cowork.plugin.json`) that bundles related capabilities:
 
-| Field | Purpose |
-|-------|---------|
-| **Skills** | Prompt templates with parameter substitution for specific workflows |
-| **Skill Directories** | Directory-backed skills that load `SKILL.md` plus relative references, scripts, assets, and agent config from the pack |
-| **Agent Roles** | Pre-configured agent identities with system prompts and capabilities |
-| **Slash Commands** | Shortcut mappings that trigger skills via `/command` syntax in the message box |
-| **Connectors** | Declarative tool definitions (HTTP, shell, script) for external services |
-| **Try Asking** | Natural language prompt suggestions for discoverability |
-| **Digital Twin Link** | Optional `personaTemplateId` connecting the pack to a proactive persona |
+| Field                  | Purpose                                                                                                                    |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Skills**             | Prompt templates with parameter substitution for specific workflows                                                        |
+| **Skill Directories**  | Directory-backed skills that load `SKILL.md` plus relative references, scripts, assets, and agent config from the pack     |
+| **Agent Roles**        | Pre-configured agent identities with system prompts and capabilities                                                       |
+| **Slash Commands**     | Shortcut mappings that trigger skills via `/command` syntax in the message box                                             |
+| **Connectors**         | Declarative tool definitions (HTTP, shell, script) for external services                                                   |
+| **Try Asking**         | Natural language prompt suggestions for discoverability                                                                    |
+| **Digital Twin Link**  | Optional `personaTemplateId` connecting the pack to a proactive persona                                                    |
 | **Best-Fit Workflows** | Optional `bestFitWorkflows` array tagging the pack to one or more operational lanes (`support_ops`, `it_ops`, `sales_ops`) |
-| **Outcome Examples** | Optional `outcomeExamples` array of short strings describing what users achieve with the pack |
+| **Outcome Examples**   | Optional `outcomeExamples` array of short strings describing what users achieve with the pack                              |
 
 ### Pack Scopes
 
-| Scope | Source | Managed By |
-|-------|--------|------------|
-| **Bundled** | Ships with CoWork OS in `resources/plugin-packs/` | CoWork OS team |
-| **Personal** | User-created in `~/.cowork/extensions/` | Individual user |
-| **Organization** | Distributed by org admins | Organization admin |
+| Scope            | Source                                            | Managed By         |
+| ---------------- | ------------------------------------------------- | ------------------ |
+| **Bundled**      | Ships with CoWork OS in `resources/plugin-packs/` | CoWork OS team     |
+| **Personal**     | User-created in `~/.cowork/extensions/`           | Individual user    |
+| **Organization** | Distributed by org admins                         | Organization admin |
 
 ### How Packs Differ from Individual Skills
 
@@ -125,6 +125,7 @@ Click any pack to view its details in the right panel.
 When a pack is selected, the right panel shows:
 
 **Header**
+
 - Pack name and description
 - Toggle switch to enable/disable the pack (state persists across restarts)
 - Digital Twin badge (if the pack links to a persona template)
@@ -133,11 +134,11 @@ When a pack is selected, the right panel shows:
 
 **Tabs**
 
-| Tab | Content |
-|-----|---------|
-| **Commands** | Card grid of slash commands derived from skills. Each card shows the `/command-name` and description. |
-| **Skills** | List of all skills in the pack with icon, name, description, and **per-skill toggle switch**. Individual skills can be enabled or disabled independently without toggling the entire pack. |
-| **Agents** | Agent roles defined by the pack, plus a Digital Twin entry if `personaTemplateId` is set. |
+| Tab          | Content                                                                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Commands** | Card grid of slash commands derived from skills. Each card shows the `/command-name` and description.                                                                                      |
+| **Skills**   | List of all skills in the pack with icon, name, description, and **per-skill toggle switch**. Individual skills can be enabled or disabled independently without toggling the entire pack. |
+| **Agents**   | Agent roles defined by the pack, plus a Digital Twin entry if `personaTemplateId` is set.                                                                                                  |
 
 When `bestFitWorkflows` is set, the pack header shows colored **Best for** lane badges (Support Ops, IT Ops, Sales Ops). When `outcomeExamples` is set, a short bulleted list of outcomes appears below the badges.
 
@@ -168,20 +169,22 @@ CoWork OS ships with 37 plugin packs covering common job functions, finance work
 
 ### CoWork Shortcuts
 
-| | |
-|---|---|
-| **Icon** | ⚡ |
-| **Category** | Productivity |
-| **Agent Role** | None |
+|                |              |
+| -------------- | ------------ |
+| **Icon**       | ⚡           |
+| **Category**   | Productivity |
+| **Agent Role** | None         |
 
 **Purpose:** seed message-box workflow shortcuts as regular skills, not hard-coded app actions.
 
 **Core shortcuts:**
+
 - `/strategy`
 - `/review` - review local changes or a pull request from a regular workspace
 - `/memory`
 
 **File and workspace shortcuts:**
+
 - `/batch-rename`
 - `/smart-deduplication`
 - `/folder-structure`
@@ -192,6 +195,7 @@ CoWork OS ships with 37 plugin packs covering common job functions, finance work
 - `/size-audit`
 
 **Communication, calendar, and cross-source shortcuts:**
+
 - `/gmail-summary-drive`
 - `/calendar-prep-brief`
 - `/slack-action-items`
@@ -204,6 +208,7 @@ CoWork OS ships with 37 plugin packs covering common job functions, finance work
 - `/end-of-day-log`
 
 **Document and research shortcuts:**
+
 - `/drive-analysis-slides`
 - `/cross-platform-search`
 - `/voice-note-draft`
@@ -221,15 +226,16 @@ See [Message Box Shortcuts](message-box-shortcuts.md#cowork-shortcuts-pack) for 
 
 ### Codex Security
 
-| | |
-|---|---|
-| **Icon** | Shield |
-| **Category** | Engineering |
+|                |                   |
+| -------------- | ----------------- |
+| **Icon**       | Shield            |
+| **Category**   | Engineering       |
 | **Agent Role** | Security Reviewer |
 
 **Purpose:** run repository, diff, and deep multi-pass security review workflows through the CoWork task runtime.
 
 **Core skills and commands:**
+
 - `/security-scan` - repository-wide or scoped-path security scan
 - `/security-diff-scan` - security review of a Git diff
 - `/deep-security-scan` - deeper repository-wide scan with six independent discovery workers per round
@@ -269,20 +275,22 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Engineering
 
-| | |
-|---|---|
-| **Icon** | 👨‍💻 |
-| **Category** | Engineering |
-| **Digital Twin** | Software Engineer |
-| **Agent Role** | Engineering Assistant |
+|                  |                       |
+| ---------------- | --------------------- |
+| **Icon**         | 👨‍💻                    |
+| **Category**     | Engineering           |
+| **Digital Twin** | Software Engineer     |
+| **Agent Role**   | Engineering Assistant |
 
 **Skills:**
+
 - **Code Review Prep** — Structured review summaries with risk assessment, missing tests, and approval recommendations
 - **Dependency Audit** — Scan for CVEs, outdated versions, deprecated packages, and license issues
 - **Test Gap Analysis** — Identify functions without coverage, untested edge cases, and missing integration tests
 - **Standup Update** — Generate Done/In Progress/Blocked/Next from recent git activity
 
 **Try Asking:**
+
 - "Triage open PRs and build a prioritized review queue"
 - "Check for outdated or vulnerable dependencies"
 - "Which files changed this week but have no test coverage?"
@@ -293,19 +301,21 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Engineering Management
 
-| | |
-|---|---|
-| **Icon** | 👥 |
-| **Category** | Management |
+|                  |                     |
+| ---------------- | ------------------- |
+| **Icon**         | 👥                  |
+| **Category**     | Management          |
 | **Digital Twin** | Engineering Manager |
-| **Agent Role** | EM Assistant |
+| **Agent Role**   | EM Assistant        |
 
 **Skills:**
+
 - **Sprint Health Review** — Progress percentage, at-risk items (stalled 3+ days, blocked, failing CI), workload balance, predicted outcome
 - **1-on-1 Prep** — Recent accomplishments, current work, potential concerns, suggested discussion topics, career development points
 - **Team Status Report** — Executive summary, achievements, in-progress timelines, blockers, team health, next priorities
 
 **Try Asking:**
+
 - "Prepare 1-on-1 notes for each of my direct reports"
 - "How's our sprint looking — are we on track?"
 - "What cross-team dependencies are blocking us?"
@@ -316,19 +326,21 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Product Management
 
-| | |
-|---|---|
-| **Icon** | 🎯 |
-| **Category** | Product |
+|                  |                 |
+| ---------------- | --------------- |
+| **Icon**         | 🎯              |
+| **Category**     | Product         |
 | **Digital Twin** | Product Manager |
-| **Agent Role** | PM Assistant |
+| **Agent Role**   | PM Assistant    |
 
 **Skills:**
+
 - **Feature Request Triage** — Categorize by product area, score user impact and effort, detect duplicates, group by theme, flag conflicts with roadmap
 - **User Story Generator** — As a [user] I want [goal] so that [benefit] format, Given/When/Then acceptance criteria, edge cases, dependencies, story points
 - **Roadmap Update** — What shipped, what's in progress, what changed, key risks, decisions needed from stakeholders
 
 **Try Asking:**
+
 - "Triage these feature requests and group by theme"
 - "Are we on track for our sprint goals?"
 - "Prepare a decision package: should we build X or Y first?"
@@ -339,14 +351,15 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### DevOps
 
-| | |
-|---|---|
-| **Icon** | ⚙️ |
-| **Category** | Engineering |
+|                  |                     |
+| ---------------- | ------------------- |
+| **Icon**         | ⚙️                  |
+| **Category**     | Engineering         |
 | **Digital Twin** | DevOps/SRE Engineer |
-| **Agent Role** | DevOps Engineer |
+| **Agent Role**   | DevOps Engineer     |
 
 **Skills:**
+
 - **Incident Response** — Classification, triage steps, internal/external communication templates, escalation path, root cause checklist, mitigation options, post-mortem outline
 - **Deployment Checklist** — Pre-deployment (code review, tests, migrations, configs), deployment steps, post-deployment (health checks, smoke tests, monitoring), rollback procedure
 - **Monitoring Setup** — Key metrics (latency, throughput, errors, saturation), alert thresholds, dashboard layout, log aggregation, health checks, SLO/SLA targets
@@ -357,6 +370,7 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 - **Docker Compose File Generation** — Generate and review Docker Compose files with service definitions, networking, volumes, health checks, and multi-stage builds
 
 **Try Asking:**
+
 - "Create an incident response plan for this production issue"
 - "Generate a deployment checklist for the release"
 - "Design monitoring and alerting for the payment service"
@@ -371,19 +385,21 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Mobile Development
 
-| | |
-|---|---|
-| **Icon** | 📱 |
-| **Category** | Engineering |
+|                |                  |
+| -------------- | ---------------- |
+| **Icon**       | 📱               |
+| **Category**   | Engineering      |
 | **Agent Role** | Mobile Developer |
 
 **Skills:**
+
 - **React Native Setup** — Project scaffolding, navigation (React Navigation), state management, native module integration, Expo vs bare workflow guidance
 - **iOS Development** — SwiftUI and UIKit patterns, @Observable, SwiftData/Core Data, async/await, push notifications (APNs), `xcodebuild` commands, `xcrun simctl` simulator management, code signing, App Store submission
 - **Android Development** — Jetpack Compose, ViewModel, Room, Retrofit, Hilt/Dagger, Coroutines/Flow, Gradle builds, ADB/emulator commands, ProGuard/R8, Play Store submission
 - **Build Pipeline** — Fastlane setup, code signing automation, CI/CD for mobile, TestFlight/Play Store deployment, beta distribution
 
 **Try Asking:**
+
 - "Set up a new React Native project with navigation and state management"
 - "Build and deploy this iOS app to TestFlight"
 - "Create a Jetpack Compose screen with a ViewModel and Room database"
@@ -394,19 +410,21 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Game Development
 
-| | |
-|---|---|
-| **Icon** | 🎮 |
-| **Category** | Engineering |
+|                |                |
+| -------------- | -------------- |
+| **Icon**       | 🎮             |
+| **Category**   | Engineering    |
 | **Agent Role** | Game Developer |
 
 **Skills:**
+
 - **Unity Development** — C# scripting, MonoBehaviour lifecycle, ScriptableObjects, Addressables, URP/HDRP Shader Graph, physics, UI Toolkit, editor scripting, Unity CLI batch builds and testing
 - **Unreal Engine Development** — C++/Blueprints, Gameplay Framework, Enhanced Input, UCLASS/UPROPERTY/UFUNCTION macros, Niagara particles, Lumen/Nanite, multiplayer replication, UnrealBuildTool packaging
 - **Godot Development** — GDScript patterns, node tree architecture, signals, Godot 4 rendering, export presets, physics, UI controls, and GDNative/C++ extensions
 - **Cross-Engine Performance** — Draw call batching, LOD configuration, occlusion culling, texture optimization, object pooling, memory budgets, GPU profiling, and platform-specific tuning (mobile/PC/console)
 
 **Try Asking:**
+
 - "Create a Unity player controller with camera follow and input handling"
 - "Set up an Unreal Engine character with Enhanced Input and C++"
 - "Optimize this scene — draw calls are too high and FPS is dropping"
@@ -417,19 +435,21 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Data Analysis
 
-| | |
-|---|---|
-| **Icon** | 📊 |
-| **Category** | Data |
+|                  |                |
+| ---------------- | -------------- |
+| **Icon**         | 📊             |
+| **Category**     | Data           |
 | **Digital Twin** | Data Scientist |
-| **Agent Role** | Data Analyst |
+| **Agent Role**   | Data Analyst   |
 
 **Skills:**
+
 - **CSV Analysis** — Summary statistics, missing data, correlations, outlier detection, patterns, visualization recommendations
 - **Report Generator** — Executive summaries with key metrics, insights, trend analysis, recommendations, suggested charts
 - **SQL Query Builder** — Natural language to SQL, with table references, joins, aggregations, and optimization notes
 
 **Try Asking:**
+
 - "Analyze this CSV and give me the key insights"
 - "Build a SQL query to find our top customers by revenue"
 - "What patterns do you see in this dataset?"
@@ -440,19 +460,21 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### QA & Testing
 
-| | |
-|---|---|
-| **Icon** | 🧪 |
-| **Category** | Engineering |
+|                  |                  |
+| ---------------- | ---------------- |
+| **Icon**         | 🧪               |
+| **Category**     | Engineering      |
 | **Digital Twin** | QA/Test Engineer |
-| **Agent Role** | QA Assistant |
+| **Agent Role**   | QA Assistant     |
 
 **Skills:**
+
 - **Test Plan Generator** — Scope, test types, entry/exit criteria, environment requirements, risk areas, coverage mapping
 - **Bug Report** — Reproduction steps, expected vs. actual, severity assessment, environment details, logs, suggested root cause
 - **Release Readiness Checklist** — Test execution summary, open defects, regression results, performance benchmarks, Go/No-Go recommendation
 
 **Try Asking:**
+
 - "Create a test plan for the new checkout flow"
 - "What's our current test coverage and where are the gaps?"
 - "Write a bug report for this issue I found"
@@ -463,20 +485,22 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Sales CRM
 
-| | |
-|---|---|
-| **Icon** | 💼 |
-| **Category** | Sales |
-| **Recommended Connector** | HubSpot MCP |
-| **Agent Role** | Sales Specialist |
+|                           |                  |
+| ------------------------- | ---------------- |
+| **Icon**                  | 💼               |
+| **Category**              | Sales            |
+| **Recommended Connector** | HubSpot MCP      |
+| **Agent Role**            | Sales Specialist |
 
 **Skills:**
+
 - **Prospect Research** — Company overview, key decision makers, pain points, talking points, recent news
 - **Follow-up Email** — Personalized follow-ups referencing meeting context, with multiple tone options
 - **Pipeline Review** — Deal stage analysis, at-risk flags, win probability, recommended actions
 - **Objection Handler** — Counter-arguments for common pricing, timing, and competitor objections
 
 **Try Asking:**
+
 - "Research this prospect and compile a briefing for outreach"
 - "Draft a follow-up email after yesterday's demo call"
 - "Review my pipeline and flag deals at risk this quarter"
@@ -487,20 +511,22 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Customer Support
 
-| | |
-|---|---|
-| **Icon** | 🎧 |
-| **Category** | Operations |
-| **Recommended Connector** | Zendesk MCP |
-| **Agent Role** | Support Specialist |
+|                           |                    |
+| ------------------------- | ------------------ |
+| **Icon**                  | 🎧                 |
+| **Category**              | Operations         |
+| **Recommended Connector** | Zendesk MCP        |
+| **Agent Role**            | Support Specialist |
 
 **Skills:**
+
 - **Ticket Triage** — Categorize by type, assess urgency, route to appropriate team, extract key details
 - **Response Draft** — Empathetic, clear customer responses with solution steps and next actions
 - **Escalation Summary** — Structured escalation with timeline, attempts made, customer sentiment, and impact
 - **KB Article Draft** — Create knowledge base articles from resolved support cases
 
 **Try Asking:**
+
 - "Triage this support ticket and suggest a response"
 - "Draft a response to this frustrated customer"
 - "Create an escalation summary for the engineering team"
@@ -511,18 +537,20 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Content & Marketing
 
-| | |
-|---|---|
-| **Icon** | 📣 |
-| **Category** | Marketing |
+|                |                      |
+| -------------- | -------------------- |
+| **Icon**       | 📣                   |
+| **Category**   | Marketing            |
 | **Agent Role** | Marketing Specialist |
 
 **Skills:**
+
 - **Blog Post Draft** — SEO-optimized posts with headline options, meta description, structured sections, internal links, CTA
 - **Social Media Posts** — Multi-platform content (Twitter, LinkedIn, Instagram) with hashtags and engagement hooks
 - **Campaign Plan** — Campaign strategy with goals, channels, timeline, budget allocation, KPIs, A/B test ideas
 
 **Try Asking:**
+
 - "Draft a blog post about our new product launch"
 - "Create social media posts for this announcement"
 - "Build a campaign plan for Q3 product awareness"
@@ -533,19 +561,21 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Technical Writing
 
-| | |
-|---|---|
-| **Icon** | ✍️ |
-| **Category** | Operations |
-| **Digital Twin** | Technical Writer |
-| **Agent Role** | Technical Writer Assistant |
+|                  |                            |
+| ---------------- | -------------------------- |
+| **Icon**         | ✍️                         |
+| **Category**     | Operations                 |
+| **Digital Twin** | Technical Writer           |
+| **Agent Role**   | Technical Writer Assistant |
 
 **Skills:**
+
 - **Documentation Audit** — Scan for stale docs, broken links, accuracy vs. current code, missing sections, style consistency
 - **Changelog Generator** — Categorize changes (added, changed, fixed, deprecated, removed), write user-friendly summaries from commit history
 - **API Reference Writer** — Generate endpoint docs from code: method, path, parameters, request/response examples, error codes, authentication
 
 **Try Asking:**
+
 - "Which docs are stale after this week's code changes?"
 - "Draft a changelog from this sprint's PRs"
 - "Generate API reference documentation for the user service"
@@ -556,13 +586,14 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Equity Research
 
-| | |
-|---|---|
-| **Icon** | 📈 |
-| **Category** | Finance |
+|                |                         |
+| -------------- | ----------------------- |
+| **Icon**       | 📈                      |
+| **Category**   | Finance                 |
 | **Agent Role** | Equity Research Analyst |
 
 **Skills:**
+
 - **Earnings Analysis** — Parse earnings results, analyze beat/miss vs consensus, assess forward guidance quality
 - **Sector Analysis** — In-depth research on market dynamics, competitive landscape, regulatory environment, technology trends
 - **Coverage Initiation** — Draft initiation of coverage notes with investment thesis, financial analysis, and rating
@@ -570,6 +601,7 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 - **Catalyst Tracking** — Identify and analyze upcoming catalysts (earnings, product launches, M&A, regulatory events)
 
 **Try Asking:**
+
 - "Analyze Tesla's latest earnings vs consensus expectations"
 - "Write a semiconductor industry deep dive focusing on AI chip demand"
 - "Draft CrowdStrike coverage initiation with buy thesis"
@@ -580,13 +612,14 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Financial Analysis
 
-| | |
-|---|---|
-| **Icon** | 📊 |
-| **Category** | Finance |
+|                |                   |
+| -------------- | ----------------- |
+| **Icon**       | 📊                |
+| **Category**   | Finance           |
 | **Agent Role** | Financial Analyst |
 
 **Skills:**
+
 - **DCF Modeling** — Build discounted cash flow models with WACC calculation, terminal value, sensitivity analysis
 - **Ratio Analysis** — Comprehensive liquidity, profitability, leverage, and efficiency metrics with industry benchmarking
 - **Financial Statement Analysis** — Deep income statement, balance sheet, and cash flow analysis with trend identification
@@ -594,6 +627,7 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 - **Valuation Summary** — Multi-method valuation combining DCF, comparables, and precedent transactions
 
 **Try Asking:**
+
 - "Build DCF model for Apple with 10-year projection and sensitivity analysis"
 - "Analyze Tesla's liquidity and profitability ratios"
 - "Compare Microsoft's financials over 5 years and flag trends"
@@ -604,13 +638,14 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Investment Banking
 
-| | |
-|---|---|
-| **Icon** | 🏦 |
-| **Category** | Finance |
+|                |                   |
+| -------------- | ----------------- |
+| **Icon**       | 🏦                |
+| **Category**   | Finance           |
 | **Agent Role** | Investment Banker |
 
 **Skills:**
+
 - **Deal Screening** — Screen and identify M&A targets, IPO candidates based on strategic and financial criteria
 - **Pitch Book** — Prepare structured pitch book content with situation overview, strategic alternatives, valuation, process
 - **M&A Analysis** — Synergy analysis, accretion/dilution modeling, deal structure evaluation
@@ -618,6 +653,7 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 - **Comps Analysis** — Trading comparable companies and precedent transaction analysis for valuation
 
 **Try Asking:**
+
 - "Screen potential M&A targets in healthcare SaaS under $500M EV"
 - "Prepare pitch book for mid-market tech company sale process"
 - "Analyze accretion/dilution of Company A acquiring Company B at 30% premium"
@@ -628,13 +664,14 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Private Equity
 
-| | |
-|---|---|
-| **Icon** | 🏢 |
-| **Category** | Finance |
+|                |              |
+| -------------- | ------------ |
+| **Icon**       | 🏢           |
+| **Category**   | Finance      |
 | **Agent Role** | PE Associate |
 
 **Skills:**
+
 - **Deal Sourcing** — Source and screen PE investment targets based on financial, strategic, operational criteria
 - **LBO Modeling** — Build leveraged buyout models with debt structuring, sources/uses, returns analysis, sensitivity
 - **Portfolio Monitoring** — Track portfolio company performance against business plan with KPI dashboards
@@ -642,6 +679,7 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 - **Fund Reporting** — Prepare fund-level LP reports with performance metrics, capital accounts, portfolio summaries
 
 **Try Asking:**
+
 - "Screen mid-market healthcare services companies suitable for platform acquisition"
 - "Build LBO model for $200M acquisition with 5x leverage and 20% equity"
 - "Generate quarterly performance dashboard for logistics portfolio company"
@@ -652,13 +690,14 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 ### Wealth Management
 
-| | |
-|---|---|
-| **Icon** | 💎 |
-| **Category** | Finance |
+|                |                |
+| -------------- | -------------- |
+| **Icon**       | 💎             |
+| **Category**   | Finance        |
 | **Agent Role** | Wealth Advisor |
 
 **Skills:**
+
 - **Portfolio Construction** — Build diversified portfolios using modern portfolio theory, factor analysis, constraint optimization
 - **Asset Allocation** — Strategic and tactical asset allocation recommendations based on macro outlook and client profile
 - **Client Reporting** — Generate client-facing performance reports with attribution, commentary, and forward outlook
@@ -666,6 +705,7 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 - **Tax Optimization** — Tax-loss harvesting identification, asset location optimization, tax-aware strategies
 
 **Try Asking:**
+
 - "Construct balanced portfolio for moderate-risk client with $2M investable assets"
 - "Recommend tactical asset allocation shift given current macro environment"
 - "Prepare quarterly performance review for Henderson family account"
@@ -678,15 +718,15 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 
 Seven of the seventeen bundled packs link to [Digital Twin Personas](digital-twins.md):
 
-| Pack | Persona Template | Example Role Fit |
-|------|-----------------|------------------|
-| Engineering | Software Engineer | PR triage, dependency checks, test coverage review |
-| Engineering Management | Engineering Manager | Sprint health reporting, standup prep, blocker detection |
-| Product Management | Product Manager | Feature triage, roadmap prep, stakeholder briefs |
-| DevOps | DevOps/SRE Engineer | Uptime review, deployment verification, incident summaries |
-| Data Analysis | Data Scientist | Pipeline review, data quality scans, anomaly detection |
-| QA & Testing | QA/Test Engineer | Test coverage reporting, regression review, flaky-test detection |
-| Technical Writing | Technical Writer | Doc freshness review, style consistency checks, link verification |
+| Pack                   | Persona Template    | Example Role Fit                                                  |
+| ---------------------- | ------------------- | ----------------------------------------------------------------- |
+| Engineering            | Software Engineer   | PR triage, dependency checks, test coverage review                |
+| Engineering Management | Engineering Manager | Sprint health reporting, standup prep, blocker detection          |
+| Product Management     | Product Manager     | Feature triage, roadmap prep, stakeholder briefs                  |
+| DevOps                 | DevOps/SRE Engineer | Uptime review, deployment verification, incident summaries        |
+| Data Analysis          | Data Scientist      | Pipeline review, data quality scans, anomaly detection            |
+| QA & Testing           | QA/Test Engineer    | Test coverage reporting, regression review, flaky-test detection  |
+| Technical Writing      | Technical Writer    | Doc freshness review, style consistency checks, link verification |
 
 Pack activation exposes the linked twin as an optional persona preset. It does not auto-enroll that role into heartbeat, Workflow Intelligence, or memory ownership.
 
@@ -785,6 +825,7 @@ This helps pack authors avoid accidental ID collisions. The later-registered ski
 ### Update Detection
 
 The Customize panel checks for pack updates in the background on mount. It compares installed pack versions against the remote registry catalog using semver comparison. Packs with newer versions available show:
+
 - An **orange dot** on the sidebar item
 - An **"Update available: vX.Y.Z"** badge in the detail panel header
 
@@ -792,24 +833,24 @@ Update checks are non-blocking and fail silently if the registry is unavailable.
 
 ### IPC Channels
 
-| Channel | Direction | Purpose |
-|---------|-----------|---------|
-| `pluginPack:list` | Renderer → Main | List all plugin packs with metadata |
-| `pluginPack:get` | Renderer → Main | Get single pack details |
-| `pluginPack:toggle` | Renderer → Main | Enable or disable a pack (persisted) |
-| `pluginPack:toggleSkill` | Renderer → Main | Enable or disable a specific skill within a pack (persisted) |
-| `pluginPack:getContext` | Renderer → Main | Get active connectors and skills |
-| `pluginPack:checkUpdates` | Renderer → Main | Check for pack updates against remote registry |
-| `pluginPack:scaffold` | Renderer → Main | Create a new pack from a template |
-| `pluginPack:installGit` | Renderer → Main | Install a pack from a Git repository |
-| `pluginPack:installUrl` | Renderer → Main | Install a pack from a manifest URL |
-| `pluginPack:uninstall` | Renderer → Main | Uninstall a user-installed pack |
-| `pluginPack:registrySearch` | Renderer → Main | Search the remote pack registry |
-| `pluginPack:registryDetails` | Renderer → Main | Get pack details from remote registry |
-| `pluginPack:registryCategories` | Renderer → Main | Get available categories from registry |
-| `admin:policiesGet` | Renderer → Main | Get current admin policies |
-| `admin:policiesUpdate` | Renderer → Main | Update admin policies |
-| `admin:checkPack` | Renderer → Main | Check if a pack is allowed/required |
+| Channel                         | Direction       | Purpose                                                      |
+| ------------------------------- | --------------- | ------------------------------------------------------------ |
+| `pluginPack:list`               | Renderer → Main | List all plugin packs with metadata                          |
+| `pluginPack:get`                | Renderer → Main | Get single pack details                                      |
+| `pluginPack:toggle`             | Renderer → Main | Enable or disable a pack (persisted)                         |
+| `pluginPack:toggleSkill`        | Renderer → Main | Enable or disable a specific skill within a pack (persisted) |
+| `pluginPack:getContext`         | Renderer → Main | Get active connectors and skills                             |
+| `pluginPack:checkUpdates`       | Renderer → Main | Check for pack updates against remote registry               |
+| `pluginPack:scaffold`           | Renderer → Main | Create a new pack from a template                            |
+| `pluginPack:installGit`         | Renderer → Main | Install a pack from a Git repository                         |
+| `pluginPack:installUrl`         | Renderer → Main | Install a pack from a manifest URL                           |
+| `pluginPack:uninstall`          | Renderer → Main | Uninstall a user-installed pack                              |
+| `pluginPack:registrySearch`     | Renderer → Main | Search the remote pack registry                              |
+| `pluginPack:registryDetails`    | Renderer → Main | Get pack details from remote registry                        |
+| `pluginPack:registryCategories` | Renderer → Main | Get available categories from registry                       |
+| `admin:policiesGet`             | Renderer → Main | Get current admin policies                                   |
+| `admin:policiesUpdate`          | Renderer → Main | Update admin policies                                        |
+| `admin:checkPack`               | Renderer → Main | Check if a pack is allowed/required                          |
 
 ### Preload API
 
@@ -882,6 +923,7 @@ Click the **"+"** button in the Customize panel sidebar header to open the Plugi
 ### Features
 
 **Browse Registry**
+
 - Search packs by name or description with debounced filtering
 - Filter by category using clickable chips
 - Paginated results grid with pack cards showing icon, name, description, and category
@@ -889,12 +931,14 @@ Click the **"+"** button in the Customize panel sidebar header to open the Plugi
 - Install results surface whether the pack was installed cleanly, installed with a warning, or quarantined
 
 **Install from URL/Git**
+
 - Enter any Git URL (`github:owner/repo`, `https://github.com/...`, `git@github.com:...`)
 - Or enter a direct URL to a `cowork.plugin.json` manifest
 - Progress feedback during installation
 - Imported packs are scanned before activation and can be quarantined with a stored report instead of being loaded immediately
 
 **Create New Pack**
+
 - Fill in pack name, display name, category, and icon
 - Scaffolds a new pack directory in `~/.cowork/extensions/`
 - Includes example skill and agent role to get started
@@ -903,6 +947,7 @@ Click the **"+"** button in the Customize panel sidebar header to open the Plugi
 ### How Installation Works
 
 **From Git:**
+
 1. Shallow clone the repository to a temp directory
 2. Validate the `cowork.plugin.json` manifest
 3. Run install-time bundle security scanning against the manifest, declarative connectors, bundled scripts, and any detected package references
@@ -911,6 +956,7 @@ Click the **"+"** button in the Customize panel sidebar header to open the Plugi
 6. Trigger plugin discovery to register the new pack
 
 **From URL:**
+
 1. Fetch the manifest JSON from the URL
 2. Validate required fields and structure
 3. Stage the manifest and run install-time security scanning
@@ -918,11 +964,13 @@ Click the **"+"** button in the Customize panel sidebar header to open the Plugi
 5. Trigger plugin discovery to register the new pack
 
 If a pack is blocked, CoWork stores it in quarantine outside the normal discovery path and exposes:
+
 - a short install result summary
 - a detailed report view in the Customize panel
 - retry scan and removal actions
 
 **From Scaffold:**
+
 1. Validate pack name (kebab-case, max 64 chars, no path traversal)
 2. Create directory in `~/.cowork/extensions/`
 3. Generate `cowork.plugin.json` with all fields populated
@@ -934,8 +982,9 @@ If a pack is blocked, CoWork stores it in quarantine outside the normal discover
 Only user-installed packs (in `~/.cowork/extensions/`) can be uninstalled. Bundled packs and organization packs cannot be removed.
 
 To uninstall: right-click a personal pack in the sidebar or use the API:
+
 ```typescript
-window.electronAPI.uninstallPluginPack("my-custom-pack")
+window.electronAPI.uninstallPluginPack("my-custom-pack");
 ```
 
 ## Imported Pack Security
@@ -943,6 +992,7 @@ window.electronAPI.uninstallPluginPack("my-custom-pack")
 Imported packs are treated as a trust boundary.
 
 CoWork now applies the following behavior to packs installed from Git or URL sources:
+
 - installs are staged before activation
 - declarative connectors, manifest fields, bundled text/script content, and inferred package references are scanned before the pack is registered
 - high-confidence malicious findings move the pack into quarantine instead of loading it
@@ -1013,12 +1063,12 @@ Packs placed in the organization directory are loaded with `scope: "organization
 
 ### Policy Enforcement
 
-| Policy | Effect |
-|--------|--------|
-| **Blocked packs** | Pack shows as disabled, cannot be toggled on |
-| **Required packs** | Pack cannot be toggled off, auto-activated |
-| **Allowed packs** | If set, only listed packs are permitted (whitelist) |
-| **Blocked connectors** | Specific connectors cannot be used |
+| Policy                    | Effect                                                |
+| ------------------------- | ----------------------------------------------------- |
+| **Blocked packs**         | Pack shows as disabled, cannot be toggled on          |
+| **Required packs**        | Pack cannot be toggled off, auto-activated            |
+| **Allowed packs**         | If set, only listed packs are permitted (whitelist)   |
+| **Blocked connectors**    | Specific connectors cannot be used                    |
 | **Installation controls** | Toggle custom pack creation, git install, URL install |
 
 Policies are enforced at the IPC handler level — the UI reflects policy state with visual indicators (lock icons, disabled toggles).
@@ -1055,7 +1105,7 @@ window.electronAPI.scaffoldPluginPack({
   category: "Engineering",
   icon: "🔧",
   author: "Your Name",
-})
+});
 ```
 
 ### Minimal Manifest
@@ -1110,10 +1160,7 @@ window.electronAPI.scaffoldPluginPack({
       "systemPrompt": "You are a custom assistant. Be helpful and precise."
     }
   ],
-  "tryAsking": [
-    "Analyze this input and give recommendations",
-    "Help me with my custom workflow"
-  ]
+  "tryAsking": ["Analyze this input and give recommendations", "Help me with my custom workflow"]
 }
 ```
 
@@ -1137,10 +1184,7 @@ window.electronAPI.scaffoldPluginPack({
     "Draft personalized follow-up emails for 20 prospects in one session",
     "Review pipeline health and flag at-risk deals automatically"
   ],
-  "tryAsking": [
-    "Natural language prompt 1",
-    "Natural language prompt 2"
-  ],
+  "tryAsking": ["Natural language prompt 1", "Natural language prompt 2"],
   "skills": [
     {
       "id": "skill-id",
@@ -1287,6 +1331,7 @@ See [Digital Twin Personas Guide](digital-twin-personas-guide.md) for the full l
 ### Cross-Functional Team
 
 Enable multiple packs simultaneously. A team of 5 might have:
+
 - 2 engineers with the **Engineering** pack + twin
 - 1 PM with **Product Management** pack + twin
 - 1 EM with **Engineering Management** pack + twin
@@ -1300,21 +1345,22 @@ Each person gets role-specific skills and proactive digital twins that work in t
 
 CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 
-| Feature | CoWork OS | Typical AI Plugins |
-|---------|-----------|-------------------|
-| **Digital Twin integration** | Packs link to proactive personas that work in the background | Reactive only — waits for user prompts |
-| **Multi-model** | Skills work across supported account, API, gateway, cloud, local-model, and Mixture of Agents routes | Commonly tied to one provider |
-| **Local-first** | Pack definitions and runtime state stay local by default; invoked providers and integrations receive required request data | Commonly cloud-dependent |
-| **MCP standard** | Connectors use open Model Context Protocol | Proprietary integrations |
-| **Heartbeat tasks** | Twins proactively surface insights on a schedule | No background processing |
-| **Agent Teams** | Packs include team configurations for multi-agent orchestration | Single agent only |
-| **Declarative** | Create packs with JSON only — no code required | Often requires code |
+| Feature                      | CoWork OS                                                                                                                  | Typical AI Plugins                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **Digital Twin integration** | Packs link to proactive personas that work in the background                                                               | Reactive only — waits for user prompts |
+| **Multi-model**              | Skills work across supported account, API, gateway, cloud, local-model, and Mixture of Agents routes                       | Commonly tied to one provider          |
+| **Local-first**              | Pack definitions and runtime state stay local by default; invoked providers and integrations receive required request data | Commonly cloud-dependent               |
+| **MCP standard**             | Connectors use open Model Context Protocol                                                                                 | Proprietary integrations               |
+| **Heartbeat tasks**          | Twins proactively surface insights on a schedule                                                                           | No background processing               |
+| **Agent Teams**              | Packs include team configurations for multi-agent orchestration                                                            | Single agent only                      |
+| **Declarative**              | Create packs with JSON only — no code required                                                                             | Often requires code                    |
 
 ---
 
 ## Troubleshooting
 
 ### Pack not appearing in Customize panel
+
 - Verify `cowork.plugin.json` exists in the pack directory
 - Check that `"type": "pack"` is set in the manifest
 - Ensure the `name` field is unique across all packs
@@ -1322,58 +1368,69 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 - Check if the pack is blocked by admin policy (Settings > Admin Policies)
 
 ### Skills not executing
+
 - Check that the pack is toggled ON (enabled)
 - Verify skill parameters match the `{{placeholder}}` names in the prompt
 - Check the `"enabled": true` flag on each skill
 
 ### Digital Twin badge not showing
+
 - Confirm `personaTemplateId` is set in the manifest
 - Verify the referenced template ID exists in `resources/persona-templates/`
 - The badge appears in the Agents tab and the pack header
 
 ### Toggle doesn't persist after restart
+
 - Pack enable/disable states are persisted in `pack-states.json` in the user data directory
 - Per-skill toggle states are also persisted (individual skills within a pack can be toggled on/off)
 - If states appear to reset, check that the user data directory is writable
 - Delete `pack-states.json` to reset all toggles to defaults
 
 ### Pack toggle is locked / cannot be disabled
+
 - The pack may be marked as **required** by admin policy
 - Check Settings > Admin Policies > Required Packs
 - Required packs show a lock indicator and cannot be toggled off
 
 ### Pack is blocked by policy
+
 - The pack is in the admin policy blocked list
 - Contact your organization admin to unblock it
 - Blocked packs appear grayed out with a "Blocked" indicator
 
 ### Git install fails
+
 - Verify the Git URL is accessible (try cloning manually)
 - Check that the repo contains a valid `cowork.plugin.json` at the root
 - Git-based installation may be disabled by admin policy
 
 ### Skill ID conflict between packs
+
 - Two packs may define skills with the same ID
 - The registry logs a warning at startup: check the console for `[PluginRegistry] Skill ID "..." already registered by`
 - The later-loaded pack's skill takes precedence
 - Fix by renaming the conflicting skill ID in one of the packs
 
 ### Update indicator not showing
+
 - Update checks require the remote pack registry to be reachable
 - Checks run in the background on panel mount and fail silently on network errors
 - Only packs in the remote registry catalog can have update indicators
 - Bundled packs are updated with app releases, not via the registry
 
 ### Search not finding a pack
+
 - The search bar matches against: display name, name, description, category, and skill names
 - Search is case-insensitive
 - Try a broader term or clear the search to show all packs
 
 ### Plugin Store shows "Installation disabled"
+
 - Admin policies may restrict custom pack creation or remote installation
 - Check Settings > Admin Policies > Installation Permissions
 
 ### Pack installed but is not visible
+
 - The import may have been quarantined during install or on the next discovery pass
 - Open the Customize panel and check the **Quarantined Imports** section
 - Use **View Report** to inspect the finding, then retry the scan or remove the pack

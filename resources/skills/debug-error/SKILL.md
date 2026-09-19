@@ -37,11 +37,11 @@ Analyze an error message and suggest fixes
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| error | string | Yes | The error message or stack trace |
+| Name  | Type   | Required | Description                      |
+| ----- | ------ | -------- | -------------------------------- |
+| error | string | Yes      | The error message or stack trace |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 429 characters.
-- Runtime prompt is defined directly in `../debug-error.json`. 
+- Runtime prompt is defined directly in `../debug-error.json`.

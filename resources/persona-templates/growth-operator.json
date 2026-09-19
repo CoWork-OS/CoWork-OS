@@ -19,11 +19,7 @@
     "staggerOffset": 9
   },
   "cognitiveOffload": {
-    "primaryCategories": [
-      "information-triage",
-      "decision-preparation",
-      "status-reporting"
-    ],
+    "primaryCategories": ["information-triage", "decision-preparation", "status-reporting"],
     "proactiveTasks": [
       {
         "id": "growth-experiment-review",

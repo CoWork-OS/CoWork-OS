@@ -13,6 +13,7 @@
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { assertResolvedHostAllowed } from "../../security/address-classes";
 import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 import { CanvasManager } from "../../canvas/canvas-manager";
 import { LLMTool } from "../llm/types";
@@ -468,6 +469,9 @@ export class CanvasTools {
         `Network access denied for "${parsedUrl.toString()}": ${networkDecision.reason}`,
       );
     }
+    // The policy above only inspects the literal host. Resolve the name too, so
+    // `evil.test` pointing at 169.254.169.254 or a private range is refused.
+    await assertResolvedHostAllowed(parsedUrl.hostname);
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "canvas_open_url",
       sessionId,

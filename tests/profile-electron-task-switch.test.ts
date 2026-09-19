@@ -295,7 +295,7 @@ describe("profile_electron_task_switch", () => {
       },
       {
         source: "electron",
-        line: "[IPC] [RendererPerf] {\"message\":\"[Startup] sidebar_ready at 200.0ms\"}",
+        line: '[IPC] [RendererPerf] {"message":"[Startup] sidebar_ready at 200.0ms"}',
       },
     ]);
 

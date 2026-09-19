@@ -37,30 +37,20 @@
       "description": "How to publish the learned workflow.",
       "required": false,
       "default": "proposal",
-      "options": [
-        "proposal",
-        "draft-only"
-      ]
+      "options": ["proposal", "draft-only"]
     }
   ],
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
     "author": "cowork-os",
-    "tags": [
-      "browser",
-      "automation",
-      "skills",
-      "learning"
-    ],
+    "tags": ["browser", "automation", "skills", "learning"],
     "routing": {
       "useWhen": "Use when the user wants to learn a repeatable browser workflow from live site exploration and turn it into a durable reusable skill.",
       "dontUseWhen": "Do not use for one-off browsing, simple scraping, ordinary research, or frontend QA where playwright-qa is the better fit.",
       "outputs": "Autobrowse run notes, strategy.md, iterations.md, draft-skill.md, and usually an approval-gated skill proposal.",
       "successCriteria": "The workflow is successfully attempted, refined, documented with evidence, and graduated into a reusable draft or skill proposal.",
-      "expectedArtifacts": [
-        "autobrowse"
-      ],
+      "expectedArtifacts": ["autobrowse"],
       "examples": {
         "positive": [
           "Find cheap road bikes near me on Craigslist and remember the best way to do this.",

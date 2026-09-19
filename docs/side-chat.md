@@ -32,15 +32,15 @@ CoWork opens a right-side Side Chat panel and keeps the parent task selected on 
 
 Side Chat is a first-class session type with a stricter contract than a normal task fork:
 
-| Guarantee | Behavior |
-|-----------|----------|
-| **Non-steering** | Side questions do not append instructions to the parent task, change the parent plan, cancel work, approve tools, or alter the active queue. |
-| **Parent keeps running** | The active parent session continues independently while the side response is generated. |
-| **Read-only chat** | Side Chat runs in chat execution mode with command tools unavailable, autonomous mode off, worktree creation off, and mutating tools denied. |
-| **Hidden inherited context** | The side task can receive read-only parent transcript and runtime context, but cloned parent events are hidden from the visible Side Chat transcript. |
+| Guarantee                        | Behavior                                                                                                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Non-steering**                 | Side questions do not append instructions to the parent task, change the parent plan, cancel work, approve tools, or alter the active queue.                     |
+| **Parent keeps running**         | The active parent session continues independently while the side response is generated.                                                                          |
+| **Read-only chat**               | Side Chat runs in chat execution mode with command tools unavailable, autonomous mode off, worktree creation off, and mutating tools denied.                     |
+| **Hidden inherited context**     | The side task can receive read-only parent transcript and runtime context, but cloned parent events are hidden from the visible Side Chat transcript.            |
 | **Visible side-only transcript** | The panel shows only messages asked and answered directly in Side Chat. It does not replay the original parent prompt or parent answers at the top of the panel. |
-| **Fresh status checks** | Status/progress questions inject a live parent-status snapshot for that turn. The assistant must prefer that snapshot over older side-chat history. |
-| **Markdown rendering** | Side answers render Markdown, including inline code, lists, and fenced code blocks. |
+| **Fresh status checks**          | Status/progress questions inject a live parent-status snapshot for that turn. The assistant must prefer that snapshot over older side-chat history.              |
+| **Markdown rendering**           | Side answers render Markdown, including inline code, lists, and fenced code blocks.                                                                              |
 
 ## Status Questions
 
@@ -104,17 +104,17 @@ This means Side Chat can explain what it can see from inherited and live parent 
 
 ## Implementation Landmarks
 
-| Area | Files |
-|------|-------|
-| `/side` shortcut parsing | `src/shared/message-shortcuts.ts` |
-| Side task type | `src/shared/types.ts` |
-| Fork creation, hidden context, and live parent-status injection | `src/electron/agent/daemon.ts` |
-| Side-chat prompt rules and chat-mode behavior | `src/electron/agent/executor.ts` |
-| Tool deny-all enforcement | `src/electron/agent/runtime/ToolPolicyPipeline.ts` |
-| IPC bridge | `src/electron/ipc/handlers.ts`, `src/electron/preload.ts` |
-| Main app wiring | `src/renderer/App.tsx` |
-| Main composer `/side` trigger | `src/renderer/components/MainContent/MainContent.tsx` |
-| Side panel UI and Markdown rendering | `src/renderer/components/SideChatPanel.tsx`, `src/renderer/components/side-chat-panel.css` |
+| Area                                                            | Files                                                                                      |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `/side` shortcut parsing                                        | `src/shared/message-shortcuts.ts`                                                          |
+| Side task type                                                  | `src/shared/types.ts`                                                                      |
+| Fork creation, hidden context, and live parent-status injection | `src/electron/agent/daemon.ts`                                                             |
+| Side-chat prompt rules and chat-mode behavior                   | `src/electron/agent/executor.ts`                                                           |
+| Tool deny-all enforcement                                       | `src/electron/agent/runtime/ToolPolicyPipeline.ts`                                         |
+| IPC bridge                                                      | `src/electron/ipc/handlers.ts`, `src/electron/preload.ts`                                  |
+| Main app wiring                                                 | `src/renderer/App.tsx`                                                                     |
+| Main composer `/side` trigger                                   | `src/renderer/components/MainContent/MainContent.tsx`                                      |
+| Side panel UI and Markdown rendering                            | `src/renderer/components/SideChatPanel.tsx`, `src/renderer/components/side-chat-panel.css` |
 
 ## Focused Checks
 

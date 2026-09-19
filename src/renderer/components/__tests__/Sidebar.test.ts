@@ -4,11 +4,42 @@ import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { Sidebar, truncateSidebarTitleToFit } from "../Sidebar";
+import {
+  Sidebar,
+  compareSidebarWorkspaceGroups,
+  getSidebarProjectSessionPreview,
+  getSidebarWorkspaceSelection,
+  isSidebarRecentWorkspace,
+  truncateSidebarTitleToFit,
+} from "../Sidebar";
 
 const stylesPath = fileURLToPath(new URL("../../styles/index.css", import.meta.url));
+const sidebarSourcePath = fileURLToPath(new URL("../Sidebar.tsx", import.meta.url));
 
 describe("Sidebar top-level destinations", () => {
+  it("shows Bots when a bot conversation view is active", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(Sidebar, {
+        workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+        tasks: [] as Any,
+        selectedTaskId: "bot-task-1",
+        isBotViewActive: true,
+        onSelectTask: () => {},
+        onOpenSettings: () => {},
+        onOpenMissionControl: () => {},
+        onTasksChanged: () => {},
+      }),
+    );
+
+    expect(markup).toMatch(
+      /class="sidebar-session-tab active"[^>]*aria-selected="true"[^>]*>Bots<\/button>/,
+    );
+    expect(markup).toMatch(
+      /class="sidebar-session-tab "[^>]*aria-selected="false"[^>]*>Sessions<\/button>/,
+    );
+    expect(markup).toContain("sidebar-bots-pane");
+  });
+
   it("marks Automations as the active main-screen destination", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
@@ -184,6 +215,248 @@ describe("Sidebar top-level destinations", () => {
     expect(markup).not.toContain("cli-task-status awaiting");
     expect(markup).not.toContain("cli-session-indicator-awaiting");
     expect(markup).not.toContain("cli-task-time");
+  });
+
+  it("places active session spinners in the leading sidebar gutter", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(Sidebar, {
+        workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+        tasks: [
+          {
+            id: "active-task-1",
+            title: "Active session",
+            prompt: "Active session",
+            status: "executing",
+            workspaceId: "ws-1",
+            createdAt: Date.now() - 60 * 1000,
+            updatedAt: Date.now() - 60 * 1000,
+          },
+          {
+            id: "active-child-task-1",
+            parentTaskId: "active-task-1",
+            title: "Active child session",
+            prompt: "Active child session",
+            status: "executing",
+            workspaceId: "ws-1",
+            createdAt: Date.now() - 45 * 1000,
+            updatedAt: Date.now() - 45 * 1000,
+          },
+        ] as Any,
+        selectedTaskId: "active-task-1",
+        onSelectTask: () => {},
+        onOpenSettings: () => {},
+        onOpenMissionControl: () => {},
+        onTasksChanged: () => {},
+      }),
+    );
+
+    expect((markup.match(/cli-task-status active cli-task-status-leading/g) ?? []).length).toBe(2);
+    expect(markup).toContain("Active session");
+    const source = readFileSync(stylesPath, "utf8");
+    expect(source).toMatch(
+      /\.density-focused \.cli-task-status-leading\s*\{[\s\S]*position:\s*absolute;[\s\S]*left:\s*4px;/,
+    );
+  });
+
+  it("shows failed sessions by default while keeping the optional filter available", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(Sidebar, {
+        workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+        tasks: [
+          {
+            id: "failed-task-1",
+            title: "Recently stopped session",
+            prompt: "Recently stopped session",
+            status: "cancelled",
+            workspaceId: "ws-1",
+            createdAt: Date.now() - 2 * 60 * 1000,
+            updatedAt: Date.now() - 2 * 60 * 1000,
+          },
+        ] as Any,
+        selectedTaskId: null,
+        onSelectTask: () => {},
+        onOpenSettings: () => {},
+        onOpenMissionControl: () => {},
+        onTasksChanged: () => {},
+      }),
+    );
+
+    expect(markup).toContain("Recently stopped session");
+    expect(markup).toContain('title="Filter sessions"');
+  });
+
+  it("keeps projects opt-in while retaining pinned and recent sessions", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(Sidebar, {
+        workspace: { id: "ws-cowork", name: "cowork", path: "/workspace/cowork" } as Any,
+        tasks: [
+          {
+            id: "pinned-task",
+            title: "Pinned session",
+            prompt: "Pinned session",
+            status: "completed",
+            workspaceId: "ws-cowork",
+            pinned: true,
+            createdAt: Date.now() - 60_000,
+            updatedAt: Date.now() - 60_000,
+          },
+          {
+            id: "recent-task",
+            title: "Temporary session",
+            prompt: "Temporary session",
+            status: "completed",
+            workspaceId: "__temp_workspace__:sidebar-test",
+            createdAt: Date.now() - 120_000,
+            updatedAt: Date.now() - 120_000,
+          },
+        ] as Any,
+        selectedTaskId: null,
+        onSelectTask: () => {},
+        onOpenSettings: () => {},
+        onOpenMissionControl: () => {},
+        onTasksChanged: () => {},
+      }),
+    );
+
+    expect(markup).toContain("Pinned");
+    expect(markup).toContain("Projects");
+    expect(markup).toContain("Recents");
+    expect(markup).toContain("No projects added");
+    expect(markup).toContain('aria-label="Organize projects"');
+    expect(markup).not.toContain('sidebar-workspace-label">cowork');
+    expect(markup).toContain("Pinned session");
+    expect(markup).toContain("Temporary session");
+    expect(markup.indexOf("Pinned session")).toBeLessThan(markup.indexOf("Projects"));
+  });
+
+  it("keeps project menu icons and labels left-aligned", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
+    expect(source).toMatch(
+      /\.sidebar-workspace-menu-option\s*\{[\s\S]*justify-content:\s*flex-start;[\s\S]*text-align:\s*left;/,
+    );
+  });
+
+  it("keeps the project organizer menu clear of the sidebar edge", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
+    expect(source).toMatch(/\.sidebar-workspace-section-menu\s*\{[\s\S]*right:\s*-12px;/);
+  });
+
+  it("uses the project menu treatment for session actions", () => {
+    const source = readFileSync(sidebarSourcePath, "utf8");
+    const sessionMenu = source.match(
+      /className="task-item-menu sidebar-workspace-menu sidebar-session-menu"[\s\S]*?aria-label="Session actions"[\s\S]*?<\/div>/,
+    )?.[0];
+
+    expect(sessionMenu).toContain('className="sidebar-workspace-menu-option"');
+    expect(sessionMenu).toContain("<Pencil size={16} />");
+    expect(sessionMenu).toContain("<Pin size={16} />");
+    expect(sessionMenu).toContain("<Archive size={16} />");
+    expect(sessionMenu).toContain("sidebar-workspace-menu-option-danger");
+    expect(sessionMenu).not.toContain("cli-menu-prefix");
+    expect(sessionMenu).not.toContain("cli-menu-option");
+  });
+
+  it("previews six project sessions and reports the remaining sessions", () => {
+    const sessions = Array.from({ length: 8 }, (_, index) => `session-${index + 1}`);
+
+    expect(getSidebarProjectSessionPreview(sessions, false)).toEqual({
+      visibleItems: sessions.slice(0, 6),
+      hasMore: true,
+      remainingCount: 2,
+    });
+    expect(getSidebarProjectSessionPreview(sessions, true)).toEqual({
+      visibleItems: sessions,
+      hasMore: false,
+      remainingCount: 0,
+    });
+  });
+
+  it("does not render a session-count badge in project rows", () => {
+    expect(readFileSync(sidebarSourcePath, "utf8")).not.toContain("sidebar-workspace-count");
+  });
+
+  it("left-aligns the project session overflow action with session rows", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
+    expect(source).toMatch(
+      /\.sidebar-workspace-session-action\s*\{[\s\S]*justify-content:\s*flex-start\s*!important;[\s\S]*padding:\s*2px 12px 2px 40px;/,
+    );
+  });
+
+  it("keeps the project session overflow action text-only", () => {
+    const source = readFileSync(sidebarSourcePath, "utf8");
+    const actionBlock = source.match(
+      /if \(row\.kind === "workspace-session-action"\)[\s\S]*?if \(row\.kind === "workspace-header"\)/,
+    )?.[0];
+
+    expect(actionBlock).toContain("<span>{label}</span>");
+    expect(actionBlock).not.toContain("Chevron");
+  });
+
+  it("uses explicit project selection and always keeps pinned projects selected", () => {
+    const selected = getSidebarWorkspaceSelection({
+      visibleWorkspaceIds: ["ws-folder"],
+      pinnedWorkspaceIds: ["ws-pinned", "ws-folder"],
+    });
+
+    expect([...selected]).toEqual(["ws-folder", "ws-pinned"]);
+  });
+
+  it("keeps temporary workspace paths out of durable project ordering", () => {
+    expect(
+      isSidebarRecentWorkspace({
+        id: "workspace-temp-qa",
+        name: "cowork-realistic-qa-3",
+        path: "/Users/mesut/Downloads/app/cowork/tmp/cowork-realistic-qa-3",
+      } as Any),
+    ).toBe(true);
+    expect(
+      isSidebarRecentWorkspace({
+        id: "workspace-permanent",
+        name: "glean",
+        path: "/Users/mesut/Desktop/glean",
+      } as Any),
+    ).toBe(false);
+  });
+
+  it("sorts project groups deterministically instead of by last-used database order", () => {
+    const groups = [
+      {
+        workspaceId: "workspace-zeta",
+        label: "Project 10",
+        path: "/projects/project-10",
+        nodes: [],
+        pinned: false,
+        recent: false,
+        current: false,
+      },
+      {
+        workspaceId: "workspace-alpha",
+        label: "Project 2",
+        path: "/projects/project-2",
+        nodes: [],
+        pinned: false,
+        recent: false,
+        current: false,
+      },
+      {
+        workspaceId: "workspace-current",
+        label: "Project 99",
+        path: "/projects/project-99",
+        nodes: [],
+        pinned: false,
+        recent: false,
+        current: true,
+      },
+    ];
+
+    expect([...groups].sort(compareSidebarWorkspaceGroups).map((group) => group.label)).toEqual([
+      "Project 99",
+      "Project 2",
+      "Project 10",
+    ]);
   });
 
   it("places the completion attention dot directly before the session time", () => {

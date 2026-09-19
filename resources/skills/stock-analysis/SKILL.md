@@ -37,12 +37,12 @@ Analyze stocks, ETFs, and crypto using Yahoo Finance and Alpha Vantage. Get real
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| ticker | string | No | Stock ticker symbol (e.g., AAPL, MSFT, BTC-USD, ^GSPC) |
-| analysis_type | select | No | Type of analysis to perform |
+| Name          | Type   | Required | Description                                            |
+| ------------- | ------ | -------- | ------------------------------------------------------ |
+| ticker        | string | No       | Stock ticker symbol (e.g., AAPL, MSFT, BTC-USD, ^GSPC) |
+| analysis_type | select | No       | Type of analysis to perform                            |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 918 characters.
-- Runtime prompt is defined directly in `../stock-analysis.json`. 
+- Runtime prompt is defined directly in `../stock-analysis.json`.

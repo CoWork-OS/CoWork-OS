@@ -16,38 +16,39 @@ OnDestroy()       -> Called when object is destroyed
 ```
 
 ### Component Pattern
+
 ```csharp
 public class PlayerController : MonoBehaviour
 {
     [Header("Movement")]
     [SerializeField] private float moveSpeed = 5f;
     [SerializeField] private float jumpForce = 10f;
-    
+
     [Header("Ground Check")]
     [SerializeField] private Transform groundCheck;
     [SerializeField] private LayerMask groundLayer;
-    
+
     private Rigidbody rb;
     private bool isGrounded;
-    
+
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
     }
-    
+
     private void Update()
     {
         isGrounded = Physics.CheckSphere(groundCheck.position, 0.2f, groundLayer);
-        
+
         float horizontal = Input.GetAxisRaw("Horizontal");
         float vertical = Input.GetAxisRaw("Vertical");
         Vector3 direction = new Vector3(horizontal, 0, vertical).normalized;
-        
+
         if (direction.magnitude >= 0.1f)
         {
             rb.MovePosition(rb.position + direction * moveSpeed * Time.deltaTime);
         }
-        
+
         if (Input.GetButtonDown("Jump") && isGrounded)
         {
             rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
@@ -75,7 +76,7 @@ public class WeaponData : ScriptableObject
 public class WeaponSystem : MonoBehaviour
 {
     [SerializeField] private WeaponData currentWeapon;
-    
+
     public void Attack()
     {
         // Use currentWeapon.damage, currentWeapon.range, etc.
@@ -91,7 +92,7 @@ public class ObjectPool<T> where T : MonoBehaviour
     private readonly Queue<T> pool = new();
     private readonly T prefab;
     private readonly Transform parent;
-    
+
     public ObjectPool(T prefab, int initialSize, Transform parent = null)
     {
         this.prefab = prefab;
@@ -103,14 +104,14 @@ public class ObjectPool<T> where T : MonoBehaviour
             pool.Enqueue(obj);
         }
     }
-    
+
     public T Get()
     {
         T obj = pool.Count > 0 ? pool.Dequeue() : Object.Instantiate(prefab, parent);
         obj.gameObject.SetActive(true);
         return obj;
     }
-    
+
     public void Return(T obj)
     {
         obj.gameObject.SetActive(false);
@@ -140,11 +141,13 @@ await Addressables.DownloadDependenciesAsync("EnemyGroup").Task;
 ```
 
 ## Shader Graph (URP)
+
 - Create in Project: Create > Shader Graph > URP > Lit/Unlit Shader Graph
 - Key nodes: Sample Texture 2D, Fresnel Effect, Noise, UV manipulation
 - Output: Base Color, Normal, Metallic, Smoothness, Emission
 
 ## Custom Shader (URP)
+
 ```hlsl
 Shader "Custom/ToonShading"
 {
@@ -159,26 +162,28 @@ Shader "Custom/ToonShading"
 ```
 
 ## UI Toolkit
+
 ```csharp
 public class GameHUD : MonoBehaviour
 {
     [SerializeField] private UIDocument uiDocument;
     private Label scoreLabel;
     private ProgressBar healthBar;
-    
+
     private void OnEnable()
     {
         var root = uiDocument.rootVisualElement;
         scoreLabel = root.Q<Label>("score-label");
         healthBar = root.Q<ProgressBar>("health-bar");
     }
-    
+
     public void UpdateScore(int score) => scoreLabel.text = $"Score: {score}";
     public void UpdateHealth(float pct) => healthBar.value = pct * 100;
 }
 ```
 
 ## Editor Scripting
+
 ```csharp
 #if UNITY_EDITOR
 using UnityEditor;
@@ -218,6 +223,7 @@ public class LevelGeneratorEditor : Editor
 ```
 
 ## Testing
+
 ```csharp
 using NUnit.Framework;
 using UnityEngine;
@@ -233,7 +239,7 @@ public class PlayerTests
         health.TakeDamage(30);
         Assert.AreEqual(70, health.CurrentHealth);
     }
-    
+
     [UnityTest]
     public IEnumerator Player_Movement_ChangesPosition()
     {
@@ -246,6 +252,7 @@ public class PlayerTests
 ```
 
 ## Performance Tips
+
 - Use `[SerializeField]` instead of `public` fields
 - Cache component references in `Awake()`
 - Avoid `Find()` and `GetComponent()` in `Update()`

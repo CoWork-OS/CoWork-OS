@@ -1,6 +1,7 @@
 import * as os from "os";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { createHash } from "node:crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { BrowserService } from "../browser/browser-service";
@@ -20,6 +21,7 @@ import {
 } from "../../browser/browser-workbench-service";
 import { normalizeBrowserUrl } from "../../browser/browser-session-manager";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { assertResolvedHostAllowed } from "../../security/address-classes";
 import {
   assertWorkspaceFilesystemAccess,
   assertWorkspaceReadableFileAccessWithApproval,
@@ -27,6 +29,13 @@ import {
   resolveWorkspaceFilesystemAccessWithApproval,
 } from "../../security/access-profile-paths";
 import { BuiltinToolsSettingsManager } from "./builtin-settings";
+import { LLMProviderFactory } from "../llm/provider-factory";
+import { createConfiguredJevProvider, isJevActiveHarnessEnabled } from "../jev";
+import { createDecisionService } from "../decisions";
+import {
+  selectBrowserActionsWithJev,
+  type BrowserActionCandidate,
+} from "../jev/browser-action-decision";
 
 // oxlint-disable-next-line typescript-eslint/no-explicit-any
 type Any = any;
@@ -139,6 +148,129 @@ export class BrowserTools {
       : undefined;
   }
 
+  private async selectBrowserActionsWithJev(
+    input: Record<string, unknown>,
+    actions: Array<Record<string, unknown>>,
+  ): Promise<Array<Record<string, unknown>> | null> {
+    let settings: ReturnType<typeof LLMProviderFactory.loadSettings>;
+    try {
+      settings = LLMProviderFactory.loadSettings();
+    } catch {
+      return null;
+    }
+    const jevSettings = settings.jev;
+    if (
+      !jevSettings ||
+      jevSettings.browserActionSelectionEnabled === false ||
+      !isJevActiveHarnessEnabled(jevSettings)
+    ) {
+      return null;
+    }
+
+    let resolution: ReturnType<typeof createConfiguredJevProvider>;
+    try {
+      resolution = createConfiguredJevProvider(settings);
+    } catch {
+      resolution = null;
+    }
+    if (!resolution) return null;
+
+    const sessionId = this.getSessionId(input);
+    let snapshot: Any = null;
+    if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+      snapshot = await this.browserWorkbenchService.snapshot(this.taskId, sessionId);
+    } else {
+      try {
+        const content = await this.browserService.getContent();
+        snapshot = {
+          url: content.url,
+          title: content.title,
+          links: content.links?.slice?.(0, 40),
+        };
+      } catch {
+        snapshot = null;
+      }
+    }
+    if (!snapshot) return null;
+
+    const snapshotDigest = createHash("sha256")
+      .update(
+        JSON.stringify({
+          url: snapshot.url || "",
+          title: snapshot.title || "",
+          nodes: Array.isArray(snapshot.nodes)
+            ? snapshot.nodes.slice(0, 80).map((node: Any) => ({
+                ref: node?.ref,
+                role: node?.role,
+                name: node?.name,
+                value: node?.value,
+              }))
+            : snapshot.links,
+        }),
+      )
+      .digest("hex");
+
+    const candidates: BrowserActionCandidate[] = actions.map((action, index) => {
+      const targetText = `${String(action.selector || "")} ${String(action.key || "")}`;
+      return {
+        index,
+        type: String(action.type || "").toLowerCase(),
+        ...(typeof action.selector === "string" ? { selector: action.selector } : {}),
+        ...(typeof action.value === "string" ? { value: action.value } : {}),
+        ...(typeof action.text === "string" ? { text: action.text } : {}),
+        ...(typeof action.key === "string" ? { key: action.key } : {}),
+        ...(typeof action.direction === "string" ? { direction: action.direction } : {}),
+        snapshotDigest,
+        sensitive: /password|token|secret|api[_-]?key|credential|ssn|credit.?card/i.test(
+          targetText,
+        ),
+        consequential: /delete|remove|purchase|pay|send|publish|submit|confirm/i.test(targetText),
+      };
+    });
+
+    const decision = await selectBrowserActionsWithJev({
+      provider: resolution.provider,
+      decisionService: createDecisionService(resolution.provider, {
+        model: resolution.model,
+        providerType: resolution.providerType,
+        telemetryContext: {
+          workspaceId: this.workspace.id,
+          taskId: this.taskId,
+          sourceKind: "browser-action-selection",
+        },
+        timeoutMs: Math.min(jevSettings.timeoutMs ?? 700, 1_500),
+        maxRetries: 0,
+        maxCalls: 1,
+        maxConcurrent: 1,
+        cache: { enabled: true, ttlMs: 5_000, maxEntries: 4 },
+      }),
+      model: resolution.model,
+      snapshotDigest,
+      actions: candidates,
+      timeoutMs: Math.min(jevSettings.timeoutMs ?? 700, 1_500),
+    });
+    this.daemon.logEvent(this.taskId, "log", {
+      metric: "jev_browser_action_selection",
+      status: decision.status,
+      reason: decision.reason,
+      snapshotDigest,
+      candidateCount: actions.length,
+      selectedCount: decision.selectedIndexes.length,
+      decisionModel: decision.model,
+    });
+    if (decision.status !== "selected" || decision.selectedIndexes.length === 0) return null;
+    const selected = new Set(decision.selectedIndexes);
+    const prefixLength = decision.selectedIndexes.includes(0)
+      ? (() => {
+          let count = 0;
+          while (selected.has(count)) count += 1;
+          return count;
+        })()
+      : 0;
+    if (prefixLength <= 0) return null;
+    return actions.slice(0, prefixLength);
+  }
+
   private syncVisibleAccessPolicy(input?: unknown): void {
     this.browserWorkbenchService.setAccessPolicy?.({
       taskId: this.taskId,
@@ -167,7 +299,7 @@ export class BrowserTools {
     return value;
   }
 
-  private ensureVisibleNavigationAllowed(rawUrl: unknown): string {
+  private async ensureVisibleNavigationAllowed(rawUrl: unknown): Promise<string> {
     const url = normalizeBrowserUrl(rawUrl);
     if (!url) {
       throw new Error("url is required");
@@ -189,6 +321,10 @@ export class BrowserTools {
       }
       throw new Error(`Network access denied for "${url}": ${decision.reason}`);
     }
+    // The policy above only inspects the literal host. Resolve the name too, so
+    // `evil.test` pointing at 169.254.169.254 or a private range is refused
+    // rather than navigated to and read back through browser_get_content.
+    await assertResolvedHostAllowed(new URL(url).hostname);
     return url;
   }
 
@@ -1467,7 +1603,7 @@ export class BrowserTools {
         // Apply the same network/domain policy before choosing visible,
         // headless, or Browser Use Cloud routing. This prevents a fallback
         // backend from changing the error or bypassing the guardrail.
-        const navigationUrl = this.ensureVisibleNavigationAllowed(input?.url);
+        const navigationUrl = await this.ensureVisibleNavigationAllowed(input?.url);
         if (await this.shouldUseVisibleWorkbenchForNavigation(input)) {
           const visibleResult = await this.browserWorkbenchService.navigate({
             taskId: this.taskId,
@@ -2454,9 +2590,13 @@ export class BrowserTools {
       }
 
       case "browser_act_batch": {
-        const actions = Array.isArray(input?.actions) ? input.actions : [];
+        let actions = Array.isArray(input?.actions) ? input.actions : [];
         if (actions.length === 0) {
           return { success: false, error: "actions array is required and must not be empty" };
+        }
+        const selectedActions = await this.selectBrowserActionsWithJev(input, actions);
+        if (selectedActions && selectedActions.length < actions.length) {
+          actions = selectedActions;
         }
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
           const results: Array<{ type: string; success: boolean; error?: string }> = [];

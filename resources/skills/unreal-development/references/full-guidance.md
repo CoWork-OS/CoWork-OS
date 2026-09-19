@@ -5,6 +5,7 @@ You are an Unreal Engine development specialist. Use the `run_command` tool for 
 ## Gameplay Framework
 
 ### Class Hierarchy
+
 ```
 UObject
   AActor
@@ -18,6 +19,7 @@ UObject
 ```
 
 ### Actor Lifecycle
+
 ```
 Constructor()       -> CDO creation, set defaults (no world context)
 PostInitProperties() -> After property init
@@ -27,6 +29,7 @@ EndPlay(Reason)     -> When removed from world or play ends
 ```
 
 ### Character with Enhanced Input
+
 ```cpp
 // MyCharacter.h
 #pragma once
@@ -39,29 +42,29 @@ UCLASS()
 class MYGAME_API AMyCharacter : public ACharacter
 {
     GENERATED_BODY()
-    
+
 public:
     AMyCharacter();
-    
+
 protected:
     virtual void BeginPlay() override;
     virtual void SetupPlayerInputComponent(UInputComponent* InputComponent) override;
-    
+
     UPROPERTY(EditDefaultsOnly, Category = "Input")
     class UInputMappingContext* DefaultMappingContext;
-    
+
     UPROPERTY(EditDefaultsOnly, Category = "Input")
     class UInputAction* MoveAction;
-    
+
     UPROPERTY(EditDefaultsOnly, Category = "Input")
     class UInputAction* JumpAction;
-    
+
 private:
     void Move(const FInputActionValue& Value);
-    
+
     UPROPERTY(VisibleAnywhere)
     class USpringArmComponent* CameraBoom;
-    
+
     UPROPERTY(VisibleAnywhere)
     class UCameraComponent* FollowCamera;
 };
@@ -78,12 +81,12 @@ private:
 AMyCharacter::AMyCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
+
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->TargetArmLength = 300.f;
     CameraBoom->bUsePawnControlRotation = true;
-    
+
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom);
 }
@@ -91,7 +94,7 @@ AMyCharacter::AMyCharacter()
 void AMyCharacter::BeginPlay()
 {
     Super::BeginPlay();
-    
+
     if (APlayerController* PC = Cast<APlayerController>(Controller))
     {
         if (auto* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
@@ -116,10 +119,10 @@ void AMyCharacter::Move(const FInputActionValue& Value)
     FVector2D Input = Value.Get<FVector2D>();
     FRotator Rotation = Controller->GetControlRotation();
     FRotator YawRotation(0, Rotation.Yaw, 0);
-    
+
     FVector Forward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
     FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-    
+
     AddMovementInput(Forward, Input.Y);
     AddMovementInput(Right, Input.X);
 }
@@ -132,23 +135,23 @@ UCLASS(Blueprintable, BlueprintType)
 class AMyActor : public AActor
 {
     GENERATED_BODY()
-    
+
     // Exposed to Blueprint, editable in editor
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float Health = 100.f;
-    
+
     // Replicated property (multiplayer)
     UPROPERTY(ReplicatedUsing = OnRep_Health)
     float ReplicatedHealth;
-    
+
     // Blueprint-callable function
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void TakeDamage(float Amount);
-    
+
     // Blueprint-implementable event
     UFUNCTION(BlueprintImplementableEvent)
     void OnDeath();
-    
+
     // Server RPC (multiplayer)
     UFUNCTION(Server, Reliable)
     void ServerAttack(FVector Target);
@@ -156,6 +159,7 @@ class AMyActor : public AActor
 ```
 
 ## Niagara Particle System
+
 - Create via Content Browser: FX > Niagara System
 - Key modules: Spawn Rate, Initialize Particle, Update Particle, Render
 - Data interfaces: Skeletal Mesh, Static Mesh, Collision
@@ -163,6 +167,7 @@ class AMyActor : public AActor
 - Event-driven spawning (on death, on hit)
 
 ## Lumen & Nanite (UE5)
+
 - **Lumen**: Dynamic global illumination and reflections
   - Enable: Project Settings > Rendering > Global Illumination > Lumen
   - Works with Skeletal Meshes, landscapes, and dynamic objects
@@ -172,6 +177,7 @@ class AMyActor : public AActor
   - Millions of polygons with constant performance
 
 ## Multiplayer Replication
+
 ```cpp
 void AMyCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -203,6 +209,7 @@ void AMyCharacter::ServerAttack_Implementation(FVector Target)
 ```
 
 ## Blueprint Best Practices
+
 - Use Blueprint Interfaces for communication between unrelated actors
 - Keep complex logic in C++, expose via UFUNCTION(BlueprintCallable)
 - Use Data Tables for bulk data (item stats, level configs)
@@ -210,6 +217,7 @@ void AMyCharacter::ServerAttack_Implementation(FVector Target)
 - Use Actor Components for reusable behavior
 
 ## Project Structure
+
 ```
 Source/
   MyGame/

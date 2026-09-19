@@ -7,8 +7,7 @@ const packagePath = join(process.cwd(), "native", "location-helper-macos");
 const executableName = "CoWorkLocationHelper";
 const buildOutput = join(packagePath, ".build", "release", executableName);
 const swiftCacheRoot =
-  process.env.COWORK_LOCATION_SWIFTPM_CACHE_DIR ||
-  join(packagePath, ".build", "swiftpm-cache");
+  process.env.COWORK_LOCATION_SWIFTPM_CACHE_DIR || join(packagePath, ".build", "swiftpm-cache");
 const swiftHome = process.env.COWORK_LOCATION_SWIFTPM_HOME || join(swiftCacheRoot, "home");
 const swiftSharedCache = join(swiftCacheRoot, "shared-cache");
 const swiftConfigPath = join(swiftCacheRoot, "configuration");
@@ -85,31 +84,35 @@ const swiftBuildEnv = {
   SWIFT_MODULE_CACHE_PATH: process.env.SWIFT_MODULE_CACHE_PATH || swiftModuleCache,
 };
 
-const build = spawnSync("swift", [
-  "build",
-  "--disable-sandbox",
-  "--cache-path",
-  swiftSharedCache,
-  "--config-path",
-  swiftConfigPath,
-  "--security-path",
-  swiftSecurityPath,
-  "--manifest-cache",
-  "local",
-  "--package-path",
-  packagePath,
-  "-c",
-  "release",
-  "-Xcc",
-  `-fmodules-cache-path=${swiftModuleCache}`,
-  "-Xswiftc",
-  "-module-cache-path",
-  "-Xswiftc",
-  swiftModuleCache,
-], {
-  stdio: "inherit",
-  env: swiftBuildEnv,
-});
+const build = spawnSync(
+  "swift",
+  [
+    "build",
+    "--disable-sandbox",
+    "--cache-path",
+    swiftSharedCache,
+    "--config-path",
+    swiftConfigPath,
+    "--security-path",
+    swiftSecurityPath,
+    "--manifest-cache",
+    "local",
+    "--package-path",
+    packagePath,
+    "-c",
+    "release",
+    "-Xcc",
+    `-fmodules-cache-path=${swiftModuleCache}`,
+    "-Xswiftc",
+    "-module-cache-path",
+    "-Xswiftc",
+    swiftModuleCache,
+  ],
+  {
+    stdio: "inherit",
+    env: swiftBuildEnv,
+  },
+);
 
 if (build.status !== 0) {
   console.error("[location-helper-macos] swift build failed.");

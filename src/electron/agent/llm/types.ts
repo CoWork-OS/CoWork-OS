@@ -148,6 +148,15 @@ export interface LLMToolUse {
   id: string;
   name: string;
   input: Record<string, Any>;
+  /**
+   * Provider-side arguments or call metadata are invalid. The executor must turn
+   * this into an error tool result without dispatching the tool. Invalid metadata
+   * may carry a synthetic ID/name solely to correlate the rejection.
+   */
+  inputError?: {
+    code: "malformed_json" | "invalid_shape";
+    message: string;
+  };
 }
 
 export interface LLMTextContent {
@@ -229,6 +238,13 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
     supportsImages: true,
     maxImageBytes: 20 * 1024 * 1024,
     supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  },
+  "atomic-chat": {
+    // Atomic Chat can serve different model families; do not infer vision
+    // support from the provider name until the selected model is qualified.
+    supportsImages: false,
+    maxImageBytes: 0,
+    supportedMimeTypes: [],
   },
   moa: {
     supportsImages: true,
@@ -574,6 +590,11 @@ export type OpenRouterModelKey = keyof typeof OPENROUTER_MODELS;
  * Users with ChatGPT Plus/Team/Enterprise subscriptions can use these models
  */
 export const OPENAI_MODELS = {
+  "gpt-6-astra": {
+    id: "gpt-6-astra",
+    displayName: "GPT-6 Astra",
+    description: "Flagship model for complex reasoning and coding",
+  },
   "gpt-4o": {
     id: "gpt-4o",
     displayName: "GPT-4o",

@@ -57,6 +57,24 @@ interface LlmSummary {
   distinctTaskCount: number;
 }
 
+interface JevSummary {
+  totalJevCalls: number;
+  successfulCalls: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalReportedCost: number;
+  avgLatencyMs: number | null;
+  cacheHitRate: number | null;
+  distinctTaskCount: number;
+  byPurpose: Array<{
+    purpose: string;
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    reportedCost: number;
+  }>;
+}
+
 interface RequestDayRow {
   dateKey: string;
   llmCalls: number;
@@ -140,6 +158,7 @@ interface UsageInsightsData {
   formatted: string;
   llmSuccessRate?: number | null;
   llmSummary?: LlmSummary;
+  jevSummary?: JevSummary;
   requestsByDay?: RequestDayRow[];
   providerBreakdown?: ProviderSlice[];
   personaMetrics?: Array<{
@@ -860,6 +879,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
             }
           }
           llmSuccessRate={data.llmSuccessRate ?? null}
+          jevSummary={data.jevSummary}
           requestsByDay={data.requestsByDay ?? []}
           providerBreakdown={data.providerBreakdown ?? []}
           costByModel={(data.costMetrics?.costByModel ?? []).map((m) => ({

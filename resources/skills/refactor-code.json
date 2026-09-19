@@ -18,13 +18,7 @@
       "description": "What to focus on",
       "required": true,
       "default": "readability",
-      "options": [
-        "readability",
-        "performance",
-        "modularity",
-        "error handling",
-        "all of the above"
-      ]
+      "options": ["readability", "performance", "modularity", "error handling", "all of the above"]
     }
   ],
   "enabled": true,

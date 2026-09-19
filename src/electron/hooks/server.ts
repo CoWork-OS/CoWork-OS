@@ -284,6 +284,18 @@ export class HooksServer {
 
     const mappedTokens = this.findMappedTokenCandidates(hookPath, req.method || "GET");
 
+    // Verify authentication BEFORE emitting anything. The "request" event is
+    // not just logging: it reaches EventTriggerService, where a webhook-source
+    // trigger with no conditions fires on any request and can create a task.
+    // Emitting first made that reachable from any web page the user visits via
+    // a plain <img src="http://127.0.0.1:9877/hooks/x">, since the 401 and CORS
+    // only stop the attacker reading the response, not causing the effect.
+    const tokenResult = this.extractHookToken(req, url);
+    if (!this.verifyAnyToken(tokenResult.token, mappedTokens)) {
+      this.sendJsonResponse(res, 401, { success: false, error: "Invalid or missing token" });
+      return;
+    }
+
     // Emit request event
     this.emitEvent({
       action: "request",
@@ -291,13 +303,6 @@ export class HooksServer {
       path: hookPath,
       method: req.method,
     });
-
-    // Verify authentication
-    const tokenResult = this.extractHookToken(req, url);
-    if (!this.verifyAnyToken(tokenResult.token, mappedTokens)) {
-      this.sendJsonResponse(res, 401, { success: false, error: "Invalid or missing token" });
-      return;
-    }
 
     if (tokenResult.fromQuery) {
       log.warn("Token provided via query param (deprecated)");

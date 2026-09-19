@@ -173,6 +173,7 @@ export function GenericApprovalDialog({
   onApproveAllSession,
 }: GenericApprovalDialogProps) {
   const [selectedScope, setSelectedScope] = useState<ScopeKey>("once");
+  const [showAdvancedScopes, setShowAdvancedScopes] = useState(false);
   const details =
     approval.details && typeof approval.details === "object" && !Array.isArray(approval.details)
       ? (approval.details as Record<string, unknown>)
@@ -294,7 +295,13 @@ export function GenericApprovalDialog({
         { action: "allow_once" as const, label: "Allow once" },
       ];
 
-  const scopePairs = extractScopePairs(suggestedActions);
+  const allScopePairs = extractScopePairs(suggestedActions);
+  const hasAdvancedScopes = allScopePairs?.some(
+    (pair) => !["once", "session"].includes(pair.scope),
+  );
+  const scopePairs = allScopePairs?.filter(
+    (pair) => showAdvancedScopes || pair.scope === "once" || pair.scope === "session",
+  );
   const activePair = scopePairs?.find((p) => p.scope === selectedScope) ?? scopePairs?.[0];
 
   return (
@@ -350,6 +357,20 @@ export function GenericApprovalDialog({
               </div>
             </div>
 
+            {hasAdvancedScopes ? (
+              <button
+                type="button"
+                className="session-approval-approve-all-link"
+                aria-expanded={showAdvancedScopes}
+                onClick={() => {
+                  setShowAdvancedScopes(!showAdvancedScopes);
+                  setSelectedScope("once");
+                }}
+              >
+                {showAdvancedScopes ? "Hide advanced rules" : "Advanced permission rules"}
+              </button>
+            ) : null}
+
             <div className="session-approval-actions session-approval-actions--scoped">
               <button
                 type="button"
@@ -370,7 +391,7 @@ export function GenericApprovalDialog({
         ) : (
           <>
             <p className="session-approval-footer-hint">
-              Choose a one-off decision or persist the rule for this session, workspace, or profile.
+              This decision applies to the requested action and resource.
             </p>
             <div className="session-approval-actions">
               {suggestedActions.map((action) => (
@@ -391,7 +412,7 @@ export function GenericApprovalDialog({
           </>
         )}
 
-        {onApproveAllSession ? (
+        {onApproveAllSession && showAdvancedScopes && !details.accessProfile ? (
           <button
             type="button"
             className="session-approval-approve-all-link"

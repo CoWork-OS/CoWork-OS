@@ -38,4 +38,4 @@ Notion API for creating and managing pages, databases, and blocks.
 ## Runtime Prompt
 
 - Current runtime prompt length: 4860 characters.
-- Runtime prompt is defined directly in `../notion.json`. 
+- Runtime prompt is defined directly in `../notion.json`.

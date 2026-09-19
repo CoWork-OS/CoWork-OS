@@ -38,4 +38,4 @@ Docker Compose operations: service orchestration, compose file authoring, multi-
 ## Runtime Prompt
 
 - Current runtime prompt length: 899 characters.
-- Runtime prompt is defined directly in `../docker-compose-ops.json`. 
+- Runtime prompt is defined directly in `../docker-compose-ops.json`.

@@ -9,8 +9,8 @@ Create this file at the workspace root if it does not exist:
 
 ## Completed Topics
 
-| Date | Topic | File |
-|------|-------|------|
+| Date                                        | Topic | File |
+| ------------------------------------------- | ----- | ---- |
 | (empty — add rows as you complete research) |
 
 ## Queue (Next Topics)
@@ -46,10 +46,10 @@ Save each research document as `research/YYYY-MM-DD-topic-slug.md`:
 
 ### Papers / Frameworks / Case Studies
 
-| Source | Type | Key Points |
-|-------|------|------------|
+| Source       | Type                     | Key Points    |
+| ------------ | ------------------------ | ------------- |
 | [Title](URL) | Paper / Framework / Case | Bullet points |
-| ... | ... | ... |
+| ...          | ...                      | ...           |
 
 ### Citations
 

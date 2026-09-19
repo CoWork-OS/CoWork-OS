@@ -99,26 +99,20 @@ export async function GET(request: Request) {
 ```typescript
 // Incorrect: reads config on every call
 export async function processRequest(data: Data) {
-  const config = JSON.parse(
-    await fs.readFile('./config.json', 'utf-8')
-  )
-  const template = await fs.readFile('./template.html', 'utf-8')
+  const config = JSON.parse(await fs.readFile("./config.json", "utf-8"));
+  const template = await fs.readFile("./template.html", "utf-8");
 
-  return render(template, data, config)
+  return render(template, data, config);
 }
 
 // Correct: loads once at module level
-const configPromise = fs.readFile('./config.json', 'utf-8')
-  .then(JSON.parse)
-const templatePromise = fs.readFile('./template.html', 'utf-8')
+const configPromise = fs.readFile("./config.json", "utf-8").then(JSON.parse);
+const templatePromise = fs.readFile("./template.html", "utf-8");
 
 export async function processRequest(data: Data) {
-  const [config, template] = await Promise.all([
-    configPromise,
-    templatePromise
-  ])
+  const [config, template] = await Promise.all([configPromise, templatePromise]);
 
-  return render(template, data, config)
+  return render(template, data, config);
 }
 ```
 

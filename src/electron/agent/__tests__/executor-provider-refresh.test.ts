@@ -9,6 +9,94 @@ describe("TaskExecutor provider refresh", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([false, true])(
+    "counts a successful response exactly once when usage is present=%s",
+    async (hasUsage) => {
+      const recordLlmTurn = vi.fn();
+      const executor = Object.assign(Object.create(TaskExecutor.prototype), {
+        _runtime: { recordLlmTurn },
+        provider: {
+          type: "openai",
+          createMessage: vi.fn().mockResolvedValue({
+            content: [],
+            ...(hasUsage ? { usage: { inputTokens: 1, outputTokens: 1 } } : {}),
+          }),
+        },
+        modelId: "test-model",
+        abortController: new AbortController(),
+        refreshProviderIfSettingsChanged: vi.fn(),
+        emitEvent: vi.fn(),
+      });
+      await executor.createMessageWithTimeout(
+        { model: "test-model", maxTokens: 8, messages: [] },
+        1000,
+        "test",
+      );
+      // Usage-bearing responses are counted by updateTracking at their existing callsites.
+      expect(recordLlmTurn).toHaveBeenCalledTimes(hasUsage ? 0 : 1);
+      executor.provider.createMessage.mockRejectedValue(new Error("provider failed"));
+      await expect(
+        executor.createMessageWithTimeout(
+          { model: "test-model", maxTokens: 8, messages: [] },
+          1000,
+          "test",
+        ),
+      ).rejects.toThrow("provider failed");
+      expect(recordLlmTurn).toHaveBeenCalledTimes(hasUsage ? 0 : 1);
+    },
+  );
+
+  it.each([
+    ["document", false],
+    ["document", true],
+    ["canvas", false],
+    ["canvas", true],
+    ["report", false],
+    ["report", true],
+  ])("accounts for %s helper turns when usage is present=%s", async (kind, hasUsage) => {
+    const recordLlmTurn = vi.fn();
+    const updateTracking = vi.fn(() => recordLlmTurn());
+    const executor = Object.assign(Object.create(TaskExecutor.prototype), {
+      _runtime: { recordLlmTurn },
+      task: { id: "accounting-test", title: "test", agentConfig: { autoReportEnabled: true } },
+      provider: {
+        type: "openai",
+        createMessage: vi.fn().mockResolvedValue({
+          content: [{ type: "text", text: "<html><body>ok</body></html>" }],
+          ...(hasUsage
+            ? { usage: { inputTokens: 3, outputTokens: 2, cachedTokens: 1, cacheWriteTokens: 0 } }
+            : {}),
+        }),
+      },
+      modelId: "test-model",
+      abortController: new AbortController(),
+      refreshProviderIfSettingsChanged: vi.fn(),
+      emitEvent: vi.fn(),
+      updateTracking,
+      getContractPrompt: () => "test",
+      callLLMWithRetry: (fn: () => Promise<unknown>) => fn(),
+      extractTextFromLLMContent: (content: Any[]) =>
+        content.map((item) => item.text || "").join(""),
+    });
+    if (kind === "document") {
+      await executor.requestBoundedDocumentAnalysisTurn({
+        system: "test",
+        prompt: "test",
+        label: "test",
+        maxTokens: 8,
+      });
+    } else if (kind === "canvas") {
+      expect(await executor.generateCanvasHtml("test")).toContain("<html>");
+    } else {
+      // Deliberately short output: account for the response, then stop before file creation.
+      await executor.autoGenerateReport();
+    }
+    expect(executor.provider.createMessage).toHaveBeenCalledOnce();
+    expect(recordLlmTurn).toHaveBeenCalledOnce();
+    expect(updateTracking).toHaveBeenCalledTimes(hasUsage ? 1 : 0);
+    if (hasUsage) expect(updateTracking).toHaveBeenCalledWith(3, 2, 1, 0);
+  });
+
   it("refreshes provider before an LLM call and uses the refreshed model id", async () => {
     const oldProvider = {
       type: "ollama",
@@ -70,6 +158,9 @@ describe("TaskExecutor provider refresh", () => {
     expect(executor.provider).toBe(newProvider);
     expect(executor.modelId).toBe("mini-max-model");
     expect(executor.contextManager).toBeInstanceOf(ContextManager);
+    expect(executor.iterationCount).toBe(1);
+    expect(executor.globalTurnCount).toBe(1);
+    expect(executor.lifetimeTurnCount).toBe(1);
   });
 
   it("switches to the new global provider even when the task has an older model override", async () => {

@@ -148,4 +148,38 @@ describe("CollaborativeAgentLines", () => {
     expect(markup).not.toContain("failures need review");
     expect(markup).toContain("Wrap Up");
   });
+
+  it("renders ordinary delegated children without a collaborative run", () => {
+    const markup = render(
+      React.createElement(CollaborativeAgentLines, {
+        childTasks: [makeTask({ title: "Backend worker" })],
+        childEvents: [],
+        onOpenAgent: () => undefined,
+        mainTaskCompleted: false,
+      }),
+    );
+
+    expect(markup).toContain("1 background agents");
+    expect(markup).toContain("Backend worker");
+    expect(markup).toContain("Running");
+    expect(markup).not.toContain("Wrap Up");
+  });
+
+  it("collapses large worker sets behind a show-all action", () => {
+    const markup = render(
+      React.createElement(CollaborativeAgentLines, {
+        childTasks: Array.from({ length: 6 }, (_, index) =>
+          makeTask({ id: `child-${index + 1}`, title: `Worker ${index + 1}` }),
+        ),
+        childEvents: [],
+        onOpenAgent: () => undefined,
+        onShowAllAgents: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain("Worker 1");
+    expect(markup).toContain("Worker 4");
+    expect(markup).not.toContain("Worker 5");
+    expect(markup).toContain("Show all agents (2 more)");
+  });
 });

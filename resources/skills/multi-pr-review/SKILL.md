@@ -39,4 +39,4 @@ Run a consensus-style multi-agent review of a PR with severity-based findings.
 ## Runtime Prompt
 
 - Current runtime prompt length: 872 characters.
-- Runtime prompt is defined directly in `../multi-pr-review.json`. 
+- Runtime prompt is defined directly in `../multi-pr-review.json`.

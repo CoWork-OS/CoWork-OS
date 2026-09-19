@@ -182,7 +182,6 @@ cd ~/project && pi --no-session --tools read,grep,find,ls,bash -e npm:pi-librari
 
 Use the resulting shortlist as the opening context for Codex/Claude prompts instead of broad repo reads.
 
-
 ---
 
 ## Parallel Issue Fixing with git worktrees

@@ -60,11 +60,11 @@ The remaining replacement-client gaps are native new-mail compose, provider-back
 
 ## 2. Cross-System Hooks (CoWork OS)
 
-| Signal | Mission Control | Automations / triggers | Heartbeat | Briefing | Knowledge Graph | Memory / playbooks |
-|--------|-----------------|-------------------------|-----------|----------|-----------------|--------------------|
+| Signal                              | Mission Control                          | Automations / triggers                      | Heartbeat                                          | Briefing                                          | Knowledge Graph                        | Memory / playbooks                            |
+| ----------------------------------- | ---------------------------------------- | ------------------------------------------- | -------------------------------------------------- | ------------------------------------------------- | -------------------------------------- | --------------------------------------------- |
 | Saved view created / thread matched | Optional handoff from high-priority view | Rule or schedule **bridge** from saved view | Pulse can use view membership as context in future | Mention “N saved views active” in mailbox section | Entity extraction from threads in view | Playbook capture for repeated triage patterns |
-| Triage feedback | Issue updates if linked | Refine trigger conditions over time | Lower noise if user consistently dismisses class | — | Reinforce entity confidence | Reinforcement signals |
-| Quick reply / snippet usage | — | — | — | Usage counts in productivity metrics | — | Style / template preferences |
+| Triage feedback                     | Issue updates if linked                  | Refine trigger conditions over time         | Lower noise if user consistently dismisses class   | —                                                 | Reinforce entity confidence            | Reinforcement signals                         |
+| Quick reply / snippet usage         | —                                        | —                                           | —                                                  | Usage counts in productivity metrics              | —                                      | Style / template preferences                  |
 
 Mailbox events (`thread_classified`, `mission_control_handoff_created`, etc.) continue to flow through [MailboxAutomationHub](../src/electron/mailbox/MailboxAutomationHub.ts) as today.
 
@@ -93,15 +93,15 @@ Additional implemented slices since then:
 
 ## 4. Success Metrics
 
-| Metric | Definition | Target direction |
-|--------|------------|------------------|
-| Time to triage | Median seconds from open thread to archive/mark-read or reply | Decrease |
-| Saved view usage | % of active users with ≥1 saved view; filters used per session | Increase |
-| Quick reply adoption | Chips clicked / threads with suggestions shown | Increase |
-| Snippet usage | Inserts per week | Increase |
-| Handoff traceability | % of MC handoffs opened from inbox vs created-only | Increase |
-| Automation bridge | Schedules created from saved views | Increase (secondary) |
-| Feedback volume | Triage feedback rows per user (opt-in analytics locally) | Increase slowly (signal quality) |
+| Metric               | Definition                                                     | Target direction                 |
+| -------------------- | -------------------------------------------------------------- | -------------------------------- |
+| Time to triage       | Median seconds from open thread to archive/mark-read or reply  | Decrease                         |
+| Saved view usage     | % of active users with ≥1 saved view; filters used per session | Increase                         |
+| Quick reply adoption | Chips clicked / threads with suggestions shown                 | Increase                         |
+| Snippet usage        | Inserts per week                                               | Increase                         |
+| Handoff traceability | % of MC handoffs opened from inbox vs created-only             | Increase                         |
+| Automation bridge    | Schedules created from saved views                             | Increase (secondary)             |
+| Feedback volume      | Triage feedback rows per user (opt-in analytics locally)       | Increase slowly (signal quality) |
 
 ---
 

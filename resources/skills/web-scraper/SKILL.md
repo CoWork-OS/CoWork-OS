@@ -37,12 +37,12 @@ Scrape web pages with anti-bot bypass and structured data extraction using Scrap
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| url | string | Yes | URL to scrape |
-| selector | string | No | CSS selector for specific content (optional) |
+| Name     | Type   | Required | Description                                  |
+| -------- | ------ | -------- | -------------------------------------------- |
+| url      | string | Yes      | URL to scrape                                |
+| selector | string | No       | CSS selector for specific content (optional) |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1117 characters.
-- Runtime prompt is defined directly in `../web-scraper.json`. 
+- Runtime prompt is defined directly in `../web-scraper.json`.

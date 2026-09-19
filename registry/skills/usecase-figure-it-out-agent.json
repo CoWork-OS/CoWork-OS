@@ -25,10 +25,7 @@
       "description": "Policy for external irreversible actions",
       "required": false,
       "default": "ask-first",
-      "options": [
-        "ask-first",
-        "never"
-      ]
+      "options": ["ask-first", "never"]
     },
     {
       "name": "completion_bar",
@@ -36,10 +33,7 @@
       "description": "How strict to be before calling task complete",
       "required": false,
       "default": "fully-complete",
-      "options": [
-        "fully-complete",
-        "best-effort"
-      ]
+      "options": ["fully-complete", "best-effort"]
     }
   ],
   "enabled": true,

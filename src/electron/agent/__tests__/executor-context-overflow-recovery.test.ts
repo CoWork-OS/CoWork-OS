@@ -39,10 +39,12 @@ function makeExecutor(): Any {
           getContextManager: () => executor.contextManager,
           getTask: () => executor.task,
           getWorkspace: () => executor.workspace,
+          buildCompactionSummaryBlock: vi.fn(async () => "compaction summary"),
+          extractPinnedBlockContent: vi.fn((summary: string) => summary),
           pruneStaleToolErrors: executor.pruneStaleToolErrors,
           consolidateConsecutiveUserMessages: executor.consolidateConsecutiveUserMessages,
         } as Any,
-        {} as Any,
+        { transcript: { conversationHistory: [] } } as Any,
       ),
   );
   return executor;

@@ -38,4 +38,4 @@ CLI to manage emails via IMAP/SMTP. Use `himalaya` to list, read, write, reply, 
 ## Runtime Prompt
 
 - Current runtime prompt length: 3935 characters.
-- Runtime prompt is defined directly in `../himalaya.json`. 
+- Runtime prompt is defined directly in `../himalaya.json`.

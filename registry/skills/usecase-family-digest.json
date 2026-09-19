@@ -12,11 +12,7 @@
       "description": "Time range to summarize",
       "required": false,
       "default": "today",
-      "options": [
-        "today",
-        "tomorrow",
-        "week"
-      ]
+      "options": ["today", "tomorrow", "week"]
     },
     {
       "name": "recipient",
@@ -31,11 +27,7 @@
       "description": "Writing tone",
       "required": false,
       "default": "concise",
-      "options": [
-        "concise",
-        "friendly",
-        "formal"
-      ]
+      "options": ["concise", "friendly", "formal"]
     }
   ],
   "enabled": true,

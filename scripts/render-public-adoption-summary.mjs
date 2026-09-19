@@ -58,9 +58,7 @@ function renderTopList(metric, labelKey) {
 }
 
 function renderReleaseAssets(assets) {
-  const rows = (assets || [])
-    .filter((asset) => asset.platform !== "metadata")
-    .slice(0, 20);
+  const rows = (assets || []).filter((asset) => asset.platform !== "metadata").slice(0, 20);
 
   if (rows.length === 0) {
     return "| Release | Asset | Platform | Downloads | Delta |\n|---|---|---|---:|---:|\n| - | none reported | - | 0 | n/a |";
@@ -84,7 +82,10 @@ function renderReleaseAssets(assets) {
 }
 
 function renderPlatformTotals(platformTotals, platformDeltas) {
-  const platforms = new Set([...Object.keys(platformTotals || {}), ...Object.keys(platformDeltas || {})]);
+  const platforms = new Set([
+    ...Object.keys(platformTotals || {}),
+    ...Object.keys(platformDeltas || {}),
+  ]);
   const rows = [...platforms].sort();
 
   if (rows.length === 0) {
@@ -96,13 +97,21 @@ function renderPlatformTotals(platformTotals, platformDeltas) {
     "|---|---:|---:|",
     ...rows.map((platform) => {
       const delta = platformDeltas?.[platform];
-      const formattedDelta = delta == null ? "n/a" : delta >= 0 ? `+${formatNumber(delta)}` : formatNumber(delta);
+      const formattedDelta =
+        delta == null ? "n/a" : delta >= 0 ? `+${formatNumber(delta)}` : formatNumber(delta);
       return `| ${markdownEscape(platform)} | ${formatNumber(platformTotals?.[platform])} | ${formattedDelta} |`;
     }),
   ].join("\n");
 }
 
-function renderReadmeStatsBlock({ stats, repo, releases, traffic, npmDownloads, releaseDownloadDeltas }) {
+function renderReadmeStatsBlock({
+  stats,
+  repo,
+  releases,
+  traffic,
+  npmDownloads,
+  releaseDownloadDeltas,
+}) {
   const releaseDelta =
     releaseDownloadDeltas.totalDeltaSincePreviousSnapshot == null
       ? "n/a"
@@ -137,7 +146,8 @@ async function updateReadmeStats(block) {
     const after = readme.slice(endIndex + readmeStatsEnd.length).trimStart();
     readme = `${before}\n\n${block}\n\n${after}`;
   } else {
-    const heroImageMarker = '<p align="center">\n  <img src="resources/branding/images/cowork-os-1.webp"';
+    const heroImageMarker =
+      '<p align="center">\n  <img src="resources/branding/images/cowork-os-1.webp"';
     const insertIndex = readme.indexOf(heroImageMarker);
     if (insertIndex < 0) {
       throw new Error("Could not locate README insertion point for public adoption stats block.");

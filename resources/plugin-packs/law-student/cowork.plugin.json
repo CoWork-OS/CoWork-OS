@@ -7,21 +7,10 @@
   "author": "Anthropic",
   "license": "Apache-2.0",
   "homepage": "https://github.com/anthropics/claude-for-legal/tree/993f6619fc2f321cfdd65daa6919ad6cd2c56d92/law-student",
-  "keywords": [
-    "legal",
-    "law",
-    "compliance",
-    "law-student"
-  ],
+  "keywords": ["legal", "law", "compliance", "law-student"],
   "icon": "⚖️",
   "category": "Legal",
-  "recommendedConnectors": [
-    "CourtListener",
-    "Descrybe",
-    "Google Drive",
-    "Lexis+ Protégé",
-    "Slack"
-  ],
+  "recommendedConnectors": ["CourtListener", "Descrybe", "Google Drive", "Lexis+ Protégé", "Slack"],
   "tryAsking": [
     "Use Law Student Bar Prep Questions for this legal workflow",
     "Use Law Student Case Brief for this legal workflow",
@@ -475,13 +464,7 @@
       "description": "Drills Socratically, briefs cases, builds outlines, runs bar prep sessions tuned to your jurisdiction, grades IRAC practice, and plans the study schedule — without ever writing it for you.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "research",
-        "review",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "research", "review", "summarize", "triage"],
       "systemPrompt": "You are a Law Student assistant in CoWork OS. Produce draft legal work product for attorney review, preserve citations and source provenance, flag uncertainty, and require explicit confirmation before irreversible actions."
     }
   ],
@@ -498,12 +481,7 @@
       "pluginName": "law-student",
       "license": "Apache-2.0",
       "connectors": {
-        "recommendedCategories": [
-          "legal-research",
-          "case-law",
-          "documents",
-          "chat"
-        ],
+        "recommendedCategories": ["legal-research", "case-law", "documents", "chat"],
         "mcpServers": {
           "Slack": {
             "type": "http",

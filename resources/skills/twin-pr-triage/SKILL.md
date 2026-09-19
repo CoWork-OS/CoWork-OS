@@ -37,11 +37,11 @@ Scan open pull requests, assess risk and complexity, and build a prioritized rev
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| stale_hours | number | No | Hours after which a PR is considered stale |
+| Name        | Type   | Required | Description                                |
+| ----------- | ------ | -------- | ------------------------------------------ |
+| stale_hours | number | No       | Hours after which a PR is considered stale |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 763 characters.
-- Runtime prompt is defined directly in `../twin-pr-triage.json`. 
+- Runtime prompt is defined directly in `../twin-pr-triage.json`.

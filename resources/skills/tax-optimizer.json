@@ -37,15 +37,7 @@
       "type": "select",
       "description": "Federal marginal tax bracket",
       "required": true,
-      "options": [
-        "10%",
-        "12%",
-        "22%",
-        "24%",
-        "32%",
-        "35%",
-        "37%"
-      ]
+      "options": ["10%", "12%", "22%", "24%", "32%", "35%", "37%"]
     },
     {
       "name": "filingStatus",

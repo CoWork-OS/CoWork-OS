@@ -7,11 +7,7 @@
   "metadata": {
     "version": "2.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "development",
-      "skills",
-      "authoring"
-    ],
+    "tags": ["development", "skills", "authoring"],
     "routing": {
       "useWhen": "Use when the user asks to create or update AgentSkills for CoWork-OSS. Use when designing, structuring, or packaging skills. Supports JSON format with requirements, installation specs, and metadata.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",

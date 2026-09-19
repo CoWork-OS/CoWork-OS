@@ -25,8 +25,18 @@
       "prompt": "Write a blog post on the following topic.\n\nTopic: {{topic}}\nTarget audience: {{audience}}\nTone: {{tone}}\n\nPlease include:\n1. SEO-optimized title (under 60 characters)\n2. Meta description (under 160 characters)\n3. Introduction with a hook\n4. 3-5 main sections with headers (H2/H3)\n5. Key takeaways or bullet points\n6. Call-to-action\n7. Suggested internal/external link opportunities\n8. 5-10 target keywords",
       "parameters": [
         { "name": "topic", "type": "string", "description": "Blog post topic", "required": true },
-        { "name": "audience", "type": "string", "description": "Target audience", "required": false },
-        { "name": "tone", "type": "string", "description": "Writing tone (professional, casual, technical)", "required": false }
+        {
+          "name": "audience",
+          "type": "string",
+          "description": "Target audience",
+          "required": false
+        },
+        {
+          "name": "tone",
+          "type": "string",
+          "description": "Writing tone (professional, casual, technical)",
+          "required": false
+        }
       ],
       "enabled": true
     },
@@ -38,8 +48,18 @@
       "category": "Marketing",
       "prompt": "Create social media posts for the following content.\n\nContent/Announcement: {{content}}\nPlatforms: {{platforms}}\n\nFor each platform, provide:\n- Post text (optimized for character limits)\n- Suggested hashtags\n- Best posting time\n- Image/visual suggestions\n- Engagement hook",
       "parameters": [
-        { "name": "content", "type": "string", "description": "Content or announcement to promote", "required": true },
-        { "name": "platforms", "type": "string", "description": "Platforms (Twitter, LinkedIn, Instagram, etc.)", "required": false }
+        {
+          "name": "content",
+          "type": "string",
+          "description": "Content or announcement to promote",
+          "required": true
+        },
+        {
+          "name": "platforms",
+          "type": "string",
+          "description": "Platforms (Twitter, LinkedIn, Instagram, etc.)",
+          "required": false
+        }
       ],
       "enabled": true
     },
@@ -51,9 +71,19 @@
       "category": "Marketing",
       "prompt": "Create a marketing campaign plan.\n\nCampaign goal: {{goal}}\nBudget: {{budget}}\nTimeline: {{timeline}}\n\nPlease include:\n1. Campaign overview and objectives\n2. Target audience personas\n3. Channel strategy (paid, organic, email, social)\n4. Content calendar outline\n5. Budget allocation by channel\n6. KPIs and success metrics\n7. A/B testing opportunities\n8. Risk mitigation",
       "parameters": [
-        { "name": "goal", "type": "string", "description": "Campaign goal or objective", "required": true },
+        {
+          "name": "goal",
+          "type": "string",
+          "description": "Campaign goal or objective",
+          "required": true
+        },
         { "name": "budget", "type": "string", "description": "Campaign budget", "required": false },
-        { "name": "timeline", "type": "string", "description": "Campaign timeline", "required": false }
+        {
+          "name": "timeline",
+          "type": "string",
+          "description": "Campaign timeline",
+          "required": false
+        }
       ],
       "enabled": true
     }

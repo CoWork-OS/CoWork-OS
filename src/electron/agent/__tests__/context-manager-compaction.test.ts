@@ -1,8 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { ContextManager } from "../context-manager";
+import { ContextManager, truncateToolResult } from "../context-manager";
 import type { LLMMessage } from "../llm";
 
 describe("ContextManager.compactMessagesWithMeta", () => {
+  it("uses Astra's documented long context window", () => {
+    expect(new ContextManager("gpt-6-astra").getModelTokenLimit()).toBe(1_050_000);
+    expect(new ContextManager("openai/gpt-6-astra").getModelTokenLimit()).toBe(1_050_000);
+  });
+
   it("returns kind=none when within limits", () => {
     const cm = new ContextManager("gpt-3.5-turbo");
     const messages: LLMMessage[] = [
@@ -216,5 +221,28 @@ describe("ContextManager active-file path retention", () => {
       expect(keptOldActiveFileMessages.length).toBeLessThan(20);
     }
     // If no removal needed, the test is vacuously satisfied
+  });
+});
+
+describe("structured tool result size bounds", () => {
+  it("bounds metadata even when the content field is already short", () => {
+    const original = JSON.stringify({ content: "ok", metadata: "x".repeat(50_000) });
+    const truncated = truncateToolResult(original);
+    expect(truncated.length).toBeLessThanOrEqual(40_000);
+    expect(truncated).toContain("truncated");
+  });
+
+  it("counts JSON escaping and metadata in expanded document budgets", () => {
+    const original = JSON.stringify({
+      format: "pdf",
+      content: "\n".repeat(130_000),
+      metadata: "x".repeat(150_000),
+    });
+    expect(truncateToolResult(original).length).toBeLessThanOrEqual(120_000);
+  });
+
+  it("includes the array omission notice in the budget", () => {
+    const original = JSON.stringify(Array.from({ length: 51 }, () => "x".repeat(792)));
+    expect(truncateToolResult(original).length).toBeLessThanOrEqual(40_000);
   });
 });

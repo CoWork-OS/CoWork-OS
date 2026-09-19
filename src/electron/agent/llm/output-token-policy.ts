@@ -2,6 +2,14 @@ import type { LLMProviderType } from "../../../shared/types";
 import { estimateTotalTokens } from "../context-manager";
 import type { ContextManager } from "../context-manager";
 import type { LLMContent, LLMMessage } from "./types";
+import {
+  estimateLocalRequestTokenBudget,
+  resolveLocalModelExecutionProfile,
+  type LocalRequestTokenBudget,
+  type LocalModelExecutionProfile,
+  type LocalModelExecutionProfileTrace,
+} from "../runtime/local-model-execution-profile";
+import type { LLMTool } from "./types";
 
 export type OutputTokenPolicyMode = "legacy" | "adaptive";
 export type OutputBudgetRequestKind = "agentic_main" | "tool_followup" | "continuation";
@@ -25,6 +33,15 @@ export interface OutputTokenPolicyInput {
   taskMaxTokens?: number | null;
   requestKind: OutputBudgetRequestKind;
   phase: "initial" | "escalated";
+  /** Explicit opt-in profile; otherwise COWORK_LOCAL_MODEL_PROFILE is read. */
+  localProfile?: string;
+  /** Used to distinguish local OpenAI-compatible servers from remote gateways. */
+  endpointBaseUrl?: string;
+  /** Optional full-request inputs used for local profile accounting. */
+  tools?: LLMTool[];
+  evidenceTokens?: number;
+  attachmentTokens?: number;
+  memoryTokens?: number;
 }
 
 export interface ResolvedOutputTokenBudget {
@@ -44,6 +61,10 @@ export interface ResolvedOutputTokenBudget {
   policyDefault: number;
   knownHardCap: number | null;
   capSource: "task" | "env" | "policy";
+  localProfileId?: string;
+  localProfileVersion?: number;
+  localProfileTrace?: LocalModelExecutionProfileTrace;
+  localRequestBudget?: LocalRequestTokenBudget;
 }
 
 const DEFAULT_AGENTIC_INITIAL_MAX_TOKENS = 8_000;
@@ -95,14 +116,21 @@ function readEnvLimit(name: string): number | null {
 function isOpenAIReasoningModel(modelId: string): boolean {
   const normalized = String(modelId || "")
     .toLowerCase()
-    .trim();
+    .trim()
+    .replace(/^(?:openai-codex|openai)\//, "")
+    .split("@", 1)[0];
   return (
+    normalized === "gpt-6-astra" ||
     normalized.startsWith("gpt-5") ||
     normalized.startsWith("o1") ||
     normalized.startsWith("o3") ||
     normalized.startsWith("o4")
   );
 }
+
+const OPENAI_OUTPUT_LIMITS: Array<{ pattern: RegExp; limit: number }> = [
+  { pattern: /(?:^|[/:])gpt-6-astra(?:@|$)/i, limit: 128_000 },
+];
 
 function inferOpenRouterRoutedFamily(
   modelId: string,
@@ -186,7 +214,9 @@ function getKnownHardCap(
       ? BEDROCK_CLAUDE_OUTPUT_LIMITS
       : routedFamily === "anthropic" || providerFamily === "anthropic"
         ? ANTHROPIC_OUTPUT_LIMITS
-        : [];
+        : providerFamily === "openai" || routedFamily === "openai"
+          ? OPENAI_OUTPUT_LIMITS
+          : [];
 
   for (const entry of patterns) {
     if (entry.pattern.test(normalized)) {
@@ -202,7 +232,15 @@ function getPolicyDefault(
   providerFamily: OutputBudgetProviderFamily,
   routedFamily: Exclude<OutputBudgetProviderFamily, "openrouter"> | null,
   phase: "initial" | "escalated",
+  localProfile?: LocalModelExecutionProfile | null,
 ): number {
+  if (localProfile) {
+    if (phase === "escalated") return localProfile.finalOutputTokens;
+    if (requestKind === "tool_followup") return localProfile.toolFollowUpOutputTokens;
+    if (requestKind === "continuation") return localProfile.actionOutputTokens;
+    return localProfile.actionOutputTokens;
+  }
+
   const initialOverride = readEnvLimit("COWORK_LLM_AGENTIC_INITIAL_MAX_TOKENS");
   const escalatedOverride = readEnvLimit("COWORK_LLM_AGENTIC_ESCALATED_MAX_TOKENS");
   const effectiveFamily = routedFamily ?? providerFamily;
@@ -275,6 +313,13 @@ export function resolveOutputTokenParamName(opts: {
 
 export function resolveOutputTokenBudget(input: OutputTokenPolicyInput): ResolvedOutputTokenBudget {
   const mode = getOutputTokenPolicyMode();
+  const localProfileResolution = resolveLocalModelExecutionProfile({
+    providerType: String(input.providerType),
+    modelId: input.modelId,
+    baseUrl: input.endpointBaseUrl,
+    requestedProfile: input.localProfile,
+  });
+  const localProfile = localProfileResolution.profile;
   const { providerFamily, routedFamily } = resolvePolicyFamily({
     providerType: input.providerType,
     modelId: input.modelId,
@@ -287,6 +332,7 @@ export function resolveOutputTokenBudget(input: OutputTokenPolicyInput): Resolve
     providerFamily,
     routedFamily,
     input.phase,
+    localProfile,
   );
   const knownHardCap = getKnownHardCap(providerFamily, routedFamily, input.modelId);
 
@@ -309,6 +355,20 @@ export function resolveOutputTokenBudget(input: OutputTokenPolicyInput): Resolve
   }
 
   const finalBudget = Math.max(1, chosenBudget);
+  const localRequestBudget = localProfile
+    ? estimateLocalRequestTokenBudget(
+        {
+          systemText: input.system,
+          tools: input.tools,
+          history: input.messages,
+          evidenceTokens: input.evidenceTokens,
+          attachmentTokens: input.attachmentTokens,
+          memoryTokens: input.memoryTokens,
+          outputTokens: finalBudget,
+        },
+        localProfile,
+      )
+    : undefined;
 
   return {
     mode,
@@ -330,6 +390,14 @@ export function resolveOutputTokenBudget(input: OutputTokenPolicyInput): Resolve
     policyDefault,
     knownHardCap,
     capSource,
+    ...(localProfile
+      ? {
+          localProfileId: localProfile.id,
+          localProfileVersion: localProfile.version,
+          localProfileTrace: localProfileResolution.trace || undefined,
+          localRequestBudget,
+        }
+      : {}),
   };
 }
 

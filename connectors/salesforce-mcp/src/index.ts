@@ -1,24 +1,24 @@
-import * as readline from 'readline';
+import * as readline from "readline";
 
 // ==================== MCP Types ====================
 
 type JSONRPCId = string | number;
 
 type JSONRPCRequest = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCNotification = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   method: string;
   params?: Record<string, any>;
 };
 
 type JSONRPCResponse = {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: JSONRPCId;
   result?: any;
   error?: { code: number; message: string; data?: any };
@@ -38,7 +38,7 @@ type MCPTool = {
   name: string;
   description?: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties?: Record<string, MCPToolProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -54,14 +54,14 @@ type MCPServerInfo = {
   };
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+const PROTOCOL_VERSION = "2024-11-05";
 
 const MCP_METHODS = {
-  INITIALIZE: 'initialize',
-  INITIALIZED: 'notifications/initialized',
-  SHUTDOWN: 'shutdown',
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  INITIALIZE: "initialize",
+  INITIALIZED: "notifications/initialized",
+  SHUTDOWN: "shutdown",
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 } as const;
 
 const MCP_ERROR_CODES = {
@@ -113,65 +113,77 @@ class SalesforceClient {
   }
 
   async health(): Promise<RequestResult> {
-    return this.requestJson('GET', 'limits');
+    return this.requestJson("GET", "limits");
   }
 
   async listObjects(): Promise<RequestResult> {
-    return this.requestJson('GET', 'sobjects');
+    return this.requestJson("GET", "sobjects");
   }
 
   async describeObject(objectName: string): Promise<RequestResult> {
-    return this.requestJson('GET', `sobjects/${encodeURIComponent(objectName)}/describe`);
+    return this.requestJson("GET", `sobjects/${encodeURIComponent(objectName)}/describe`);
   }
 
   async getRecord(objectName: string, recordId: string, fields?: string[]): Promise<RequestResult> {
-    const query = fields && fields.length > 0 ? `?fields=${encodeURIComponent(fields.join(','))}` : '';
-    return this.requestJson('GET', `sobjects/${encodeURIComponent(objectName)}/${encodeURIComponent(recordId)}${query}`);
+    const query =
+      fields && fields.length > 0 ? `?fields=${encodeURIComponent(fields.join(","))}` : "";
+    return this.requestJson(
+      "GET",
+      `sobjects/${encodeURIComponent(objectName)}/${encodeURIComponent(recordId)}${query}`,
+    );
   }
 
   async query(soql: string, cursor?: string): Promise<RequestResult> {
     if (cursor) {
-      return this.requestJson('GET', cursor, undefined, true);
+      return this.requestJson("GET", cursor, undefined, true);
     }
 
     const encoded = encodeURIComponent(soql);
-    return this.requestJson('GET', `query?q=${encoded}`);
+    return this.requestJson("GET", `query?q=${encoded}`);
   }
 
   async createRecord(objectName: string, fields: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('POST', `sobjects/${encodeURIComponent(objectName)}`, fields);
+    return this.requestJson("POST", `sobjects/${encodeURIComponent(objectName)}`, fields);
   }
 
-  async updateRecord(objectName: string, recordId: string, fields: Record<string, any>): Promise<RequestResult> {
-    return this.requestJson('PATCH', `sobjects/${encodeURIComponent(objectName)}/${encodeURIComponent(recordId)}`, fields);
+  async updateRecord(
+    objectName: string,
+    recordId: string,
+    fields: Record<string, any>,
+  ): Promise<RequestResult> {
+    return this.requestJson(
+      "PATCH",
+      `sobjects/${encodeURIComponent(objectName)}/${encodeURIComponent(recordId)}`,
+      fields,
+    );
   }
 
   private getBaseUrl(): string {
     if (!this.config.instanceUrl) {
-      throw new Error('SALESFORCE_INSTANCE_URL is required');
+      throw new Error("SALESFORCE_INSTANCE_URL is required");
     }
-    return `${this.config.instanceUrl.replace(/\/$/, '')}/services/data/v${this.config.apiVersion}`;
+    return `${this.config.instanceUrl.replace(/\/$/, "")}/services/data/v${this.config.apiVersion}`;
   }
 
   private async requestJson(
     method: string,
     path: string,
     body?: any,
-    absolutePath = false
+    absolutePath = false,
   ): Promise<RequestResult> {
     const start = Date.now();
 
     const url = absolutePath
       ? this.buildAbsoluteUrl(path)
-      : `${this.getBaseUrl()}/${path.replace(/^\//, '')}`;
+      : `${this.getBaseUrl()}/${path.replace(/^\//, "")}`;
 
     const token = await this.ensureAccessToken();
     const res = await fetch(url, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'User-Agent': 'CoWork-Salesforce-Connector/0.1.0',
+        "Content-Type": "application/json",
+        "User-Agent": "CoWork-Salesforce-Connector/0.1.0",
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -182,8 +194,8 @@ class SalesforceClient {
     }
 
     const durationMs = Date.now() - start;
-    const rateLimit = parseRateLimit(res.headers.get('sforce-limit-info'));
-    const vendorRequestId = res.headers.get('sforce-request-id') || undefined;
+    const rateLimit = parseRateLimit(res.headers.get("sforce-limit-info"));
+    const vendorRequestId = res.headers.get("sforce-request-id") || undefined;
 
     if (!res.ok) {
       const message = await this.extractErrorMessage(res);
@@ -212,13 +224,41 @@ class SalesforceClient {
 
   private buildAbsoluteUrl(path: string): string {
     const trimmed = path.trim();
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return trimmed;
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      // A cursor (nextRecordsUrl) is model-supplied via search_records, and
+      // requestJson attaches the live OAuth bearer token to whatever URL comes
+      // back from here. Without an origin check, injected content telling the
+      // agent to "continue pagination from https://attacker.tld/c" exfiltrates
+      // the org's access token — and a 401 from that host triggers a refresh
+      // and replays a freshly minted one. Confine it to the Salesforce
+      // instance's own REST API.
+      if (!this.config.instanceUrl) {
+        throw new Error("SALESFORCE_INSTANCE_URL is required");
+      }
+      let target: URL;
+      let instance: URL;
+      try {
+        target = new URL(trimmed);
+        instance = new URL(this.config.instanceUrl);
+      } catch {
+        throw new Error("Invalid Salesforce URL");
+      }
+      if (target.origin !== instance.origin) {
+        throw new Error(
+          `Refusing to request ${target.origin}: Salesforce pagination cursors must stay on ${instance.origin}`,
+        );
+      }
+      if (!target.pathname.startsWith("/services/data/")) {
+        throw new Error(
+          "Refusing to request a non-REST Salesforce path; cursors must target /services/data/",
+        );
+      }
+      return target.toString();
     }
     if (!this.config.instanceUrl) {
-      throw new Error('SALESFORCE_INSTANCE_URL is required');
+      throw new Error("SALESFORCE_INSTANCE_URL is required");
     }
-    return `${this.config.instanceUrl.replace(/\/$/, '')}${trimmed.startsWith('/') ? '' : '/'}${trimmed}`;
+    return `${this.config.instanceUrl.replace(/\/$/, "")}${trimmed.startsWith("/") ? "" : "/"}${trimmed}`;
   }
 
   private async extractErrorMessage(res: Response): Promise<string> {
@@ -231,8 +271,8 @@ class SalesforceClient {
       const parsed = JSON.parse(text);
       if (Array.isArray(parsed) && parsed.length > 0) {
         const first = parsed[0];
-        const code = first.errorCode ? ` (${first.errorCode})` : '';
-        return `${first.message || 'Salesforce API error'}${code}`;
+        const code = first.errorCode ? ` (${first.errorCode})` : "";
+        return `${first.message || "Salesforce API error"}${code}`;
       }
       if (parsed.error && parsed.error_description) {
         return `${parsed.error_description} (${parsed.error})`;
@@ -251,7 +291,7 @@ class SalesforceClient {
       this.config.clientId &&
       this.config.clientSecret &&
       this.config.refreshToken &&
-      this.config.loginUrl
+      this.config.loginUrl,
     );
   }
 
@@ -260,32 +300,32 @@ class SalesforceClient {
       return this.config.accessToken;
     }
     if (!this.canRefresh()) {
-      throw new Error('SALESFORCE_ACCESS_TOKEN is required (or provide refresh credentials)');
+      throw new Error("SALESFORCE_ACCESS_TOKEN is required (or provide refresh credentials)");
     }
     await this.refreshAccessToken();
     if (!this.config.accessToken) {
-      throw new Error('Failed to obtain Salesforce access token');
+      throw new Error("Failed to obtain Salesforce access token");
     }
     return this.config.accessToken;
   }
 
   private async refreshAccessToken(): Promise<void> {
     if (!this.canRefresh()) {
-      throw new Error('Missing refresh credentials');
+      throw new Error("Missing refresh credentials");
     }
 
     const params = new URLSearchParams({
-      grant_type: 'refresh_token',
+      grant_type: "refresh_token",
       client_id: this.config.clientId as string,
       client_secret: this.config.clientSecret as string,
       refresh_token: this.config.refreshToken as string,
     });
 
-    const url = `${this.config.loginUrl.replace(/\/$/, '')}/services/oauth2/token`;
+    const url = `${this.config.loginUrl.replace(/\/$/, "")}/services/oauth2/token`;
     const res = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: params.toString(),
     });
@@ -297,7 +337,7 @@ class SalesforceClient {
 
     const data = await res.json();
     if (!data.access_token) {
-      throw new Error('Salesforce OAuth refresh returned no access_token');
+      throw new Error("Salesforce OAuth refresh returned no access_token");
     }
 
     this.config.accessToken = data.access_token;
@@ -336,7 +376,7 @@ class StdioMCPServer {
 
   constructor(
     private toolProvider: ToolProvider,
-    private serverInfo: MCPServerInfo
+    private serverInfo: MCPServerInfo,
   ) {}
 
   start(): void {
@@ -346,11 +386,11 @@ class StdioMCPServer {
       terminal: false,
     });
 
-    this.rl.on('line', (line) => this.handleLine(line));
-    this.rl.on('close', () => this.stop());
+    this.rl.on("line", (line) => this.handleLine(line));
+    this.rl.on("close", () => this.stop());
 
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    process.on("SIGINT", () => this.stop());
+    process.on("SIGTERM", () => this.stop());
   }
 
   stop(): void {
@@ -369,17 +409,17 @@ class StdioMCPServer {
       const message = JSON.parse(trimmed);
       this.handleMessage(message);
     } catch (error) {
-      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, 'Parse error');
+      this.sendError(0, MCP_ERROR_CODES.PARSE_ERROR, "Parse error");
     }
   }
 
   private async handleMessage(message: any): Promise<void> {
-    if ('id' in message && message.id !== null) {
+    if ("id" in message && message.id !== null) {
       await this.handleRequest(message as JSONRPCRequest);
       return;
     }
 
-    if ('method' in message) {
+    if ("method" in message) {
       await this.handleNotification(message as JSONRPCNotification);
     }
   }
@@ -414,7 +454,7 @@ class StdioMCPServer {
       if (error.code !== undefined) {
         this.sendError(id, error.code, error.message, error.data);
       } else {
-        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || 'Internal error');
+        this.sendError(id, MCP_ERROR_CODES.INTERNAL_ERROR, error?.message || "Internal error");
       }
     }
   }
@@ -429,11 +469,11 @@ class StdioMCPServer {
 
   private handleInitialize(_params: any): {
     protocolVersion: string;
-    capabilities: MCPServerInfo['capabilities'];
+    capabilities: MCPServerInfo["capabilities"];
     serverInfo: MCPServerInfo;
   } {
     if (this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, 'Already initialized');
+      throw this.createError(MCP_ERROR_CODES.INVALID_REQUEST, "Already initialized");
     }
 
     return {
@@ -450,27 +490,27 @@ class StdioMCPServer {
   private async handleToolsCall(params: any): Promise<any> {
     const { name, arguments: args } = params || {};
     if (!name) {
-      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, 'Tool name is required');
+      throw this.createError(MCP_ERROR_CODES.INVALID_PARAMS, "Tool name is required");
     }
 
     try {
       const result = await this.toolProvider.executeTool(name, args || {});
 
-      if (typeof result === 'string') {
-        return { content: [{ type: 'text', text: result }] };
+      if (typeof result === "string") {
+        return { content: [{ type: "text", text: result }] };
       }
 
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
-      return { content: [{ type: 'text', text: String(result) }] };
+      return { content: [{ type: "text", text: String(result) }] };
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Error: ${error?.message || 'Tool failed'}` }],
+        content: [{ type: "text", text: `Error: ${error?.message || "Tool failed"}` }],
         isError: true,
       };
     }
@@ -482,13 +522,13 @@ class StdioMCPServer {
   }
 
   private sendResult(id: JSONRPCId, result: any): void {
-    const response: JSONRPCResponse = { jsonrpc: '2.0', id, result };
+    const response: JSONRPCResponse = { jsonrpc: "2.0", id, result };
     this.sendMessage(response);
   }
 
   private sendError(id: JSONRPCId, code: number, message: string, data?: any): void {
     const response: JSONRPCResponse = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       error: { code, message, data },
     };
@@ -496,122 +536,132 @@ class StdioMCPServer {
   }
 
   private sendMessage(message: JSONRPCResponse | JSONRPCNotification): void {
-    process.stdout.write(JSON.stringify(message) + '\n');
+    process.stdout.write(JSON.stringify(message) + "\n");
   }
 
   private requireInitialized(): void {
     if (!this.initialized) {
-      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, 'Server not initialized');
+      throw this.createError(MCP_ERROR_CODES.SERVER_NOT_INITIALIZED, "Server not initialized");
     }
   }
 
-  private createError(code: number, message: string, data?: any): { code: number; message: string; data?: any } {
+  private createError(
+    code: number,
+    message: string,
+    data?: any,
+  ): { code: number; message: string; data?: any } {
     return { code, message, data };
   }
 }
 
 // ==================== Tool Definitions ====================
 
-const CONNECTOR_PREFIX = 'salesforce';
-const DEFAULT_API_VERSION = '60.0';
+const CONNECTOR_PREFIX = "salesforce";
+const DEFAULT_API_VERSION = "60.0";
 
 const tools: MCPTool[] = [
   {
     name: `${CONNECTOR_PREFIX}.health`,
-    description: 'Check connector health and authentication status',
+    description: "Check connector health and authentication status",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.list_objects`,
-    description: 'List available Salesforce objects',
+    description: "List available Salesforce objects",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.describe_object`,
-    description: 'Describe a Salesforce object and its fields',
+    description: "Describe a Salesforce object and its fields",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        object: { type: 'string', description: 'Salesforce object name (e.g., Account)', },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        object: { type: "string", description: "Salesforce object name (e.g., Account)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['object'],
+      required: ["object"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.get_record`,
-    description: 'Fetch a Salesforce record by id',
+    description: "Fetch a Salesforce record by id",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        object: { type: 'string', description: 'Salesforce object name (e.g., Account)' },
-        id: { type: 'string', description: 'Salesforce record id' },
+        object: { type: "string", description: "Salesforce object name (e.g., Account)" },
+        id: { type: "string", description: "Salesforce record id" },
         fields: {
-          type: 'array',
-          description: 'Optional list of fields to include',
-          items: { type: 'string' },
+          type: "array",
+          description: "Optional list of fields to include",
+          items: { type: "string" },
         },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['object', 'id'],
+      required: ["object", "id"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.search_records`,
-    description: 'Run a SOQL query',
+    description: "Run a SOQL query",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        soql: { type: 'string', description: 'SOQL query to execute (required if cursor is not provided)' },
-        limit: { type: 'number', description: 'Optional LIMIT to append if not present' },
-        cursor: { type: 'string', description: 'Pagination cursor (nextRecordsUrl); if provided, soql is optional' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        soql: {
+          type: "string",
+          description: "SOQL query to execute (required if cursor is not provided)",
+        },
+        limit: { type: "number", description: "Optional LIMIT to append if not present" },
+        cursor: {
+          type: "string",
+          description: "Pagination cursor (nextRecordsUrl); if provided, soql is optional",
+        },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.create_record`,
-    description: 'Create a Salesforce record',
+    description: "Create a Salesforce record",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        object: { type: 'string', description: 'Salesforce object name (e.g., Account)' },
-        fields: { type: 'object', description: 'Field map for creation' },
-        idempotencyKey: { type: 'string', description: 'Optional idempotency key (best-effort)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        object: { type: "string", description: "Salesforce object name (e.g., Account)" },
+        fields: { type: "object", description: "Field map for creation" },
+        idempotencyKey: { type: "string", description: "Optional idempotency key (best-effort)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['object', 'fields'],
+      required: ["object", "fields"],
       additionalProperties: false,
     },
   },
   {
     name: `${CONNECTOR_PREFIX}.update_record`,
-    description: 'Update a Salesforce record',
+    description: "Update a Salesforce record",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        object: { type: 'string', description: 'Salesforce object name (e.g., Account)' },
-        id: { type: 'string', description: 'Salesforce record id' },
-        fields: { type: 'object', description: 'Field map for update' },
-        idempotencyKey: { type: 'string', description: 'Optional idempotency key (best-effort)' },
-        requestId: { type: 'string', description: 'Optional request id for tracing' },
+        object: { type: "string", description: "Salesforce object name (e.g., Account)" },
+        id: { type: "string", description: "Salesforce record id" },
+        fields: { type: "object", description: "Field map for update" },
+        idempotencyKey: { type: "string", description: "Optional idempotency key (best-effort)" },
+        requestId: { type: "string", description: "Optional request id for tracing" },
       },
-      required: ['object', 'id', 'fields'],
+      required: ["object", "id", "fields"],
       additionalProperties: false,
     },
   },
@@ -621,7 +671,7 @@ const config: SalesforceConfig = {
   instanceUrl: process.env.SALESFORCE_INSTANCE_URL,
   accessToken: process.env.SALESFORCE_ACCESS_TOKEN,
   apiVersion: process.env.SALESFORCE_API_VERSION || DEFAULT_API_VERSION,
-  loginUrl: process.env.SALESFORCE_LOGIN_URL || 'https://login.salesforce.com',
+  loginUrl: process.env.SALESFORCE_LOGIN_URL || "https://login.salesforce.com",
   clientId: process.env.SALESFORCE_CLIENT_ID,
   clientSecret: process.env.SALESFORCE_CLIENT_SECRET,
   refreshToken: process.env.SALESFORCE_REFRESH_TOKEN,
@@ -647,23 +697,23 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
     return buildEnvelope(result, args.requestId);
   },
   [`${CONNECTOR_PREFIX}.search_records`]: async (args) => {
-    const soql = args.soql ? normalizeSoql(args.soql, args.limit) : '';
+    const soql = args.soql ? normalizeSoql(args.soql, args.limit) : "";
     if (!args.cursor && !soql) {
-      throw new Error('search_records requires either soql or cursor');
+      throw new Error("search_records requires either soql or cursor");
     }
     const result = await client.query(soql, args.cursor);
     return buildEnvelope(result, args.requestId);
   },
   [`${CONNECTOR_PREFIX}.create_record`]: async (args) => {
     const warnings = args.idempotencyKey
-      ? ['Salesforce does not natively support idempotency keys; handled best-effort.']
+      ? ["Salesforce does not natively support idempotency keys; handled best-effort."]
       : [];
     const result = await client.createRecord(args.object, args.fields || {});
     return buildEnvelope(result, args.requestId, warnings);
   },
   [`${CONNECTOR_PREFIX}.update_record`]: async (args) => {
     const warnings = args.idempotencyKey
-      ? ['Salesforce does not natively support idempotency keys; handled best-effort.']
+      ? ["Salesforce does not natively support idempotency keys; handled best-effort."]
       : [];
     const result = await client.updateRecord(args.object, args.id, args.fields || {});
     return buildEnvelope(result, args.requestId, warnings);
@@ -682,8 +732,8 @@ const toolProvider: ToolProvider = {
 };
 
 const serverInfo: MCPServerInfo = {
-  name: 'Salesforce Connector',
-  version: '0.1.0',
+  name: "Salesforce Connector",
+  version: "0.1.0",
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {
     tools: { listChanged: false },

@@ -15,83 +15,80 @@ One-page quick reference. Scan before filling a template or tweaking a detail. F
 
 ## Color
 
-| Role | Hex | Use |
-|---|---|---|
-| Parchment | `#f5f4ed` | Page background |
-| Ivory | `#faf9f5` | Card / lifted container |
-| Warm Sand | `#e8e6dc` | Button / interactive surface |
-| Dark Surface | `#30302e` | Dark container |
-| Deep Dark | `#141413` | Dark page background |
-| **Brand** | **`#1B365D`** | **Accent · CTA · title left bar (≤ 5% of surface)** |
-| Brand Coral | `#2D5A8A` | Links on dark surfaces |
-| Near Black | `#141413` | Primary text |
-| Dark Warm | `#3d3d3a` | Secondary dark / link |
-| Charcoal | `#4d4c48` | Button text / dense body |
-| Olive | `#5e5d59` | Subtext · descriptions |
-| Stone | `#87867f` | Tertiary · metadata |
-| Warm Silver | `#b0aea5` | Light text on dark surfaces |
-| Border Cream | `#e8e5da` | Default card border |
-| Border Warm | `#e8e6dc` | Section divider |
-| Ring Warm | `#d1cfc5` | Button hover / focus ring |
+| Role         | Hex           | Use                                                 |
+| ------------ | ------------- | --------------------------------------------------- |
+| Parchment    | `#f5f4ed`     | Page background                                     |
+| Ivory        | `#faf9f5`     | Card / lifted container                             |
+| Warm Sand    | `#e8e6dc`     | Button / interactive surface                        |
+| Dark Surface | `#30302e`     | Dark container                                      |
+| Deep Dark    | `#141413`     | Dark page background                                |
+| **Brand**    | **`#1B365D`** | **Accent · CTA · title left bar (≤ 5% of surface)** |
+| Brand Coral  | `#2D5A8A`     | Links on dark surfaces                              |
+| Near Black   | `#141413`     | Primary text                                        |
+| Dark Warm    | `#3d3d3a`     | Secondary dark / link                               |
+| Charcoal     | `#4d4c48`     | Button text / dense body                            |
+| Olive        | `#5e5d59`     | Subtext · descriptions                              |
+| Stone        | `#87867f`     | Tertiary · metadata                                 |
+| Warm Silver  | `#b0aea5`     | Light text on dark surfaces                         |
+| Border Cream | `#e8e5da`     | Default card border                                 |
+| Border Warm  | `#e8e6dc`     | Section divider                                     |
+| Ring Warm    | `#d1cfc5`     | Button hover / focus ring                           |
 
 **rgba -> solid** (parchment base + ink-blue):
 
-| Alpha | Solid |
-|---|---|
-| 0.08 | `#EEF2F7` |
-| 0.14 | `#E4ECF5` |
+| Alpha    | Solid                       |
+| -------- | --------------------------- |
+| 0.08     | `#EEF2F7`                   |
+| 0.14     | `#E4ECF5`                   |
 | **0.18** | **`#E4ECF5`** ← default tag |
-| 0.22 | `#D0DCE9` |
-| 0.30 | `#D6E1EE` |
+| 0.22     | `#D0DCE9`                   |
+| 0.30     | `#D6E1EE`                   |
 
 ## Type (print pt)
 
-| Role | Size | Weight | Line-height |
-|---|---|---|---|
-| Display | 36-48 | 500 | 1.10 |
-| H1 | 18-22 | 500 | 1.20 |
-| H2 | 14-16 | 500 | 1.25 |
-| H3 | 12-13 | 500 | 1.30 |
-| Body Lead | 11 | 400 | 1.55 |
-| Body | 9.5-10 | 400 | 1.55 |
-| Body Dense | 9-9.2 | 400 | 1.42 |
-| Caption | 8.5-9 | 400 | 1.45 |
-| Label | 7.5-8 | 600 | 1.35 |
-| Tiny | 7 | 400 | 1.40 |
+| Role       | Size   | Weight | Line-height |
+| ---------- | ------ | ------ | ----------- |
+| Display    | 36-48  | 500    | 1.10        |
+| H1         | 18-22  | 500    | 1.20        |
+| H2         | 14-16  | 500    | 1.25        |
+| H3         | 12-13  | 500    | 1.30        |
+| Body Lead  | 11     | 400    | 1.55        |
+| Body       | 9.5-10 | 400    | 1.55        |
+| Body Dense | 9-9.2  | 400    | 1.42        |
+| Caption    | 8.5-9  | 400    | 1.45        |
+| Label      | 7.5-8  | 600    | 1.35        |
+| Tiny       | 7      | 400    | 1.40        |
 
 Screen (px) ≈ pt × 1.33.
 
 ## Font stack (English)
 
 ```css
---serif: "Newsreader", "Source Serif 4", "Charter",
-         Georgia, "Times New Roman", serif;
---sans:  "Inter", -apple-system, BlinkMacSystemFont,
-         "Helvetica Neue", Arial, sans-serif;
---mono:  "JetBrains Mono", "SF Mono", "Fira Code",
-         Consolas, Monaco, monospace;
+--serif: "Newsreader", "Source Serif 4", "Charter", Georgia, "Times New Roman", serif;
+--sans: "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+--mono: "JetBrains Mono", "SF Mono", "Fira Code", Consolas, Monaco, monospace;
 ```
 
 ## Spacing (4pt base)
 
-| Tier | Value | Use |
-|---|---|---|
-| xs | 2-3pt | Inline |
-| sm | 4-5pt | Tag padding |
-| md | 8-10pt | Component interior |
-| lg | 16-20pt | Between components |
-| xl | 24-32pt | Section-title margin |
-| 2xl | 40-60pt | Between major sections |
-| 3xl | 80-120pt | Between chapters |
+| Tier | Value    | Use                    |
+| ---- | -------- | ---------------------- |
+| xs   | 2-3pt    | Inline                 |
+| sm   | 4-5pt    | Tag padding            |
+| md   | 8-10pt   | Component interior     |
+| lg   | 16-20pt  | Between components     |
+| xl   | 24-32pt  | Section-title margin   |
+| 2xl  | 40-60pt  | Between major sections |
+| 3xl  | 80-120pt | Between chapters       |
 
 **Page margins (A4)**
 
-| Document | T · R · B · L |
-|---|---|
-| Resume | 11 · 13 · 11 · 13 mm |
+| Document  | T · R · B · L        |
+| --------- | -------------------- |
+| Resume    | 11 · 13 · 11 · 13 mm |
 | One-Pager | 15 · 18 · 15 · 18 mm |
-| Long Doc | 20 · 22 · 22 · 22 mm |
-| Letter | 25 mm all sides |
+| Long Doc  | 20 · 22 · 22 · 22 mm |
+| Letter    | 25 mm all sides      |
 | Portfolio | 12 · 15 · 12 · 15 mm |
 
 ## Radius scale
@@ -115,9 +112,10 @@ Screen (px) ≈ pt × 1.33.
 
 ```css
 .tag {
-  background: #EEF2F7;            /* 0.08 equivalent */
+  background: #eef2f7; /* 0.08 equivalent */
   color: var(--brand);
-  font-size: 8pt; font-weight: 600;
+  font-size: 8pt;
+  font-weight: 600;
   padding: 1pt 5pt;
   border-radius: 2pt;
   letter-spacing: 0.4pt;
@@ -130,7 +128,8 @@ Screen (px) ≈ pt × 1.33.
 ```css
 .section-title {
   font-family: var(--serif);
-  font-size: 14pt; font-weight: 500;
+  font-size: 14pt;
+  font-weight: 500;
   color: var(--near-black);
   margin: 24pt 0 10pt 0;
   border-left: 2.5pt solid var(--brand);
@@ -142,13 +141,22 @@ Screen (px) ≈ pt × 1.33.
 ### Metric (data card)
 
 ```css
-.metric { display: flex; align-items: baseline; gap: 6pt; }
+.metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6pt;
+}
 .metric-value {
-  font-family: var(--serif); font-size: 16pt; font-weight: 500;
+  font-family: var(--serif);
+  font-size: 16pt;
+  font-weight: 500;
   color: var(--brand);
   font-variant-numeric: tabular-nums;
 }
-.metric-label { font-size: 9pt; color: var(--olive); }
+.metric-label {
+  font-size: 9pt;
+  color: var(--olive);
+}
 ```
 
 ### Quote
@@ -166,11 +174,11 @@ Screen (px) ≈ pt × 1.33.
 
 Three built-in diagram types. Extract the `<svg>` block and embed in a `<figure>` in long-doc / portfolio:
 
-| Type | File | Use |
-|---|---|---|
+| Type         | File                                | Use                               |
+| ------------ | ----------------------------------- | --------------------------------- |
 | Architecture | `assets/diagrams/architecture.html` | System components and connections |
-| Flowchart | `assets/diagrams/flowchart.html` | Decision branches and flows |
-| Quadrant | `assets/diagrams/quadrant.html` | 2×2 positioning |
+| Flowchart    | `assets/diagrams/flowchart.html`    | Decision branches and flows       |
+| Quadrant     | `assets/diagrams/quadrant.html`     | 2×2 positioning                   |
 
 Usage: extract the `<svg>` block from the HTML file and paste into the template's `<figure>` container.
 
@@ -196,18 +204,18 @@ Alternate light/dark rhythm: add `.sd-alt` to any section container.
 
 ## Quick decisions
 
-| Need | Use |
-|---|---|
-| Headline | serif 500, line-height 1.10-1.30 |
-| Reading body (EN) | serif 400, 9.5-10pt, 1.55 |
-| Reading body (CN) | sans 400, 9.5-10pt, 1.55 |
-| Emphasize a number | `color: var(--brand)`, no bold |
-| Divide two sections | 2.5pt brand left bar, or 0.5pt warm dotted |
-| Quote | 2pt brand left border + olive color |
-| Code | ivory bg + 0.5pt border + 6pt radius + mono |
-| Primary button | brand fill + ivory text |
-| Secondary button | warm-sand + charcoal |
-| Chapter start | serif heading + 2.5pt brand left bar |
-| Cover | Display heading + right-aligned author/date + heavy whitespace |
+| Need                | Use                                                            |
+| ------------------- | -------------------------------------------------------------- |
+| Headline            | serif 500, line-height 1.10-1.30                               |
+| Reading body (EN)   | serif 400, 9.5-10pt, 1.55                                      |
+| Reading body (CN)   | sans 400, 9.5-10pt, 1.55                                       |
+| Emphasize a number  | `color: var(--brand)`, no bold                                 |
+| Divide two sections | 2.5pt brand left bar, or 0.5pt warm dotted                     |
+| Quote               | 2pt brand left border + olive color                            |
+| Code                | ivory bg + 0.5pt border + 6pt radius + mono                    |
+| Primary button      | brand fill + ivory text                                        |
+| Secondary button    | warm-sand + charcoal                                           |
+| Chapter start       | serif heading + 2.5pt brand left bar                           |
+| Cover               | Display heading + right-aligned author/date + heavy whitespace |
 
 Not on the table -> first principles: **serif carries authority, sans carries utility, warm gray carries rhythm, ink-blue carries focus**.

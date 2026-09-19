@@ -21,17 +21,17 @@ The remaining differences versus OpenClaw are now mostly product-shape choices r
 
 ## Current Comparison Matrix
 
-| Aspect | OpenClaw | CoWork OS | Current status |
-|--------|----------|-----------|----------------|
-| **Personalization** | `USER.md`, `IDENTITY.md`, `SOUL.md` in workspace | `UserProfileService`, `RelationshipMemoryService`, `.cowork/USER.md`, curated hot memory, adaptive style | CoWork has both file-based and structured personalization |
-| **Always-visible memory** | Plain markdown memory files | Curated hot memory in `<cowork_hot_memory>` plus auto-managed blocks in `.cowork/USER.md` and `.cowork/MEMORY.md` | CoWork now has a dedicated hot-memory lane |
-| **Archive recall** | Markdown memory history | `MemoryService`, `search_memories`, imported ChatGPT history, indexed `.cowork/` markdown | CoWork keeps broader searchable recall separate from always-on injection |
-| **Session recall** | Session-history tooling | `search_sessions` over transcript spans and checkpoints | Gap closed |
-| **Topic-focused recall** | Workspace-native markdown browsing | `memory_topics_load` packs focused topic files under `.cowork/memory/topics` | CoWork now has an explicit topical recall path |
-| **Daily logs** | `memory/YYYY-MM-DD.md` style files | `DailyLogService` + `DailyLogSummarizer` under `.cowork/memory/daily` and `.cowork/memory/summaries` | Primitive exists; writer wiring remains an optional follow-up |
-| **Style adaptation** | Static persona files | `AdaptiveStyleEngine` with UI toggles in `GuardrailSettings` | CoWork ahead |
-| **Feedback learning** | Limited in reviewed docs | Message/task thumbs, `FeedbackService`, `UserProfileService.ingestUserFeedback`, playbook reinforcement | CoWork ahead |
-| **Privacy** | Local-first | Local-first plus `SecureSettingsRepository` encryption | CoWork ahead |
+| Aspect                    | OpenClaw                                         | CoWork OS                                                                                                         | Current status                                                           |
+| ------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Personalization**       | `USER.md`, `IDENTITY.md`, `SOUL.md` in workspace | `UserProfileService`, `RelationshipMemoryService`, `.cowork/USER.md`, curated hot memory, adaptive style          | CoWork has both file-based and structured personalization                |
+| **Always-visible memory** | Plain markdown memory files                      | Curated hot memory in `<cowork_hot_memory>` plus auto-managed blocks in `.cowork/USER.md` and `.cowork/MEMORY.md` | CoWork now has a dedicated hot-memory lane                               |
+| **Archive recall**        | Markdown memory history                          | `MemoryService`, `search_memories`, imported ChatGPT history, indexed `.cowork/` markdown                         | CoWork keeps broader searchable recall separate from always-on injection |
+| **Session recall**        | Session-history tooling                          | `search_sessions` over transcript spans and checkpoints                                                           | Gap closed                                                               |
+| **Topic-focused recall**  | Workspace-native markdown browsing               | `memory_topics_load` packs focused topic files under `.cowork/memory/topics`                                      | CoWork now has an explicit topical recall path                           |
+| **Daily logs**            | `memory/YYYY-MM-DD.md` style files               | `DailyLogService` + `DailyLogSummarizer` under `.cowork/memory/daily` and `.cowork/memory/summaries`              | Primitive exists; writer wiring remains an optional follow-up            |
+| **Style adaptation**      | Static persona files                             | `AdaptiveStyleEngine` with UI toggles in `GuardrailSettings`                                                      | CoWork ahead                                                             |
+| **Feedback learning**     | Limited in reviewed docs                         | Message/task thumbs, `FeedbackService`, `UserProfileService.ingestUserFeedback`, playbook reinforcement           | CoWork ahead                                                             |
+| **Privacy**               | Local-first                                      | Local-first plus `SecureSettingsRepository` encryption                                                            | CoWork ahead                                                             |
 
 ---
 
@@ -75,16 +75,16 @@ These are still reasonable OpenClaw-inspired improvements, but they are no longe
 
 ## Key File References
 
-| Component | Path |
-|-----------|------|
-| Curated hot memory | `src/electron/memory/CuratedMemoryService.ts` |
-| Session recall | `src/electron/memory/SessionRecallService.ts` |
-| Prompt memory assembly | `src/electron/memory/MemorySynthesizer.ts` |
-| Topic packs | `src/electron/memory/LayeredMemoryIndexService.ts` |
-| Archive memory | `src/electron/memory/MemoryService.ts` |
-| Memory tools | `src/electron/agent/tools/memory-tools.ts` |
-| System recall tools | `src/electron/agent/tools/system-tools.ts` |
-| Memory feature defaults | `src/electron/settings/memory-features-manager.ts` |
-| Guardrail adaptation UI | `src/renderer/components/GuardrailSettings.tsx` |
-| Memory hub UI | `src/renderer/components/MemoryHubSettings.tsx` |
-| Feedback UI | `src/renderer/components/MainContent.tsx`, `src/renderer/components/RightPanel.tsx` |
+| Component               | Path                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| Curated hot memory      | `src/electron/memory/CuratedMemoryService.ts`                                       |
+| Session recall          | `src/electron/memory/SessionRecallService.ts`                                       |
+| Prompt memory assembly  | `src/electron/memory/MemorySynthesizer.ts`                                          |
+| Topic packs             | `src/electron/memory/LayeredMemoryIndexService.ts`                                  |
+| Archive memory          | `src/electron/memory/MemoryService.ts`                                              |
+| Memory tools            | `src/electron/agent/tools/memory-tools.ts`                                          |
+| System recall tools     | `src/electron/agent/tools/system-tools.ts`                                          |
+| Memory feature defaults | `src/electron/settings/memory-features-manager.ts`                                  |
+| Guardrail adaptation UI | `src/renderer/components/GuardrailSettings.tsx`                                     |
+| Memory hub UI           | `src/renderer/components/MemoryHubSettings.tsx`                                     |
+| Feedback UI             | `src/renderer/components/MainContent.tsx`, `src/renderer/components/RightPanel.tsx` |

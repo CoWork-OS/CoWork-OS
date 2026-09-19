@@ -21,12 +21,12 @@ Create and maintain a persistent markdown research vault with immutable raw sour
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| objective | string | No | Topic, question, or research objective. If omitted, ask one short scoping question before durable ingest work. |
-| mode | string | No | `auto`, `init`, `ingest`, `query`, `lint`, or `refresh` |
-| path | string | No | Workspace-relative or absolute vault path |
-| obsidian | string | No | `auto`, `on`, or `off` |
+| Name      | Type   | Required | Description                                                                                                    |
+| --------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------- |
+| objective | string | No       | Topic, question, or research objective. If omitted, ask one short scoping question before durable ingest work. |
+| mode      | string | No       | `auto`, `init`, `ingest`, `query`, `lint`, or `refresh`                                                        |
+| path      | string | No       | Workspace-relative or absolute vault path                                                                      |
+| obsidian  | string | No       | `auto`, `on`, or `off`                                                                                         |
 
 ## Runtime Prompt
 

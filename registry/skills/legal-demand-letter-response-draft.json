@@ -33,10 +33,7 @@
       "description": "Role of your client in the dispute",
       "required": false,
       "default": "responding party",
-      "options": [
-        "responding party",
-        "claiming party"
-      ]
+      "options": ["responding party", "claiming party"]
     },
     {
       "name": "response_output_path",

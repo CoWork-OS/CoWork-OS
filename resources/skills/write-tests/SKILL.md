@@ -37,12 +37,12 @@ Generate unit tests for existing code
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the file to test |
-| framework | select | Yes | Testing framework to use |
+| Name      | Type   | Required | Description              |
+| --------- | ------ | -------- | ------------------------ |
+| path      | string | Yes      | Path to the file to test |
+| framework | select | Yes      | Testing framework to use |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 339 characters.
-- Runtime prompt is defined directly in `../write-tests.json`. 
+- Runtime prompt is defined directly in `../write-tests.json`.

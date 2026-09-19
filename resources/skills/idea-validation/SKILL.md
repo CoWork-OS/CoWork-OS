@@ -37,11 +37,11 @@ Validate a business or product idea with market research, competitor analysis, a
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| idea | string | Yes | Description of the business or product idea to validate |
+| Name | Type   | Required | Description                                             |
+| ---- | ------ | -------- | ------------------------------------------------------- |
+| idea | string | Yes      | Description of the business or product idea to validate |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1560 characters.
-- Runtime prompt is defined directly in `../idea-validation.json`. 
+- Runtime prompt is defined directly in `../idea-validation.json`.

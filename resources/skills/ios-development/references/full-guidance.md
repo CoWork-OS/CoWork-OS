@@ -5,15 +5,16 @@ You are an iOS development specialist. Use the `run_command` tool to execute Xco
 ## SwiftUI Patterns
 
 ### View Structure
+
 ```swift
 struct ContentView: View {
     @State private var items: [Item] = []
     @State private var searchText = ""
-    
+
     var filteredItems: [Item] {
         searchText.isEmpty ? items : items.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
-    
+
     var body: some View {
         NavigationStack {
             List(filteredItems) { item in
@@ -32,13 +33,14 @@ struct ContentView: View {
 ```
 
 ### MVVM with @Observable (iOS 17+)
+
 ```swift
 @Observable
 class ItemViewModel {
     var items: [Item] = []
     var isLoading = false
     var errorMessage: String?
-    
+
     func fetchItems() async {
         isLoading = true
         defer { isLoading = false }
@@ -52,7 +54,7 @@ class ItemViewModel {
 
 struct ItemListView: View {
     @State private var viewModel = ItemViewModel()
-    
+
     var body: some View {
         List(viewModel.items) { item in
             Text(item.name)
@@ -66,13 +68,14 @@ struct ItemListView: View {
 ### Data Persistence
 
 #### SwiftData (iOS 17+)
+
 ```swift
 @Model
 class Item {
     var name: String
     var createdAt: Date
     @Relationship(deleteRule: .cascade) var tags: [Tag]
-    
+
     init(name: String) {
         self.name = name
         self.createdAt = .now
@@ -97,6 +100,7 @@ struct MyApp: App {
 ```
 
 #### Core Data
+
 ```swift
 let container = NSPersistentContainer(name: "Model")
 container.loadPersistentStores { _, error in
@@ -106,6 +110,7 @@ let context = container.viewContext
 ```
 
 ### Networking with async/await
+
 ```swift
 func fetchData<T: Decodable>(from url: URL) async throws -> T {
     let (data, response) = try await URLSession.shared.data(from: url)
@@ -117,6 +122,7 @@ func fetchData<T: Decodable>(from url: URL) async throws -> T {
 ```
 
 ### Push Notifications (APNs)
+
 ```swift
 UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
     guard granted else { return }
@@ -164,12 +170,14 @@ xcrun simctl erase all                              # Factory reset all
 ```
 
 ## Code Signing
+
 - **Development**: Automatic signing in Xcode for debug builds
 - **Distribution**: Manual signing with provisioning profiles for release
 - **Fastlane match**: `fastlane match appstore` for team certificate management
 - **Keychain**: Certificates stored in login keychain
 
 ## App Store Submission
+
 1. Archive build in Xcode or CLI
 2. Upload via Xcode Organizer or `xcrun altool --upload-app`
 3. Configure in App Store Connect (screenshots, description, pricing)
@@ -177,6 +185,7 @@ xcrun simctl erase all                              # Factory reset all
 5. TestFlight: Upload build -> Add testers -> Distribute
 
 ## Best Practices
+
 - Use SwiftUI for new views, UIKit hosting for legacy integration
 - Prefer @Observable (iOS 17+) over ObservableObject
 - Use async/await over Combine for new async code

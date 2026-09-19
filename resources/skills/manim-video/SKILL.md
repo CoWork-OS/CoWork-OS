@@ -37,14 +37,14 @@ Build production-ready Manim CE explainer videos with a stronger workflow than a
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| topic | string | Yes | What the animation should explain or visualize |
-| mode | select | No | Video pattern: auto, concept-explainer, equation-derivation, algorithm-visualization, data-story, architecture-diagram, paper-explainer, 3d-visualization |
-| audience | string | No | Target audience for pacing and explanation depth |
-| target_length_seconds | string | No | Approximate runtime in seconds |
-| output_dir | string | No | Workspace-relative or absolute project directory |
-| voiceover | select | No | Whether to scaffold a voiceover script |
+| Name                  | Type   | Required | Description                                                                                                                                               |
+| --------------------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| topic                 | string | Yes      | What the animation should explain or visualize                                                                                                            |
+| mode                  | select | No       | Video pattern: auto, concept-explainer, equation-derivation, algorithm-visualization, data-story, architecture-diagram, paper-explainer, 3d-visualization |
+| audience              | string | No       | Target audience for pacing and explanation depth                                                                                                          |
+| target_length_seconds | string | No       | Approximate runtime in seconds                                                                                                                            |
+| output_dir            | string | No       | Workspace-relative or absolute project directory                                                                                                          |
+| voiceover             | select | No       | Whether to scaffold a voiceover script                                                                                                                    |
 
 ## Workflow Notes
 

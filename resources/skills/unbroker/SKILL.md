@@ -50,7 +50,7 @@ digest at the end of the run (`$PDD tasks`). Between those:
   recorded at intake is standing authorization for T0-T2 opt-outs. (`autonomy=assisted` restores
   per-submission confirmation for cautious operators - honor `confirm_first` flags in `next` output.)
 - **Never interrupt the run for human-only work.** Record it (`record ... human_task_queued
-  --reason "..."`) and keep going; it all surfaces once in the final digest.
+--reason "..."`) and keep going; it all surfaces once in the final digest.
 - **Drive the whole run as a loop over `$PDD next <subject>`** - it returns the exact ordered actions
   to take right now (scan, poll verification, re-check, opt out parents-first, requeue blocked), plus
   the human digest. Execute every action, record outcomes, re-run `next`, repeat until
@@ -101,6 +101,7 @@ Before running any command, read [references/operations.md](references/operation
    `indirect_email_send`, and `stealth_rescan`. Human-only work never appears as an action - it
    accumulates in `q.human_digest`. In `autonomy=full`, execute actions without pausing; honor
    `confirm_first` in `assisted` mode.
+
 4. **Scanning (when `next` says so).** For `fanout_scan`: run `$PDD fanout <subject>` and **spawn one
    CoWork subagent per `batch`, in parallel when multi-agent tools are available, passing that batch's ready-made `brief`** - do
    not scan all brokers yourself sequentially. For `scan_inline`: scan the few brokers yourself.
@@ -121,34 +122,34 @@ Before running any command, read [references/operations.md](references/operation
      only `disclosure_fields`, screenshot the confirmation, then the action's `after` record command.
      Playbooks may end with a right-to-delete `send-email` follow-up - do it (full erasure, not just
      listing suppression).
-    - **email** → `$PDD send-email <subject> <broker> --kind <ccpa|gdpr|generic> --to <addr>
-      --listing <url>` records + discloses in one step (recipient locked to addresses the broker
-      record declares; `next` picks the kind from residency - never claim CCPA/GDPR for someone who
-      can't). In **browser** mode it returns a recipient-locked `compose` payload: compose a new
-      message to `compose.to` with `compose.subject`/`compose.body` exactly in the operator's webmail
-      via CoWork browser tools and send (no password); in **programmatic** mode it SMTP-sends. `next` also
-      routes human-gated forms (phone-callback/gov-ID) through a broker's deletion email when one
-      exists - the **rescue lane** (verified Whitepages pattern). Draft-only falls back to
-      `render-email` + a digest entry.
+   - **email** → `$PDD send-email <subject> <broker> --kind <ccpa|gdpr|generic> --to <addr>
+--listing <url>` records + discloses in one step (recipient locked to addresses the broker
+     record declares; `next` picks the kind from residency - never claim CCPA/GDPR for someone who
+     can't). In **browser** mode it returns a recipient-locked `compose` payload: compose a new
+     message to `compose.to` with `compose.subject`/`compose.body` exactly in the operator's webmail
+     via CoWork browser tools and send (no password); in **programmatic** mode it SMTP-sends. `next` also
+     routes human-gated forms (phone-callback/gov-ID) through a broker's deletion email when one
+     exists - the **rescue lane** (verified Whitepages pattern). Draft-only falls back to
+     `render-email` + a digest entry.
    - **captcha** → soft/managed challenges clear automatically on the default cloud browser (proceed
      as normal); only a hard interactive/behavioral challenge it can't pass is recorded `blocked`
      (requeued for the stealth/operator-browser pass). Never a solver service.
-   - **phone_callback / account / gov_id / fax / mail / voice (T3)** *without a deletion email* →
+   - **phone_callback / account / gov_id / fax / mail / voice (T3)** _without a deletion email_ →
      never an agent action; `next` already routed these to the digest. Record them:
      `$PDD record <subject> <broker> human_task_queued --reason "..."`.
- 6. **Verification (when `next` says so).** In **programmatic** mode `$PDD poll-verification <subject>`
-    finds arrived confirmation links via IMAP (anti-phishing scored, auto-advances state). In
-    **browser** mode, open the broker's confirmation email in the operator's webmail and run
-    `$PDD verify-link <subject> <broker> --text '<body>'` to score the link. Either way **open the
-    link in the same browser** (several brokers bind the verification session to the browser that
-    opens it), finish the flow, then record `awaiting_processing`. `confirmed_removed` ONLY after a
-    verifying re-scan shows the listing gone - never off the submission flow's own confirmation page.
+6. **Verification (when `next` says so).** In **programmatic** mode `$PDD poll-verification <subject>`
+   finds arrived confirmation links via IMAP (anti-phishing scored, auto-advances state). In
+   **browser** mode, open the broker's confirmation email in the operator's webmail and run
+   `$PDD verify-link <subject> <broker> --text '<body>'` to score the link. Either way **open the
+   link in the same browser** (several brokers bind the verification session to the browser that
+   opens it), finish the flow, then record `awaiting_processing`. `confirmed_removed` ONLY after a
+   verifying re-scan shows the listing gone - never off the submission flow's own confirmation page.
 7. **Wrap up (once per run).** When `next` returns no actions: present `$PDD tasks <subject>` (the
    consolidated human digest) if non-empty, then `$PDD status <subject>`; if the Sheets tracker is
    on, append `$PDD report <subject> --sheets` rows via CoWork's Google Sheets/Workspace capability.
 8. **Schedule the next wake-up.** `next` returns `next_wake_at` (earliest due re-check). Create ONE
-   CoWork scheduled automation that re-runs this skill's loop for the subject (a prompt like: *"run the
-   unbroker loop for <subject_id>: `$PDD next` and execute all actions"*). Processing
+   CoWork scheduled automation that re-runs this skill's loop for the subject (a prompt like: _"run the
+   unbroker loop for <subject_id>: `$PDD next` and execute all actions"_). Processing
    windows, verification polls, and reappearance sweeps all flow through the same queue, so the case
    keeps advancing with zero human attention.
 
@@ -161,5 +162,5 @@ Apply the safety and recovery rules in [references/operations.md](references/ope
 - `scripts/run_tests.sh tests/skills/test_unbroker_skill.py` (hermetic; no network), or the
   dependency-free runner `python3 tests/skills/test_unbroker_skill.py`.
 - Dry run: `$PDD setup --auto && $PDD doctor && SID=$($PDD intake --full-name "Test Person"
-  --email t@example.com --consent | python3 -c 'import sys,json;print(json.load(sys.stdin)["subject_id"])')
-  && $PDD next "$SID"` and confirm a readiness summary plus an ordered action queue.
+--email t@example.com --consent | python3 -c 'import sys,json;print(json.load(sys.stdin)["subject_id"])')
+&& $PDD next "$SID"` and confirm a readiness summary plus an ordered action queue.

@@ -142,6 +142,151 @@ describe("AgentDaemon.createChildTask", () => {
     );
   });
 
+  it("keeps a verifier read-only when the parent bypasses permissions", async () => {
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "parent-1",
+        agentConfig: {
+          permissionMode: "bypass_permissions",
+          shellAccess: true,
+        },
+      }),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({
+        id: "child-task-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...task,
+      })),
+    };
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+
+    const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+      title: "Verifier",
+      prompt: "Check the delegated result.",
+      workspaceId: "ws-1",
+      parentTaskId: "parent-1",
+      agentType: "sub",
+      workerRole: "verifier",
+      agentConfig: {
+        permissionMode: "bypass_permissions",
+        shellAccess: true,
+      },
+    });
+
+    expect(child.agentConfig).toEqual(
+      expect.objectContaining({
+        permissionMode: "plan",
+        shellAccess: false,
+      }),
+    );
+    expect(child.agentConfig?.toolRestrictions).toEqual(
+      expect.arrayContaining([
+        "group:write",
+        "group:destructive",
+        "group:system",
+        "gmail_send_email",
+      ]),
+    );
+  });
+
+  it("keeps a read-only researcher helper bounded through child permission merging", async () => {
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "parent-1",
+        agentConfig: {
+          permissionMode: "bypass_permissions",
+          shellAccess: true,
+        },
+      }),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({
+        id: "child-task-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...task,
+      })),
+    };
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+
+    const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+      title: "Entropy researcher",
+      prompt: "Inspect the supplied evidence.",
+      workspaceId: "ws-1",
+      parentTaskId: "parent-1",
+      agentType: "sub",
+      workerRole: "researcher",
+      agentConfig: {
+        readOnlyExecution: true,
+        permissionMode: "bypass_permissions",
+        shellAccess: true,
+        externalRuntime: {
+          kind: "acpx",
+          agent: "codex",
+          sessionMode: "persistent",
+          outputMode: "json",
+          permissionMode: "approve-all",
+        },
+      },
+    });
+
+    expect(child.agentConfig).toEqual(
+      expect.objectContaining({
+        readOnlyExecution: true,
+        permissionMode: "plan",
+        shellAccess: false,
+      }),
+    );
+    expect(child.agentConfig?.externalRuntime).toBeUndefined();
+    expect(child.agentConfig?.toolRestrictions).toEqual(
+      expect.arrayContaining(["group:destructive", "group:system", "group:memory"]),
+    );
+  });
+
+  it("does not retain the inherited full-access profile for a verifier", async () => {
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "parent-1",
+        agentConfig: {
+          accessProfileId: "full_access",
+        },
+      }),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({
+        id: "child-task-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...task,
+      })),
+    };
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+
+    const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+      title: "Verifier",
+      prompt: "Check the delegated result.",
+      workspaceId: "ws-1",
+      parentTaskId: "parent-1",
+      agentType: "sub",
+      workerRole: "verifier",
+    });
+
+    expect(child.agentConfig?.accessProfileId).toBeUndefined();
+    expect(child.agentConfig?.permissionMode).toBe("plan");
+    expect(child.agentConfig?.shellAccess).toBe(false);
+  });
+
   it("does not let a legacy child permission mode bypass a parent ceiling", async () => {
     const taskRepo = {
       findById: vi.fn().mockReturnValue({
@@ -334,7 +479,7 @@ describe("AgentDaemon.createChildTask", () => {
     }
   });
 
-  it("maps inherited full access to approve-all for external runtime child tasks", async () => {
+  it("preserves separate external runtime consent under inherited full access", async () => {
     const taskRepo = {
       findById: vi.fn().mockReturnValue({
         id: "parent-1",
@@ -374,7 +519,7 @@ describe("AgentDaemon.createChildTask", () => {
       },
     });
 
-    expect(child.agentConfig?.externalRuntime?.permissionMode).toBe("approve-all");
+    expect(child.agentConfig?.externalRuntime?.permissionMode).toBe("approve-reads");
   });
 
   it("normalizes legacy read-only system role restrictions so shell permission can carry to subagents", () => {
@@ -402,7 +547,7 @@ describe("AgentDaemon.createChildTask", () => {
     expect(result.task.agentConfig.toolRestrictions).not.toContain("group:destructive");
   });
 
-  it("keeps read-only helper child tasks shell-capable", async () => {
+  it("enforces the read-only helper boundary while preserving the researcher role", async () => {
     const createChildTask = vi.fn().mockResolvedValue({ id: "child-task-1" });
     const daemonLike = {
       createChildTask,
@@ -418,18 +563,87 @@ describe("AgentDaemon.createChildTask", () => {
     const result = await (AgentDaemon.prototype as Any).runReadOnlyChildTaskAndWait.call(
       daemonLike,
       {
-        parentTask: { id: "parent-1", workspaceId: "ws-1", depth: 0 },
+        parentTask: {
+          id: "parent-1",
+          workspaceId: "ws-1",
+          depth: 0,
+          agentConfig: { permissionMode: "bypass_permissions", shellAccess: true },
+        },
         title: "Read-only check",
         prompt: "Check git state.",
         timeoutMs: 10,
+        workerRole: "researcher",
+        agentConfig: {
+          permissionMode: "bypass_permissions",
+          shellAccess: true,
+          readOnlyExecution: false,
+          externalRuntime: {
+            kind: "acpx",
+            agent: "codex",
+            sessionMode: "persistent",
+            outputMode: "json",
+            permissionMode: "approve-all",
+          },
+        },
       },
     );
 
     expect(result.status).toBe("completed");
     expect(createChildTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        workerRole: "researcher",
         agentConfig: expect.objectContaining({
-          toolRestrictions: ["group:write", "delete_file", "group:image"],
+          readOnlyExecution: true,
+          permissionMode: "plan",
+          shellAccess: false,
+          toolRestrictions: expect.arrayContaining([
+            "group:destructive",
+            "group:system",
+            "group:memory",
+          ]),
+        }),
+      }),
+    );
+    expect(createChildTask.mock.calls[0][0].agentConfig.externalRuntime).toBeUndefined();
+  });
+
+  it("configures verifier helper children as read-only", async () => {
+    const createChildTask = vi.fn().mockResolvedValue({ id: "child-task-1" });
+    const daemonLike = {
+      createChildTask,
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({
+          id: "child-task-1",
+          status: "completed",
+          resultSummary: "VERDICT: PASS",
+        }),
+      },
+    } as Any;
+
+    const result = await (AgentDaemon.prototype as Any).runReadOnlyChildTaskAndWait.call(
+      daemonLike,
+      {
+        parentTask: {
+          id: "parent-1",
+          workspaceId: "ws-1",
+          depth: 0,
+          agentConfig: { permissionMode: "bypass_permissions", shellAccess: true },
+        },
+        title: "Verification check",
+        prompt: "Verify the result.",
+        timeoutMs: 10,
+        workerRole: "verifier",
+      },
+    );
+
+    expect(result.status).toBe("completed");
+    expect(createChildTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerRole: "verifier",
+        agentConfig: expect.objectContaining({
+          permissionMode: "plan",
+          shellAccess: false,
+          toolRestrictions: expect.arrayContaining(["group:destructive"]),
         }),
       }),
     );

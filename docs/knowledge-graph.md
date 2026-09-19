@@ -37,29 +37,32 @@ Agent Task Execution
 ## Schema
 
 ### Entity Types (`kg_entity_types`)
+
 Defines the vocabulary of entity types. 10 built-in types are seeded per workspace on startup. Users and agents can create custom types.
 
 **Built-in types:**
 
-| Type | Icon | Description |
-|------|------|-------------|
-| person | :bust_in_silhouette: | A person or individual |
-| organization | :office: | A company, team, or organization |
-| project | :file_folder: | A project or initiative |
-| technology | :gear: | A programming language, framework, or tool |
-| concept | :bulb: | An abstract idea, pattern, or principle |
-| file | :page_facing_up: | A file or document in the codebase |
-| service | :wrench: | A running service, microservice, or daemon |
-| api_endpoint | :electric_plug: | An API endpoint or route |
-| database_table | :card_file_box: | A database table or collection |
-| environment | :globe_with_meridians: | A deployment environment |
+| Type           | Icon                   | Description                                |
+| -------------- | ---------------------- | ------------------------------------------ |
+| person         | :bust_in_silhouette:   | A person or individual                     |
+| organization   | :office:               | A company, team, or organization           |
+| project        | :file_folder:          | A project or initiative                    |
+| technology     | :gear:                 | A programming language, framework, or tool |
+| concept        | :bulb:                 | An abstract idea, pattern, or principle    |
+| file           | :page_facing_up:       | A file or document in the codebase         |
+| service        | :wrench:               | A running service, microservice, or daemon |
+| api_endpoint   | :electric_plug:        | An API endpoint or route                   |
+| database_table | :card_file_box:        | A database table or collection             |
+| environment    | :globe_with_meridians: | A deployment environment                   |
 
 ### Entities (`kg_entities`)
+
 Core nodes in the graph. Each entity has a type, name, optional description, flexible JSON properties, confidence score (0-1), and source tracking.
 
 **Unique constraint:** `(workspace_id, entity_type_id, name)` ensures no duplicate entities of the same type and name within a workspace.
 
 ### Edges (`kg_edges`)
+
 Typed directed relationships between entities.
 
 **Built-in edge types (15):**
@@ -75,17 +78,21 @@ Edges can also carry:
 Current facts are protected by a partial unique index on `(workspace_id, source_entity_id, target_entity_id, edge_type)` where `valid_to IS NULL`. Historical edges are allowed, but overlapping intervals for the same directed relation are rejected.
 
 ### Observations (`kg_observations`)
+
 Timestamped facts or notes attached to entities. Append-only log that tracks changes and discoveries over time.
 
 ## Search Capabilities
 
 ### Full-Text Search (FTS5)
+
 Entity names and descriptions are indexed in an FTS5 virtual table with BM25 ranking. Auto-sync triggers keep the index updated on INSERT, UPDATE, and DELETE.
 
 ### Graph Traversal
+
 Neighbors can be retrieved up to 3 hops deep using iterative BFS traversal with optional edge type filtering. Subgraph queries return all entities and connecting edges for a given set of entity IDs. Both traversal paths can optionally filter by historical `as_of` timestamp, so the graph can answer “what was true then?” instead of only “what is true now?”
 
 ### LIKE Fallback
+
 If FTS5 is unavailable (rare SQLite builds), search falls back to `LIKE` pattern matching with confidence-based ranking.
 
 ## Auto-Extraction
@@ -105,6 +112,7 @@ Auto-extracted entities are stored with `source='auto'` and `confidence=0.85`.
 - **Auto-extracted entities:** confidence 0.85
 
 Confidence decay runs periodically for auto-extracted entities older than 30 days:
+
 - Decay rate: 0.95 per run (5% reduction each cycle)
 - Floor: 0.3 (entities never decay below this)
 
@@ -124,18 +132,18 @@ This context is available for injection into the agent's system prompt alongside
 
 ## Agent Tools (10)
 
-| Tool | Description |
-|------|-------------|
-| `kg_create_entity` | Create or update an entity with type, name, description, and properties |
-| `kg_update_entity` | Update an entity's description, properties, or confidence |
-| `kg_delete_entity` | Delete an entity (cascades to edges and observations) |
-| `kg_create_edge` | Create a typed relationship between two entities, optionally with `valid_from` / `valid_to` |
-| `kg_delete_edge` | Remove a relationship |
-| `kg_invalidate_edge` | Close an active relationship without deleting its history |
-| `kg_add_observation` | Append a timestamped observation to an entity |
-| `kg_search` | Full-text search with optional type filtering |
-| `kg_get_neighbors` | Get connected entities up to 3 hops deep, optionally `as_of` a historical timestamp |
-| `kg_get_subgraph` | Get entities and edges for a set of entity IDs, optionally `as_of` a historical timestamp |
+| Tool                 | Description                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| `kg_create_entity`   | Create or update an entity with type, name, description, and properties                     |
+| `kg_update_entity`   | Update an entity's description, properties, or confidence                                   |
+| `kg_delete_entity`   | Delete an entity (cascades to edges and observations)                                       |
+| `kg_create_edge`     | Create a typed relationship between two entities, optionally with `valid_from` / `valid_to` |
+| `kg_delete_edge`     | Remove a relationship                                                                       |
+| `kg_invalidate_edge` | Close an active relationship without deleting its history                                   |
+| `kg_add_observation` | Append a timestamped observation to an entity                                               |
+| `kg_search`          | Full-text search with optional type filtering                                               |
+| `kg_get_neighbors`   | Get connected entities up to 3 hops deep, optionally `as_of` a historical timestamp         |
+| `kg_get_subgraph`    | Get entities and edges for a set of entity IDs, optionally `as_of` a historical timestamp   |
 
 ## Usage & Testing
 
@@ -170,6 +178,7 @@ Try prompts like:
 ### Auto-Extraction (Passive)
 
 The knowledge graph also grows passively. After each completed task, the system automatically extracts:
+
 - Technology mentions (React, TypeScript, Docker, etc.)
 - File paths referenced in the task (src/components/App.tsx, etc.)
 - API endpoints (GET /api/users, POST /auth/login, etc.)
@@ -185,20 +194,20 @@ These auto-extracted entities appear with `confidence=0.85` and decay over time 
 
 ## Comparison with ClawHub Ontology
 
-| Capability | ClawHub Ontology | CoWork OS Knowledge Graph |
-|------------|-----------------|--------------------------|
-| **Storage** | Flat JSON file | SQLite with 4 normalized tables |
-| **Search** | Linear scan | FTS5 full-text search with BM25 ranking |
-| **Graph traversal** | Manual JSON parsing | Iterative BFS queries (up to 3 hops) |
-| **Entity types** | Fixed schema | 10 built-in + user-extensible |
-| **Edge types** | Basic relationships | 15 built-in typed relationships + custom |
-| **Observations** | None | Append-only timestamped fact log per entity |
-| **Auto-extraction** | None | Regex-based extraction from task results |
-| **Confidence scoring** | None | 0-1 confidence with time-based decay |
-| **Deduplication** | None | Upsert on (workspace, type, name) |
-| **Context injection** | Manual tool use | Auto-injected into task system prompts |
-| **Multi-workspace** | Single file | Per-workspace isolation |
-| **Privacy** | None | Inherits workspace memory privacy settings |
-| **Agent tools** | ~3 basic | 10 comprehensive tools |
-| **Subgraph queries** | None | Multi-entity subgraph extraction |
-| **Cascade deletes** | Manual cleanup | Automatic via FK constraints + transactions |
+| Capability             | ClawHub Ontology    | CoWork OS Knowledge Graph                   |
+| ---------------------- | ------------------- | ------------------------------------------- |
+| **Storage**            | Flat JSON file      | SQLite with 4 normalized tables             |
+| **Search**             | Linear scan         | FTS5 full-text search with BM25 ranking     |
+| **Graph traversal**    | Manual JSON parsing | Iterative BFS queries (up to 3 hops)        |
+| **Entity types**       | Fixed schema        | 10 built-in + user-extensible               |
+| **Edge types**         | Basic relationships | 15 built-in typed relationships + custom    |
+| **Observations**       | None                | Append-only timestamped fact log per entity |
+| **Auto-extraction**    | None                | Regex-based extraction from task results    |
+| **Confidence scoring** | None                | 0-1 confidence with time-based decay        |
+| **Deduplication**      | None                | Upsert on (workspace, type, name)           |
+| **Context injection**  | Manual tool use     | Auto-injected into task system prompts      |
+| **Multi-workspace**    | Single file         | Per-workspace isolation                     |
+| **Privacy**            | None                | Inherits workspace memory privacy settings  |
+| **Agent tools**        | ~3 basic            | 10 comprehensive tools                      |
+| **Subgraph queries**   | None                | Multi-entity subgraph extraction            |
+| **Cascade deletes**    | Manual cleanup      | Automatic via FK constraints + transactions |

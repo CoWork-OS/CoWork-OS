@@ -25,7 +25,12 @@
       "category": "Data",
       "prompt": "Analyze the CSV data and provide comprehensive insights.\n\nFile path or data:\n{{data_source}}\n\nPlease provide:\n1. Data overview (rows, columns, data types)\n2. Summary statistics for numerical columns\n3. Missing data report\n4. Key patterns and correlations\n5. Outlier detection\n6. Top 3 actionable insights\n7. Suggested visualizations",
       "parameters": [
-        { "name": "data_source", "type": "string", "description": "CSV file path or pasted data", "required": true }
+        {
+          "name": "data_source",
+          "type": "string",
+          "description": "CSV file path or pasted data",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -37,7 +42,12 @@
       "category": "Data",
       "prompt": "Generate a comprehensive data report.\n\nData source: {{data_source}}\nReport focus: {{focus}}\n\nPlease create:\n1. Executive summary (3-5 key findings)\n2. Methodology description\n3. Detailed findings with supporting data\n4. Trend analysis\n5. Recommendations\n6. Include relevant tables with the data\n7. Suggest chart types for key metrics",
       "parameters": [
-        { "name": "data_source", "type": "string", "description": "Data to analyze", "required": true },
+        {
+          "name": "data_source",
+          "type": "string",
+          "description": "Data to analyze",
+          "required": true
+        },
         { "name": "focus", "type": "string", "description": "Report focus area", "required": false }
       ],
       "enabled": true
@@ -50,8 +60,18 @@
       "category": "Data",
       "prompt": "Generate a SQL query based on the following request.\n\nRequest: {{request}}\nTable schema: {{schema}}\n\nPlease provide:\n1. The SQL query\n2. Explanation of what the query does\n3. Performance considerations\n4. Alternative approaches if applicable",
       "parameters": [
-        { "name": "request", "type": "string", "description": "What data do you need?", "required": true },
-        { "name": "schema", "type": "string", "description": "Table schema or description", "required": false }
+        {
+          "name": "request",
+          "type": "string",
+          "description": "What data do you need?",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "type": "string",
+          "description": "Table schema or description",
+          "required": false
+        }
       ],
       "enabled": true
     }

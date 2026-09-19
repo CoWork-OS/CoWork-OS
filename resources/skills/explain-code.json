@@ -18,11 +18,7 @@
       "description": "Explanation depth",
       "required": true,
       "default": "intermediate",
-      "options": [
-        "beginner",
-        "intermediate",
-        "advanced"
-      ]
+      "options": ["beginner", "intermediate", "advanced"]
     }
   ],
   "enabled": true,

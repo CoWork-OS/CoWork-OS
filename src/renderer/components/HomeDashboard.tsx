@@ -4,7 +4,6 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
   ArrowRight,
-  Bot,
   CheckCircle2,
   CircleDot,
   FileCode2,
@@ -19,6 +18,7 @@ import {
   Zap,
   Mail,
 } from "lucide-react";
+import { BotGlyph } from "./BotGlyph";
 import type { FileViewerResult } from "../../electron/preload";
 import type {
   EverydayActionReceipt,
@@ -923,7 +923,7 @@ export function HomeDashboard({
             onClick={onOpenModelSettings}
             aria-label={`Manage model access. Current route: ${selectedProviderName}, ${selectedModel}`}
           >
-            <Bot size={16} />
+            <BotGlyph size={17} />
             <span className="home-model-access-copy">
               <strong>{selectedProviderName}</strong>
               <span>{selectedModel}</span>
@@ -1224,7 +1224,7 @@ export function HomeDashboard({
             </button>
             <button type="button" className="home-auto-card" onClick={onOpenMissionControl}>
               <div className="home-auto-card-icon">
-                <Bot size={20} />
+                <BotGlyph size={21} />
               </div>
               <div className="home-auto-card-copy">
                 <strong>Core automation</strong>

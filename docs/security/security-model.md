@@ -34,11 +34,11 @@ CoWork OS implements a layered security model with multiple defense mechanisms.
 
 CoWork OS supports three security modes for external channels (Telegram, Discord, etc.):
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| **Pairing** | Users must enter a 6-character code | Recommended for most cases |
-| **Allowlist** | Only pre-approved user IDs allowed | Enterprise deployments |
-| **Open** | Anyone can interact | Trusted private channels only |
+| Mode          | Description                         | Use Case                      |
+| ------------- | ----------------------------------- | ----------------------------- |
+| **Pairing**   | Users must enter a 6-character code | Recommended for most cases    |
+| **Allowlist** | Only pre-approved user IDs allowed  | Enterprise deployments        |
+| **Open**      | Anyone can interact                 | Trusted private channels only |
 
 ### Context Policies
 
@@ -65,6 +65,7 @@ profile boundary.
 ### Layer 1: Global Guardrails
 
 Dangerous patterns that are always blocked:
+
 - `sudo` - Privilege escalation
 - `rm -rf /` - Destructive deletions
 - `curl | bash` - Remote code execution
@@ -73,6 +74,7 @@ Dangerous patterns that are always blocked:
 ### Layer 2: Workspace Permissions
 
 Per-workspace controls:
+
 - **Read**: Allow reading files
 - **Write**: Allow creating/modifying files
 - **Delete**: Allow file deletion
@@ -87,13 +89,17 @@ requests, and a workspace with `network: false` blocks both ordinary web access 
 ### Layer 3: Context Restrictions
 
 Based on message context (private/group/public):
+
 - Memory tools denied in group contexts
 - Clipboard access denied in shared contexts
 
 ### Layer 4: Tool-Specific Rules
 
 Individual tool permissions and approval decisions:
-- Destructive tools usually prompt unless an explicit allow rule or mode applies
+
+- Named profiles evaluate the concrete operation and boundary; in-scope local mutations can run
+  without an approval lifecycle, while protected, external, sensitive, or explicitly-asked
+  operations still require consent or a denial
 - Command tools may prompt, auto-review, or run without a prompt according to the selected profile;
   a separate shell toggle is not part of new-task configuration
 - Domain-scoped rules can allow or deny `web_fetch` / `http_request` per destination
@@ -103,6 +109,10 @@ Individual tool permissions and approval decisions:
 
 After the access profile is applied, a legacy permission mode and the denial fallback tracker may
 provide compatibility defaults for the individual decision:
+
+These mode descriptions apply to older profile-less tasks and compatibility callers. New tasks
+with a named access profile use the boundary rules above instead of translating the profile into a
+legacy prompt category.
 
 - `default`, `plan`, `accept_edits`, `dangerous_only`, `dont_ask`, and `bypass_permissions` define baseline behavior
 - `dangerous_only` is the middle ground between `accept_edits` and full autonomy: it auto-allows safe reads, edits, and a conservative read/test shell subset, while still prompting for destructive actions, privacy-sensitive non-workspace access, MCP/external side effects, and ambiguous shell commands
@@ -169,6 +179,7 @@ fails closed rather than silently widening access.
 ### macOS (Primary)
 
 Uses native `sandbox-exec` with generated profiles:
+
 - Deny-by-default policy
 - Explicit allows for workspace, approved roots, and required system paths
 - Network isolation unless the active profile explicitly enables it
@@ -178,6 +189,7 @@ Uses native `sandbox-exec` with generated profiles:
 ### Docker (Cross-platform)
 
 For Linux and Windows systems:
+
 - Container isolation per command
 - Only centrally approved workspace and additional roots are mounted
 - CPU and memory limits
@@ -188,6 +200,7 @@ For Linux and Windows systems:
 ### Fallback
 
 When sandboxing unavailable:
+
 - Process isolation with timeout
 - Output size limits
 - Environment variable filtering
@@ -198,12 +211,14 @@ When sandboxing unavailable:
 ### Protected Paths
 
 These paths can never be written to:
+
 - `/System`, `/Library`, `/usr`, `/bin` (macOS)
 - `C:\Windows`, `C:\Program Files` (Windows)
 
 ### Workspace Boundaries
 
 By default, and subject to the effective access profile, tools can access:
+
 1. The active workspace directory
 2. Profile-declared additional workspace roots and matching filesystem rules
 3. Legacy explicitly allowed paths for unprofiled compatibility tasks
@@ -216,6 +231,7 @@ external-file approval. Existing prefixes and symlinks are canonicalized before 
 ### Path Traversal Prevention
 
 Multiple validation layers prevent `../` escape:
+
 - Path normalization
 - Relative path detection
 - Workspace prefix checking
@@ -243,17 +259,18 @@ Application settings stored through `SecureSettingsRepository` are encrypted ins
 
 ### Features
 
-| Feature | Description |
-|---------|-------------|
+| Feature                    | Description                             |
+| -------------------------- | --------------------------------------- |
 | **Multi-layer encryption** | OS keychain preferred, AES-256 fallback |
-| **Stable machine ID** | Survives hostname/user changes |
-| **Integrity checks** | SHA-256 checksums per setting |
-| **Safe migration** | Backups preserved on failure |
-| **Health diagnostics** | Status APIs for debugging |
+| **Stable machine ID**      | Survives hostname/user changes          |
+| **Integrity checks**       | SHA-256 checksums per setting           |
+| **Safe migration**         | Backups preserved on failure            |
+| **Health diagnostics**     | Status APIs for debugging               |
 
 ### Protected Categories
 
 All sensitive settings including API keys, preferences, and configurations are stored encrypted:
+
 - LLM provider settings and API keys
 - Voice/TTS/STT configurations
 - Search provider credentials
@@ -274,11 +291,11 @@ Pending approvals are stored in `pending_memory_writes`. Because this table is i
 
 ## Rate Limiting
 
-| Operation | Limit |
-|-----------|-------|
-| LLM calls | 10/minute |
-| Task creation | 10/minute |
-| Settings changes | 5/minute |
+| Operation           | Limit     |
+| ------------------- | --------- |
+| LLM calls           | 10/minute |
+| Task creation       | 10/minute |
+| Settings changes    | 5/minute  |
 | Standard operations | 60/minute |
 
 ## Security Harness
@@ -303,6 +320,7 @@ regression coverage. See [Security Harness](security-harness.md).
 ## Brute-Force Protection
 
 For pairing codes:
+
 - Maximum 5 attempts
 - 15-minute lockout after max attempts
 - Automatic cleanup of expired codes
@@ -310,10 +328,12 @@ For pairing codes:
 ## Concurrency Safety
 
 ### Mutex Locks
+
 - Pairing operations protected by named mutexes
 - Prevents race conditions in verification
 
 ### Idempotency
+
 - Approval operations tracked with idempotency keys
 - Prevents double-processing of the same request
 
@@ -325,16 +345,17 @@ CoWork OS implements multiple layers of defense against prompt injection attacks
 
 The agent system prompt includes security directives that resist common attack vectors:
 
-| Directive | Purpose |
-|-----------|---------|
-| **Confidentiality** | Prevents disclosure of system instructions in any format |
-| **Output Integrity** | Resists behavioral modification (language changes, suffix injection) |
-| **Code Review Safety** | Treats code comments as data, not instructions |
-| **Autonomous Operation** | Resists response pattern manipulation |
+| Directive                | Purpose                                                              |
+| ------------------------ | -------------------------------------------------------------------- |
+| **Confidentiality**      | Prevents disclosure of system instructions in any format             |
+| **Output Integrity**     | Resists behavioral modification (language changes, suffix injection) |
+| **Code Review Safety**   | Treats code comments as data, not instructions                       |
+| **Autonomous Operation** | Resists response pattern manipulation                                |
 
 ### Input Sanitization (`InputSanitizer`)
 
 Preprocesses all inputs to detect:
+
 - **Encoded instructions**: Base64, ROT13, hex-encoded payloads
 - **System impersonation**: `[SYSTEM]`, `[ADMIN OVERRIDE]`, mode activation attempts
 - **Content injection**: Hidden instructions in documents, emails, HTML comments
@@ -343,22 +364,24 @@ Preprocesses all inputs to detect:
 ### Output Monitoring (`OutputFilter`)
 
 Post-processes LLM responses to detect potential:
+
 - **Canary compliance**: Verification strings like `ZEBRA_CONFIRMED_9X7K`
 - **Format injection**: Word count suffixes, tracking codes
 - **Prompt leakage**: System prompt section headers, YAML configuration
 
 ### Content Sanitization
 
-| Source | Protection |
-|--------|------------|
-| **Tool Results** | Injection patterns in web/file content annotated; imported file reads can also carry an explicit untrusted-content banner |
-| **Memory Context** | Stored memories sanitized before injection |
-| **Skill Guidelines** | Validated and filtered before system prompt injection |
-| **Imported Files / Attachments** | Provenance recorded so later export approvals can show what content recently entered from outside the workspace |
+| Source                           | Protection                                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Tool Results**                 | Injection patterns in web/file content annotated; imported file reads can also carry an explicit untrusted-content banner |
+| **Memory Context**               | Stored memories sanitized before injection                                                                                |
+| **Skill Guidelines**             | Validated and filtered before system prompt injection                                                                     |
+| **Imported Files / Attachments** | Provenance recorded so later export approvals can show what content recently entered from outside the workspace           |
 
 ### Defense Philosophy
 
 These defenses are layered rather than purely reactive:
+
 - suspicious patterns are still logged and annotated instead of blindly discarded
 - system-prompt hardening and sanitization still provide the first line of defense
 - imported content is marked with provenance so the runtime can distinguish workspace-native data from externally supplied data

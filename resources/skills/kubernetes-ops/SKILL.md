@@ -38,4 +38,4 @@ Kubernetes cluster operations: kubectl commands, manifest generation, Helm chart
 ## Runtime Prompt
 
 - Current runtime prompt length: 898 characters.
-- Runtime prompt is defined directly in `../kubernetes-ops.json`. 
+- Runtime prompt is defined directly in `../kubernetes-ops.json`.

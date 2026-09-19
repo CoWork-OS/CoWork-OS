@@ -37,16 +37,16 @@ Analyze counterparty contract changes against agreement/schedules, flag conflict
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| agreement_path | string | No | Optional explicit path to the main agreement (DOCX/PDF/TXT) |
-| disclosure_schedules_path | string | No | Optional explicit path to disclosure schedules or side letter |
-| counterparty_changes_path | string | No | Optional explicit path to counterparty redline or demand letter |
-| client_side | select | No | Which side you represent |
-| output_report_path | string | No | Where to write the negotiation analysis markdown |
-| output_docx_path | string | No | Optional path for a clean revised DOCX draft |
+| Name                      | Type   | Required | Description                                                     |
+| ------------------------- | ------ | -------- | --------------------------------------------------------------- |
+| agreement_path            | string | No       | Optional explicit path to the main agreement (DOCX/PDF/TXT)     |
+| disclosure_schedules_path | string | No       | Optional explicit path to disclosure schedules or side letter   |
+| counterparty_changes_path | string | No       | Optional explicit path to counterparty redline or demand letter |
+| client_side               | select | No       | Which side you represent                                        |
+| output_report_path        | string | No       | Where to write the negotiation analysis markdown                |
+| output_docx_path          | string | No       | Optional path for a clean revised DOCX draft                    |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 2482 characters.
-- Runtime prompt is defined directly in `../legal-contract-negotiation-review.json`. 
+- Runtime prompt is defined directly in `../legal-contract-negotiation-review.json`.

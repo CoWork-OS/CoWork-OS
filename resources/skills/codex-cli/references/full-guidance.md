@@ -18,6 +18,7 @@ which codex
 - **Not found** (exit 1): go to Phase 1
 
 Then verify auth:
+
 ```bash
 codex --version
 ```
@@ -35,17 +36,20 @@ npm install -g @openai/codex
 ```
 
 Verify:
+
 ```bash
 which codex && codex --version
 ```
 
 If `which codex` still fails after install — PATH issue:
+
 ```bash
 npm bin -g         # shows the global bin path
 echo $PATH         # check if it's included
 ```
 
 Fix: add to `~/.zshrc` or `~/.bashrc`:
+
 ```bash
 export PATH="$(npm bin -g):$PATH"
 ```
@@ -59,12 +63,15 @@ Then `source ~/.zshrc && which codex`.
 Codex requires an OpenAI API key.
 
 ### Option A: Browser Login (recommended)
+
 ```bash
 codex login
 ```
+
 Opens browser for OAuth. Credentials saved to `~/.codex/auth.json`.
 
 ### Option B: API Key
+
 ```bash
 # Check if already set
 echo $OPENAI_API_KEY | head -c 10
@@ -75,6 +82,7 @@ export OPENAI_API_KEY="sk-your-key-here"
 ```
 
 Verify auth works:
+
 ```bash
 codex --version
 ```
@@ -112,6 +120,7 @@ API keys (`OPENAI_API_KEY`, `CODEX_API_KEY`) are also auto-forwarded from the ho
 ### Git Repo Required
 
 Codex refuses to run outside a trusted git directory. For scratch work:
+
 ```bash
 SCRATCH=$(mktemp -d) && cd $SCRATCH && git init
 ```
@@ -122,85 +131,85 @@ SCRATCH=$(mktemp -d) && cd $SCRATCH && git init
 
 ### Subcommands
 
-| Command | Description |
-|---|---|
+| Command               | Description                                     |
+| --------------------- | ----------------------------------------------- |
 | `codex exec "prompt"` | One-shot: run prompt and exit. Alias: `codex e` |
-| `codex login` | Browser-based OAuth login |
-| `codex logout` | Remove stored credentials |
-| `codex resume` | Resume a previous session |
-| `codex resume --last` | Resume the most recent session |
-| `codex resume --all` | List all resumable sessions |
-| `codex mcp` | Run as MCP server (for external orchestration) |
-| `codex completion` | Generate shell completions |
+| `codex login`         | Browser-based OAuth login                       |
+| `codex logout`        | Remove stored credentials                       |
+| `codex resume`        | Resume a previous session                       |
+| `codex resume --last` | Resume the most recent session                  |
+| `codex resume --all`  | List all resumable sessions                     |
+| `codex mcp`           | Run as MCP server (for external orchestration)  |
+| `codex completion`    | Generate shell completions                      |
 
 ### Global Flags
 
-| Flag | Short | Description |
-|---|---|---|
-| `--model MODEL` | `-m` | Override model (default: from config) |
-| `--approval-mode MODE` | `-a` | `on-request` (default) or `never` |
-| `--sandbox TYPE` | `-s` | `read-only`, `workspace-write`, or `danger-full-access` |
-| `--quiet` | `-q` | Suppress non-essential output |
-| `--chdir DIR` | | Change working directory before execution |
-| `--full-auto` | | Shorthand: `--approval-mode never --sandbox workspace-write` |
-| `--yolo` | | Shorthand: `--approval-mode never --sandbox danger-full-access` |
-| `--add-writable DIR` | | Add extra writable directory |
-| `--no-project-doc` | | Skip reading AGENTS.md |
-| `--enable FEATURE` | | Enable a feature |
-| `--disable FEATURE` | | Disable a feature |
-| `-c key=value` | | Set config override |
+| Flag                   | Short | Description                                                     |
+| ---------------------- | ----- | --------------------------------------------------------------- |
+| `--model MODEL`        | `-m`  | Override model (default: from config)                           |
+| `--approval-mode MODE` | `-a`  | `on-request` (default) or `never`                               |
+| `--sandbox TYPE`       | `-s`  | `read-only`, `workspace-write`, or `danger-full-access`         |
+| `--quiet`              | `-q`  | Suppress non-essential output                                   |
+| `--chdir DIR`          |       | Change working directory before execution                       |
+| `--full-auto`          |       | Shorthand: `--approval-mode never --sandbox workspace-write`    |
+| `--yolo`               |       | Shorthand: `--approval-mode never --sandbox danger-full-access` |
+| `--add-writable DIR`   |       | Add extra writable directory                                    |
+| `--no-project-doc`     |       | Skip reading AGENTS.md                                          |
+| `--enable FEATURE`     |       | Enable a feature                                                |
+| `--disable FEATURE`    |       | Disable a feature                                               |
+| `-c key=value`         |       | Set config override                                             |
 
 ### Exec-Specific Flags
 
-| Flag | Description |
-|---|---|
-| `--json` | NDJSON streaming output (one event per line) |
-| `--resume SESSION_ID` | Resume a previous exec session |
-| `--last` | Resume the most recent session |
-| `--all` | List all sessions |
-| `--image PATH` | Attach an image to the prompt |
+| Flag                  | Description                                  |
+| --------------------- | -------------------------------------------- |
+| `--json`              | NDJSON streaming output (one event per line) |
+| `--resume SESSION_ID` | Resume a previous exec session               |
+| `--last`              | Resume the most recent session               |
+| `--all`               | List all sessions                            |
+| `--image PATH`        | Attach an image to the prompt                |
 
 ### Environment Variables
 
-| Variable | Description |
-|---|---|
-| `OPENAI_API_KEY` | API key (fallback) |
-| `CODEX_API_KEY` | API key (preferred) |
-| `CODEX_HOME` | Override config directory (default: `~/.codex`) |
+| Variable         | Description                                     |
+| ---------------- | ----------------------------------------------- |
+| `OPENAI_API_KEY` | API key (fallback)                              |
+| `CODEX_API_KEY`  | API key (preferred)                             |
+| `CODEX_HOME`     | Override config directory (default: `~/.codex`) |
 
 ### Config Files
 
-| Path | Scope | Format |
-|---|---|---|
-| `~/.codex/config.toml` | Global | TOML |
-| `.codex/config.toml` | Project | TOML |
-| `~/.codex/auth.json` | Auth credentials | JSON |
-| `AGENTS.md` | Project instructions | Markdown |
+| Path                   | Scope                | Format   |
+| ---------------------- | -------------------- | -------- |
+| `~/.codex/config.toml` | Global               | TOML     |
+| `.codex/config.toml`   | Project              | TOML     |
+| `~/.codex/auth.json`   | Auth credentials     | JSON     |
+| `AGENTS.md`            | Project instructions | Markdown |
 
 ### NDJSON Event Types (`--json` mode)
 
-| Event | Description |
-|---|---|
-| `thread.started` | Execution session started |
-| `turn.started` | New agent turn began |
-| `item.started` | Tool call or message started |
-| `item.updated` | Streaming update |
+| Event            | Description                   |
+| ---------------- | ----------------------------- |
+| `thread.started` | Execution session started     |
+| `turn.started`   | New agent turn began          |
+| `item.started`   | Tool call or message started  |
+| `item.updated`   | Streaming update              |
 | `item.completed` | Tool call or message finished |
-| `turn.completed` | Turn finished |
-| `turn.failed` | Turn errored |
+| `turn.completed` | Turn finished                 |
+| `turn.failed`    | Turn errored                  |
 
 ---
 
 ## Decision Tree
 
-| Task | Command |
-|---|---|
-| **PR Review** (read-only) | `codex exec "Review this PR against main. Focus on bugs, security, breaking changes."` |
-| **Fix/Build** (auto-approve) | `codex exec --full-auto "Fix issue #N: description"` |
-| **Scratch/Dangerous** (no sandbox) | `codex exec --yolo "Do X"` |
-| **JSON output** (programmatic) | `codex exec --json "prompt"` |
-| **Resume previous** | `codex resume --last` |
-| **Specific model** | `codex exec -m o4-mini "prompt"` |
+| Task                               | Command                                                                                |
+| ---------------------------------- | -------------------------------------------------------------------------------------- |
+| **PR Review** (read-only)          | `codex exec "Review this PR against main. Focus on bugs, security, breaking changes."` |
+| **Fix/Build** (auto-approve)       | `codex exec --full-auto "Fix issue #N: description"`                                   |
+| **Scratch/Dangerous** (no sandbox) | `codex exec --yolo "Do X"`                                                             |
+| **JSON output** (programmatic)     | `codex exec --json "prompt"`                                                           |
+| **Resume previous**                | `codex resume --last`                                                                  |
+| **Specific model**                 | `codex exec -m o4-mini "prompt"`                                                       |
 
 ---
 

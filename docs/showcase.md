@@ -32,12 +32,14 @@ This makes CoWork the default workspace instead of jumping between Word, Excel, 
 Build entire features, modules, or applications from a natural language description. The agent reads your existing codebase, follows your project's conventions, and produces files that compile and pass lint on the first try.
 
 **What it handles:**
+
 - Full-stack feature scaffolding (API endpoints, database models, UI components, tests)
 - Language-specific idioms — TypeScript, Python, Rust, Go, Swift, Kotlin, C#, C++, GDScript
 - Framework scaffolding — React, Next.js, Express, FastAPI, Django, Rails, SwiftUI, Jetpack Compose
 - Boilerplate reduction — generates repetitive code (CRUD operations, form validation, serializers) while you focus on business logic
 
 **Example prompt:**
+
 ```
 Create a REST API for a blog platform with posts, comments, and tags.
 Use Express + TypeScript + Prisma + PostgreSQL.
@@ -54,12 +56,14 @@ Generate tests for each endpoint.
 Review pull requests, identify code smells, and refactor with confidence. The agent understands your codebase context — not just the diff.
 
 **What it handles:**
+
 - Structured PR review with risk assessment, missing test coverage, and approval recommendations
 - TypeScript/JavaScript migration (e.g., JS → TS with full type annotations)
 - Large-scale refactoring — rename symbols across files, extract shared modules, decompose monoliths
 - SOLID principle enforcement, dead code removal, import cleanup
 
 **Example prompt:**
+
 ```
 Review the changes in PR #42. For each file, assess risk level (low/medium/high),
 flag potential bugs, note missing tests, and give an overall approve/request-changes recommendation.
@@ -74,6 +78,7 @@ flag potential bugs, note missing tests, and give an overall approve/request-cha
 Paste an error, a stack trace, or describe unexpected behavior — the agent traces through your code to find the root cause and suggests a fix.
 
 **What it handles:**
+
 - Stack trace analysis with file/line pinpointing
 - Race condition and concurrency debugging
 - Memory leak investigation
@@ -81,6 +86,7 @@ Paste an error, a stack trace, or describe unexpected behavior — the agent tra
 - Environment-specific issues (works on my machine / doesn't work in CI)
 
 **Example prompt:**
+
 ```
 This test passes locally but fails in CI with "ECONNREFUSED 127.0.0.1:5432".
 Here's the CI config and docker-compose.yml. Find the issue and fix it.
@@ -95,6 +101,7 @@ Here's the CI config and docker-compose.yml. Find the issue and fix it.
 Generate unit, integration, and end-to-end tests that cover edge cases you didn't think of. The agent reads your implementation and infers the test surface.
 
 **What it handles:**
+
 - Unit test generation (Jest, pytest, NUnit, XCTest, JUnit)
 - Integration test scaffolding with mock setup
 - Edge case discovery — boundary values, null inputs, concurrent access, error paths
@@ -102,6 +109,7 @@ Generate unit, integration, and end-to-end tests that cover edge cases you didn'
 - Test data factories and fixture generation
 
 **Example prompt:**
+
 ```
 Write comprehensive tests for the PaymentService class.
 Cover happy paths, insufficient funds, expired cards, network timeouts,
@@ -118,6 +126,7 @@ Use Jest with TypeScript.
 Generate API references, READMEs, architecture docs, and changelogs directly from your source code and git history.
 
 **What it handles:**
+
 - API reference docs from endpoint definitions (method, path, params, request/response examples, error codes)
 - README generation with project structure, setup instructions, and usage examples
 - Changelog generation from git commits and PR descriptions
@@ -125,6 +134,7 @@ Generate API references, READMEs, architecture docs, and changelogs directly fro
 - Inline documentation and JSDoc/docstring generation
 
 **Example prompt:**
+
 ```
 Generate API reference documentation for all endpoints in src/routes/.
 Include method, path, query/body parameters, example request, example response,
@@ -140,6 +150,7 @@ possible error codes, and authentication requirements.
 Scan your dependency tree for vulnerabilities, outdated packages, license conflicts, and supply chain risks.
 
 **What it handles:**
+
 - CVE scanning across npm, pip, Maven, NuGet, CocoaPods, Gradle
 - Outdated version detection with upgrade impact assessment
 - License compliance checking (GPL contamination, MIT/Apache compatibility)
@@ -147,6 +158,7 @@ Scan your dependency tree for vulnerabilities, outdated packages, license confli
 - Automated upgrade PRs with test validation
 
 **Example prompt:**
+
 ```
 Audit all dependencies in this project. Flag any with known CVEs,
 check for outdated major versions, and identify any GPL-licensed
@@ -169,6 +181,7 @@ packages that conflict with our MIT license.
 Manage Kubernetes clusters, generate manifests, debug pods, and configure networking — all from natural language.
 
 **What it handles:**
+
 - Manifest generation — Deployments, Services, Ingress, ConfigMaps, Secrets, HPA, NetworkPolicies
 - Helm chart operations — install, upgrade, rollback, template rendering
 - Debugging — pod logs, describe, exec into containers, event inspection
@@ -176,6 +189,7 @@ Manage Kubernetes clusters, generate manifests, debug pods, and configure networ
 - Kustomize overlays for environment-specific configs
 
 **Example prompt:**
+
 ```
 Generate Kubernetes manifests for a Node.js API with:
 - 3 replicas with rolling update strategy
@@ -195,6 +209,7 @@ Generate Kubernetes manifests for a Node.js API with:
 Plan, review, and apply Terraform configurations. The agent understands state management, module composition, and blast radius assessment.
 
 **What it handles:**
+
 - `terraform init/plan/apply/destroy` workflows with dry-run analysis
 - State management — inspect, move, import, remove resources
 - Module development and composition
@@ -203,6 +218,7 @@ Plan, review, and apply Terraform configurations. The agent understands state ma
 - Multi-environment workspace management
 
 **Example prompt:**
+
 ```
 Review this terraform plan output. Flag any resource deletions,
 assess the blast radius, check for configuration drift,
@@ -218,6 +234,7 @@ and recommend whether to approve or reject.
 Build Docker images, compose multi-service stacks, and optimize container configurations.
 
 **What it handles:**
+
 - Docker Compose file generation with services, networking, volumes, secrets
 - Multi-stage Dockerfile optimization (smaller images, faster builds)
 - Health checks and dependency ordering
@@ -225,6 +242,7 @@ Build Docker images, compose multi-service stacks, and optimize container config
 - Container debugging and log analysis
 
 **Example prompt:**
+
 ```
 Create a Docker Compose setup for a full-stack app:
 - Next.js frontend on port 3000
@@ -244,6 +262,7 @@ Include health checks and a .env.example file.
 Assess workloads for migration readiness, plan cutover strategies, and estimate costs across cloud providers.
 
 **What it handles:**
+
 - 6 Rs assessment (Rehost, Replatform, Refactor, Repurchase, Retain, Retire)
 - Database migration strategies (homogeneous, heterogeneous, CDC-based)
 - Network migration planning (VPN, Direct Connect, peering)
@@ -252,6 +271,7 @@ Assess workloads for migration readiness, plan cutover strategies, and estimate 
 - Multi-cloud and hybrid patterns
 
 **Example prompt:**
+
 ```
 Assess these 5 workloads for cloud migration readiness:
 1. Legacy Java monolith on bare metal
@@ -272,6 +292,7 @@ For each, recommend the right R strategy, estimate effort, and flag risks.
 Generate deployment checklists, configure CI pipelines, and manage releases with automated verification.
 
 **What it handles:**
+
 - Deployment checklists — pre-deploy checks, migration scripts, rollback procedures
 - CI configuration (GitHub Actions, GitLab CI, CircleCI, Jenkins)
 - Zero-downtime deployment strategies (blue-green, canary, rolling)
@@ -279,6 +300,7 @@ Generate deployment checklists, configure CI pipelines, and manage releases with
 - Incident response playbooks and post-mortems
 
 **Example prompt:**
+
 ```
 Create an incident response plan for this production database outage.
 Include: severity classification, immediate triage steps,
@@ -297,6 +319,7 @@ root cause investigation checklist, and post-mortem outline.
 Build iOS apps with SwiftUI or UIKit, manage data with SwiftData/Core Data, and deploy to the App Store.
 
 **What it handles:**
+
 - SwiftUI views, @Observable state management, navigation patterns
 - Core Data / SwiftData models and migrations
 - Push notifications (APNs), deep linking, Universal Links
@@ -305,6 +328,7 @@ Build iOS apps with SwiftUI or UIKit, manage data with SwiftData/Core Data, and 
 - App Store submission and review guidelines
 
 **Example prompt:**
+
 ```
 Create a SwiftUI view for a settings screen with:
 - User profile section (avatar, name, email)
@@ -322,6 +346,7 @@ Create a SwiftUI view for a settings screen with:
 Build Android apps with Jetpack Compose, manage data with Room, and deploy to the Play Store.
 
 **What it handles:**
+
 - Jetpack Compose UI with Material 3 theming
 - ViewModel, Room database, Retrofit networking
 - Dependency injection with Hilt/Dagger
@@ -330,6 +355,7 @@ Build Android apps with Jetpack Compose, manage data with Room, and deploy to th
 - ADB/emulator commands, Play Store submission
 
 **Example prompt:**
+
 ```
 Create a Jetpack Compose screen that displays a list of items from a Room database.
 Include a ViewModel with StateFlow, a Repository layer with Retrofit for remote sync,
@@ -345,6 +371,7 @@ and Hilt dependency injection. Use Material 3 components.
 Build with React Native, manage native modules, and configure build pipelines for both platforms.
 
 **What it handles:**
+
 - React Native project scaffolding with navigation and state management
 - Native module integration and platform-specific code
 - Expo vs bare workflow decision guidance
@@ -353,6 +380,7 @@ Build with React Native, manage native modules, and configure build pipelines fo
 - Beta distribution via TestFlight and Play Store internal tracks
 
 **Example prompt:**
+
 ```
 Set up a React Native project with:
 - React Navigation (tab + stack navigators)
@@ -373,6 +401,7 @@ Set up a React Native project with:
 Build games with Unity and C#. Covers gameplay programming, asset management, rendering pipelines, and CLI builds.
 
 **What it handles:**
+
 - MonoBehaviour lifecycle, component patterns, SerializeField best practices
 - ScriptableObjects for data-driven design (weapons, items, level configs)
 - Object pooling, Addressables, async asset loading
@@ -382,6 +411,7 @@ Build games with Unity and C#. Covers gameplay programming, asset management, re
 - Unity CLI batch builds and automated testing
 
 **Example prompt:**
+
 ```
 Create a Unity player controller with:
 - Third-person camera using Cinemachine
@@ -400,6 +430,7 @@ Create a Unity player controller with:
 Build with Unreal Engine 5 using C++ and Blueprints. Covers the Gameplay Framework, rendering, multiplayer, and packaging.
 
 **What it handles:**
+
 - Actor lifecycle, Gameplay Framework class hierarchy
 - Enhanced Input system for player controls
 - UCLASS/UPROPERTY/UFUNCTION macros for Blueprint exposure
@@ -408,6 +439,7 @@ Build with Unreal Engine 5 using C++ and Blueprints. Covers the Gameplay Framewo
 - UnrealBuildTool and RunUAT packaging commands
 
 **Example prompt:**
+
 ```
 Set up an Unreal Engine character with:
 - Enhanced Input for WASD movement and mouse look
@@ -425,6 +457,7 @@ Set up an Unreal Engine character with:
 Profile and optimize games across Unity, Unreal, and Godot. Identify whether you're CPU-bound, GPU-bound, or memory-bound and fix it.
 
 **What it handles:**
+
 - Draw call reduction — static/dynamic batching, GPU instancing, SRP Batcher
 - LOD configuration with automatic transition distances
 - Occlusion culling setup (frustum, occlusion, distance)
@@ -436,6 +469,7 @@ Profile and optimize games across Unity, Unreal, and Godot. Identify whether you
 - Profiling tool guidance for each engine
 
 **Example prompt:**
+
 ```
 My Unity mobile game runs at 22fps on a Galaxy S21. The profiler shows
 1200 draw calls and 45MB of texture memory. Give me a prioritized
@@ -458,6 +492,7 @@ optimization plan to hit 30fps stable.
 Connect to Salesforce and HubSpot to automate pipeline management, prospect research, and follow-up sequences.
 
 **What it handles:**
+
 - Salesforce record CRUD via SOQL — accounts, contacts, opportunities, leads
 - HubSpot contact, company, and deal management
 - Pipeline review with at-risk deal flagging and win probability analysis
@@ -466,6 +501,7 @@ Connect to Salesforce and HubSpot to automate pipeline management, prospect rese
 - Objection handling with counter-arguments for pricing, timing, and competitor concerns
 
 **Example prompt:**
+
 ```
 Review my Salesforce pipeline for Q1. Flag deals that haven't moved stages
 in 2+ weeks, identify the top 5 at-risk opportunities by revenue,
@@ -481,6 +517,7 @@ and draft re-engagement emails for each.
 Connect to Jira, Linear, and Asana to manage sprints, triage issues, and generate reports.
 
 **What it handles:**
+
 - Jira issue CRUD, JQL search, sprint management
 - Linear issue tracking and project management
 - Asana task and project operations
@@ -489,6 +526,7 @@ Connect to Jira, Linear, and Asana to manage sprints, triage issues, and generat
 - Automated standup generation from recent activity
 
 **Example prompt:**
+
 ```
 Search Jira for all open bugs in the PAYMENTS project assigned to the backend team.
 Group by severity, flag any older than 2 weeks, and create a summary
@@ -504,6 +542,7 @@ for the next sprint planning meeting.
 Manage Discord guilds, channels, roles, messages, threads, webhooks, and members through the REST API connector.
 
 **What it handles:**
+
 - Guild and channel management — list, create, edit, delete channels across text, voice, forum, and category types
 - Rich message sending with typed embed cards (title, description, color, fields, images, author)
 - Thread creation from messages or standalone for organized discussions
@@ -514,6 +553,7 @@ Manage Discord guilds, channels, roles, messages, threads, webhooks, and members
 - Automatic rate limit handling with 429 retry
 
 **Example prompt:**
+
 ```
 Set up a Discord server structure for our open-source project:
 - Create categories: General, Development, Community, Support
@@ -537,6 +577,7 @@ Set up a Discord server structure for our open-source project:
 Connect to Zendesk and ServiceNow to automate ticket triage, response drafting, and escalation management.
 
 **What it handles:**
+
 - Ticket triage — categorize by type, assess urgency, route to team
 - Response drafting with empathetic tone, solution steps, and next actions
 - Escalation summaries with timeline, attempts made, and customer sentiment
@@ -544,6 +585,7 @@ Connect to Zendesk and ServiceNow to automate ticket triage, response drafting, 
 - Recurring issue pattern detection
 
 **Example prompt:**
+
 ```
 Triage the 15 unassigned Zendesk tickets from the last 24 hours.
 Classify each by urgency (critical/high/medium/low), suggest routing,
@@ -559,6 +601,7 @@ and draft responses for the critical and high-priority ones.
 Manage conversations across Slack, email (Gmail/IMAP), and other channels with unified AI-powered workflows.
 
 **What it handles:**
+
 - Slack channel management, message posting, and history search
 - Email triage, draft responses, and cleanup suggestions
 - Cross-channel message monitoring and digest generation
@@ -566,6 +609,7 @@ Manage conversations across Slack, email (Gmail/IMAP), and other channels with u
 - Identity and access management via Okta
 
 **Example prompt:**
+
 ```
 Search Slack for all messages mentioning "deployment" in the last 48 hours.
 Summarize the key discussions, flag any unresolved issues,
@@ -583,6 +627,7 @@ and draft a status update for the #engineering channel.
 Analyze datasets, generate insights, and create visualizations from structured data.
 
 **What it handles:**
+
 - Summary statistics, distribution analysis, and correlation matrices
 - Missing data detection and imputation recommendations
 - Outlier identification and anomaly detection
@@ -591,6 +636,7 @@ Analyze datasets, generate insights, and create visualizations from structured d
 - Chart and dashboard recommendations
 
 **Example prompt:**
+
 ```
 Analyze this CSV of 50,000 e-commerce transactions. Give me:
 - Revenue by month with growth rate
@@ -609,6 +655,7 @@ Analyze this CSV of 50,000 e-commerce transactions. Give me:
 Build financial models, analyze earnings, screen markets, and assess portfolio risk.
 
 **What it handles:**
+
 - DCF valuation models with sensitivity analysis
 - Earnings analysis and peer comparison
 - Market screening by fundamentals and technicals
@@ -617,6 +664,7 @@ Build financial models, analyze earnings, screen markets, and assess portfolio r
 - Tax optimization strategies
 
 **Example prompt:**
+
 ```
 Build a DCF model for Apple (AAPL) using the last 4 quarters of financial data.
 Include revenue growth assumptions (base/bull/bear), WACC calculation,
@@ -634,6 +682,7 @@ terminal value with exit multiple, and a sensitivity table.
 Audit existing docs, generate new content, and maintain consistency across your documentation.
 
 **What it handles:**
+
 - Documentation audit — stale docs, broken links, accuracy vs current code
 - API reference generation from code
 - Changelog generation from git history
@@ -641,6 +690,7 @@ Audit existing docs, generate new content, and maintain consistency across your 
 - Getting started guides and tutorials
 
 **Example prompt:**
+
 ```
 Audit our docs/ folder. Find any files that reference APIs or features
 that have changed since their last update. Produce a table of stale docs
@@ -656,6 +706,7 @@ with the specific sections that need updating and suggested corrections.
 Create blog posts, social media content, email campaigns, and landing page copy with SEO optimization.
 
 **What it handles:**
+
 - SEO-optimized blog posts with headline variants and meta descriptions
 - Multi-platform social media (Twitter/X, LinkedIn, Instagram) with hashtags
 - Email marketing campaigns with A/B test variants
@@ -664,6 +715,7 @@ Create blog posts, social media content, email campaigns, and landing page copy 
 - Copywriting frameworks — PAS, AIDA, BAB, 4Ps, FAB
 
 **Example prompt:**
+
 ```
 Create a launch campaign for our new API product:
 - 3 blog post outlines targeting different audiences (developers, CTOs, DevOps)
@@ -683,6 +735,7 @@ Create a launch campaign for our new API product:
 Start your day with an AI-generated executive brief covering calendar, inbox, tasks, and priorities.
 
 **What it handles:**
+
 - Calendar event summary with prep notes for meetings
 - Inbox triage with priority classification
 - Task and reminder overview
@@ -691,6 +744,7 @@ Start your day with an AI-generated executive brief covering calendar, inbox, ta
 - Schedulable as a daily recurring task
 
 **Example prompt:**
+
 ```
 /brief morning
 ```
@@ -704,6 +758,7 @@ Start your day with an AI-generated executive brief covering calendar, inbox, ta
 Triage email in the Inbox Agent workspace, work Today lanes, ask mailbox questions, send normal replies or forwards, identify cleanup opportunities, and manage follow-ups automatically.
 
 **What it handles:**
+
 - Classic inbox plus Today lanes for Needs action, Happening today, Good to know, and More to browse
 - Unread, Needs reply, Suggested Actions, and Open Commitments at a glance
 - Inbox / Sent / All views plus Recent / Priority sorting, saved views, account filters, and domain chips
@@ -715,11 +770,13 @@ Triage email in the Inbox Agent workspace, work Today lanes, ask mailbox questio
 - Provider-backed read/unread where supported, background autosync, and thread intelligence refresh
 
 **Example prompt:**
+
 ```
 Open Inbox Agent, switch to Today mode, and show what needs action before I start replying.
 ```
 
 **Main-composer shortcut:**
+
 ```
 @inbox when do I need to make payment for my QNB credit card?
 ```
@@ -735,6 +792,7 @@ See [Inbox Agent](inbox-agent.md) for the full feature workflow.
 Manage conversations across supported messaging and communication channels — reply to messages, monitor discussions, and send updates from the surfaces you configure.
 
 **What it handles:**
+
 - WhatsApp, Telegram, Discord, Slack, Teams, iMessage, Signal, and more
 - Message drafting with tone matching
 - Reply confirmation gates (drafts before sending)
@@ -743,6 +801,7 @@ Manage conversations across supported messaging and communication channels — r
 - File sharing and media handling
 
 **Example prompt:**
+
 ```
 Check my Telegram messages from the last 12 hours.
 Summarize any messages that need a response, draft replies,
@@ -758,6 +817,7 @@ and let me review before sending.
 Capture tasks from conversations, notes, or free-form text and organize them across Notion, Apple Reminders, Things, Trello, and other tools.
 
 **What it handles:**
+
 - Natural language task extraction with due date inference
 - Notion database integration — create pages, update properties
 - Apple Reminders and Calendar integration (macOS native)
@@ -765,6 +825,7 @@ Capture tasks from conversations, notes, or free-form text and organize them acr
 - Priority assignment and dependency detection
 
 **Example prompt:**
+
 ```
 Turn this meeting transcript into action items. For each item:
 - Create a Notion task with assignee and due date
@@ -783,6 +844,7 @@ Scrape websites, monitor prices, map site structures, and extract structured dat
 For normal-user website testing, JavaScript-heavy app checks, forms, screenshots, responsive breakpoints, or visual QA, CoWork opens the [Browser Workbench](browser-workbench.md): a visible right-sidebar/fullscreen Browser V2 surface where the agent and user share the same page, with cursor movement, desktop/tablet/mobile viewport control, snapshot refs, diagnostics, screenshot capture, downloads/uploads, and annotation.
 
 **What it handles:**
+
 - Visible browser-use testing for live websites and local apps, including responsive viewport checks
 - Shared right-sidebar/fullscreen browser sessions with persistent workspace profile
 - Screenshots and screenshot annotation for visual feedback
@@ -794,6 +856,7 @@ For normal-user website testing, JavaScript-heavy app checks, forms, screenshots
 - Site mapping and content monitoring
 
 **Example prompt:**
+
 ```
 Scrape the pricing page of these 5 competitor websites.
 Extract plan names, prices, and feature lists into a comparison table.
@@ -811,6 +874,7 @@ Set up weekly monitoring to alert me of any pricing changes.
 Track sprint progress, identify at-risk items, balance workloads, and generate status reports.
 
 **What it handles:**
+
 - Sprint health dashboards — completion percentage, at-risk items, predicted outcome
 - Blocker detection and escalation recommendations
 - Workload balance analysis across team members
@@ -818,6 +882,7 @@ Track sprint progress, identify at-risk items, balance workloads, and generate s
 - Cross-team dependency tracking
 
 **Example prompt:**
+
 ```
 How's our sprint looking? Pull data from Jira and give me:
 - Overall completion percentage
@@ -835,6 +900,7 @@ How's our sprint looking? Pull data from Jira and give me:
 Prepare for meetings with context on each participant's recent work, accomplishments, and potential concerns.
 
 **What it handles:**
+
 - Recent accomplishments and contributions per team member
 - Current work items and their status
 - Potential concerns (overdue items, declining velocity, blocked work)
@@ -842,6 +908,7 @@ Prepare for meetings with context on each participant's recent work, accomplishm
 - Meeting agenda generation
 
 **Example prompt:**
+
 ```
 Prepare 1-on-1 notes for my meeting with Sarah.
 Pull her recent PRs, Jira activity, and any blockers.
@@ -857,6 +924,7 @@ Suggest 3-4 discussion topics including career growth.
 Activate role-specific AI twins that proactively handle cognitive overhead in the background — PR triage, sprint health reports, dependency scans, and more.
 
 **What it handles:**
+
 - 10 pre-built persona templates across engineering, management, product, data, and operations
 - Heartbeat-driven background tasks on configurable schedules
 - Proactive insights — flagging issues, preparing reports, surfacing patterns
@@ -864,6 +932,7 @@ Activate role-specific AI twins that proactively handle cognitive overhead in th
 - Persistent across sessions
 
 **Available twins:**
+
 - Software Engineer — PR triage, dependency checks, test coverage monitoring
 - Engineering Manager — Sprint health, standup summaries, blocker detection
 - Product Manager — Feature request triage, roadmap risk flagging
@@ -883,6 +952,7 @@ Activate role-specific AI twins that proactively handle cognitive overhead in th
 Scan codebases for vulnerabilities including SQL injection, XSS, CSRF, authentication flaws, and OWASP Top 10 issues.
 
 **What it handles:**
+
 - Static analysis for common vulnerability patterns
 - Authentication and authorization flow review
 - Input validation and sanitization checks
@@ -891,6 +961,7 @@ Scan codebases for vulnerabilities including SQL injection, XSS, CSRF, authentic
 - Compliance checklist generation (HIPAA, PCI-DSS, SOC2, GDPR)
 
 **Example prompt:**
+
 ```
 Run a security audit on the src/auth/ and src/api/ directories.
 Check for: SQL injection, XSS, CSRF, improper auth checks,
@@ -907,6 +978,7 @@ Output findings by severity with remediation steps.
 Find and remove authorized personal information exposure from data brokers and people-search sites with a consent-gated local workflow.
 
 **What it handles:**
+
 - Recorded consent intake before scanning or removal
 - Exposure scans for data brokers and people-search listings
 - Broker opt-out, deletion, CCPA/CPRA/GDPR, and recheck queues
@@ -915,6 +987,7 @@ Find and remove authorized personal information exposure from data brokers and p
 - Recurring monitoring for broker re-listing
 
 **Example prompt:**
+
 ```
 Use the unbroker skill to remove my data from data brokers and people-search sites.
 Ask for the intake details you need, record my consent before acting, keep the ledger local,
@@ -932,6 +1005,7 @@ and give me one final human-task digest instead of interrupting for every broker
 Deploy code, manage servers, and run operations from any messaging channel — WhatsApp, Telegram, Slack, Discord, or even SMS.
 
 **What it handles:**
+
 - Deployment triggers via chat commands
 - Server health checks and status monitoring
 - Log tailing and error investigation
@@ -939,6 +1013,7 @@ Deploy code, manage servers, and run operations from any messaging channel — W
 - Approval workflows with confirmation gates
 
 **Example prompt (via Telegram):**
+
 ```
 Deploy the staging branch to production.
 Run the pre-deploy checklist first, then proceed if all green.
@@ -954,6 +1029,7 @@ Send me a summary when done.
 Run CoWork OS as a headless daemon on Linux servers with remote access via Tailscale, SSH, or WebSocket. The recommended production path is the packaged Linux x64 server release tarball, which includes built daemon assets, bundled resources, connector runtimes, and systemd templates.
 
 **What it handles:**
+
 - Packaged Linux x64 VPS installs via systemd
 - Docker containerized deployment
 - Source-build fallback for custom hosts
@@ -974,6 +1050,7 @@ Run CoWork OS as a headless daemon on Linux servers with remote access via Tails
 Onboard to new codebases faster. The agent reads project structure, identifies patterns, and explains architecture.
 
 **What it handles:**
+
 - Project structure mapping and architecture explanation
 - Framework and pattern identification
 - Dependency graph visualization
@@ -981,6 +1058,7 @@ Onboard to new codebases faster. The agent reads project structure, identifies p
 - Convention and style guide inference
 
 **Example prompt:**
+
 ```
 I just joined this project. Walk me through:
 - The overall architecture and key directories
@@ -998,6 +1076,7 @@ I just joined this project. Walk me through:
 Learn new languages, frameworks, and concepts with contextual guidance tailored to your existing codebase.
 
 **What it handles:**
+
 - Language-specific idiom guidance (e.g., converting Python patterns to Rust)
 - Framework tutorial generation with working examples
 - Best practice explanations with before/after code comparisons
@@ -1005,6 +1084,7 @@ Learn new languages, frameworks, and concepts with contextual guidance tailored 
 - Career transition support (e.g., PM → developer, frontend → backend)
 
 **Example prompt:**
+
 ```
 I know JavaScript well and want to learn Rust.
 Convert this Node.js HTTP server to Rust using Axum.
@@ -1022,6 +1102,7 @@ Explain each Rust concept (ownership, borrowing, lifetimes) as it appears.
 Initiate, manage, and transcribe voice calls directly from the agent. Make outbound calls, handle inbound routing, and generate real-time transcripts — all hands-free.
 
 **What it handles:**
+
 - Outbound voice calls via ElevenLabs Conversational AI or Twilio
 - Call recording and automatic transcription
 - Voice-driven task execution — speak a command and the agent acts on it
@@ -1029,6 +1110,7 @@ Initiate, manage, and transcribe voice calls directly from the agent. Make outbo
 - Voicemail management and priority routing
 
 **Example prompt:**
+
 ```
 Call the restaurant at +1-555-0123 and ask if they have availability
 for 4 people this Saturday at 7pm. Record the answer and summarize it.
@@ -1043,6 +1125,7 @@ for 4 people this Saturday at 7pm. Record the answer and summarize it.
 Convert any text output to natural-sounding speech with multiple voice providers. Generate audio briefings, narrated reports, or podcast-style summaries.
 
 **What it handles:**
+
 - Multi-provider TTS — ElevenLabs (premium voices), OpenAI TTS, macOS `say` command (offline)
 - Voice cloning and custom voice profiles
 - Audio briefing generation — morning brief read aloud as a podcast
@@ -1050,6 +1133,7 @@ Convert any text output to natural-sounding speech with multiple voice providers
 - Audio file export (MP3, WAV) for sharing
 
 **Example prompt:**
+
 ```
 Take my morning briefing and convert it to an audio file using a professional
 news-anchor voice. Save it as morning-brief.mp3 so I can listen on my commute.
@@ -1064,6 +1148,7 @@ news-anchor voice. Save it as morning-brief.mp3 so I can listen on my commute.
 Transcribe audio files or live dictation into structured text. Use local Whisper models for privacy-sensitive transcription or cloud providers for speed.
 
 **What it handles:**
+
 - Local transcription with OpenAI Whisper (no data leaves your machine)
 - Cloud transcription via Deepgram, AssemblyAI, or OpenAI
 - Meeting recording transcription with speaker diarization
@@ -1071,6 +1156,7 @@ Transcribe audio files or live dictation into structured text. Use local Whisper
 - Multi-language transcription and auto-translation
 
 **Example prompt:**
+
 ```
 Transcribe this meeting recording (meeting-2026-02-25.m4a) using Whisper locally.
 Identify speakers, extract action items, and create Notion tasks for each one.
@@ -1085,6 +1171,7 @@ Identify speakers, extract action items, and create Notion tasks for each one.
 Control music playback and multi-room audio systems through natural language. Queue songs, adjust volume, and orchestrate multi-room setups.
 
 **What it handles:**
+
 - Spotify playback control — play, pause, skip, queue, playlists, search
 - Sonos multi-room speaker management — group rooms, set volume per zone
 - BluOS/NAD speaker control for audiophile setups
@@ -1092,6 +1179,7 @@ Control music playback and multi-room audio systems through natural language. Qu
 - Cross-platform audio routing
 
 **Example prompt:**
+
 ```
 Play my "Focus" playlist on Spotify, route it to the office Sonos speaker
 at 40% volume. When it's 5pm, switch to "Evening Jazz" in the living room.
@@ -1108,6 +1196,7 @@ at 40% volume. When it's 5pm, switch to "Evening Jazz" in the living room.
 Control smart lighting systems with scene management, schedules, and adaptive automation. Set the mood without opening an app.
 
 **What it handles:**
+
 - Philips Hue control via OpenHue MCP — individual lights, rooms, zones, scenes
 - Color temperature scheduling (energizing blue in morning, warm amber at night)
 - Motion-triggered automation rules
@@ -1115,6 +1204,7 @@ Control smart lighting systems with scene management, schedules, and adaptive au
 - Multi-room coordination and transition effects
 
 **Example prompt:**
+
 ```
 Set up an evening routine: at sunset, dim the living room to 30% warm white,
 turn off the office lights, and set the bedroom to a soft amber glow.
@@ -1130,6 +1220,7 @@ Create this as a reusable scene called "Wind Down".
 Monitor and control connected wellness hardware — sleep trackers, smart mattresses, and environmental sensors.
 
 **What it handles:**
+
 - Eight Sleep pod control — bed temperature per side, schedules, vibration alarms
 - Sleep data analysis — sleep stages, HRV, respiratory rate trends
 - Environmental monitoring — room temperature, humidity, air quality
@@ -1137,6 +1228,7 @@ Monitor and control connected wellness hardware — sleep trackers, smart mattre
 - Weekly sleep quality reports with recommendations
 
 **Example prompt:**
+
 ```
 Set my Eight Sleep to cool the bed to -2 on my side starting at 10pm,
 then gradually warm to +1 by 6am. Show me last week's sleep data and
@@ -1152,6 +1244,7 @@ flag any nights where deep sleep was below 15%.
 Access and analyze security camera feeds, motion detection logs, and visual monitoring — all from the agent.
 
 **What it handles:**
+
 - RTSP/ONVIF camera stream access and snapshot capture
 - Motion event log retrieval and timeline review
 - Visual analysis of camera snapshots (person/vehicle/animal detection)
@@ -1159,6 +1252,7 @@ Access and analyze security camera feeds, motion detection logs, and visual moni
 - Alert configuration for specific zones or times
 
 **Example prompt:**
+
 ```
 Pull the latest snapshot from the front door camera and the driveway camera.
 Check if there are any packages visible on the porch. Summarize any motion
@@ -1176,6 +1270,7 @@ events from the last 4 hours.
 Run quantitative risk assessments on investment portfolios with Monte Carlo simulation, Value-at-Risk calculations, and stress testing.
 
 **What it handles:**
+
 - Value-at-Risk (VaR) calculations at multiple confidence levels
 - Monte Carlo portfolio simulation (1000+ scenarios)
 - Stress testing against historical events (2008 crisis, COVID crash, rate hikes)
@@ -1183,6 +1278,7 @@ Run quantitative risk assessments on investment portfolios with Monte Carlo simu
 - Drawdown analysis and recovery projections
 
 **Example prompt:**
+
 ```
 Run a Monte Carlo simulation on my portfolio (60% SPY, 25% BND, 15% GLD)
 with 10,000 scenarios over a 5-year horizon. Calculate the 95% VaR,
@@ -1198,6 +1294,7 @@ maximum drawdown, and Sharpe ratio. Compare against a 100% SPY benchmark.
 Analyze tax positions, identify optimization opportunities, and model different filing scenarios. Supports individual and business tax planning.
 
 **What it handles:**
+
 - Tax-loss harvesting opportunity identification
 - Capital gains optimization (short-term vs long-term holding analysis)
 - Retirement contribution strategy (401k, IRA, Roth conversion ladders)
@@ -1205,6 +1302,7 @@ Analyze tax positions, identify optimization opportunities, and model different 
 - Estimated quarterly tax calculations
 
 **Example prompt:**
+
 ```
 Review my 2025 trading activity and identify tax-loss harvesting opportunities.
 Calculate my estimated capital gains tax liability under current brackets.
@@ -1220,6 +1318,7 @@ Model the impact of converting $50K from traditional IRA to Roth this year.
 Execute crypto market analysis, portfolio tracking, and trading operations across multiple exchanges via unified APIs.
 
 **What it handles:**
+
 - Multi-exchange portfolio aggregation (Binance, Coinbase, Kraken, etc. via ccxt)
 - Real-time price monitoring and alert configuration
 - DeFi yield farming analysis and comparison
@@ -1227,6 +1326,7 @@ Execute crypto market analysis, portfolio tracking, and trading operations acros
 - Technical analysis with crypto-specific indicators (funding rates, liquidation levels)
 
 **Example prompt:**
+
 ```
 Show my total crypto portfolio value across Binance and Coinbase.
 Flag any position that's down more than 20% from entry.
@@ -1243,6 +1343,7 @@ and recommend the best risk-adjusted option.
 Act as a fractional CFO for startups — build financial models, track burn rate, model fundraising scenarios, and generate investor-ready reports.
 
 **What it handles:**
+
 - Three-statement financial model generation (P&L, balance sheet, cash flow)
 - Burn rate tracking with runway projections
 - Fundraising scenario modeling (dilution tables, valuation waterfalls)
@@ -1250,6 +1351,7 @@ Act as a fractional CFO for startups — build financial models, track burn rate
 - Board deck financial slide generation
 
 **Example prompt:**
+
 ```
 Build a 3-year financial model for my SaaS startup.
 Current MRR: $45K, growing 12% MoM, gross margin 82%, burn: $120K/month.
@@ -1266,6 +1368,7 @@ Show runway extension and dilution impact.
 Monitor prediction market odds, analyze sentiment shifts, and build probabilistic forecasts from market data.
 
 **What it handles:**
+
 - Polymarket position tracking and odds monitoring
 - Event probability analysis with historical calibration
 - Sentiment aggregation across prediction platforms
@@ -1273,6 +1376,7 @@ Monitor prediction market odds, analyze sentiment shifts, and build probabilisti
 - Custom forecast model building
 
 **Example prompt:**
+
 ```
 Pull current Polymarket odds for the top 10 most-traded political and
 economic events. Compare with Metaculus forecasts where available.
@@ -1288,6 +1392,7 @@ Flag any events where the markets disagree by more than 15 percentage points.
 Evaluate companies and portfolios against Environmental, Social, and Governance criteria with quantitative scoring.
 
 **What it handles:**
+
 - Company-level ESG score computation across E, S, G pillars
 - Portfolio-wide ESG exposure analysis
 - Controversy screening and news monitoring
@@ -1295,6 +1400,7 @@ Evaluate companies and portfolios against Environmental, Social, and Governance 
 - Peer comparison and sector benchmarking
 
 **Example prompt:**
+
 ```
 Score these 5 companies on ESG metrics: AAPL, MSFT, XOM, TSLA, JPM.
 Break down by Environmental, Social, and Governance pillars.
@@ -1312,6 +1418,7 @@ Flag any recent controversies that should affect the scores.
 Create, search, and organize notes in Apple Notes directly from the agent. Perfect for macOS users who want their AI assistant to work with their existing note system.
 
 **What it handles:**
+
 - Create and append to Apple Notes with rich formatting
 - Search across all notes by keyword or date range
 - Organize notes into folders automatically
@@ -1319,6 +1426,7 @@ Create, search, and organize notes in Apple Notes directly from the agent. Perfe
 - Export note collections to markdown or PDF
 
 **Example prompt:**
+
 ```
 Search my Apple Notes for anything related to "project alpha".
 Summarize the key decisions across all matching notes and create
@@ -1334,6 +1442,7 @@ a new consolidated note called "Project Alpha — Decision Log".
 Build a persistent, searchable knowledge graph that connects information across conversations, documents, and research. The agent remembers what matters.
 
 **What it handles:**
+
 - Automatic knowledge extraction from conversations and documents
 - Full-text search with SQLite FTS5 indexing
 - Entity relationship mapping (people → projects → decisions → outcomes)
@@ -1342,6 +1451,7 @@ Build a persistent, searchable knowledge graph that connects information across 
 - ChatGPT conversation history import and indexing
 
 **Example prompt:**
+
 ```
 Build a knowledge graph from my last 50 conversations.
 Extract key decisions, people mentioned, and project references.
@@ -1357,6 +1467,7 @@ Show me the connections between them and flag any conflicting decisions.
 Conduct multi-source research with structured output — the agent reads documents, fetches web sources, cross-references data, and produces cited reports.
 
 **What it handles:**
+
 - Multi-URL web research with automatic summarization
 - Academic paper analysis and literature review
 - Competitive landscape research with comparison matrices
@@ -1364,6 +1475,7 @@ Conduct multi-source research with structured output — the agent reads documen
 - Research report generation with citations and confidence scores
 
 **Example prompt:**
+
 ```
 Research the current state of WebAssembly for server-side applications.
 Cover: major runtimes (Wasmtime, Wasmer, WasmEdge), production deployments,
@@ -1382,6 +1494,7 @@ Cite all sources and rate confidence for each claim.
 Spin up coordinated agent teams that work on multiple tasks simultaneously with shared context and progress tracking.
 
 **What it handles:**
+
 - Parallel task execution with up to 8 concurrent agents
 - Shared checklist coordination — agents check off items as they complete
 - Inter-agent context sharing for dependent workflows
@@ -1389,6 +1502,7 @@ Spin up coordinated agent teams that work on multiple tasks simultaneously with 
 - Automatic conflict resolution when agents touch overlapping areas
 
 **Example prompt:**
+
 ```
 Create an agent team to prepare for our product launch:
 - Agent 1: Draft the press release and blog post
@@ -1407,6 +1521,7 @@ Run all 4 in parallel and show me progress.
 Enter a visual canvas workflow where the agent helps you design, iterate, and refine complex artifacts — documents, architectures, slide decks, or product specs.
 
 **What it handles:**
+
 - Interactive document building with iterative refinement
 - Architecture diagram generation and review
 - Product spec drafting with stakeholder-specific views
@@ -1414,6 +1529,7 @@ Enter a visual canvas workflow where the agent helps you design, iterate, and re
 - Version tracking and diff-based iteration
 
 **Example prompt:**
+
 ```
 Enter build mode. Let's create a technical design document for our
 new authentication system. Start with the requirements, then walk me
@@ -1429,6 +1545,7 @@ through the architecture options. I'll give feedback at each step.
 Capture successful workflows as reusable playbooks that can be shared, versioned, and triggered by the agent automatically.
 
 **What it handles:**
+
 - Workflow recording — the agent captures steps as you work and saves them as playbooks
 - Playbook execution — replay a saved workflow with different inputs
 - Template library — share playbooks across team members
@@ -1436,6 +1553,7 @@ Capture successful workflows as reusable playbooks that can be shared, versioned
 - Scheduling — trigger playbooks on a cron schedule or event-driven
 
 **Example prompt:**
+
 ```
 Record a playbook for our weekly metrics review:
 1. Pull this week's analytics from our dashboard
@@ -1454,6 +1572,7 @@ Save this as "weekly-metrics-review" and schedule it for Mondays at 9am.
 Route tasks to the best model for the job — compare outputs across providers, run A/B tests, and optimize for cost, speed, or quality.
 
 **What it handles:**
+
 - Multiple supported model routes — account connections, provider APIs, compatible gateways, cloud credentials, and local inference
 - Side-by-side output comparison for the same prompt
 - Automatic model selection based on task type (coding → Claude, creative → GPT-4)
@@ -1461,6 +1580,7 @@ Route tasks to the best model for the job — compare outputs across providers, 
 - Latency monitoring and provider failover
 
 **Example prompt:**
+
 ```
 Compare Claude Sonnet and GPT-4o on this code review task.
 Show me both outputs side by side, highlight where they agree and
@@ -1478,6 +1598,7 @@ disagree, and recommend which review I should trust for this PR.
 Run untrusted code, experiments, or one-off scripts in isolated cloud sandboxes without touching your local machine.
 
 **What it handles:**
+
 - E2B cloud sandbox provisioning — spin up a fresh Linux environment in seconds
 - Multi-language execution (Python, Node.js, Rust, Go, etc.)
 - File system persistence within sandbox sessions
@@ -1485,6 +1606,7 @@ Run untrusted code, experiments, or one-off scripts in isolated cloud sandboxes 
 - Output capture with stdout, stderr, and file artifacts
 
 **Example prompt:**
+
 ```
 Spin up a sandbox and run this Python data pipeline that processes
 a 2GB CSV file. Install pandas and duckdb, run the script, and
@@ -1500,6 +1622,7 @@ return the output summary. Don't run this on my local machine.
 Register domains, manage DNS records, and handle domain transfers — all from natural language commands.
 
 **What it handles:**
+
 - Domain availability search and registration via Namecheap
 - DNS record management (A, AAAA, CNAME, MX, TXT, NS)
 - SSL certificate status checking
@@ -1507,6 +1630,7 @@ Register domains, manage DNS records, and handle domain transfers — all from n
 - Bulk domain operations
 
 **Example prompt:**
+
 ```
 Check if "myproject.dev" is available. If so, register it and set up
 DNS records: A record pointing to 203.0.113.50, MX records for Google
@@ -1522,6 +1646,7 @@ Workspace, and a TXT record for domain verification.
 Enable autonomous agent-to-agent payments using crypto wallets and the x402 protocol — the agent can pay for API calls, services, and resources on your behalf.
 
 **What it handles:**
+
 - USDC wallet management (Coinbase-backed)
 - x402 protocol for HTTP-native machine payments
 - Automatic micro-payments for API services
@@ -1529,6 +1654,7 @@ Enable autonomous agent-to-agent payments using crypto wallets and the x402 prot
 - Transaction history and receipt generation
 
 **Example prompt:**
+
 ```
 Set a $5 budget for this research task. The agent can use x402 payments
 to access premium APIs if needed. Show me a receipt when done with
@@ -1546,6 +1672,7 @@ a breakdown of what was spent and where.
 Browse restaurant menus, place orders, and track deliveries through natural language — no app switching required.
 
 **What it handles:**
+
 - Restaurant search and menu browsing via delivery platforms
 - Order placement with customization (dietary preferences, allergies)
 - Delivery tracking and ETA monitoring
@@ -1553,6 +1680,7 @@ Browse restaurant menus, place orders, and track deliveries through natural lang
 - Group order coordination
 
 **Example prompt:**
+
 ```
 Order dinner from Foodora: find a Thai restaurant near me that delivers
 in under 30 minutes. I want pad thai (medium spice, no peanuts) and
@@ -1568,6 +1696,7 @@ a green curry. Add a drink. Show me the total before confirming.
 Manage complex scheduling across multiple calendars, find optimal meeting times, and handle timezone coordination automatically.
 
 **What it handles:**
+
 - Multi-calendar conflict detection (Google Calendar, Apple Calendar, Outlook)
 - Calendly-style availability sharing
 - Timezone-aware meeting coordination for distributed teams
@@ -1575,6 +1704,7 @@ Manage complex scheduling across multiple calendars, find optimal meeting times,
 - Travel time buffer calculation between in-person meetings
 
 **Example prompt:**
+
 ```
 Find a 90-minute slot this week for a team meeting across these 4 people's
 calendars. Everyone is in a different timezone (PST, EST, CET, IST).
@@ -1590,6 +1720,7 @@ Propose the top 3 options that fall within each person's working hours.
 Generate professional documents, edit existing PDFs, and convert between formats — contracts, invoices, reports, and more.
 
 **What it handles:**
+
 - PDF creation from templates or scratch
 - Existing PDF editing — add text, signatures, annotations
 - Document format conversion (Markdown → PDF, HTML → DOCX, etc.)
@@ -1597,6 +1728,7 @@ Generate professional documents, edit existing PDFs, and convert between formats
 - Batch document processing and merge operations
 
 **Example prompt:**
+
 ```
 Create a professional invoice PDF for client "Acme Corp":
 - 40 hours consulting at $200/hr
@@ -1614,6 +1746,7 @@ Save as invoice-2026-02.pdf.
 Create durable local web page artifacts for prototypes, dashboards, microsites, and reviewable UI outputs.
 
 **What it handles:**
+
 - `.html` / `.htm` output cards in the task feed
 - built React/Vite/Next output such as `dist/index.html`, `build/index.html`, or `out/index.html`
 - sandboxed iframe preview in the resizable artifact sidebar or fullscreen mode
@@ -1622,6 +1755,7 @@ Create durable local web page artifacts for prototypes, dashboards, microsites, 
 - clear build-output-needed state for React-style projects without built HTML
 
 **Example prompt:**
+
 ```
 Create a polished single-page HTML launch dashboard.
 Save it as artifacts/launch-dashboard.html.
@@ -1637,6 +1771,7 @@ Use local CSS and JavaScript only, and make it responsive.
 Write technical papers, notes, or diagram-heavy explanations as editable LaTeX source and compile them into PDFs when a system TeX engine is installed.
 
 **What it handles:**
+
 - `.tex` source generation for papers, reports, and architecture explanations
 - TikZ diagrams when the user explicitly asks for LaTeX/TikZ output
 - Compilation through `tectonic`, `latexmk`, `xelatex`, `lualatex`, or `pdflatex`
@@ -1644,6 +1779,7 @@ Write technical papers, notes, or diagram-heavy explanations as editable LaTeX s
 - Paired artifact output with Summary, source, and PDF tabs in the task UI
 
 **Example prompt:**
+
 ```
 Write a LaTeX paper explaining how our app-server request path works.
 Use TikZ diagrams for the architecture and request lifecycle.
@@ -1660,6 +1796,7 @@ If no TeX engine is installed, keep the source and tell me what is missing.
 Create designed document artifacts that feel typeset rather than merely exported. This is the right path when the output should look like an editorial one-pager, resume, white paper, formal letter, portfolio, or restrained slide deck.
 
 **What it handles:**
+
 - Workspace-local source scaffolding for HTML, diagram, or slide projects
 - Resume and CV typesetting with presentable typography
 - One-pagers, white papers, letters, and portfolios in a consistent editorial system
@@ -1669,6 +1806,7 @@ Create designed document artifacts that feel typeset rather than merely exported
 - Dependency-aware render fallback when PDF/PPTX tooling is unavailable
 
 **Example prompt:**
+
 ```
 Use the kami skill to turn notes/seed-round-story.md into a polished English one-pager.
 Scaffold the project in this workspace, keep the editable source files, and render a PDF if local dependencies are available.
@@ -1684,6 +1822,7 @@ If rendering tools are missing, stop after editing the source and tell me exactl
 Control your Mac's UI programmatically — click buttons, fill forms, extract screen content, and automate repetitive desktop workflows.
 
 **What it handles:**
+
 - Screen capture and OCR-based UI element detection
 - Automated clicking, typing, and form filling in any macOS app
 - Application launching and window management
@@ -1691,6 +1830,7 @@ Control your Mac's UI programmatically — click buttons, fill forms, extract sc
 - Multi-step desktop workflow recording and replay
 
 **Example prompt:**
+
 ```
 Open System Settings, navigate to Wi-Fi, and tell me the name of the
 currently connected network and its signal strength. Then take a
@@ -1706,6 +1846,7 @@ screenshot of the Wi-Fi settings page.
 Translate content across languages with context-aware quality — not just word-for-word, but culturally appropriate translations.
 
 **What it handles:**
+
 - Real-time text translation across 100+ languages
 - Software localization — translate UI strings, preserve placeholders and formatting
 - Document translation with layout preservation
@@ -1713,6 +1854,7 @@ Translate content across languages with context-aware quality — not just word-
 - Quality scoring with back-translation verification
 
 **Example prompt:**
+
 ```
 Translate our app's English strings file (en.json) to Spanish, German,
 and Japanese. Preserve all {placeholder} variables. For Japanese, use
@@ -1730,6 +1872,7 @@ polite/formal register. Flag any strings that need cultural adaptation.
 Create deterministic technical explainer videos with local project files instead of relying on opaque text-to-video generation. This is useful when the output needs exact equations, algorithm state transitions, or architecture diagrams that are easier to validate as code.
 
 **What it handles:**
+
 - 3Blue1Brown-style math explainers
 - Equation derivations with `MathTex`
 - Algorithm walkthroughs with one scene per beat
@@ -1738,6 +1881,7 @@ Create deterministic technical explainer videos with local project files instead
 - Draft-first local render workflow with explicit `render.sh` commands
 
 **Example prompt:**
+
 ```
 Use the manim-video skill to create a 75-second Manim explainer for gradient descent aimed at software engineers.
 Scaffold the full project in this workspace, include a voiceover draft, and render draft quality only if local Manim prerequisites are satisfied.
@@ -1752,6 +1896,7 @@ Scaffold the full project in this workspace, include a voiceover draft, and rend
 Analyze YouTube videos without watching them — extract transcripts, summarize content, identify key moments, and generate derivative content.
 
 **What it handles:**
+
 - YouTube transcript extraction and summarization
 - Key moment identification with timestamps
 - Video content comparison (e.g., "How does video A's advice differ from B?")
@@ -1759,6 +1904,7 @@ Analyze YouTube videos without watching them — extract transcripts, summarize 
 - Channel analysis and content trend identification
 
 **Example prompt:**
+
 ```
 Analyze this YouTube video: [URL]. Extract the transcript, summarize
 the key points in 5 bullets, identify the 3 most important moments
@@ -1774,6 +1920,7 @@ with timestamps, and draft a Twitter thread based on the content.
 Monitor blogs, RSS feeds, and news sources for specific topics. Get daily digests or real-time alerts when relevant content is published.
 
 **What it handles:**
+
 - RSS/Atom feed aggregation and monitoring
 - Topic-based filtering and relevance scoring
 - Daily/weekly digest generation with summaries
@@ -1781,6 +1928,7 @@ Monitor blogs, RSS feeds, and news sources for specific topics. Get daily digest
 - Trend detection across multiple sources
 
 **Example prompt:**
+
 ```
 Monitor these 10 tech blogs for any posts about "AI agents" or "LLM tooling".
 Check daily and send me a digest with title, link, and 2-sentence summary
@@ -1796,6 +1944,7 @@ for each new post. Flag anything that mentions our competitors.
 Review AI-generated content and rewrite it to sound naturally human — remove telltale patterns, vary sentence structure, and match a target voice.
 
 **What it handles:**
+
 - AI-pattern detection (overused transitions, formulaic structure, hedge phrases)
 - Voice matching — adapt content to match your existing writing style
 - Sentence structure variation and rhythm improvement
@@ -1803,6 +1952,7 @@ Review AI-generated content and rewrite it to sound naturally human — remove t
 - Before/after comparison with change annotations
 
 **Example prompt:**
+
 ```
 Here's a blog post draft that sounds too AI-generated. Rewrite it to
 match the voice in my previous 3 blog posts (attached). Remove AI-isms,
@@ -1819,6 +1969,7 @@ Show me what you changed.
 Validate business ideas, analyze competitive landscapes, and generate market intelligence reports from public data.
 
 **What it handles:**
+
 - Competitor feature matrix generation
 - Market sizing and TAM/SAM/SOM estimation
 - Product-market fit signal analysis
@@ -1826,6 +1977,7 @@ Validate business ideas, analyze competitive landscapes, and generate market int
 - SWOT analysis with data-backed evidence
 
 **Example prompt:**
+
 ```
 Research the AI code assistant market. Map the top 10 competitors,
 their pricing, key features, funding, and team size.
@@ -1839,27 +1991,27 @@ Rate the attractiveness of entering with a [specific angle].
 
 ## Capability Summary
 
-| Category | Capabilities | Key Skills & Connectors |
-|----------|-------------|------------------------|
-| **Software Engineering** | Code gen, review, debugging, tests, docs, deps | Coding agent, Engineering pack, 20+ skills |
-| **DevOps & Infra** | K8s, Terraform, Docker, CI/CD, cloud migration, incidents | DevOps pack (8 skills), `run_command` tool |
-| **Mobile Development** | iOS (SwiftUI), Android (Compose), React Native, Fastlane | Mobile Development pack, iOS/Android skills |
-| **Game Development** | Unity, Unreal, Godot, cross-engine performance | Game Development pack, 3 engine skills |
-| **Enterprise** | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and 36 more | 44 shipped MCP connectors |
-| **Data & Analytics** | CSV analysis, SQL, financial modeling, market screening | Data Analysis pack, 8+ financial skills |
-| **Content & Marketing** | Blog, social, email campaigns, SEO, copywriting | Marketing pack, marketing strategist skill |
-| **Personal Productivity** | Briefings, inbox, multi-channel messaging, task capture | 17 channels, scheduling, 10+ productivity skills |
-| **Team & Management** | Sprints, 1-on-1 prep, status reports, digital twins | EM pack, PM pack, 10 persona templates |
-| **Security** | Vulnerability scanning, compliance, dependency auditing, authorized data-broker privacy cleanup | Security audit skill, dependency check skill, Unbroker skill |
-| **Remote Ops** | Chat-driven deployment, headless mode, WebSocket API | Gateway, headless daemon, remote access |
-| **Voice & Audio** | Calls, TTS, STT, dictation, music/speaker control | ElevenLabs MCP, Whisper, Spotify/Sonos/BluOS MCP |
-| **Smart Home & IoT** | Lighting, sleep devices, cameras, ambiance scenes | OpenHue MCP, Eight Sleep MCP, RTSP/ONVIF tools |
-| **Financial Intelligence** | Risk analysis, tax planning, crypto, CFO modeling, ESG | 8 financial skills, ccxt MCP, Wealth Management pack |
-| **Knowledge & Notes** | Apple Notes, knowledge graph, memory, deep research | Memory service, FTS5 index, scratchpad tools |
-| **AI Agent Ecosystem** | Agent teams, build mode, playbooks, multi-LLM routing | Orchestration engine, provider factory, playbook engine |
-| **Cloud Infrastructure** | Sandboxed execution, domain registration, crypto payments | E2B MCP, Namecheap MCP, x402 protocol |
-| **Everyday Automation** | Food ordering, scheduling, PDF editing, desktop control | Foodora MCP, Calendly MCP, nano-pdf, Peekaboo |
-| **Content Intelligence** | Video analysis, blog monitoring, humanization, research | YouTube tools, RSS parsing, web research, style matching |
+| Category                   | Capabilities                                                                                        | Key Skills & Connectors                                      |
+| -------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| **Software Engineering**   | Code gen, review, debugging, tests, docs, deps                                                      | Coding agent, Engineering pack, 20+ skills                   |
+| **DevOps & Infra**         | K8s, Terraform, Docker, CI/CD, cloud migration, incidents                                           | DevOps pack (8 skills), `run_command` tool                   |
+| **Mobile Development**     | iOS (SwiftUI), Android (Compose), React Native, Fastlane                                            | Mobile Development pack, iOS/Android skills                  |
+| **Game Development**       | Unity, Unreal, Godot, cross-engine performance                                                      | Game Development pack, 3 engine skills                       |
+| **Enterprise**             | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and 36 more | 44 shipped MCP connectors                                    |
+| **Data & Analytics**       | CSV analysis, SQL, financial modeling, market screening                                             | Data Analysis pack, 8+ financial skills                      |
+| **Content & Marketing**    | Blog, social, email campaigns, SEO, copywriting                                                     | Marketing pack, marketing strategist skill                   |
+| **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 17 channels, scheduling, 10+ productivity skills             |
+| **Team & Management**      | Sprints, 1-on-1 prep, status reports, digital twins                                                 | EM pack, PM pack, 10 persona templates                       |
+| **Security**               | Vulnerability scanning, compliance, dependency auditing, authorized data-broker privacy cleanup     | Security audit skill, dependency check skill, Unbroker skill |
+| **Remote Ops**             | Chat-driven deployment, headless mode, WebSocket API                                                | Gateway, headless daemon, remote access                      |
+| **Voice & Audio**          | Calls, TTS, STT, dictation, music/speaker control                                                   | ElevenLabs MCP, Whisper, Spotify/Sonos/BluOS MCP             |
+| **Smart Home & IoT**       | Lighting, sleep devices, cameras, ambiance scenes                                                   | OpenHue MCP, Eight Sleep MCP, RTSP/ONVIF tools               |
+| **Financial Intelligence** | Risk analysis, tax planning, crypto, CFO modeling, ESG                                              | 8 financial skills, ccxt MCP, Wealth Management pack         |
+| **Knowledge & Notes**      | Apple Notes, knowledge graph, memory, deep research                                                 | Memory service, FTS5 index, scratchpad tools                 |
+| **AI Agent Ecosystem**     | Agent teams, build mode, playbooks, multi-LLM routing                                               | Orchestration engine, provider factory, playbook engine      |
+| **Cloud Infrastructure**   | Sandboxed execution, domain registration, crypto payments                                           | E2B MCP, Namecheap MCP, x402 protocol                        |
+| **Everyday Automation**    | Food ordering, scheduling, PDF editing, desktop control                                             | Foodora MCP, Calendly MCP, nano-pdf, Peekaboo                |
+| **Content Intelligence**   | Video analysis, blog monitoring, humanization, research                                             | YouTube tools, RSS parsing, web research, style matching     |
 
 ---
 

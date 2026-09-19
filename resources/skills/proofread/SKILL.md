@@ -37,11 +37,11 @@ Check document for grammar and clarity
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the document |
+| Name | Type   | Required | Description          |
+| ---- | ------ | -------- | -------------------- |
+| path | string | Yes      | Path to the document |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 419 characters.
-- Runtime prompt is defined directly in `../proofread.json`. 
+- Runtime prompt is defined directly in `../proofread.json`.

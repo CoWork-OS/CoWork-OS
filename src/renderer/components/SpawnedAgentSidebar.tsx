@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { Check, Loader2, MessageSquare, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Loader2, MessageSquare, Pause, Play, Square, X } from "lucide-react";
 import type {
   ImageAttachment,
   IntegrationMentionSelection,
@@ -50,6 +50,14 @@ type SpawnedAgentSidebarProps = {
 
 function isWorkingTask(task: Task): boolean {
   return task.status === "executing" || task.status === "planning" || task.status === "interrupted";
+}
+
+function isPauseAvailable(task: Task): boolean {
+  return task.status === "executing" || task.status === "planning";
+}
+
+function isResumeAvailable(task: Task): boolean {
+  return task.status === "paused" || task.status === "interrupted";
 }
 
 function formatDuration(startMs?: number, endMs?: number): string | null {
@@ -116,7 +124,56 @@ export function SpawnedAgentSidebar({
   showTranscript = true,
 }: SpawnedAgentSidebarProps) {
   const [sendError, setSendError] = useState<string | null>(null);
+  const [sendStatus, setSendStatus] = useState<string | null>(null);
+  const [controlError, setControlError] = useState<string | null>(null);
+  const draftsByTaskRef = useRef<Map<string, string>>(new Map());
+  const [sendMode, setSendMode] = useState<"message" | "follow_up">("follow_up");
+  const [failedRequest, setFailedRequest] = useState<{
+    message: string;
+    images?: ImageAttachment[];
+    quotedAssistantMessage?: QuotedAssistantMessage;
+    options?: {
+      permissionMode?: PermissionMode;
+      shellAccess?: boolean;
+      integrationMentions?: IntegrationMentionSelection[];
+      deliveryMode?: "message" | "follow_up";
+      messageId?: string;
+    };
+  } | null>(null);
   const selectedTask = resolveSpawnedAgentSidebarTask(childTasks, selectedTaskId);
+  useEffect(() => {
+    setSendError(null);
+    setSendStatus(null);
+    setControlError(null);
+    setFailedRequest(null);
+    setSendMode(selectedTask && isWorkingTask(selectedTask) ? "message" : "follow_up");
+  }, [selectedTask?.id]);
+  const selectedDraft = selectedTask ? (draftsByTaskRef.current.get(selectedTask.id) ?? "") : "";
+
+  const runTaskControl = useCallback(
+    async (action: "pause" | "resume") => {
+      if (!selectedTask) return;
+      setControlError(null);
+      try {
+        if (action === "pause") {
+          await window.electronAPI.pauseTask(selectedTask.id);
+        } else {
+          await window.electronAPI.resumeTask(selectedTask.id);
+        }
+        await onTasksChanged?.();
+      } catch (error) {
+        setControlError(error instanceof Error ? error.message : `Failed to ${action} worker`);
+      }
+    },
+    [onTasksChanged, selectedTask],
+  );
+
+  const handleDraftChange = useCallback(
+    (value: string) => {
+      if (selectedTask) draftsByTaskRef.current.set(selectedTask.id, value);
+    },
+    [selectedTask],
+  );
   const selectedEvents = useMemo(
     () =>
       selectedTask
@@ -143,25 +200,63 @@ export function SpawnedAgentSidebar({
         permissionMode?: PermissionMode;
         shellAccess?: boolean;
         integrationMentions?: IntegrationMentionSelection[];
+        deliveryMode?: "message" | "follow_up";
+        messageId?: string;
       },
-    ) => {
-      if (!selectedTask) return;
+    ): Promise<boolean> => {
+      if (!selectedTask) return false;
       setSendError(null);
+      setSendStatus(null);
+      const deliveryMode = options?.deliveryMode || sendMode;
+      const messageId =
+        deliveryMode === "message"
+          ? options?.messageId || globalThis.crypto?.randomUUID?.()
+          : options?.messageId;
+      const requestOptions = {
+        ...options,
+        deliveryMode,
+        ...(messageId ? { messageId } : {}),
+      };
       try {
-        await window.electronAPI.sendMessage(
+        const result = (await window.electronAPI.sendMessage(
           selectedTask.id,
           message,
           images,
           quotedAssistantMessage,
-          options,
+          requestOptions,
+        )) as
+          | {
+              queued?: boolean;
+              duplicate?: boolean;
+            }
+          | undefined;
+        setFailedRequest(null);
+        setSendStatus(
+          result?.duplicate
+            ? result.queued
+              ? "Already queued; duplicate ignored"
+              : "Already delivered; duplicate ignored"
+            : result?.queued
+              ? deliveryMode === "message"
+                ? "Queued without starting work"
+                : "Queued for the next turn"
+              : "Message delivered",
         );
+        return true;
       } catch (error) {
         const messageText = error instanceof Error ? error.message : "Failed to send message";
         setSendError(messageText);
+        setFailedRequest({
+          message,
+          images,
+          quotedAssistantMessage,
+          options: requestOptions,
+        });
         console.error("Failed to send spawned-agent follow-up:", error);
+        return false;
       }
     },
-    [selectedTask],
+    [selectedTask, sendMode],
   );
 
   if (!selectedTask) {
@@ -196,6 +291,33 @@ export function SpawnedAgentSidebar({
               {selectedEvents.length} event{selectedEvents.length === 1 ? "" : "s"}
             </span>
           </div>
+          {isWorkingTask(selectedTask) || isResumeAvailable(selectedTask) ? (
+            <div
+              className="spawned-agent-sidebar-controls"
+              role="group"
+              aria-label="Worker controls"
+            >
+              {isPauseAvailable(selectedTask) ? (
+                <button type="button" onClick={() => void runTaskControl("pause")}>
+                  <Pause size={12} /> Pause
+                </button>
+              ) : null}
+              {isResumeAvailable(selectedTask) ? (
+                <button type="button" onClick={() => void runTaskControl("resume")}>
+                  <Play size={12} /> Resume
+                </button>
+              ) : null}
+              {onCancelTask && isWorkingTask(selectedTask) ? (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => onCancelTask(selectedTask.id)}
+                >
+                  <Square size={12} /> Stop
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <button type="button" className="spawned-agent-sidebar-close" onClick={onClose}>
           Close
@@ -224,10 +346,58 @@ export function SpawnedAgentSidebar({
         </div>
       ) : null}
 
+      <div className="spawned-agent-sidebar-send-mode" role="group" aria-label="Worker action">
+        <span className="spawned-agent-sidebar-send-mode-label">When you send</span>
+        <button
+          type="button"
+          className={sendMode === "message" ? "active" : ""}
+          onClick={() => setSendMode("message")}
+          title="Queue the instruction without starting a new worker turn"
+        >
+          Message
+        </button>
+        <button
+          type="button"
+          className={sendMode === "follow_up" ? "active" : ""}
+          onClick={() => setSendMode("follow_up")}
+          title="Start or continue a worker turn"
+        >
+          Start follow-up
+        </button>
+      </div>
+
       {sendError ? (
         <div className="spawned-agent-sidebar-error" role="alert">
           <MessageSquare size={14} />
           <span>{sendError}</span>
+          {failedRequest ? (
+            <button
+              type="button"
+              className="spawned-agent-sidebar-retry"
+              onClick={() => {
+                const request = failedRequest;
+                void sendChildMessage(
+                  request.message,
+                  request.images,
+                  request.quotedAssistantMessage,
+                  request.options,
+                );
+              }}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {controlError ? (
+        <div className="spawned-agent-sidebar-control-error" role="alert">
+          {controlError}
+        </div>
+      ) : null}
+      {sendStatus ? (
+        <div className="spawned-agent-sidebar-send-status" role="status">
+          <MessageSquare size={14} />
+          <span>{sendStatus}</span>
         </div>
       ) : null}
 
@@ -236,6 +406,8 @@ export function SpawnedAgentSidebar({
           <MainContent
             task={selectedTask}
             selectedTaskId={selectedTask.id}
+            draftValue={selectedDraft}
+            onDraftValueChange={handleDraftChange}
             workspace={workspace}
             events={selectedEvents}
             sharedTaskEventUi={null}

@@ -25,6 +25,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     baseUrl: "https://opencode.ai/zen/v1",
     defaultModel: "gpt-5.5",
     knownModels: [
+      "gpt-6-astra",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
@@ -287,6 +288,18 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "sk-...",
     requiresBaseUrl: true,
+  },
+  {
+    id: "atomic-chat",
+    name: "Atomic Chat (local)",
+    compatibility: "openai",
+    baseUrl: "http://127.0.0.1:1337/v1",
+    defaultModel: "auto",
+    apiKeyLabel: "API Key (optional)",
+    apiKeyPlaceholder: "Leave empty unless Atomic Chat proxy auth is enabled",
+    apiKeyOptional: true,
+    description:
+      "Use an already-running Atomic Chat local API for inference. CoWork keeps its own tools, permissions, approvals, and task runtime.",
   },
   {
     id: "hf-agents",

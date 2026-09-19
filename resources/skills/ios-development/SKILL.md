@@ -38,4 +38,4 @@ iOS/Swift development: SwiftUI, UIKit, Core Data, Xcode builds, simulator manage
 ## Runtime Prompt
 
 - Current runtime prompt length: 893 characters.
-- Runtime prompt is defined directly in `../ios-development.json`. 
+- Runtime prompt is defined directly in `../ios-development.json`.

@@ -11,16 +11,16 @@ The products below are not interchangeable. Some are exceptional coding speciali
 
 ## At a Glance
 
-| Product | Best known for | Choose it when | Consider CoWork OS when |
-|---|---|---|---|
-| [Claude Code](claude-code.md) | Claude-native terminal coding | You want Anthropic's focused coding workflow | You want broader work surfaces or multiple model routes in one harness |
-| [Codex](codex.md) | OpenAI-native coding agents | You want tight OpenAI integration and cloud delegation | You want provider choice plus non-coding work in the same runtime |
-| [Cursor](cursor.md) | AI-native code editor | Your primary workspace should be an IDE | You want a workspace-level agent beyond the editor |
-| [OpenCode](opencode.md) | Open-source coding agent | You want a focused, model-flexible coding interface | You want the same openness across a wider personal-work surface |
-| [ChatGPT](chatgpt.md) | Broad hosted AI assistant | You value hosted convenience and OpenAI's integrated services | You want an open runtime, local control, and supported provider choice |
-| [Claude Cowork](claude-cowork.md) | Claude-powered knowledge work | You want Anthropic's polished hosted work experience | You want an open, multi-provider desktop and daemon runtime |
-| [OpenClaw](openclaw.md) | Open personal-agent ecosystem | You want a channel-forward operator runtime | You want a GUI-first control plane with visible governance |
-| [Hermes Agent](hermes.md) | Open agent runtime and provider integrations | You want its runtime, CLI, and community conventions | You want an integrated desktop super app and visual operations |
+| Product                           | Best known for                               | Choose it when                                                | Consider CoWork OS when                                                |
+| --------------------------------- | -------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [Claude Code](claude-code.md)     | Claude-native terminal coding                | You want Anthropic's focused coding workflow                  | You want broader work surfaces or multiple model routes in one harness |
+| [Codex](codex.md)                 | OpenAI-native coding agents                  | You want tight OpenAI integration and cloud delegation        | You want provider choice plus non-coding work in the same runtime      |
+| [Cursor](cursor.md)               | AI-native code editor                        | Your primary workspace should be an IDE                       | You want a workspace-level agent beyond the editor                     |
+| [OpenCode](opencode.md)           | Open-source coding agent                     | You want a focused, model-flexible coding interface           | You want the same openness across a wider personal-work surface        |
+| [ChatGPT](chatgpt.md)             | Broad hosted AI assistant                    | You value hosted convenience and OpenAI's integrated services | You want an open runtime, local control, and supported provider choice |
+| [Claude Cowork](claude-cowork.md) | Claude-powered knowledge work                | You want Anthropic's polished hosted work experience          | You want an open, multi-provider desktop and daemon runtime            |
+| [OpenClaw](openclaw.md)           | Open personal-agent ecosystem                | You want a channel-forward operator runtime                   | You want a GUI-first control plane with visible governance             |
+| [Hermes Agent](hermes.md)         | Open agent runtime and provider integrations | You want its runtime, CLI, and community conventions          | You want an integrated desktop super app and visual operations         |
 
 ## The CoWork OS Difference
 

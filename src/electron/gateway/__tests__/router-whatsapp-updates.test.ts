@@ -71,6 +71,35 @@ describe("MessageRouter WhatsApp task updates", () => {
     vi.useRealTimers();
   });
 
+  it("ignores late adapter status callbacks after shutdown begins", async () => {
+    const db = createMockDb();
+    const router = new MessageRouter(db, {}, undefined);
+    const statusHandlers: Array<(status: string, error?: Error) => void> = [];
+    const adapter = {
+      type: "whatsapp",
+      status: "connected",
+      botUsername: "test-bot",
+      onMessage: vi.fn(),
+      onError: vi.fn(),
+      onStatusChange: vi.fn((handler: (status: string, error?: Error) => void) => {
+        statusHandlers.push(handler);
+      }),
+      sendMessage: vi.fn().mockResolvedValue("wa-msg-1"),
+      connect: vi.fn(),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    } as Any;
+    const findById = vi.fn().mockReturnValue({ id: "wa-1" });
+    (router as Any).channelRepo.findById = findById;
+
+    router.registerAdapter(adapter, "wa-1");
+    findById.mockClear();
+
+    await router.disconnectAll();
+    statusHandlers[0]?.("disconnected");
+
+    expect(findById).not.toHaveBeenCalled();
+  });
+
   it("suppresses executor-internal planning chatter", async () => {
     const db = createMockDb();
     const router = new MessageRouter(db, {}, undefined);

@@ -38,4 +38,4 @@ Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Tasks, Sheets, Docs, 
 ## Runtime Prompt
 
 - Current runtime prompt length: 4964 characters.
-- Runtime prompt is defined directly in `../gog.json`. 
+- Runtime prompt is defined directly in `../gog.json`.

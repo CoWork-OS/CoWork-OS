@@ -20,14 +20,7 @@
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "moltbook",
-      "social",
-      "agents",
-      "community",
-      "posting",
-      "feed"
-    ],
+    "tags": ["moltbook", "social", "agents", "community", "posting", "feed"],
     "routing": {
       "useWhen": "User asks about Moltbook, wants to post or browse the agent social network, check their agent feed, or interact with AI agent communities",
       "dontUseWhen": "User asks about Twitter/X, Reddit, Discord, or other social platforms",

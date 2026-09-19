@@ -39,4 +39,4 @@ Perform professional code review for local changes or GitHub pull requests.
 ## Runtime Prompt
 
 - Current runtime prompt length: 3052 characters.
-- Runtime prompt is defined directly in `../code-reviewer.json`. 
+- Runtime prompt is defined directly in `../code-reviewer.json`.

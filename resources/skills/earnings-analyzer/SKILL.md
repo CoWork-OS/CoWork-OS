@@ -37,15 +37,15 @@ Analyze quarterly and annual earnings reports including EPS beat/miss analysis, 
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| company | string | Yes | Company name or ticker symbol |
-| analysisType | select | Yes | Type of earnings analysis |
-| question | string | Yes | Your specific earnings analysis question |
-| quarter | string | No | Specific quarter to analyze (e.g., Q3 2024, FY 2024) |
-| earningsData | string | No | Earnings data to analyze (e.g., EPS $2.15 vs $2.05 est, revenue $15.2B vs $14.8B est) |
+| Name         | Type   | Required | Description                                                                           |
+| ------------ | ------ | -------- | ------------------------------------------------------------------------------------- |
+| company      | string | Yes      | Company name or ticker symbol                                                         |
+| analysisType | select | Yes      | Type of earnings analysis                                                             |
+| question     | string | Yes      | Your specific earnings analysis question                                              |
+| quarter      | string | No       | Specific quarter to analyze (e.g., Q3 2024, FY 2024)                                  |
+| earningsData | string | No       | Earnings data to analyze (e.g., EPS $2.15 vs $2.05 est, revenue $15.2B vs $14.8B est) |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1165 characters.
-- Runtime prompt is defined directly in `../earnings-analyzer.json`. 
+- Runtime prompt is defined directly in `../earnings-analyzer.json`.

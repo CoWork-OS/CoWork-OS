@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, copyFileSync, chmodSync, writeFileSync, cpSync, readFileSync, readdirSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  copyFileSync,
+  chmodSync,
+  writeFileSync,
+  cpSync,
+  readFileSync,
+  readdirSync,
+} from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -27,11 +36,15 @@ const appExecutable = join(appMacOS, "HealthKitBridge");
 const pkgInfo = "APPL????\n";
 const localConfigPath = join(process.cwd(), ".cowork", "healthkit-bridge.json");
 const localConfig = readLocalConfig(localConfigPath);
-const appName = process.env.COWORK_HEALTHKIT_APP_NAME || localConfig.appName || "CoWork Health Sync";
+const appName =
+  process.env.COWORK_HEALTHKIT_APP_NAME || localConfig.appName || "CoWork Health Sync";
 const useXcodeBuild =
   process.env.COWORK_HEALTHKIT_USE_XCODE_BUILD === "1" || localConfig.useXcodeBuild === true;
 const developmentTeam =
-  process.env.COWORK_HEALTHKIT_DEVELOPMENT_TEAM || process.env.DEVELOPMENT_TEAM || localConfig.developmentTeam || "";
+  process.env.COWORK_HEALTHKIT_DEVELOPMENT_TEAM ||
+  process.env.DEVELOPMENT_TEAM ||
+  localConfig.developmentTeam ||
+  "";
 const bundleIdentifier =
   process.env.COWORK_HEALTHKIT_BUNDLE_IDENTIFIER ||
   process.env.HEALTHKIT_BRIDGE_BUNDLE_IDENTIFIER ||
@@ -102,7 +115,9 @@ function readLocalConfig(configPath) {
     const parsed = JSON.parse(readFileSync(configPath, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (error) {
-    console.warn(`[healthkit-bridge] Ignoring invalid local config at ${configPath}: ${error.message}`);
+    console.warn(
+      `[healthkit-bridge] Ignoring invalid local config at ${configPath}: ${error.message}`,
+    );
     return {};
   }
 }
@@ -195,11 +210,12 @@ const identities = spawnSync("security", ["find-identity", "-v", "-p", "codesign
 });
 const identitiesOutput = identities.stdout || "";
 const quotedIdentityMatches = [...identitiesOutput.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-const matchingTeamIdentity = findAppleDevelopmentIdentityForTeam(developmentTeam, quotedIdentityMatches);
+const matchingTeamIdentity = findAppleDevelopmentIdentityForTeam(
+  developmentTeam,
+  quotedIdentityMatches,
+);
 const configuredSigningIdentity =
-  process.env.COWORK_HEALTHKIT_SIGNING_IDENTITY ||
-  localConfig.signingIdentity ||
-  "";
+  process.env.COWORK_HEALTHKIT_SIGNING_IDENTITY || localConfig.signingIdentity || "";
 const signingIdentity = configuredSigningIdentity || matchingTeamIdentity || "-";
 
 if (!configuredSigningIdentity && !matchingTeamIdentity) {
@@ -209,7 +225,15 @@ if (!configuredSigningIdentity && !matchingTeamIdentity) {
 }
 
 const xcodeProjectPath = join(packagePath, "HealthKitBridge.xcodeproj");
-const xcodeAppBundle = join(packagePath, ".build", "xcode", "Build", "Products", "Release", "HealthKitBridge.app");
+const xcodeAppBundle = join(
+  packagePath,
+  ".build",
+  "xcode",
+  "Build",
+  "Products",
+  "Release",
+  "HealthKitBridge.app",
+);
 
 if (existsSync(xcodeProjectPath) && developmentTeam && useXcodeBuild) {
   const xcodebuildArgs = [
@@ -230,11 +254,10 @@ if (existsSync(xcodeProjectPath) && developmentTeam && useXcodeBuild) {
   if (developmentTeam) {
     xcodebuildArgs.push(`DEVELOPMENT_TEAM=${developmentTeam}`);
   }
-  const xcodebuild = spawnSync(
-    "xcodebuild",
-    xcodebuildArgs,
-    { stdio: "inherit", env: process.env },
-  );
+  const xcodebuild = spawnSync("xcodebuild", xcodebuildArgs, {
+    stdio: "inherit",
+    env: process.env,
+  });
 
   if (xcodebuild.status === 0 && existsSync(xcodeAppBundle)) {
     mkdirSync(destinationDir, { recursive: true });
@@ -245,38 +268,48 @@ if (existsSync(xcodeProjectPath) && developmentTeam && useXcodeBuild) {
     process.exit(0);
   }
 
-  console.warn("[healthkit-bridge] Xcode app build failed or did not produce a bundle; falling back to SwiftPM packaging.");
+  console.warn(
+    "[healthkit-bridge] Xcode app build failed or did not produce a bundle; falling back to SwiftPM packaging.",
+  );
 } else if (!developmentTeam) {
-  console.log("[healthkit-bridge] Skipping Xcode app build because no development team is configured.");
+  console.log(
+    "[healthkit-bridge] Skipping Xcode app build because no development team is configured.",
+  );
 } else if (!useXcodeBuild) {
-  console.log("[healthkit-bridge] Skipping Xcode app build; set COWORK_HEALTHKIT_USE_XCODE_BUILD=1 to enable it.");
+  console.log(
+    "[healthkit-bridge] Skipping Xcode app build; set COWORK_HEALTHKIT_USE_XCODE_BUILD=1 to enable it.",
+  );
 }
 
-const build = spawnSync("swift", [
-  "build",
-  "--disable-sandbox",
-  "--cache-path",
-  swiftSharedCache,
-  "--config-path",
-  swiftConfigPath,
-  "--security-path",
-  swiftSecurityPath,
-  "--manifest-cache",
-  "local",
-  "--package-path",
-  packagePath,
-  "-c",
-  "release",
-  "-Xcc",
-  `-fmodules-cache-path=${swiftModuleCache}`,
-  "-Xswiftc",
-  "-module-cache-path",
-  "-Xswiftc",
-  swiftModuleCache,
-], {
-  stdio: "inherit",
-  env: swiftBuildEnv,
-});
+const build = spawnSync(
+  "swift",
+  [
+    "build",
+    "--disable-sandbox",
+    "--cache-path",
+    swiftSharedCache,
+    "--config-path",
+    swiftConfigPath,
+    "--security-path",
+    swiftSecurityPath,
+    "--manifest-cache",
+    "local",
+    "--package-path",
+    packagePath,
+    "-c",
+    "release",
+    "-Xcc",
+    `-fmodules-cache-path=${swiftModuleCache}`,
+    "-Xswiftc",
+    "-module-cache-path",
+    "-Xswiftc",
+    swiftModuleCache,
+  ],
+  {
+    stdio: "inherit",
+    env: swiftBuildEnv,
+  },
+);
 
 if (build.status !== 0) {
   console.error("[healthkit-bridge] swift build failed.");
@@ -296,7 +329,9 @@ writeFileSync(join(appContents, "Info.plist"), infoPlist);
 writeFileSync(join(appContents, "PkgInfo"), pkgInfo);
 copyFileSync(buildOutput, appExecutable);
 chmodSync(appExecutable, 0o755);
-const provisioningProfile = process.env.COWORK_HEALTHKIT_PROVISIONING_PROFILE || process.env.HEALTHKIT_BRIDGE_PROVISIONING_PROFILE;
+const provisioningProfile =
+  process.env.COWORK_HEALTHKIT_PROVISIONING_PROFILE ||
+  process.env.HEALTHKIT_BRIDGE_PROVISIONING_PROFILE;
 const resolvedProvisioningProfile =
   provisioningProfile ||
   localConfig.provisioningProfile ||

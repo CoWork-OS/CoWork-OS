@@ -8,10 +8,10 @@ This page documents the current concept, runtime behavior, authoring model, and 
 
 There are two shortcut families:
 
-| Family | Source | What it does |
-|--------|--------|--------------|
-| **App commands** | Shared deterministic catalog in the app | Runs a fixed UI/app behavior or starts a safe built-in workflow |
-| **Workflow shortcuts** | Skills and plugin-pack `slashCommands` | Invokes a skill through the existing skills runtime |
+| Family                 | Source                                  | What it does                                                    |
+| ---------------------- | --------------------------------------- | --------------------------------------------------------------- |
+| **App commands**       | Shared deterministic catalog in the app | Runs a fixed UI/app behavior or starts a safe built-in workflow |
+| **Workflow shortcuts** | Skills and plugin-pack `slashCommands`  | Invokes a skill through the existing skills runtime             |
 
 The picker merges these sources in this order:
 
@@ -26,23 +26,23 @@ Visible command names are always valid slash tokens such as `/batch-rename`, not
 
 The built-in app command catalog is:
 
-| Command | Behavior |
-|---------|----------|
-| `/side [question]` | Opens a right-side Side Chat panel for the selected active task. The side task is a read-only chat fork that can answer questions about the parent session without steering, stopping, approving, or mutating the parent task. If `[question]` is provided, it is sent as the first side-chat message. See [Side Chat](side-chat.md). |
-| `/schedule ...` | Creates, lists, enables, disables, or deletes scheduled tasks through the deterministic schedule handler. Plain `/schedule ...` creates standalone scheduled work; `/schedule here ...` and schedule prompts that clearly ask to return to this conversation create a scheduled follow-up for the selected task thread. |
-| `/clear` | Clears the current task/chat view without deleting history and without switching the current workspace. |
-| `/plan <task>` | Creates a new task in Plan execution mode using `<task>` as the prompt. |
-| `/cost <task>` | Creates an Analyze-mode estimate request for token usage, model cost, runtime, and risk without executing the requested task. |
-| `/goal <objective>` | Starts a fresh persistent-goal task. The task stores the objective in its agent configuration, enables deep-work continuations, and keeps working until the goal is complete, blocked, paused, or cleared. |
-| `/goal` | Reports the selected task's persistent-goal status. |
-| `/goal pause` | Pauses the selected task's persistent goal. |
-| `/goal resume` | Resumes the selected task's persistent goal and continues work from the current task state. |
-| `/goal clear` | Clears the selected task's persistent goal metadata. |
-| `/multitask [N] <task>` | Starts a fresh collaborative multitask run. CoWork strips the command prefix, splits the request into `N` lane-specific child tasks (`2-8`, default `4`), runs them through the existing team orchestrator, and synthesizes the result. See [Multitask Command](multitask.md). |
-| `/compact [context]` | Starts a safe continuation-brief workflow that summarizes context, decisions, open questions, constraints, and next actions. |
-| `/doctor [context]` | Starts a diagnostic workflow for workspace/app state, integrations, permissions, skills, commands, and setup issues. It should not make changes unless explicitly asked. |
-| `/undo [context]` | Starts a safe undo-planning workflow. It does not roll back, delete, or modify anything unless the user explicitly approves a follow-up action. |
-| `/review [target]` | Invokes the code-review workflow for local changes, a PR, or the requested focus in the current regular workspace. It is unavailable in temporary workspaces. |
+| Command                 | Behavior                                                                                                                                                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/side [question]`      | Opens a right-side Side Chat panel for the selected active task. The side task is a read-only chat fork that can answer questions about the parent session without steering, stopping, approving, or mutating the parent task. If `[question]` is provided, it is sent as the first side-chat message. See [Side Chat](side-chat.md). |
+| `/schedule ...`         | Creates, lists, enables, disables, or deletes scheduled tasks through the deterministic schedule handler. Plain `/schedule ...` creates standalone scheduled work; `/schedule here ...` and schedule prompts that clearly ask to return to this conversation create a scheduled follow-up for the selected task thread.               |
+| `/clear`                | Clears the current task/chat view without deleting history and without switching the current workspace.                                                                                                                                                                                                                               |
+| `/plan <task>`          | Creates a new task in Plan execution mode using `<task>` as the prompt.                                                                                                                                                                                                                                                               |
+| `/cost <task>`          | Creates an Analyze-mode estimate request for token usage, model cost, runtime, and risk without executing the requested task.                                                                                                                                                                                                         |
+| `/goal <objective>`     | Starts a fresh persistent-goal task. The task stores the objective in its agent configuration, enables deep-work continuations, and keeps working until the goal is complete, blocked, paused, or cleared.                                                                                                                            |
+| `/goal`                 | Reports the selected task's persistent-goal status.                                                                                                                                                                                                                                                                                   |
+| `/goal pause`           | Pauses the selected task's persistent goal.                                                                                                                                                                                                                                                                                           |
+| `/goal resume`          | Resumes the selected task's persistent goal and continues work from the current task state.                                                                                                                                                                                                                                           |
+| `/goal clear`           | Clears the selected task's persistent goal metadata.                                                                                                                                                                                                                                                                                  |
+| `/multitask [N] <task>` | Starts a fresh collaborative multitask run. CoWork strips the command prefix, splits the request into `N` lane-specific child tasks (`2-8`, default `4`), runs them through the existing team orchestrator, and synthesizes the result. See [Multitask Command](multitask.md).                                                        |
+| `/compact [context]`    | Starts a safe continuation-brief workflow that summarizes context, decisions, open questions, constraints, and next actions.                                                                                                                                                                                                          |
+| `/doctor [context]`     | Starts a diagnostic workflow for workspace/app state, integrations, permissions, skills, commands, and setup issues. It should not make changes unless explicitly asked.                                                                                                                                                              |
+| `/undo [context]`       | Starts a safe undo-planning workflow. It does not roll back, delete, or modify anything unless the user explicitly approves a follow-up action.                                                                                                                                                                                       |
+| `/review [target]`      | Invokes the code-review workflow for local changes, a PR, or the requested focus in the current regular workspace. It is unavailable in temporary workspaces.                                                                                                                                                                         |
 
 `/clear` is intentionally view-only. It deselects the current task and clears visible events, but it does not delete task history or move the user into a new temporary workspace.
 
@@ -168,20 +168,20 @@ Customize remains the authoring and enable/disable surface. There is no separate
 
 ## Implementation Landmarks
 
-| Area | Files |
-|------|-------|
-| App command catalog and parser | `src/shared/message-shortcuts.ts` |
-| Renderer picker option builder | `src/renderer/utils/message-slash-options.ts` |
-| Main composer integration | `src/renderer/components/MainContent.tsx` |
-| Side Chat panel and `/side` app wiring | `src/renderer/components/SideChatPanel.tsx`, `src/renderer/App.tsx` |
-| Side task fork and live parent-status injection | `src/electron/agent/daemon.ts` |
-| Side Chat prompt rules and read-only chat execution | `src/electron/agent/executor.ts` |
-| Claude-for-Legal intake detection and follow-up serialization | `src/renderer/utils/legal-demand-intake.ts` |
-| Safe `/clear` view handling | `src/renderer/App.tsx` |
-| Plugin alias backend resolution | `src/electron/agent/skill-slash-aliases.ts` |
-| Generic skill slash execution | `src/electron/agent/executor.ts` |
-| Multitask command parser and lane planning | `src/shared/multitask-command.ts`, `src/electron/agents/MultitaskLanePlanner.ts` |
-| Bundled shortcut pack | `resources/plugin-packs/cowork-shortcuts/cowork.plugin.json` |
+| Area                                                          | Files                                                                            |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| App command catalog and parser                                | `src/shared/message-shortcuts.ts`                                                |
+| Renderer picker option builder                                | `src/renderer/utils/message-slash-options.ts`                                    |
+| Main composer integration                                     | `src/renderer/components/MainContent.tsx`                                        |
+| Side Chat panel and `/side` app wiring                        | `src/renderer/components/SideChatPanel.tsx`, `src/renderer/App.tsx`              |
+| Side task fork and live parent-status injection               | `src/electron/agent/daemon.ts`                                                   |
+| Side Chat prompt rules and read-only chat execution           | `src/electron/agent/executor.ts`                                                 |
+| Claude-for-Legal intake detection and follow-up serialization | `src/renderer/utils/legal-demand-intake.ts`                                      |
+| Safe `/clear` view handling                                   | `src/renderer/App.tsx`                                                           |
+| Plugin alias backend resolution                               | `src/electron/agent/skill-slash-aliases.ts`                                      |
+| Generic skill slash execution                                 | `src/electron/agent/executor.ts`                                                 |
+| Multitask command parser and lane planning                    | `src/shared/multitask-command.ts`, `src/electron/agents/MultitaskLanePlanner.ts` |
+| Bundled shortcut pack                                         | `resources/plugin-packs/cowork-shortcuts/cowork.plugin.json`                     |
 
 ## Focused Checks
 

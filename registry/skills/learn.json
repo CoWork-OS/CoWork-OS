@@ -18,12 +18,7 @@
       "description": "Type of learning",
       "required": false,
       "default": "insight",
-      "options": [
-        "insight",
-        "correction",
-        "preference",
-        "rule"
-      ]
+      "options": ["insight", "correction", "preference", "rule"]
     }
   ],
   "enabled": true,

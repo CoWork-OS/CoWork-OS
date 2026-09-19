@@ -51,13 +51,13 @@ Ordinary remote text sent while a task is running is treated as a follow-up to t
 
 Use explicit commands when you want to change the task lifecycle:
 
-| Command | Behavior |
-|---------|----------|
-| `/stop`, `/cancel` | Cancel the running daemon task and clear the chat's task association. |
-| `/new`, `/newtask` | Unlink the chat from the current task without cancelling that task. The next ordinary message starts fresh. |
+| Command                      | Behavior                                                                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/stop`, `/cancel`           | Cancel the running daemon task and clear the chat's task association.                                                                      |
+| `/new`, `/newtask`           | Unlink the chat from the current task without cancelling that task. The next ordinary message starts fresh.                                |
 | `/new temp`, `/newtask temp` | Start a fresh temporary workspace session for scratch work. Temporary workspace paths are hidden from command replies and workspace lists. |
-| `/pause`, `/resume` | Pause or resume the active task. |
-| `/status`, `/task` | Inspect gateway status or the current task snapshot. |
+| `/pause`, `/resume`          | Pause or resume the active task.                                                                                                           |
+| `/status`, `/task`           | Inspect gateway status or the current task snapshot.                                                                                       |
 
 The gateway tracks task ownership and generation state for each chat. If a task produces late updates after `/new`, `/newtask`, `/stop`, or `/cancel`, those stale updates are not sent back into the chat.
 
@@ -69,38 +69,38 @@ Telegram and Discord use this registry to populate their native command menus fo
 
 Core commands:
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show the compact channel help. |
-| `/commands` | Show the command catalog. |
-| `/status` | Show gateway and task status. |
-| `/workspaces` | List non-temporary workspaces. |
-| `/workspace <name or number>` | Select a workspace for the chat. |
-| `/new`, `/newtask` | Fresh task association for the next message. |
-| `/new temp` | Fresh temporary workspace session. |
-| `/stop`, `/cancel` | Stop the active task. |
+| Command                       | Description                                  |
+| ----------------------------- | -------------------------------------------- |
+| `/help`                       | Show the compact channel help.               |
+| `/commands`                   | Show the command catalog.                    |
+| `/status`                     | Show gateway and task status.                |
+| `/workspaces`                 | List non-temporary workspaces.               |
+| `/workspace <name or number>` | Select a workspace for the chat.             |
+| `/new`, `/newtask`            | Fresh task association for the next message. |
+| `/new temp`                   | Fresh temporary workspace session.           |
+| `/stop`, `/cancel`            | Stop the active task.                        |
 
 Task-flow commands:
 
-| Command | Description |
-|---------|-------------|
-| `/queue` | Show queue status. |
-| `/queue clear` | Clear queued work where supported. |
-| `/queue <message>`, `/q <message>` | Add a follow-up message to the current task. |
-| `/steer <guidance>` | Send high-priority guidance to the current task. |
-| `/background <prompt>` | Start an unlinked background task. |
-| `/bg <prompt>`, `/btw <prompt>` | Short aliases for `/background`. |
-| `/retry` | Retry a failed task. |
+| Command                            | Description                                      |
+| ---------------------------------- | ------------------------------------------------ |
+| `/queue`                           | Show queue status.                               |
+| `/queue clear`                     | Clear queued work where supported.               |
+| `/queue <message>`, `/q <message>` | Add a follow-up message to the current task.     |
+| `/steer <guidance>`                | Send high-priority guidance to the current task. |
+| `/background <prompt>`             | Start an unlinked background task.               |
+| `/bg <prompt>`, `/btw <prompt>`    | Short aliases for `/background`.                 |
+| `/retry`                           | Retry a failed task.                             |
 
 Approval and settings commands:
 
-| Command | Description |
-|---------|-------------|
-| `/approve`, `/yes` | Approve a pending action. |
-| `/deny`, `/no` | Deny a pending action. |
-| `/brief`, `/schedule`, `/digest`, `/followups`, `/inbox` | Run channel-friendly productivity workflows. |
-| `/models`, `/model <name>`, `/providers`, `/provider <name>` | Inspect or change model/provider routing. |
-| `/agent`, `/agents`, `/agent <name|id|clear>` | Inspect or choose the preferred agent role for the chat. |
+| Command                                                      | Description                                  |
+| ------------------------------------------------------------ | -------------------------------------------- | ------- | -------------------------------------------------------- |
+| `/approve`, `/yes`                                           | Approve a pending action.                    |
+| `/deny`, `/no`                                               | Deny a pending action.                       |
+| `/brief`, `/schedule`, `/digest`, `/followups`, `/inbox`     | Run channel-friendly productivity workflows. |
+| `/models`, `/model <name>`, `/providers`, `/provider <name>` | Inspect or change model/provider routing.    |
+| `/agent`, `/agents`, `/agent <name                           | id                                           | clear>` | Inspect or choose the preferred agent role for the chat. |
 
 WhatsApp also maps common plain-language shortcuts such as `help`, `status`, `new task`, `new temp`, `stop`, `queue ...`, `q ...`, `steer ...`, `background ...`, and `btw ...` into their slash-command equivalents before routing.
 
@@ -108,14 +108,14 @@ WhatsApp also maps common plain-language shortcuts such as `help`, `status`, `ne
 
 Bundled and enabled skills can be invoked from gateway channels with slash syntax.
 
-| Command | Behavior |
-|---------|----------|
-| `/skills` | List skills and show the runnable slash form for enabled skills. |
-| `/skill <id>` | Toggle a skill on or off for the profile. |
-| `/simplify [objective]` | Run the simplify workflow. |
-| `/batch <objective>` | Run the batch workflow. |
-| `/llm-wiki <objective>` | Run the research-vault workflow. |
-| `/<skill-slug> args` | Invoke an enabled skill by its slash alias or skill slug. |
+| Command                 | Behavior                                                         |
+| ----------------------- | ---------------------------------------------------------------- |
+| `/skills`               | List skills and show the runnable slash form for enabled skills. |
+| `/skill <id>`           | Toggle a skill on or off for the profile.                        |
+| `/simplify [objective]` | Run the simplify workflow.                                       |
+| `/batch <objective>`    | Run the batch workflow.                                          |
+| `/llm-wiki <objective>` | Run the research-vault workflow.                                 |
+| `/<skill-slug> args`    | Invoke an enabled skill by its slash alias or skill slug.        |
 
 If a skill alias points to a disabled or missing skill, the gateway returns an actionable error instead of treating the slash text as a normal task.
 

@@ -219,11 +219,11 @@ describe("SecureSettingsRepository", () => {
       // Should not call safeStorage
       expect(mockEncryptString).not.toHaveBeenCalled();
 
-      // Should have inserted with app: prefix
+      // Should have inserted with the app2: prefix (app-level fallback)
       expect(mockStmt.run).toHaveBeenCalledWith(
         expect.any(String),
         "search",
-        expect.stringMatching(/^app:/),
+        expect.stringMatching(/^app2:/),
         expect.any(String),
         expect.any(Number),
         expect.any(Number),
@@ -486,7 +486,7 @@ describe("SecureSettingsRepository", () => {
       repository.save("voice", { test: "data" });
 
       const runCall = mockStmt.run.mock.calls[0];
-      expect(runCall[2]).toMatch(/^app:/);
+      expect(runCall[2]).toMatch(/^app2:/);
     });
 
     it("should handle app-encrypted data on load (round-trip)", () => {
@@ -506,7 +506,7 @@ describe("SecureSettingsRepository", () => {
       const savedChecksum = saveCall[3];
 
       // Verify it uses app: prefix
-      expect(savedEncryptedData).toMatch(/^app:/);
+      expect(savedEncryptedData).toMatch(/^app2:/);
 
       // Now set up mock to return this encrypted data
       mockStmt.get.mockReturnValue({
@@ -522,6 +522,68 @@ describe("SecureSettingsRepository", () => {
       const result = repository.load("voice");
 
       expect(result).toEqual(testData);
+    });
+
+    it("rewrites an os: record whose checksum is a digest of the plaintext", () => {
+      // An unkeyed SHA-256 of the secret stored beside its ciphertext is a
+      // brute-force oracle for low-entropy values. Keying the migration off
+      // the `app:` prefix alone would leave that oracle in place for every
+      // safeStorage record — the common case on desktop — because nothing else
+      // rewrites a category that is only ever read.
+      const crypto = require("crypto");
+      mockIsEncryptionAvailable.mockReturnValue(true);
+      (SecureSettingsRepositoryClass as Any).instance = null;
+      repository = new SecureSettingsRepositoryClass(mockDb);
+
+      const plaintext = JSON.stringify({ provider: "test" });
+      mockDecryptString.mockReturnValue(plaintext);
+      mockEncryptString.mockReturnValue(Buffer.from("re-encrypted"));
+
+      mockStmt.get.mockReturnValue({
+        id: "test-id",
+        category: "voice",
+        encrypted_data: "os:legacy-ciphertext",
+        checksum: crypto.createHash("sha256").update(plaintext).digest("hex"),
+        created_at: 1000,
+        updated_at: 2000,
+      });
+
+      expect(repository.load("voice")).toEqual({ provider: "test" });
+
+      // The record was re-saved. It already exists, so save() takes the UPDATE
+      // path: (encrypted_data, checksum, updated_at, category).
+      const rewrite = mockStmt.run.mock.calls.at(-1) as unknown[] | undefined;
+      expect(rewrite).toBeDefined();
+      const [rewrittenCiphertext, rewrittenChecksum] = rewrite as unknown[];
+      expect(String(rewrittenCiphertext)).toMatch(/^os:/);
+      expect(rewrittenChecksum).toBe(
+        crypto.createHash("sha256").update(String(rewrittenCiphertext)).digest("hex"),
+      );
+      expect(rewrittenChecksum).not.toBe(
+        crypto.createHash("sha256").update(plaintext).digest("hex"),
+      );
+    });
+
+    it("leaves a record alone once its checksum already covers the ciphertext", () => {
+      const crypto = require("crypto");
+      mockIsEncryptionAvailable.mockReturnValue(true);
+      (SecureSettingsRepositoryClass as Any).instance = null;
+      repository = new SecureSettingsRepositoryClass(mockDb);
+
+      const plaintext = JSON.stringify({ provider: "test" });
+      mockDecryptString.mockReturnValue(plaintext);
+
+      mockStmt.get.mockReturnValue({
+        id: "test-id",
+        category: "voice",
+        encrypted_data: "os:current-ciphertext",
+        checksum: crypto.createHash("sha256").update("os:current-ciphertext").digest("hex"),
+        created_at: 1000,
+        updated_at: 2000,
+      });
+
+      expect(repository.load("voice")).toEqual({ provider: "test" });
+      expect(mockStmt.run).not.toHaveBeenCalled();
     });
 
     it("should throw when OS encryption was used but is no longer available", () => {
@@ -663,7 +725,7 @@ describe("SecureSettingsRepository", () => {
 
       // Should use app: prefix for encryption
       const runCall = mockStmt.run.mock.calls[0];
-      expect(runCall[2]).toMatch(/^app:/);
+      expect(runCall[2]).toMatch(/^app2:/);
     });
   });
 

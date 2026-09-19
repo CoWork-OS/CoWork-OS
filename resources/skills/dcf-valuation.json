@@ -17,11 +17,7 @@
       "type": "select",
       "description": "Number of projection years",
       "required": true,
-      "options": [
-        "5",
-        "7",
-        "10"
-      ]
+      "options": ["5", "7", "10"]
     },
     {
       "name": "question",

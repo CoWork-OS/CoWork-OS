@@ -202,7 +202,7 @@ describe("buildActionBlockSummary", () => {
     expect(html).not.toContain("lucide-circle-dot");
   });
 
-  it("renders generic work blocks with activity glyph instead of circle-dot", () => {
+  it("renders generic work blocks with a checklist glyph instead of circle-dot", () => {
     const html = renderToStaticMarkup(
       createElement(ActionBlock, {
         blockId: "work-block",
@@ -219,7 +219,44 @@ describe("buildActionBlockSummary", () => {
       }),
     );
 
-    expect(html).toContain("lucide-activity");
+    expect(html).toContain("lucide-list-checks");
     expect(html).not.toContain("lucide-circle-dot");
+  });
+
+  it("uses human-scale units for long durations and omits zero-duration metadata", () => {
+    const longDurationHtml = renderToStaticMarkup(
+      createElement(ActionBlock, {
+        blockId: "long-duration-block",
+        summary: "Activity complete",
+        iconKind: "work",
+        stepCount: 1,
+        toolCallCount: 0,
+        durationMs: 18 * 24 * 60 * 60 * 1000 + 19 * 60 * 60 * 1000,
+        outputTokens: 0,
+        isActive: false,
+        expanded: false,
+        onToggle: () => {},
+        children: createElement("span", null, "Activity complete"),
+      }),
+    );
+    expect(longDurationHtml).toContain("18d 19h");
+    expect(longDurationHtml).not.toContain("27080m");
+
+    const zeroDurationHtml = renderToStaticMarkup(
+      createElement(ActionBlock, {
+        blockId: "zero-duration-block",
+        summary: "Activity complete",
+        iconKind: "work",
+        stepCount: 1,
+        toolCallCount: 0,
+        durationMs: 0,
+        outputTokens: 0,
+        isActive: false,
+        expanded: false,
+        onToggle: () => {},
+        children: createElement("span", null, "Activity complete"),
+      }),
+    );
+    expect(zeroDurationHtml).not.toContain("action-block-meta");
   });
 });

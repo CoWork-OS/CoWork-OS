@@ -53,8 +53,27 @@ import {
   ChronicleSettingsManager,
 } from "../chronicle";
 import { NativeNotificationCenter, NotificationOverlayManager } from "../notifications";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 
 const LEGACY_SETTINGS_FILE = "tray-settings.json";
+
+/**
+ * Escape text before interpolating it into the quick-input window's HTML.
+ *
+ * QuickInputWindow.updateResponse assigns its argument to innerHTML inside a
+ * `data:text/html` document that has no CSP and no preload, so inline handlers
+ * in that markup execute. Anything derived from agent output — plan step
+ * descriptions in progress events, tool error text — must come through here.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 export interface TrayManagerOptions {
   showDockIcon?: boolean;
@@ -250,8 +269,11 @@ export class TrayManager {
         if (event.taskId !== this.currentQuickTaskId) return;
         // Only show progress if we don't have response content yet
         if (!this.quickTaskAccumulatedResponse && event.message) {
+          // escapeHtml: progress messages embed LLM-authored plan step text,
+          // and updateResponse assigns to innerHTML in a window that has no
+          // CSP, so unescaped markup here executes script.
           this.quickInputWindow?.updateResponse(
-            `<p style="color: rgba(255,255,255,0.6);">${event.message}</p>`,
+            `<p style="color: rgba(255,255,255,0.6);">${escapeHtml(event.message)}</p>`,
             false,
           );
         }
@@ -281,10 +303,12 @@ export class TrayManager {
       if (event.taskId !== this.currentQuickTaskId) return;
       const question = this.quickInputWindow?.getCurrentQuestion() || "";
       const questionHtml = question
-        ? `<div class="user-question"><strong>You:</strong> ${question.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`
+        ? `<div class="user-question"><strong>You:</strong> ${escapeHtml(question)}</div>`
         : "";
       this.quickInputWindow?.updateResponse(
-        `${questionHtml}<div class="error-message">Error: ${event.message || "An error occurred"}</div>`,
+        `${questionHtml}<div class="error-message">Error: ${escapeHtml(
+          event.message || "An error occurred",
+        )}</div>`,
         true,
       );
       this.currentQuickTaskId = null;
@@ -504,6 +528,10 @@ export class TrayManager {
         prompt,
         workspaceId: wsId,
         status: "queued",
+        agentConfig: taskAgentConfigForCreation(
+          undefined,
+          PermissionSettingsManager.loadSettings(),
+        ),
       });
 
       this.currentQuickTaskId = task.id;

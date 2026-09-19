@@ -42,7 +42,10 @@ The summary cards should explain the architecture in human terms, for example:
 Use JetBrains Mono for the technical visual language:
 
 ```html
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link
+  href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+  rel="stylesheet"
+/>
 ```
 
 Typical sizes:
@@ -56,15 +59,15 @@ Typical sizes:
 
 Use semantic coloring consistently.
 
-| Type | Fill | Stroke | Use for |
-|---|---|---|---|
-| Frontend | `rgba(8, 51, 68, 0.4)` | `#22d3ee` | clients, UI, edge apps |
-| Backend | `rgba(6, 78, 59, 0.4)` | `#34d399` | APIs, services, workers |
-| Database | `rgba(76, 29, 149, 0.4)` | `#a78bfa` | databases, storage, AI/ML |
-| Cloud | `rgba(120, 53, 15, 0.3)` | `#fbbf24` | cloud infra, gateways, CDN |
-| Security | `rgba(136, 19, 55, 0.4)` | `#fb7185` | auth, secrets, guardrails |
-| Message Bus | `rgba(251, 146, 60, 0.3)` | `#fb923c` | queues, streams, buses |
-| External | `rgba(30, 41, 59, 0.5)` | `#94a3b8` | third-party or generic systems |
+| Type        | Fill                      | Stroke    | Use for                        |
+| ----------- | ------------------------- | --------- | ------------------------------ |
+| Frontend    | `rgba(8, 51, 68, 0.4)`    | `#22d3ee` | clients, UI, edge apps         |
+| Backend     | `rgba(6, 78, 59, 0.4)`    | `#34d399` | APIs, services, workers        |
+| Database    | `rgba(76, 29, 149, 0.4)`  | `#a78bfa` | databases, storage, AI/ML      |
+| Cloud       | `rgba(120, 53, 15, 0.3)`  | `#fbbf24` | cloud infra, gateways, CDN     |
+| Security    | `rgba(136, 19, 55, 0.4)`  | `#fb7185` | auth, secrets, guardrails      |
+| Message Bus | `rgba(251, 146, 60, 0.3)` | `#fb923c` | queues, streams, buses         |
+| External    | `rgba(30, 41, 59, 0.5)`   | `#94a3b8` | third-party or generic systems |
 
 ## SVG Rules
 

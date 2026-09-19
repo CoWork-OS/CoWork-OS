@@ -58,6 +58,24 @@ export interface CostByModelRow {
   distinctTasks: number;
 }
 
+export interface JevUsageSummaryProps {
+  totalJevCalls: number;
+  successfulCalls: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalReportedCost: number;
+  avgLatencyMs: number | null;
+  cacheHitRate: number | null;
+  distinctTaskCount: number;
+  byPurpose: Array<{
+    purpose: string;
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    reportedCost: number;
+  }>;
+}
+
 const CHART_COLORS = ["#3b82f6", "#14b8a6", "#22c55e", "#f59e0b", "#a855f7", "#ec4899"];
 
 function formatDayLabel(dateKey: string): string {
@@ -89,6 +107,7 @@ export interface UsageInsightsLlmSectionProps {
   requestsByDay: RequestDayRow[];
   providerBreakdown: ProviderSlice[];
   costByModel: CostByModelRow[];
+  jevSummary?: JevUsageSummaryProps;
 }
 
 export function UsageInsightsLlmSection({
@@ -97,6 +116,7 @@ export function UsageInsightsLlmSection({
   requestsByDay,
   providerBreakdown,
   costByModel,
+  jevSummary,
 }: UsageInsightsLlmSectionProps) {
   const hasLlmUsage = ls.totalLlmCalls > 0;
 
@@ -170,6 +190,50 @@ export function UsageInsightsLlmSection({
           {ls.totalCachedTokens === 0 && <div className="insights-hero-sub">No cache data yet</div>}
         </div>
       </div>
+
+      {jevSummary && jevSummary.totalJevCalls > 0 && (
+        <div className="insights-card" style={{ marginTop: 16 }}>
+          <div className="insights-card-header">Jev usage</div>
+          <div className="insights-card-header-sub">
+            Provider-reported Jev units are tracked separately from LLM pricing.
+          </div>
+          <div className="insights-llm-kpi-grid">
+            <div className="insights-hero-card insights-llm-kpi-card">
+              <div className="insights-hero-value">{jevSummary.totalJevCalls}</div>
+              <div className="insights-hero-label">Jev decisions</div>
+            </div>
+            <div className="insights-hero-card insights-llm-kpi-card">
+              <div className="insights-hero-value">
+                {formatTokens(jevSummary.totalInputTokens + jevSummary.totalOutputTokens)}
+              </div>
+              <div className="insights-hero-label">Jev tokens</div>
+            </div>
+            <div className="insights-hero-card insights-llm-kpi-card">
+              <div className="insights-hero-value">{jevSummary.totalReportedCost.toFixed(6)}</div>
+              <div className="insights-hero-label">Reported Jev cost</div>
+            </div>
+            <div className="insights-hero-card insights-llm-kpi-card">
+              <div className="insights-hero-value">
+                {jevSummary.avgLatencyMs !== null
+                  ? `${Math.round(jevSummary.avgLatencyMs)} ms`
+                  : "\u2014"}
+              </div>
+              <div className="insights-hero-label">Avg Jev latency</div>
+            </div>
+          </div>
+          {jevSummary.byPurpose.length > 0 && (
+            <div className="insights-runtime-section-label">Decisions by purpose</div>
+          )}
+          {jevSummary.byPurpose.slice(0, 8).map((row) => (
+            <div className="insights-bar-row" key={row.purpose}>
+              <span className="insights-bar-label" style={{ minWidth: 160 }}>
+                {row.purpose}
+              </span>
+              <span className="insights-bar-value">{row.calls} calls</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!hasLlmUsage && (
         <div className="insights-card insights-llm-empty-banner" role="status">

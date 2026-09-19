@@ -33,6 +33,26 @@ export interface UsageInsightsLlmSummary {
   distinctTaskCount: number;
 }
 
+export interface UsageInsightsJevPurposeRow {
+  purpose: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  reportedCost: number;
+}
+
+export interface UsageInsightsJevSummary {
+  totalJevCalls: number;
+  successfulCalls: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalReportedCost: number;
+  avgLatencyMs: number | null;
+  cacheHitRate: number | null;
+  distinctTaskCount: number;
+  byPurpose: UsageInsightsJevPurposeRow[];
+}
+
 export interface UsageInsightsRequestDay {
   dateKey: string;
   llmCalls: number;
@@ -115,6 +135,9 @@ export interface UsageInsights {
   llmSuccessRate: number | null;
 
   llmSummary: UsageInsightsLlmSummary;
+
+  /** Jev provider usage is reported separately and is never run through LLM pricing. */
+  jevSummary: UsageInsightsJevSummary;
 
   requestsByDay: UsageInsightsRequestDay[];
 
@@ -791,7 +814,7 @@ export class UsageInsightsService {
     const projector = candidateProjector?.isForDatabase(this.db) ? candidateProjector : null;
     if (projector) {
       projector.warm();
-      const cacheKey = `${workspaceId || "__all__"}|${periodDays}`;
+      const cacheKey = `${workspaceId || "__all__"}|${periodDays}|jev-ledger-v1`;
       const cached = projector.getCachedReport<UsageInsights>(cacheKey);
       if (cached) {
         return cached;
@@ -860,6 +883,7 @@ export class UsageInsightsService {
 
     const costMetrics = this.costMetricsFromScan(llmScan);
     const llmSummary = this.llmSummaryFromScan(llmScan);
+    const jevSummary = this.collectJevUsageSummary(workspaceId, periodStart, periodEnd);
     const requestsByDay = this.requestsByDayFromScan(llmScan, periodStart, periodEnd);
     const providerBreakdown = this.providerBreakdownFromScan(llmScan);
     const denom = llmScan.totalLlmCalls + llmErrorCount;
@@ -899,6 +923,7 @@ export class UsageInsightsService {
       executionMetrics,
       awuMetrics,
       llmSummary,
+      jevSummary,
       llmSuccessRate,
       llmErrorCount,
     );
@@ -912,6 +937,7 @@ export class UsageInsightsService {
       costMetrics,
       llmSuccessRate,
       llmSummary,
+      jevSummary,
       requestsByDay,
       providerBreakdown,
       activityPattern,
@@ -943,6 +969,7 @@ export class UsageInsightsService {
 
     const costMetrics = this.costMetricsFromScan(llmScan);
     const llmSummary = this.llmSummaryFromScan(llmScan);
+    const jevSummary = this.collectJevUsageSummary(workspaceId, periodStart, periodEnd);
     const requestsByDay = this.requestsByDayFromScan(llmScan, periodStart, periodEnd);
     const providerBreakdown = this.providerBreakdownFromScan(llmScan);
 
@@ -980,6 +1007,7 @@ export class UsageInsightsService {
       executionMetrics,
       awuMetrics,
       llmSummary,
+      jevSummary,
       llmSuccessRate,
       llmErrorCount,
     );
@@ -993,6 +1021,7 @@ export class UsageInsightsService {
       costMetrics,
       llmSuccessRate,
       llmSummary,
+      jevSummary,
       requestsByDay,
       providerBreakdown,
       activityPattern,
@@ -1019,6 +1048,7 @@ export class UsageInsightsService {
 
     const costMetrics = this.costMetricsFromScan(llmScan);
     const llmSummary = this.llmSummaryFromScan(llmScan);
+    const jevSummary = this.collectJevUsageSummary(workspaceId, periodStart, periodEnd);
     const requestsByDay = this.requestsByDayFromScan(llmScan, periodStart, periodEnd);
     const providerBreakdown = this.providerBreakdownFromScan(llmScan);
     const denom = llmScan.totalLlmCalls + llmErrorCount;
@@ -1058,6 +1088,7 @@ export class UsageInsightsService {
       executionMetrics,
       awuMetrics,
       llmSummary,
+      jevSummary,
       llmSuccessRate,
       llmErrorCount,
     );
@@ -1071,6 +1102,7 @@ export class UsageInsightsService {
       costMetrics,
       llmSuccessRate,
       llmSummary,
+      jevSummary,
       requestsByDay,
       providerBreakdown,
       activityPattern,
@@ -1682,6 +1714,112 @@ export class UsageInsightsService {
       // llm_call_events table may not exist yet.
     }
     return out;
+  }
+
+  private collectJevUsageSummary(
+    workspaceId: string | null,
+    periodStart: number,
+    periodEnd: number,
+  ): UsageInsightsJevSummary {
+    const summary: UsageInsightsJevSummary = {
+      totalJevCalls: 0,
+      successfulCalls: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalReportedCost: 0,
+      avgLatencyMs: null,
+      cacheHitRate: null,
+      distinctTaskCount: 0,
+      byPurpose: [],
+    };
+
+    try {
+      const rows = workspaceId
+        ? (this.db
+            .prepare(
+              `SELECT task_id, purpose, input_tokens, output_tokens, cost, latency_ms, from_cache, success
+               FROM jev_call_events
+               WHERE workspace_id = ? AND timestamp >= ? AND timestamp <= ?`,
+            )
+            .all(workspaceId, periodStart, periodEnd) as Array<{
+            task_id: string | null;
+            purpose: string | null;
+            input_tokens: number;
+            output_tokens: number;
+            cost: number;
+            latency_ms: number;
+            from_cache: number;
+            success: number;
+          }>)
+        : (this.db
+            .prepare(
+              `SELECT task_id, purpose, input_tokens, output_tokens, cost, latency_ms, from_cache, success
+               FROM jev_call_events
+               WHERE timestamp >= ? AND timestamp <= ?`,
+            )
+            .all(periodStart, periodEnd) as Array<{
+            task_id: string | null;
+            purpose: string | null;
+            input_tokens: number;
+            output_tokens: number;
+            cost: number;
+            latency_ms: number;
+            from_cache: number;
+            success: number;
+          }>);
+
+      const taskIds = new Set<string>();
+      const byPurpose = new Map<string, UsageInsightsJevPurposeRow>();
+      let totalLatencyMs = 0;
+      let cacheHits = 0;
+
+      for (const row of rows) {
+        const calls = 1;
+        const inputTokens = Number.isFinite(row.input_tokens) ? Math.max(0, row.input_tokens) : 0;
+        const outputTokens = Number.isFinite(row.output_tokens)
+          ? Math.max(0, row.output_tokens)
+          : 0;
+        const reportedCost = Number.isFinite(row.cost) ? Math.max(0, row.cost) : 0;
+        const latencyMs = Number.isFinite(row.latency_ms) ? Math.max(0, row.latency_ms) : 0;
+        const purpose = String(row.purpose || "decision").slice(0, 80);
+
+        summary.totalJevCalls += calls;
+        summary.successfulCalls += row.success === 1 ? 1 : 0;
+        summary.totalInputTokens += inputTokens;
+        summary.totalOutputTokens += outputTokens;
+        summary.totalReportedCost += reportedCost;
+        totalLatencyMs += latencyMs;
+        if (row.from_cache === 1) cacheHits += 1;
+        if (row.task_id) taskIds.add(row.task_id);
+
+        const purposeRow = byPurpose.get(purpose) ?? {
+          purpose,
+          calls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          reportedCost: 0,
+        };
+        purposeRow.calls += calls;
+        purposeRow.inputTokens += inputTokens;
+        purposeRow.outputTokens += outputTokens;
+        purposeRow.reportedCost += reportedCost;
+        byPurpose.set(purpose, purposeRow);
+      }
+
+      summary.distinctTaskCount = taskIds.size;
+      summary.avgLatencyMs =
+        summary.totalJevCalls > 0 ? totalLatencyMs / summary.totalJevCalls : null;
+      summary.cacheHitRate =
+        summary.totalJevCalls > 0 ? (cacheHits / summary.totalJevCalls) * 100 : null;
+      summary.byPurpose = Array.from(byPurpose.values()).sort((a, b) => {
+        if (b.calls !== a.calls) return b.calls - a.calls;
+        return a.purpose.localeCompare(b.purpose);
+      });
+    } catch {
+      // jev_call_events may not exist in an older database until schema setup runs.
+    }
+
+    return summary;
   }
 
   private applyCanonicalPersonaCosts(
@@ -2973,6 +3111,7 @@ export class UsageInsightsService {
     executionMetrics: UsageInsights["executionMetrics"],
     awuMetrics: UsageInsights["awuMetrics"],
     llmSummary: UsageInsightsLlmSummary,
+    jevSummary: UsageInsightsJevSummary,
     llmSuccessRate: number | null,
     llmErrorCount: number,
   ): string {
@@ -3004,6 +3143,24 @@ export class UsageInsightsService {
       }
       if (llmSummary.cacheReadRate !== null && llmSummary.totalCachedTokens > 0) {
         lines.push(`- Cache read (of prompt tokens): ${llmSummary.cacheReadRate.toFixed(1)}%`);
+      }
+      lines.push("");
+    }
+
+    if (jevSummary.totalJevCalls > 0) {
+      lines.push("**Jev usage (reported separately):**");
+      lines.push(
+        `- Decisions: ${jevSummary.totalJevCalls} (${jevSummary.successfulCalls} successful)`,
+      );
+      lines.push(
+        `- Tokens: ${formatTokens(jevSummary.totalInputTokens)} input, ${formatTokens(jevSummary.totalOutputTokens)} output`,
+      );
+      lines.push(`- Provider-reported cost: ${jevSummary.totalReportedCost.toFixed(6)}`);
+      if (jevSummary.avgLatencyMs !== null) {
+        lines.push(`- Average decision latency: ${Math.round(jevSummary.avgLatencyMs)} ms`);
+      }
+      if (jevSummary.cacheHitRate !== null && jevSummary.cacheHitRate > 0) {
+        lines.push(`- Cache hit rate: ${jevSummary.cacheHitRate.toFixed(1)}%`);
       }
       lines.push("");
     }

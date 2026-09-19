@@ -31,11 +31,7 @@
       "description": "Document language",
       "required": false,
       "default": "auto",
-      "options": [
-        "auto",
-        "english",
-        "chinese"
-      ]
+      "options": ["auto", "english", "chinese"]
     },
     {
       "name": "source_material_path",
@@ -55,13 +51,7 @@
       "description": "Preferred render target after source editing",
       "required": false,
       "default": "auto",
-      "options": [
-        "auto",
-        "source-only",
-        "pdf",
-        "pptx",
-        "both"
-      ]
+      "options": ["auto", "source-only", "pdf", "pptx", "both"]
     }
   ],
   "enabled": true,
@@ -74,24 +64,14 @@
     "license": "MIT; bundled CoWork port excludes the proprietary TsangerJinKai Chinese font",
     "homepage": "https://github.com/tw93/Kami",
     "repository": "https://github.com/tw93/Kami",
-    "tags": [
-      "kami",
-      "kami-skill",
-      "kami-editorial-design"
-    ],
+    "tags": ["kami", "kami-skill", "kami-editorial-design"],
     "routing": {
       "useWhen": "Use only when the user explicitly mentions Kami, asks for the Kami skill, or asks for the Kami editorial design system by name.",
       "dontUseWhen": "Do not use for generic document, PDF, report, resume, slide deck, presentation, or PowerPoint requests unless the user explicitly mentions Kami. Use native document/presentation/spreadsheet tools for normal Office-style artifacts.",
       "outputs": "A workspace-local Kami project with scaffolded source files plus rendered PDF or PPTX outputs when dependencies are available and Kami was explicitly requested.",
       "successCriteria": "The skill produces source files and polished outputs that match the requested document type, preserve Kami's design system, and avoid inventing missing facts from raw material.",
-      "expectedArtifacts": [
-        "manifest.md"
-      ],
-      "keywords": [
-        "kami",
-        "kami skill",
-        "kami editorial design system"
-      ],
+      "expectedArtifacts": ["manifest.md"],
+      "keywords": ["kami", "kami skill", "kami editorial design system"],
       "examples": {
         "positive": [
           "Use the Kami skill for this request.",

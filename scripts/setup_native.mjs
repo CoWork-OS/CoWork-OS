@@ -66,9 +66,7 @@ function resolvePackageFile(packageName, filePath) {
 function getElectronBinaryPath() {
   try {
     const electronBinary = cwdRequire("electron");
-    return typeof electronBinary === "string" && electronBinary.length > 0
-      ? electronBinary
-      : null;
+    return typeof electronBinary === "string" && electronBinary.length > 0 ? electronBinary : null;
   } catch {
     return null;
   }
@@ -117,15 +115,23 @@ function run(cmd, args, opts = {}) {
   const pretty = [cmd, ...(args || [])].join(" ");
   console.log(`\n[cowork] $ ${pretty}`);
   const runner = cmd === NPM_CMD ? spawnNpm : spawnSync;
-  const res = runner(cmd === NPM_CMD ? args : cmd, cmd === NPM_CMD ? {
-    stdio: "inherit",
-    env: opts.env || process.env,
-    cwd: opts.cwd || process.cwd(),
-  } : args, cmd === NPM_CMD ? undefined : {
-    stdio: "inherit",
-    env: opts.env || process.env,
-    cwd: opts.cwd || process.cwd(),
-  });
+  const res = runner(
+    cmd === NPM_CMD ? args : cmd,
+    cmd === NPM_CMD
+      ? {
+          stdio: "inherit",
+          env: opts.env || process.env,
+          cwd: opts.cwd || process.cwd(),
+        }
+      : args,
+    cmd === NPM_CMD
+      ? undefined
+      : {
+          stdio: "inherit",
+          env: opts.env || process.env,
+          cwd: opts.cwd || process.cwd(),
+        },
+  );
   return res;
 }
 
@@ -194,19 +200,21 @@ function makeElectronTargetEnv(env, electronVersion, arch = process.arch) {
 }
 
 function resolveElectronRebuildCli() {
-  return resolvePackageFile("@electron/rebuild", "cli.js")
-    || (() => {
+  return (
+    resolvePackageFile("@electron/rebuild", "cli.js") ||
+    (() => {
       // Fallback: try resolving the main entry and deriving cli.js
       const entry = resolveFromCwd("@electron/rebuild");
       return entry ? path.join(path.dirname(entry), "cli.js") : null;
-    })();
+    })()
+  );
 }
 
 function runElectronRebuild(
   electronRebuildCli,
   env,
   installRootDir,
-  { arch = null, electronVersion = null } = {}
+  { arch = null, electronVersion = null } = {},
 ) {
   const rebuildHome = path.join(installRootDir, "node_modules", ".cache", "electron-rebuild-home");
   const rebuildEnv = {
@@ -214,13 +222,7 @@ function runElectronRebuild(
     HOME: rebuildHome,
     USERPROFILE: rebuildHome,
   };
-  const args = [
-    electronRebuildCli,
-    "-f",
-    "--only",
-    "better-sqlite3,node-pty",
-    "--sequential",
-  ];
+  const args = [electronRebuildCli, "-f", "--only", "better-sqlite3,node-pty", "--sequential"];
 
   if (arch) {
     args.push("--arch", arch);
@@ -253,11 +255,10 @@ function getElectronModulesAbi(env) {
   if (!electronBinary) return null;
 
   // Use Electron's bundled Node in "run as node" mode so this doesn't start a GUI app.
-  const res = spawnSync(
-    electronBinary,
-    ["-p", "process.versions.modules"],
-    { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
-  );
+  const res = spawnSync(electronBinary, ["-p", "process.versions.modules"], {
+    env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+    encoding: "utf8",
+  });
   if (res.status !== 0) return null;
   return String(res.stdout || "").trim() || null;
 }
@@ -272,7 +273,7 @@ function testBetterSqlite3InElectron(env) {
       "-e",
       "const Database=require('better-sqlite3');const db=new Database(':memory:');db.close();console.log('ok')",
     ],
-    { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
+    { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" },
   );
   return res;
 }
@@ -283,11 +284,10 @@ function testNativeModulesInElectron(env) {
 
   const electronBinary = getElectronBinaryPath();
   if (!electronBinary) return { status: 1, signal: null };
-  return spawnSync(
-    electronBinary,
-    ["-e", "require('node-pty');console.log('ok')"],
-    { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
-  );
+  return spawnSync(electronBinary, ["-e", "require('node-pty');console.log('ok')"], {
+    env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+    encoding: "utf8",
+  });
 }
 
 function shouldTryWindowsArm64X64Fallback() {
@@ -303,13 +303,13 @@ function tryWindowsArm64X64Fallback(
   installRootDir,
   electronInstallScript,
   electronVersion,
-  electronRebuildCli
+  electronRebuildCli,
 ) {
   if (!shouldTryWindowsArm64X64Fallback()) return null;
   if (!electronInstallScript || !electronVersion) return null;
 
   console.log(
-    "[cowork] Windows ARM64 detected; trying x64 Electron + native module fallback (emulation mode)."
+    "[cowork] Windows ARM64 detected; trying x64 Electron + native module fallback (emulation mode).",
   );
 
   // Force Electron's installer to fetch x64 binaries, then rebuild better-sqlite3 for x64 Electron ABI.
@@ -321,28 +321,22 @@ function tryWindowsArm64X64Fallback(
 
   const x64ElectronEnv = makeElectronTargetEnv(env, electronVersion, "x64");
   if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
-    console.log(
-      "[cowork] @electron/rebuild is not installed; cannot run x64 fallback rebuild."
-    );
+    console.log("[cowork] @electron/rebuild is not installed; cannot run x64 fallback rebuild.");
     return { status: 1, signal: null };
   }
 
-  const rebuildX64Res = runElectronRebuild(
-    electronRebuildCli,
-    env,
-    installRootDir,
-    { arch: "x64", electronVersion }
-  );
+  const rebuildX64Res = runElectronRebuild(electronRebuildCli, env, installRootDir, {
+    arch: "x64",
+    electronVersion,
+  });
   if (rebuildX64Res.status !== 0) return rebuildX64Res;
 
   const testRes = testNativeModulesInElectron(x64ElectronEnv);
   if (testRes.status === 0) {
-    console.log(
-      "[cowork] native modules load in Electron after x64 electron-rebuild fallback."
-    );
+    console.log("[cowork] native modules load in Electron after x64 electron-rebuild fallback.");
   } else {
     console.log(
-      "[cowork] x64 electron-rebuild fallback completed, but native modules still did not load."
+      "[cowork] x64 electron-rebuild fallback completed, but native modules still did not load.",
     );
   }
 
@@ -356,10 +350,7 @@ function ensureBetterSqlite3(env, installRootDir) {
     return { status: 0, signal: null };
   }
 
-  const betterSqlite3Version = getInstallRootDependencyVersion(
-    installRootDir,
-    "better-sqlite3",
-  );
+  const betterSqlite3Version = getInstallRootDependencyVersion(installRootDir, "better-sqlite3");
   if (!betterSqlite3Version) {
     console.error(
       `[cowork] better-sqlite3 is missing and its required version could not be read from the install manifests at ${installRootDir} or ${scriptPackageJsonPath}.`,
@@ -367,9 +358,7 @@ function ensureBetterSqlite3(env, installRootDir) {
     return { status: 1, signal: null };
   }
 
-  console.log(
-    `[cowork] better-sqlite3 is missing; installing ${betterSqlite3Version}...`
-  );
+  console.log(`[cowork] better-sqlite3 is missing; installing ${betterSqlite3Version}...`);
 
   if (installRootDir !== process.cwd()) {
     console.log(`[cowork] Installing better-sqlite3 from root ${installRootDir}`);
@@ -386,14 +375,13 @@ function ensureBetterSqlite3(env, installRootDir) {
       "--no-save",
       `better-sqlite3@${betterSqlite3Version}`,
     ],
-    { env, cwd: installRootDir }
+    { env, cwd: installRootDir },
   );
 }
 
 function fail(res, context) {
   const sig = res.signal ? ` (signal ${res.signal})` : "";
-  const code =
-    res.status == null ? "" : ` (exit ${String(res.status).trim()})`;
+  const code = res.status == null ? "" : ` (exit ${String(res.status).trim()})`;
   console.error(`\n[cowork] ${context} failed${sig}${code}.`);
   const spawnError = formatSpawnError(res.error);
   if (spawnError) {
@@ -403,18 +391,18 @@ function fail(res, context) {
     console.error(
       "[cowork] The OS terminated the process (usually memory pressure). " +
         "Setup will retry automatically; if it still fails after retries, " +
-        "close other apps and re-run `npm run setup`."
+        "close other apps and re-run `npm run setup`.",
     );
   }
   if (process.platform === "win32") {
     console.error(
-      "[cowork] On Windows, inspect npm logs in %LocalAppData%\\npm-cache\\_logs\\ for detailed native build errors."
+      "[cowork] On Windows, inspect npm logs in %LocalAppData%\\npm-cache\\_logs\\ for detailed native build errors.",
     );
   }
   // If a child process was SIGKILL'd, `spawnSync` will surface it as `signal`
   // with `status === null`. Exit 137 (128 + 9) so shell-level retries can
   // reliably detect and retry.
-  process.exit(isKilledByOS(res) ? 137 : res.status ?? 1);
+  process.exit(isKilledByOS(res) ? 137 : (res.status ?? 1));
 }
 
 function checkPrereqs() {
@@ -424,7 +412,7 @@ function checkPrereqs() {
       console.error(
         "\n[cowork] Xcode Command Line Tools not found.\n" +
           "Install them with:\n" +
-          "  xcode-select --install\n"
+          "  xcode-select --install\n",
       );
       process.exit(1);
     }
@@ -436,10 +424,7 @@ function checkPrereqs() {
       const npmRes = spawnNpm(["config", "get", "msvs_version"], {
         encoding: "utf8",
       });
-      const hasMsvs =
-        npmRes.status === 0 &&
-        npmRes.stdout &&
-        npmRes.stdout.trim() !== "undefined";
+      const hasMsvs = npmRes.status === 0 && npmRes.stdout && npmRes.stdout.trim() !== "undefined";
       if (!hasMsvs) {
         console.warn(
           "\n[cowork] Warning: Visual Studio C++ Build Tools were not detected.\n" +
@@ -451,27 +436,26 @@ function checkPrereqs() {
             "Then set node-gyp MSVC env vars (in cmd):\n" +
             "  setx GYP_MSVS_VERSION 2022\n" +
             "  setx npm_config_msvs_version 2022\n" +
-            "Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/\n"
+            "Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/\n",
         );
         // Don't exit — prebuilt binaries may work without compilation
       }
     }
 
     const pyRes = spawnSync("py", ["-3", "--version"], { encoding: "utf8" });
-    const pythonRes = pyRes.status === 0
-      ? pyRes
-      : spawnSync("python", ["--version"], { encoding: "utf8" });
+    const pythonRes =
+      pyRes.status === 0 ? pyRes : spawnSync("python", ["--version"], { encoding: "utf8" });
     if (pythonRes.status !== 0) {
       console.warn(
         "\n[cowork] Warning: Python 3 was not detected (`py -3` / `python`).\n" +
-          "node-gyp requires Python 3 for native module builds.\n"
+          "node-gyp requires Python 3 for native module builds.\n",
       );
     }
 
     if (process.arch === "arm64" && (nodeMajorVersion() ?? 0) >= 24) {
       console.log(
         "[cowork] Windows ARM64 + Node 24 detected. If native ARM64 rebuild fails,\n" +
-          "setup will auto-try x64 Electron emulation for better compatibility."
+          "setup will auto-try x64 Electron emulation for better compatibility.",
       );
     }
   }
@@ -479,19 +463,16 @@ function checkPrereqs() {
 
 function main() {
   console.log(
-    `[cowork] Native setup (${process.platform}/${process.arch}) using Node ${process.version}`
+    `[cowork] Native setup (${process.platform}/${process.arch}) using Node ${process.version}`,
   );
 
   checkPrereqs();
 
   const userSpecifiedJobs =
-    process.env.COWORK_SETUP_JOBS != null &&
-    String(process.env.COWORK_SETUP_JOBS).trim() !== "";
+    process.env.COWORK_SETUP_JOBS != null && String(process.env.COWORK_SETUP_JOBS).trim() !== "";
 
   let jobs = computeJobs();
-  console.log(
-    `[cowork] Using jobs=${jobs} (set COWORK_SETUP_JOBS=N to override)`
-  );
+  console.log(`[cowork] Using jobs=${jobs} (set COWORK_SETUP_JOBS=N to override)`);
 
   const attempt = (attemptJobs) => {
     const env = baseEnvWithJobs(attemptJobs);
@@ -502,7 +483,7 @@ function main() {
 
     if (!electronInstallScript) {
       console.error(
-        "[cowork] Electron install script not found. Ensure the `electron` dependency is installed."
+        "[cowork] Electron install script not found. Ensure the `electron` dependency is installed.",
       );
       return { status: 1, signal: null };
     }
@@ -523,28 +504,20 @@ function main() {
     const electronAbi = getElectronModulesAbi(env);
 
     console.log(
-      `[cowork] Electron: version=${electronVersion ?? "?"} modules=${
-        electronAbi ?? "?"
-      }`
+      `[cowork] Electron: version=${electronVersion ?? "?"} modules=${electronAbi ?? "?"}`,
     );
 
     // 2) Rebuild native modules against Electron's ABI.
     if (electronVersion) {
       if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
-        console.log(
-          "[cowork] @electron/rebuild is not installed; trying fallback paths."
-        );
+        console.log("[cowork] @electron/rebuild is not installed; trying fallback paths.");
       } else {
-        const rebuildElectronRes = runElectronRebuild(
-          electronRebuildCli,
-          env,
-          installRootDir,
-          { arch: process.arch, electronVersion }
-        );
+        const rebuildElectronRes = runElectronRebuild(electronRebuildCli, env, installRootDir, {
+          arch: process.arch,
+          electronVersion,
+        });
         if (rebuildElectronRes.status !== 0) {
-          console.log(
-            "[cowork] Electron rebuild failed; trying fallback paths."
-          );
+          console.log("[cowork] Electron rebuild failed; trying fallback paths.");
         } else {
           const testRes = testNativeModulesInElectron(env);
           if (testRes.status === 0) {
@@ -554,7 +527,7 @@ function main() {
 
           console.log(
             "[cowork] native modules did not load after Electron rebuild; " +
-              "trying fallback paths."
+              "trying fallback paths.",
           );
         }
       }
@@ -564,25 +537,23 @@ function main() {
         installRootDir,
         electronInstallScript,
         electronVersion,
-        electronRebuildCli
+        electronRebuildCli,
       );
       if (winArmFallbackRes) {
         if (winArmFallbackRes.status === 0) return winArmFallbackRes;
         console.log(
-          "[cowork] Windows ARM64 x64 fallback did not fully recover; trying current-arch electron-rebuild fallback."
+          "[cowork] Windows ARM64 x64 fallback did not fully recover; trying current-arch electron-rebuild fallback.",
         );
       }
     } else {
       console.log(
-        "[cowork] Could not determine Electron version; falling back to electron-rebuild."
+        "[cowork] Could not determine Electron version; falling back to electron-rebuild.",
       );
     }
 
     // 3) Fallback: electron-rebuild.
     if (!electronRebuildCli || !fs.existsSync(electronRebuildCli)) {
-      console.log(
-        "[cowork] @electron/rebuild is not installed; skipping fallback rebuild."
-      );
+      console.log("[cowork] @electron/rebuild is not installed; skipping fallback rebuild.");
       return testNativeModulesInElectron(env);
     }
 
@@ -601,9 +572,7 @@ function main() {
 
   let res = attempt(jobs);
   if (res.status !== 0 && isKilledByOS(res) && !userSpecifiedJobs && jobs > 1) {
-    console.log(
-      `\n[cowork] Detected SIGKILL; retrying once with jobs=1 to reduce memory...`
-    );
+    console.log(`\n[cowork] Detected SIGKILL; retrying once with jobs=1 to reduce memory...`);
     jobs = 1;
     res = attempt(jobs);
   }

@@ -269,6 +269,78 @@ describe("PiProvider", () => {
       expect(result.stopReason).toBe("tool_use");
     });
 
+    it("should preserve valid siblings when a tool call has malformed arguments", () => {
+      const provider = new PiProvider(createConfig());
+      const piResponse = {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "tc-bad", name: "write_file", arguments: "{" },
+          {
+            type: "toolCall",
+            id: "tc-good",
+            name: "read_file",
+            arguments: { path: "src/app.ts" },
+          },
+          { type: "toolCall", id: "tc-array", name: "glob", arguments: "[]" },
+          { type: "toolCall", id: "tc-null", name: "noop", arguments: null },
+        ],
+        stopReason: "toolUse",
+        usage: {
+          input: 10,
+          output: 5,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 15,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        api: "openai-completions",
+        provider: "anthropic",
+        model: "claude-sonnet-4-5-20250514",
+        timestamp: Date.now(),
+      };
+
+      const result: LLMResponse = getPrivate(provider).convertPiAiResponse(piResponse);
+      expect(result.content).toEqual([
+        {
+          type: "tool_use",
+          id: "tc-bad",
+          name: "write_file",
+          input: {},
+          inputError: {
+            code: "malformed_json",
+            message: "Tool call arguments must be valid JSON.",
+          },
+        },
+        {
+          type: "tool_use",
+          id: "tc-good",
+          name: "read_file",
+          input: { path: "src/app.ts" },
+        },
+        {
+          type: "tool_use",
+          id: "tc-array",
+          name: "glob",
+          input: {},
+          inputError: {
+            code: "invalid_shape",
+            message: "Tool call arguments must be a JSON object.",
+          },
+        },
+        {
+          type: "tool_use",
+          id: "tc-null",
+          name: "noop",
+          input: {},
+          inputError: {
+            code: "invalid_shape",
+            message: "Tool call arguments must be a JSON object.",
+          },
+        },
+      ]);
+      expect(result.stopReason).toBe("tool_use");
+    });
+
     it("should map length stop reason to max_tokens", () => {
       const provider = new PiProvider(createConfig());
       const piResponse = {

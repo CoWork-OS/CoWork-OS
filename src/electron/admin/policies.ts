@@ -103,6 +103,18 @@ export interface AdminPolicies {
       defaultAction: AdminNetworkDefault;
       allowedDomains: string[];
       blockedDomains: string[];
+      /**
+       * Internal hosts an administrator has deliberately re-opened.
+       *
+       * Private/link-local/CGNAT addresses and `*.internal` names are denied
+       * before any allow rule, because an agent-supplied URL must not be able
+       * to reach cloud metadata or the LAN. That boundary breaks legitimate
+       * self-hosted deployments (a LAN SearXNG or Ollama box, an intranet
+       * webhook target), so this list is the only way back in. It is matched
+       * with `domainMatches`, is never populated by the agent or the renderer,
+       * and `*` is rejected — entries must name specific hosts.
+       */
+      allowedInternalHosts: string[];
       /** Coarse shell egress switch. Shell network cannot yet be domain-scoped. */
       allowShellNetwork: boolean;
     };
@@ -170,6 +182,7 @@ const DEFAULT_POLICIES: AdminPolicies = {
       defaultAction: "allow",
       allowedDomains: [],
       blockedDomains: [],
+      allowedInternalHosts: [],
       allowShellNetwork: false,
     },
     autoReview: {
@@ -265,6 +278,11 @@ function normalizePolicies(parsed: any): AdminPolicies {
         defaultAction: parsed.runtime?.network?.defaultAction === "deny" ? "deny" : "allow",
         allowedDomains: normalizeStringList(parsed.runtime?.network?.allowedDomains),
         blockedDomains: normalizeStringList(parsed.runtime?.network?.blockedDomains),
+        // `*` and `**.` wildcards would re-open the whole internal boundary
+        // (including 169.254.169.254) with one character, so they are dropped.
+        allowedInternalHosts: normalizeStringList(
+          parsed.runtime?.network?.allowedInternalHosts,
+        ).filter((pattern) => pattern !== "*" && !pattern.startsWith("**.")),
         allowShellNetwork: parsed.runtime?.network?.allowShellNetwork === true,
       },
       autoReview: {
@@ -726,6 +744,12 @@ export function validatePolicies(policies: unknown): string | null {
       }
       if (network.blockedDomains !== undefined && !Array.isArray(network.blockedDomains)) {
         return "runtime.network.blockedDomains must be an array";
+      }
+      if (
+        network.allowedInternalHosts !== undefined &&
+        !Array.isArray(network.allowedInternalHosts)
+      ) {
+        return "runtime.network.allowedInternalHosts must be an array";
       }
       if (
         network.allowShellNetwork !== undefined &&

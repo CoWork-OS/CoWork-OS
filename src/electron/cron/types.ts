@@ -122,6 +122,7 @@ export interface CronJob {
   workspaceId: string; // Which workspace to run the task in
   taskPrompt: string; // The prompt to send to the agent
   taskTitle?: string; // Optional title for the created task
+  assignedAgentRoleId?: string;
   /**
    * How the scheduler executes this job.
    * - new_task: create a fresh task for every run (legacy/default behavior)
@@ -245,6 +246,7 @@ export interface CronServiceDeps {
     title: string;
     prompt: string;
     workspaceId: string;
+    assignedAgentRoleId?: string;
     modelKey?: string; // Optional model override
     allowUserInput?: boolean; // Whether task can pause awaiting user input
     agentConfig?: AgentConfig; // Optional agent config override (gateway context, tool restrictions, etc.)

@@ -78,13 +78,15 @@ function validateExternalSkillDirectories(input: string[]): void {
   }
 }
 
-interface ModelSkillDescriptionOptions {
+export interface ModelSkillDescriptionOptions {
   availableToolNames?: Set<string>;
   routingQuery?: string;
   shortlistSize?: number;
   lowConfidenceThreshold?: number;
   textBudgetChars?: number;
   includePrereqBlockedSkills?: boolean;
+  /** JEV may reorder this already-eligible shortlist; it cannot add skills. */
+  preferredSkillOrder?: readonly string[];
 }
 
 export interface RuntimeSkillDescriptor {
@@ -992,6 +994,20 @@ export class CustomSkillLoader {
     const selectedDescriptors = routed.skills
       .map((skill) => descriptors.find((descriptor) => descriptor.skill.id === skill.id))
       .filter((descriptor): descriptor is RuntimeSkillDescriptor => Boolean(descriptor));
+
+    if (options.preferredSkillOrder && options.preferredSkillOrder.length > 0) {
+      const preferredIndex = new Map(
+        options.preferredSkillOrder.map((skillId, index) => [String(skillId), index]),
+      );
+      selectedDescriptors.sort((a, b) => {
+        const aIndex = preferredIndex.get(a.skill.id);
+        const bIndex = preferredIndex.get(b.skill.id);
+        if (aIndex === undefined && bIndex === undefined) return 0;
+        if (aIndex === undefined) return 1;
+        if (bIndex === undefined) return -1;
+        return aIndex - bIndex;
+      });
+    }
 
     // Group skills by category
     const byCategory: Record<string, RuntimeSkillDescriptor[]> = {};

@@ -3,18 +3,24 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
   packages: write
+  actions: read
+
+# Shared with registry recovery: never interrupt a publication halfway through.
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   hardening-release-gate:
     name: Hardening Release Gate
     runs-on: ubuntu-latest
     env:
-      HARDENING_REQUIRED_AFTER_UTC: '2026-03-14T00:00:00Z'
+      HARDENING_REQUIRED_AFTER_UTC: "2026-03-14T00:00:00Z"
 
     steps:
       - name: Checkout code
@@ -23,11 +29,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Check documentation version policy
         run: npm run qa:docs-versions
+
+      - name: Test registry publication recovery
+        run: node --test scripts/release/*.test.mjs
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
@@ -37,15 +46,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sqlite3
 
-      - name: Run deterministic eval suite
+      - name: Prepare native harness test dependency
+        run: npm rebuild better-sqlite3 --ignore-scripts=false --no-audit --no-fund
+
+      - name: Run deterministic harness regressions
         id: run_eval_suite
         continue-on-error: true
-        run: npm run qa:eval:run -- --suite reliability-regressions --mode deterministic
-        env:
-          COWORK_DB_PATH: ${{ runner.temp }}/cowork-release-eval.db
-          COWORK_EVAL_ALLOW_EMPTY: '1'
+        run: npm run qa:harness
 
-      - name: Run battery suite when hooks are configured
+      - name: Run optional live battery when hooks are configured
         id: run_battery
         continue-on-error: true
         env:
@@ -53,16 +62,24 @@ jobs:
           COWORK_HOOKS_TOKEN: ${{ secrets.COWORK_HOOKS_TOKEN }}
           COWORK_DB_PATH: ${{ secrets.COWORK_DB_PATH }}
         run: |
-          if [ -n "${COWORK_HOOKS_ORIGIN}" ] && [ -n "${COWORK_HOOKS_TOKEN}" ] && [ -n "${COWORK_DB_PATH}" ]; then
+          set -euo pipefail
+          echo "coverage=failed" >> "$GITHUB_OUTPUT"
+          if [ -z "${COWORK_HOOKS_ORIGIN}" ] && [ -z "${COWORK_HOOKS_TOKEN}" ] && [ -z "${COWORK_DB_PATH}" ]; then
+            echo "coverage=not_configured" >> "$GITHUB_OUTPUT"
+            echo "Optional live battery not configured; no live battery coverage claimed."
+          elif [ -n "${COWORK_HOOKS_ORIGIN}" ] && [ -n "${COWORK_HOOKS_TOKEN}" ] && [ -n "${COWORK_DB_PATH}" ]; then
             node scripts/qa/run_battery.cjs
+            echo "coverage=completed" >> "$GITHUB_OUTPUT"
           else
-            echo "Battery skipped: set COWORK_HOOKS_ORIGIN, COWORK_HOOKS_TOKEN, and COWORK_DB_PATH secrets."
+            echo "Incomplete live battery configuration: all three hook/database secrets are required."
+            exit 1
           fi
 
       - name: Enforce release hardening gate
         env:
           RUN_EVAL_OUTCOME: ${{ steps.run_eval_suite.outcome }}
           RUN_BATTERY_OUTCOME: ${{ steps.run_battery.outcome }}
+          BATTERY_COVERAGE: ${{ steps.run_battery.outputs.coverage }}
         run: |
           set -euo pipefail
           now_epoch="$(date -u +%s)"
@@ -73,19 +90,19 @@ jobs:
           fi
 
           echo "Release hardening strict mode: ${strict_mode} (cutoff: ${HARDENING_REQUIRED_AFTER_UTC})"
-          echo "Outcomes: eval=${RUN_EVAL_OUTCOME} battery=${RUN_BATTERY_OUTCOME}"
+          echo "Outcomes: eval=${RUN_EVAL_OUTCOME} optional_battery=${RUN_BATTERY_OUTCOME} coverage=${BATTERY_COVERAGE}"
 
           if [ "${strict_mode}" != "true" ]; then
             echo "Stability window active. Hardening failures do not block release."
             exit 0
           fi
 
-          if [ "${RUN_EVAL_OUTCOME}" != "success" ] || [ "${RUN_BATTERY_OUTCOME}" != "success" ]; then
+          if [ "${RUN_EVAL_OUTCOME}" != "success" ] || [ "${RUN_BATTERY_OUTCOME}" != "success" ] || { [ "${BATTERY_COVERAGE}" != "completed" ] && [ "${BATTERY_COVERAGE}" != "not_configured" ]; }; then
             echo "Release blocked: hardening gate failed after stability window."
             exit 1
           fi
 
-          echo "Release hardening gate passed."
+          echo "Deterministic harness gate passed. Optional live battery coverage: ${BATTERY_COVERAGE}."
 
   release:
     name: Release (${{ matrix.os }})
@@ -109,8 +126,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
@@ -271,6 +288,18 @@ jobs:
           fi
           npm run package:desktop:smoke "${smoke_args[@]}"
 
+      - name: Sign release artifacts
+        shell: bash
+        env:
+          RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # Detached Ed25519 signatures over each artifact. Neither platform is
+          # code-signed, so this is what lets the app refuse a tampered update
+          # instead of trusting a sha512 published beside the artifact it
+          # describes. No-ops (with a message) until the secret is configured.
+          node scripts/release/sign-release-artifacts.mjs
+
       - name: Upload release artifacts explicitly
         shell: bash
         env:
@@ -279,7 +308,7 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           release_tag="${{ steps.release_metadata.outputs.release_tag }}"
-          artifacts=(release/*.exe release/*.dmg release/*.zip release/*.yml release/*.blockmap)
+          artifacts=(release/*.exe release/*.dmg release/*.zip release/*.yml release/*.blockmap release/*.sig)
           if [ "${#artifacts[@]}" -eq 0 ]; then
             echo "No release artifacts found to upload." >&2
             exit 1
@@ -308,8 +337,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
@@ -423,100 +452,127 @@ jobs:
             gh release upload "${release_tag}" "${artifact}" --repo "${GITHUB_REPOSITORY}" --clobber
           done
 
-  publish-npm:
-    name: Publish to npm
-    runs-on: ubuntu-latest
-    needs:
-      - release
-      - release-linux-server
-    timeout-minutes: 45
+  prepare-registry:
+    name: Prepare registry packages
+    runs-on: macos-latest
+    needs: [release, release-linux-server]
+    timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Restore exact packages or validate first preparation
+        id: restore
+        run: node scripts/release/package-bundle.mjs restore --allow-missing
       - name: Force HTTPS for GitHub git dependencies
+        if: steps.restore.outputs.restored != 'true'
         run: |
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
           git config --global url."https://github.com/".insteadOf "git@github.com:"
-
-      - name: Setup Node.js for npm
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-
       - name: Install dependencies
+        if: steps.restore.outputs.restored != 'true'
         run: npm ci --no-audit --no-fund
-
-      - name: Build
+      - name: Build packages once
+        if: steps.restore.outputs.restored != 'true'
         run: npm run build
+      - name: Retain and verify exact registry packages
+        if: steps.restore.outputs.restored != 'true'
+        run: node scripts/release/package-bundle.mjs prepare
+      - name: Smoke test retained package installations
+        run: node scripts/release/smoke-bundle.mjs
 
-      - name: Publish to npm
-        run: npm publish --access public
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [prepare-registry]
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      RELEASE_TARGET: npm
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Restore exact registry packages
+        run: node scripts/release/package-bundle.mjs restore
+      - name: Verify release prerequisite evidence
+        run: node scripts/release/package-bundle.mjs verify-evidence
+      - name: Publish or verify npm package
+        run: node scripts/release/registry-publication.mjs publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-github-packages:
     name: Publish to GitHub Packages
     runs-on: ubuntu-latest
-    needs:
-      - release
-      - release-linux-server
-    timeout-minutes: 45
+    needs: [prepare-registry]
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      RELEASE_TARGET: github
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Force HTTPS for GitHub git dependencies
-        run: |
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-
-      - name: Setup Node.js for GitHub Packages
-        uses: actions/setup-node@v6
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@cowork-os'
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Build
-        run: npm run build
-
-      - name: Update package name for GitHub Packages
-        run: |
-          # GitHub Packages requires scoped package names
-          node -e "
-            const pkg = require('./package.json');
-            pkg.name = '@cowork-os/cowork-os';
-            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-          "
-
-      - name: Publish to GitHub Packages
-        run: npm publish
+          node-version: "24"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@cowork-os"
+      - name: Restore exact registry packages
+        run: node scripts/release/package-bundle.mjs restore
+      - name: Verify release prerequisite evidence
+        run: node scripts/release/package-bundle.mjs verify-evidence
+      - name: Publish or verify GitHub package
+        run: node scripts/release/registry-publication.mjs publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-github-release:
     name: Publish GitHub release
     runs-on: ubuntu-latest
-    needs:
-      - release
-      - release-linux-server
-      - publish-npm
-      - publish-github-packages
-    timeout-minutes: 15
+    needs: [release, release-linux-server, publish-npm, publish-github-packages]
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Publish draft GitHub release
-        shell: bash
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Restore exact registry packages
+        run: node scripts/release/package-bundle.mjs restore
+      - name: Verify release prerequisite evidence
+        run: node scripts/release/package-bundle.mjs verify-evidence
+      - name: Verify npm publication
+        run: node scripts/release/registry-publication.mjs verify
+        env:
+          RELEASE_TARGET: npm
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Verify GitHub Packages publication
+        run: node scripts/release/registry-publication.mjs verify
+        env:
+          RELEASE_TARGET: github
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish verified GitHub release
         run: |
           set -euo pipefail
-          release_tag="${GITHUB_REF_NAME}"
-          if [[ "${release_tag}" != v* ]]; then
-            release_tag="v${release_tag}"
+          if [ "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh release edit "$RELEASE_TAG" --draft=false --repo "$GITHUB_REPOSITORY"
           fi
-          gh release edit "${release_tag}" --draft=false --repo "${GITHUB_REPOSITORY}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

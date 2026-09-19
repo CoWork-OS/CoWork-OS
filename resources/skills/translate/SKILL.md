@@ -37,12 +37,12 @@ Translate content to another language
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the file to translate |
-| language | select | Yes | Target language |
+| Name     | Type   | Required | Description                   |
+| -------- | ------ | -------- | ----------------------------- |
+| path     | string | Yes      | Path to the file to translate |
+| language | select | Yes      | Target language               |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 415 characters.
-- Runtime prompt is defined directly in `../translate.json`. 
+- Runtime prompt is defined directly in `../translate.json`.

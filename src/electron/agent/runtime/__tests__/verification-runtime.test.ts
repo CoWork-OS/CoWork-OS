@@ -103,4 +103,72 @@ describe("VerificationRuntime", () => {
     expect(result.ran).toBe(false);
     expect(result.verdict).toBe("PASS");
   });
+  it.each(["failed", "cancelled", "timeout", "missing"] as const)(
+    "rejects a PASS summary from a %s verifier",
+    async (status) => {
+      const runtime = new VerificationRuntime({
+        runReadOnlyChildTaskAndWait: vi.fn().mockResolvedValue({
+          childTaskId: "child-incomplete",
+          status,
+          summary: "VERDICT: PASS\nA partial or stale summary",
+        }),
+      });
+      const result = await runtime.run({ parentTask: makeTask(), explicit: true });
+      expect(result.status).toBe(status);
+      expect(result.verdict).toBe("FAIL");
+      expect(result.shouldBlock).toBe(true);
+    },
+  );
+
+  it("uses caller risk evidence even when task wording looks harmless", async () => {
+    const runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "child-risk",
+      status: "completed",
+      summary: "VERDICT: PARTIAL\nUnable to verify all results",
+    });
+    const runtime = new VerificationRuntime({ runReadOnlyChildTaskAndWait });
+    const result = await runtime.run({
+      parentTask: makeTask({
+        title: "Review the changes",
+        prompt: "Check the result",
+        agentConfig: { verificationAgent: false },
+      }),
+      highRisk: true,
+    });
+    expect(runReadOnlyChildTaskAndWait).toHaveBeenCalledOnce();
+    expect(result.verdict).toBe("PARTIAL");
+    expect(result.shouldBlock).toBe(true);
+  });
+
+  it("preserves nonblocking PARTIAL for a completed low-risk review", async () => {
+    const runtime = new VerificationRuntime({
+      runReadOnlyChildTaskAndWait: vi.fn().mockResolvedValue({
+        childTaskId: "child-low-risk",
+        status: "completed",
+        summary: "VERDICT: PARTIAL\nOne optional check unavailable",
+      }),
+    });
+    const result = await runtime.run({
+      parentTask: makeTask({ title: "Review text", prompt: "Proofread the paragraph" }),
+      explicit: true,
+    });
+    expect(result.verdict).toBe("PARTIAL");
+    expect(result.shouldBlock).toBe(false);
+  });
+  it.each(["partial_success", "failed", "needs_user_action"] as const)(
+    "rejects a completed child whose terminal outcome is %s",
+    async (terminalStatus) => {
+      const runtime = new VerificationRuntime({
+        runReadOnlyChildTaskAndWait: vi.fn().mockResolvedValue({
+          childTaskId: "incomplete-child",
+          status: "completed",
+          terminalStatus,
+          summary: "VERDICT: PASS\nOld summary",
+        }),
+      });
+      const result = await runtime.run({ parentTask: makeTask(), explicit: true });
+      expect(result.verdict).toBe("FAIL");
+      expect(result.shouldBlock).toBe(true);
+    },
+  );
 });

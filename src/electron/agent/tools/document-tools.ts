@@ -20,6 +20,7 @@ import { generateLandingPage } from "../../utils/document-generators/html-page-g
 import { compileLatex } from "../../utils/document-generators/latex-compiler";
 import { getVoiceService } from "../../voice";
 import {
+  preserveLexicalMacAlias,
   resolveWorkspaceFilesystemAccessWithApproval,
   type AccessFilesystemOperation,
   type WorkspaceFilesystemApprovalHandlers,
@@ -140,7 +141,7 @@ export class DocumentTools {
       throw new Error(`Path is outside the active access profile boundary: ${resolved}`);
     }
 
-    return access.path;
+    return preserveLexicalMacAlias(resolved, access.path);
   }
 
   private async normalizePresentationAssets(assets: unknown): Promise<Any[]> {

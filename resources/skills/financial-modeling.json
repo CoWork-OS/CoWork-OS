@@ -11,12 +11,7 @@
       "type": "select",
       "description": "Type of financial model to build",
       "required": true,
-      "options": [
-        "Three-Statement",
-        "Revenue Build",
-        "Operating Model",
-        "Scenario Analysis"
-      ]
+      "options": ["Three-Statement", "Revenue Build", "Operating Model", "Scenario Analysis"]
     },
     {
       "name": "company",

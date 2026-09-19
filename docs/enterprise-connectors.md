@@ -23,6 +23,7 @@ For some integrations with strong native CoWork paths, the runtime now prefers d
 Connector notifications are also part of the runtime surface now: MCP resource updates and catalog-change notifications can be bridged into CoWork's Event Triggers so connector-side content changes can wake agents or create follow-up tasks.
 
 Benefits:
+
 - Decoupled release cadence (connectors ship independently of the desktop app).
 - Supports local and managed deployments.
 - Works with existing CoWork MCP settings, registry, and tool discovery.
@@ -96,24 +97,31 @@ Secure MCP Tunnels enforce relay-side and local policy, including tool allowlist
 The shipped connector catalog includes **47 connectors** across CRM, productivity, devtools, communication, legal, finance, and creative categories. Install from **Settings > Connectors > Browse Registry**.
 
 ### Enterprise & CRM
+
 Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend, Discord, Google Workspace
 
 ### Dev Tools & Analytics
+
 Figma, Vercel, Monday, Excalidraw, Supabase, Netlify, Honeycomb, Ahrefs, Cloudflare, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba
 
 ### Productivity
+
 Miro, Hugging Face, Mermaid Chart, Make, Smartsheet, Airtable, Cal.com, Cloudinary, Mem, Drafts (macOS), Fantastical (macOS)
 
 ### Finance & Payments
+
 Stripe, PayPal, Square, Attio
 
 ### Legal
+
 Clinical Trials
 
 ### Communication
+
 Mailtrap
 
 ### Creative / Architecture
+
 Rhino, Blender, ComfyUI
 
 ## Connector Contract
@@ -131,6 +139,7 @@ Rhino, Blender, ComfyUI
   - `comfyui.submit_flux_photoreal_pass`
 
 In the CoWork app, MCP tools are prefixed (default `mcp_`), so agents will see:
+
 - `mcp_salesforce.search_records`
 - `mcp_jira.search_issues`
 
@@ -186,6 +195,7 @@ Every connector should provide:
   - Verifies auth, returns org/user info, scopes, and rate limit snapshot.
 
 Optional but strongly recommended:
+
 - `<connector>.whoami`
 - `<connector>.list_projects` or `<connector>.list_accounts`
 
@@ -321,11 +331,11 @@ Common setup:
 COWORK_ARCH_PROJECT_ROOT=/absolute/path/to/project
 ```
 
-| Connector | Default endpoint | Required local dependency | Primary tools |
-|-----------|------------------|---------------------------|---------------|
-| Rhino | `http://127.0.0.1:17641` | Rhino bridge process | `rhino.create_project`, `rhino.import_site_image`, `rhino.generate_massing`, `rhino.generate_floor_plan`, `rhino.export_model`, `rhino.capture_viewport` |
-| Blender | `http://127.0.0.1:17642` | Blender bridge process | `blender.import_model`, `blender.assign_materials_by_layer`, `blender.setup_camera`, `blender.setup_lighting`, `blender.render_view`, `blender.save_scene` |
-| ComfyUI | `http://127.0.0.1:8188` | Local ComfyUI API | `comfyui.list_workflows`, `comfyui.submit_workflow`, `comfyui.submit_flux_photoreal_pass`, `comfyui.get_job_status`, `comfyui.collect_outputs` |
+| Connector | Default endpoint         | Required local dependency | Primary tools                                                                                                                                              |
+| --------- | ------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rhino     | `http://127.0.0.1:17641` | Rhino bridge process      | `rhino.create_project`, `rhino.import_site_image`, `rhino.generate_massing`, `rhino.generate_floor_plan`, `rhino.export_model`, `rhino.capture_viewport`   |
+| Blender   | `http://127.0.0.1:17642` | Blender bridge process    | `blender.import_model`, `blender.assign_materials_by_layer`, `blender.setup_camera`, `blender.setup_lighting`, `blender.render_view`, `blender.save_scene` |
+| ComfyUI   | `http://127.0.0.1:8188`  | Local ComfyUI API         | `comfyui.list_workflows`, `comfyui.submit_workflow`, `comfyui.submit_flux_photoreal_pass`, `comfyui.get_job_status`, `comfyui.collect_outputs`             |
 
 Security and reliability behavior:
 
@@ -355,15 +365,15 @@ Use it to bootstrap new connectors quickly. It includes:
 
 **47 connectors** are included in the local MCP registry and appear in **Settings → Connectors → Browse Registry**. All are npm-installable MCP servers (stdio transport) unless noted as manual (bundled connectors).
 
-| Category | Connectors |
-|----------|------------|
-| **CRM & Enterprise** | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta |
-| **Communication** | Resend, Discord, Mailtrap |
-| **Productivity** | Google Workspace (OAuth), Figma, Vercel, Monday, Miro, Supabase, Excalidraw, Make, Smartsheet, Netlify, Airtable, Cal.com, Cloudinary, Mem, Drafts (macOS), Fantastical (macOS) |
-| **Dev Tools** | Hugging Face, Ahrefs, Mermaid Chart, Cloudflare, Honeycomb, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba |
-| **Finance** | Stripe, PayPal, Square, Attio |
-| **Legal** | Clinical Trials |
-| **Creative / Architecture** | Rhino, Blender, ComfyUI |
+| Category                    | Connectors                                                                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CRM & Enterprise**        | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta                                                                                                             |
+| **Communication**           | Resend, Discord, Mailtrap                                                                                                                                                       |
+| **Productivity**            | Google Workspace (OAuth), Figma, Vercel, Monday, Miro, Supabase, Excalidraw, Make, Smartsheet, Netlify, Airtable, Cal.com, Cloudinary, Mem, Drafts (macOS), Fantastical (macOS) |
+| **Dev Tools**               | Hugging Face, Ahrefs, Mermaid Chart, Cloudflare, Honeycomb, Tavily, tldraw, Amplitude, Clerk, Grafana, Socket, Metabase, Shadcn UI, GrowthBook, Tomba                           |
+| **Finance**                 | Stripe, PayPal, Square, Attio                                                                                                                                                   |
+| **Legal**                   | Clinical Trials                                                                                                                                                                 |
+| **Creative / Architecture** | Rhino, Blender, ComfyUI                                                                                                                                                         |
 
 Not shipped in the current connector catalog: Slack, DocuSign, Outreach (removed from Tier-1). Slack remains available as a channel gateway. GitHub and Notion prefer native CoWork integrations first, with MCP as fallback.
 

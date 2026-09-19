@@ -2712,7 +2712,13 @@ function getBuiltinRegistry(): MCPRegistry {
   return {
     version: "1.1.0",
     lastUpdated: new Date().toISOString(),
-    servers: [...BASE_BUILTIN_SERVERS, ...getConnectorEntries()],
+    // Stamped bundled here too, not only in mergeLocalConnectors: when the
+    // remote registry is disabled, fetchRegistry returns this directly, and an
+    // unstamped entry would be treated as remote and require confirmation to
+    // install a connector this build ships itself.
+    servers: [...BASE_BUILTIN_SERVERS, ...getConnectorEntries()].map((connector) =>
+      tagProvenance(connector, "bundled"),
+    ),
   };
 }
 
@@ -2720,23 +2726,79 @@ export function getBuiltinRegistryServer(serverId: string): MCPRegistryEntry | u
   return getBuiltinRegistry().servers.find((server) => server.id === serverId);
 }
 
+/** Marker stamped on entries as they are assembled, recording where they came from. */
+export const REGISTRY_ENTRY_PROVENANCE = "__coworkProvenance" as const;
+
+type ProvenanceTaggedEntry = MCPRegistryEntry & {
+  [REGISTRY_ENTRY_PROVENANCE]?: "bundled" | "remote";
+};
+
+function tagProvenance(
+  entry: MCPRegistryEntry,
+  provenance: "bundled" | "remote",
+): MCPRegistryEntry {
+  return { ...entry, [REGISTRY_ENTRY_PROVENANCE]: provenance } as MCPRegistryEntry;
+}
+
+/**
+ * True when `entry` did NOT come from this build — i.e. it was supplied by the
+ * remote registry response and its command/args/env are attacker-influenced if
+ * that registry (or a publisher on it) is hostile.
+ *
+ * Reads the provenance stamped by mergeLocalConnectors. An entry with no stamp
+ * did not come through the normal assembly path, so it is treated as remote:
+ * the confirmation prompt must not depend on id/name matching, or an entry that
+ * reused a bundled id (`linear`, `jira`, `figma`) would skip it.
+ */
+export function isRemoteRegistryEntry(entry: MCPRegistryEntry): boolean {
+  const provenance = (entry as ProvenanceTaggedEntry)[REGISTRY_ENTRY_PROVENANCE];
+  if (provenance === "bundled") return false;
+  if (provenance === "remote") return true;
+  return true;
+}
+
 function mergeLocalConnectors(registry: MCPRegistry): MCPRegistry {
   const localConnectors = [...BASE_BUILTIN_SERVERS, ...getConnectorEntries()];
-  const existingIds = new Set(registry.servers.map((s) => s.id));
-  const existingNames = new Set(registry.servers.map((s) => s.name.toLowerCase()));
-  const mergedServers = [...registry.servers];
+  const localIds = new Set(localConnectors.map((connector) => connector.id));
+  const localNames = new Set(localConnectors.map((connector) => connector.name.toLowerCase()));
 
-  for (const connector of localConnectors) {
-    if (existingIds.has(connector.id) || existingNames.has(connector.name.toLowerCase())) {
-      continue;
-    }
-    mergedServers.push(connector);
-  }
+  // Bundled connectors win over remote entries of the same id/name. The
+  // previous order was reversed: remote entries were kept and the shipped
+  // connector was dropped, so a public-registry entry named `linear`, `jira`,
+  // or `figma` — all generic single words this app uses as ids — shadowed the
+  // real one and supplied its own spawn command.
+  const remoteServers = registry.servers
+    .filter((server) => !localIds.has(server.id) && !localNames.has(server.name.toLowerCase()))
+    .map((server) => tagProvenance(server, "remote"));
 
   return {
     ...registry,
-    servers: mergedServers,
+    servers: [
+      ...localConnectors.map((connector) => tagProvenance(connector, "bundled")),
+      ...remoteServers,
+    ],
   };
+}
+
+/**
+ * Scheme check for non-stdio entries, applied regardless of installMethod.
+ * validateManualEntry returns early for anything that is not "manual", so this
+ * was previously unenforced for npm/remote entries.
+ */
+function validateRemoteTransportEntry(entry: MCPRegistryEntry): void {
+  if (entry.transport === "stdio") return;
+  if (!entry.defaultUrl) {
+    throw new Error(`Remote server ${entry.name} is missing a URL`);
+  }
+  let url: URL;
+  try {
+    url = new URL(entry.defaultUrl);
+  } catch {
+    throw new Error(`Remote server ${entry.name} has an invalid URL`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`Remote server ${entry.name} must use an http:// or https:// URL`);
+  }
 }
 
 function validateManualEntry(entry: MCPRegistryEntry): void {
@@ -2811,6 +2873,22 @@ function npmViewVersion(packageName: string): Promise<string> {
     });
   });
 }
+
+/** What the user is shown before a remote registry entry is installed. */
+export interface McpInstallConfirmationRequest {
+  entryId: string;
+  name: string;
+  publisher?: string;
+  transport: string;
+  command?: string;
+  args: string[];
+  envKeys: string[];
+  url?: string;
+}
+
+export type McpInstallConfirmationHandler = (
+  request: McpInstallConfirmationRequest,
+) => Promise<boolean>;
 
 export class MCPRegistryManager {
   private static registryCache: MCPRegistry | null = null;
@@ -2969,6 +3047,56 @@ export class MCPRegistryManager {
   }
 
   /**
+   * Register the handler that asks the user to confirm a remote registry
+   * entry's spawn command. Set once during startup.
+   *
+   * Installing a remote entry runs whatever `defaultCommand`/`defaultArgs` the
+   * registry response supplied, in the main process's environment. That is a
+   * code-execution decision, so it needs a human — including (especially) when
+   * the install is triggered by the agent's `integration_setup` tool, which is
+   * reachable through prompt injection.
+   */
+  static setInstallConfirmationHandler(handler: McpInstallConfirmationHandler | null): void {
+    this.installConfirmationHandler = handler;
+  }
+
+  private static installConfirmationHandler: McpInstallConfirmationHandler | null = null;
+
+  private static async confirmRemoteEntryInstall(
+    entry: MCPRegistryEntry,
+    command: string | undefined,
+    args: string[],
+  ): Promise<void> {
+    if (!isRemoteRegistryEntry(entry)) return;
+    // Remote entries with no local command still get confirmed if they carry a
+    // stdio command; url-only remote entries are covered by validateManualEntry.
+    if (entry.transport === "stdio" && !command) return;
+
+    const handler = this.installConfirmationHandler;
+    if (!handler) {
+      // Fail closed: no way to ask the user means no install.
+      throw new Error(
+        `Refusing to install "${entry.name}" from the remote registry: no confirmation handler is available to review its launch command.`,
+      );
+    }
+
+    const approved = await handler({
+      entryId: entry.id,
+      name: entry.name,
+      publisher: entry.author,
+      transport: entry.transport,
+      command,
+      args,
+      envKeys: Object.keys(entry.defaultEnv || {}),
+      url: entry.defaultUrl,
+    });
+
+    if (!approved) {
+      throw new Error(`Installation of "${entry.name}" was declined.`);
+    }
+  }
+
+  /**
    * Install a server from the registry
    */
   static async installServer(entryId: string, extraArgs?: string[]): Promise<MCPServerConfig> {
@@ -2994,6 +3122,16 @@ export class MCPRegistryManager {
 
     // Validate manual entries (local connectors)
     validateManualEntry(entry);
+    // Applies to every install method, not just "manual": a non-stdio entry
+    // from any source must still carry a valid http(s) URL.
+    validateRemoteTransportEntry(entry);
+
+    // Ask the user before running a launch command that came from the remote
+    // registry, showing the exact command and args.
+    await this.confirmRemoteEntryInstall(entry, entry.defaultCommand || entry.installCommand, [
+      ...(entry.defaultArgs || []),
+      ...(extraArgs || []),
+    ]);
 
     // Verify the npm package exists before installing
     if (entry.packageName && entry.installMethod === "npm") {

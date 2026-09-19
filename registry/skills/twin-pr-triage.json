@@ -15,29 +15,19 @@
     }
   ],
   "requires": {
-    "bins": [
-      "gh"
-    ]
+    "bins": ["gh"]
   },
   "enabled": true,
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "digital-twin",
-      "code-review",
-      "PR",
-      "triage",
-      "github"
-    ],
+    "tags": ["digital-twin", "code-review", "PR", "triage", "github"],
     "routing": {
       "useWhen": "Use when triaging open pull requests, building a review queue, or assessing PR backlog health.",
       "dontUseWhen": "Don't use for performing actual code reviews or making merge decisions.",
       "outputs": "Prioritized PR review queue with risk assessments",
       "successCriteria": "All open PRs listed with accurate risk and priority assessment",
-      "expectedArtifacts": [
-        "pr-triage.md"
-      ],
+      "expectedArtifacts": ["pr-triage.md"],
       "examples": {
         "positive": [
           "Use the twin-pr-triage skill for this request.",

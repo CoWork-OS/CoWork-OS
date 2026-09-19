@@ -13,8 +13,8 @@ not directly from packages. This enables global changes and easy refactoring.
 **Incorrect (imports directly from package):**
 
 ```tsx
-import { View, Text } from 'react-native'
-import { Button } from '@ui/button'
+import { View, Text } from "react-native";
+import { Button } from "@ui/button";
 
 function Profile() {
   return (
@@ -22,7 +22,7 @@ function Profile() {
       <Text>Hello</Text>
       <Button>Save</Button>
     </View>
-  )
+  );
 }
 ```
 
@@ -30,30 +30,28 @@ function Profile() {
 
 ```tsx
 // components/view.tsx
-import { View as RNView } from 'react-native'
+import { View as RNView } from "react-native";
 
 // ideal: pick the props you will actually use to control implementation
-export function View(
-  props: Pick<React.ComponentProps<typeof RNView>, 'style' | 'children'>
-) {
-  return <RNView {...props} />
+export function View(props: Pick<React.ComponentProps<typeof RNView>, "style" | "children">) {
+  return <RNView {...props} />;
 }
 ```
 
 ```tsx
 // components/text.tsx
-export { Text } from 'react-native'
+export { Text } from "react-native";
 ```
 
 ```tsx
 // components/button.tsx
-export { Button } from '@ui/button'
+export { Button } from "@ui/button";
 ```
 
 ```tsx
-import { View } from '@/components/view'
-import { Text } from '@/components/text'
-import { Button } from '@/components/button'
+import { View } from "@/components/view";
+import { Text } from "@/components/text";
+import { Button } from "@/components/button";
 
 function Profile() {
   return (
@@ -61,7 +59,7 @@ function Profile() {
       <Text>Hello</Text>
       <Button>Save</Button>
     </View>
-  )
+  );
 }
 ```
 

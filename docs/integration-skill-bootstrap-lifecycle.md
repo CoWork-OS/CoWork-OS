@@ -319,11 +319,11 @@ Lifecycle rules:
 
 Lifecycle mutations are isolated in `ensureBootstrapLifecycleState()`, which is the only function that writes `workspace-state.json`:
 
-| Function | Reads | Writes | When to call |
-|----------|-------|--------|--------------|
-| `readWorkspaceKitState()` | ✓ | — | Always safe |
-| `computeWorkspaceKitStatus()` | ✓ | — | Status display, lint, UI |
-| `ensureBootstrapLifecycleState()` | ✓ | ✓ | Kit init, status refresh (`KIT_GET_STATUS`), bootstrap deletion flow |
+| Function                          | Reads | Writes | When to call                                                         |
+| --------------------------------- | ----- | ------ | -------------------------------------------------------------------- |
+| `readWorkspaceKitState()`         | ✓     | —      | Always safe                                                          |
+| `computeWorkspaceKitStatus()`     | ✓     | —      | Status display, lint, UI                                             |
+| `ensureBootstrapLifecycleState()` | ✓     | ✓      | Kit init, status refresh (`KIT_GET_STATUS`), bootstrap deletion flow |
 
 `KIT_GET_STATUS` IPC handler calls `ensureBootstrapLifecycleState()` before the pure `computeWorkspaceKitStatus()` so that `bootstrapSeededAt` and `onboardingCompletedAt` timestamps are always current in the returned status object.
 
@@ -385,6 +385,7 @@ This channel is part of the shared IPC contract exported from `src/shared/types.
 Exposed in **Memory Hub → Per Workspace** as "Open USER.md" and "Open MEMORY.md" buttons.
 
 Security constraints:
+
 - `relPath` must start with `.cowork/` and must not contain `..`
 - Rate-limited to the `limited` tier
 

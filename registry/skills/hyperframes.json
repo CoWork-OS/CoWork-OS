@@ -11,15 +11,7 @@
     "version": "0.4.3",
     "author": "HeyGen",
     "homepage": "https://github.com/heygen-com/hyperframes",
-    "tags": [
-      "video",
-      "animation",
-      "html",
-      "gsap",
-      "captions",
-      "tts",
-      "creative"
-    ],
+    "tags": ["video", "animation", "html", "gsap", "captions", "tts", "creative"],
     "routing": {
       "keywords": [
         "hyperframes",

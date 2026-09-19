@@ -38,4 +38,4 @@ Android/Kotlin development: Jetpack Compose, Room database, Gradle builds, emula
 ## Runtime Prompt
 
 - Current runtime prompt length: 903 characters.
-- Runtime prompt is defined directly in `../android-development.json`. 
+- Runtime prompt is defined directly in `../android-development.json`.

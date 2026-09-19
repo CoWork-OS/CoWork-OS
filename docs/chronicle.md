@@ -64,17 +64,17 @@ The same Chronicle card is also mirrored under **Settings > Tools** so the scree
 
 ### Current defaults
 
-| Setting | Default |
-|---------|---------|
-| Enabled | `false` |
-| Mode | `hybrid` |
-| Paused | `false` |
-| Capture interval | `10` seconds |
-| Retention window | `5` minutes |
-| Frame cap | `60` |
-| Capture scope | `frontmost_display` |
-| Background memory generation | `true` |
-| Respect workspace memory settings | `true` |
+| Setting                           | Default             |
+| --------------------------------- | ------------------- |
+| Enabled                           | `false`             |
+| Mode                              | `hybrid`            |
+| Paused                            | `false`             |
+| Capture interval                  | `10` seconds        |
+| Retention window                  | `5` minutes         |
+| Frame cap                         | `60`                |
+| Capture scope                     | `frontmost_display` |
+| Background memory generation      | `true`              |
+| Respect workspace memory settings | `true`              |
 
 ## What the UI shows
 
@@ -169,18 +169,18 @@ Chronicle should be treated as **context evidence**, not as an authority overrid
 
 ## Contributor map
 
-| Area | Location |
-|------|----------|
-| Chronicle subsystem | `src/electron/chronicle/` |
-| Tool registration and promotion into evidence | `src/electron/agent/tools/registry.ts` |
-| Tool exposure / routing | `src/electron/agent/tool-policy-engine.ts`, `src/electron/agent/executor.ts`, `src/electron/agent/strategy/IntentRouter.ts` |
-| Prompt guidance | `src/electron/agent/tools/tool-prompting.ts` |
-| Runtime visibility / unified recall | `src/electron/agent/RuntimeVisibilityService.ts` |
-| IPC handlers | `src/electron/ipc/handlers.ts`, `src/electron/preload.ts` |
-| Settings UI | `src/renderer/components/ChronicleSettings.tsx`, `src/renderer/components/MemoryHubSettings.tsx` |
-| Observation management UI | `src/renderer/components/MemorySettings.tsx` |
-| Tray controls | `src/electron/tray/TrayManager.ts` |
-| Task-level toggles | `src/renderer/components/MainContent.tsx`, `src/renderer/components/DevicesPanel.tsx`, `src/renderer/App.tsx` |
+| Area                                          | Location                                                                                                                    |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Chronicle subsystem                           | `src/electron/chronicle/`                                                                                                   |
+| Tool registration and promotion into evidence | `src/electron/agent/tools/registry.ts`                                                                                      |
+| Tool exposure / routing                       | `src/electron/agent/tool-policy-engine.ts`, `src/electron/agent/executor.ts`, `src/electron/agent/strategy/IntentRouter.ts` |
+| Prompt guidance                               | `src/electron/agent/tools/tool-prompting.ts`                                                                                |
+| Runtime visibility / unified recall           | `src/electron/agent/RuntimeVisibilityService.ts`                                                                            |
+| IPC handlers                                  | `src/electron/ipc/handlers.ts`, `src/electron/preload.ts`                                                                   |
+| Settings UI                                   | `src/renderer/components/ChronicleSettings.tsx`, `src/renderer/components/MemoryHubSettings.tsx`                            |
+| Observation management UI                     | `src/renderer/components/MemorySettings.tsx`                                                                                |
+| Tray controls                                 | `src/electron/tray/TrayManager.ts`                                                                                          |
+| Task-level toggles                            | `src/renderer/components/MainContent.tsx`, `src/renderer/components/DevicesPanel.tsx`, `src/renderer/App.tsx`               |
 
 ## Related docs
 

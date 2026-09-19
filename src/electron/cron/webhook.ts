@@ -126,8 +126,9 @@ export class CronWebhookServer {
    * Handle incoming HTTP request
    */
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    // Set CORS headers for local development
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    // No wildcard CORS: this server triggers agent tasks, so a page the user
+    // visits must not be able to read its responses. The secret header already
+    // forces a preflight, which is not answered.
     res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Webhook-Secret");
 
@@ -173,9 +174,19 @@ export class CronWebhookServer {
       return;
     }
 
-    // Verify secret if configured
-    if (this.config.secret) {
-      const providedSecret = body.secret || req.headers["x-webhook-secret"];
+    // Fail closed: an unset secret previously skipped this check entirely,
+    // which would make POST /trigger (i.e. running a cron job, i.e. an agent
+    // task) reachable from any page the user visits. Header only — a secret in
+    // the body is submittable by a cross-origin form without a preflight.
+    if (!this.config.secret) {
+      this.sendJsonResponse(res, 503, {
+        success: false,
+        error: "Webhook secret is not configured",
+      });
+      return;
+    }
+    {
+      const providedSecret = req.headers["x-webhook-secret"];
       if (!this.verifySecret(providedSecret as string | undefined)) {
         this.sendJsonResponse(res, 401, { success: false, error: "Invalid or missing secret" });
         return;
@@ -232,8 +243,15 @@ export class CronWebhookServer {
    * Handle list jobs request
    */
   private async handleListJobs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    // Verify secret if configured
-    if (this.config.secret) {
+    // Fail closed, as in handleTrigger.
+    if (!this.config.secret) {
+      this.sendJsonResponse(res, 503, {
+        success: false,
+        error: "Webhook secret is not configured",
+      });
+      return;
+    }
+    {
       const providedSecret = req.headers["x-webhook-secret"];
       if (!this.verifySecret(providedSecret as string | undefined)) {
         this.sendJsonResponse(res, 401, { success: false, error: "Invalid or missing secret" });

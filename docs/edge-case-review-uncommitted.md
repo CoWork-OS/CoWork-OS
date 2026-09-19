@@ -242,10 +242,10 @@ The full response is buffered in memory with no size limit. Discord attachment U
 ## Summary
 
 | Severity | Count | Status |
-|----------|-------|--------|
-| P0       | 2     | Fixed |
-| P1       | 5     | Fixed |
-| P2       | 9     | Fixed |
-| P3       | 5     | Fixed |
+| -------- | ----- | ------ |
+| P0       | 2     | Fixed  |
+| P1       | 5     | Fixed  |
+| P2       | 9     | Fixed  |
+| P3       | 5     | Fixed  |
 
 All identified edge cases have been addressed.

@@ -26,6 +26,7 @@ npm run dev
 ```
 
 This will:
+
 1. Start the Vite dev server (React UI)
 2. Launch Electron with hot reload enabled
 3. Open DevTools automatically
@@ -68,17 +69,17 @@ The onboarding flow keeps your answers in the renderer while you are moving thro
 
 If you use the API-key path, open **Settings > AI & Models > Model Access** and choose a provider:
 
-   - **Claude** - Claude API key or a supported Claude account-token route, subject to Anthropic's current terms and eligibility
-   - **Google Gemini** - Gemini models through Google AI Studio; free usage is available subject to Google's current limits (API key from [aistudio.google.com](https://aistudio.google.com/apikey))
-   - **OpenRouter** - Multiple models, including free model options and the Pareto Code coding router (API key from [openrouter.ai](https://openrouter.ai/keys))
-   - **OpenAI API** - OpenAI API models (requires API key from [platform.openai.com](https://platform.openai.com/api-keys))
-   - **ChatGPT account** - browser sign-in for supported models available to the signed-in account
-   - **Groq** - low-latency hosted models with free usage available subject to Groq's current limits
-   - **Grok OAuth** - browser sign-in for supported models available to an eligible xAI account
-   - **xAI API Key** - Grok models billed through your xAI API account
-   - **AWS Bedrock** - Enterprise AWS (requires AWS credentials)
-   - **Ollama** - Local inference with [Ollama](https://ollama.ai) installed; there is no hosted-model usage charge from CoWork, but compute runs on your hardware
-   - **MLX (Apple Silicon)** - Native Apple Silicon local inference through [MLX-LM](mlx-lm.md); install `mlx-lm`, select a quantized model, and start the local server
+- **Claude** - Claude API key or a supported Claude account-token route, subject to Anthropic's current terms and eligibility
+- **Google Gemini** - Gemini models through Google AI Studio; free usage is available subject to Google's current limits (API key from [aistudio.google.com](https://aistudio.google.com/apikey))
+- **OpenRouter** - Multiple models, including free model options and the Pareto Code coding router (API key from [openrouter.ai](https://openrouter.ai/keys))
+- **OpenAI API** - OpenAI API models (requires API key from [platform.openai.com](https://platform.openai.com/api-keys))
+- **ChatGPT account** - browser sign-in for supported models available to the signed-in account
+- **Groq** - low-latency hosted models with free usage available subject to Groq's current limits
+- **Grok OAuth** - browser sign-in for supported models available to an eligible xAI account
+- **xAI API Key** - Grok models billed through your xAI API account
+- **AWS Bedrock** - Enterprise AWS (requires AWS credentials)
+- **Ollama** - Local inference with [Ollama](https://ollama.ai) installed; there is no hosted-model usage charge from CoWork, but compute runs on your hardware
+- **MLX (Apple Silicon)** - Native Apple Silicon local inference through [MLX-LM](mlx-lm.md); install `mlx-lm`, select a quantized model, and start the local server
 
 3. If you choose **Claude**, pick one of these tabs:
    - **Claude API**: paste an API key from [console.anthropic.com](https://console.anthropic.com/)
@@ -90,6 +91,13 @@ If you use the API-key path, open **Settings > AI & Models > Model Access** and 
 7. Save settings
 
 After you have at least two working model routes, you can optionally create a [Mixture of Agents](mixture-of-agents.md) preset in **Settings > AI & Models > AI Model > Mixture of Agents**. Choose one aggregator model and one or more advisor models, save the preset, then select **Mixture of Agents** as the active provider and the preset as the model for tasks that benefit from model diversity.
+
+For automatic team composition in Collaborative mode or `/multitask`, or for
+the optional Active JEV harness that makes bounded routing, strategy, and
+review decisions, configure [Jev Decision Support](jev.md) in **Settings > AI &
+Models > Jev**. Jev is a separate decision route: with OpenRouter, the Jev
+page can reuse the OpenRouter key already saved under Model Access, so no
+second key is needed.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-10.webp" alt="AI model provider settings" width="700">
@@ -132,12 +140,12 @@ Before you start relying on long-term context, open **Settings > Memory Hub** an
 
 - **Workspace Kit** initializes the local `.cowork/` context files used for durable prompt injection and project guidance.
 - **Memory settings** control local capture, privacy mode, retention, preview of the `L0/L1` memory payload, and the Memory Inspector for structured archive observations.
-- **Memory Write Approval** controls whether durable memory writes commit immediately or wait in a review queue. Use `curated_only` for hot-memory edits, `external_only` for Supermemory writes/mirrors, `background_only` for Dreaming/distillation/mirroring, or `all` for every durable memory write. Sensitive external-memory payloads are blocked before they are stored in the queue.
+- **Memory Write Approval** is an optional review compatibility path. The normal no-prompt runtime commits new durable memory writes immediately, including when an older saved setting selected a review mode. `COWORK_MEMORY_WRITE_APPROVAL_MODE=curated_only|external_only|background_only|all` opts a controlled run into the review queue. Sensitive external-memory payloads are blocked before they are stored in the queue.
 - **Memory Inspector** lets you search observation metadata, inspect details and timelines, edit titles/narratives, promote useful entries to curated memory, mark entries private, suppress prompt recall, redact content, soft-delete entries, and rebuild deterministic metadata when needed.
 - **Durable Runtime Context** is optional. Enable it if you want long active tasks to retain sanitized task messages and source-linked compaction summaries that the agent can recover with `context_grep` and `context_describe`. It stays task-scoped by default and is erased by **Clear memory** for the workspace.
 - **Supermemory** is optional. If you want an external memory provider, enable it here, paste your API key, keep the default `cowork:{workspaceId}` container template unless you need something else, save, and click **Test Connection**.
 
-Supermemory does not replace CoWork's local memory system. It adds an external profile/search layer, explicit `supermemory_*` tools, optional prompt-time profile injection, and optional mirroring of non-private local memory captures. Local structured observations remain authoritative for privacy controls; private, redacted, and suppressed entries stay local. Dreaming also stays local and review-first by proposing memory curation candidates instead of sending memory maintenance to an external provider. If Memory Write Approval is enabled for external or background writes, `supermemory_remember` and mirror writes are staged for review instead of committed immediately. See [Structured Memory Observations](memory-observations.md), [Durable Runtime Context](durable-runtime-context.md), [Dreaming](dreaming.md), [Workspace Memory Flow](workspace-memory-flow.md#memory-write-governance), and [Supermemory Integration](supermemory.md).
+Supermemory does not replace CoWork's local memory system. It adds an external profile/search layer, explicit `supermemory_*` tools, optional prompt-time profile injection, and optional mirroring of non-private local memory captures. Local structured observations remain authoritative for privacy controls; private, redacted, and suppressed entries stay local. Dreaming also stays local and review-first by proposing memory curation candidates instead of sending memory maintenance to an external provider. In a controlled run with an explicit review mode, `supermemory_remember` and mirror writes are staged for review; the normal no-prompt runtime commits them directly after the same sensitive-payload checks. See [Structured Memory Observations](memory-observations.md), [Durable Runtime Context](durable-runtime-context.md), [Dreaming](dreaming.md), [Workspace Memory Flow](workspace-memory-flow.md#memory-write-governance), and [Supermemory Integration](supermemory.md).
 
 ## Troubleshooting
 
@@ -179,8 +187,9 @@ After the app is configured, try tasks that produce or use visible work surfaces
 - `open my local app and test the main flow at desktop, tablet, and mobile sizes`
 
 Generated documents, spreadsheets, presentations, and web pages appear as artifact cards and open in the right sidebar or fullscreen workbench. Live website testing opens the [Browser Workbench](browser-workbench.md), where the agent and user share the same Browser V2 in-app browser, with visible cursor movement, responsive viewport testing, accessibility snapshot refs, diagnostics, screenshots, annotation, and follow-up controls.
-   - Changes to tracked kit files keep revision snapshots under `.cowork/**/.history/`
-   - You can validate kit health, freshness, and secret/missing-file warnings locally with `npm run kit:lint`
+
+- Changes to tracked kit files keep revision snapshots under `.cowork/**/.history/`
+- You can validate kit health, freshness, and secret/missing-file warnings locally with `npm run kit:lint`
 
 2. **Create a Task**
    - Click "+ New Task"
@@ -217,6 +226,7 @@ Once the app opens, the most important places to know are:
 - **Task menu**: open a task and use the three-dot menu beside the title for pin/rename/archive, copy working directory/task ID/deeplink/Markdown, fork session, view outputs, or turn the current task into a same-thread or new-task automation. See [Task Automations](task-automations.md).
 - **Automations**: open the main-sidebar Automation Studio to discover templates, build a versioned structured flow, test it without external writes, turn it on, and inspect step-level activity. See [Automation Studio](automation-studio.md).
 - **Agents Hub**: create and inspect reusable managed agents from **Agents**. The clicked-agent detail page is for configuration and actions, not a separate chat. **Test this agent**, **Preview**, and starter prompts start a normal managed-session task and open it in the main task window, where follow-ups, approvals, responses, and outputs work like any other task. See [Managed Agents](managed-agents.md).
+- **Bots**: choose **Bots** beside **Sessions** to create reusable bot identities and keep multiple conversations under each one. Selecting a bot reuses its latest unarchived conversation or opens a dormant one; the first message starts execution. Edit the profile from the bot row or conversation header, and use conversation history for older streams. See [Bots, conversations, and tasks](bots-and-conversations.md).
 - **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
 - **Settings > Automations**: advanced prompt-based Routines, Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing controls
 - **Settings > Profiles**: create, switch, export, and import isolated app profiles
@@ -422,11 +432,13 @@ CoWork samples the video into representative still frames for image-capable mode
 ### Approval Dialogs
 
 When the agent needs permission for:
+
 - Deleting files
 - Bulk operations
 - Command-tool calls
 
 You'll see a dialog with:
+
 - What it wants to do
 - Why it needs to do it
 - Approve or Deny buttons
@@ -437,20 +449,20 @@ You'll see a dialog with:
 
 Open **Settings > AI & Models > Model Access**:
 
-| Provider | Setup |
-|----------|-------|
-| Claude | Use **Claude API** with a key from [console.anthropic.com](https://console.anthropic.com), or, where supported and permitted for your account, use the **Claude Subscription** UI route with a token from `claude setup-token` |
-| Google Gemini | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey); Google AI Studio free usage may be available subject to current limits |
-| OpenRouter | Enter API key from [openrouter.ai](https://openrouter.ai/keys); free model options are available, and `openrouter/pareto-code` / `openrouter/pareto-code:nitro` support coding-score-based routing |
-| OpenAI (API Key) | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys) |
-| OpenAI (ChatGPT) | Click **Sign in with ChatGPT** to connect an eligible account; available models, limits, and charges depend on OpenAI and the account plan |
-| AWS Bedrock | Enter AWS Access Key, Secret Key, and Region |
-| Ollama | Install Ollama, pull a model, select it |
-| MLX (Apple Silicon) | Install `mlx-lm`, select a compatible quantized model, start the MLX server |
-| Groq | Enter API key in Settings; free usage may be available subject to current limits |
-| xAI (Grok API) | Enter API key in Settings |
-| xAI Grok OAuth | Sign in with an eligible xAI account, refresh the available models, and select one supported for that account |
-| Kimi (Moonshot) | Enter API key in Settings |
+| Provider            | Setup                                                                                                                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude              | Use **Claude API** with a key from [console.anthropic.com](https://console.anthropic.com), or, where supported and permitted for your account, use the **Claude Subscription** UI route with a token from `claude setup-token` |
+| Google Gemini       | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey); Google AI Studio free usage may be available subject to current limits                                                                           |
+| OpenRouter          | Enter API key from [openrouter.ai](https://openrouter.ai/keys); free model options are available, and `openrouter/pareto-code` / `openrouter/pareto-code:nitro` support coding-score-based routing                             |
+| OpenAI (API Key)    | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys)                                                                                                                                                 |
+| OpenAI (ChatGPT)    | Click **Sign in with ChatGPT** to connect an eligible account; available models, limits, and charges depend on OpenAI and the account plan                                                                                     |
+| AWS Bedrock         | Enter AWS Access Key, Secret Key, and Region                                                                                                                                                                                   |
+| Ollama              | Install Ollama, pull a model, select it                                                                                                                                                                                        |
+| MLX (Apple Silicon) | Install `mlx-lm`, select a compatible quantized model, start the MLX server                                                                                                                                                    |
+| Groq                | Enter API key in Settings; free usage may be available subject to current limits                                                                                                                                               |
+| xAI (Grok API)      | Enter API key in Settings                                                                                                                                                                                                      |
+| xAI Grok OAuth      | Sign in with an eligible xAI account, refresh the available models, and select one supported for that account                                                                                                                  |
+| Kimi (Moonshot)     | Enter API key in Settings                                                                                                                                                                                                      |
 
 Prompt caching is enabled by default on supported Anthropic and GPT-style routes. CoWork automatically keeps stable session prompt sections cacheable and dynamic turn context uncached, so follow-ups can reuse the provider-side prefix without caching the clock, recall, or one-off guidance.
 
@@ -458,28 +470,28 @@ Prompt caching is enabled by default on supported Anthropic and GPT-style routes
 
 Configure these in **Settings** > **AI & Models** > **Model Access** by entering API keys or tokens, model IDs, and base URLs when required.
 
-| Provider | Setup |
-|----------|-------|
-| OpenCode Zen | API key + base URL in Settings |
-| Google Vertex | Access token + base URL in Settings |
-| Google Antigravity | Access token + base URL in Settings |
-| Google Gemini CLI | Access token + base URL in Settings |
-| Z.AI | API key + base URL in Settings |
-| GLM | API key + base URL in Settings |
-| Vercel AI Gateway | API key in Settings |
-| Cerebras | API key in Settings |
-| Mistral | API key in Settings |
-| GitHub Copilot | GitHub token in Settings |
-| Moonshot (Kimi) | API key in Settings |
-| Qwen Portal | API key in Settings |
-| MiniMax | API key in Settings |
-| MiniMax Portal | API key in Settings |
-| Xiaomi MiMo | API key in Settings |
-| Venice AI | API key in Settings |
-| Synthetic | API key in Settings |
-| Kimi Code | API key in Settings |
-| OpenAI-Compatible (Custom) | API key + base URL in Settings |
-| Anthropic-Compatible (Custom) | API key + base URL in Settings |
+| Provider                      | Setup                               |
+| ----------------------------- | ----------------------------------- |
+| OpenCode Zen                  | API key + base URL in Settings      |
+| Google Vertex                 | Access token + base URL in Settings |
+| Google Antigravity            | Access token + base URL in Settings |
+| Google Gemini CLI             | Access token + base URL in Settings |
+| Z.AI                          | API key + base URL in Settings      |
+| GLM                           | API key + base URL in Settings      |
+| Vercel AI Gateway             | API key in Settings                 |
+| Cerebras                      | API key in Settings                 |
+| Mistral                       | API key in Settings                 |
+| GitHub Copilot                | GitHub token in Settings            |
+| Moonshot (Kimi)               | API key in Settings                 |
+| Qwen Portal                   | API key in Settings                 |
+| MiniMax                       | API key in Settings                 |
+| MiniMax Portal                | API key in Settings                 |
+| Xiaomi MiMo                   | API key in Settings                 |
+| Venice AI                     | API key in Settings                 |
+| Synthetic                     | API key in Settings                 |
+| Kimi Code                     | API key in Settings                 |
+| OpenAI-Compatible (Custom)    | API key + base URL in Settings      |
+| Anthropic-Compatible (Custom) | API key + base URL in Settings      |
 
 Advanced override: prompt caching can be disabled manually with `promptCaching.mode: "off"` in the saved LLM settings payload or by launching the app with `COWORK_PROMPT_CACHE_MODE=off`.
 
@@ -487,18 +499,19 @@ Advanced override: prompt caching can be disabled manually with `promptCaching.m
 
 Web search works immediately via the built-in DuckDuckGo provider (free, no API key). For richer results (news, images, AI-optimized ranking), configure a paid provider in **Settings** > **Web Search**:
 
-| Provider | Setup |
-|----------|-------|
-| DuckDuckGo | Built-in — no setup needed (automatic fallback) |
-| Tavily | Enter API key from [tavily.com](https://tavily.com) |
-| Exa | Enter API key from [exa.ai](https://exa.ai/) |
-| Brave | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
-| SerpAPI | Enter API key from [serpapi.com](https://serpapi.com) |
-| Google | Enter API key and Search Engine ID from Google Cloud Console |
+| Provider   | Setup                                                                   |
+| ---------- | ----------------------------------------------------------------------- |
+| DuckDuckGo | Built-in — no setup needed (automatic fallback)                         |
+| Tavily     | Enter API key from [tavily.com](https://tavily.com)                     |
+| Exa        | Enter API key from [exa.ai](https://exa.ai/)                            |
+| Brave      | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
+| SerpAPI    | Enter API key from [serpapi.com](https://serpapi.com)                   |
+| Google     | Enter API key and Search Engine ID from Google Cloud Console            |
 
 ### Channel Integrations (Optional)
 
 #### WhatsApp Bot
+
 1. Open **Settings** > **WhatsApp**
 2. Click **Add WhatsApp Channel**
 3. A QR code will appear
@@ -512,6 +525,7 @@ After connection, WhatsApp uses the shared gateway message lifecycle: send norma
 For shared groups or dedicated operational channels, use **Channel Specialization** in the channel settings to default a channel, group, or topic/thread to a workspace, agent role, prompt guidance, tool restrictions, and optional shared-memory policy.
 
 #### Telegram Bot
+
 1. Create bot with [@BotFather](https://t.me/BotFather)
 2. Open **Settings** > **Channels** > **Telegram**
 3. Enter bot token
@@ -520,6 +534,7 @@ For shared groups or dedicated operational channels, use **Channel Specializatio
 6. Enable and test
 
 #### Discord Bot
+
 1. Create app at [Discord Developer Portal](https://discord.com/developers/applications)
 2. Open **Settings** > **Channels** > **Discord**
 3. Enter bot token and application ID
@@ -528,6 +543,7 @@ For shared groups or dedicated operational channels, use **Channel Specializatio
 6. Enable and test
 
 #### Slack Bot
+
 1. Create app at [Slack API Apps](https://api.slack.com/apps)
 2. Enable Socket Mode and create App-Level Token (xapp-...)
 3. Add OAuth scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, `users:read`, `files:write`
@@ -539,12 +555,14 @@ For shared groups or dedicated operational channels, use **Channel Specializatio
 9. Enable and test
 
 #### Feishu / Lark
+
 1. Create a bot/app in the Feishu or Lark developer console
 2. Copy the App ID, App Secret, verification token, and event encryption key
 3. Open **Settings** > **Channels** > **Feishu / Lark**
 4. Enter credentials, set the webhook/event callback URL shown by CoWork, then enable and test
 
 #### WeCom
+
 1. Create a WeCom app in the WeCom admin console
 2. Copy the Corp ID, Agent ID, Secret, token, and EncodingAESKey
 3. Open **Settings** > **Channels** > **WeCom**
@@ -571,27 +589,28 @@ For slash-searchable app commands and workflow shortcuts, type `/` in the same m
 
 Install enterprise connectors from **Settings** > **Integrations** > **Browse Registry**:
 
-| Connector | Type | Setup |
-|-----------|------|-------|
-| **Salesforce** | CRM | OAuth or API key |
-| **Jira** | Issue Tracking | API token + domain |
-| **HubSpot** | CRM | API key |
-| **Zendesk** | Support | API key + subdomain |
-| **ServiceNow** | ITSM | OAuth or credentials |
-| **Linear** | Product/Issue | API key |
-| **Asana** | Work Management | Personal access token |
-| **Okta** | Identity | API token + domain |
-| **Discord** | Community | Bot token + application ID |
-| **Google Workspace** | Productivity | Shared OAuth in-app flow; reconnect when newer required scopes are missing |
-| **Rhino** | Architecture/CAD | Localhost Rhino bridge + `COWORK_ARCH_PROJECT_ROOT` |
-| **Blender** | 3D/Rendering | Localhost Blender bridge + `COWORK_ARCH_PROJECT_ROOT` |
-| **ComfyUI** | Image Generation | Local ComfyUI API + `COWORK_ARCH_PROJECT_ROOT` |
+| Connector            | Type             | Setup                                                                      |
+| -------------------- | ---------------- | -------------------------------------------------------------------------- |
+| **Salesforce**       | CRM              | OAuth or API key                                                           |
+| **Jira**             | Issue Tracking   | API token + domain                                                         |
+| **HubSpot**          | CRM              | API key                                                                    |
+| **Zendesk**          | Support          | API key + subdomain                                                        |
+| **ServiceNow**       | ITSM             | OAuth or credentials                                                       |
+| **Linear**           | Product/Issue    | API key                                                                    |
+| **Asana**            | Work Management  | Personal access token                                                      |
+| **Okta**             | Identity         | API token + domain                                                         |
+| **Discord**          | Community        | Bot token + application ID                                                 |
+| **Google Workspace** | Productivity     | Shared OAuth in-app flow; reconnect when newer required scopes are missing |
+| **Rhino**            | Architecture/CAD | Localhost Rhino bridge + `COWORK_ARCH_PROJECT_ROOT`                        |
+| **Blender**          | 3D/Rendering     | Localhost Blender bridge + `COWORK_ARCH_PROJECT_ROOT`                      |
+| **ComfyUI**          | Image Generation | Local ComfyUI API + `COWORK_ARCH_PROJECT_ROOT`                             |
 
 Most service connectors provide tools like `search`, `get`, `create`, and `update` for their respective APIs. Local creative connectors provide app-specific tools for Rhino, Blender, and ComfyUI; their file arguments must stay inside `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`. **47 connectors** are available in total, including Stripe, Tavily, Grafana, Metabase, Socket, Rhino, Blender, ComfyUI, and more. See [Enterprise Connectors](enterprise-connectors.md) for the full catalog.
 
 ### Social Integrations (Optional)
 
 #### X (Twitter)
+
 1. Open **Settings** > **X (Twitter)**
 2. Choose Browser Cookies or Manual Cookies
 3. (Optional) Enable **Mention Trigger** and configure:
@@ -635,10 +654,12 @@ src/
 ### Debugging
 
 **Renderer Process (UI)**:
+
 - DevTools open automatically in dev mode
 - Use `console.log()` - shows in DevTools Console
 
 **Main Process (Backend)**:
+
 - Use `console.log()` - shows in terminal
 - Check logs:
   - macOS: `~/Library/Application Support/cowork-os/`
@@ -647,10 +668,12 @@ src/
 ### Database
 
 SQLite database location:
+
 - macOS: `~/Library/Application Support/cowork-os/cowork-os.db`
 - Windows: `%APPDATA%\\cowork-os\\cowork-os.db`
 
 View it with any SQLite browser or:
+
 ```bash
 # macOS
 sqlite3 ~/Library/Application\ Support/cowork-os/cowork-os.db
@@ -686,6 +709,7 @@ Output: `release/*.dmg` (macOS) and `release/*.exe` (Windows)
 ### Issue: Electron won't start
 
 **Solution**: Clear and reinstall:
+
 ```bash
 rm -rf node_modules dist
 npm run setup
@@ -695,6 +719,7 @@ npm run dev
 ### Issue: "Permission denied" for workspace
 
 **Solution**: Choose a folder you have write access to, like:
+
 - `~/Documents/cowork-test`
 - `~/Downloads/test`
 
@@ -703,6 +728,7 @@ Don't use system folders like `/System` or `/Applications`.
 ### Issue: Tasks fail immediately
 
 **Solution**: Check:
+
 1. LLM provider is configured in Settings
 2. API key is valid
 3. Workspace has proper permissions
@@ -712,6 +738,7 @@ Don't use system folders like `/System` or `/Applications`.
 ### Issue: Ollama connection failed
 
 **Solution**:
+
 1. Make sure Ollama is running: `ollama serve`
 2. Check URL is correct (default: `http://localhost:11434`)
 3. Make sure you've pulled a model: `ollama pull llama3.2`

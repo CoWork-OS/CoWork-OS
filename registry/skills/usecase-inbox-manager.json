@@ -12,11 +12,7 @@
       "description": "Inbox manager mode",
       "required": false,
       "default": "triage",
-      "options": [
-        "triage",
-        "autopilot",
-        "followups"
-      ]
+      "options": ["triage", "autopilot", "followups"]
     },
     {
       "name": "message_limit",
@@ -38,10 +34,7 @@
       "description": "How to format the final report",
       "required": false,
       "default": "priority-table",
-      "options": [
-        "priority-table",
-        "bullets"
-      ]
+      "options": ["priority-table", "bullets"]
     }
   ],
   "enabled": true,

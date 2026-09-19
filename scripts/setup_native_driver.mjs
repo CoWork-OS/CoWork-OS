@@ -29,8 +29,8 @@ async function main() {
       const delayMs = Math.min(10_000, 1_000 * Math.pow(2, attempt - 1));
       console.log(
         `\n[cowork] Native setup was killed; retrying (attempt ${attempt}/${maxAttempts}) in ${Math.round(
-          delayMs / 1000
-        )}s...`
+          delayMs / 1000,
+        )}s...`,
       );
       await sleep(delayMs);
     }
@@ -55,4 +55,3 @@ main().catch((err) => {
   console.error("[cowork] setup:native driver failed:", err);
   process.exit(1);
 });
-

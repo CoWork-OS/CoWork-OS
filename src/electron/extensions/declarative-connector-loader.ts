@@ -187,6 +187,26 @@ function createHttpHandler(
   };
 }
 
+/**
+ * SECURITY: these handlers execute manifest-supplied content and are NOT a
+ * sandbox.
+ *
+ * - `config.command` is a manifest string passed to a shell. Only the
+ *   interpolated *parameters* are escaped by expandShellTemplate; the command
+ *   template itself is trusted.
+ * - `createScriptHandler` runs manifest JS in a `vm` context, which is
+ *   escapable (e.g. `input.constructor.constructor("return process")()`).
+ *
+ * That is currently acceptable only because both are reachable exclusively from
+ * an installed plugin pack, and installing a pack already `require()`s its
+ * entry point into the main process — so a hostile pack has code execution
+ * regardless. Neither handler has a live caller today
+ * (`PluginRegistry.getTool` is unreferenced outside tests).
+ *
+ * Do NOT expose these to any lower-trust manifest source — a marketplace, a
+ * remote catalog, or agent-authored config — without first replacing the shell
+ * template with an argv allowlist and the `vm` context with a real isolate.
+ */
 function createShellHandler(
   connector: DeclarativeConnector,
 ): (input: Record<string, unknown>) => Promise<unknown> {

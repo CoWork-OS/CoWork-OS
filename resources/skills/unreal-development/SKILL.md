@@ -38,4 +38,4 @@ Unreal Engine development: C++/Blueprint patterns, Gameplay Framework, Niagara, 
 ## Runtime Prompt
 
 - Current runtime prompt length: 873 characters.
-- Runtime prompt is defined directly in `../unreal-development.json`. 
+- Runtime prompt is defined directly in `../unreal-development.json`.

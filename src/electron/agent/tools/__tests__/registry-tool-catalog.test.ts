@@ -1,3 +1,11 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { PermissionEngine } from "../../runtime/PermissionEngine";
+import {
+  applyAccessProfileToWorkspace,
+  resolveEffectiveAccessProfile,
+} from "../../../security/access-profile-resolver";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import mermaid from "mermaid";
 
@@ -129,6 +137,7 @@ vi.mock("../../../memory/SupermemoryService", () => ({
 
 import { ToolRegistry } from "../registry";
 import { ChannelTools } from "../channel-tools";
+import * as montyPolicy from "../../../security/monty-tool-policy";
 
 function createWorkspace(): Any {
   return {
@@ -348,6 +357,9 @@ describe("ToolRegistry tool catalog versioning", () => {
 
     expect((registry as Any).getApprovalTypeForTool("run_command")).toBe("run_command");
     expect((registry as Any).getApprovalTypeForTool("delete_file")).toBe("delete_file");
+    expect((registry as Any).getApprovalTypeForTool("batch_image_process")).toBe(
+      "external_file_access",
+    );
     expect((registry as Any).getApprovalTypeForTool("get_current_location")).toBe(
       "location_access",
     );
@@ -515,4 +527,86 @@ describe("ToolRegistry tool catalog versioning", () => {
 
     parseSpy.mockRestore();
   });
+});
+
+describe("registered workspace operations without approval interruptions", () => {
+  it("does not execute a legacy handler after required consent is cancelled", async () => {
+    const daemon = {
+      ...createDaemon(),
+      requestApproval: vi.fn(async () => {
+        throw new Error("Approval request cancelled because tool execution ended");
+      }),
+    };
+    const registry = new ToolRegistry(createWorkspace(), daemon as Any, "task-cancelled-consent");
+    const legacy = vi.spyOn((registry as Any).handlerRegistry, "has").mockReturnValue(false);
+    const reader = vi.spyOn((registry as Any).fileTools, "readFile");
+    const policy = vi.spyOn(montyPolicy, "evaluateMontyToolPolicy").mockResolvedValue({
+      decision: "require_approval",
+      reason: "Explicit workspace consent",
+    } as Any);
+    try {
+      await expect(registry.executeTool("read_file", { path: "note.md" })).rejects.toThrow(
+        "cancelled",
+      );
+      expect(daemon.requestApproval).toHaveBeenCalledTimes(1);
+      expect(reader).not.toHaveBeenCalled();
+    } finally {
+      legacy.mockRestore();
+      reader.mockRestore();
+      policy.mockRestore();
+    }
+  });
+
+  it.each(["ask_for_approval", "approve_for_me", "full_access"])(
+    "writes a real temporary-session note under %s without approval calls or events",
+    async (accessProfileId) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-boundary-"));
+      const session = path.join(root, "cowork-os-temp", "ui-session-test");
+      await fs.mkdir(session, { recursive: true });
+      try {
+        const source = { ...createWorkspace(), path: session };
+        const profile = resolveEffectiveAccessProfile({
+          workspace: source,
+          task: { agentConfig: { accessProfileId } },
+        });
+        const workspace = applyAccessProfileToWorkspace(source, profile);
+        const daemon = {
+          ...createDaemon(),
+          requestApproval: vi.fn(() => {
+            throw new Error("Unexpected approval interruption");
+          }),
+          updateTask: vi.fn(),
+          evaluateToolPermission: vi.fn((_taskId, request) =>
+            PermissionEngine.evaluate({
+              workspace,
+              toolName: request.toolName,
+              toolInput: request.details?.params,
+              approvalType: request.approvalType,
+              mode: profile.permissionMode,
+              rules: [],
+            }),
+          ),
+        };
+        const registry = new ToolRegistry(workspace, daemon as Any, "task-local-note");
+        const notePath = path.join(session, "scribe-conversation.md");
+        const result = await registry.executeTool("write_file", {
+          path: notePath,
+          content: "# Conversation\nA saved workspace note.\n",
+        });
+        expect(result.success).toBe(true);
+        expect(await fs.readFile(notePath, "utf8")).toContain("A saved workspace note.");
+        await registry.executeTool("write_file", { path: notePath, content: "Updated note\n" });
+        expect(await fs.readFile(notePath, "utf8")).toBe("Updated note\n");
+        expect(daemon.requestApproval).not.toHaveBeenCalled();
+        expect(daemon.updateTask).not.toHaveBeenCalled();
+        expect(
+          daemon.logEvent.mock.calls.some((call: Any[]) =>
+            ["approval_requested", "approval_granted", "approval_denied"].includes(call[1]),
+          ),
+        ).toBe(false);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 });

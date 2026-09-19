@@ -13,8 +13,13 @@ Cowork now supports more than ACP discovery-only plumbing:
 - `acp.task.cancel` can cancel both local delegated work and remote A2A-compatible tasks
 - orchestration tools can target `acp_agent_id` so local DAGs can delegate to local or remote ACP agents
 - remote ACP invocations are approval-gated under the same policy model as other governed actions
-- ACP child tasks and acpx-backed command execution inherit the effective [access profile](access-profiles.md)
-  and cannot widen the parent task's sandbox, command-tool, filesystem, network, or domain scope
+- ACP child tasks inherit the effective [access profile](access-profiles.md). The external acpx
+  adapter cannot enforce CoWork's bounded filesystem and network rules, so bounded tasks are
+  rejected before the adapter is started; acpx execution requires an explicitly unrestricted
+  Full access profile and compatible administrator policy. The adapter's own consent flags remain
+  separate and are never silently promoted to `approve-all`.
+- The [approval-boundary validation record](approval-boundary-validation.md) covers the native
+  runtime smoke, bounded ACP rejection, cancellation cleanup, and the known platform limits.
 - ACP task and inbox access is scope-aware so non-operator clients are limited to their own work by default
 - remote endpoints are validated and timed out before invocation to reduce bad registrations and unsafe outbound calls
 
@@ -62,7 +67,6 @@ Use acpx instead of raw `codex` / `claude` commands. Cowork’s executor keeps u
    ```
 
 2. **Add acpx detection** in `cli-agent-detection.ts`:
-
    - Extend patterns for `acpx codex`, etc.
    - Render `CliAgentFrame` for acpx-backed tasks
 

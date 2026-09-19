@@ -37,11 +37,11 @@ Research competitors for a product, market, or idea and identify opportunities t
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| topic | string | Yes | The product, market, or idea to research competitors for |
+| Name  | Type   | Required | Description                                              |
+| ----- | ------ | -------- | -------------------------------------------------------- |
+| topic | string | Yes      | The product, market, or idea to research competitors for |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1020 characters.
-- Runtime prompt is defined directly in `../competitive-research.json`. 
+- Runtime prompt is defined directly in `../competitive-research.json`.

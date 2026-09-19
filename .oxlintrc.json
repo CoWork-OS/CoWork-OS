@@ -7,11 +7,5 @@
     "no-control-regex": "off",
     "no-require-imports": "warn"
   },
-  "ignorePatterns": [
-    "dist",
-    "node_modules",
-    ".tmp",
-    "tmp",
-    "connectors/**/dist"
-  ]
+  "ignorePatterns": ["dist", "node_modules", ".tmp", "tmp", "connectors/**/dist"]
 }

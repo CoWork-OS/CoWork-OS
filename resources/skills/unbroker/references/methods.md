@@ -20,7 +20,7 @@ optimal per site. Do not hand back a to-do list of "we could not search these."
 
 - **Why it is sound (does NOT violate least-disclosure):** a blind opt-out sends only the subject's own
   identifiers to the broker's own official removal channel. You are giving the broker the subject's data
-  *to remove it*, not exposing new data or acting on a third party. (Third-party / indirect records are
+  _to remove it_, not exposing new data or acting on a third party. (Third-party / indirect records are
   the exception: those still require confirming the exposure first.)
 - **The opt-out flow doubles as the authoritative search.** Guided flows that match on email + DOB +
   legal name and then say "no results" are a **stronger `not_found` than any scrape** - the broker ran
@@ -62,7 +62,7 @@ URLs.
 
 1. CoWork web extraction/fetch on the broker `search.url` (fast HTML -> markdown). Look for `search.match_signal`.
    Build per-vector URLs from `search.url_patterns` and heed `search.url_format_quirks` (see below).
-1b. **`site:` search-engine probe (cheap, do it early and in parallel).** `web_search` with
+   1b. **`site:` search-engine probe (cheap, do it early and in parallel).** `web_search` with
    `site:<broker-domain> "First Last"` (add a city/ZIP or a unique phone/address to cut namesake
    noise) often returns the **exact profile-slug URL** in one shot - which both confirms the listing
    exists AND hands you the opaque `/find/person/<id>` or `/p/<slug>` URL you'd otherwise have to
@@ -78,18 +78,18 @@ URLs.
    cloud/stealth browser (Browserbase) may get through; if none is available, do **not**
    burn attempts - `pdd.py record <subject> <broker> blocked` and move on (a re-scan with a stealth
    backend can pick it up later).
-3b. **Operator-browser path (the reliable unblock for anti-bot sites).** Cloudflare/DataDome key on
+   3b. **Operator-browser path (the reliable unblock for anti-bot sites).** Cloudflare/DataDome key on
    datacenter IPs + headless fingerprints, so web extraction, the proxyless agent browser, and even a
    cloud browser often fail - but the **operator's own everyday browser (residential IP, real
    fingerprint) sails straight through**. For any `blocked` site, hand the operator a paste-ready
    search URL (built from `search.url_patterns`), give them the identity anchors to judge by (current
-   + prior addresses, age, a distinguishing detail) and the namesake/relative watch-list, and ask for
-   the verdict or a screenshot (the agent can read screenshots). This is a **first-class scan path, not
-   a fallback** - treat the operator's live check as authoritative and record the real verdict
-   (`found` / `not_found` / `indirect_exposure`), citing `scanned_via: operator_browser`. Same for
-   opt-out forms the agent's browser can't reach: guide the operator field-by-field (least-disclosure),
-   pausing before submit. (This is exactly why the same trick clears email-verification links the agent
-   can't open - see the Verification loop.)
+   - prior addresses, age, a distinguishing detail) and the namesake/relative watch-list, and ask for
+     the verdict or a screenshot (the agent can read screenshots). This is a **first-class scan path, not
+     a fallback** - treat the operator's live check as authoritative and record the real verdict
+     (`found` / `not_found` / `indirect_exposure`), citing `scanned_via: operator_browser`. Same for
+     opt-out forms the agent's browser can't reach: guide the operator field-by-field (least-disclosure),
+     pausing before submit. (This is exactly why the same trick clears email-verification links the agent
+     can't open - see the Verification loop.)
 4. Capture evidence: save listing URLs and a `browser` screenshot into the subject's `evidence/` dir,
    then `pdd.py record <subject> <broker> found --found true --evidence '{"listing_urls":[...]}'`.
 
@@ -99,12 +99,13 @@ If a listing genuinely does not exist: `pdd.py record <subject> <broker> not_fou
 
 A constructed search URL that 404s almost always means the **URL pattern is wrong**, not that the
 person is absent. Never record `not_found` off a 404. Instead:
-  1. Re-check the broker's `search.url_patterns` / `url_format_quirks` and rebuild the URL.
-  2. Fall back to the **on-site search box**: `browser_navigate` to the search page, `browser_type`
-     the raw query, `browser_click` Search, then read the **canonical result URL** the site lands on.
-  3. Only after the site's own search returns an empty result set do you record `not_found`.
-  4. If a pattern was wrong, fix it in `references/brokers/<id>.json` (`url_patterns` +
-     `url_format_quirks`) so the next run is correct - see the rule below.
+
+1. Re-check the broker's `search.url_patterns` / `url_format_quirks` and rebuild the URL.
+2. Fall back to the **on-site search box**: `browser_navigate` to the search page, `browser_type`
+   the raw query, `browser_click` Search, then read the **canonical result URL** the site lands on.
+3. Only after the site's own search returns an empty result set do you record `not_found`.
+4. If a pattern was wrong, fix it in `references/brokers/<id>.json` (`url_patterns` +
+   `url_format_quirks`) so the next run is correct - see the rule below.
 
 ### Log URL/format quirks for every site you scrape
 
@@ -127,28 +128,30 @@ People-search sites are dense with namesakes and family clusters. Before recordi
 record is the **subject themselves** (corroborate via DOB, a known current/prior address, or the
 identifier you searched). Two non-removable patterns to record as evidence but NOT as the subject's own
 listing:
-  - **Namesake:** same name, different person (different DOB/location with no overlap). Not the subject.
-  - **Relative record:** the listing is about a *different* person (a relative) and merely *names* the
-    subject in a "Family" field, or carries the subject's email/phone as a secondary datum. This is a
-    third party's record - the consent gate correctly blocks acting on it. See "Indirect exposure" in
-    the web_form section for what the subject *can* still request.
+
+- **Namesake:** same name, different person (different DOB/location with no overlap). Not the subject.
+- **Relative record:** the listing is about a _different_ person (a relative) and merely _names_ the
+  subject in a "Family" field, or carries the subject's email/phone as a secondary datum. This is a
+  third party's record - the consent gate correctly blocks acting on it. See "Indirect exposure" in
+  the web_form section for what the subject _can_ still request.
 
 Two more false-positive traps that a naive scan records as `found` when it should not:
-  - **Property record != PII (address-anchored sites).** Reverse-address / property sites (rehold,
-    clustrmaps-style) can match on a public **property record** (build year, beds/baths, last sale
-    price, incidents) without exposing the subject's personal info - the resident/owner NAME is behind
-    a "View full report" paywall/signup. Distinguish "this address exists in a public property DB"
-    (non-removable, `not_found`) from "the subject's personal profile is displayed" (removable,
-    `found`). Record `found` ONLY if a resident name matching the subject is publicly shown; an
-    address-only match is `not_found` - there is nothing to opt out of, and public property records are
-    not removable anyway. See `rehold.json` `search.match_signal_notes`.
-  - **SEO-templated title/H1 fakes a "found".** Many people-search sites auto-insert the query into the
-    page `<title>`, H1, and intro copy ("FREE public records found for {Name} in {City}", "Over 100+
-    FREE public records found for {Name}"). That echo is **templating, not a result** - the actual
-    result cards are often unrelated namesakes in other states. A `match_signal` on title/intro text
-    yields false positives. Require a real result **card** corroborated by the subject's address or
-    DOB, and ignore the templated title/intro/H1 entirely. See `truepeoplesearch.json` /
-    `fastpeoplesearch.json` `search.match_signal_notes`.
+
+- **Property record != PII (address-anchored sites).** Reverse-address / property sites (rehold,
+  clustrmaps-style) can match on a public **property record** (build year, beds/baths, last sale
+  price, incidents) without exposing the subject's personal info - the resident/owner NAME is behind
+  a "View full report" paywall/signup. Distinguish "this address exists in a public property DB"
+  (non-removable, `not_found`) from "the subject's personal profile is displayed" (removable,
+  `found`). Record `found` ONLY if a resident name matching the subject is publicly shown; an
+  address-only match is `not_found` - there is nothing to opt out of, and public property records are
+  not removable anyway. See `rehold.json` `search.match_signal_notes`.
+- **SEO-templated title/H1 fakes a "found".** Many people-search sites auto-insert the query into the
+  page `<title>`, H1, and intro copy ("FREE public records found for {Name} in {City}", "Over 100+
+  FREE public records found for {Name}"). That echo is **templating, not a result** - the actual
+  result cards are often unrelated namesakes in other states. A `match_signal` on title/intro text
+  yields false positives. Require a real result **card** corroborated by the subject's address or
+  DOB, and ignore the templated title/intro/H1 entirely. See `truepeoplesearch.json` /
+  `fastpeoplesearch.json` `search.match_signal_notes`.
 
 Both are why the **parent re-verifies every `found` before acting** rule is load-bearing (`pdd.py show
 <subject> <broker>` reads back a subagent's recorded evidence so the parent can re-verify without
@@ -166,22 +169,22 @@ re-deriving the listing URL). If a `found` turns out to be a false positive, cor
 
 ### Indirect exposure (named as a relative / your email on someone else's record)
 
-You asked the right question: if a broker lists a *relative* and names you in their "Family" field, or
+You asked the right question: if a broker lists a _relative_ and names you in their "Family" field, or
 shows **your** email/phone on **their** record, that IS personal information about you - even though the
 record's primary subject is a third party. Resolve it in two distinct lanes:
 
-- **The self-service opt-out form does NOT cover this.** That form removes a record whose *primary
-  subject* is you. It has no notion of "scrub my identifiers from this other person's record," and
+- **The self-service opt-out form does NOT cover this.** That form removes a record whose _primary
+  subject_ is you. It has no notion of "scrub my identifiers from this other person's record," and
   submitting it with the relative's address to force a match would be (a) disclosing data the listing
   doesn't tie to you and (b) acting on a third party's record. Don't. The consent gate exists to stop
   exactly that.
 - **What you CAN do - a targeted "delete my personal information" request (CCPA 1798.105 / GDPR Art.17).**
-  These rights attach to *your* personal information *wherever the business holds it*, including as a
+  These rights attach to _your_ personal information _wherever the business holds it_, including as a
   data point on another person's profile. So the subject may email the broker's privacy address and
   request suppression of **their own specific identifiers** (this email address, this phone number, my
   name in family/relative associations), citing the relative listings as the locations. This is a
   narrower request than a full opt-out and does not require the relative's consent - you are only asking
-  them to delete data about *you*. Use `render-email` with the `ccpa`/`gdpr` template, list only the
+  them to delete data about _you_. Use `render-email` with the `ccpa`/`gdpr` template, list only the
   subject's own identifiers + the URLs where they appear, and record it as a normal `submitted` →
   `awaiting_processing` email case. Verify by re-scanning those identifier vectors (email/phone) after
   the statutory window - `confirmed_removed` only when the subject's identifier no longer appears.
@@ -228,7 +231,7 @@ Then follow the **Verification loop** if the broker emails a confirmation link.
 Submit the web form, then the site places an automated call with a numeric code. If the operator is
 available to read the code, capture it and complete the form (T2). Otherwise queue a human task.
 
-## phone (voice menu) / fax / mail / gov_id  ->  human task (T3)
+## phone (voice menu) / fax / mail / gov_id -> human task (T3)
 
 Do **not** attempt to automate. Create a `todo` task and `pdd.py record <subject> <broker>
 human_task_queued` with exact instructions and an explicit **withhold** list (never SSN; never a
@@ -355,6 +358,7 @@ After each parent removal is confirmed, **re-scan its children** before submitti
 usually they drop out and need no separate opt-out.
 
 ### Any other parent
+
 A parent without a hand-verified `optout.playbook` gets synthesised steps from its structured record
 (URL/email, `requires` flags, deletion lane, notes/quirks). Follow those, and **write what you learn
 back into `references/brokers/<id>.json`** (`optout.playbook`, `optout.deletion`, `quirks`,

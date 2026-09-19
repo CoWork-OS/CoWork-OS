@@ -254,6 +254,15 @@ export class FeishuAdapter implements ChannelAdapter {
   }
 
   private async startServer(): Promise<void> {
+    // The listener binds all interfaces and is meant to be publicly exposed, so
+    // there must be a way to authenticate callbacks before it accepts traffic.
+    if (!this.config.encryptKey && !this.config.verificationToken) {
+      throw new Error(
+        "Feishu requires an Encrypt Key or a Verification Token before the callback server can start. " +
+          "Add one in the Feishu channel settings (both are shown under the app's Event Subscriptions page).",
+      );
+    }
+
     const port = this.config.webhookPort || 3980;
     const webhookPath = this.config.webhookPath || "/feishu/webhook";
 
@@ -322,6 +331,17 @@ export class FeishuAdapter implements ChannelAdapter {
     const parsed = parseMaybeJson<Record<string, unknown>>(rawBody);
     if (!parsed) {
       throw new Error("Invalid Feishu payload");
+    }
+
+    // Fail closed. Both credentials are optional in config, and when neither is
+    // set every check below is skipped — which made this endpoint accept
+    // arbitrary attacker-crafted events (with an attacker-chosen sender id)
+    // straight into the router. The webhook server also refuses to start in
+    // this state; this is the second line of defence.
+    if (!this.config.encryptKey && !this.config.verificationToken) {
+      throw new Error(
+        "Feishu callback credentials are not configured. Set an Encrypt Key or a Verification Token to accept events.",
+      );
     }
 
     if (this.config.encryptKey) {

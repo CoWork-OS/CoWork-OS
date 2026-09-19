@@ -4,11 +4,11 @@ Query the world's largest prediction market. All public endpoints require **no a
 
 ## Three APIs
 
-| API | Base URL | Purpose |
-|-----|----------|----------|
-| **Gamma** | `https://gamma-api.polymarket.com` | Events, markets, search, tags, series, sports |
-| **CLOB** | `https://clob.polymarket.com` | Prices, orderbooks, spreads, midpoints, trade history |
-| **Data** | `https://data-api.polymarket.com` | Positions, open interest, holders, analytics |
+| API       | Base URL                           | Purpose                                               |
+| --------- | ---------------------------------- | ----------------------------------------------------- |
+| **Gamma** | `https://gamma-api.polymarket.com` | Events, markets, search, tags, series, sports         |
+| **CLOB**  | `https://clob.polymarket.com`      | Prices, orderbooks, spreads, midpoints, trade history |
+| **Data**  | `https://data-api.polymarket.com`  | Positions, open interest, holders, analytics          |
 
 ## Rate Limits
 
@@ -79,19 +79,19 @@ curl -s 'https://gamma-api.polymarket.com/series?active=true' | jq '.[] | {title
 
 ### Gamma query parameters reference
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `limit` | int | Max results (default 100) |
-| `offset` | int | Pagination offset |
-| `active` | bool | Only active events |
-| `closed` | bool | Filter by closed status |
-| `archived` | bool | Filter by archived status |
-| `order` | string | Sort field: `volume24hr`, `volume1wk`, `volume1mo`, `liquidity`, `startDate`, `endDate`, `createdAt` |
-| `ascending` | bool | Sort direction |
-| `tag` | string | Filter by tag slug |
-| `title_contains` | string | Search within titles |
-| `slug` | string | Exact slug match |
-| `id` | string | Exact ID match |
+| Param            | Type   | Description                                                                                          |
+| ---------------- | ------ | ---------------------------------------------------------------------------------------------------- |
+| `limit`          | int    | Max results (default 100)                                                                            |
+| `offset`         | int    | Pagination offset                                                                                    |
+| `active`         | bool   | Only active events                                                                                   |
+| `closed`         | bool   | Filter by closed status                                                                              |
+| `archived`       | bool   | Filter by archived status                                                                            |
+| `order`          | string | Sort field: `volume24hr`, `volume1wk`, `volume1mo`, `liquidity`, `startDate`, `endDate`, `createdAt` |
+| `ascending`      | bool   | Sort direction                                                                                       |
+| `tag`            | string | Filter by tag slug                                                                                   |
+| `title_contains` | string | Search within titles                                                                                 |
+| `slug`           | string | Exact slug match                                                                                     |
+| `id`             | string | Exact ID match                                                                                       |
 
 ---
 
@@ -123,10 +123,11 @@ curl -s 'https://clob.polymarket.com/book?token_id={clob_token_id}' | jq '{bids:
 ```
 
 Response shape:
+
 ```json
 {
-  "bids": [{"price": "0.61", "size": "1500.00"}],
-  "asks": [{"price": "0.63", "size": "800.00"}]
+  "bids": [{ "price": "0.61", "size": "1500.00" }],
+  "asks": [{ "price": "0.63", "size": "800.00" }]
 }
 ```
 
@@ -143,10 +144,10 @@ curl -s 'https://clob.polymarket.com/midpoint?token_id={clob_token_id}'
 curl -s 'https://clob.polymarket.com/prices-history?market={condition_id}&interval=1d&fidelity=60'
 ```
 
-| Param | Values |
-|-------|--------|
+| Param      | Values                                    |
+| ---------- | ----------------------------------------- |
 | `interval` | `1d`, `1w`, `1m`, `3m`, `6m`, `1y`, `max` |
-| `fidelity` | Number of data points returned |
+| `fidelity` | Number of data points returned            |
 
 ---
 
@@ -177,6 +178,7 @@ curl -s 'https://data-api.polymarket.com/trades?market={condition_id}&limit=20'
 ### Understanding prices
 
 Prices are **implied probabilities** between 0 and 1:
+
 - Yes price = 0.72 means the market implies a **72% chance** the event happens
 - No price = 0.28 means **28% chance** it doesn't (always sums to ~1.0)
 - Prices come from `outcomePrices` field as a JSON string: `"[\"0.72\", \"0.28\"]"`
@@ -197,6 +199,7 @@ Prices are **implied probabilities** between 0 and 1:
 ### Price momentum fields
 
 Market objects include built-in momentum:
+
 - `oneHourPriceChange` — 1h change
 - `oneDayPriceChange` — 24h change
 - `oneWeekPriceChange` — 7d change
@@ -213,6 +216,7 @@ Market objects include built-in momentum:
 Some events have multiple markets (e.g., "Who will win the 2028 election?" with separate markets for each candidate). These use `enableNegRisk: true`.
 
 For these:
+
 - Each market is a separate Yes/No binary
 - The `negRiskOther` flag marks "Other" catch-all markets
 - All Yes prices across markets in the event should sum to ~1.0
@@ -226,7 +230,7 @@ For these:
 1. Search: `GET /events?title_contains=X&active=true&closed=false`
 2. Extract `outcomePrices` from the matching market
 3. Parse: `JSON.parse(outcomePrices)` → `[yesPrice, noPrice]`
-4. Report: "The market gives X a {yesPrice * 100}% chance"
+4. Report: "The market gives X a {yesPrice \* 100}% chance"
 
 ### "What's trending right now?"
 

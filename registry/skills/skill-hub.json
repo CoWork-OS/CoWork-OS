@@ -8,14 +8,8 @@
   "parameters": [],
   "enabled": true,
   "requires": {
-    "bins": [
-      "skill-hub"
-    ],
-    "anyBins": [
-      "npm",
-      "pnpm",
-      "yarn"
-    ]
+    "bins": ["skill-hub"],
+    "anyBins": ["npm", "pnpm", "yarn"]
   },
   "install": [
     {
@@ -23,20 +17,14 @@
       "kind": "npm",
       "package": "skill-hub",
       "label": "Install via npm (npm i -g skill-hub)",
-      "bins": [
-        "skill-hub"
-      ]
+      "bins": ["skill-hub"]
     }
   ],
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
     "homepage": "https://skill-hub.com",
-    "tags": [
-      "cli",
-      "registry",
-      "skills"
-    ],
+    "tags": ["cli", "registry", "skills"],
     "routing": {
       "useWhen": "Use when the user asks to use the skill-hub CLI to search, install, update, and publish agent skills from skill-hub.com. Use when you need to fetch new skills on the fly, sync installed skills to latest or a specific version, or publish new/updated skill folders with the npm-installed skill-hub CLI.",
       "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",

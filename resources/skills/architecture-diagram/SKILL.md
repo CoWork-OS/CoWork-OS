@@ -39,12 +39,12 @@ Turn an architecture description or inspected codebase into a self-contained HTM
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| system_name | string | No | Short system or project name for the header |
-| diagram_brief | string | No | Structured architecture description |
-| diagram_type | select | No | Diagram emphasis: auto, system-overview, cloud-infrastructure, deployment, data-flow, security, network-topology, microservices |
-| output_path | string | No | Workspace-relative or absolute HTML output path |
+| Name          | Type   | Required | Description                                                                                                                     |
+| ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| system_name   | string | No       | Short system or project name for the header                                                                                     |
+| diagram_brief | string | No       | Structured architecture description                                                                                             |
+| diagram_type  | select | No       | Diagram emphasis: auto, system-overview, cloud-infrastructure, deployment, data-flow, security, network-topology, microservices |
+| output_path   | string | No       | Workspace-relative or absolute HTML output path                                                                                 |
 
 ## Workflow Notes
 

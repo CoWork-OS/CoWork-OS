@@ -93,6 +93,7 @@ import type {
   TaskTraceRunSummary,
   GetCoreTraceResult,
   ImageAttachment,
+  JevTestProviderRequest,
   LLMReasoningEffort,
   LLMProviderType,
   ManagedAgentAuditEntry,
@@ -211,7 +212,19 @@ import type {
   TaskEventDetailResult,
   TaskTimelinePageRequest,
   TaskTimelinePageResult,
+  BotConversationListQuery,
+  BotNotificationPolicy,
+  UpdateBotNotificationPolicyRequest,
 } from "../shared/types";
+import type {
+  ComposerDraft,
+  ComposerDraftAttachmentPutRequest,
+  ComposerDraftAttachmentReleaseRequest,
+  ComposerDraftAttachmentResolveRequest,
+  ComposerDraftClearRequest,
+  ComposerDraftGetRequest,
+  ComposerDraftRekeyRequest,
+} from "../shared/composer-drafts";
 import type { AccessProfileId } from "../shared/access-profiles";
 import type {
   SubconsciousBrainSummary,
@@ -2707,6 +2720,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     offset?: number;
     prioritizeSidebar?: boolean;
     includeArchivedSessions?: boolean;
+    botConversation?: { workspaceId: string; agentRoleId: string };
     excludeSources?: string[];
     cursor?: {
       id?: string;
@@ -2721,6 +2735,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     offset?: number;
     prioritizeSidebar?: boolean;
     includeArchivedSessions?: boolean;
+    excludeBotConversations?: boolean;
     excludeSources?: string[];
     cursor?: {
       id?: string;
@@ -2730,6 +2745,31 @@ contextBridge.exposeInMainWorld("electronAPI", {
       createdAt?: number;
     };
   }) => invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_LIST_SIDEBAR, opts),
+  listBotConversations: (query: BotConversationListQuery) =>
+    invokeTaskIpcWithRendererTiming(IPC_CHANNELS.BOT_CONVERSATIONS_LIST, query),
+  getComposerDraft: (request: ComposerDraftGetRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_GET, request) as Promise<ComposerDraft | null>,
+  upsertComposerDraft: (draft: ComposerDraft) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_UPSERT, draft) as Promise<{
+      accepted: boolean;
+      draft: ComposerDraft | null;
+    }>,
+  clearComposerDraft: (request: ComposerDraftClearRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_CLEAR, request) as Promise<{
+      cleared: boolean;
+      releasedAttachments: number;
+    }>,
+  rekeyComposerDraft: (request: ComposerDraftRekeyRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_REKEY, request) as Promise<{
+      rekeyed: boolean;
+      rekeyedAttachmentCount?: number;
+    }>,
+  putComposerDraftAttachment: (request: ComposerDraftAttachmentPutRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_ATTACHMENT_PUT, request),
+  resolveComposerDraftAttachment: (request: ComposerDraftAttachmentResolveRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_ATTACHMENT_RESOLVE, request),
+  releaseComposerDraftAttachment: (request: ComposerDraftAttachmentReleaseRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_ATTACHMENT_RELEASE, request),
   exportTasksJson: (query?: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_EXPORT_JSON, query),
   toggleTaskPin: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_PIN, taskId),
   cancelTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CANCEL, id),
@@ -2802,6 +2842,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     options?: {
       expectedTurnId?: string;
       interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
+      deliveryMode?: "message" | "follow_up";
+      messageId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -2816,6 +2858,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       quotedAssistantMessage,
       ...(options?.expectedTurnId ? { expectedTurnId: options.expectedTurnId } : {}),
       ...(options?.interactionMode ? { interactionMode: options.interactionMode } : {}),
+      ...(options?.deliveryMode ? { deliveryMode: options.deliveryMode } : {}),
+      ...(options?.messageId ? { messageId: options.messageId } : {}),
       ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
       ...(options?.shellAccess !== undefined ? { shellAccess: options.shellAccess } : {}),
       ...(options?.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
@@ -3206,6 +3250,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resetLLMProviderCredentials: (providerType: LLMProviderType) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, providerType),
   testLLMProvider: (config: Any) => ipcRenderer.invoke(IPC_CHANNELS.LLM_TEST_PROVIDER, config),
+  testJevProvider: (config: JevTestProviderRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.JEV_TEST_PROVIDER, config),
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
   setLLMModel: (
@@ -3228,6 +3274,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     providerType: string,
     overrides?: { apiKey?: string; baseUrl?: string },
   ) => ipcRenderer.invoke(IPC_CHANNELS.LLM_REFRESH_CUSTOM_PROVIDER_MODELS, providerType, overrides),
+  discoverAtomicChatModels: (overrides?: { apiKey?: string; baseUrl?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LLM_DISCOVER_ATOMIC_CHAT_MODELS, overrides),
   getOllamaModels: (baseUrl?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, baseUrl),
   getGeminiModels: (apiKey?: string) =>
@@ -3530,6 +3578,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   downloadUpdate: (updateInfo: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_DOWNLOAD_UPDATE, updateInfo),
   installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_INSTALL_UPDATE),
+
+  // CoWork Pulse APIs
+  getPulseSettings: () => ipcRenderer.invoke(IPC_CHANNELS.PULSE_GET_SETTINGS),
+  setPulseEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PULSE_SET_ENABLED, enabled),
+  resetPulseIdentity: () => ipcRenderer.invoke(IPC_CHANNELS.PULSE_RESET_IDENTITY),
+  deletePulseRemoteData: () => ipcRenderer.invoke(IPC_CHANNELS.PULSE_DELETE_REMOTE_DATA),
+  flushPulse: () => ipcRenderer.invoke(IPC_CHANNELS.PULSE_FLUSH),
 
   // Update event listeners
   onUpdateProgress: (callback: (progress: Any) => void) => {
@@ -3908,6 +3964,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const subscription = (_: Any, taskId: string) => callback(taskId);
     ipcRenderer.on(IPC_CHANNELS.NAVIGATE_TO_TASK, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.NAVIGATE_TO_TASK, subscription);
+  },
+  onNavigateToBotConversation: (
+    callback: (payload: { botId: string; conversationId?: string }) => void,
+  ) => {
+    const subscription = (_: Any, payload: { botId: string; conversationId?: string }) =>
+      callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.NAVIGATE_TO_BOT_CONVERSATION, subscription);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.NAVIGATE_TO_BOT_CONVERSATION, subscription);
   },
 
   // Hooks (Webhooks & Gmail Pub/Sub) APIs
@@ -4438,6 +4503,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getDefaultAgentRoles: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_GET_DEFAULTS),
   seedDefaultAgentRoles: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS),
   syncDefaultAgentRoles: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SYNC_DEFAULTS),
+  getBotNotificationPolicy: (agentRoleId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_NOTIFICATION_GET,
+      agentRoleId,
+    ) as Promise<BotNotificationPolicy>,
+  updateBotNotificationPolicy: (request: UpdateBotNotificationPolicyRequest) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_NOTIFICATION_UPDATE,
+      request,
+    ) as Promise<BotNotificationPolicy>,
 
   // Persona Templates (Digital Twins) APIs
   listPersonaTemplates: (filter?: { category?: string; tag?: string }) =>
@@ -5877,6 +5952,7 @@ export interface ElectronAPI {
     offset?: number;
     prioritizeSidebar?: boolean;
     includeArchivedSessions?: boolean;
+    botConversation?: { workspaceId: string; agentRoleId: string };
     excludeSources?: string[];
     cursor?: {
       id?: string;
@@ -5886,11 +5962,29 @@ export interface ElectronAPI {
       createdAt?: number;
     };
   }) => Promise<Any[]>;
+  listBotConversations: (query: BotConversationListQuery) => Promise<Any[]>;
+  getComposerDraft?: (request: ComposerDraftGetRequest) => Promise<ComposerDraft | null>;
+  upsertComposerDraft?: (draft: ComposerDraft) => Promise<{
+    accepted: boolean;
+    draft: ComposerDraft | null;
+  }>;
+  clearComposerDraft?: (request: ComposerDraftClearRequest) => Promise<{
+    cleared: boolean;
+    releasedAttachments: number;
+  }>;
+  rekeyComposerDraft?: (request: ComposerDraftRekeyRequest) => Promise<{
+    rekeyed: boolean;
+    rekeyedAttachmentCount?: number;
+  }>;
+  putComposerDraftAttachment?: (request: ComposerDraftAttachmentPutRequest) => Promise<Any>;
+  resolveComposerDraftAttachment?: (request: ComposerDraftAttachmentResolveRequest) => Promise<Any>;
+  releaseComposerDraftAttachment?: (request: ComposerDraftAttachmentReleaseRequest) => Promise<Any>;
   listSidebarTasks: (opts?: {
     limit?: number;
     offset?: number;
     prioritizeSidebar?: boolean;
     includeArchivedSessions?: boolean;
+    excludeBotConversations?: boolean;
     excludeSources?: string[];
     cursor?: {
       id?: string;
@@ -5937,12 +6031,19 @@ export interface ElectronAPI {
     options?: {
       expectedTurnId?: string;
       interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
+      deliveryMode?: "message" | "follow_up";
+      messageId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
     },
-  ) => Promise<void>;
+  ) => Promise<{
+    queued: boolean;
+    duplicate?: boolean;
+    messageId?: string;
+    deliveryMode?: "message" | "follow_up";
+  }>;
   sendStepFeedback: (
     taskId: string,
     stepId: string,
@@ -6219,6 +6320,9 @@ export interface ElectronAPI {
   saveLLMSettings: (settings: Any) => Promise<{ success: boolean }>;
   resetLLMProviderCredentials: (providerType: LLMProviderType) => Promise<{ success: boolean }>;
   testLLMProvider: (config: Any) => Promise<{ success: boolean; error?: string }>;
+  testJevProvider: (
+    config: JevTestProviderRequest,
+  ) => Promise<{ success: boolean; error?: string }>;
   getLLMModels: () => Promise<Array<{ key: string; displayName: string; description: string }>>;
   getLLMConfigStatus: () => Promise<{
     currentProvider: LLMProviderType;
@@ -6265,6 +6369,19 @@ export interface ElectronAPI {
     providerType: string,
     overrides?: { apiKey?: string; baseUrl?: string },
   ) => Promise<Array<{ key: string; displayName: string; description: string }>>;
+  discoverAtomicChatModels: (overrides?: { apiKey?: string; baseUrl?: string }) => Promise<{
+    status:
+      | "success"
+      | "valid_empty"
+      | "unreachable"
+      | "authentication_rejected"
+      | "invalid_response"
+      | "cancelled"
+      | "timeout";
+    models: Array<{ id: string; name: string }>;
+    durationMs: number;
+    error?: string;
+  }>;
   getOllamaModels: (
     baseUrl?: string,
   ) => Promise<Array<{ name: string; size: number; modified: string }>>;
@@ -6883,6 +7000,7 @@ export interface ElectronAPI {
       | "coral";
     uiDensity?: "focused" | "full" | "power";
     timelineVerbosity?: "summary" | "verbose";
+    commandOutputStyle?: "terminal" | "minimal";
     language?: string;
     devRunLoggingEnabled?: boolean;
     homeResearchVaultEnabled?: boolean;
@@ -6913,6 +7031,7 @@ export interface ElectronAPI {
       | "coral";
     uiDensity?: "focused" | "full" | "power";
     timelineVerbosity?: "summary" | "verbose";
+    commandOutputStyle?: "terminal" | "minimal";
     language?: string;
     devRunLoggingEnabled?: boolean;
     homeResearchVaultEnabled?: boolean;
@@ -7427,6 +7546,9 @@ export interface ElectronAPI {
   deleteAllNotifications: () => Promise<void>;
   onNotificationEvent: (callback: (event: NotificationEvent) => void) => () => void;
   onNavigateToTask: (callback: (taskId: string) => void) => () => void;
+  onNavigateToBotConversation: (
+    callback: (payload: { botId: string; conversationId?: string }) => void,
+  ) => () => void;
   // Hooks (Webhooks & Gmail Pub/Sub)
   getHooksSettings: () => Promise<HooksSettings>;
   saveHooksSettings: (settings: Partial<HooksSettings>) => Promise<HooksSettings>;
@@ -7876,6 +7998,10 @@ export interface ElectronAPI {
   assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) => Promise<boolean>;
   getDefaultAgentRoles: () => Promise<Omit<AgentRoleData, "id" | "createdAt" | "updatedAt">[]>;
   seedDefaultAgentRoles: () => Promise<AgentRoleData[]>;
+  getBotNotificationPolicy: (agentRoleId: string) => Promise<BotNotificationPolicy>;
+  updateBotNotificationPolicy: (
+    request: UpdateBotNotificationPolicyRequest,
+  ) => Promise<BotNotificationPolicy>;
 
   // Persona Templates (Digital Twins)
   listPersonaTemplates: (filter?: { category?: string; tag?: string }) => Promise<unknown[]>;
@@ -8637,6 +8763,13 @@ export interface ElectronAPI {
   // Usage Insights
   getUsageInsights: (workspaceId: string, periodDays?: number) => Promise<Any>;
   getUsageInsightsEarliest: (workspaceId: string) => Promise<number | null>;
+
+  // CoWork Pulse
+  getPulseSettings: () => Promise<import("../shared/pulse").PulsePublicSettings>;
+  setPulseEnabled: (enabled: boolean) => Promise<import("../shared/pulse").PulseMutationResult>;
+  resetPulseIdentity: () => Promise<import("../shared/pulse").PulseMutationResult>;
+  deletePulseRemoteData: () => Promise<import("../shared/pulse").PulseMutationResult>;
+  flushPulse: () => Promise<import("../shared/pulse").PulsePublicSettings>;
 
   // Daily Briefing
   generateDailyBriefing: (workspaceId: string) => Promise<Any>;

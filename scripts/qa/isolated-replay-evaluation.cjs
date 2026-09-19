@@ -323,7 +323,16 @@ function projectionState(state) {
 function normalizeReplayTerminalStatus(value) {
   const normalized = text(value).toLowerCase();
   if (normalized === "ok") return "completed";
-  if (["waiting", "paused", "blocked", "needs_user_action", "awaiting_approval", "awaiting_verification"].includes(normalized)) {
+  if (
+    [
+      "waiting",
+      "paused",
+      "blocked",
+      "needs_user_action",
+      "awaiting_approval",
+      "awaiting_verification",
+    ].includes(normalized)
+  ) {
     return "waiting";
   }
   if (normalized === "resume_available") return "partial_success";
@@ -356,6 +365,30 @@ function replayEvents(events) {
   );
 }
 
+
+function validateReplayAssertions(value) {
+  if (value === undefined) return [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return ["invalid_assertions:expected_object"];
+  }
+  const assertions = value;
+  const findings = [];
+  for (const [key, entry] of Object.entries(assertions)) {
+    if (key === "expectedTerminalStatus") {
+      if (typeof entry !== "string" || !normalizeReplayTerminalStatus(entry)) {
+        findings.push("invalid_assertion:expectedTerminalStatus");
+      }
+    } else if (key === "mustContainAll" || key === "mustCreatePaths") {
+      if (!Array.isArray(entry) || entry.some((item) => typeof item !== "string" || !item.trim())) {
+        findings.push(`invalid_assertion:${key}`);
+      }
+    } else {
+      findings.push(`unsupported_assertion:${key}`);
+    }
+  }
+  return findings;
+}
+
 function evaluateIsolatedEvents(events, { taskRow, assertions } = {}) {
   const ordered = [...events].sort(
     (left, right) =>
@@ -381,7 +414,7 @@ function evaluateIsolatedEvents(events, { taskRow, assertions } = {}) {
   const full = replayEvents(ordered);
   const incrementalChecksum = checksum(projectionState(incremental));
   const fullRebuildChecksum = checksum(projectionState(full));
-  const failures = [...new Set(full.findings)];
+  const failures = [...new Set(full.findings), ...validateReplayAssertions(assertions)];
   if (ordered.length === 0) failures.push("missing_replay_items");
   const expectedTerminalStatus = normalizeReplayTerminalStatus(
     assertions && assertions.expectedTerminalStatus,

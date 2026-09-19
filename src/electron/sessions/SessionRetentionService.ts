@@ -7,8 +7,15 @@ import {
   type TaskSessionMetadata,
   WorkspaceRepository,
 } from "../database/repositories";
+import {
+  QueuedAttachmentStore,
+  type QueuedAttachmentRecord,
+  type QueuedAttachmentRef,
+} from "../agent/runtime/queued-attachment-store";
 
 type Any = Record<string, any>;
+
+const QUEUED_ATTACHMENT_ORPHAN_GRACE_MS = 24 * 60 * 60 * 1000;
 
 export interface TaskSessionSummary {
   id: string;
@@ -68,6 +75,7 @@ export class SessionRetentionService {
     private readonly eventRepo: TaskEventRepository,
     private readonly metadataRepo: TaskSessionMetadataRepository,
     private readonly workspaceRepo?: WorkspaceRepository,
+    private queuedAttachmentStore?: QueuedAttachmentStore,
   ) {}
 
   listSessions(filters: SessionRetentionFilters = {}): TaskSessionSummary[] {
@@ -132,22 +140,161 @@ export class SessionRetentionService {
       deletedTaskIds: [],
     };
 
-    if (options.dryRun === true || candidates.length === 0) {
+    if (options.dryRun === true) return result;
+    if (candidates.length === 0) {
+      this.cleanupOrphanedQueuedAttachments();
       return result;
     }
 
     for (const session of candidates) {
       const tasks = this.tasksForSession(session.id, 10000);
       for (const task of tasks) {
+        const queuedAttachmentRefs = this.captureQueuedAttachmentRefs(task.id);
         await options.deleteTask?.(task);
         this.taskRepo.delete(task.id);
+        this.releaseQueuedAttachmentRefs(task.id, queuedAttachmentRefs);
         result.deletedTaskIds.push(task.id);
       }
       this.metadataRepo.delete(session.id);
     }
 
+    // A process can die after persist() and before the receipt event is
+    // committed. Sweep only old, complete manifests whose owner has no
+    // authoritative receipt reference. Referenced records remain retained,
+    // including queued and delivered receipts, even when their task is not a
+    // current prune candidate.
+    this.cleanupOrphanedQueuedAttachments();
+
     result.deleted = true;
     return result;
+  }
+
+  /**
+   * Remove crash-left records after a conservative grace period. The event
+   * repository is the authority for ownership; failures retain everything.
+   */
+  cleanupOrphanedQueuedAttachments(now = Date.now()): number {
+    let store: QueuedAttachmentStore;
+    try {
+      store = this.getQueuedAttachmentStore();
+      const cutoffMs = now - QUEUED_ATTACHMENT_ORPHAN_GRACE_MS;
+      const authoritativeKeys = this.collectAuthoritativeAttachmentKeys();
+      let removed =
+        store.cleanupStaleTemporaryFiles(cutoffMs) +
+        store.cleanupOrphanedContentFiles(
+          cutoffMs,
+          (key) => authoritativeKeys === undefined || authoritativeKeys.has(key),
+        );
+      const records = store.listRecords();
+      for (const record of records) {
+        if (record.mtimeMs >= cutoffMs) continue;
+        if (this.hasAuthoritativeReceiptReference(record)) continue;
+        store.release(record.taskId, record.messageId, [record.ref]);
+        removed += 1;
+      }
+      return removed;
+    } catch {
+      // A malformed/symlinked record or an unavailable DB must never turn
+      // maintenance into destructive best-effort deletion.
+      return 0;
+    }
+  }
+
+  private getQueuedAttachmentStore(): QueuedAttachmentStore {
+    return (this.queuedAttachmentStore ??= new QueuedAttachmentStore());
+  }
+
+  private captureQueuedAttachmentRefs(taskId: string): Array<{
+    messageId: string;
+    refs: QueuedAttachmentRef[];
+  }> {
+    const captured: Array<{ messageId: string; refs: QueuedAttachmentRef[] }> = [];
+    let events: TaskEvent[];
+    try {
+      events = this.eventRepo.findByTaskId(taskId);
+    } catch {
+      return captured;
+    }
+    for (const event of events) {
+      const payload = event.payload as Record<string, unknown> | undefined;
+      const messageId = typeof payload?.messageId === "string" ? payload.messageId.trim() : "";
+      if (!messageId || !Array.isArray(payload?.queuedAttachmentRefs)) continue;
+      try {
+        const refs = this.getQueuedAttachmentStore().validateRefs(
+          taskId,
+          messageId,
+          payload.queuedAttachmentRefs,
+        );
+        if (refs.length > 0) captured.push({ messageId, refs });
+      } catch {
+        // Invalid receipt metadata cannot authorize deletion. The record is
+        // retained for the conservative orphan path.
+      }
+    }
+    return captured;
+  }
+
+  private releaseQueuedAttachmentRefs(
+    taskId: string,
+    captured: Array<{ messageId: string; refs: QueuedAttachmentRef[] }>,
+  ): void {
+    for (const entry of captured) {
+      try {
+        this.getQueuedAttachmentStore().release(taskId, entry.messageId, entry.refs);
+      } catch {
+        // Task deletion is already durable; orphan cleanup can retry safely.
+      }
+    }
+  }
+
+  private hasAuthoritativeReceiptReference(record: QueuedAttachmentRecord): boolean {
+    let events: TaskEvent[];
+    try {
+      events = this.eventRepo.findByTaskId(record.taskId);
+    } catch {
+      return true;
+    }
+    return events.some((event) => {
+      const payload = event.payload as Record<string, unknown> | undefined;
+      if (!Array.isArray(payload?.queuedAttachmentRefs)) return false;
+      return payload.queuedAttachmentRefs.some(
+        (entry) =>
+          Boolean(entry && typeof entry === "object" && !Array.isArray(entry)) &&
+          (entry as Record<string, unknown>).key === record.ref.key,
+      );
+    });
+  }
+
+  /**
+   * Content-only crash leftovers have no manifest owner, so consult every
+   * current task's authoritative user-message receipts before removing one.
+   * A repository failure returns undefined, which makes the content sweep
+   * retain everything.
+   */
+  private collectAuthoritativeAttachmentKeys(): Set<string> | undefined {
+    try {
+      // Read the owner set in one repository query. SQLite LIMIT -1 means
+      // "all rows"; offset pagination here can skip a referenced task if task
+      // ordering changes between pages.
+      const taskIds = this.taskRepo
+        .findAll(-1, 0, { includeArchivedSessions: true })
+        .map((task) => task.id);
+      const events = this.eventRepo.findByTaskIds(taskIds, ["user_message"]);
+      const keys = new Set<string>();
+      for (const event of events) {
+        const payload = event.payload as Record<string, unknown> | undefined;
+        if (!Array.isArray(payload?.queuedAttachmentRefs)) continue;
+        for (const entry of payload.queuedAttachmentRefs) {
+          if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+            const key = (entry as Record<string, unknown>).key;
+            if (typeof key === "string") keys.add(key);
+          }
+        }
+      }
+      return keys;
+    } catch {
+      return undefined;
+    }
   }
 
   private buildSessionSummaries(tasks: Task[]): TaskSessionSummary[] {

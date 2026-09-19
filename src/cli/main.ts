@@ -200,6 +200,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await tail(ctx);
       case "approvals":
         return await approvals(ctx);
+      case "telemetry":
+      case "pulse":
+        return await pulse(ctx);
       case "approve":
         return await respondApproval(ctx, true);
       case "reject":
@@ -847,6 +850,17 @@ async function approvals(ctx: CommandContext): Promise<number> {
   } finally {
     client.close();
   }
+}
+
+async function pulse(ctx: CommandContext): Promise<number> {
+  const action = (ctx.parsed.rest[0] || "status").toLowerCase();
+  if (!["status", "show", "on", "off", "send", "reset", "delete"].includes(action)) {
+    return usageError("Usage: cowork telemetry status|show|on|off|send|reset|delete");
+  }
+  if ((action === "reset" || action === "delete") && !hasFlag(ctx.parsed, "--yes")) {
+    return usageError(`cowork telemetry ${action} requires --yes`);
+  }
+  return runDirectCommandProcess(ctx, ["--pulse", "--action", action]);
 }
 
 async function respondApproval(ctx: CommandContext, approved: boolean): Promise<number> {
@@ -1764,6 +1778,8 @@ function providerEnvKey(providerType: string): string {
 const RESERVED_RUN_PROMPTS = new Set([
   "doctor",
   "status",
+  "telemetry",
+  "pulse",
   "version",
   "workspace",
   "workspaces",
@@ -1843,6 +1859,7 @@ function renderCompletions(shell: string): string {
     "models",
     "backup",
     "security",
+    "telemetry",
     "prompt-size",
     "prompt-preview",
     "dashboard",
@@ -1933,6 +1950,7 @@ function usage(): void {
       "  cowork security status|findings|decisions|inventory|scan|check-rules",
       "  cowork security hooks status|install|uninstall <agent> [--yes]",
       "  cowork security case build <caseId> --task-id <taskId> | case verify <bundleName>",
+      "  cowork telemetry status|show|on|off|send|reset|delete",
       "  cowork prompt-size <prompt text>",
       "  cowork prompt-preview <prompt text>",
       "  cowork completions zsh|bash|fish",

@@ -16,18 +16,15 @@ during scroll—expensive items cause jank.
 ```tsx
 function ProductRow({ id }: { id: string }) {
   // Bad: query inside list item
-  const { data: product } = useQuery(['product', id], () => fetchProduct(id))
+  const { data: product } = useQuery(["product", id], () => fetchProduct(id));
   // Bad: multiple context accesses
-  const theme = useContext(ThemeContext)
-  const user = useContext(UserContext)
-  const cart = useContext(CartContext)
+  const theme = useContext(ThemeContext);
+  const user = useContext(UserContext);
+  const cart = useContext(CartContext);
   // Bad: expensive computation
-  const recommendations = useMemo(
-    () => computeRecommendations(product),
-    [product]
-  )
+  const recommendations = useMemo(() => computeRecommendations(product), [product]);
 
-  return <View>{/* ... */}</View>
+  return <View>{/* ... */}</View>;
 }
 ```
 
@@ -42,7 +39,7 @@ function ProductRow({ name, price, imageUrl }: Props) {
       <Text>{name}</Text>
       <Text>{price}</Text>
     </View>
-  )
+  );
 }
 ```
 
@@ -51,7 +48,7 @@ function ProductRow({ name, price, imageUrl }: Props) {
 ```tsx
 // Parent fetches all data once
 function ProductList() {
-  const { data: products } = useQuery(['products'], fetchProducts)
+  const { data: products } = useQuery(["products"], fetchProducts);
 
   return (
     <LegendList
@@ -60,7 +57,7 @@ function ProductList() {
         <ProductRow name={item.name} price={item.price} imageUrl={item.image} />
       )}
     />
-  )
+  );
 }
 ```
 
@@ -69,15 +66,15 @@ function ProductList() {
 ```tsx
 // Incorrect: Context causes re-render when any cart value changes
 function ProductRow({ id, name }: Props) {
-  const { items } = useContext(CartContext)
-  const inCart = items.includes(id)
+  const { items } = useContext(CartContext);
+  const inCart = items.includes(id);
   // ...
 }
 
 // Correct: Zustand selector only re-renders when this specific value changes
 function ProductRow({ id, name }: Props) {
   // use Set.has (created once at the root) instead of Array.includes()
-  const inCart = useCartStore((s) => s.items.has(id))
+  const inCart = useCartStore((s) => s.items.has(id));
   // ...
 }
 ```

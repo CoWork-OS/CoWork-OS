@@ -20,6 +20,30 @@ cowork run "summarize the active project" --remote
 
 Use `--remote` only when you intentionally want the CLI to call a running remote Control Plane endpoint. In that mode, configure `COWORK_CONTROL_PLANE_URL` and `COWORK_CONTROL_PLANE_TOKEN`, or pass the equivalent CLI options.
 
+## CoWork Pulse controls
+
+These commands operate on the selected local profile. Pulse is off by default; `pulse` is an
+alias for `telemetry`.
+
+```sh
+cowork telemetry status
+cowork telemetry show
+cowork telemetry on
+cowork telemetry off
+cowork telemetry send
+cowork telemetry reset --yes
+cowork telemetry delete --yes
+```
+
+`show` prints a queued aggregate or a preview; `send` still requires full-day consent and does
+not force an ineligible day to upload. `off` discards queued packages but does not delete remote
+data or abort a request already running. `reset` creates a new identity without removing old
+remote rows and loses the old deletion token. Use `delete` before reset if you want the previous
+identity's data removed. Successful `delete` removes remote rows and disables Pulse locally;
+failed deletion retains local state for retry.
+
+See [CoWork Pulse](cowork-pulse.md) for fields, destination, daily timing, and known limitations.
+
 ## First Run
 
 Install globally from npm:
@@ -109,6 +133,20 @@ The profile controls sandboxing, approval and reviewer behavior, command-tool av
 filesystem roots/rules, and network/domain policy. `--remote` sends the requested id to the target
 Control Plane, where it is resolved and enforced using that node's settings and administrator
 policy. Credentials and local browser sessions are not transferred by selecting a profile.
+
+Within a named profile's granted boundary, reads, edits, and sandboxed local commands run without
+approval prompts. An exception requests only the additional authority it needs. A profile with
+`approval: never` denies missing authority without waiting; it does not disable the sandbox.
+
+Local CLI tasks share the desktop Jev settings and decision ledger. When Active
+JEV harness mode reviews a headless task, it cannot open an interactive
+approval prompt. A task started with an explicit non-interactive profile such
+as `--access-profile full_access` proceeds only when the exact operation is
+already authorized; a concerning Jev observation is recorded in the policy
+trace and does not create a second approval request. Missing authority,
+hard policy, security, protected-path, network, and operating-system consent
+requirements still fail closed. See [Jev Decision Support and Harness](jev.md)
+for the full decision and telemetry contract.
 
 `--permission-mode` remains available for older integrations and maps to the legacy compatibility
 path. `--shell` is also retained as a compatibility alias and maps to the bounded

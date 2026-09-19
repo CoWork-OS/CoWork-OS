@@ -14,6 +14,8 @@ WeCom is best for enterprise teams that want CoWork inside a controlled corporat
 
 - WeCom app integration.
 - Corp ID, Agent ID, Secret, token, and EncodingAESKey based setup.
+- The callback **token** is required: `msg_signature` is verified on every inbound
+  callback, encrypted or not. Plaintext callbacks without a valid signature are rejected.
 - Signed and encrypted event routing.
 - Gateway task replies and scheduled result delivery.
 

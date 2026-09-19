@@ -13,13 +13,13 @@ Dreaming does not silently rewrite memory. It produces reviewable candidates tha
 
 Workflow Intelligence now has five explicit parts:
 
-| Layer | Responsibility |
-|-------|----------------|
-| `Memory` | Durable source of truth for preferences, workflow rules, corrections, open loops, recurring tasks, constraints, and ignored-noise patterns |
-| `Heartbeat` | Scheduling and signal-readiness layer |
-| `Reflection` | Internal evaluation layer for recommendations and next actions |
-| `Dreaming` | Background memory-curation layer for stale, duplicated, missing, or drifting memory |
-| `Suggestions` | User-facing review surface for next actions |
+| Layer         | Responsibility                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Memory`      | Durable source of truth for preferences, workflow rules, corrections, open loops, recurring tasks, constraints, and ignored-noise patterns |
+| `Heartbeat`   | Scheduling and signal-readiness layer                                                                                                      |
+| `Reflection`  | Internal evaluation layer for recommendations and next actions                                                                             |
+| `Dreaming`    | Background memory-curation layer for stale, duplicated, missing, or drifting memory                                                        |
+| `Suggestions` | User-facing review surface for next actions                                                                                                |
 
 Dreaming keeps memory healthy between direct user actions. It is deliberately separate from the suggestion loop so memory maintenance does not have to masquerade as a task recommendation.
 
@@ -27,10 +27,10 @@ Dreaming keeps memory healthy between direct user actions. It is deliberately se
 
 Dreaming can run from two paths:
 
-| Trigger | When It Runs | Scope |
-|---------|--------------|-------|
+| Trigger           | When It Runs                                              | Scope                                                  |
+| ----------------- | --------------------------------------------------------- | ------------------------------------------------------ |
 | `task_completion` | After meaningful task completion and memory consolidation | The completed task's workspace and transcript evidence |
-| `heartbeat` | When Heartbeat sees memory-specific pressure | The heartbeat workspace and signal family evidence |
+| `heartbeat`       | When Heartbeat sees memory-specific pressure              | The heartbeat workspace and signal family evidence     |
 
 Heartbeat-triggered Dreaming is limited to memory-relevant signals such as:
 
@@ -68,10 +68,10 @@ memory-write approval policy.
 
 Dreaming writes two SQLite-backed records:
 
-| Table | Purpose |
-|-------|---------|
-| `dreaming_runs` | One record per Dreaming pass, including trigger source, scope, status, task or heartbeat linkage, candidate count, and error state |
-| `dreaming_candidates` | Reviewable proposed memory changes with target, action, confidence, rationale, evidence refs, and review/application status |
+| Table                 | Purpose                                                                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `dreaming_runs`       | One record per Dreaming pass, including trigger source, scope, status, task or heartbeat linkage, candidate count, and error state |
+| `dreaming_candidates` | Reviewable proposed memory changes with target, action, confidence, rationale, evidence refs, and review/application status        |
 
 The run record gives Mission Control and diagnostics a traceable background event. The candidate record keeps each proposed memory change reviewable and auditable before it mutates durable memory.
 

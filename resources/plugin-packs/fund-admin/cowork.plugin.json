@@ -66,11 +66,31 @@
     }
   ],
   "slashCommands": [
-    { "name": "gl-recon", "description": "Prepare a GL reconciliation workpaper", "skillId": "fund-gl-recon" },
-    { "name": "break-trace", "description": "Trace reconciliation breaks", "skillId": "fund-break-trace" },
-    { "name": "accrual-schedule", "description": "Draft accrual support", "skillId": "fund-accrual-schedule" },
-    { "name": "roll-forward", "description": "Prepare a roll-forward workpaper", "skillId": "fund-roll-forward" },
-    { "name": "variance-commentary", "description": "Draft variance commentary", "skillId": "fund-variance-commentary" },
+    {
+      "name": "gl-recon",
+      "description": "Prepare a GL reconciliation workpaper",
+      "skillId": "fund-gl-recon"
+    },
+    {
+      "name": "break-trace",
+      "description": "Trace reconciliation breaks",
+      "skillId": "fund-break-trace"
+    },
+    {
+      "name": "accrual-schedule",
+      "description": "Draft accrual support",
+      "skillId": "fund-accrual-schedule"
+    },
+    {
+      "name": "roll-forward",
+      "description": "Prepare a roll-forward workpaper",
+      "skillId": "fund-roll-forward"
+    },
+    {
+      "name": "variance-commentary",
+      "description": "Draft variance commentary",
+      "skillId": "fund-variance-commentary"
+    },
     { "name": "nav-tieout", "description": "Prepare a NAV tie-out", "skillId": "fund-nav-tieout" }
   ]
 }

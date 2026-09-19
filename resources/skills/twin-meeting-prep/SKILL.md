@@ -37,11 +37,11 @@ Prepare a structured brief for an upcoming meeting with relevant context, open i
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| meeting_topic | string | Yes | What the meeting is about (e.g., 'Sprint planning', 'Architecture review for auth service', '1-on-1 with Sarah') |
+| Name          | Type   | Required | Description                                                                                                      |
+| ------------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| meeting_topic | string | Yes      | What the meeting is about (e.g., 'Sprint planning', 'Architecture review for auth service', '1-on-1 with Sarah') |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 825 characters.
-- Runtime prompt is defined directly in `../twin-meeting-prep.json`. 
+- Runtime prompt is defined directly in `../twin-meeting-prep.json`.

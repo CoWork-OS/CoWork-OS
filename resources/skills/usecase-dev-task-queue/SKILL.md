@@ -37,14 +37,14 @@ Create and run an agent-ready development queue from issues/PRs with progress ch
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| repository | string | Yes | Repo slug or URL |
-| scope_filter | string | No | Optional scope (label, milestone, area, keyword) |
-| max_parallel_tasks | number | No | Maximum active tasks in parallel |
-| progress_channel | select | No | Where progress updates should be formatted for |
+| Name               | Type   | Required | Description                                      |
+| ------------------ | ------ | -------- | ------------------------------------------------ |
+| repository         | string | Yes      | Repo slug or URL                                 |
+| scope_filter       | string | No       | Optional scope (label, milestone, area, keyword) |
+| max_parallel_tasks | number | No       | Maximum active tasks in parallel                 |
+| progress_channel   | select | No       | Where progress updates should be formatted for   |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1159 characters.
-- Runtime prompt is defined directly in `../usecase-dev-task-queue.json`. 
+- Runtime prompt is defined directly in `../usecase-dev-task-queue.json`.

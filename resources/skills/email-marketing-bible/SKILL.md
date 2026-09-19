@@ -40,4 +40,4 @@ Comprehensive, data-backed email marketing consultant for audits, win-back/re-en
 ## Runtime Prompt
 
 - Current runtime prompt length: 1162 characters.
-- Runtime prompt is defined directly in `../email-marketing-bible.json`. 
+- Runtime prompt is defined directly in `../email-marketing-bible.json`.

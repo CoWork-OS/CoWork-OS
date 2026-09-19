@@ -302,12 +302,12 @@ describe("ControlPlaneSettingsManager", () => {
     });
   });
 
-  describe("getSettingsForDisplay", () => {
+  describe("loadSettingsWithSecrets", () => {
     it("should return token unchanged", () => {
       mockStoredSettings = { token: "secret-token" };
       ControlPlaneSettingsManager.clearCache();
 
-      const display = ControlPlaneSettingsManager.getSettingsForDisplay();
+      const display = ControlPlaneSettingsManager.loadSettingsWithSecrets();
 
       expect(display.token).toBe("secret-token");
     });
@@ -316,7 +316,7 @@ describe("ControlPlaneSettingsManager", () => {
       mockStoredSettings = { token: "" };
       ControlPlaneSettingsManager.clearCache();
 
-      const display = ControlPlaneSettingsManager.getSettingsForDisplay();
+      const display = ControlPlaneSettingsManager.loadSettingsWithSecrets();
 
       expect(display.token).toBe("");
     });
@@ -469,7 +469,7 @@ describe("ControlPlaneSettingsManager", () => {
       };
       ControlPlaneSettingsManager.clearCache();
 
-      const display = ControlPlaneSettingsManager.getSettingsForDisplay();
+      const display = ControlPlaneSettingsManager.loadSettingsWithSecrets();
 
       expect(display.remote).toBeDefined();
       expect(display.remote!.token).toBe("secret-remote-token");
@@ -486,7 +486,7 @@ describe("ControlPlaneSettingsManager", () => {
       };
       ControlPlaneSettingsManager.clearCache();
 
-      const display = ControlPlaneSettingsManager.getSettingsForDisplay();
+      const display = ControlPlaneSettingsManager.loadSettingsWithSecrets();
 
       expect(display.remote!.token).toBe("");
     });

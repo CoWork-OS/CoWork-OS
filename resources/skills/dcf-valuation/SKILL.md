@@ -37,17 +37,17 @@ Discounted cash flow valuation with WACC calculation, free cash flow projection,
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| company | string | Yes | Company name or ticker symbol |
-| projectionYears | select | Yes | Number of projection years |
-| question | string | Yes | Your specific valuation question |
-| revenueGrowth | string | No | Expected revenue growth rate (e.g., 15%) |
-| ebitdaMargin | string | No | Target EBITDA margin (e.g., 25%) |
-| wacc | string | No | Weighted average cost of capital (e.g., 9.5%) |
-| terminalGrowthRate | string | No | Perpetual growth rate for terminal value (e.g., 2.5%) |
+| Name               | Type   | Required | Description                                           |
+| ------------------ | ------ | -------- | ----------------------------------------------------- |
+| company            | string | Yes      | Company name or ticker symbol                         |
+| projectionYears    | select | Yes      | Number of projection years                            |
+| question           | string | Yes      | Your specific valuation question                      |
+| revenueGrowth      | string | No       | Expected revenue growth rate (e.g., 15%)              |
+| ebitdaMargin       | string | No       | Target EBITDA margin (e.g., 25%)                      |
+| wacc               | string | No       | Weighted average cost of capital (e.g., 9.5%)         |
+| terminalGrowthRate | string | No       | Perpetual growth rate for terminal value (e.g., 2.5%) |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1101 characters.
-- Runtime prompt is defined directly in `../dcf-valuation.json`. 
+- Runtime prompt is defined directly in `../dcf-valuation.json`.

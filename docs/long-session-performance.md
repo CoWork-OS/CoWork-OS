@@ -37,20 +37,20 @@ The initial task view never needs the complete event history. The repository ret
 
 The canonical values live in `src/shared/task-timeline-limits.ts`.
 
-| Limit | Value | Purpose |
-|---|---:|---|
-| Initial event count | 64 | Maximum rows requested for the first task view |
-| Initial payload budget | 256 KiB | Maximum serialized payload retained for the first page |
-| History page count | 160 | Maximum rows requested when loading earlier history |
-| History payload budget | 512 KiB | Maximum serialized payload retained for one history page |
-| Default single-event payload | 64 KiB | Payload threshold before returning a preview |
-| Maximum page count | 600 | Server-side hard ceiling |
-| Maximum page payload | 2 MiB | Server-side hard ceiling |
-| Maximum single-event payload | 256 KiB | Server-side hard ceiling for page projection |
-| Truncated preview | 4,096 characters | Inline preview stored in the projected event payload |
-| Cached tasks | 5 | Renderer LRU entry limit |
-| Timeline cache payload | 4 MiB | Combined renderer timeline-cache budget |
-| Expanded detail cache | 4 MiB | Maximum payload size eligible for detail caching |
+| Limit                        |            Value | Purpose                                                  |
+| ---------------------------- | ---------------: | -------------------------------------------------------- |
+| Initial event count          |               64 | Maximum rows requested for the first task view           |
+| Initial payload budget       |          256 KiB | Maximum serialized payload retained for the first page   |
+| History page count           |              160 | Maximum rows requested when loading earlier history      |
+| History payload budget       |          512 KiB | Maximum serialized payload retained for one history page |
+| Default single-event payload |           64 KiB | Payload threshold before returning a preview             |
+| Maximum page count           |              600 | Server-side hard ceiling                                 |
+| Maximum page payload         |            2 MiB | Server-side hard ceiling                                 |
+| Maximum single-event payload |          256 KiB | Server-side hard ceiling for page projection             |
+| Truncated preview            | 4,096 characters | Inline preview stored in the projected event payload     |
+| Cached tasks                 |                5 | Renderer LRU entry limit                                 |
+| Timeline cache payload       |            4 MiB | Combined renderer timeline-cache budget                  |
+| Expanded detail cache        |            4 MiB | Maximum payload size eligible for detail caching         |
 
 The selected task's merged timeline is also capped in `src/renderer/App.tsx` by event count and retained payload bytes. These are separate from the cross-task LRU limits.
 
@@ -202,23 +202,23 @@ npm run qa:perf:large-session
 
 ## File Map
 
-| File | Responsibility |
-|---|---|
-| `src/shared/task-timeline-limits.ts` | Shared page, payload, cache, and detail limits |
-| `src/shared/types.ts` | Cursor, page, summary, and detail contracts |
-| `src/electron/database/repositories.ts` | Bounded SQL projection, paging, detail, cursor, snapshot, and replay-tail queries |
-| `src/electron/control-plane/protocol.ts` | Remote method names |
-| `src/electron/control-plane/task-event-transport.ts` | Parameter validation, task scoping, and transport sanitization |
-| `src/electron/control-plane/handlers.ts` | Local and remote method registration |
-| `src/daemon/control-plane-methods.ts` | Node daemon method exposure |
-| `src/electron/agent/daemon.ts` | Bounded checkpoint capture and interrupted-task resume |
-| `src/renderer/App.tsx` | Initial load, page merge, LRU integration, detail lifecycle, and remote compatibility |
-| `src/renderer/components/MainContent/MainContent.tsx` | Near-top loading and detail expand/collapse actions |
-| `src/renderer/hooks/useVirtualList.ts` | Visible-range reporting |
-| `src/renderer/utils/task-timeline-cache.ts` | Byte- and count-bounded LRU cache |
-| `src/renderer/utils/task-event-detail-cache.ts` | Device-scoped detail keys and payload estimation |
-| `scripts/qa/profile_electron_task_switch.mjs` | Isolated desktop performance harness |
-| `package.json` | Performance fixture and large-session commands |
+| File                                                  | Responsibility                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `src/shared/task-timeline-limits.ts`                  | Shared page, payload, cache, and detail limits                                        |
+| `src/shared/types.ts`                                 | Cursor, page, summary, and detail contracts                                           |
+| `src/electron/database/repositories.ts`               | Bounded SQL projection, paging, detail, cursor, snapshot, and replay-tail queries     |
+| `src/electron/control-plane/protocol.ts`              | Remote method names                                                                   |
+| `src/electron/control-plane/task-event-transport.ts`  | Parameter validation, task scoping, and transport sanitization                        |
+| `src/electron/control-plane/handlers.ts`              | Local and remote method registration                                                  |
+| `src/daemon/control-plane-methods.ts`                 | Node daemon method exposure                                                           |
+| `src/electron/agent/daemon.ts`                        | Bounded checkpoint capture and interrupted-task resume                                |
+| `src/renderer/App.tsx`                                | Initial load, page merge, LRU integration, detail lifecycle, and remote compatibility |
+| `src/renderer/components/MainContent/MainContent.tsx` | Near-top loading and detail expand/collapse actions                                   |
+| `src/renderer/hooks/useVirtualList.ts`                | Visible-range reporting                                                               |
+| `src/renderer/utils/task-timeline-cache.ts`           | Byte- and count-bounded LRU cache                                                     |
+| `src/renderer/utils/task-event-detail-cache.ts`       | Device-scoped detail keys and payload estimation                                      |
+| `scripts/qa/profile_electron_task_switch.mjs`         | Isolated desktop performance harness                                                  |
+| `package.json`                                        | Performance fixture and large-session commands                                        |
 
 ## Regression Rules
 

@@ -23,7 +23,7 @@ Useful flags:
 - `--mission-control-out <path>` writes the Mission Control card payload. Default: `artifacts/security-harness/mission-control-findings.json`.
 - `--db <path> --profile-id <id>` also writes a `regression_eval` core trace and deduped failure records for Mission Control.
 - `--confirmed-fix --fix-id <id> --fix-summary <text>` creates or updates `scripts/qa/eval-cases/security-harness-regressions.json`.
-- `--fail-on-findings` makes high/critical findings fail the process. The default is advisory so the harness does not make ordinary task verification or agent execution stricter.
+- `--fail-on-findings` makes high/critical scanner candidates fail the process. The default is advisory so the harness does not make ordinary task verification or agent execution stricter.
 
 ## Targeting
 
@@ -43,17 +43,17 @@ security queue unless they cross a sensitive boundary.
 
 ## Validation And Debate
 
-Every scanner candidate must pass a deterministic verifier/debater stage before it becomes a finding.
-A candidate is confirmed only when it has concrete line evidence and the file is in a configured
-high-risk boundary. The report records:
+The scan produces static candidates; it does not execute code or claim that a suspicious pattern is a
+confirmed security issue. Each candidate records `status: "candidate"`, while the verifier, debater,
+and proof fields explicitly report `not_run`. The report also includes:
 
-- verifier requirement and verdict
-- debater counterargument
-- proof requirement
-- suggested proof or regression shape
+- the line evidence and high-risk boundary that produced the candidate
+- a proof requirement and suggested regression shape
+- a Mission Control card that keeps the candidate actionable without overstating its evidence
 
-That mirrors the rule for human review: a security issue should graduate with evidence and a path to
-proof, not just a suspicious pattern.
+An independent proof stage or human review can later promote a candidate to a confirmed finding. Until
+then, `--fail-on-findings` treats critical and high candidates as blocking scanner warnings, while the
+default remains advisory.
 
 ## Mission Control
 
@@ -83,6 +83,9 @@ For confirmed security or production-policy fixes, run:
 npm run qa:security:harness -- --confirmed-fix --fix-id <incident-or-pr-id> --fix-summary "Short fix summary"
 ```
 
-This updates `scripts/qa/eval-cases/security-harness-regressions.json` with one category per confirmed
-finding, or a production-policy placeholder when the fix removes the original finding. The existing
-regression policy can then enforce that production/security fixes leave durable eval coverage.
+This updates `scripts/qa/eval-cases/security-harness-regressions.json` with one category per explicitly confirmed
+finding, or a record for the supplied fix ID and summary when only static candidates are available. The
+`--confirmed-fix` flag is an explicit operator assertion for regression registration; it does not turn a
+static scan into proof. The existing regression policy can then enforce that production/security fixes
+leave durable regression specifications. These JSON records do not execute proof or count as
+measured eval coverage; pair each fix with a focused executable regression test.

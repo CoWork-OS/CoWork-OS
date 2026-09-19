@@ -59,6 +59,7 @@ const ACCESS_KIND_OVERRIDES: Partial<Record<LLMProviderType, ModelAccessKind>> =
   "vercel-ai-gateway": "gateway",
   "openai-compatible": "gateway",
   "anthropic-compatible": "gateway",
+  "atomic-chat": "local",
   pi: "gateway",
   ollama: "local",
   "hf-agents": "local",
@@ -66,7 +67,11 @@ const ACCESS_KIND_OVERRIDES: Partial<Record<LLMProviderType, ModelAccessKind>> =
   moa: "orchestration",
 };
 
-const EXPERIMENTAL_PROVIDERS = new Set<LLMProviderType>(["xai-oauth", "github-copilot"]);
+const EXPERIMENTAL_PROVIDERS = new Set<LLMProviderType>([
+  "xai-oauth",
+  "github-copilot",
+  "atomic-chat",
+]);
 
 const ACCESS_LABELS: Record<ModelAccessKind, string> = {
   account: "Account",

@@ -18,12 +18,7 @@
       "description": "Home mode context",
       "required": false,
       "default": "home",
-      "options": [
-        "home",
-        "away",
-        "night",
-        "vacation"
-      ]
+      "options": ["home", "away", "night", "vacation"]
     },
     {
       "name": "confirmation_policy",
@@ -31,10 +26,7 @@
       "description": "When to require explicit confirmation",
       "required": false,
       "default": "risky-only",
-      "options": [
-        "always",
-        "risky-only"
-      ]
+      "options": ["always", "risky-only"]
     },
     {
       "name": "quiet_hours",

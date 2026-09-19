@@ -1103,6 +1103,7 @@ export class RoutineService {
           : ("new_task" as const),
       workflowRoutineId: workflowMode ? routine.id : undefined,
       targetTaskId: workflowMode ? undefined : targetTaskId,
+      assignedAgentRoleId: routine.contextBindings.metadata?.assignedAgentRoleId,
       threadAutomation:
         !workflowMode && targetTaskId
           ? {
@@ -1624,6 +1625,7 @@ export class RoutineService {
         title: routine.name,
         prompt: params.prompt,
         workspaceId: routine.workspaceId,
+        assignedAgentRoleId: routine.contextBindings.metadata?.assignedAgentRoleId,
         agentConfig,
         source: params.source,
       });

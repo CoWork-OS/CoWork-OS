@@ -78,17 +78,17 @@ rules remain detection-only.
 
 Policy defaults and accepted ranges are:
 
-| Field | Default | Accepted values |
-|---|---:|---|
-| `enabled` | `false` | Boolean |
-| `mode` | `monitor` | `monitor`, `enforce` |
-| `ruleProfile` | `recommended` | `builtin`, `recommended`, `custom` |
-| `customRuleDirs` | `[]` | Absolute safe directories used by `custom` |
-| `failurePolicy` | `open` | `open`, `deny_high_risk` |
-| `timeoutMs` | `1500` | `250`–`5000` |
-| `retentionDays` | `30` | `1`–`365` |
-| `scheduledScan.enabled` | `false` | Boolean |
-| `scheduledScan.intervalHours` | `24` | `1`–`168` |
+| Field                         |       Default | Accepted values                            |
+| ----------------------------- | ------------: | ------------------------------------------ |
+| `enabled`                     |       `false` | Boolean                                    |
+| `mode`                        |     `monitor` | `monitor`, `enforce`                       |
+| `ruleProfile`                 | `recommended` | `builtin`, `recommended`, `custom`         |
+| `customRuleDirs`              |          `[]` | Absolute safe directories used by `custom` |
+| `failurePolicy`               |        `open` | `open`, `deny_high_risk`                   |
+| `timeoutMs`                   |        `1500` | `250`–`5000`                               |
+| `retentionDays`               |          `30` | `1`–`365`                                  |
+| `scheduledScan.enabled`       |       `false` | Boolean                                    |
+| `scheduledScan.intervalHours` |          `24` | `1`–`168`                                  |
 
 The full policy lives at `runtime.agentSecurity` in the active user-data
 directory's `policies.json`. See [Admin Policies](admin-policies.md) for the

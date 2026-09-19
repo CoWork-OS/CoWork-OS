@@ -2,6 +2,13 @@ import type { AgentRole, AgentCapability } from "../../shared/types";
 import { LLMProviderFactory } from "../agent/llm/provider-factory";
 import type { LLMProvider } from "../agent/llm/types";
 import { recordLlmCallError, recordLlmCallSuccess } from "../agent/llm/usage-telemetry";
+import { createConfiguredJevProvider } from "../agent/jev";
+import {
+  createDecisionService,
+  redactDecisionText,
+  type JevDecisionTelemetryContext,
+} from "../agent/decisions";
+import type { JevNoulAnswer, JevQuestion } from "../agent/decisions";
 
 /**
  * Keyword-based capability detection signals (used as fallback).
@@ -32,6 +39,179 @@ const CAPABILITY_SIGNALS: Record<AgentCapability, RegExp> = {
 interface LLMTeamSelection {
   memberIds: string[];
   leaderId: string;
+  model: string;
+}
+
+const JEV_CANDIDATE_LIMIT = 8;
+const JEV_LEADER_MIN_CONFIDENCE = 0.85;
+const JEV_LEADER_MIN_PROBABILITY = 0.6;
+const JEV_MEMBER_MIN_PROBABILITY = 0.75;
+
+interface JevTeamSelection {
+  memberIds: string[];
+  leaderId: string;
+  model: string;
+}
+
+export type AgentSelectionSource = "jev" | "chat_model" | "keyword" | "keyword_active";
+
+export interface AgentSelectionResult {
+  members: AgentRole[];
+  leader: AgentRole;
+  source: AgentSelectionSource;
+  decisionModel?: string;
+}
+
+function rankJevCandidates(prompt: string, activeRoles: AgentRole[]): AgentRole[] {
+  const detected = new Set<AgentCapability>();
+  for (const [capability, pattern] of Object.entries(CAPABILITY_SIGNALS)) {
+    if (pattern.test(prompt)) detected.add(capability as AgentCapability);
+  }
+
+  return activeRoles
+    .map((role) => ({
+      role,
+      score: role.capabilities.filter((capability) => detected.has(capability)).length,
+    }))
+    .sort((a, b) => b.score - a.score || a.role.sortOrder - b.role.sortOrder)
+    .slice(0, JEV_CANDIDATE_LIMIT)
+    .map(({ role }) => role);
+}
+
+function buildJevQuestions(candidates: AgentRole[]): Record<string, JevQuestion> {
+  const leaderCriteria: Record<string, string> = {
+    none: "No candidate is a clear fit for leading this task.",
+  };
+  for (const role of candidates) {
+    leaderCriteria[role.id] =
+      "Choose " +
+      redactDecisionText(role.displayName, 120) +
+      " when this role is the best primary specialist and coordinator for the task.";
+  }
+
+  const questions: Record<string, JevQuestion> = {
+    leader: {
+      type: "choice",
+      instructions: "Which active candidate should lead this task?",
+      criteria: leaderCriteria,
+    },
+  };
+
+  candidates.forEach((role, index) => {
+    questions["include_" + index] = {
+      type: "noul",
+      instructions:
+        "Should " +
+        redactDecisionText(role.displayName, 120) +
+        " participate in the team for this task?",
+      criteria: {
+        true: "The role provides a necessary, non-duplicative contribution.",
+        false: "The role is tangential, redundant, or unrelated.",
+      },
+    };
+  });
+
+  return questions;
+}
+
+async function selectViaJev(
+  prompt: string,
+  activeRoles: AgentRole[],
+  maxAgents?: number,
+  telemetryContext?: JevDecisionTelemetryContext,
+): Promise<JevTeamSelection | null> {
+  if (maxAgents === 1) return null;
+
+  let resolved;
+  try {
+    const settings = LLMProviderFactory.loadSettings();
+    const jevSettings = settings.jev;
+    const teamSelectionEnabled =
+      jevSettings?.teamSelectionEnabled === true ||
+      (jevSettings?.enabled === true &&
+        jevSettings.harnessEnabled === true &&
+        jevSettings.toolReviewMode === "active");
+    if (!teamSelectionEnabled) return null;
+    resolved = createConfiguredJevProvider(settings);
+  } catch {
+    return null;
+  }
+  if (!resolved) return null;
+
+  const candidates = rankJevCandidates(prompt, activeRoles);
+  if (candidates.length < 2) return null;
+
+  const decisionService = createDecisionService(resolved.provider, {
+    model: resolved.model,
+    providerType: resolved.providerType,
+    telemetryContext,
+    timeoutMs: 1_000,
+    maxRetries: 0,
+    maxCalls: 1,
+    maxConcurrent: 1,
+    cache: { enabled: true, ttlMs: 5_000, maxEntries: 4 },
+  });
+
+  const candidateByQuestion = new Map(
+    candidates.map((role, index) => ["include_" + index, role] as const),
+  );
+  const state = {
+    task: redactDecisionText(prompt, 8_000),
+    requestedAgentCount: maxAgents ?? null,
+    candidates: candidates.map((role) => ({
+      id: redactDecisionText(role.id, 120),
+      name: redactDecisionText(role.displayName, 120),
+      description: redactDecisionText(role.description || "", 600),
+      capabilities: role.capabilities,
+      autonomyLevel: redactDecisionText(role.autonomyLevel || "", 80),
+    })),
+  };
+
+  try {
+    const serviceResult = await decisionService.decide(
+      {
+        state,
+        model: resolved.model,
+        questions: buildJevQuestions(candidates),
+      },
+      { purpose: "team-selection", timeoutMs: 1_000, maxRetries: 0 },
+    );
+    if (serviceResult.status !== "success" || !serviceResult.response) return null;
+    const response = serviceResult.response;
+    const leaderAnswer = response.answers.leader;
+    if (
+      !leaderAnswer ||
+      leaderAnswer.type !== "choice" ||
+      leaderAnswer.choice === "none" ||
+      leaderAnswer.confidence < JEV_LEADER_MIN_CONFIDENCE ||
+      (leaderAnswer.probabilities[leaderAnswer.choice] ?? 0) < JEV_LEADER_MIN_PROBABILITY
+    ) {
+      return null;
+    }
+
+    const roleIds = new Set(candidates.map((role) => role.id));
+    if (!roleIds.has(leaderAnswer.choice)) return null;
+
+    const selectedIds = new Set<string>([leaderAnswer.choice]);
+    for (const [questionId, answer] of Object.entries(response.answers)) {
+      const role = candidateByQuestion.get(questionId);
+      if (!role || answer.type !== "noul") continue;
+      const noulAnswer = answer as JevNoulAnswer;
+      if (noulAnswer.noul >= JEV_MEMBER_MIN_PROBABILITY) selectedIds.add(role.id);
+    }
+
+    const orderedIds = [
+      leaderAnswer.choice,
+      ...candidates.map((role) => role.id).filter((id) => id !== leaderAnswer.choice),
+    ].filter((id) => selectedIds.has(id));
+    const boundedIds =
+      maxAgents != null && maxAgents >= 1 ? orderedIds.slice(0, maxAgents) : orderedIds;
+    if (boundedIds.length < 2 || !boundedIds.includes(leaderAnswer.choice)) return null;
+    return { memberIds: boundedIds, leaderId: leaderAnswer.choice, model: resolved.model };
+  } catch (error) {
+    console.error("[capabilityMatcher] Jev selection failed, falling back:", error);
+    return null;
+  }
 }
 
 /**
@@ -130,7 +310,7 @@ async function selectViaLLM(
       validMembers.push(leaderId);
     }
 
-    return { memberIds: validMembers, leaderId };
+    return { memberIds: validMembers, leaderId, model };
   } catch (err) {
     recordLlmCallError(
       {
@@ -225,13 +405,57 @@ export async function selectAgentsForTask(
   prompt: string,
   allRoles: AgentRole[],
   maxAgents?: number,
-): Promise<{ members: AgentRole[]; leader: AgentRole }> {
+  telemetryContext?: JevDecisionTelemetryContext,
+): Promise<AgentSelectionResult> {
   const active = allRoles.filter((r) => r.isActive);
   if (active.length === 0) {
     throw new Error("No active agent roles available for team selection");
   }
 
-  // Try LLM-based selection first
+  let activeJevHarness = false;
+  try {
+    const settings = LLMProviderFactory.loadSettings();
+    activeJevHarness =
+      settings.jev?.enabled === true &&
+      settings.jev.harnessEnabled === true &&
+      settings.jev.toolReviewMode === "active";
+  } catch {
+    // Keep the existing fallback behavior when settings are unavailable.
+  }
+
+  // Jev is an opt-in structured-decision adviser. Active harness mode makes
+  // it the only remote decision route for this bounded selection; a failed or
+  // low-confidence answer goes directly to deterministic matching so the
+  // normal chat model is not charged for a harness decision.
+  const jevResult = await selectViaJev(prompt, active, maxAgents, telemetryContext);
+  if (jevResult) {
+    const roleMap = new Map(active.map((r) => [r.id, r]));
+    const members = jevResult.memberIds
+      .map((id) => roleMap.get(id))
+      .filter((r): r is AgentRole => r != null);
+    const leader = roleMap.get(jevResult.leaderId) || members[0];
+    if (members.length >= 2 && leader) {
+      return {
+        members,
+        leader,
+        source: "jev",
+        decisionModel: jevResult.model,
+      };
+    }
+  }
+
+  if (activeJevHarness) {
+    let result = selectViaKeywords(prompt, active, maxAgents);
+    if (maxAgents != null && maxAgents >= 1 && result.members.length > maxAgents) {
+      result = {
+        ...result,
+        members: result.members.slice(0, maxAgents),
+      };
+    }
+    return { ...result, source: "keyword_active" };
+  }
+
+  // Try the existing chat-model selection next.
   const llmResult = await selectViaLLM(prompt, active, maxAgents);
 
   if (llmResult) {
@@ -243,7 +467,12 @@ export async function selectAgentsForTask(
     const members = memberIds.map((id) => roleMap.get(id)).filter((r): r is AgentRole => r != null);
     const leader = roleMap.get(llmResult.leaderId) || members[0];
     if (members.length >= 2) {
-      return { members, leader };
+      return {
+        members,
+        leader,
+        source: "chat_model",
+        decisionModel: llmResult.model,
+      };
     }
   }
 
@@ -255,5 +484,5 @@ export async function selectAgentsForTask(
       members: result.members.slice(0, maxAgents),
     };
   }
-  return result;
+  return { ...result, source: "keyword" };
 }

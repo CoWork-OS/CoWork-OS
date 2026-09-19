@@ -38,4 +38,4 @@ Interact with GitHub using the `gh` CLI. Use `gh issue`, `gh pr`, `gh run`, and 
 ## Runtime Prompt
 
 - Current runtime prompt length: 942 characters.
-- Runtime prompt is defined directly in `../github.json`. 
+- Runtime prompt is defined directly in `../github.json`.

@@ -58,17 +58,19 @@ The agent produces a markdown report:
 ## Findings Report
 
 ### Summary
+
 - Total links processed: N
 - Classification overview: [tags]
 
 ### Per-URL Findings
 
 #### 1. [Page Title]
+
 - **URL:** [url]
 - **Summary:** 2-3 sentence summary
 - **Key points:** ...
 - **Classification:** [tag1], [tag2]
-...
+  ...
 ```
 
 The report is saved to `{artifactDir}/findings-report.md` and can be used by follow-up agents.

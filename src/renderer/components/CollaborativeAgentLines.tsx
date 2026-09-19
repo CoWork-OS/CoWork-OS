@@ -15,10 +15,11 @@ import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
 
 interface CollaborativeAgentLinesProps {
-  collaborativeRun: AgentTeamRun;
+  collaborativeRun?: AgentTeamRun | null;
   childTasks: Task[];
   childEvents?: TaskEvent[];
   onOpenAgent: (taskId: string) => void;
+  onShowAllAgents?: () => void;
   onWrapUp?: () => void;
   isWrappingUp?: boolean;
   /** When true, main task is done — hide Wrap Up */
@@ -256,12 +257,14 @@ export function CollaborativeAgentLines({
   childTasks,
   childEvents = [],
   onOpenAgent,
+  onShowAllAgents,
   onWrapUp,
   isWrappingUp,
   mainTaskCompleted = false,
 }: CollaborativeAgentLinesProps) {
   const [streamingByAgent, setStreamingByAgent] = useState<Map<string, AgentThought>>(new Map());
-  const isMultiLlm = collaborativeRun.multiLlmMode === true;
+  const isMultiLlm = collaborativeRun?.multiLlmMode === true;
+  const collaborativeRunId = collaborativeRun?.id ?? null;
 
   // Subscribe to streaming thoughts for "is thinking" indicator (maps agentRoleId -> thought)
   // Team items link child tasks to agent roles; we match via listTeamItems when needed
@@ -277,19 +280,24 @@ export function CollaborativeAgentLines({
   >([]);
   const [agentRoles, setAgentRoles] = useState<Map<string, { icon?: string }>>(new Map());
   useEffect(() => {
+    if (!collaborativeRunId) {
+      setTeamItems([]);
+      return;
+    }
     window.electronAPI
-      .listTeamItems(collaborativeRun.id)
+      .listTeamItems(collaborativeRunId)
       .then((items: Any[]) => setTeamItems(items))
       .catch(() => {});
-  }, [collaborativeRun.id]);
+  }, [collaborativeRunId]);
 
   // Subscribe to team item events so sourceTaskId is updated as soon as tasks are spawned.
   // Without this, teamItems holds stale null sourceTaskIds, defeating the deduplication
   // check at render time and causing "ghost" agent lines alongside the real child task lines.
   useEffect(() => {
+    if (!collaborativeRunId) return;
     const unsub = window.electronAPI.onTeamRunEvent(
       (event: { runId?: string; type?: string; item?: Any }) => {
-        if (event.runId !== collaborativeRun.id) return;
+        if (event.runId !== collaborativeRunId) return;
         if (
           (event.type === "team_item_spawned" || event.type === "team_item_updated") &&
           event.item
@@ -307,8 +315,12 @@ export function CollaborativeAgentLines({
     return () => {
       if (typeof unsub === "function") unsub();
     };
-  }, [collaborativeRun.id]);
+  }, [collaborativeRunId]);
   useEffect(() => {
+    if (!collaborativeRunId) {
+      setAgentRoles(new Map());
+      return;
+    }
     window.electronAPI
       .getAgentRoles(false)
       .then((roles: Array<{ id: string; icon?: string }>) => {
@@ -317,11 +329,12 @@ export function CollaborativeAgentLines({
         setAgentRoles(map);
       })
       .catch(() => {});
-  }, []);
+  }, [collaborativeRunId]);
 
   useEffect(() => {
+    if (!collaborativeRunId) return;
     const unsub = window.electronAPI.onTeamThoughtEvent((event: Any) => {
-      if (event.runId !== collaborativeRun.id) return;
+      if (event.runId !== collaborativeRunId) return;
       if (event.type === "team_thought_streaming" && event.thought) {
         const t = event.thought as AgentThought;
         setStreamingByAgent((prev) => {
@@ -345,7 +358,7 @@ export function CollaborativeAgentLines({
     return () => {
       if (typeof unsub === "function") unsub();
     };
-  }, [collaborativeRun.id]);
+  }, [collaborativeRunId]);
 
   // Map taskId -> agentRoleId for streaming check
   const taskToRole = new Map<string, string>();
@@ -412,6 +425,9 @@ export function CollaborativeAgentLines({
 
   if (agentLines.length === 0) return null;
 
+  const visibleAgentLines = agentLines.slice(0, 4);
+  const hiddenAgentCount = Math.max(0, agentLines.length - visibleAgentLines.length);
+
   const statusCounts = agentLines.reduce<Record<AgentLineStatusKind, number>>(
     (acc, line) => {
       acc[line.statusKind] += 1;
@@ -430,7 +446,7 @@ export function CollaborativeAgentLines({
         <span className="collab-lines-hint">@ to tag agents</span>
       </div>
       <div className="collab-lines-list">
-        {agentLines.map(({ id, title, status, statusKind, statusLabel, taskId, icon }) => (
+        {visibleAgentLines.map(({ id, title, status, statusKind, statusLabel, taskId, icon }) => (
           <div key={id} className={`collab-agent-line collab-agent-line-${statusKind}`}>
             <span className="collab-agent-status-text">
               <span className="collab-agent-icon">
@@ -472,8 +488,18 @@ export function CollaborativeAgentLines({
             )}
           </div>
         ))}
+        {hiddenAgentCount > 0 ? (
+          <button
+            type="button"
+            className="collab-agent-show-all"
+            onClick={onShowAllAgents}
+            disabled={!onShowAllAgents}
+          >
+            Show all agents ({hiddenAgentCount} more)
+          </button>
+        ) : null}
       </div>
-      {!mainTaskCompleted && onWrapUp && (
+      {!mainTaskCompleted && collaborativeRun && onWrapUp && (
         <div className="collab-lines-actions">
           <span className="collab-lines-status">
             {isWrappingUp

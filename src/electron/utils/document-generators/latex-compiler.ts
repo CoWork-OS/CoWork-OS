@@ -110,6 +110,14 @@ function buildLatexCommand(engine: LatexEngine, sourcePath: string, outputDir: s
       return ["--keep-logs", "--keep-intermediates", "--outdir", outputDir, sourcePath];
     case "latexmk":
       return [
+        // -norc: latexmk otherwise evaluates ./latexmkrc and ./.latexmkrc from
+        // its working directory as Perl. That directory holds the agent-authored
+        // .tex file, so an agent that can write the workspace could drop a
+        // .latexmkrc containing system(...) and get it executed by asking for a
+        // compile — no shell tool, no approval prompt.
+        "-norc",
+        // Shell-escape lets \write18 run commands from inside the document.
+        "-no-shell-escape",
         "-pdf",
         "-interaction=nonstopmode",
         "-halt-on-error",
@@ -120,6 +128,8 @@ function buildLatexCommand(engine: LatexEngine, sourcePath: string, outputDir: s
     case "lualatex":
     case "pdflatex":
       return [
+        // Same reasoning as above: block \write18 from the document itself.
+        "-no-shell-escape",
         "-interaction=nonstopmode",
         "-halt-on-error",
         "-file-line-error",

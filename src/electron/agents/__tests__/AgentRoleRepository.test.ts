@@ -95,4 +95,89 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
       primaryCategories: ["planning"],
     });
   });
+
+  it("updates the editable bot profile fields without changing its handle", () => {
+    const created = agentRoleRepo.create({
+      name: "profile-editor",
+      displayName: "Profile editor",
+      description: "Original description",
+      systemPrompt: "Original instructions",
+      icon: "Bot",
+      color: "#6366f1",
+      capabilities: ["code"],
+    });
+
+    const updated = agentRoleRepo.update({
+      id: created.id,
+      displayName: "Research partner",
+      description: "First line\nSecond line",
+      systemPrompt: "Use the user's preferred language.\nBe concise.",
+      icon: "Search",
+      color: "#0ea5e9",
+    });
+
+    expect(updated).toMatchObject({
+      id: created.id,
+      name: "profile-editor",
+      displayName: "Research partner",
+      description: "First line\nSecond line",
+      systemPrompt: "Use the user's preferred language.\nBe concise.",
+      icon: "Search",
+      color: "#0ea5e9",
+    });
+  });
+
+  it("deactivates custom roles without breaking historical task references", () => {
+    const db = manager.getDatabase();
+    const workspaceId = "workspace-for-role-delete";
+    db.prepare(
+      `INSERT INTO workspaces (id, name, path, created_at, permissions)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(workspaceId, "Role delete test", "/tmp/cowork-role-delete-test", Date.now(), "{}");
+
+    const custom = agentRoleRepo.create({
+      name: "deletable-bot",
+      displayName: "Deletable bot",
+      capabilities: ["code"],
+      heartbeatEnabled: true,
+    });
+
+    const taskId = "task-for-deletable-bot";
+    db.prepare(
+      `INSERT INTO tasks (
+         id, title, prompt, status, workspace_id, created_at, updated_at, assigned_agent_role_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      taskId,
+      "Historical bot task",
+      "Keep this task linked to the removed bot.",
+      "completed",
+      workspaceId,
+      Date.now(),
+      Date.now(),
+      custom.id,
+    );
+
+    expect(agentRoleRepo.delete(custom.id)).toBe(true);
+    expect(agentRoleRepo.findById(custom.id)).toMatchObject({
+      id: custom.id,
+      isActive: false,
+    });
+    expect(agentRoleRepo.findAll()).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: custom.id })]),
+    );
+    expect(db.prepare("SELECT assigned_agent_role_id FROM tasks WHERE id = ?").get(taskId)).toEqual(
+      { assigned_agent_role_id: custom.id },
+    );
+    expect(
+      db.prepare("SELECT enabled FROM automation_profiles WHERE agent_role_id = ?").get(custom.id),
+    ).toEqual({ enabled: 0 });
+  });
+
+  it("refuses to delete seeded system roles", () => {
+    const system = agentRoleRepo.seedDefaults()[0];
+    expect(system?.isSystem).toBe(true);
+    expect(agentRoleRepo.delete(system.id)).toBe(false);
+    expect(agentRoleRepo.findById(system.id)).toMatchObject({ isSystem: true });
+  });
 });

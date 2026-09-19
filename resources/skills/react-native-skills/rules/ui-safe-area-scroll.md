@@ -12,7 +12,7 @@ Use `contentInsetAdjustmentBehavior="automatic"` on the root ScrollView instead 
 **Incorrect (SafeAreaView wrapper):**
 
 ```tsx
-import { SafeAreaView, ScrollView, View, Text } from 'react-native'
+import { SafeAreaView, ScrollView, View, Text } from "react-native";
 
 function MyScreen() {
   return (
@@ -23,18 +23,18 @@ function MyScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
-  )
+  );
 }
 ```
 
 **Incorrect (manual safe area padding):**
 
 ```tsx
-import { ScrollView, View, Text } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { ScrollView, View, Text } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 function MyScreen() {
-  const insets = useSafeAreaInsets()
+  const insets = useSafeAreaInsets();
 
   return (
     <ScrollView contentContainerStyle={{ paddingTop: insets.top }}>
@@ -42,23 +42,23 @@ function MyScreen() {
         <Text>Content</Text>
       </View>
     </ScrollView>
-  )
+  );
 }
 ```
 
 **Correct (native content inset adjustment):**
 
 ```tsx
-import { ScrollView, View, Text } from 'react-native'
+import { ScrollView, View, Text } from "react-native";
 
 function MyScreen() {
   return (
-    <ScrollView contentInsetAdjustmentBehavior='automatic'>
+    <ScrollView contentInsetAdjustmentBehavior="automatic">
       <View>
         <Text>Content</Text>
       </View>
     </ScrollView>
-  )
+  );
 }
 ```
 

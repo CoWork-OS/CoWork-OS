@@ -19,6 +19,7 @@ If a required input is still missing, stop and ask the user for it before contin
 Use the shared scan artifact path conventions in `../../references/scan-artifacts.md`.
 
 ### Code Diff Workflow
+
 If the scan target is for a targeted code-diff:
 
 - Read `../security-scan/references/scan-artifacts-and-ledger.md`.
@@ -139,7 +140,6 @@ Otherwise, for each candidate include:
 - enough evidence that a later reviewer can understand why the candidate is technically plausible before validation
 
 When candidates are emitted, create the per-finding directory from `../../references/scan-artifacts.md` and append one discovery receipt to that finding's candidate ledger. The ledger row should identify the candidate, scan scope, discovery status, affected locations, and the discovery artifact or evidence that produced it.
-
 
 ## Hard Rules
 

@@ -6,4 +6,3 @@ copyright its contributors and distributed under the MIT License.
 
 The CoWork adaptation uses CoWork OS native web_search and web_fetch tools. It does not bundle
 the Hermes Python runtime, provider credentials, or the separately distributed DonSeTch program.
-

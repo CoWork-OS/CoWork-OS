@@ -14,11 +14,11 @@ Remote access is now also the foundation for the desktop **Devices** tab. The sa
 
 The Control Plane WebSocket server binds to `127.0.0.1:18789` by default for security. For remote access, you have three options:
 
-| Method | Use Case | Setup Complexity |
-|--------|----------|------------------|
-| **SSH Tunnel** | Personal use, existing SSH infrastructure | Low |
-| **Tailscale Serve** | Private network access (Tailnet only) | Medium |
-| **Tailscale Funnel** | Public internet access | Medium |
+| Method               | Use Case                                  | Setup Complexity |
+| -------------------- | ----------------------------------------- | ---------------- |
+| **SSH Tunnel**       | Personal use, existing SSH infrastructure | Low              |
+| **Tailscale Serve**  | Private network access (Tailnet only)     | Medium           |
+| **Tailscale Funnel** | Public internet access                    | Medium           |
 
 For private MCP tool access, use [Secure MCP Tunnels](secure-mcp-tunnels.md) instead of exposing a local MCP port. Secure MCP Tunnels open an outbound WebSocket from the local CoWork app to a relay you operate and forward only authenticated MCP JSON-RPC requests.
 
@@ -122,12 +122,12 @@ ssh -fN -L 18789:127.0.0.1:18789 user@remote-host
 
 ### SSH Tunnel Options
 
-| Flag | Description |
-|------|-------------|
-| `-N` | Don't execute remote commands (tunnel only) |
-| `-L` | Local port forwarding |
-| `-f` | Run in background |
-| `-o ServerAliveInterval=60` | Keep connection alive |
+| Flag                        | Description                                 |
+| --------------------------- | ------------------------------------------- |
+| `-N`                        | Don't execute remote commands (tunnel only) |
+| `-L`                        | Local port forwarding                       |
+| `-f`                        | Run in background                           |
+| `-o ServerAliveInterval=60` | Keep connection alive                       |
 
 ### Custom Port
 
@@ -213,26 +213,28 @@ Client                              CoWork Control Plane
 ### Example: Node.js Client
 
 ```javascript
-const WebSocket = require('ws');
+const WebSocket = require("ws");
 
-const ws = new WebSocket('ws://127.0.0.1:18789');
+const ws = new WebSocket("ws://127.0.0.1:18789");
 
-ws.on('open', () => {
+ws.on("open", () => {
   // Send connect request with token
-  ws.send(JSON.stringify({
-    type: 'req',
-    id: '1',
-    method: 'connect',
-    params: {
-      token: 'your-token-here',
-      deviceName: 'My CLI Client'
-    }
-  }));
+  ws.send(
+    JSON.stringify({
+      type: "req",
+      id: "1",
+      method: "connect",
+      params: {
+        token: "your-token-here",
+        deviceName: "My CLI Client",
+      },
+    }),
+  );
 });
 
-ws.on('message', (data) => {
+ws.on("message", (data) => {
   const frame = JSON.parse(data);
-  console.log('Received:', frame);
+  console.log("Received:", frame);
 });
 ```
 
@@ -271,12 +273,12 @@ CoWork can also operate as a client connecting to a remote Control Plane. This i
 
 In Settings > Control Plane > Remote Connection:
 
-| Setting | Description |
-|---------|-------------|
-| **Gateway URL** | WebSocket URL (e.g., `ws://127.0.0.1:18789` via SSH tunnel) |
-| **Token** | Control Plane authentication token from the remote machine |
-| **Device name** | Human-readable label shown in the Devices tab |
-| **Purpose** | Optional remote-device role hint used in device cards and task routing |
+| Setting         | Description                                                            |
+| --------------- | ---------------------------------------------------------------------- |
+| **Gateway URL** | WebSocket URL (e.g., `ws://127.0.0.1:18789` via SSH tunnel)            |
+| **Token**       | Control Plane authentication token from the remote machine             |
+| **Device name** | Human-readable label shown in the Devices tab                          |
+| **Purpose**     | Optional remote-device role hint used in device cards and task routing |
 
 ### Devices tab workflow
 
@@ -303,22 +305,24 @@ When you open a remote task from that tab, CoWork shows a remote-session banner 
 
 ### Connection Modes
 
-| Mode | Description |
-|------|-------------|
-| **Local** | This CoWork instance runs the Control Plane server |
-| **Remote** | Connect to a Control Plane on another machine |
+| Mode       | Description                                        |
+| ---------- | -------------------------------------------------- |
+| **Local**  | This CoWork instance runs the Control Plane server |
+| **Remote** | Connect to a Control Plane on another machine      |
 
 ## Troubleshooting
 
 ### SSH Tunnel Issues
 
 **Connection refused:**
+
 ```bash
 # Check if CoWork is running and Control Plane is enabled
 curl http://127.0.0.1:18789/health
 ```
 
 **Tunnel disconnects:**
+
 ```bash
 # Use keep-alive options
 ssh -N -L 18789:127.0.0.1:18789 \
@@ -330,16 +334,19 @@ ssh -N -L 18789:127.0.0.1:18789 \
 ### Authentication Failures
 
 **"Too many failed attempts":**
+
 - Wait 5 minutes (automatic ban expires)
 - Or restart the Control Plane server
 
 **"Invalid token":**
+
 - Verify token matches the one in CoWork settings
 - Check for extra whitespace when copying
 
 ### Tailscale Issues
 
 **"Funnel not available":**
+
 - Ensure you have a Tailscale subscription with Funnel enabled
 - Run `tailscale serve status` to check configuration
 

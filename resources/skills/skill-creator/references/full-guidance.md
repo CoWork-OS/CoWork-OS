@@ -40,6 +40,7 @@ CoWork-OSS uses JSON files for skills. Each skill is a `.json` file with the fol
 ```
 
 ### Required Fields
+
 - `id`: Unique identifier (lowercase, hyphens allowed)
 - `name`: Display name
 - `description`: What the skill does (used for triggering)
@@ -47,6 +48,7 @@ CoWork-OSS uses JSON files for skills. Each skill is a `.json` file with the fol
 - `prompt`: The content/instructions
 
 ### Optional Fields
+
 - `category`: For grouping in UI
 - `parameters`: Array of input parameters
 - `enabled`: Whether skill is active (default: true)
@@ -56,17 +58,21 @@ CoWork-OSS uses JSON files for skills. Each skill is a `.json` file with the fol
 - `metadata`: Extended information
 
 ### Requirements (`requires`)
+
 - `bins`: All these binaries must exist
 - `anyBins`: At least one must exist
 - `env`: All these env vars must be set
 - `os`: Must match current OS (darwin/linux/win32)
 
 ### Skill Types
+
 - `task`: Executable skill selected for tasks
 - `guideline`: Always injected into system prompt when enabled
 
 ### Skill Sources
+
 Skills are loaded from three locations (highest precedence wins):
+
 1. **Workspace** (`workspace/skills/`) - User's project skills
 2. **Managed** (`~/Library/Application Support/cowork-oss/skills/`) - From SkillHub
 3. **Bundled** (`resources/skills/`) - Pre-packaged with app

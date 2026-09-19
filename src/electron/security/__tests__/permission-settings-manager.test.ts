@@ -102,7 +102,9 @@ describe("PermissionSettingsManager", () => {
       },
     });
 
-    expect(repository.save).toHaveBeenCalledTimes(2);
+    // Loading the legacy record performs one durable v1 -> v2 migration,
+    // followed by the two explicit rule writes.
+    expect(repository.save).toHaveBeenCalledTimes(3);
     const lastSaved = repository.save.mock.calls.at(-1)?.[1];
     expect(lastSaved.rules).toHaveLength(1);
     expect(lastSaved.rules[0]).toEqual(
@@ -197,7 +199,7 @@ describe("PermissionSettingsManager", () => {
     ]);
   });
 
-  it("fails closed to the built-in approval profile for an unknown default", () => {
+  it("preserves an unknown default id and fails the mode closed", () => {
     repository.load.mockReturnValue({
       version: 1,
       defaultMode: "accept_edits",
@@ -207,9 +209,196 @@ describe("PermissionSettingsManager", () => {
 
     const settings = PermissionSettingsManager.loadSettings();
 
-    expect(settings.defaultAccessProfileId).toBe("ask_for_approval");
+    expect(settings.defaultAccessProfileId).toBe("missing-profile");
     expect(settings.defaultMode).toBe("dangerous_only");
     expect(settings.defaultPermissionAccess).toBe("default");
+    expect(settings.migration?.defaultProvenance).toBe("fail_closed_unknown_profile");
+  });
+
+  it("does not let a deleted named default preserve a bypass mode", () => {
+    repository.load.mockReturnValue({
+      version: 1,
+      defaultMode: "bypass_permissions",
+      defaultAccessProfileId: "deleted-profile",
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+
+    // A profile-less legacy task inherits defaultMode directly, so preserving
+    // bypass_permissions here would resolve it to the full-access profile.
+    expect(settings.defaultMode).toBe("dangerous_only");
+  });
+
+  it("migrates a profile-less legacy default with a recoverable snapshot", () => {
+    const legacy = {
+      version: 1,
+      defaultMode: "accept_edits",
+      defaultShellEnabled: false,
+      defaultPermissionAccess: "default",
+      rules: [],
+    } as const;
+    repository.load.mockReturnValue(legacy);
+
+    const settings = PermissionSettingsManager.loadSettings();
+    const migratedProfile = settings.accessProfiles?.find(
+      (profile) => profile.id === settings.defaultAccessProfileId,
+    );
+
+    expect(settings.version).toBe(2);
+    expect(migratedProfile).toEqual(
+      expect.objectContaining({
+        sandbox: "workspace-write",
+        shellAccess: false,
+      }),
+    );
+    expect(settings.migration).toEqual(
+      expect.objectContaining({
+        version: 2,
+        sourceVersion: 1,
+        previous: expect.objectContaining({
+          version: 1,
+          defaultMode: "accept_edits",
+          defaultShellEnabled: false,
+        }),
+      }),
+    );
+    expect(repository.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps legacy dont_ask bounded during migration", () => {
+    repository.load.mockReturnValue({
+      version: 1,
+      defaultMode: "dont_ask",
+      defaultShellEnabled: false,
+      defaultPermissionAccess: "default",
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+    const migratedProfile = settings.accessProfiles?.find(
+      (profile) => profile.id === settings.defaultAccessProfileId,
+    );
+
+    expect(migratedProfile).toEqual(
+      expect.objectContaining({
+        sandbox: "workspace-write",
+        approval: "never",
+        reviewer: "none",
+        network: "on-request",
+        shellAccess: false,
+      }),
+    );
+    expect(migratedProfile?.sandbox).not.toBe("danger-full-access");
+    expect(settings.migration?.defaultProvenance).toBe("legacy_mode");
+  });
+
+  it("preserves shell access without widening legacy dont_ask", () => {
+    repository.load.mockReturnValue({
+      version: 1,
+      defaultMode: "dont_ask",
+      defaultShellEnabled: true,
+      defaultPermissionAccess: "default",
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+    const migratedProfile = settings.accessProfiles?.find(
+      (profile) => profile.id === settings.defaultAccessProfileId,
+    );
+
+    expect(migratedProfile).toEqual(
+      expect.objectContaining({
+        sandbox: "workspace-write",
+        approval: "never",
+        reviewer: "none",
+        network: "on-request",
+        shellAccess: true,
+      }),
+    );
+    expect(migratedProfile?.sandbox).not.toBe("danger-full-access");
+  });
+
+  it("does not rewrite an already migrated settings record", () => {
+    const legacy = {
+      version: 1,
+      defaultMode: "dangerous_only",
+      defaultShellEnabled: false,
+      defaultPermissionAccess: "default",
+      rules: [],
+    } as const;
+    repository.load.mockReturnValueOnce(legacy);
+    const first = PermissionSettingsManager.loadSettings();
+    const saved = repository.save.mock.calls[0]?.[1];
+
+    PermissionSettingsManager.clearCache();
+    repository.load.mockReturnValue(saved);
+    const second = PermissionSettingsManager.loadSettings();
+
+    expect(second).toEqual(first);
+    expect(repository.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not rewrite a complete v2 record that has no diagnostic backup", () => {
+    repository.load.mockReturnValue({
+      version: 2,
+      defaultMode: "default",
+      defaultShellEnabled: false,
+      defaultPermissionAccess: "default",
+      defaultAccessProfileId: "ask_for_approval",
+      accessProfiles: [],
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+
+    expect(settings.version).toBe(2);
+    expect(settings.defaultAccessProfileId).toBe("ask_for_approval");
+    expect(settings.migration).toBeUndefined();
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
+  it("records a recoverable snapshot for a v2 record with a missing default profile", () => {
+    repository.load.mockReturnValue({
+      version: 2,
+      defaultMode: "dont_ask",
+      defaultShellEnabled: true,
+      defaultPermissionAccess: "default",
+      defaultAccessProfileId: "deleted-profile",
+      accessProfiles: [],
+      rules: [],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+
+    expect(settings.defaultAccessProfileId).toBe("deleted-profile");
+    expect(settings.migration).toEqual(
+      expect.objectContaining({
+        version: 2,
+        sourceVersion: 2,
+        defaultProvenance: "fail_closed_unknown_profile",
+        previous: expect.objectContaining({
+          defaultMode: "dont_ask",
+          defaultShellEnabled: true,
+          defaultAccessProfileId: "deleted-profile",
+        }),
+      }),
+    );
+    expect(repository.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops malformed legacy rules while preserving the migration", () => {
+    repository.load.mockReturnValue({
+      version: 1,
+      defaultMode: "default",
+      rules: [{ effect: "allow" }, { effect: "invalid", scope: {} }],
+    });
+
+    const settings = PermissionSettingsManager.loadSettings();
+
+    expect(settings.rules).toEqual([]);
+    expect(settings.migration?.previous.rules).toHaveLength(2);
+    expect(repository.save).toHaveBeenCalledTimes(1);
   });
 
   it("preserves explicit empty child scopes so inheritance cannot restore a parent grant", () => {

@@ -39,4 +39,4 @@ Generate a structured Product Requirements Document from a feature request.
 ## Runtime Prompt
 
 - Current runtime prompt length: 845 characters.
-- Runtime prompt is defined directly in `../prd.json`. 
+- Runtime prompt is defined directly in `../prd.json`.

@@ -37,12 +37,12 @@ Read-only local workspace scout subagent for Pi. Use it to narrow context to rel
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| query | string | Yes | What to find in the local workspace |
-| scope_hint | string | No | Optional directories/files/symbols to prioritize |
+| Name       | Type   | Required | Description                                      |
+| ---------- | ------ | -------- | ------------------------------------------------ |
+| query      | string | Yes      | What to find in the local workspace              |
+| scope_hint | string | No       | Optional directories/files/symbols to prioritize |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 775 characters.
-- Runtime prompt is defined directly in `../pi-finder-subagent.json`. 
+- Runtime prompt is defined directly in `../pi-finder-subagent.json`.

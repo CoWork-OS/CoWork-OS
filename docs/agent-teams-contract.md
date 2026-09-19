@@ -1,17 +1,26 @@
 # Agentic Tribe Contract
 
 ## Goal
+
 Define a first-class Tribe Lead + Members model on top of existing CoWork task/agent primitives.
 
 > Current state: team runs are dispatched through the shared orchestration graph engine. This document describes the team contract and projection surfaces, not a standalone execution runtime.
 
+This contract describes task-execution tribes and their run graph. The persistent
+**CoWork Bot Team** uses the same role and team primitives as a verified
+workspace boundary for named bot-to-bot conversations, but it is not a tribe run
+or a replacement for `agent_team_runs`. See [Bots, conversations, and tasks](bots-and-conversations.md)
+for the bot roster, conversation lifecycle, and peer-message behavior.
+
 ## Scope
+
 - Tribe definition and membership
 - Tribe run lifecycle
 - Shared tribe task list/checklist
 - Execution/events contract between renderer and daemon
 
 ## Non-Goals
+
 - Replacing existing `spawn_agent` tools
 - Replacing Mission Control board
 - Changing workspace-level security policy precedence
@@ -19,6 +28,7 @@ Define a first-class Tribe Lead + Members model on top of existing CoWork task/a
 ## Data Model
 
 ### `agent_teams`
+
 ```sql
 CREATE TABLE agent_teams (
   id TEXT PRIMARY KEY,
@@ -37,6 +47,7 @@ CREATE INDEX idx_agent_teams_workspace ON agent_teams(workspace_id);
 ```
 
 ### `agent_team_members`
+
 ```sql
 CREATE TABLE agent_team_members (
   id TEXT PRIMARY KEY,
@@ -52,6 +63,7 @@ CREATE INDEX idx_team_members_team ON agent_team_members(team_id);
 ```
 
 ### `agent_team_runs`
+
 ```sql
 CREATE TABLE agent_team_runs (
   id TEXT PRIMARY KEY,
@@ -68,6 +80,7 @@ CREATE INDEX idx_team_runs_root_task ON agent_team_runs(root_task_id);
 ```
 
 ### `agent_team_items` (shared checklist)
+
 ```sql
 CREATE TABLE agent_team_items (
   id TEXT PRIMARY KEY,
@@ -92,6 +105,7 @@ CREATE INDEX idx_team_items_source_task ON agent_team_items(source_task_id);
 Follow existing naming style in `IPC_CHANNELS`.
 
 ### Team CRUD
+
 - `TEAM_LIST` -> `team:list`
 - `TEAM_GET` -> `team:get`
 - `TEAM_CREATE` -> `team:create`
@@ -99,6 +113,7 @@ Follow existing naming style in `IPC_CHANNELS`.
 - `TEAM_DELETE` -> `team:delete`
 
 ### Membership
+
 - `TEAM_MEMBER_ADD` -> `teamMember:add`
 - `TEAM_MEMBER_LIST` -> `teamMember:list`
 - `TEAM_MEMBER_UPDATE` -> `teamMember:update`
@@ -106,6 +121,7 @@ Follow existing naming style in `IPC_CHANNELS`.
 - `TEAM_MEMBER_REORDER` -> `teamMember:reorder`
 
 ### Run Lifecycle
+
 - `TEAM_RUN_CREATE` -> `teamRun:create`
 - `TEAM_RUN_GET` -> `teamRun:get`
 - `TEAM_RUN_LIST` -> `teamRun:list`
@@ -114,6 +130,7 @@ Follow existing naming style in `IPC_CHANNELS`.
 - `TEAM_RUN_RESUME` -> `teamRun:resume`
 
 ### Shared Checklist
+
 - `TEAM_ITEM_LIST` -> `teamItem:list`
 - `TEAM_ITEM_CREATE` -> `teamItem:create`
 - `TEAM_ITEM_UPDATE` -> `teamItem:update`
@@ -121,13 +138,14 @@ Follow existing naming style in `IPC_CHANNELS`.
 - `TEAM_ITEM_MOVE` -> `teamItem:move`
 
 ### Streaming
+
 - `TEAM_RUN_EVENT` -> `teamRun:event`
 
 ## TypeScript Shapes (Proposed)
 
 ```ts
-type TeamRunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
-type TeamItemStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'failed';
+type TeamRunStatus = "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+type TeamItemStatus = "todo" | "in_progress" | "blocked" | "done" | "failed";
 
 interface AgentTeam {
   id: string;
@@ -136,7 +154,7 @@ interface AgentTeam {
   description?: string;
   leadAgentRoleId: string;
   maxParallelAgents: number;
-  defaultModelPreference?: 'same' | 'cheaper' | 'smarter';
+  defaultModelPreference?: "same" | "cheaper" | "smarter";
   defaultPersonality?: string;
   isActive: boolean;
   createdAt: number;
@@ -181,6 +199,7 @@ interface AgentTeamItem {
 ```
 
 ## Execution Rules
+
 - Team lead creates/owns the run.
 - Team items can be assigned to members; execution uses the graph-backed child-task spawn path.
 - Child task completion writes `resultSummary` back to both:
@@ -195,6 +214,7 @@ interface AgentTeamItem {
   - `agent_teams.default_personality` -> `AgentConfig.personalityId`
 - Team-run spawned child tasks set `AgentConfig.bypassQueue=false` so they respect the global task queue concurrency limit.
 - `/multitask` uses the same ephemeral collaborative team/run path, but its root task carries `AgentConfig.multitaskMode=true` and its team items are lane-specific assignments instead of one full-prompt item per selected agent.
+- Optional [Jev Decision Support](jev.md) can select the team members and lead before the run is created. In Active harness mode it can also choose bounded multitask lanes; the normal chat model, orchestration graph, access profile, approval rules, and queue limits remain authoritative.
 - Team runs now surface worker role intent, semantic completion labels, and graph node state through the same delegated-work timeline used elsewhere in the app.
 
 ## Events
@@ -202,6 +222,7 @@ interface AgentTeamItem {
 The renderer subscribes to `TEAM_RUN_EVENT` and maintains local state with incremental updates.
 
 Common event types:
+
 - `team_created`, `team_updated`, `team_deleted`
 - `team_member_added`, `team_member_updated`, `team_member_removed`, `team_members_reordered`
 - `team_run_created`, `team_run_updated`, `team_run_loaded`

@@ -66,10 +66,7 @@
       "dontUseWhen": "Do not use for text-only summaries, requests that require Mermaid or another explicit diagram format, or non-technical visual design tasks such as UI mockups and marketing graphics.",
       "outputs": "A standalone HTML architecture diagram plus supporting plan and summary artifacts under {artifactDir} or the requested output path.",
       "successCriteria": "The skill produces a readable, self-contained HTML diagram grounded in the provided or inspected system context, with explicit assumptions and no major layout collisions.",
-      "expectedArtifacts": [
-        "diagram-plan.md",
-        "diagram-summary.md"
-      ],
+      "expectedArtifacts": ["diagram-plan.md", "diagram-summary.md"],
       "keywords": [
         "architecture diagram",
         "infrastructure diagram",

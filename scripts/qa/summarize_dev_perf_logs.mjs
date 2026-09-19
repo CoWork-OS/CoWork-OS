@@ -58,7 +58,9 @@ const startupLanes = new Map();
 
 for (const row of rows) {
   const message = String(row.message ?? row.rawLine ?? "");
-  const startupMatch = message.match(/\[Startup\]\s+([a-zA-Z0-9_.:-]+)\s+at\s+([\d.]+)ms(?:\s+(\{.*\}))?/);
+  const startupMatch = message.match(
+    /\[Startup\]\s+([a-zA-Z0-9_.:-]+)\s+at\s+([\d.]+)ms(?:\s+(\{.*\}))?/,
+  );
   if (startupMatch) {
     const name = startupMatch[1];
     const atMs = Number(startupMatch[2]);
@@ -69,7 +71,9 @@ for (const row of rows) {
     }
   }
 
-  const markMatch = message.match(/\[Mark\]\s+([a-zA-Z0-9_.:-]+)\s+at\s+([\d.]+)ms(?:\s+(\{.*\}))?/);
+  const markMatch = message.match(
+    /\[Mark\]\s+([a-zA-Z0-9_.:-]+)\s+at\s+([\d.]+)ms(?:\s+(\{.*\}))?/,
+  );
   if (markMatch) {
     const name = markMatch[1];
     const atMs = Number(markMatch[2]);

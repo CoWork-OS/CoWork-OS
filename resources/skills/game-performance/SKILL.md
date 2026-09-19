@@ -38,4 +38,4 @@ Cross-engine game performance: draw call optimization, LOD, object pooling, GPU 
 ## Runtime Prompt
 
 - Current runtime prompt length: 979 characters.
-- Runtime prompt is defined directly in `../game-performance.json`. 
+- Runtime prompt is defined directly in `../game-performance.json`.

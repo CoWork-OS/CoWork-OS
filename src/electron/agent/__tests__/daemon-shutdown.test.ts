@@ -91,8 +91,23 @@ describe("daemon shutdown persistence", () => {
       maybeCaptureMentionedAgentRoleIds: vi.fn(),
       applyRuntimeTaskStrategy: vi.fn((task: Any) => ({
         task,
+        route: {
+          intent: "execution",
+          confidence: 1,
+          conversationMode: "execute",
+          answerFirst: false,
+          signals: [],
+          complexity: "low",
+          domain: "general",
+        },
         agentConfigChanged: false,
         promptChanged: false,
+      })),
+      applyJevTaskStrategy: vi.fn(async (task: Any) => ({
+        task,
+        changed: false,
+        profileSelected: true,
+        status: "skipped",
       })),
       maybeLaunchCollaborativeTask: vi.fn(() => collaboration),
       finishQueueSlot: vi.fn(),

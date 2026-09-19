@@ -37,11 +37,11 @@ Check code for common security vulnerabilities
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to file or folder to audit |
+| Name | Type   | Required | Description                     |
+| ---- | ------ | -------- | ------------------------------- |
+| path | string | Yes      | Path to file or folder to audit |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 497 characters.
-- Runtime prompt is defined directly in `../security-audit.json`. 
+- Runtime prompt is defined directly in `../security-audit.json`.

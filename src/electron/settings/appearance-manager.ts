@@ -15,6 +15,8 @@ import {
   UI_DENSITIES,
   UiDensity,
   TimelineVerbosity,
+  COMMAND_OUTPUT_STYLES,
+  CommandOutputStyle,
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
@@ -29,6 +31,7 @@ const DEFAULT_SETTINGS: AppearanceSettings = {
   transparencyEffectsEnabled: true,
   uiDensity: "focused",
   timelineVerbosity: "summary",
+  commandOutputStyle: "terminal",
   devRunLoggingEnabled: false,
   homeResearchVaultEnabled: false,
   homeNextActionsEnabled: false,
@@ -146,6 +149,7 @@ export class AppearanceManager {
             typeof stored.transparencyEffectsEnabled !== "boolean" ||
             !isValidUiDensity(stored.uiDensity) ||
             !isValidTimelineVerbosity(stored.timelineVerbosity) ||
+            !isValidCommandOutputStyle(stored.commandOutputStyle) ||
             typeof stored.devRunLoggingEnabled !== "boolean" ||
             typeof stored.homeResearchVaultEnabled !== "boolean" ||
             typeof stored.homeNextActionsEnabled !== "boolean"
@@ -181,6 +185,10 @@ export class AppearanceManager {
         settings.timelineVerbosity = DEFAULT_SETTINGS.timelineVerbosity;
         needsWrite = true;
       }
+      if (!isValidCommandOutputStyle(settings.commandOutputStyle)) {
+        settings.commandOutputStyle = DEFAULT_SETTINGS.commandOutputStyle;
+        needsWrite = true;
+      }
       if (typeof settings.devRunLoggingEnabled !== "boolean") {
         settings.devRunLoggingEnabled = DEFAULT_SETTINGS.devRunLoggingEnabled;
         needsWrite = true;
@@ -211,6 +219,7 @@ export class AppearanceManager {
           JSON.stringify({
             uiDensity: settings.uiDensity,
             timelineVerbosity: settings.timelineVerbosity,
+            commandOutputStyle: settings.commandOutputStyle,
             devRunLoggingEnabled: settings.devRunLoggingEnabled,
             homeResearchVaultEnabled: settings.homeResearchVaultEnabled,
             homeNextActionsEnabled: settings.homeNextActionsEnabled,
@@ -313,6 +322,9 @@ export class AppearanceManager {
         timelineVerbosity: isValidTimelineVerbosity(settings.timelineVerbosity)
           ? settings.timelineVerbosity
           : existingSettings.timelineVerbosity,
+        commandOutputStyle: isValidCommandOutputStyle(settings.commandOutputStyle)
+          ? settings.commandOutputStyle
+          : existingSettings.commandOutputStyle,
         devRunLoggingEnabled:
           typeof settings.devRunLoggingEnabled === "boolean"
             ? settings.devRunLoggingEnabled
@@ -394,6 +406,10 @@ function isValidUiDensity(value: unknown): value is UiDensity {
 
 function isValidTimelineVerbosity(value: unknown): value is TimelineVerbosity {
   return value === "summary" || value === "verbose";
+}
+
+function isValidCommandOutputStyle(value: unknown): value is CommandOutputStyle {
+  return COMMAND_OUTPUT_STYLES.includes(value as CommandOutputStyle);
 }
 
 function syncDevLogSettingsFile(captureEnabled: boolean): void {

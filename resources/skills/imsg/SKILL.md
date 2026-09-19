@@ -38,4 +38,4 @@ iMessage/SMS CLI for listing chats, history, watch, and sending.
 ## Runtime Prompt
 
 - Current runtime prompt length: 569 characters.
-- Runtime prompt is defined directly in `../imsg.json`. 
+- Runtime prompt is defined directly in `../imsg.json`.

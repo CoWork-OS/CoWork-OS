@@ -15,36 +15,32 @@ image component.
 **Incorrect (single component with conditionals):**
 
 ```tsx
-type Item = { id: string; text?: string; imageUrl?: string; isHeader?: boolean }
+type Item = { id: string; text?: string; imageUrl?: string; isHeader?: boolean };
 
 function ListItem({ item }: { item: Item }) {
   if (item.isHeader) {
-    return <HeaderItem title={item.text} />
+    return <HeaderItem title={item.text} />;
   }
   if (item.imageUrl) {
-    return <ImageItem url={item.imageUrl} />
+    return <ImageItem url={item.imageUrl} />;
   }
-  return <MessageItem text={item.text} />
+  return <MessageItem text={item.text} />;
 }
 
 function Feed({ items }: { items: Item[] }) {
   return (
-    <LegendList
-      data={items}
-      renderItem={({ item }) => <ListItem item={item} />}
-      recycleItems
-    />
-  )
+    <LegendList data={items} renderItem={({ item }) => <ListItem item={item} />} recycleItems />
+  );
 }
 ```
 
 **Correct (typed items with separate components):**
 
 ```tsx
-type HeaderItem = { id: string; type: 'header'; title: string }
-type MessageItem = { id: string; type: 'message'; text: string }
-type ImageItem = { id: string; type: 'image'; url: string }
-type FeedItem = HeaderItem | MessageItem | ImageItem
+type HeaderItem = { id: string; type: "header"; title: string };
+type MessageItem = { id: string; type: "message"; text: string };
+type ImageItem = { id: string; type: "image"; url: string };
+type FeedItem = HeaderItem | MessageItem | ImageItem;
 
 function Feed({ items }: { items: FeedItem[] }) {
   return (
@@ -54,17 +50,17 @@ function Feed({ items }: { items: FeedItem[] }) {
       getItemType={(item) => item.type}
       renderItem={({ item }) => {
         switch (item.type) {
-          case 'header':
-            return <SectionHeader title={item.title} />
-          case 'message':
-            return <MessageRow text={item.text} />
-          case 'image':
-            return <ImageRow url={item.url} />
+          case "header":
+            return <SectionHeader title={item.title} />;
+          case "message":
+            return <MessageRow text={item.text} />;
+          case "image":
+            return <ImageRow url={item.url} />;
         }
       }}
       recycleItems
     />
-  )
+  );
 }
 ```
 
@@ -83,14 +79,14 @@ function Feed({ items }: { items: FeedItem[] }) {
   getItemType={(item) => item.type}
   getEstimatedItemSize={(index, item, itemType) => {
     switch (itemType) {
-      case 'header':
-        return 48
-      case 'message':
-        return 72
-      case 'image':
-        return 300
+      case "header":
+        return 48;
+      case "message":
+        return 72;
+      case "image":
+        return 300;
       default:
-        return 72
+        return 72;
     }
   }}
   renderItem={({ item }) => {

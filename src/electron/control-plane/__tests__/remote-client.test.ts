@@ -60,8 +60,10 @@ import {
   getRemoteGatewayClient,
   initRemoteGatewayClient,
   shutdownRemoteGatewayClient,
+  pinnedServerIdentity,
   type RemoteGatewayClientOptions,
 } from "../remote-client";
+import tls from "tls";
 
 describe("RemoteGatewayClient", () => {
   let client: RemoteGatewayClient;
@@ -511,5 +513,56 @@ describe("Auto-reconnect configuration", () => {
 
     expect(client.getStatus().state).toBe("disconnected");
     client.disconnect();
+  });
+});
+
+describe("pinnedServerIdentity", () => {
+  const fingerprint = "AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89";
+  const normalized = "abcdef0123456789abcdef0123456789";
+
+  function certWith(fp: string | undefined): tls.PeerCertificate {
+    return { fingerprint256: fp } as unknown as tls.PeerCertificate;
+  }
+
+  beforeEach(() => {
+    // The default hostname/SAN check is exercised separately; neutralize it
+    // here so these cases isolate the fingerprint comparison.
+    vi.spyOn(tls, "checkServerIdentity").mockReturnValue(undefined);
+  });
+
+  it("accepts a matching fingerprint by returning undefined", () => {
+    // Node's contract: undefined means "identity verified". Returning a
+    // truthy value here would REJECT the correct certificate.
+    expect(pinnedServerIdentity(fingerprint)("host", certWith(normalized))).toBeUndefined();
+  });
+
+  it("rejects a mismatched fingerprint with an Error", () => {
+    // Regression guard for the inverted check: returning `false` here was
+    // falsy, which Node read as success and accepted any CA-signed cert.
+    const result = pinnedServerIdentity(fingerprint)("host", certWith("f".repeat(32)));
+
+    expect(result).toBeInstanceOf(Error);
+    expect(String(result)).toContain("does not match the pinned value");
+  });
+
+  it("rejects a certificate with no SHA-256 fingerprint", () => {
+    expect(pinnedServerIdentity(fingerprint)("host", certWith(undefined))).toBeInstanceOf(Error);
+  });
+
+  it("normalizes colons and case on both sides", () => {
+    expect(
+      pinnedServerIdentity(normalized.toUpperCase())("host", certWith(fingerprint)),
+    ).toBeUndefined();
+  });
+
+  it("still rejects a hostname mismatch even when the fingerprint matches", () => {
+    // Supplying checkServerIdentity replaces Node's default hostname check, so
+    // pinning must not silently disable SAN validation.
+    const hostnameError = new Error("Hostname/IP does not match certificate's altnames");
+    vi.spyOn(tls, "checkServerIdentity").mockReturnValue(hostnameError);
+
+    expect(pinnedServerIdentity(fingerprint)("evil.example", certWith(normalized))).toBe(
+      hostnameError,
+    );
   });
 });

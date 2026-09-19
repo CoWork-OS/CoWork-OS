@@ -5,8 +5,13 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import { checkpointCrashRoundTrip } from "../../../../tests/helpers/checkpoint-crash-roundtrip";
 import { AwaitingUserInputError, TaskExecutor } from "../executor";
 import type { LLMResponse } from "../llm";
+import { FileOperationTracker } from "../executor-helpers";
+import { fromOpenAICompatibleResponse } from "../llm/openai-compatible";
+import { ContextCapacityExhaustedError } from "../runtime/SessionRuntime";
 
 vi.mock("electron", () => ({
   app: {
@@ -38,6 +43,20 @@ function toolUseResponse(name: string, input: Record<string, Any>): LLMResponse 
         input,
       },
     ],
+  };
+}
+
+function multiToolUseResponse(
+  calls: Array<{ name: string; input: Record<string, Any> }>,
+): LLMResponse {
+  return {
+    stopReason: "tool_use",
+    content: calls.map((call, index) => ({
+      type: "tool_use" as const,
+      id: `tool-${index}-${call.name}`,
+      name: call.name,
+      input: call.input,
+    })),
   };
 }
 
@@ -477,6 +496,33 @@ describe("TaskExecutor executeStep failure handling", () => {
 
     expect(step.status).toBe("failed");
     expect(step.error).toBeDefined();
+  });
+
+  it("fails before provider dispatch when retained context exceeds the hard budget", async () => {
+    executor = createExecutorWithStubs([textResponse("provider must not run")], {});
+    const contextError = new ContextCapacityExhaustedError({
+      phase: "step",
+      contextLabel: "step:context-overflow",
+      availableTokens: 100,
+      tokensBefore: 240,
+      tokensAfter: 220,
+    });
+    const prepareMessages = vi
+      .spyOn(executor as Any, "prepareMessagesForTurnIteration")
+      .mockRejectedValue(contextError);
+    const providerRequest = (executor as Any).callLLMWithRetry;
+    const step: Any = {
+      id: "context-overflow",
+      description: "Answer using the retained task context",
+      status: "pending",
+    };
+
+    await expect((executor as Any).executeStep(step)).rejects.toBe(contextError);
+
+    expect(prepareMessages).toHaveBeenCalledTimes(1);
+    expect(providerRequest).not.toHaveBeenCalled();
+    expect(step.status).toBe("failed");
+    expect(step.error).toBe(contextError.message);
   });
 
   it("returns a direct completion response after duplicate non-idempotent tool calls are blocked", async () => {
@@ -2968,6 +3014,245 @@ relationship_memory:
     expect(webSearchBudgetCheck.blocked).toBe(true);
     expect(webSearchBudgetCheck.failureClass).toBe("budget_exhausted");
     expect(webSearchBudgetCheck.scope).toBe("task");
+  });
+
+  it("stops after a fatal tool dispatch and does not request another model turn", async () => {
+    executor = createExecutorWithStubs(
+      [
+        multiToolUseResponse([
+          { name: "read_file", input: { path: "first.txt" } },
+          { name: "list_directory", input: { path: "." } },
+        ]),
+        textResponse("This response must never be requested."),
+      ],
+      {},
+    );
+    (executor as Any).fileOperationTracker = new FileOperationTracker();
+    (executor as Any).budgetContractsEnabled = true;
+    (executor as Any).budgetContract = {
+      maxTurns: 20,
+      maxToolCalls: 1,
+      maxWebSearchCalls: 8,
+      maxConsecutiveSearchSteps: 2,
+      maxAutoRecoverySteps: 0,
+    };
+    const appendToolResults = vi.spyOn(
+      (executor as Any).getToolBatchExecutor(),
+      "appendOrderedToolResults",
+    );
+    const step: Any = {
+      id: "dispatch-budget-stop",
+      description: "Inspect the workspace files",
+      status: "pending",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [step] };
+
+    await expect((executor as Any).executeStep(step)).rejects.toMatchObject({
+      name: "BudgetLimitExceededError",
+      message: expect.stringContaining("Tool-call budget exhausted"),
+    });
+
+    const snapshots = (executor as Any).daemon.logEvent.mock.calls.filter(
+      (call: Any[]) => call[1] === "conversation_snapshot",
+    );
+    expect(snapshots.length).toBeGreaterThan(0);
+    const snapshot = snapshots.at(-1)[2];
+    const persistedResults = snapshot.conversationHistory.flatMap((message: Any) =>
+      Array.isArray(message.content)
+        ? message.content.filter((block: Any) => block.type === "tool_result")
+        : [],
+    );
+    expect(persistedResults.map((result: Any) => result.tool_use_id)).toEqual([
+      "tool-0-read_file",
+      "tool-1-list_directory",
+    ]);
+    expect(persistedResults[1].is_error).toBe(true);
+    const diskWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-fatal-snapshot-"));
+    try {
+      const recovered = await checkpointCrashRoundTrip(diskWorkspace, snapshot);
+      const restarted = createExecutorWithStubs([], {}) as Any;
+      restarted.fileOperationTracker = new FileOperationTracker();
+      expect(
+        restarted.restoreFromSnapshot([
+          {
+            id: "durable-failure",
+            taskId: "task-1",
+            type: "conversation_snapshot",
+            timestamp: Date.now(),
+            payload: recovered,
+          },
+        ]),
+      ).toBe(true);
+      const recoveredResults = restarted.conversationHistory.flatMap((message: Any) =>
+        Array.isArray(message.content)
+          ? message.content.filter((block: Any) => block.type === "tool_result")
+          : [],
+      );
+      expect(recoveredResults).toEqual(persistedResults);
+      expect(restarted.toolRegistry.executeTool).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(diskWorkspace, { recursive: true, force: true });
+    }
+
+    expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(1);
+    expect((executor as Any).toolRegistry.executeTool).toHaveBeenCalledTimes(1);
+    expect((executor as Any).toolRegistry.executeTool).toHaveBeenCalledWith("read_file", {
+      path: "first.txt",
+    });
+    expect(appendToolResults).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.arrayContaining([
+        expect.objectContaining({ tool_use_id: "tool-0-read_file" }),
+        expect.objectContaining({ tool_use_id: "tool-1-list_directory", is_error: true }),
+      ]),
+      undefined,
+    );
+  });
+
+  it("rejects malformed provider calls while executing valid siblings and preserving the snapshot", async () => {
+    const response = fromOpenAICompatibleResponse({
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            tool_calls: [
+              {
+                type: "function",
+                id: "bad-write",
+                function: { name: "write_file", arguments: '{"path":' },
+              },
+              {
+                type: "function",
+                id: "good-read",
+                function: { name: "read_file", arguments: '{"path":"source.txt"}' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    executor = createExecutorWithStubs(
+      [response, textResponse("Read the source successfully.")],
+      {},
+    );
+    const runtime = executor as Any;
+    runtime.fileOperationTracker = new FileOperationTracker();
+    const step: Any = {
+      id: "malformed-call",
+      description: "Inspect the source file",
+      status: "pending",
+    };
+    runtime.plan = { description: "Plan", steps: [step] };
+
+    await runtime.executeStep(step);
+
+    expect(runtime.toolRegistry.executeTool).toHaveBeenCalledTimes(1);
+    expect(runtime.toolRegistry.executeTool).toHaveBeenCalledWith("read_file", {
+      path: "source.txt",
+    });
+    expect(
+      runtime.checkFileOperation.mock.calls.every((call: Any[]) => call[0] !== "write_file"),
+    ).toBe(true);
+    const results = runtime.conversationHistory.flatMap((message: Any) =>
+      Array.isArray(message.content)
+        ? message.content.filter((block: Any) => block.type === "tool_result")
+        : [],
+    );
+    expect(results.map((result: Any) => result.tool_use_id)).toEqual(["bad-write", "good-read"]);
+    expect(results[0].is_error).toBe(true);
+    expect(JSON.parse(results[0].content)).toMatchObject({
+      rejected: true,
+      reason: "invalid_tool_arguments",
+    });
+
+    runtime.saveConversationSnapshot();
+    const snapshots = runtime.daemon.logEvent.mock.calls.filter(
+      (call: Any[]) => call[1] === "conversation_snapshot",
+    );
+    const snapshot = JSON.parse(JSON.stringify(snapshots.at(-1)[2]));
+    const restored = createExecutorWithStubs([], {}) as Any;
+    restored.fileOperationTracker = new FileOperationTracker();
+    expect(
+      restored.restoreFromSnapshot([
+        {
+          id: "malformed-snapshot",
+          taskId: "task-1",
+          type: "conversation_snapshot",
+          timestamp: Date.now(),
+          payload: snapshot,
+        },
+      ]),
+    ).toBe(true);
+    const blocks = restored.conversationHistory.flatMap((message: Any) =>
+      Array.isArray(message.content) ? message.content : [],
+    );
+    expect(blocks.find((block: Any) => block.id === "bad-write").inputError).toMatchObject({
+      code: "malformed_json",
+    });
+    expect(blocks.filter((block: Any) => block.type === "tool_result")).toEqual(results);
+    expect(restored.toolRegistry.executeTool).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed Ollama mutations instead of reporting them as deferred successes", async () => {
+    const response = fromOpenAICompatibleResponse({
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            tool_calls: [
+              {
+                type: "function",
+                id: "ollama-bad-write",
+                function: { name: "write_file", arguments: '{"path":' },
+              },
+              {
+                type: "function",
+                id: "ollama-good-read",
+                function: { name: "read_file", arguments: '{"path":"source.txt"}' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    executor = createExecutorWithStubs(
+      [response, textResponse("Read the source successfully.")],
+      {},
+    );
+    const runtime = executor as Any;
+    runtime.provider = { type: "ollama" };
+    runtime.fileOperationTracker = new FileOperationTracker();
+    const step: Any = {
+      id: "ollama-malformed-mutation",
+      description: "Inspect the source file",
+      status: "pending",
+    };
+    runtime.plan = { description: "Plan", steps: [step] };
+
+    await runtime.executeStep(step);
+
+    expect(runtime.toolRegistry.executeTool).toHaveBeenCalledTimes(1);
+    expect(runtime.toolRegistry.executeTool).toHaveBeenCalledWith(
+      "read_file",
+      expect.objectContaining({ path: "source.txt" }),
+    );
+    expect(
+      runtime.checkFileOperation.mock.calls.every((call: Any[]) => call[0] !== "write_file"),
+    ).toBe(true);
+    const results = runtime.conversationHistory.flatMap((message: Any) =>
+      Array.isArray(message.content)
+        ? message.content.filter((block: Any) => block.type === "tool_result")
+        : [],
+    );
+    const malformedResult = results.find(
+      (result: Any) => result.tool_use_id === "ollama-bad-write",
+    );
+    expect(malformedResult?.is_error).toBe(true);
+    expect(JSON.parse(malformedResult?.content || "{}")).toMatchObject({
+      rejected: true,
+      reason: "invalid_tool_arguments",
+    });
+    expect(JSON.parse(malformedResult?.content || "{}")).not.toHaveProperty("deferred");
   });
 
   it("clamps per-call web_search maxUses by task and step policy limits", () => {

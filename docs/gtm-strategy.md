@@ -24,15 +24,15 @@ Supporting line:
 
 ## Message Architecture
 
-| Layer | Approved message | What it explains |
-| --- | --- | --- |
-| Category | Free, open-source AI super app / everything app | What CoWork OS is |
-| User benefit | One workspace for real work across code, browser, inbox, files, artifacts, and automation | Why it matters |
-| Differentiator | Open, multi-provider, and MIT-licensed | Why CoWork is structurally different |
-| Technical engine | One agent harness across supported model routes | How model flexibility works |
-| Access promise | Supported subscriptions/accounts, APIs, gateways, cloud credentials, and local models | What users can bring |
-| Continuity promise | Keep tools, skills, memory, approvals, agents, artifacts, and workflows when routes change | The practical advantage |
-| Trust | Local-first state, visible execution, policies, approvals, and source access | Why users can rely on it |
+| Layer                | Approved message                                                                            | What it explains                            |
+| -------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Category             | Free, open-source AI super app / everything app                                             | What CoWork OS is                           |
+| User benefit         | One workspace for real work across code, browser, inbox, files, artifacts, and automation   | Why it matters                              |
+| Differentiator       | Open, multi-provider, and MIT-licensed                                                      | Why CoWork is structurally different        |
+| Technical engine     | One agent harness across supported model routes                                             | How model flexibility works                 |
+| Access promise       | Supported subscriptions/accounts, APIs, gateways, cloud credentials, and local models       | What users can bring                        |
+| Continuity promise   | Keep tools, skills, memory, approvals, agents, artifacts, and workflows when routes change  | The practical advantage                     |
+| Trust                | Local-first state, visible execution, policies, approvals, and source access                | Why users can rely on it                    |
 | Governed task access | Named profiles for sandbox, approvals, command tools, filesystem, network, and domain scope | How operators control what each task may do |
 
 The relationship should always be explained in this order:
@@ -122,17 +122,17 @@ Comparison content must be fit-based:
 
 ## Claim Guardrails
 
-| Topic | Approved wording | Do not claim |
-| --- | --- | --- |
-| Price | “CoWork OS is free and MIT-licensed. Provider usage may cost money.” | “All AI is free.” |
-| Breadth | “Dozens of model routes and compatible endpoints.” | “Every LLM” or “all models.” |
-| Accounts | “Supported account-based and subscription routes.” | “Any subscription.” |
-| Lock-in | “Reduce model-provider lock-in.” | “No lock-in.” |
-| Locality | “Local-first persistence with optional local inference.” | “Everything is fully local.” |
-| Credentials | “Credentials are stored locally and sent only to the configured provider or gateway for authentication.” | “Keys never leave the device.” |
-| Analytics | “No mandatory product analytics by default.” | “No telemetry.” |
-| Capability | “One harness across different model strengths.” | “Every model supports identical features.” |
-| Competition | “A broader open workspace for users who want model choice.” | “Better than every harness.” |
+| Topic       | Approved wording                                                                                         | Do not claim                               |
+| ----------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Price       | “CoWork OS is free and MIT-licensed. Provider usage may cost money.”                                     | “All AI is free.”                          |
+| Breadth     | “Dozens of model routes and compatible endpoints.”                                                       | “Every LLM” or “all models.”               |
+| Accounts    | “Supported account-based and subscription routes.”                                                       | “Any subscription.”                        |
+| Lock-in     | “Reduce model-provider lock-in.”                                                                         | “No lock-in.”                              |
+| Locality    | “Local-first persistence with optional local inference.”                                                 | “Everything is fully local.”               |
+| Credentials | “Credentials are stored locally and sent only to the configured provider or gateway for authentication.” | “Keys never leave the device.”             |
+| Analytics   | “No mandatory product analytics by default.”                                                             | “No telemetry.”                            |
+| Capability  | “One harness across different model strengths.”                                                          | “Every model supports identical features.” |
+| Competition | “A broader open workspace for users who want model choice.”                                              | “Better than every harness.”               |
 
 Use stable capability language instead of hardcoded provider, channel, skill, connector, or
 test counts unless the number is generated from a canonical released source.

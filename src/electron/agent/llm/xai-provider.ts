@@ -12,6 +12,7 @@ import {
   LLMImageContent,
 } from "./types";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
+import { parseOpenAICompatibleToolArguments } from "./openai-compatible";
 import { XAIOAuth, XAIOAuthTokens, isXAIAccessTokenExpiring } from "./xai-oauth";
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
@@ -198,17 +199,13 @@ export class XAIProvider implements LLMProvider {
           if (text) content.push({ type: "text", text });
         }
       } else if (item?.type === "function_call") {
-        let input: Record<string, Any> = {};
-        try {
-          input = JSON.parse(item.arguments || "{}");
-        } catch {
-          input = {};
-        }
+        const parsedArguments = parseOpenAICompatibleToolArguments(item.arguments);
         content.push({
           type: "tool_use",
           id: item.call_id || item.id,
           name: item.name,
-          input,
+          input: parsedArguments.input,
+          ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
         });
       } else if (item?.type === "output_text" && item.text) {
         content.push({ type: "text", text: item.text });

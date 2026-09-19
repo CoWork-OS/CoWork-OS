@@ -38,4 +38,4 @@ Send WhatsApp messages to other people or search/sync WhatsApp history via the w
 ## Runtime Prompt
 
 - Current runtime prompt length: 1597 characters.
-- Runtime prompt is defined directly in `../wacli.json`. 
+- Runtime prompt is defined directly in `../wacli.json`.

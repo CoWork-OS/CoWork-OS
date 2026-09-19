@@ -92,6 +92,46 @@ const quoteSqlIdentifier = (identifier: string): string => {
   return `"${identifier}"`;
 };
 
+/**
+ * Bot conversations keep their durable transcript in task_events rather than
+ * replacing the task's original seed prompt. Use the latest visible message
+ * as the roster preview so an active conversation is not presented as empty.
+ */
+const BOT_CONVERSATION_PREVIEW_SELECT = `
+  SUBSTR(
+    COALESCE(
+      (
+        SELECT COALESCE(
+          CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.message') END,
+          CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.content') END,
+          CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.text') END
+        )
+        FROM task_events te
+        WHERE te.task_id = tasks.id
+          AND COALESCE(NULLIF(te.legacy_type, ''), te.type) IN ('user_message', 'assistant_message')
+          AND json_valid(te.payload) = 1
+          AND TRIM(CAST(COALESCE(
+            CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.message') END,
+            CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.content') END,
+            CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.text') END,
+            ''
+          ) AS TEXT)) <> ''
+          AND NOT (
+            COALESCE(NULLIF(te.legacy_type, ''), te.type) = 'assistant_message'
+            AND COALESCE(
+              CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.internal') END,
+              0
+            ) = 1
+          )
+        ORDER BY COALESCE(te.seq, te.timestamp) DESC, te.timestamp DESC, te.id DESC
+        LIMIT 1
+      ),
+      ''
+    ),
+    1,
+    1024
+  ) AS sidebar_prompt_preview`;
+
 interface SqliteForeignKeyRow {
   table?: string;
   from?: string;
@@ -356,6 +396,49 @@ export class TaskSessionMetadataRepository {
       createdAt: Number(row.created_at || 0),
       updatedAt: Number(row.updated_at || 0),
     };
+  }
+}
+
+export class BotNotificationPreferenceRepository {
+  constructor(private db: Database.Database) {}
+
+  findByAgentRoleId(agentRoleId: string): import("../../shared/types").BotNotificationPolicy {
+    const id = String(agentRoleId || "").trim();
+    const row = id
+      ? (this.db
+          .prepare("SELECT * FROM bot_notification_preferences WHERE agent_role_id = ?")
+          .get(id) as Any)
+      : undefined;
+    return {
+      agentRoleId: id,
+      onFinish: row ? Number(row.on_finish) !== 0 : true,
+      onInputRequired: row ? Number(row.on_input_required) !== 0 : true,
+      updatedAt: row?.updated_at ? Number(row.updated_at) : 0,
+    };
+  }
+
+  upsert(
+    agentRoleId: string,
+    updates: { onFinish?: boolean; onInputRequired?: boolean },
+  ): import("../../shared/types").BotNotificationPolicy {
+    const id = String(agentRoleId || "").trim();
+    if (!id) throw new Error("Agent role id is required.");
+    const existing = this.findByAgentRoleId(id);
+    const now = Date.now();
+    const onFinish = updates.onFinish ?? existing.onFinish;
+    const onInputRequired = updates.onInputRequired ?? existing.onInputRequired;
+    this.db
+      .prepare(`
+        INSERT INTO bot_notification_preferences (
+          agent_role_id, on_finish, on_input_required, updated_at
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(agent_role_id) DO UPDATE SET
+          on_finish = excluded.on_finish,
+          on_input_required = excluded.on_input_required,
+          updated_at = excluded.updated_at
+      `)
+      .run(id, onFinish ? 1 : 0, onInputRequired ? 1 : 0, now);
+    return { agentRoleId: id, onFinish, onInputRequired, updatedAt: now };
   }
 }
 
@@ -814,6 +897,7 @@ export class TaskRepository {
     options?: {
       prioritizeSidebar?: boolean;
       includeArchivedSessions?: boolean;
+      botConversation?: { workspaceId: string; agentRoleId: string };
       excludeSources?: Array<NonNullable<Task["source"]>>;
       cursor?: {
         id?: string;
@@ -844,6 +928,14 @@ export class TaskRepository {
       ? TaskRepository.buildSidebarCursorPredicate(options.cursor)
       : { sql: "", args: [] };
     const whereClauses = [
+      ...(options?.botConversation
+        ? [
+            "workspace_id = ?",
+            "assigned_agent_role_id = ?",
+            "json_valid(agent_config) = 1",
+            "json_extract(agent_config, '$.botConversation') = 1",
+          ]
+        : []),
       ...(excludedSources.length > 0
         ? [`COALESCE(source, 'manual') NOT IN (${excludedSources.map(() => "?").join(", ")})`]
         : []),
@@ -860,12 +952,81 @@ export class TaskRepository {
     ];
     const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
     const stmt = this.db.prepare(`
-      SELECT * FROM tasks
+      SELECT tasks.*${options?.botConversation ? `, ${BOT_CONVERSATION_PREVIEW_SELECT}` : ""}
+      FROM tasks
       ${where}
       ${orderBy}
       LIMIT ? OFFSET ?
     `);
-    const rows = stmt.all(...excludedSources, ...cursor.args, limit, offset) as Any[];
+    const botConversationArgs = options?.botConversation
+      ? [options.botConversation.workspaceId, options.botConversation.agentRoleId]
+      : [];
+    const rows = stmt.all(
+      ...botConversationArgs,
+      ...excludedSources,
+      ...cursor.args,
+      limit,
+      offset,
+    ) as Any[];
+    return rows.map((row) => this.mapRowToTask(row));
+  }
+
+  /**
+   * Return the conversations that belong to bots. Bot transcripts live in the
+   * normal tasks table so they retain the task/event lifecycle, but are kept
+   * out of the Sessions feed and queried explicitly by bot identity.
+   */
+  findBotConversations(
+    workspaceId: string,
+    options?: {
+      agentRoleId?: string;
+      includeArchivedSessions?: boolean;
+      includeAllWorkspaces?: boolean;
+      limit?: number;
+      offset?: number;
+    },
+  ): Task[] {
+    const safeWorkspaceId = String(workspaceId || "").trim();
+    const includeAllWorkspaces = options?.includeAllWorkspaces === true;
+    if (!safeWorkspaceId && !includeAllWorkspaces) return [];
+    const limit = Math.min(500, Math.max(1, Math.floor(options?.limit ?? 100)));
+    const offset = Math.max(0, Math.floor(options?.offset ?? 0));
+    const clauses = [
+      "json_valid(agent_config) = 1",
+      "json_extract(agent_config, '$.botConversation') = 1",
+      "COALESCE(source, 'manual') <> 'side_chat'",
+    ];
+    const args: Any[] = [];
+    if (!includeAllWorkspaces) {
+      clauses.unshift("workspace_id = ?");
+      args.push(safeWorkspaceId);
+    }
+    if (options?.agentRoleId) {
+      clauses.push("assigned_agent_role_id = ?");
+      args.push(String(options.agentRoleId).trim());
+    }
+    if (options?.includeArchivedSessions === false) {
+      clauses.push(`NOT EXISTS (
+        SELECT 1 FROM task_session_metadata
+        WHERE task_session_metadata.session_id = COALESCE(NULLIF(tasks.session_id, ''), tasks.id)
+          AND task_session_metadata.archived_at IS NOT NULL
+      )`);
+    }
+    const rows = this.db
+      .prepare(`
+        SELECT tasks.*,
+          ${BOT_CONVERSATION_PREVIEW_SELECT},
+          CASE WHEN EXISTS (
+            SELECT 1 FROM task_session_metadata
+            WHERE task_session_metadata.session_id = COALESCE(NULLIF(tasks.session_id, ''), tasks.id)
+              AND task_session_metadata.archived_at IS NOT NULL
+          ) THEN 1 ELSE 0 END AS session_archived
+        FROM tasks
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC
+        LIMIT ? OFFSET ?
+      `)
+      .all(...args, limit, offset) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -912,6 +1073,7 @@ export class TaskRepository {
     options?: {
       prioritizeSidebar?: boolean;
       includeArchivedSessions?: boolean;
+      excludeBotConversations?: boolean;
       excludeSources?: Array<NonNullable<Task["source"]>>;
       cursor?: {
         id?: string;
@@ -942,6 +1104,11 @@ export class TaskRepository {
       ? TaskRepository.buildSidebarCursorPredicate(options.cursor)
       : { sql: "", args: [] };
     const whereClauses = [
+      ...(options?.excludeBotConversations
+        ? [
+            "COALESCE(json_extract(CASE WHEN json_valid(agent_config) = 1 THEN agent_config END, '$.botConversation'), 0) <> 1",
+          ]
+        : []),
       ...(excludedSources.length > 0
         ? [`COALESCE(source, 'manual') NOT IN (${excludedSources.map(() => "?").join(", ")})`]
         : []),
@@ -1325,6 +1492,11 @@ export class TaskRepository {
       );
       clearLlmCallEventTaskId.run(taskId);
 
+      const clearJevCallEventTaskId = this.db.prepare(
+        "UPDATE jev_call_events SET task_id = NULL WHERE task_id = ?",
+      );
+      clearJevCallEventTaskId.run(taskId);
+
       // Orphan child tasks so we can delete this parent
       const clearChildParent = this.db.prepare(
         "UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = ?",
@@ -1439,6 +1611,7 @@ export class TaskRepository {
       prompt: row.prompt,
       rawPrompt: row.raw_prompt || undefined,
       userPrompt: row.user_prompt || undefined,
+      sidebarPromptPreview: row.sidebar_prompt_preview || undefined,
       status: row.status,
       workspaceId: row.workspace_id,
       createdAt: row.created_at,
@@ -1485,6 +1658,7 @@ export class TaskRepository {
       worktreeStatus: (row.worktree_status as Task["worktreeStatus"]) || undefined,
       comparisonSessionId: row.comparison_session_id || undefined,
       sessionId: row.session_id || undefined,
+      sessionArchived: Number(row.session_archived) === 1 ? true : undefined,
       branchFromTaskId: row.branch_from_task_id || undefined,
       branchFromEventId: row.branch_from_event_id || undefined,
       branchLabel: row.branch_label || undefined,
@@ -1852,6 +2026,7 @@ export class TaskEventRepository {
     "llm_streaming",
     "progress_update",
     "task_analysis",
+    "jev_decision",
     "executing",
   ] as const;
   private static readonly DEFAULT_TIMELINE_PAGE_LIMIT = TASK_TIMELINE_HISTORY_LIMIT;
@@ -3422,6 +3597,17 @@ export class ApprovalRepository {
     return rows.map((row) => this.mapRowToApproval(row));
   }
 
+  /** Return every pending approval for restart reconciliation and cleanup. */
+  findAllPending(): ApprovalRequest[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM approvals
+      WHERE status = 'pending'
+      ORDER BY requested_at ASC
+    `);
+    const rows = stmt.all() as Any[];
+    return rows.map((row) => this.mapRowToApproval(row));
+  }
+
   private mapRowToApproval(row: Any): ApprovalRequest {
     return {
       id: row.id,
@@ -3646,6 +3832,17 @@ export class InputRequestRepository {
       ORDER BY requested_at ASC
     `);
     const rows = stmt.all(taskId) as Any[];
+    return rows.map((row) => this.mapRowToInputRequest(row));
+  }
+
+  /** Return every pending structured input request for restart reconciliation. */
+  findAllPending(): InputRequest[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM input_requests
+      WHERE status = 'pending'
+      ORDER BY requested_at ASC
+    `);
+    const rows = stmt.all() as Any[];
     return rows.map((row) => this.mapRowToInputRequest(row));
   }
 
@@ -7200,6 +7397,36 @@ export class PendingMemoryWriteRepository {
         expectedStatus,
       );
     return result.changes > 0 ? this.findById(id) : undefined;
+  }
+
+  /**
+   * Resolve every still-pending write without replaying its payload.
+   *
+   * This is used by migrations and no-prompt runtime cleanup.  It deliberately
+   * only claims rows that are still `pending`; an `applying` row may belong to
+   * an in-flight replay and must be left for that operation to finish.
+   */
+  rejectPending(
+    details: {
+      workspaceId?: string;
+      reviewedBy?: string;
+      resolution?: string;
+    } = {},
+  ): number {
+    const clauses = ["status = 'pending'"];
+    const values: unknown[] = [];
+    if (details.workspaceId) {
+      clauses.push("workspace_id = ?");
+      values.push(details.workspaceId);
+    }
+    const result = this.db
+      .prepare(
+        `UPDATE pending_memory_writes
+         SET status = 'rejected', reviewed_at = ?, reviewed_by = ?, resolution = ?
+         WHERE ${clauses.join(" AND ")}`,
+      )
+      .run(Date.now(), details.reviewedBy || null, details.resolution || null, ...values);
+    return result.changes;
   }
 
   private mapRow(row: Record<string, unknown>): PendingMemoryWrite {

@@ -38,4 +38,4 @@ Infrastructure-as-Code operations: plan, apply, import, state management, module
 ## Runtime Prompt
 
 - Current runtime prompt length: 4112 characters.
-- Runtime prompt is defined directly in `../terraform-ops.json`. 
+- Runtime prompt is defined directly in `../terraform-ops.json`.

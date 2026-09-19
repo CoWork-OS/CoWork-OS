@@ -18,14 +18,7 @@
       "description": "Target tone for the rewrite",
       "required": false,
       "default": "professional",
-      "options": [
-        "casual",
-        "professional",
-        "academic",
-        "journalistic",
-        "technical",
-        "warm"
-      ]
+      "options": ["casual", "professional", "academic", "journalistic", "technical", "warm"]
     }
   ],
   "enabled": true,
@@ -35,14 +28,7 @@
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "writing",
-      "editing",
-      "humanize",
-      "ai-detection",
-      "rewriting",
-      "content"
-    ],
+    "tags": ["writing", "editing", "humanize", "ai-detection", "rewriting", "content"],
     "routing": {
       "useWhen": "User asks to humanize text, make text sound less like AI, rewrite AI-generated content, remove AI tells, make writing more natural, or edit text to sound human-written",
       "dontUseWhen": "User wants to generate new content from scratch, translate text, or summarize text",

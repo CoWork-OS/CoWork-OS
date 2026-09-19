@@ -276,6 +276,15 @@ export function normalizeTimelineTitleMarkdownForDisplay(text: string): string {
   );
 }
 
+/**
+ * True when `cleanAssistantMessageForDisplay` would leave something on screen. A turn that
+ * carried only tool-call markup sanitizes to nothing and renders an empty bubble, so callers
+ * that decide whether a message is worth a slot in the feed must ask this first.
+ */
+export function hasDisplayableAssistantText(message: string): boolean {
+  return cleanAssistantMessageForDisplay(message).trim().length > 0;
+}
+
 export function cleanAssistantMessageForDisplay(message: string): string {
   const sanitized = String(message || "")
     .replace(/\[\[speak\]\]([\s\S]*?)\[\[\/speak\]\]/gi, "$1")

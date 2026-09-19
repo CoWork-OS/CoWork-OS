@@ -47,6 +47,8 @@ import { mergeMailboxCapabilities, resolveMailboxProviderBackend } from "./Mailb
 import { getMailboxForwardingServiceInstance } from "./mailbox-forwarding-singleton";
 import { parsePdfBuffer } from "../utils/pdf-parser";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import {
   ChannelPreferenceSummary,
   ContactIdentity,
@@ -12316,6 +12318,7 @@ export class MailboxService {
       status: "pending",
       workspaceId,
       source: "manual",
+      agentConfig: taskAgentConfigForCreation(undefined, PermissionSettingsManager.loadSettings()),
     });
 
     this.db

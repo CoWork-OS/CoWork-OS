@@ -16,13 +16,17 @@ function inferComplexity(length) {
 }
 
 function compact(text) {
-  return String(text || "").replace(/\s+/g, " ").trim();
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function ensureExamples(skill) {
   const routing = (skill.metadata = skill.metadata || {}).routing || (skill.metadata.routing = {});
   const topic = compact(skill.name || skill.id || "this skill");
-  const useWhen = compact(routing.useWhen || skill.description || "Use for in-domain execution tasks");
+  const useWhen = compact(
+    routing.useWhen || skill.description || "Use for in-domain execution tasks",
+  );
   const dontUseWhen = compact(routing.dontUseWhen || "Avoid this skill for out-of-domain requests");
 
   const positive = Array.isArray(routing.examples?.positive)
@@ -48,7 +52,8 @@ function ensureExamples(skill) {
     "This is conceptual discussion only; no tool workflow is needed.",
   ];
 
-  const uniq = (items) => Array.from(new Set(items.filter(isNonEmptyString).map((i) => compact(i))));
+  const uniq = (items) =>
+    Array.from(new Set(items.filter(isNonEmptyString).map((i) => compact(i))));
 
   routing.examples = {
     positive: uniq(positiveCandidates).slice(0, 5),
@@ -66,7 +71,8 @@ function ensureExamples(skill) {
     routing.outputs = `Task-specific output produced by ${skill.id} with concrete, user-actionable details.`;
   }
   if (!isNonEmptyString(routing.successCriteria)) {
-    routing.successCriteria = "Output is actionable, specific, and aligned with requested scope and constraints.";
+    routing.successCriteria =
+      "Output is actionable, specific, and aligned with requested scope and constraints.";
   }
 }
 
@@ -232,7 +238,9 @@ function migrate() {
   }
 
   console.log(`[skills-migrate] Updated ${updated} skills`);
-  console.log(`[skills-migrate] Extracted full guidance for ${extracted} long prompts (>5000 chars)`);
+  console.log(
+    `[skills-migrate] Extracted full guidance for ${extracted} long prompts (>5000 chars)`,
+  );
 }
 
 migrate();

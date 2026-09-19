@@ -7,6 +7,7 @@ Recommended security practices for CoWork OS deployments.
 ### 1. Use Pairing Mode by Default
 
 Always start with pairing mode for external channels:
+
 - Most secure option
 - Users must prove access to desktop app
 - Prevents unauthorized access
@@ -14,6 +15,7 @@ Always start with pairing mode for external channels:
 ### 2. Use Dedicated Bot Accounts
 
 Create separate bot accounts for CoWork OS:
+
 - Don't use personal accounts
 - Easier to audit and revoke
 - Limits blast radius if compromised
@@ -21,6 +23,7 @@ Create separate bot accounts for CoWork OS:
 ### 3. Enable All Guardrails
 
 Keep all guardrails enabled:
+
 - Command blocking prevents dangerous operations
 - Budget limits prevent runaway costs
 - Iteration limits prevent infinite loops
@@ -28,6 +31,7 @@ Keep all guardrails enabled:
 ### 4. Choose and review an access profile
 
 Start with the least-privileged profile that fits the task:
+
 - use **Ask for approval** for new or sensitive workflows
 - use **Approve for me** only when automatic review is appropriate for bounded work
 - use **Full access** only for a trusted task that genuinely needs unrestricted local access
@@ -41,15 +45,18 @@ profile fields, inheritance ceiling, migration behavior, and fail-closed rules.
 ### 5. Keep Group Memory Explicit
 
 For shared chats and public channels:
+
 - Leave shared context memory disabled unless the group is trusted
 - Use channel specialization tool restrictions for shared groups that need narrower access
 - Prefer deny-first restrictions for memory, system, network, or destructive tool groups when a channel has broad membership
 
 ## Ongoing Operations
 
-### 1. Review Approval Requests
+### 1. Review Approval Requests When Enabled
 
-Always review approval requests carefully:
+If `COWORK_APPROVAL_PROMPTS=on` is enabled for an interactive or diagnostic
+run, review approval requests carefully:
+
 - Read the full command/action
 - Verify it matches your intent
 - Deny suspicious requests
@@ -57,6 +64,7 @@ Always review approval requests carefully:
 ### 2. Monitor Task Activity
 
 Regularly check:
+
 - Active tasks and their status
 - Completed tasks and results
 - Any unusual patterns
@@ -64,6 +72,7 @@ Regularly check:
 ### 3. Audit User Access
 
 Periodically review:
+
 - Who has paired/allowlisted access
 - Remove users who no longer need access
 - Rotate pairing codes if shared widely
@@ -71,6 +80,7 @@ Periodically review:
 ### 4. Keep CoWork OS Updated
 
 Install updates promptly:
+
 - Security fixes
 - New features
 - Bug fixes
@@ -175,15 +185,16 @@ Install updates promptly:
 
 ### Development
 
-- **Ask for approval** is the recommended development default
-- **Full access** is acceptable only for a deliberately trusted local task
+- Access profiles still enforce sandbox, filesystem, domain, and administrator boundaries
+- The local runtime is full-auto by default; set `COWORK_APPROVAL_PROMPTS=on` when interactive review is required
+- **Full access** removes the local sandbox and is acceptable only for a deliberately trusted local task
 - Keep filesystem and domain scope narrow while testing new skills/connectors
 - Enable debug logging
 
 ### Production
 
 - Use pairing or allowlist mode
-- Use **Ask for approval** or a reviewed **Custom** profile
+- Use a reviewed **Custom** profile and enable `COWORK_APPROVAL_PROMPTS=on` when operator review is required
 - Restrict file access to the workspace and explicitly approved roots
 - Disable debug logging
 - Enable all guardrails
@@ -207,6 +218,7 @@ Yes. Use channel specialization in channel settings to bind a channel, chat/grou
 ### 1. How to Revoke Access
 
 To immediately revoke a user's access:
+
 1. Go to **Settings > Channels > [Channel] > Users**
 2. Find the user
 3. Click **Revoke Access**
@@ -216,6 +228,7 @@ Or remove from allowlist in channel settings.
 ### 2. How to Stop a Runaway Task
 
 If a task is misbehaving:
+
 1. Click the task in the UI
 2. Click **Cancel Task**
 3. Or use the task manager to force-stop
@@ -223,6 +236,7 @@ If a task is misbehaving:
 ### 3. How to Reset Security
 
 If you suspect compromise:
+
 1. Revoke all channel users
 2. Generate new pairing codes
 3. Review audit logs
@@ -231,6 +245,7 @@ If you suspect compromise:
 ### 4. How to Report Vulnerabilities
 
 If you find a security issue:
+
 1. Do not disclose publicly
 2. Email info@coworkosapp.com
 3. Include:

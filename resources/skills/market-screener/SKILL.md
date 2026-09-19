@@ -37,15 +37,15 @@ Screen equities, ETFs, and bonds using fundamental, technical, and quantitative 
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| assetClass | select | Yes | Asset class to screen |
-| criteria | string | Yes | Screening criteria (e.g., P/E < 15, ROE > 20%, dividend yield > 3%) |
-| question | string | Yes | Your specific screening question |
-| market | select | Yes | Market region to screen |
-| maxResults | select | Yes | Maximum number of results to return |
+| Name       | Type   | Required | Description                                                         |
+| ---------- | ------ | -------- | ------------------------------------------------------------------- |
+| assetClass | select | Yes      | Asset class to screen                                               |
+| criteria   | string | Yes      | Screening criteria (e.g., P/E < 15, ROE > 20%, dividend yield > 3%) |
+| question   | string | Yes      | Your specific screening question                                    |
+| market     | select | Yes      | Market region to screen                                             |
+| maxResults | select | Yes      | Maximum number of results to return                                 |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1111 characters.
-- Runtime prompt is defined directly in `../market-screener.json`. 
+- Runtime prompt is defined directly in `../market-screener.json`.

@@ -31,11 +31,11 @@ The timeline should show the extracted screenshots inline, similar to generated 
 
 ## Supported Formats
 
-| Extension | MIME type |
-|-----------|-----------|
-| `.mp4` | `video/mp4` |
-| `.mov` | `video/quicktime` |
-| `.webm` | `video/webm` |
+| Extension | MIME type         |
+| --------- | ----------------- |
+| `.mp4`    | `video/mp4`       |
+| `.mov`    | `video/quicktime` |
+| `.webm`   | `video/webm`      |
 
 Videos are accepted only as file-backed attachments. Base64 inline video payloads are rejected because large video data should stay on disk and be sampled into frames.
 

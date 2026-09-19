@@ -7,20 +7,11 @@
   "author": "Thomson Reuters via Anthropic Claude for Legal",
   "license": "Apache-2.0",
   "homepage": "https://github.com/anthropics/claude-for-legal/tree/993f6619fc2f321cfdd65daa6919ad6cd2c56d92/external_plugins/cocounsel-legal",
-  "keywords": [
-    "legal",
-    "law",
-    "compliance",
-    "cocounsel-legal"
-  ],
+  "keywords": ["legal", "law", "compliance", "cocounsel-legal"],
   "icon": "⚖️",
   "category": "Legal",
-  "recommendedConnectors": [
-    "cocounsel-legal"
-  ],
-  "tryAsking": [
-    "Use Cocounsel Legal Deep Research for this legal workflow"
-  ],
+  "recommendedConnectors": ["cocounsel-legal"],
+  "tryAsking": ["Use Cocounsel Legal Deep Research for this legal workflow"],
   "skills": [
     {
       "id": "cocounsel-legal-legal-guardrails",
@@ -63,10 +54,7 @@
           "pluginName": "cocounsel-legal",
           "skillName": "cocounsel-legal:deep-research",
           "argumentHint": "",
-          "allowedTools": [
-            "mcp",
-            "Bash"
-          ],
+          "allowedTools": ["mcp", "Bash"],
           "license": "Apache-2.0"
         }
       }
@@ -86,13 +74,7 @@
       "description": "CoCounsel Legal delivers comprehensive Westlaw Deep Research reports with inline, linked citations to Westlaw and Practical Law sources.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "research",
-        "review",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "research", "review", "summarize", "triage"],
       "systemPrompt": "You are a Cocounsel Legal assistant in CoWork OS. Produce draft legal work product for attorney review, preserve citations and source provenance, flag uncertainty, and require explicit confirmation before irreversible actions."
     }
   ],

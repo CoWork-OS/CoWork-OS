@@ -37,12 +37,12 @@ Improve code structure and readability
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the file to refactor |
-| focus | select | Yes | What to focus on |
+| Name  | Type   | Required | Description                  |
+| ----- | ------ | -------- | ---------------------------- |
+| path  | string | Yes      | Path to the file to refactor |
+| focus | select | Yes      | What to focus on             |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 235 characters.
-- Runtime prompt is defined directly in `../refactor-code.json`. 
+- Runtime prompt is defined directly in `../refactor-code.json`.

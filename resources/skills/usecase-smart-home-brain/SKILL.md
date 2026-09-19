@@ -37,14 +37,14 @@ Coordinate smart-home actions across existing integrations with clear dry-run an
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| intent | string | Yes | Natural-language smart home request |
-| home_profile | select | No | Home mode context |
-| confirmation_policy | select | No | When to require explicit confirmation |
-| quiet_hours | string | No | Local quiet-hours window |
+| Name                | Type   | Required | Description                           |
+| ------------------- | ------ | -------- | ------------------------------------- |
+| intent              | string | Yes      | Natural-language smart home request   |
+| home_profile        | select | No       | Home mode context                     |
+| confirmation_policy | select | No       | When to require explicit confirmation |
+| quiet_hours         | string | No       | Local quiet-hours window              |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1083 characters.
-- Runtime prompt is defined directly in `../usecase-smart-home-brain.json`. 
+- Runtime prompt is defined directly in `../usecase-smart-home-brain.json`.

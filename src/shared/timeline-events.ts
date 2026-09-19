@@ -55,6 +55,7 @@ export type CanonicalActionKind =
   | "memory.write"
   | "agent.start"
   | "agent.stop"
+  | "agent.message"
   | "task.complete"
   | "step.update"
   | "generic";

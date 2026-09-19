@@ -38,4 +38,4 @@ Terminal Spotify playback/search via spogo (preferred) or spotify_player.
 ## Runtime Prompt
 
 - Current runtime prompt length: 884 characters.
-- Runtime prompt is defined directly in `../spotify-player.json`. 
+- Runtime prompt is defined directly in `../spotify-player.json`.

@@ -4,12 +4,12 @@
  * Tests the AppleScript execution functionality on macOS.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import * as os from 'os';
-import * as childProcess from 'child_process';
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import * as os from "os";
+import * as childProcess from "child_process";
 
 // Mock electron modules
-vi.mock('electron', () => ({
+vi.mock("electron", () => ({
   clipboard: {
     readText: vi.fn(),
     readImage: vi.fn().mockReturnValue({ isEmpty: () => true }),
@@ -26,32 +26,32 @@ vi.mock('electron', () => ({
     showItemInFolder: vi.fn(),
   },
   app: {
-    getPath: vi.fn().mockReturnValue('/mock/path'),
+    getPath: vi.fn().mockReturnValue("/mock/path"),
   },
 }));
 
 // Mock os module
-vi.mock('os', async () => {
-  const actual = await vi.importActual<typeof os>('os');
+vi.mock("os", async () => {
+  const actual = await vi.importActual<typeof os>("os");
   return {
     ...actual,
-    platform: vi.fn().mockReturnValue('darwin'),
-    homedir: vi.fn().mockReturnValue('/Users/testuser'),
-    tmpdir: vi.fn().mockReturnValue('/tmp'),
-    hostname: vi.fn().mockReturnValue('test-host'),
+    platform: vi.fn().mockReturnValue("darwin"),
+    homedir: vi.fn().mockReturnValue("/Users/testuser"),
+    tmpdir: vi.fn().mockReturnValue("/tmp"),
+    hostname: vi.fn().mockReturnValue("test-host"),
     cpus: vi.fn().mockReturnValue([{}, {}, {}, {}]),
     totalmem: vi.fn().mockReturnValue(16 * 1024 * 1024 * 1024),
     freemem: vi.fn().mockReturnValue(8 * 1024 * 1024 * 1024),
     uptime: vi.fn().mockReturnValue(3600),
-    release: vi.fn().mockReturnValue('23.0.0'),
-    arch: vi.fn().mockReturnValue('arm64'),
-    userInfo: vi.fn().mockReturnValue({ username: 'testuser' }),
+    release: vi.fn().mockReturnValue("23.0.0"),
+    arch: vi.fn().mockReturnValue("arm64"),
+    userInfo: vi.fn().mockReturnValue({ username: "testuser" }),
   };
 });
 
 // Mock child_process
-vi.mock('child_process', async () => {
-  const actual = await vi.importActual<typeof childProcess>('child_process');
+vi.mock("child_process", async () => {
+  const actual = await vi.importActual<typeof childProcess>("child_process");
   return {
     ...actual,
     exec: vi.fn(),
@@ -60,7 +60,7 @@ vi.mock('child_process', async () => {
 });
 
 // Mock fs/promises
-vi.mock('fs/promises', () => ({
+vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
 }));
 
@@ -73,9 +73,9 @@ const mockDaemon = {
 
 // Mock workspace
 const mockWorkspace = {
-  id: 'test-workspace',
-  name: 'Test Workspace',
-  path: '/tmp/test-workspace',
+  id: "test-workspace",
+  name: "Test Workspace",
+  path: "/tmp/test-workspace",
   permissions: {
     shell: true,
     fileSystem: true,
@@ -84,11 +84,11 @@ const mockWorkspace = {
 };
 
 // Import after mocks are set up
-import { SystemTools } from '../../src/electron/agent/tools/system-tools';
-import { AgentDaemon } from '../../src/electron/agent/daemon';
-import { Workspace } from '../../src/shared/types';
+import { SystemTools } from "../../src/electron/agent/tools/system-tools";
+import { AgentDaemon } from "../../src/electron/agent/daemon";
+import { Workspace } from "../../src/shared/types";
 
-describe('SystemTools - run_applescript', () => {
+describe("SystemTools - run_applescript", () => {
   let systemTools: SystemTools;
   let execFileMock: ReturnType<typeof vi.fn>;
 
@@ -103,7 +103,7 @@ describe('SystemTools - run_applescript', () => {
     systemTools = new SystemTools(
       mockWorkspace as unknown as Workspace,
       mockDaemon as unknown as AgentDaemon,
-      'test-task-id'
+      "test-task-id",
     );
   });
 
@@ -111,61 +111,67 @@ describe('SystemTools - run_applescript', () => {
     vi.clearAllMocks();
   });
 
-  describe('successful execution', () => {
-    it('should execute AppleScript and return output', async () => {
+  describe("successful execution", () => {
+    it("should execute AppleScript and return output", async () => {
       const script = 'tell application "Finder" to get name of front window';
-      const expectedOutput = 'Documents';
+      const expectedOutput = "Documents";
 
       // Mock successful execution
-      execFileMock.mockImplementation((file: string, args: string[], opts: any, callback?: Function) => {
-        expect(file).toBe('osascript');
-        if (callback) {
-          callback(null, { stdout: expectedOutput + '\n', stderr: '' });
-        }
-        return { stdout: expectedOutput + '\n', stderr: '' };
-      });
+      execFileMock.mockImplementation(
+        (file: string, args: string[], opts: any, callback?: Function) => {
+          expect(file).toBe("osascript");
+          if (callback) {
+            callback(null, { stdout: expectedOutput + "\n", stderr: "" });
+          }
+          return { stdout: expectedOutput + "\n", stderr: "" };
+        },
+      );
 
       const result = await systemTools.runAppleScript(script);
 
       expect(result.success).toBe(true);
       expect(result.result).toBe(expectedOutput);
-      expect(mockDaemon.logEvent).toHaveBeenCalledWith('test-task-id', 'tool_call', {
-        tool: 'run_applescript',
+      expect(mockDaemon.logEvent).toHaveBeenCalledWith("test-task-id", "tool_call", {
+        tool: "run_applescript",
         scriptLength: script.length,
       });
-      expect(mockDaemon.logEvent).toHaveBeenCalledWith('test-task-id', 'tool_result', {
-        tool: 'run_applescript',
+      expect(mockDaemon.logEvent).toHaveBeenCalledWith("test-task-id", "tool_result", {
+        tool: "run_applescript",
         success: true,
         outputLength: expectedOutput.length,
       });
     });
 
-    it('should handle empty output gracefully', async () => {
+    it("should handle empty output gracefully", async () => {
       const script = 'tell application "System Events" to click button "OK"';
 
-      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
-        if (callback) {
-          callback(null, { stdout: '', stderr: '' });
-        }
-        return { stdout: '', stderr: '' };
-      });
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], _opts: any, callback?: Function) => {
+          if (callback) {
+            callback(null, { stdout: "", stderr: "" });
+          }
+          return { stdout: "", stderr: "" };
+        },
+      );
 
       const result = await systemTools.runAppleScript(script);
 
       expect(result.success).toBe(true);
-      expect(result.result).toBe('(no output)');
+      expect(result.result).toBe("(no output)");
     });
 
-    it('should use stderr as output when stdout is empty', async () => {
-      const script = 'some script';
-      const stderrOutput = 'Script completed';
+    it("should use stderr as output when stdout is empty", async () => {
+      const script = "some script";
+      const stderrOutput = "Script completed";
 
-      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
-        if (callback) {
-          callback(null, { stdout: '', stderr: stderrOutput + '\n' });
-        }
-        return { stdout: '', stderr: stderrOutput + '\n' };
-      });
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], _opts: any, callback?: Function) => {
+          if (callback) {
+            callback(null, { stdout: "", stderr: stderrOutput + "\n" });
+          }
+          return { stdout: "", stderr: stderrOutput + "\n" };
+        },
+      );
 
       const result = await systemTools.runAppleScript(script);
 
@@ -173,18 +179,20 @@ describe('SystemTools - run_applescript', () => {
       expect(result.result).toBe(stderrOutput);
     });
 
-    it('should properly escape script for shell execution', async () => {
+    it("should properly escape script for shell execution", async () => {
       const script = 'tell application "Safari" to get URL of front document';
 
-      execFileMock.mockImplementation((file: string, args: string[], _opts: any, callback?: Function) => {
-        // Verify the execFile invocation contains proper args
-        expect(file).toBe('osascript');
-        expect(args).toEqual(['-e', script]);
-        if (callback) {
-          callback(null, { stdout: 'https://example.com\n', stderr: '' });
-        }
-        return { stdout: 'https://example.com\n', stderr: '' };
-      });
+      execFileMock.mockImplementation(
+        (file: string, args: string[], _opts: any, callback?: Function) => {
+          // Verify the execFile invocation contains proper args
+          expect(file).toBe("osascript");
+          expect(args).toEqual(["-e", script]);
+          if (callback) {
+            callback(null, { stdout: "https://example.com\n", stderr: "" });
+          }
+          return { stdout: "https://example.com\n", stderr: "" };
+        },
+      );
 
       const result = await systemTools.runAppleScript(script);
 
@@ -192,324 +200,342 @@ describe('SystemTools - run_applescript', () => {
     });
   });
 
-  describe('error handling', () => {
-    it('should throw error for empty script', async () => {
-      await expect(systemTools.runAppleScript('')).rejects.toThrow(
-        'Invalid script: must be a non-empty string'
+  describe("error handling", () => {
+    it("should throw error for empty script", async () => {
+      await expect(systemTools.runAppleScript("")).rejects.toThrow(
+        "Invalid script: must be a non-empty string",
       );
     });
 
-    it('should throw error for null script', async () => {
+    it("should throw error for null script", async () => {
       await expect(systemTools.runAppleScript(null as unknown as string)).rejects.toThrow(
-        'Invalid script: must be a non-empty string'
+        "Invalid script: must be a non-empty string",
       );
     });
 
-    it('should throw error for non-string script', async () => {
+    it("should throw error for non-string script", async () => {
       await expect(systemTools.runAppleScript(123 as unknown as string)).rejects.toThrow(
-        'Invalid script: must be a non-empty string'
+        "Invalid script: must be a non-empty string",
       );
     });
 
-    it('should throw error on non-macOS platform', async () => {
-      vi.mocked(os.platform).mockReturnValue('linux');
+    it("should throw error on non-macOS platform", async () => {
+      vi.mocked(os.platform).mockReturnValue("linux");
 
-      await expect(systemTools.runAppleScript('some script')).rejects.toThrow(
-        'AppleScript is only available on macOS'
+      await expect(systemTools.runAppleScript("some script")).rejects.toThrow(
+        "AppleScript is only available on macOS",
       );
     });
 
-    it('should throw error on Windows platform', async () => {
-      vi.mocked(os.platform).mockReturnValue('win32');
+    it("should throw error on Windows platform", async () => {
+      vi.mocked(os.platform).mockReturnValue("win32");
 
-      await expect(systemTools.runAppleScript('some script')).rejects.toThrow(
-        'AppleScript is only available on macOS'
+      await expect(systemTools.runAppleScript("some script")).rejects.toThrow(
+        "AppleScript is only available on macOS",
       );
     });
 
-    it('should handle osascript execution errors', async () => {
-      vi.mocked(os.platform).mockReturnValue('darwin');
-      const script = 'invalid applescript syntax {{{';
+    it("should handle osascript execution errors", async () => {
+      vi.mocked(os.platform).mockReturnValue("darwin");
+      const script = "invalid applescript syntax {{{";
 
-      const errorMessage = 'syntax error: Expected expression but found unknown token.';
-      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
-        const error = new Error('Command failed') as any;
-        error.stderr = errorMessage;
-        if (callback) {
-          callback(error, null);
-        }
-        return undefined;
-      });
+      const errorMessage = "syntax error: Expected expression but found unknown token.";
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], _opts: any, callback?: Function) => {
+          const error = new Error("Command failed") as any;
+          error.stderr = errorMessage;
+          if (callback) {
+            callback(error, null);
+          }
+          return undefined;
+        },
+      );
 
       await expect(systemTools.runAppleScript(script)).rejects.toThrow(
-        `AppleScript execution failed: ${errorMessage}`
+        `AppleScript execution failed: ${errorMessage}`,
       );
 
-      expect(mockDaemon.logEvent).toHaveBeenCalledWith('test-task-id', 'tool_error', {
-        tool: 'run_applescript',
+      expect(mockDaemon.logEvent).toHaveBeenCalledWith("test-task-id", "tool_error", {
+        tool: "run_applescript",
         error: expect.any(String),
       });
     });
 
-    it('should handle timeout errors', async () => {
-      vi.mocked(os.platform).mockReturnValue('darwin');
-      const script = 'delay 60';
+    it("should handle timeout errors", async () => {
+      vi.mocked(os.platform).mockReturnValue("darwin");
+      const script = "delay 60";
 
-      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
-        const error = new Error('Command timed out') as any;
-        error.killed = true;
-        if (callback) {
-          callback(error, null);
-        }
-        return undefined;
-      });
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], _opts: any, callback?: Function) => {
+          const error = new Error("Command timed out") as any;
+          error.killed = true;
+          if (callback) {
+            callback(error, null);
+          }
+          return undefined;
+        },
+      );
 
       await expect(systemTools.runAppleScript(script)).rejects.toThrow(
-        'AppleScript execution failed:'
+        "AppleScript execution failed:",
       );
     });
   });
 
-  describe('resolveAppBundleId', () => {
-    it('resolves an app name to a bundle identifier', async () => {
-      vi.mocked(os.platform).mockReturnValue('darwin');
-      execFileMock.mockImplementation((file: string, args: string[], _opts: any, callback?: Function) => {
-        expect(file).toBe('osascript');
-        expect(args).toEqual(['-e', 'id of application "Perplexity"']);
-        if (callback) {
-          callback(null, { stdout: 'ai.perplexity.macv3\n', stderr: '' });
-        }
-        return undefined;
-      });
+  describe("resolveAppBundleId", () => {
+    it("resolves an app name to a bundle identifier", async () => {
+      vi.mocked(os.platform).mockReturnValue("darwin");
+      execFileMock.mockImplementation(
+        (file: string, args: string[], _opts: any, callback?: Function) => {
+          expect(file).toBe("osascript");
+          expect(args).toEqual(["-e", 'id of application "Perplexity"']);
+          if (callback) {
+            callback(null, { stdout: "ai.perplexity.macv3\n", stderr: "" });
+          }
+          return undefined;
+        },
+      );
 
-      await expect(systemTools.resolveAppBundleId('Perplexity')).resolves.toEqual({
+      await expect(systemTools.resolveAppBundleId("Perplexity")).resolves.toEqual({
         success: true,
-        appName: 'Perplexity',
-        bundleId: 'ai.perplexity.macv3',
-        resolvedBy: 'app_name',
+        appName: "Perplexity",
+        bundleId: "ai.perplexity.macv3",
+        resolvedBy: "app_name",
       });
     });
 
-    it('tries application id resolution when the input looks like a bundle identifier', async () => {
-      vi.mocked(os.platform).mockReturnValue('darwin');
+    it("tries application id resolution when the input looks like a bundle identifier", async () => {
+      vi.mocked(os.platform).mockReturnValue("darwin");
       execFileMock
-        .mockImplementationOnce((_file: string, _args: string[], _opts: any, callback?: Function) => {
-          if (callback) {
-            const error = new Error('not found') as any;
-            error.stderr = 'Can’t get application "ai.perplexity.macv3".';
-            callback(error, null, '');
-          }
-          return undefined;
-        })
+        .mockImplementationOnce(
+          (_file: string, _args: string[], _opts: any, callback?: Function) => {
+            if (callback) {
+              const error = new Error("not found") as any;
+              error.stderr = 'Can’t get application "ai.perplexity.macv3".';
+              callback(error, null, "");
+            }
+            return undefined;
+          },
+        )
         .mockImplementationOnce((file: string, args: string[], _opts: any, callback?: Function) => {
-          expect(file).toBe('osascript');
-          expect(args).toEqual(['-e', 'id of application id "ai.perplexity.macv3"']);
+          expect(file).toBe("osascript");
+          expect(args).toEqual(["-e", 'id of application id "ai.perplexity.macv3"']);
           if (callback) {
-            callback(null, { stdout: 'ai.perplexity.macv3\n', stderr: '' });
+            callback(null, { stdout: "ai.perplexity.macv3\n", stderr: "" });
           }
           return undefined;
         });
 
-      const result = await systemTools.resolveAppBundleId('ai.perplexity.macv3');
-      expect(result.resolvedBy).toBe('bundle_id');
-      expect(result.bundleId).toBe('ai.perplexity.macv3');
+      const result = await systemTools.resolveAppBundleId("ai.perplexity.macv3");
+      expect(result.resolvedBy).toBe("bundle_id");
+      expect(result.bundleId).toBe("ai.perplexity.macv3");
     });
   });
 
-  describe('macOS app process tools', () => {
-    it('finds matching macOS app processes without shell pipelines', async () => {
-      vi.mocked(os.platform).mockReturnValue('darwin');
-      execFileMock.mockImplementation((file: string, args: string[], _opts: any, callback?: Function) => {
-        expect(file).toBe('/bin/ps');
-        expect(args).toEqual(['-axo', 'pid=,ppid=,comm=,args=']);
-        if (callback) {
-          callback(null, {
-            stdout:
-              '101 1 /Applications/Perplexity.app/Contents/MacOS/Perplexity /Applications/Perplexity.app/Contents/MacOS/Perplexity\\n' +
-              '202 1 /usr/bin/grep grep Perplexity\\n',
-            stderr: '',
-          });
-        }
-        return undefined;
-      });
+  describe("macOS app process tools", () => {
+    it("finds matching macOS app processes without shell pipelines", async () => {
+      vi.mocked(os.platform).mockReturnValue("darwin");
+      execFileMock.mockImplementation(
+        (file: string, args: string[], _opts: any, callback?: Function) => {
+          expect(file).toBe("/bin/ps");
+          expect(args).toEqual(["-axo", "pid=,ppid=,comm=,args="]);
+          if (callback) {
+            callback(null, {
+              stdout:
+                "101 1 /Applications/Perplexity.app/Contents/MacOS/Perplexity /Applications/Perplexity.app/Contents/MacOS/Perplexity\\n" +
+                "202 1 /usr/bin/grep grep Perplexity\\n",
+              stderr: "",
+            });
+          }
+          return undefined;
+        },
+      );
 
-      const result = await systemTools.findMacOSAppProcesses({ query: 'Perplexity' });
+      const result = await systemTools.findMacOSAppProcesses({ query: "Perplexity" });
       expect(result.processes).toHaveLength(1);
       expect(result.processes[0].pid).toBe(101);
     });
 
-    it('terminates matching macOS app processes after approval', async () => {
-      vi.mocked(os.platform).mockReturnValue('darwin');
-      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    it("terminates matching macOS app processes after approval", async () => {
+      vi.mocked(os.platform).mockReturnValue("darwin");
+      const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
       execFileMock
-        .mockImplementationOnce((_file: string, _args: string[], _opts: any, callback?: Function) => {
-          if (callback) {
-            callback(null, {
-              stdout:
-                '101 1 /Applications/Perplexity.app/Contents/MacOS/Perplexity /Applications/Perplexity.app/Contents/MacOS/Perplexity\\n',
-              stderr: '',
-            });
-          }
-          return undefined;
-        })
-        .mockImplementationOnce((_file: string, _args: string[], _opts: any, callback?: Function) => {
-          if (callback) {
-            callback(null, { stdout: '', stderr: '' });
-          }
-          return undefined;
-        });
+        .mockImplementationOnce(
+          (_file: string, _args: string[], _opts: any, callback?: Function) => {
+            if (callback) {
+              callback(null, {
+                stdout:
+                  "101 1 /Applications/Perplexity.app/Contents/MacOS/Perplexity /Applications/Perplexity.app/Contents/MacOS/Perplexity\\n",
+                stderr: "",
+              });
+            }
+            return undefined;
+          },
+        )
+        .mockImplementationOnce(
+          (_file: string, _args: string[], _opts: any, callback?: Function) => {
+            if (callback) {
+              callback(null, { stdout: "", stderr: "" });
+            }
+            return undefined;
+          },
+        );
 
       const result = await systemTools.terminateMacOSAppProcesses({
-        query: 'Perplexity',
-        signal: 'KILL',
+        query: "Perplexity",
+        signal: "KILL",
       });
 
-      expect(killSpy).toHaveBeenCalledWith(101, 'SIGKILL');
+      expect(killSpy).toHaveBeenCalledWith(101, "SIGKILL");
       expect(result.terminated).toHaveLength(1);
       expect(result.remaining).toHaveLength(0);
       killSpy.mockRestore();
     });
   });
 
-  describe('tool definition', () => {
-    it('should include run_applescript in tool definitions', () => {
+  describe("tool definition", () => {
+    it("should include run_applescript in tool definitions", () => {
       const tools = SystemTools.getToolDefinitions();
-      const appleScriptTool = tools.find((t) => t.name === 'run_applescript');
-      const bundleResolverTool = tools.find((t) => t.name === 'resolve_app_bundle_id');
-      const processFinderTool = tools.find((t) => t.name === 'find_macos_app_processes');
-      const launchAgentTool = tools.find((t) => t.name === 'list_macos_launch_agents');
+      const appleScriptTool = tools.find((t) => t.name === "run_applescript");
+      const bundleResolverTool = tools.find((t) => t.name === "resolve_app_bundle_id");
+      const processFinderTool = tools.find((t) => t.name === "find_macos_app_processes");
+      const launchAgentTool = tools.find((t) => t.name === "list_macos_launch_agents");
 
       expect(appleScriptTool).toBeDefined();
-      expect(appleScriptTool!.description).toContain('AppleScript');
-      expect(appleScriptTool!.description).toContain('macOS');
+      expect(appleScriptTool!.description).toContain("AppleScript");
+      expect(appleScriptTool!.description).toContain("macOS");
       expect(appleScriptTool!.input_schema.properties.script).toBeDefined();
-      expect(appleScriptTool!.input_schema.required).toContain('script');
+      expect(appleScriptTool!.input_schema.required).toContain("script");
       expect(bundleResolverTool).toBeDefined();
       expect(processFinderTool).toBeDefined();
       expect(launchAgentTool).toBeDefined();
     });
 
-    it('should have proper input schema for run_applescript', () => {
+    it("should have proper input schema for run_applescript", () => {
       const tools = SystemTools.getToolDefinitions();
-      const appleScriptTool = tools.find((t) => t.name === 'run_applescript');
+      const appleScriptTool = tools.find((t) => t.name === "run_applescript");
 
       expect(appleScriptTool!.input_schema).toEqual({
-        type: 'object',
+        type: "object",
         properties: {
           script: {
-            type: 'string',
-            description: expect.stringContaining('AppleScript code'),
+            type: "string",
+            description: expect.stringContaining("AppleScript code"),
           },
         },
-        required: ['script'],
+        required: ["script"],
       });
     });
   });
 
-  describe('logging', () => {
+  describe("logging", () => {
     beforeEach(() => {
-      vi.mocked(os.platform).mockReturnValue('darwin');
+      vi.mocked(os.platform).mockReturnValue("darwin");
     });
 
-    it('should log tool_call event with script length', async () => {
+    it("should log tool_call event with script length", async () => {
       const script = 'tell application "Finder" to activate';
 
-      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
-        if (callback) {
-          callback(null, { stdout: '', stderr: '' });
-        }
-        return { stdout: '', stderr: '' };
-      });
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], _opts: any, callback?: Function) => {
+          if (callback) {
+            callback(null, { stdout: "", stderr: "" });
+          }
+          return { stdout: "", stderr: "" };
+        },
+      );
 
       await systemTools.runAppleScript(script);
 
-      expect(mockDaemon.logEvent).toHaveBeenCalledWith('test-task-id', 'tool_call', {
-        tool: 'run_applescript',
+      expect(mockDaemon.logEvent).toHaveBeenCalledWith("test-task-id", "tool_call", {
+        tool: "run_applescript",
         scriptLength: script.length,
       });
     });
 
-    it('should log tool_result event with output length on success', async () => {
+    it("should log tool_result event with output length on success", async () => {
       const script = 'return "hello"';
-      const output = 'hello';
+      const output = "hello";
 
-      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
-        if (callback) {
-          callback(null, { stdout: output, stderr: '' });
-        }
-        return { stdout: output, stderr: '' };
-      });
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], _opts: any, callback?: Function) => {
+          if (callback) {
+            callback(null, { stdout: output, stderr: "" });
+          }
+          return { stdout: output, stderr: "" };
+        },
+      );
 
       await systemTools.runAppleScript(script);
 
-      expect(mockDaemon.logEvent).toHaveBeenCalledWith('test-task-id', 'tool_result', {
-        tool: 'run_applescript',
+      expect(mockDaemon.logEvent).toHaveBeenCalledWith("test-task-id", "tool_result", {
+        tool: "run_applescript",
         success: true,
         outputLength: output.length,
       });
     });
 
-    it('should log tool_error event on failure', async () => {
-      const script = 'invalid';
+    it("should log tool_error event on failure", async () => {
+      const script = "invalid";
 
-      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
-        const error = new Error('Execution failed');
-        if (callback) {
-          callback(error, null);
-        }
-        return undefined;
-      });
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], _opts: any, callback?: Function) => {
+          const error = new Error("Execution failed");
+          if (callback) {
+            callback(error, null);
+          }
+          return undefined;
+        },
+      );
 
       await expect(systemTools.runAppleScript(script)).rejects.toThrow();
 
-      expect(mockDaemon.logEvent).toHaveBeenCalledWith('test-task-id', 'tool_error', {
-        tool: 'run_applescript',
+      expect(mockDaemon.logEvent).toHaveBeenCalledWith("test-task-id", "tool_error", {
+        tool: "run_applescript",
         error: expect.any(String),
       });
     });
   });
 });
 
-describe('SystemTools - getToolDefinitions', () => {
-  it('should return all expected system tools', () => {
+describe("SystemTools - getToolDefinitions", () => {
+  it("should return all expected system tools", () => {
     const tools = SystemTools.getToolDefinitions();
     const toolNames = tools.map((t) => t.name);
 
-    expect(toolNames).toContain('system_info');
-    expect(toolNames).toContain('read_clipboard');
-    expect(toolNames).toContain('write_clipboard');
-    expect(toolNames).toContain('take_screenshot');
-    expect(toolNames).toContain('open_application');
-    expect(toolNames).toContain('open_url');
-    expect(toolNames).toContain('open_path');
-    expect(toolNames).toContain('show_in_folder');
-    expect(toolNames).toContain('get_env');
-    expect(toolNames).toContain('get_app_paths');
-    expect(toolNames).toContain('run_applescript');
-    expect(toolNames).toContain('search_memories');
+    expect(toolNames).toContain("system_info");
+    expect(toolNames).toContain("read_clipboard");
+    expect(toolNames).toContain("write_clipboard");
+    expect(toolNames).toContain("take_screenshot");
+    expect(toolNames).toContain("open_application");
+    expect(toolNames).toContain("open_url");
+    expect(toolNames).toContain("open_path");
+    expect(toolNames).toContain("show_in_folder");
+    expect(toolNames).toContain("get_env");
+    expect(toolNames).toContain("get_app_paths");
+    expect(toolNames).toContain("run_applescript");
+    expect(toolNames).toContain("search_memories");
   });
 
-  it('should include at least the stable core system tools', () => {
+  it("should include at least the stable core system tools", () => {
     const tools = SystemTools.getToolDefinitions();
     expect(tools.length).toBeGreaterThanOrEqual(12);
   });
 });
 
-describe('run_applescript category integration', () => {
-  it('should be categorized as a system tool', async () => {
+describe("run_applescript category integration", () => {
+  it("should be categorized as a system tool", async () => {
     // Import builtin settings to verify category mapping
-    const { BuiltinToolsSettingsManager } = await import(
-      '../../src/electron/agent/tools/builtin-settings'
-    );
-    const category = BuiltinToolsSettingsManager.getToolCategory('run_applescript');
-    expect(category).toBe('system');
+    const { BuiltinToolsSettingsManager } =
+      await import("../../src/electron/agent/tools/builtin-settings");
+    const category = BuiltinToolsSettingsManager.getToolCategory("run_applescript");
+    expect(category).toBe("system");
   });
 
-  it('should be included in system tools list', async () => {
-    const { BuiltinToolsSettingsManager } = await import(
-      '../../src/electron/agent/tools/builtin-settings'
-    );
+  it("should be included in system tools list", async () => {
+    const { BuiltinToolsSettingsManager } =
+      await import("../../src/electron/agent/tools/builtin-settings");
     const toolsByCategory = BuiltinToolsSettingsManager.getToolsByCategory();
-    expect(toolsByCategory.system).toContain('run_applescript');
+    expect(toolsByCategory.system).toContain("run_applescript");
   });
 });

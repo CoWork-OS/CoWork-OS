@@ -1388,6 +1388,29 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
 
             <section className="onboarding-recap-card">
               <div className="onboarding-recap-card-copy">
+                <span className="onboarding-recap-row-label">CoWork Pulse</span>
+                <strong>{onboarding.data.pulseEnabled ? "Opted in" : "Off"}</strong>
+                <p>
+                  Optional, content-free daily usage counts. No prompts, responses, files, commands,
+                  URLs, model routes, or account data.
+                </p>
+              </div>
+              <div className="onboarding-recap-edit-actions">
+                <button
+                  type="button"
+                  className="onboarding-recap-edit-btn"
+                  aria-pressed={onboarding.data.pulseEnabled}
+                  onClick={() =>
+                    onboarding.updateData({ pulseEnabled: !onboarding.data.pulseEnabled })
+                  }
+                >
+                  {onboarding.data.pulseEnabled ? "Turn off" : "Opt in"}
+                </button>
+              </div>
+            </section>
+
+            <section className="onboarding-recap-card">
+              <div className="onboarding-recap-card-copy">
                 <span className="onboarding-recap-row-label">Memory</span>
                 <strong>{memoryLabel}</strong>
                 <p>

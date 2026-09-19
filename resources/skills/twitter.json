@@ -27,9 +27,7 @@
       "dontUseWhen": "Don't use for other social media platforms (LinkedIn, Instagram, TikTok) or general copywriting not specific to X/Twitter.",
       "outputs": "Hook variations, single tweet, thread version, and posting strategy based on real viral examples.",
       "successCriteria": "Research-backed content with specific hooks, proper character counts, algorithm optimization, and clear CTAs.",
-      "expectedArtifacts": [
-        "twitter-content.md"
-      ],
+      "expectedArtifacts": ["twitter-content.md"],
       "examples": {
         "positive": [
           "Use the twitter skill for this request.",

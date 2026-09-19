@@ -250,6 +250,201 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
+  it("preserves OpenAI Responses tool siblings when one has rejected arguments", async () => {
+    responsesCreateMock.mockResolvedValue({
+      output: [
+        {
+          type: "function_call",
+          call_id: "call_bad",
+          name: "write_file",
+          arguments: '{"path":',
+        },
+        {
+          type: "function_call",
+          call_id: "call_good",
+          name: "read_file",
+          arguments: '{"path":"a.ts"}',
+        },
+        {
+          type: "function_call",
+          call_id: "call_scalar",
+          name: "glob",
+          arguments: "42",
+        },
+      ],
+    });
+
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    const response = await provider.createMessage({
+      model: "gpt-5.5",
+      maxTokens: 64,
+      messages: [{ role: "user", content: "inspect the file" }],
+    });
+
+    expect(response.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_bad",
+        name: "write_file",
+        input: {},
+        inputError: {
+          code: "malformed_json",
+          message: "Tool call arguments must be valid JSON.",
+        },
+      },
+      {
+        type: "tool_use",
+        id: "call_good",
+        name: "read_file",
+        input: { path: "a.ts" },
+      },
+      {
+        type: "tool_use",
+        id: "call_scalar",
+        name: "glob",
+        input: {},
+        inputError: {
+          code: "invalid_shape",
+          message: "Tool call arguments must be a JSON object.",
+        },
+      },
+    ]);
+    expect(response.stopReason).toBe("tool_use");
+  });
+
+  it("rejects malformed OpenAI Chat Completions arguments without dropping valid siblings", async () => {
+    chatCompletionsCreateMock.mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            tool_calls: [
+              {
+                type: "function",
+                id: "call_bad",
+                function: { name: "write_file", arguments: "null" },
+              },
+              {
+                type: "function",
+                id: "call_good",
+                function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-4o",
+      openaiApiKey: "sk-test",
+    });
+
+    const response = await provider.createMessage({
+      model: "gpt-4o",
+      maxTokens: 64,
+      messages: [{ role: "user", content: "inspect the file" }],
+    });
+
+    expect(response.content).toEqual([
+      {
+        type: "tool_use",
+        id: "call_bad",
+        name: "write_file",
+        input: {},
+        inputError: {
+          code: "invalid_shape",
+          message: "Tool call arguments must be a JSON object.",
+        },
+      },
+      {
+        type: "tool_use",
+        id: "call_good",
+        name: "read_file",
+        input: { path: "a.ts" },
+      },
+    ]);
+  });
+
+  it("routes GPT-6 Astra API-key calls through Responses with modern cache controls", async () => {
+    responsesCreateMock.mockResolvedValue({
+      output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+      usage: {
+        input_tokens: 15_000,
+        output_tokens: 12,
+        input_tokens_details: { cached_tokens: 12_000, cache_write_tokens: 3_000 },
+      },
+    });
+
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-6-astra",
+      openaiApiKey: "sk-test",
+      openaiReasoningEffort: "ultra",
+    });
+
+    const response = await provider.createMessage({
+      model: "gpt-6-astra",
+      maxTokens: 128,
+      system: "Stable instructions",
+      promptCache: {
+        mode: "openai_key",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+        cacheKey: "astra-session",
+        retention: "24h",
+      },
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(chatCompletionsCreateMock).not.toHaveBeenCalled();
+    expect(responsesCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-6-astra",
+        reasoning: { effort: "max" },
+        prompt_cache_key: "astra-session",
+        prompt_cache_options: { mode: "implicit", ttl: "30m" },
+      }),
+      undefined,
+    );
+    expect(responsesCreateMock.mock.calls[0][0].prompt_cache_retention).toBeUndefined();
+    expect(response.usage).toEqual({
+      inputTokens: 15_000,
+      outputTokens: 12,
+      cachedTokens: 12_000,
+      cacheWriteTokens: 3_000,
+    });
+  });
+
+  it("strips provider and profile routing suffixes before an Astra API request", async () => {
+    responsesCreateMock.mockResolvedValue({
+      output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+    });
+
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-6-astra",
+      openaiApiKey: "sk-test",
+    });
+
+    await provider.createMessage({
+      model: "openai/gpt-6-astra@fast",
+      maxTokens: 64,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(responsesCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-6-astra" }),
+      undefined,
+    );
+  });
+
   it("sends prompt_cache_key with a split stable/turn system prefix for API-key requests", async () => {
     chatCompletionsCreateMock.mockResolvedValue({
       choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
@@ -505,7 +700,7 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
-  it.each(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])(
+  it.each(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])(
     "routes ChatGPT subscription model %s through the Codex compatibility shim",
     async (model) => {
       completeMock.mockResolvedValue({
@@ -561,13 +756,45 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
-  it("includes all GPT-5.6 variants in the ChatGPT subscription model catalog", async () => {
+  it("forwards GPT-6 Astra Ultra reasoning and response verbosity to the ChatGPT backend", async () => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    });
+    getModelsMock.mockReturnValue([{ id: "gpt-5.5" }]);
+    const provider = new OpenAIProvider({
+      ...makeConfig(),
+      model: "gpt-6-astra",
+      openaiReasoningEffort: "ultra",
+      openaiTextVerbosity: "high",
+    });
+
+    await provider.createMessage({
+      ...makeRequest(),
+      model: "gpt-6-astra",
+      reasoningEffort: "ultra",
+      textVerbosity: "high",
+    });
+
+    expect(completeMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        reasoningEffort: "ultra",
+        textVerbosity: "high",
+      }),
+    );
+  });
+
+  it("includes GPT-6 Astra and all GPT-5.6 variants in the ChatGPT subscription model catalog", async () => {
     getModelsMock.mockReturnValue([{ id: "gpt-5.5", name: "GPT-5.5" }]);
     const provider = new OpenAIProvider(makeConfig());
 
     const models = await provider.getAvailableModels();
 
-    expect(models.slice(0, 3).map((model) => model.id)).toEqual([
+    expect(models.slice(0, 4).map((model) => model.id)).toEqual([
+      "gpt-6-astra",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",

@@ -12,9 +12,7 @@
       "id": "hyperframes-npm",
       "kind": "npm",
       "package": "hyperframes",
-      "bins": [
-        "hyperframes"
-      ],
+      "bins": ["hyperframes"],
       "label": "Install HyperFrames CLI via npm"
     }
   ],
@@ -22,14 +20,7 @@
     "version": "0.4.3",
     "author": "HeyGen",
     "homepage": "https://github.com/heygen-com/hyperframes",
-    "tags": [
-      "video",
-      "cli",
-      "ffmpeg",
-      "rendering",
-      "tts",
-      "transcription"
-    ],
+    "tags": ["video", "cli", "ffmpeg", "rendering", "tts", "transcription"],
     "routing": {
       "keywords": [
         "hyperframes cli",

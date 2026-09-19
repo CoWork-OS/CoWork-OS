@@ -38,4 +38,4 @@ Analyze and explain project architecture
 ## Runtime Prompt
 
 - Current runtime prompt length: 563 characters.
-- Runtime prompt is defined directly in `../project-structure.json`. 
+- Runtime prompt is defined directly in `../project-structure.json`.

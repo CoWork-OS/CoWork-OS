@@ -38,4 +38,4 @@ Query Google Places API (New) via the goplaces CLI for text search, place detail
 ## Runtime Prompt
 
 - Current runtime prompt length: 812 characters.
-- Runtime prompt is defined directly in `../goplaces.json`. 
+- Runtime prompt is defined directly in `../goplaces.json`.

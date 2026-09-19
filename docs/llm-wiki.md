@@ -113,14 +113,14 @@ Research GRPO implementations and tradeoffs then run /llm-wiki --mode ingest
 
 ## Modes
 
-| Mode | Purpose |
-|------|---------|
-| `init` | Create the vault structure and seed files |
-| `ingest` | Capture sources and update durable notes |
-| `query` | Answer from the vault first, then save durable syntheses back |
-| `lint` | Audit structure, linking, frontmatter, index coverage, and contradictions |
-| `refresh` | Re-check important pages against fresher evidence and tighten links |
-| `auto` | Infer the best mode from the request and current vault state |
+| Mode      | Purpose                                                                   |
+| --------- | ------------------------------------------------------------------------- |
+| `init`    | Create the vault structure and seed files                                 |
+| `ingest`  | Capture sources and update durable notes                                  |
+| `query`   | Answer from the vault first, then save durable syntheses back             |
+| `lint`    | Audit structure, linking, frontmatter, index coverage, and contradictions |
+| `refresh` | Re-check important pages against fresher evidence and tighten links       |
+| `auto`    | Infer the best mode from the request and current vault state              |
 
 ## Deterministic workbench
 

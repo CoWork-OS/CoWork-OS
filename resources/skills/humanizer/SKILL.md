@@ -37,12 +37,12 @@ Rewrite AI-generated text to sound natural and human-written. Removes LLM tells 
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| text | string | No | The text to humanize (or paste it directly in your message) |
-| tone | select | No | Target tone for the rewrite |
+| Name | Type   | Required | Description                                                 |
+| ---- | ------ | -------- | ----------------------------------------------------------- |
+| text | string | No       | The text to humanize (or paste it directly in your message) |
+| tone | select | No       | Target tone for the rewrite                                 |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 818 characters.
-- Runtime prompt is defined directly in `../humanizer.json`. 
+- Runtime prompt is defined directly in `../humanizer.json`.

@@ -223,6 +223,10 @@ export function TaskQuickActions({
 
         {activePanel === "agent" && (
           <div className="action-panel">
+            <p className="agent-assignment-help">
+              Assigning a bot runs it on this task. Use the Bots tab to start a dedicated bot
+              conversation.
+            </p>
             <button
               className={`panel-option ${!task.assignedAgentRoleId ? "selected" : ""}`}
               onClick={() => {

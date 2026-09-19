@@ -18,6 +18,19 @@ describe("timeline v2 helpers", () => {
     expect(formatTimelineActivityLabel("Working on: BUILD")).toBe("Building");
   });
 
+  it("renders model-authored markdown emphasis as plain header text", () => {
+    expect(formatTimelineActivityLabel("**Collect the required details**")).toBe(
+      "Collect the required details",
+    );
+    expect(formatTimelineActivityLabel("Run `npm run build`")).toBe("Running npm run build");
+    expect(formatTimelineActivityLabel("Update snake_case_name")).toBe("Updating snake_case_name");
+  });
+
+  it("collapses a duplicated progressive verb prefix", () => {
+    expect(formatTimelineActivityLabel("Starting Adjusting the plan")).toBe("Adjusting the plan");
+    expect(formatTimelineActivityLabel("Starting the work")).toBe("Starting the work");
+  });
+
   it("normalizes legacy step events into timeline step lifecycle events", () => {
     const normalized = normalizeTaskEventToTimelineV2({
       taskId: "task-1",
@@ -129,7 +142,7 @@ describe("timeline v2 helpers", () => {
     expect(inferTimelineSubStageLabel("step_failed")).toBe("Applying fixes");
     expect(inferTimelineSubStageLabel("retry_started")).toBe("Retrying");
     expect(inferTimelineSubStageLabel("context_compaction_started")).toBe(
-      "Making room to continue",
+      "Context automatically compacting",
     );
     expect(inferTimelineSubStageLabel("verification_failed")).toBe("Verifying results");
     expect(inferTimelineSubStageLabel("plan_contract_conflict")).toBe("Adjusting approach");

@@ -56,10 +56,7 @@ import {
   Box,
   Link,
   Hexagon,
-  Crosshair,
-  Pi,
   ChevronDown,
-  Plus,
   Building2,
   HeartPulse,
   Film,
@@ -70,7 +67,10 @@ import {
   VisualTheme,
   AccentColor,
   UiDensity,
+  CommandOutputStyle,
   type LLMProviderType,
+  type JevDecisionProvider,
+  type JevToolReviewMode,
   type LLMRoutingRuntimeState,
   type CustomProviderConfig,
   type AzureReasoningEffort,
@@ -87,6 +87,7 @@ import {
   MODEL_ACCESS_GROUP_ORDER,
 } from "../../shared/model-access";
 import { getLlmModelReasoningEfforts } from "../../shared/llm-model-selection";
+import { getLLMProviderIcon } from "./llm-provider-icons";
 import {
   buildClaudeCredentialInput,
   resolveOpenAIReasoningEffort,
@@ -192,6 +193,10 @@ const UsageInsightsPanel = lazySettingsPanel(
   () => import("./UsageInsightsPanel"),
   "UsageInsightsPanel",
 );
+const PulseSettingsPanel = lazySettingsPanel(
+  () => import("./PulseSettingsPanel"),
+  "PulseSettingsPanel",
+);
 const SuggestionsPanel = lazySettingsPanel(() => import("./SuggestionsPanel"), "SuggestionsPanel");
 const CustomizePanel = lazySettingsPanel(() => import("./CustomizePanel"), "CustomizePanel");
 const ProfileSettings = lazySettingsPanel(() => import("./ProfileSettings"), "ProfileSettings");
@@ -251,6 +256,7 @@ type SettingsTab =
   | "policies"
   | "voice"
   | "aimodels"
+  | "jev"
   | "llm"
   | "image"
   | "search"
@@ -279,6 +285,7 @@ type SettingsTab =
   | "memory"
   | "git"
   | "insights"
+  | "pulse"
   | "suggestions"
   | "traces"
   | "customize"
@@ -321,6 +328,8 @@ interface SettingsProps {
   onTransparencyEffectsEnabledChange: (enabled: boolean) => void;
   uiDensity: UiDensity;
   onUiDensityChange: (density: UiDensity) => void;
+  commandOutputStyle: CommandOutputStyle;
+  onCommandOutputStyleChange: (style: CommandOutputStyle) => void;
   devRunLoggingEnabled: boolean;
   onDevRunLoggingEnabledChange: (enabled: boolean) => void;
   homeResearchVaultEnabled: boolean;
@@ -433,8 +442,11 @@ const DEFAULT_OPENAI_REASONING_EFFORTS: OpenAIReasoningEffort[] = [
   "xhigh",
 ];
 
-function getOpenAIReasoningEffortOptions(modelKey: string) {
-  const modelEfforts = getLlmModelReasoningEfforts("openai", modelKey);
+function getOpenAIReasoningEffortOptions(
+  modelKey: string,
+  authMethod: "api_key" | "oauth" = "api_key",
+) {
+  const modelEfforts = getLlmModelReasoningEfforts("openai", modelKey, authMethod);
   const supportedEfforts =
     modelEfforts.length > 0 ? modelEfforts : DEFAULT_OPENAI_REASONING_EFFORTS;
   return OPENAI_REASONING_EFFORT_OPTIONS.filter((option) =>
@@ -744,6 +756,12 @@ const sidebarItems: SidebarItem[] = [
     icon: <Layers {...I} />,
   },
   {
+    tab: "jev",
+    label: "Jev",
+    group: "AI & Models",
+    icon: <GitBranch {...I} />,
+  },
+  {
     tab: "whatsapp",
     label: "WhatsApp",
     group: "Communication",
@@ -844,6 +862,12 @@ const sidebarItems: SidebarItem[] = [
     label: "Usage Insights",
     group: "Advanced",
     icon: <BarChart3 {...I} />,
+  },
+  {
+    tab: "pulse",
+    label: "CoWork Pulse",
+    group: "Advanced",
+    icon: <HeartPulse {...I} />,
   },
   {
     tab: "suggestions",
@@ -1000,6 +1024,11 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
       target: { tab: "aimodels", aiModelsSubTab: "search" },
     },
   ],
+  jev: [
+    {
+      terms: ["jev", "jev decisions", "structured decisions", "typesafe", "typesafe ai"],
+    },
+  ],
   morechannels: secondaryChannelItems.map((item) => ({
     terms: [item.label, ...(secondaryChannelSearchTerms[item.key] ?? [])],
     target: { tab: "morechannels", secondaryChannel: item.key },
@@ -1107,6 +1136,17 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
   nodes: [{ terms: ["mobile companions", "nodes", "mobile"] }],
   extensions: [{ terms: ["extensions", "browser extension", "extension"] }],
   insights: [{ terms: ["usage insights", "analytics", "metrics"] }],
+  pulse: [
+    {
+      terms: [
+        "cowork pulse",
+        "pulse",
+        "anonymous telemetry",
+        "usage telemetry",
+        "privacy analytics",
+      ],
+    },
+  ],
   suggestions: [{ terms: ["suggestions", "recommendations"] }],
   traces: [{ terms: ["trace debugger", "traces", "sessions", "debugger"] }],
   updates: [{ terms: ["updates", "update", "release notes"] }],
@@ -1259,41 +1299,7 @@ const SettingsSidebar = memo(function SettingsSidebar({
   );
 });
 
-const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
-  anthropic: <Layers {...S} />,
-  openai: <CircleDot {...S} />,
-  azure: <Cloud {...S} />,
-  "azure-anthropic": <Cloud {...S} />,
-  gemini: <Star {...S} />,
-  openrouter: <Globe {...S} />,
-  deepseek: <Hexagon {...S} />,
-  ollama: <Box {...S} />,
-  groq: <Crosshair {...S} />,
-  xai: <AtSign {...S} />,
-  "xai-oauth": <AtSign {...S} />,
-  kimi: <Sparkles {...S} />,
-  "nano-gpt": <Sparkles {...S} />,
-  bedrock: <Hexagon {...S} />,
-  pi: <Pi {...S} />,
-  moa: <UsersRound {...S} />,
-  "hf-agents": <Zap {...S} />,
-  mlx: <Sparkles {...S} />,
-};
-
 const DEFAULT_DEEPSEEK_MODELS = [{ id: "deepseek-chat", name: "DeepSeek Chat" }];
-
-const getLLMProviderIcon = (providerType: string, customEntry?: { compatibility?: string }) => {
-  if (LLM_PROVIDER_ICONS[providerType]) {
-    return LLM_PROVIDER_ICONS[providerType];
-  }
-  if (customEntry?.compatibility === "anthropic") {
-    return LLM_PROVIDER_ICONS.anthropic;
-  }
-  if (customEntry?.compatibility === "openai") {
-    return LLM_PROVIDER_ICONS.openai;
-  }
-  return <Plus {...S} />;
-};
 
 interface SystemSettingsSectionProps {
   icon: ReactNode;
@@ -1337,6 +1343,8 @@ export function Settings({
   onTransparencyEffectsEnabledChange,
   uiDensity,
   onUiDensityChange,
+  commandOutputStyle,
+  onCommandOutputStyleChange,
   devRunLoggingEnabled,
   onDevRunLoggingEnabledChange,
   homeResearchVaultEnabled,
@@ -1424,6 +1432,7 @@ export function Settings({
   const [routingRuntime, setRoutingRuntime] = useState<LLMRoutingRuntimeState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [resettingCredentials, setResettingCredentials] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -1510,9 +1519,39 @@ export function Settings({
   >([]);
   const [loadingOpenRouterImageModels, setLoadingOpenRouterImageModels] = useState(false);
 
+  // Jev structured-decision state
+  const [jevEnabled, setJevEnabled] = useState(false);
+  const [jevProvider, setJevProvider] = useState<JevDecisionProvider>("typesafe");
+  const [jevTypesafeApiKey, setJevTypesafeApiKey] = useState("");
+  const [jevTypesafeKeyConfigured, setJevTypesafeKeyConfigured] = useState(false);
+  const [jevTypesafeClearKey, setJevTypesafeClearKey] = useState(false);
+  const [jevTypesafeBaseUrl, setJevTypesafeBaseUrl] = useState("https://api.typesafe.ai");
+  const [jevTypesafeModel, setJevTypesafeModel] = useState("jev-latest");
+  const [jevOpenRouterBaseUrl, setJevOpenRouterBaseUrl] = useState("https://openrouter.ai");
+  const [jevOpenRouterModel, setJevOpenRouterModel] = useState("~typesafe/jev-latest");
+  const [jevReuseOpenRouterKey, setJevReuseOpenRouterKey] = useState(true);
+  const [jevTeamSelectionEnabled, setJevTeamSelectionEnabled] = useState(false);
+  const [jevHarnessEnabled, setJevHarnessEnabled] = useState(false);
+  const [jevToolReviewMode, setJevToolReviewMode] = useState<JevToolReviewMode>("off");
+  const [jevModelRoutingEnabled, setJevModelRoutingEnabled] = useState(true);
+  const [jevAdaptiveStrategyEnabled, setJevAdaptiveStrategyEnabled] = useState(true);
+  const [jevBrowserActionSelectionEnabled, setJevBrowserActionSelectionEnabled] = useState(true);
+  const [jevLoopControlEnabled, setJevLoopControlEnabled] = useState(true);
+  const [jevContextCompactionEnabled, setJevContextCompactionEnabled] = useState(true);
+  const [jevSkillToolSelectionEnabled, setJevSkillToolSelectionEnabled] = useState(true);
+  const [jevOutputGuardrailsEnabled, setJevOutputGuardrailsEnabled] = useState(true);
+  const [jevTesting, setJevTesting] = useState(false);
+  const [jevTestResult, setJevTestResult] = useState<{
+    success: boolean;
+    provider?: JevDecisionProvider;
+    model?: string;
+    latencyMs?: number;
+    error?: string;
+  } | null>(null);
+
   // OpenAI state
   const [openaiApiKey, setOpenaiApiKey] = useState("");
-  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
+  const [openaiModel, setOpenaiModel] = useState("gpt-6-astra");
   const [openaiModels, setOpenaiModels] = useState<
     Array<{ id: string; name: string; description: string }>
   >([]);
@@ -1521,8 +1560,13 @@ export function Settings({
   const [openaiReasoningEffort, setOpenaiReasoningEffort] =
     useState<OpenAIReasoningEffort>("medium");
   const openaiReasoningEffortOptions = useMemo(
-    () => getOpenAIReasoningEffortOptions(openaiModel),
-    [openaiModel],
+    () =>
+      getOpenAIReasoningEffortOptions(openaiModel, openaiAuthMethod).map((option) =>
+        openaiAuthMethod === "oauth" && option.value === "low"
+          ? { ...option, label: "Light" }
+          : option,
+      ),
+    [openaiModel, openaiAuthMethod],
   );
   useEffect(() => {
     if (!openaiReasoningEffortOptions.some((option) => option.value === openaiReasoningEffort)) {
@@ -2634,6 +2678,37 @@ export function Settings({
           : "",
       );
 
+      // Set Jev structured-decision form state
+      const loadedJev = loadedSettings.jev;
+      const loadedJevEnabled = loadedJev?.enabled === true;
+      setJevEnabled(loadedJevEnabled);
+      setJevProvider(loadedJev?.provider ?? "typesafe");
+      setJevTypesafeApiKey("");
+      setJevTypesafeKeyConfigured(loadedJev?.typesafe?.apiKeyConfigured === true);
+      setJevTypesafeClearKey(false);
+      setJevTypesafeBaseUrl(loadedJev?.typesafe?.baseUrl ?? "https://api.typesafe.ai");
+      setJevTypesafeModel(loadedJev?.typesafe?.model ?? "jev-latest");
+      setJevOpenRouterBaseUrl(loadedJev?.openrouter?.baseUrl ?? "https://openrouter.ai");
+      setJevOpenRouterModel(loadedJev?.openrouter?.model ?? "~typesafe/jev-latest");
+      setJevReuseOpenRouterKey(
+        loadedJev?.openrouter ? loadedJev.openrouter.reuseOpenRouterKey === true : true,
+      );
+      setJevTeamSelectionEnabled(loadedJev?.teamSelectionEnabled === true);
+      setJevHarnessEnabled(loadedJevEnabled && loadedJev?.harnessEnabled === true);
+      setJevToolReviewMode(
+        loadedJevEnabled &&
+          (loadedJev?.toolReviewMode === "observe" || loadedJev?.toolReviewMode === "active")
+          ? loadedJev.toolReviewMode
+          : "off",
+      );
+      setJevModelRoutingEnabled(loadedJev?.modelRoutingEnabled !== false);
+      setJevAdaptiveStrategyEnabled(loadedJev?.adaptiveStrategyEnabled !== false);
+      setJevBrowserActionSelectionEnabled(loadedJev?.browserActionSelectionEnabled !== false);
+      setJevLoopControlEnabled(loadedJev?.loopControlEnabled !== false);
+      setJevContextCompactionEnabled(loadedJev?.contextCompactionEnabled !== false);
+      setJevSkillToolSelectionEnabled(loadedJev?.skillToolSelectionEnabled !== false);
+      setJevOutputGuardrailsEnabled(loadedJev?.outputGuardrailsEnabled !== false);
+
       // Set OpenAI form state
       if (loadedSettings.openai?.apiKey) {
         setOpenaiApiKey(loadedSettings.openai.apiKey);
@@ -2649,7 +2724,7 @@ export function Settings({
         // If authMethod is 'oauth', check if tokens are available
         if (loadedSettings.openai.authMethod === "oauth") {
           if (!loadedSettings.openai.model) {
-            setOpenaiModel("gpt-5.5");
+            setOpenaiModel("gpt-6-astra");
           }
           if (loadedSettings.openai.accessToken || loadedSettings.openai.refreshToken) {
             // Tokens available - fully connected
@@ -3178,10 +3253,38 @@ export function Settings({
       setLoadingCustomProviderModels(true);
       setTestResult(null);
       const currentConfig = customProviders[resolvedType] || {};
-      const models = await window.electronAPI.refreshCustomProviderModels(resolvedType, {
-        apiKey: currentConfig.apiKey,
-        baseUrl: currentConfig.baseUrl || customEntry.baseUrl,
-      });
+      let models: Array<{ key: string; displayName: string; description: string }>;
+      let discoverySuccess = true;
+      let discoveryMessage: string | undefined;
+      if (resolvedType === "atomic-chat") {
+        const discovery = await window.electronAPI.discoverAtomicChatModels({
+          apiKey: currentConfig.apiKey,
+          baseUrl: currentConfig.baseUrl || customEntry.baseUrl,
+        });
+        models = discovery.models.map((model) => ({
+          key: model.id,
+          displayName: model.name || model.id,
+          description: customEntry.description || "Atomic Chat model",
+        }));
+        discoverySuccess = discovery.status === "success" && models.length > 0;
+        if (!discoverySuccess) {
+          const messages: Record<string, string> = {
+            valid_empty: "Atomic Chat is reachable, but no loaded model is available.",
+            unreachable: "Atomic Chat is unavailable at the configured endpoint.",
+            authentication_rejected: "Atomic Chat rejected the configured authentication.",
+            invalid_response: "Atomic Chat returned an incompatible model response.",
+            cancelled: "Atomic Chat model discovery was cancelled.",
+            timeout: "Atomic Chat model discovery timed out.",
+          };
+          discoveryMessage =
+            messages[discovery.status] || "Atomic Chat model discovery failed unexpectedly.";
+        }
+      } else {
+        models = await window.electronAPI.refreshCustomProviderModels(resolvedType, {
+          apiKey: currentConfig.apiKey,
+          baseUrl: currentConfig.baseUrl || customEntry.baseUrl,
+        });
+      }
 
       setCustomProviders((prev) => {
         const existing = prev[resolvedType] || {};
@@ -3195,16 +3298,18 @@ export function Settings({
           [resolvedType]: {
             ...existing,
             ...(nextModel ? { model: nextModel } : {}),
-            cachedModels: models,
+            cachedModels:
+              models.length > 0 || resolvedType !== "atomic-chat" ? models : existing.cachedModels,
           },
         };
       });
       setTestResult({
-        success: true,
+        success: discoverySuccess,
         error:
-          models.length > 0
+          discoveryMessage ||
+          (models.length > 0
             ? undefined
-            : `No models returned for ${customEntry.name}. Keeping the current/default model list.`,
+            : `No models returned for ${customEntry.name}. Keeping the current/default model list.`),
       });
       onSettingsChanged?.();
     } catch (error) {
@@ -3322,7 +3427,7 @@ export function Settings({
         setOpenaiAuthMethod("oauth");
         setOpenaiApiKey(""); // Clear API key when using OAuth
         if (!openaiModel || openaiModel === "gpt-4o-mini") {
-          setOpenaiModel("gpt-5.5");
+          setOpenaiModel("gpt-6-astra");
         }
         onSettingsChanged?.();
         // Load models after OAuth success
@@ -3575,7 +3680,7 @@ export function Settings({
         break;
       case "openai":
         setOpenaiApiKey("");
-        setOpenaiModel("gpt-4o-mini");
+        setOpenaiModel("gpt-6-astra");
         setOpenaiModels([]);
         setOpenaiAuthMethod("api_key");
         setOpenaiOAuthConnected(false);
@@ -3691,6 +3796,7 @@ export function Settings({
   const handleSave = async () => {
     try {
       setSaving(true);
+      setSettingsSaveError(null);
       setTestResult(null);
 
       const currentSettings = settingsRef.current;
@@ -3698,6 +3804,7 @@ export function Settings({
       const shouldValidateOpenRouterParetoScore =
         currentSettings.providerType === "openrouter" && openrouterParetoScore.shouldSave;
       if (shouldValidateOpenRouterParetoScore && openrouterParetoScore.error) {
+        setSettingsSaveError(openrouterParetoScore.error);
         setTestResult({ success: false, error: openrouterParetoScore.error });
         return;
       }
@@ -3836,6 +3943,31 @@ export function Settings({
             : {}),
           ...routingFor("openrouter"),
           ...failoverFor("openrouter"),
+        },
+        jev: {
+          enabled: jevEnabled,
+          provider: jevProvider,
+          typesafe: {
+            apiKey: jevTypesafeApiKey || undefined,
+            clearApiKey: jevTypesafeClearKey || undefined,
+            baseUrl: jevTypesafeBaseUrl || undefined,
+            model: jevTypesafeModel || undefined,
+          },
+          openrouter: {
+            baseUrl: jevOpenRouterBaseUrl || undefined,
+            model: jevOpenRouterModel || undefined,
+            reuseOpenRouterKey: jevReuseOpenRouterKey,
+          },
+          teamSelectionEnabled: jevTeamSelectionEnabled,
+          harnessEnabled: jevHarnessEnabled,
+          toolReviewMode: jevToolReviewMode,
+          modelRoutingEnabled: jevModelRoutingEnabled,
+          adaptiveStrategyEnabled: jevAdaptiveStrategyEnabled,
+          browserActionSelectionEnabled: jevBrowserActionSelectionEnabled,
+          loopControlEnabled: jevLoopControlEnabled,
+          contextCompactionEnabled: jevContextCompactionEnabled,
+          skillToolSelectionEnabled: jevSkillToolSelectionEnabled,
+          outputGuardrailsEnabled: jevOutputGuardrailsEnabled,
         },
         // Always include openai settings
         openai: {
@@ -4025,10 +4157,12 @@ export function Settings({
       };
 
       await window.electronAPI.saveLLMSettings(settingsToSave);
+      setSettingsSaveError(null);
       onSettingsChanged?.();
       onBack();
     } catch (error) {
       console.error("Failed to save settings:", error);
+      setSettingsSaveError(error instanceof Error ? error.message : "Failed to save settings.");
     } finally {
       setSaving(false);
     }
@@ -4207,8 +4341,400 @@ export function Settings({
     }
   };
 
-  const renderModelSettingsActions = (options?: { includeProviderActions?: boolean }) => (
-    <div className="settings-actions">
+  const handleTestJevConnection = async () => {
+    try {
+      setJevTesting(true);
+      setJevTestResult(null);
+      const result = await window.electronAPI.testJevProvider({
+        settings: {
+          enabled: true,
+          provider: jevProvider,
+          typesafe: {
+            apiKey: jevTypesafeApiKey || undefined,
+            clearApiKey: jevTypesafeClearKey || undefined,
+            baseUrl: jevTypesafeBaseUrl || undefined,
+            model: jevTypesafeModel || undefined,
+          },
+          openrouter: {
+            baseUrl: jevOpenRouterBaseUrl || undefined,
+            model: jevOpenRouterModel || undefined,
+            reuseOpenRouterKey: jevReuseOpenRouterKey,
+          },
+        },
+        mainOpenRouterApiKey: openrouterApiKey || undefined,
+      });
+      setJevTestResult(result);
+    } catch (error: Any) {
+      setJevTestResult({ success: false, error: error.message });
+    } finally {
+      setJevTesting(false);
+    }
+  };
+
+  const renderJevSettingsSection = () => (
+    <div className="settings-section">
+      <h3>Jev decision support</h3>
+      <p className="settings-description">
+        Configure Jev for typed decisions in CoWork&apos;s collaboration path. Jev can choose an
+        agent team; your configured chat model still runs the agents and writes the response.
+      </p>
+      <div className="jev-settings-overview" aria-label="Jev use cases">
+        <div className="jev-settings-overview-title">Available in CoWork today</div>
+        <div className="jev-settings-use-cases">
+          <div className="jev-settings-use-case">
+            <strong>Team composition</strong>
+            <span>Choose complementary agents for collaborative tasks.</span>
+          </div>
+          <div className="jev-settings-use-case">
+            <strong>Typed choices</strong>
+            <span>Return structured decisions instead of free-form planning text.</span>
+          </div>
+          <div className="jev-settings-use-case">
+            <strong>Separate from chat</strong>
+            <span>Use Jev for routing decisions while the chat model does the work.</span>
+          </div>
+        </div>
+      </div>
+      <label className="settings-label jev-settings-enable" style={{ display: "flex", gap: "8px" }}>
+        <input
+          type="checkbox"
+          checked={jevEnabled}
+          onChange={(event) => {
+            const enabled = event.target.checked;
+            setJevEnabled(enabled);
+            if (!enabled) {
+              setJevTeamSelectionEnabled(false);
+              setJevHarnessEnabled(false);
+              setJevToolReviewMode("off");
+            }
+          }}
+        />
+        Enable Jev decision support
+      </label>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(160px, 220px) minmax(260px, 1fr)",
+          gap: "12px",
+          marginTop: "12px",
+        }}
+      >
+        <div>
+          <label className="settings-label">Provider route</label>
+          <select
+            className="settings-select"
+            value={jevProvider}
+            onChange={(event) => setJevProvider(event.target.value as JevDecisionProvider)}
+          >
+            <option value="typesafe">TypeSafe API</option>
+            <option value="openrouter">OpenRouter</option>
+          </select>
+        </div>
+        <div className={!jevEnabled ? "jev-settings-control-disabled" : undefined}>
+          <label className="settings-label">Team selection</label>
+          <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+            <input
+              type="checkbox"
+              checked={jevTeamSelectionEnabled}
+              disabled={!jevEnabled}
+              onChange={(event) => setJevTeamSelectionEnabled(event.target.checked)}
+            />
+            Use Jev for automatic agent-team selection
+          </label>
+          <p className="settings-hint jev-settings-control-hint">
+            {jevEnabled
+              ? jevToolReviewMode === "active"
+                ? "Active harness mode also lets Jev choose bounded single-agent, team, multitask, verification, and lane decisions for eligible tasks."
+                : "Used when CoWork starts a collaborative task with multiple agents."
+              : "Enable Jev decision support to turn on automatic team selection."}
+          </p>
+        </div>
+      </div>
+
+      <div
+        className={!jevEnabled ? "jev-settings-control-disabled" : undefined}
+        style={{ marginTop: "12px" }}
+      >
+        <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="checkbox"
+            checked={jevHarnessEnabled}
+            disabled={!jevEnabled}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              setJevHarnessEnabled(enabled);
+              setJevToolReviewMode(enabled ? "observe" : "off");
+            }}
+          />
+          Enable optional JEV harness
+        </label>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(160px, 220px) minmax(260px, 1fr)",
+            gap: "12px",
+            marginTop: "8px",
+          }}
+        >
+          <div>
+            <label className="settings-label" htmlFor="jev-tool-review-mode">
+              Contextual tool review
+            </label>
+            <select
+              id="jev-tool-review-mode"
+              className="settings-select"
+              value={jevToolReviewMode}
+              disabled={!jevEnabled || !jevHarnessEnabled}
+              onChange={(event) => setJevToolReviewMode(event.target.value as JevToolReviewMode)}
+            >
+              <option value="off">Off</option>
+              <option value="observe">Observe</option>
+              <option value="active">Active</option>
+            </select>
+          </div>
+          <p className="settings-hint jev-settings-control-hint" style={{ marginTop: "22px" }}>
+            {jevToolReviewMode === "active"
+              ? "Use Jev for bounded harness decisions. A concerning review can request approval; uncertain or unavailable reviews stay advisory while hard policy, permissions, and security remain authoritative."
+              : "Observe selected higher-risk tool calls with bounded, redacted context. Observation never changes permissions, approvals, security decisions, or tool execution."}
+          </p>
+        </div>
+      </div>
+
+      <div
+        className={!jevEnabled || !jevHarnessEnabled ? "jev-settings-control-disabled" : undefined}
+        style={{ marginTop: "12px" }}
+      >
+        <label className="settings-label">Active harness decisions</label>
+        <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="checkbox"
+            checked={jevModelRoutingEnabled}
+            disabled={!jevEnabled || !jevHarnessEnabled}
+            onChange={(event) => setJevModelRoutingEnabled(event.target.checked)}
+          />
+          Adaptive model routing
+        </label>
+        <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="checkbox"
+            checked={jevAdaptiveStrategyEnabled}
+            disabled={!jevEnabled || !jevHarnessEnabled}
+            onChange={(event) => setJevAdaptiveStrategyEnabled(event.target.checked)}
+          />
+          Adaptive task strategy (single-agent, team, multitask, or verification)
+        </label>
+        <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="checkbox"
+            checked={jevBrowserActionSelectionEnabled}
+            disabled={!jevEnabled || !jevHarnessEnabled}
+            onChange={(event) => setJevBrowserActionSelectionEnabled(event.target.checked)}
+          />
+          Snapshot-bound browser action selection
+        </label>
+        <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="checkbox"
+            checked={jevLoopControlEnabled}
+            disabled={!jevEnabled || !jevHarnessEnabled}
+            onChange={(event) => setJevLoopControlEnabled(event.target.checked)}
+          />
+          Goal and stuck-loop checks
+        </label>
+        <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="checkbox"
+            checked={jevContextCompactionEnabled}
+            disabled={!jevEnabled || !jevHarnessEnabled}
+            onChange={(event) => setJevContextCompactionEnabled(event.target.checked)}
+          />
+          Context compaction retention advice
+        </label>
+        <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="checkbox"
+            checked={jevSkillToolSelectionEnabled}
+            disabled={!jevEnabled || !jevHarnessEnabled}
+            onChange={(event) => setJevSkillToolSelectionEnabled(event.target.checked)}
+          />
+          Eligible skill/tool reranking
+        </label>
+        <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="checkbox"
+            checked={jevOutputGuardrailsEnabled}
+            disabled={!jevEnabled || !jevHarnessEnabled}
+            onChange={(event) => setJevOutputGuardrailsEnabled(event.target.checked)}
+          />
+          Output and trace guardrails
+        </label>
+        <p className="settings-hint jev-settings-control-hint">
+          These recommendations are bounded and fail closed. CoWork policies, permissions,
+          approvals, execution caps, and verification remain authoritative. Compaction decisions are
+          replayable and never remove pinned or active tool-pair context.
+        </p>
+      </div>
+
+      {jevProvider === "typesafe" ? (
+        <div style={{ marginTop: "12px" }}>
+          <label className="settings-label">TypeSafe API key</label>
+          <input
+            type="password"
+            className="settings-input"
+            placeholder={
+              jevTypesafeKeyConfigured
+                ? "Stored TypeSafe key configured; enter a replacement"
+                : "TypeSafe API key"
+            }
+            value={jevTypesafeApiKey}
+            onChange={(event) => {
+              setJevTypesafeApiKey(event.target.value);
+              if (event.target.value) {
+                setJevTypesafeKeyConfigured(true);
+                setJevTypesafeClearKey(false);
+              }
+            }}
+          />
+          {jevTypesafeKeyConfigured && (
+            <button
+              type="button"
+              className="button-secondary"
+              style={{ marginTop: "8px" }}
+              onClick={() => {
+                setJevTypesafeApiKey("");
+                setJevTypesafeKeyConfigured(false);
+                setJevTypesafeClearKey(true);
+              }}
+            >
+              Clear saved TypeSafe key
+            </button>
+          )}
+          <label className="settings-label" style={{ marginTop: "10px" }}>
+            TypeSafe base URL
+          </label>
+          <input
+            className="settings-input"
+            placeholder="https://api.typesafe.ai"
+            value={jevTypesafeBaseUrl}
+            onChange={(event) => setJevTypesafeBaseUrl(event.target.value)}
+          />
+          <label className="settings-label" style={{ marginTop: "10px" }}>
+            Jev model
+          </label>
+          <input
+            className="settings-input"
+            placeholder="jev-latest"
+            value={jevTypesafeModel}
+            onChange={(event) => setJevTypesafeModel(event.target.value)}
+          />
+          <p className="settings-hint">
+            See the{" "}
+            <a href="https://docs.typesafe.ai/api" target="_blank" rel="noopener noreferrer">
+              TypeSafe API docs
+            </a>
+            .
+          </p>
+        </div>
+      ) : (
+        <div style={{ marginTop: "12px" }}>
+          <p className="settings-description">
+            Jev reuses the OpenRouter API key from AI &amp; Models, so you only need to enter it
+            once.
+          </p>
+          <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+            <input
+              type="checkbox"
+              checked={jevReuseOpenRouterKey}
+              onChange={(event) => setJevReuseOpenRouterKey(event.target.checked)}
+            />
+            Reuse the OpenRouter API key from OpenRouter settings for Jev
+          </label>
+          <p className="settings-hint">
+            Disable this only if you already have a separate legacy Jev key saved.
+          </p>
+          <label className="settings-label" style={{ marginTop: "10px" }}>
+            OpenRouter base URL
+          </label>
+          <input
+            className="settings-input"
+            placeholder="https://openrouter.ai"
+            value={jevOpenRouterBaseUrl}
+            onChange={(event) => setJevOpenRouterBaseUrl(event.target.value)}
+          />
+          <label className="settings-label" style={{ marginTop: "10px" }}>
+            Jev model
+          </label>
+          <input
+            list="jev-openrouter-model-options"
+            className="settings-input"
+            placeholder="~typesafe/jev-latest"
+            value={jevOpenRouterModel}
+            onChange={(event) => setJevOpenRouterModel(event.target.value)}
+          />
+          <datalist id="jev-openrouter-model-options">
+            <option value="~typesafe/jev-latest">Recommended latest Jev model</option>
+          </datalist>
+          <p className="settings-hint">
+            Recommended: <code>~typesafe/jev-latest</code>. Uses OpenRouter&apos;s
+            structured-decisions endpoint for{" "}
+            <a
+              href="https://openrouter.ai/~typesafe/jev-latest"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Jev Latest
+            </a>
+            .
+          </p>
+        </div>
+      )}
+
+      <div className="settings-actions" style={{ marginTop: "12px" }}>
+        <button
+          type="button"
+          className="button-secondary"
+          onClick={handleTestJevConnection}
+          disabled={jevTesting || saving}
+        >
+          {jevTesting ? "Testing Jev..." : "Test Jev Connection"}
+        </button>
+        {jevTestResult && (
+          <span
+            className={`jev-test-result ${jevTestResult.success ? "is-success" : "is-error"}`}
+            role={jevTestResult.success ? "status" : "alert"}
+            aria-live="polite"
+          >
+            {jevTestResult.success ? (
+              <>
+                <strong>Connection succeeded</strong>
+                <span className="jev-test-result-meta">
+                  {[
+                    jevTestResult.provider === "openrouter" ? "OpenRouter" : "TypeSafe API",
+                    jevTestResult.model,
+                    typeof jevTestResult.latencyMs === "number"
+                      ? `${jevTestResult.latencyMs} ms`
+                      : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </>
+            ) : (
+              jevTestResult.error || "Connection failed"
+            )}
+          </span>
+        )}
+      </div>
+      {renderModelSettingsActions({ className: "jev-settings-save-bar" })}
+    </div>
+  );
+
+  const renderModelSettingsActions = (options?: {
+    includeProviderActions?: boolean;
+    className?: string;
+  }) => (
+    <div className={`settings-actions ${options?.className || ""}`.trim()}>
       {options?.includeProviderActions && (
         <>
           <button
@@ -4234,6 +4760,11 @@ export function Settings({
       >
         {saving ? "Saving..." : "Save Settings"}
       </button>
+      {settingsSaveError && (
+        <span className="settings-save-error" role="alert">
+          {settingsSaveError}
+        </span>
+      )}
     </div>
   );
 
@@ -5714,7 +6245,7 @@ export function Settings({
                 <input
                   type="text"
                   className="settings-input"
-                  placeholder="gpt-4o-mini"
+                  placeholder="gpt-6-astra"
                   value={openaiModel}
                   onChange={(e) => setOpenaiModel(e.target.value)}
                 />
@@ -8213,6 +8744,8 @@ export function Settings({
                   onTransparencyEffectsEnabledChange={onTransparencyEffectsEnabledChange}
                   uiDensity={uiDensity}
                   onUiDensityChange={onUiDensityChange}
+                  commandOutputStyle={commandOutputStyle}
+                  onCommandOutputStyleChange={onCommandOutputStyleChange}
                   devRunLoggingEnabled={devRunLoggingEnabled}
                   onDevRunLoggingEnabledChange={onDevRunLoggingEnabledChange}
                   homeResearchVaultEnabled={homeResearchVaultEnabled}
@@ -8361,6 +8894,17 @@ export function Settings({
                     </div>
                   );
                 })()
+              ) : activeTab === "jev" ? (
+                <div className="more-channels-panel">
+                  <div className="more-channels-header">
+                    <h2>Jev</h2>
+                    <p className="settings-description">
+                      Use Jev for automatic agent-team selection in collaborative tasks. It does not
+                      replace your chat model.
+                    </p>
+                  </div>
+                  <div className="more-channels-content">{renderJevSettingsSection()}</div>
+                </div>
               ) : activeTab === "aimodels" ? (
                 <div className="more-channels-panel">
                   <div className="more-channels-header">
@@ -8596,6 +9140,8 @@ export function Settings({
                 />
               ) : activeTab === "insights" ? (
                 <UsageInsightsPanel workspaceId={workspaceId} />
+              ) : activeTab === "pulse" ? (
+                <PulseSettingsPanel />
               ) : activeTab === "suggestions" ? (
                 <SuggestionsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
               ) : activeTab === "traces" ? (

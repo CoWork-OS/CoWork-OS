@@ -55,10 +55,14 @@ npm run package        # package desktop installers (.dmg on macOS, .exe on Wind
 If a globally installed `cowork-os` command is linked to this source checkout, its runtime dependency repair preserves the checkout's development dependencies. Packaged npm installs continue to omit development-only packages.
 
 Once complete, the packaged app will be in the `release/` folder:
+
 - **`*.dmg`** — macOS installer image
 - **`*.exe`** — Windows NSIS installer
 - **`mac-*/CoWork OS.app`** — unpacked macOS app bundle
 - **`win-*/`** — unpacked Windows app directory
+
+For the renderer bundler architecture, dependency versions, migration rationale, and
+Vite-specific validation checklist, see [Vite 8 Renderer Toolchain Migration](vite-8-migration.md).
 
 ## Linux Server Release Package
 
@@ -130,35 +134,35 @@ npm run dev:log
 
 ## Available Commands
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start development mode; log capture follows Settings toggle |
-| `npm run dev:log` | Start development mode and force redacted text + JSONL logs to `logs/` |
-| `npm run dev:start` | Internal raw dev start command (used by wrappers) |
-| `npm run build` | Production build |
-| `npm run build:cli` | Compile the `cowork` CLI TypeScript output |
-| `npm run package` | Package desktop installers (`.dmg` on macOS, `.exe` on Windows) |
-| `npm run package:linux:server` | Build the Linux x64 server tarball and checksum on Linux |
-| `npm run package:linux:server:smoke` | Extract and boot-smoke the Linux server tarball on Linux |
-| `npm run setup` | Set up native modules for Electron |
-| `npm run fmt` | Format code with Oxfmt |
-| `npm run fmt:check` | Check formatting without writing |
-| `npm run lint` | Run Oxlint (fast, Rust-based linter) |
-| `npm run type-check` | TypeScript validation |
-| `npm run qa:eval:build` | Build regression eval corpus from failed/partial tasks |
-| `npm run qa:eval:run` | Replay eval suite (deterministic or hooks mode) |
-| `npm run qa:eval:enforce-regressions` | Enforce production-fix -> eval-case policy |
-| `npm run qa:renderer-perf` | Replay renderer task-surface performance fixtures, including noisy failure storms |
-| `npm run qa:perf:fixtures` | Run timeline repository, renderer stream, renderer fixture, and profiler regression tests |
-| `npm run qa:perf:profile` | Capture an isolated Electron task-switch profile and optional budget report |
-| `npm run qa:perf:large-session` | Run the production-budget profile with 15,529 events and a requested 231 MiB payload |
-| `npm run qa:timeline:backfill` | Recompute timeline completion telemetry for `task_completed` timeline events |
-| `npm run qa:timeline:enforce` | Enforce timeline reliability thresholds from completion telemetry |
-| `npm run qa:reliability` | Reliability loop (`qa:eval:run` + battery script) |
-| `npm run skills:validate-routing` | Validate skill routing metadata |
-| `npm run skills:validate-content` | Validate skill prompt content, placeholders, and references |
-| `npm run skills:audit` | Generate skill audit scorecards in `tmp/qa/` |
-| `npm run skills:check` | Run full skill quality gate (routing + content + audit + eval) |
+| Command                               | Description                                                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `npm run dev`                         | Start development mode; log capture follows Settings toggle                               |
+| `npm run dev:log`                     | Start development mode and force redacted text + JSONL logs to `logs/`                    |
+| `npm run dev:start`                   | Internal raw dev start command (used by wrappers)                                         |
+| `npm run build`                       | Production build                                                                          |
+| `npm run build:cli`                   | Compile the `cowork` CLI TypeScript output                                                |
+| `npm run package`                     | Package desktop installers (`.dmg` on macOS, `.exe` on Windows)                           |
+| `npm run package:linux:server`        | Build the Linux x64 server tarball and checksum on Linux                                  |
+| `npm run package:linux:server:smoke`  | Extract and boot-smoke the Linux server tarball on Linux                                  |
+| `npm run setup`                       | Set up native modules for Electron                                                        |
+| `npm run fmt`                         | Format code with Oxfmt                                                                    |
+| `npm run fmt:check`                   | Check formatting without writing                                                          |
+| `npm run lint`                        | Run Oxlint (fast, Rust-based linter)                                                      |
+| `npm run type-check`                  | TypeScript validation                                                                     |
+| `npm run qa:eval:build`               | Build regression eval corpus from failed/partial tasks                                    |
+| `npm run qa:eval:run`                 | Replay eval suite (deterministic or hooks mode)                                           |
+| `npm run qa:eval:enforce-regressions` | Enforce production-fix -> eval-case policy                                                |
+| `npm run qa:renderer-perf`            | Replay renderer task-surface performance fixtures, including noisy failure storms         |
+| `npm run qa:perf:fixtures`            | Run timeline repository, renderer stream, renderer fixture, and profiler regression tests |
+| `npm run qa:perf:profile`             | Capture an isolated Electron task-switch profile and optional budget report               |
+| `npm run qa:perf:large-session`       | Run the production-budget profile with 15,529 events and a requested 231 MiB payload      |
+| `npm run qa:timeline:backfill`        | Recompute timeline completion telemetry for `task_completed` timeline events              |
+| `npm run qa:timeline:enforce`         | Enforce timeline reliability thresholds from completion telemetry                         |
+| `npm run qa:reliability`              | Reliability loop (`qa:eval:run` + battery script)                                         |
+| `npm run skills:validate-routing`     | Validate skill routing metadata                                                           |
+| `npm run skills:validate-content`     | Validate skill prompt content, placeholders, and references                               |
+| `npm run skills:audit`                | Generate skill audit scorecards in `tmp/qa/`                                              |
+| `npm run skills:check`                | Run full skill quality gate (routing + content + audit + eval)                            |
 
 ## macOS Dev Electron Bundle
 
@@ -425,6 +429,7 @@ npm run qa:timeline:enforce -- --db /absolute/path/to.db
 ```
 
 See also:
+
 - [Reliability Flywheel](reliability-flywheel.md)
 
 ## Memory Observation QA
@@ -464,6 +469,7 @@ npm run skills:check
 ```
 
 Notes:
+
 - `skills:check` is phase-driven (`SKILLS_CHECK_PHASE=1|2|3`).
 - Phase 2+ enables path enforcement for `{baseDir}` references.
 - Phase 3 enables strict warning enforcement.
@@ -711,13 +717,13 @@ npx vitest run \
 
 ## Project Structure
 
-| Directory | Description |
-|-----------|-------------|
-| `src/electron/` | Main process (Node.js/Electron) |
-| `src/renderer/` | React UI components |
-| `src/shared/` | Shared types between main and renderer |
-| `resources/skills/` | Built-in skill definitions |
-| `connectors/` | Enterprise MCP connector implementations |
+| Directory           | Description                              |
+| ------------------- | ---------------------------------------- |
+| `src/electron/`     | Main process (Node.js/Electron)          |
+| `src/renderer/`     | React UI components                      |
+| `src/shared/`       | Shared types between main and renderer   |
+| `resources/skills/` | Built-in skill definitions               |
+| `connectors/`       | Enterprise MCP connector implementations |
 
 ## Composer Mentions
 
@@ -822,12 +828,12 @@ See [Enterprise Connectors](enterprise-connectors.md) for the full connector con
 
 ## System Requirements
 
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| **Desktop OS** | macOS 13 / Windows 10 | macOS 14+ / Windows 11 |
-| **RAM** | 4 GB | 8 GB+ |
-| **CPU** | 2 cores | 4+ cores |
-| **Architecture** | x64 or arm64 | Native architecture of your host |
+| Requirement      | Minimum               | Recommended                      |
+| ---------------- | --------------------- | -------------------------------- |
+| **Desktop OS**   | macOS 13 / Windows 10 | macOS 14+ / Windows 11           |
+| **RAM**          | 4 GB                  | 8 GB+                            |
+| **CPU**          | 2 cores               | 4+ cores                         |
+| **Architecture** | x64 or arm64          | Native architecture of your host |
 
 ### Supported Desktop OS Versions
 
@@ -843,11 +849,11 @@ See [Enterprise Connectors](enterprise-connectors.md) for the full connector con
 
 ### Running in a VM
 
-| Host Platform | VM Options |
-|----------|------------|
-| **Apple Silicon Mac** | UTM, Parallels Desktop, VMware Fusion |
-| **Intel Mac** | Parallels Desktop, VMware Fusion, VirtualBox |
-| **Windows** | Hyper-V, VMware Workstation, VirtualBox |
+| Host Platform         | VM Options                                   |
+| --------------------- | -------------------------------------------- |
+| **Apple Silicon Mac** | UTM, Parallels Desktop, VMware Fusion        |
+| **Intel Mac**         | Parallels Desktop, VMware Fusion, VirtualBox |
+| **Windows**           | Hyper-V, VMware Workstation, VirtualBox      |
 
 Recommended VM specs: 4+ GB RAM, 2+ CPU cores, 40+ GB disk space.
 

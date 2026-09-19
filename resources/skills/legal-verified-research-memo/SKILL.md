@@ -37,13 +37,13 @@ Generate a legal research memo with claim-level source verification, confidence 
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| question | string | Yes | Legal question to research |
-| jurisdictions | string | No | Jurisdiction scope |
-| output_report_path | string | No | Where to write the research memo |
+| Name               | Type   | Required | Description                      |
+| ------------------ | ------ | -------- | -------------------------------- |
+| question           | string | Yes      | Legal question to research       |
+| jurisdictions      | string | No       | Jurisdiction scope               |
+| output_report_path | string | No       | Where to write the research memo |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1212 characters.
-- Runtime prompt is defined directly in `../legal-verified-research-memo.json`. 
+- Runtime prompt is defined directly in `../legal-verified-research-memo.json`.

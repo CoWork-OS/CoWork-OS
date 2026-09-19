@@ -28,7 +28,7 @@ CoWork falls back to GitHub for update information without blocking updates.
 
 Example request shape:
 
-`GET /v1/latest-version?version=0.5.52&platform=macos&arch=arm64&surface=desktop`
+`GET /v1/latest-version?version=0.5.53&platform=macos&arch=arm64&surface=desktop`
 
 ## Identity and consent
 

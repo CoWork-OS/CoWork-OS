@@ -37,16 +37,16 @@ AI CFO for bootstrapped startups. Provides financial frameworks for cash managem
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| topic | select | Yes | Area of focus |
-| question | string | Yes | Your specific question |
-| arr | string | No | Annual Recurring Revenue (e.g., $2M) |
-| monthlyChurn | string | No | Monthly churn rate (e.g., 2.5%) |
-| cac | string | No | Customer Acquisition Cost (e.g., $500) |
-| ltv | string | No | Lifetime Value (e.g., $3000) |
+| Name         | Type   | Required | Description                            |
+| ------------ | ------ | -------- | -------------------------------------- |
+| topic        | select | Yes      | Area of focus                          |
+| question     | string | Yes      | Your specific question                 |
+| arr          | string | No       | Annual Recurring Revenue (e.g., $2M)   |
+| monthlyChurn | string | No       | Monthly churn rate (e.g., 2.5%)        |
+| cac          | string | No       | Customer Acquisition Cost (e.g., $500) |
+| ltv          | string | No       | Lifetime Value (e.g., $3000)           |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 4158 characters.
-- Runtime prompt is defined directly in `../startup-cfo.json`. 
+- Runtime prompt is defined directly in `../startup-cfo.json`.

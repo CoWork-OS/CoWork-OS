@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **MLX-LM local inference**: added a first-class Apple Silicon `mlx` provider with native-platform and Python-runtime checks, quantized-model quick picks, local `mlx_lm.server` lifecycle controls, OpenAI-compatible `/v1` routing, legacy endpoint normalization, and a complete [MLX-LM Local Inference guide](docs/mlx-lm.md).
+- **Codex-style approval boundaries**: added named access profiles and documented routine in-scope work, scoped exceptions, fail-closed `approval: never` behavior, and bounded ACP execution requirements.
+
+### Changed
+
+- **No-popup approval handling**: default local runs now execute allowed operations silently and turn unresolved approval decisions—including network, credential, export, MCP/external-side-effect, and eligible outside-workspace requests—into assistant messages with inline **Deny** / **Allow once** cards. Legacy popup approvals are opt-in diagnostics via `COWORK_APPROVAL_PROMPTS=on`, and pending approval state fails closed on restart.
+- **Memory write migration**: durable memory writes now auto-commit in the default no-prompt runtime; explicit review modes remain available for controlled runs, while stale queued writes are rejected without replay.
 
 ## [0.5.52] - 2026-08-27
 
@@ -72,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.50] - 2026-07-20
 
 ### Added
+
 - **Release notes for 0.5.50**: see [Release Notes 0.5.50](docs/release-notes-0.5.50.md).
 - **Main-screen Automation Studio**: added Discover, Library, Builder, and Activity views under the main sidebar **Automations** destination, with conservative prompt-to-draft generation, eight built-in templates, a searchable action catalog, typed variables, explicit Yes/No branch authoring, dry-run and Google-scope review, immutable activation versions, manual runs, turn-off controls, per-step approvals, cancellation, and backing-task links. Added the complete [Automation Studio guide](docs/automation-studio.md).
 - **Deterministic workflow runtime**: added versioned structured definitions, graph validation, bounded conditions/filters/for-each execution, a durable deduplicated event inbox, Google Workspace polling starters with cursor pagination, action adapters, signed outbound webhooks, secure secret references, connector allowlist/schema checks, run/step/event/sample persistence, retry policy, retention cleanup, and additive legacy Routine compatibility.
@@ -88,6 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cross-platform desktop location**: added permission-gated macOS, Windows, and Linux location helpers with a common JSON response envelope and packaged runtime assets.
 
 ### Changed
+
 - **Automation product placement**: structured flow authoring now lives in the main Automations tab instead of Settings. **Settings > Automations** remains the advanced surface for prompt-based Routines, Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing.
 - **Workflow safety and lifecycle**: external writes and data exports require approval under safe/default policies, external automatic retries are capped at one, active versions are isolated from saved drafts, and re-enabling validates the active version's current account scopes and secret references.
 - **Browser and computer-use approvals**: background/headless execution is preferred unless visible Browser Workbench or native computer control is requested or approved; visible fallback choices can be governed by permission rules.
@@ -96,6 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **First-run onboarding**: refreshed staged setup, ChatGPT subscription sign-in, Ollama detection, free-provider badges, and the fixed-frame onboarding recap.
 
 ### Fixed
+
 - **Automation Studio startup and database upgrades**: registered the complete `routine:workflow*` IPC surface, ordered compatibility-column migrations before dependent indexes, and made the dev launcher detect an already-running source Electron instance before macOS bundle rebranding. Missing-handler, legacy `workflow_run_id`, silent single-instance exit, and same-bundle `SIGABRT` failures now surface actionable diagnostics without destructive database recovery.
 - **Automation Studio layout and scrolling**: made the main Automations page the vertical scroll owner, removed task-view width constraints, bounded internal panes, wrapped long card content, and added responsive collapse plus placement/layout regression coverage.
 - **Workflow recovery and cancellation**: requeue processing events after restart, recover runs before draining new events, move interrupted steps to explicit outcome verification, propagate cancellation into agent/Google/webhook work, continue Gmail/Drive pagination without skipping capped backlogs, and redact/prune durable payload data.
@@ -114,6 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.49] - 2026-06-08
 
 ### Added
+
 - **Release notes for 0.5.49**: see [Release Notes 0.5.49](docs/release-notes-0.5.49.md).
 - **CLI local runner**: added the `cowork` npm binary, CLI source/build coverage, local Control Plane discovery, terminal UI helpers, direct-run support, and package inclusion for `tsconfig.cli.json`.
 - **Browser Use Cloud stealth backend**: Browser V2 can now explicitly route `browser_navigate` through Browser Use Cloud with `browser_provider: "browser-use-cloud"`, using `BROWSER_USE_API_KEY` or encrypted `browser-use` settings, Browser Use API v3 session creation, CDP attach, optional proxy/profile/timeout/recording/screen controls, stale-session retry, and remote-session stop handling.
@@ -125,6 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Namespaced skill slash commands**: slash command resolution now supports namespaced skill routes.
 
 ### Changed
+
 - **Browser V2 docs and safety model**: documented Browser Use Cloud configuration, explicit opt-in behavior, private/local target blocking, redacted Browser Use errors/URLs, and retryable pending-stop results across Browser Workbench, Browser V2 architecture, getting started, troubleshooting, development, feature, and architecture docs.
 - **Startup and Control Plane behavior**: reduced sluggish desktop startup paths, tuned deferred startup work, and added an opt-in desktop Control Plane auto-enable path.
 - **Renderer shell polish**: improved task-list load-more state, reduced static Control Plane polling, isolated Settings sidebar search into a memoized component, and de-duplicated adjacent timeline failures in summary mode.
@@ -133,6 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation refresh**: refreshed README and docs for CLI usage, security scans, Browser Use Cloud, setup, troubleshooting, security, plugin packs, project status, and public adoption signals.
 
 ### Fixed
+
 - **Security and auth hardening**: hardened webhook and MCP host auth, authenticated CoWork host tunnel forwarding, blocked cross-host Scrapling redirects, restricted `open_url` to web schemes, and tightened web fetch/scraping guardrails.
 - **Executor completion guardrails**: strengthened completion contract handling, file mutation verification, command requirements, and frontend browser-preview guidance.
 - **Automation permissions**: automated tasks now default to `dont_ask` permission behavior.
@@ -145,6 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.48] - 2026-05-28
 
 ### Added
+
 - **Release notes for 0.5.48**: see [Release Notes 0.5.48](docs/release-notes-0.5.48.md).
 - **Side Chat**: `/side [question]` opens a right-side read-only side conversation for the selected running task, with hidden parent context, live parent-status snapshots for progress questions, and tools denied.
 - **Secure MCP Tunnels**: added self-hosted outbound-only private MCP access with a relay, local tunnel client, separate client/caller tokens, policy enforcement, audit logs, Settings UI, and relay smoke coverage.
@@ -152,12 +165,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Timeline/sidebar paging**: added sidebar summary loading, cursor-based sidebar pagination, task timeline page/detail IPC APIs, timeline payload sanitization, and performance QA scripts.
 
 ### Changed
+
 - **Mission Control semantics**: clarified UI/docs language around Heartbeat agents, the global runtime queue, and workspace-scoped Mission Board work.
 - **Scheduler reliability**: cron jobs now persist run leases before task creation, tag scheduled tasks with `scheduledJobId`, detect active scheduled work after restart, and avoid duplicate runs.
 - **Routine reconciliation**: routine runs now dedupe duplicate backing-task dispatches, preserve distinct thread follow-ups, and repair stale timeout rows when backing tasks later finish.
 - **Completion contract handling**: text-only briefs with file paths no longer require file artifacts, and recovery steps no longer overwrite stronger final deliverables with narrow operational status.
 
 ### Fixed
+
 - **Tool policy read-only enforcement**: an explicit empty task allowlist now denies all tools, while an omitted allowlist remains unrestricted.
 - **Glob and file-path safeguards**: glob scans skip generated/dependency folders case-insensitively, reject generated search roots, cap scan duration, and file tools expand `~` paths before resolution.
 - **macOS sandbox path aliases**: sandbox profiles now include `/var` and `/private/var` aliases for workspace, temp, and allowed paths.
@@ -166,17 +181,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.47] - 2026-05-21
 
 ### Added
+
 - **Release notes for 0.5.47**: see [Release Notes 0.5.47](docs/release-notes-0.5.47.md).
 - **FTS worker memory search**: added an off-main-thread memory FTS worker for prompt recall, marker lookup, and memory search, with request timeouts, crash handling, exponential restart backoff, and teardown on app quit.
 - **Desktop location and maps tools**: added native desktop location helpers and maps MCP coverage for current location, geocoding, reverse geocoding, route estimates, and nearby-place search.
 
 ### Changed
+
 - **Renderer event stability**: task-event appends now batch transient replacements, cap noisy renderer events, reduce stale-task reconciliation frequency, and avoid avoidable sidebar rerenders during large multi-agent/multi-task runs.
 - **Memory pressure analysis**: workspace memory-pressure scans now use async file reads so memory-nudge and heartbeat paths avoid synchronous filesystem pressure.
 - **Playbook recall**: playbook lookup now uses bounded marker search plus prompt-overlap scoring instead of broad main-thread recall.
 - **macOS unsigned distribution**: `0.5.47` continues the unsigned/ad hoc signed macOS artifact path; validate with the `--allow-unsigned` desktop smoke option.
 
 ### Fixed
+
 - **Memory recall fallback**: async memory search falls back to the existing DB/hybrid paths when the FTS worker is unavailable, restarting, or returns no useful rows.
 - **Prompt recall filtering**: worker prompt-recall results include content so ignored imported-memory markers and prompt-suppression rules continue to apply.
 - **Timer and map cleanup**: Teams deduplication timers, tray status timers, managed briefing runs, subconscious evidence maps, and cross-signal mention maps are cleaned up or bounded to reduce long-session memory growth.
@@ -188,6 +206,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.45] - 2026-05-14
 
 ### Added
+
 - **Release notes for 0.5.45**: see [Release Notes 0.5.45](docs/release-notes-0.5.45.md).
 - **Claude-for-Legal workflows**: documented and registered bundled legal practice plugin packs, slash commands, editable picker flows, demand-letter intake cards, management-command exclusions, and safety behavior.
 - **Finance and legal plugin packs**: added legal practice packs, finance-core packs, fund administration, KYC operations, and expanded equity research, financial analysis, investment banking, private equity, and wealth management packs.
@@ -202,6 +221,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New skills and registry entries**: added autobrowse, AURL, autoresearch report, imagegen frontend web, Kami, LLM Wiki, Manim video, novelist, Playwright QA, and taste-skill registry coverage.
 
 ### Changed
+
 - **Managed Agents concept docs**: refreshed Managed Agents, Agents Hub, Mission Control, architecture, getting started, docs home, README, and status documentation so clicked-agent detail is a configuration surface while tests/previews open normal main-window tasks.
 - **Message-box shortcut docs**: clarified skill-backed slash picker insertion behavior, Claude-for-Legal intake cards, and multitask command usage.
 - **Google Workspace OAuth and mentions**: service-specific Google Workspace options now distinguish Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, and Chat coverage, with reconnect guidance for missing scopes.
@@ -211,6 +231,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **macOS unsigned DMG distribution**: release builds continue to publish unsigned macOS DMG/ZIP artifacts without requiring a personal Developer ID certificate, with user-facing Gatekeeper first-launch guidance.
 
 ### Fixed
+
 - **Google Workspace destructive safeguards**: destructive or broad Tasks/Slides MCP tools require explicit confirmation.
 - **Task surface restart styling**: critical welcome/composer chrome remains in startup CSS while heavier task-surface styles lazy-load safely.
 - **Shell sandbox review fixes**: persistent shell commands keep their session lifecycle when sandboxing is not required, `requireSandboxForShell` is honored, and macOS sandbox profiles honor per-command network decisions.
@@ -220,6 +241,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.44] - 2026-05-05
 
 ### Added
+
 - **Release notes for 0.5.44**: see [Release Notes 0.5.44](docs/release-notes-0.5.44.md).
 - **Browser V2 documentation**: added the canonical Browser V2 architecture guide covering the visible Browser Workbench default, `BrowserSessionManager`, Electron-workbench / Playwright-local / external-CDP backends, accessibility snapshot refs, diagnostics, downloads/uploads, real-browser consent, safety invariants, and verification flow. Refreshed README, Features, Architecture, Development, Getting Started, Troubleshooting, Use Cases, Web Page Artifacts, Showcase, Status, and docs home to reflect Browser V2 as the new browser concept. See [Browser V2 Architecture](docs/browser-v2-architecture.md) and [Browser Workbench](docs/browser-workbench.md).
 - **Gateway and channel user guides**: documented remote command routing, active-task behavior, `/new` and `/new temp` sessions, `/stop` cancellation, skill slash invocation, shared channel delivery, editable WhatsApp progress, scheduled channel output delivery, per-channel feature guides, dedicated per-channel user guide pages, and end-user best practices for using CoWork from messaging channels. See [Channel User Guides](docs/channel-user-guides.md), [Dedicated Channel Guides](docs/channel-guides/), [Gateway User Guide](docs/gateway-user-guide.md), and [Gateway Message Lifecycle](docs/gateway-message-lifecycle.md).
@@ -230,6 +252,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Imagegen frontend web skill**: bundled and registered `imagegen-frontend-web` guidance for higher-quality frontend image direction and generated visual references.
 
 ### Changed
+
 - **Browser Workbench experience**: refined Browser Workbench navigation, styling, sidebar approvals, mention text/icons, browser tool prompting, runtime browser tool definitions, storage-secret redaction, and tool-scheduler behavior so live browser work is more visible and controlled.
 - **Agent and gateway routing**: tightened gateway/skill command routing, parallel batch execution coverage, temporary workspace handling, ambient monitoring updates, and shared channel-message behavior across Slack, Discord, email, Telegram, WhatsApp, and the channel registry.
 - **Release packaging and smoke coverage**: refined the Electron builder runner, mac packaging environment loading, desktop artifact smoke checks, unsigned mac entitlements, release artifact-name verification, and the mac unsigned release smoke path used by CI.
@@ -237,6 +260,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Branding assets**: refreshed app/logo assets and related docs for the current CoWork OS branding set.
 
 ### Fixed
+
 - **Agents Hub active agents**: Mission Control active agents now appear in Agents Hub counts and panel state instead of being hidden from the hub summary.
 - **Task metadata persistence**: restored persisted `TaskRepository.findAll` fields for assigned agent role, board metadata, and awaiting-user-input reason codes.
 - **Provider retry handling**: overloaded provider failures are classified as transient/retryable, enabling existing fallback and retry handling instead of failing immediately.
@@ -254,6 +278,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.43] - 2026-05-02
 
 ### Added
+
 - **Composer `@` mentions for integrations**: added a grouped autocomplete above the message box with Agents, configured Integrations, and Files. Integration mentions render as icon+name chips in prompts and user message bubbles, restore from task/session history, and submit `integrationMentions` as soft runtime guidance. See [Composer Mentions](docs/composer-mentions.md).
 - **`@Inbox` main-composer routing**: `@Inbox` / `@inbox ...` now opens Inbox Agent and runs the remaining query through the Ask Inbox module instead of starting a normal task run.
 - **Ask Inbox sidebar chat**: Inbox Agent now has right-sidebar tabs for Agent Rail and Ask Inbox. Ask Inbox shows the user question, live mailbox-agent steps, final answer, and matched email evidence, with a pinned composer for follow-up questions. See [Ask Inbox Architecture](docs/ask-inbox-architecture.md).
@@ -262,6 +287,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Desktop artifact smoke tests**: release packaging now runs shared macOS DMG and Windows installer smoke checks, while the release workflow continues to build and smoke-test the Linux server tarball before publishing artifacts.
 
 ### Changed
+
 - **Right sidebar polish**: refined the task right sidebar with keyboard-accessible section headers, cleaner compact spacing, stable row grids, clearer in-progress/checklist states, tighter truncation, a four-row scroll cap for Tools used, and lighter file/context surfaces.
 - **Files panel type icons**: the right-sidebar Files section now shows format-aware Lucide icons beside created/modified/deleted file rows, distinguishing markdown/text, code, JSON, spreadsheets, images, presentations, media, archives, folders, and generic files while preserving the existing action color states.
 - **Integration mention resolver**: Google Workspace now appears as Gmail, Google Drive, and Google Calendar in the composer; gateway channels and MCP connectors appear only when locally connected/configured; multi-service MCP connectors can split by service tool groups.
@@ -269,6 +295,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Inbox Agent docs**: Inbox Agent, Features, Composer Mentions, troubleshooting, use cases, showcase, and implementation docs now describe Ask Inbox as a sidebar mailbox-agent chat with transient progress events and hybrid evidence retrieval.
 
 ### Fixed
+
 - **Rich composer mention editing**: fixed duplicate `@` rendering and the React `removeChild` crash when deleting a raw mention or integration chip.
 - **Google Workspace reconnect recovery**: stale Google Workspace refresh tokens are cleared after refresh bad-request failures, and changing Google OAuth client credentials or scopes clears old tokens before reconnect.
 - **Azure OpenAI tool-result replay**: normalized long Responses fallback tool-call ids so Azure OpenAI does not reject integration-heavy turns with a `call_id` length error.
@@ -276,11 +303,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.42] - 2026-04-30
 
 ### Fixed
+
 - **Windows installer architecture**: rebuilt the Windows installer as an x64 app package so standard Windows PCs install `CoWork OS.exe` correctly. The 0.5.41 GitHub release asset was built with an ARM64 Windows payload and GitHub immutable releases prevented replacing that asset in place.
 
 ## [0.5.41] - 2026-04-29
 
 ### Added
+
 - **Release notes for 0.5.41**: see [Release Notes 0.5.41](docs/release-notes-0.5.41.md).
 - **Everything Workbench positioning docs**: added the canonical [Everything Workbench](docs/everything-workbench.md) page and refreshed product copy around CoWork OS as a local-first AI workbench for generated docs, sheets, decks, web pages, PDFs, previews, tasks, and automations.
 - **Document artifact workbench**: Word-style document artifact cards now recognize DOCX, DOCM, DOTX, DOTM, DOC, RTF, ODT, OTT, and Pages outputs. DOCX opens directly into an editable sidebar/fullscreen document surface with Google Docs-style controls, save/copy actions, external app actions, functional follow-up composer controls, and automatic preview refresh after follow-up edits. See [Document Artifacts](docs/document-artifacts.md).
@@ -290,6 +319,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Browser Workbench**: interactive browser-use tasks now open a visible right-sidebar/fullscreen browser by default, with a persistent workspace browser profile, functional navigation controls, screenshots, screenshot annotation, follow-up handoff, and visible cursor movement during agent actions. See [Browser Workbench](docs/browser-workbench.md).
 
 ### Changed
+
 - **Product positioning**: README, docs home, Features, Getting Started, Showcase, Use Cases, GTM, best-fit workflows, artifact docs, architecture, development, troubleshooting, and status docs now frame document, spreadsheet, presentation, web page, PDF, and preview surfaces as one unified artifact workbench that reduces app switching for generated knowledge work without claiming full office-suite replacement.
 - **Document output concept**: README, Features, Architecture, Development, Getting Started, Troubleshooting, Project Status, and the docs index now describe Word-style outputs as first-class document artifacts with sidebar/fullscreen editing for DOCX and preview/external handling for other document formats.
 - **Spreadsheet output concept**: README, Features, Architecture, Development, Getting Started, Troubleshooting, Project Status, and the docs index now describe Excel outputs as first-class spreadsheet artifacts with sidebar/fullscreen workbench behavior rather than only generic XLSX file previews.
@@ -300,6 +330,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.40] - 2026-04-26
 
 ### Added
+
 - **Release notes for 0.5.40**: see [Release Notes 0.5.40](docs/release-notes-0.5.40.md).
 - **Chronicle Desktop Research Preview**: opt-in recent-screen context for vague desktop references, with consent-gated passive capture, pause/resume controls, per-task toggles, observation management, promoted `screen_context` evidence, and optional linked background memory generation.
 - **Workflow Intelligence docs and product framing**: added the canonical Workflow Intelligence architecture guide and kept the former Subconscious page as a compatibility redirect.
@@ -313,6 +344,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rich PPTX artifact previews**: PowerPoint outputs now open in an in-app presentation viewer with slide thumbnails, navigation, zoom, extracted slide text, and speaker notes. Visual slide images are cached when local `soffice` + `pdftoppm` are available and fall back to text-only previews otherwise.
 
 ### Changed
+
 - **Workflow Intelligence concept refresh**: updated README, feature, getting-started, Mission Control, Heartbeat, core automation, digital twin, company-ops, troubleshooting, and status docs to describe Memory as source of truth, Heartbeat as scheduler, Reflection as internal evaluation, and Suggestions as the reviewable user-facing output.
 - **Bundled-skill docs**: README, features, skill-store, and related status/comparison docs now reflect the bundled `taste-skill` addition and the built-in skill count increase to 140.
 - **Computer use runtime and docs**: macOS computer use now documents helper-targeted permissions, normalized tool names, screenshot-relative coordinates, fresh `captureId` validation, single-session sequential execution, Esc abort, and clearer Chronicle-vs-GUI-control boundaries.
@@ -320,6 +352,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Developer and packaging guidance**: documented focused build commands, Oxfmt/Oxlint/type-check commands, staged skills-check strictness, Kami validation, PPTX preview dependencies, LaTeX troubleshooting, dev-start Electron repair, skill assets, computer-use resources, and refreshed app icons.
 
 ### Fixed
+
 - **Mailbox autosync**: autosync is scoped to the singleton IPC service instead of starting from every `MailboxService` instance.
 - **Mailbox search and attachments**: upgraded mailboxes now backfill FTS before trusting search results, and attachment-content filters search decrypted extracted text.
 - **Suggestion feedback**: welcome suggestions are recorded as acted-on only after prompt submission.
@@ -330,6 +363,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.35] - 2026-04-12
 
 ### Added
+
 - **Release notes for 0.5.35**: see [Release Notes 0.5.35](docs/release-notes-0.5.35.md).
 - **Managed Agents and Managed Sessions**: CoWork now includes versioned managed-agent definitions, durable managed-session runtime plumbing, and Mission Control/control-plane surfaces for operating longer-lived reusable agents.
 - **Optional Supermemory integration**: Supermemory can now act as an external memory lane with setup flows, tool exposure, runtime metadata, Memory Hub controls, and prompt-time profile context injection.
@@ -337,6 +371,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bundled `novelist` skill and CoWork School guide**: the shipped skill set now includes a novelist workflow, and the docs now include a beginner-oriented `cowork-school` guide.
 
 ### Changed
+
 - **Explicit-only turn budgets**: main interactive tasks no longer receive implicit strategy-derived `maxTurns` windows. `maxTurns` and `windowTurnCap` are now explicit-only caps, while uncapped tasks rely on lifetime limits, emergency fuses, and existing recovery safeguards.
 - **Runtime telemetry and docs**: turn-budget events, runtime docs, and session/runtime ownership docs now distinguish explicit capped runs from default-unbounded main-task execution more clearly.
 - **Renderer task-event playback**: renderer event handling now batches, throttles, and derives UI state more aggressively so larger task histories replay more smoothly.
@@ -345,6 +380,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release and packaging guidance**: docs and packaging scripts now better enforce artifact-name consistency and local release validation.
 
 ### Fixed
+
 - **Release smoke installs**: restored the Electron runtime as an installed dependency so `npm run release:smoke` no longer falls back into dependency bootstrap on clean consumer installs.
 - **Chat MCP discovery**: fixed MCP tool discovery inside chat sessions.
 - **Workspace path recovery**: stale absolute file paths can now be remapped into the active workspace more reliably during file reads.
@@ -354,6 +390,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.34] - 2026-04-08
 
 ### Added
+
 - **Release notes for 0.5.34**: see [Release Notes 0.5.34](docs/release-notes-0.5.34.md).
 - **Core automation profiles**: automation profiles now own the always-on runtime surface, replacing the older heartbeat-centric ownership path.
 - **Core automation pipelines**: the runtime now persists traces, failures, failure clusters, eval cases, harness experiments, learnings, memory candidates, regression gates, and memory-distill runs as first-class data.
@@ -365,6 +402,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **File provenance tracking**: imported and exported files can now carry trust/provenance metadata through a dedicated registry.
 
 ### Changed
+
 - **Mission Control and onboarding**: the UI now surfaces automation profiles, distillation controls, core failures, learnings, companion inbox state, and shared onboarding data more clearly.
 - **Renderer and completion UX**: task completion, disclosure handling, memory hub settings, permission settings, Slack settings, and onboarding screens were updated to fit the new runtime model.
 - **Gateway and messaging routing**: WhatsApp command handling, channel routing, and email/report delivery were updated to match the richer runtime and task-state model.
@@ -374,6 +412,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation and tests**: release notes, changelog surfaces, architecture docs, feature docs, security docs, and onboarding guidance were refreshed alongside broader test coverage.
 
 ### Fixed
+
 - **Legacy task migration**: fixed legacy task-event migration paths so older task data upgrades cleanly into the newer runtime model.
 - **Heartbeat compatibility**: preserved compatibility while routing dispatch state through automation profiles and handling deferred heartbeat state more carefully.
 - **Completion evidence**: fixed report-task contract inference and completion evidence handling so task finalization is more reliable.
@@ -386,6 +425,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.23] - 2026-04-05
 
 ### Added
+
 - **Release notes for 0.5.23**: see [Release Notes 0.5.23](docs/release-notes-0.5.23.md).
 - **Subconscious reflective loop**: CoWork now includes a new reflective automation subsystem with persisted targets, backlog items, hypotheses, critiques, dispatch records, artifact storage, migration support, and a dedicated settings surface under Automations.
 - **Provider-aware prompt caching**: stable prompt sections can now be cached across Anthropic, OpenRouter Claude, Azure OpenAI, and OpenAI-family routes, with shared cache metadata persisted in `SessionRuntime`.
@@ -395,6 +435,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Usage Insights projector**: usage metrics now support incremental backfill/projection, richer provider breakdowns, retry metrics, normalized provider names, and new renderer helpers for periods and formatting.
 
 ### Changed
+
 - **Execution runtime**: prompt assembly now uses cache-aware session- and turn-scoped sections, shared prompt-section hashing, adaptive output-budget state, prompt-aware tool text, and normalized delegation-role inference.
 - **Provider routing and failover**: fallback settings now preserve cached model metadata, respect a configurable retry-to-primary cooldown, keep active failover routes stable, and expose the new behavior in settings and provider docs.
 - **Anthropic, OpenAI, Azure, and OpenRouter integrations**: provider implementations now handle scoped system blocks, prompt-cache metadata, richer usage accounting, safer credential handling, and normalized display names more consistently.
@@ -405,6 +446,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Gateway, daemon, and worktree plumbing**: workspace bootstrap, channel gateway startup, secure worktree persistence, and health snapshots now carry richer routing and provider state.
 
 ### Fixed
+
 - **OpenRouter attribution**: request headers now use a single normalized attribution category set across OpenRouter calls.
 - **Fallback routing stability**: retryable provider failures now move through fallback routes more reliably without immediately snapping back to the primary route.
 - **LLM settings persistence**: saving provider settings now preserves fallback chains, retry cooldowns, and cached model metadata more reliably.
@@ -417,6 +459,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.22] - 2026-04-03
 
 ### Added
+
 - **Release notes for 0.5.22**: see [Release Notes 0.5.22](docs/release-notes-0.5.22.md).
 - **Session checklist primitive**: execution-style tasks can create a session-local ordered checklist via `task_list_create`, maintain it with `task_list_update`, inspect it with `task_list_list`, and surface it read-only in the task UI with verification nudge state.
 - **Shared turn/runtime kernel**: task steps, follow-ups, subagents, and verification now run through a canonical `TurnKernel` instead of duplicated loop bodies.
@@ -428,6 +471,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mailbox / inbox visibility**: inbox and mailbox completion handoff paths now keep follow-up triggers and terminal state in sync with the task timeline.
 
 ### Changed
+
 - **SessionRuntime ownership**: runtime state now includes the session checklist bucket, replayable checklist events, and the non-blocking verification nudge algorithm for implementation-first tasks.
 - **Completion projection**: task completion relays now compose from `resultSummary`, semantic batch labels, and verifier verdict/report fields.
 - **Follow-up visibility**: follow-up completion events now preserve the triggering user text so the timeline can surface orphaned follow-ups explicitly.
@@ -439,6 +483,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Build / packaging**: packaging scripts and branding assets were refreshed so release artifacts and UI branding stay aligned with the current build.
 
 ### Fixed
+
 - **Resume race on terminal tasks**: approval- or follow-up-driven resume handling no longer overwrites a freshly completed task row back to `executing`; resume now re-checks canonical persisted task state before applying active status.
 - **Stale completion state**: follow-up completion now persists terminal task state together with the completion payload, preventing sidebar/task-detail divergence after a task finishes.
 - **Hidden follow-up triggers**: session follow-up messages now remain visible in the timeline rather than collapsing behind later action blocks.
@@ -448,6 +493,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.19] - 2026-03-30
 
 ### Added
+
 - **App profiles**: isolated `userData` per profile with export/import bundles for migration and multi-environment use (`Settings → Profiles`).
 - **Feishu/Lark and WeCom channels**: enterprise messaging adapters, settings UI, and gateway registration with webhook and encrypted event handling.
 - **Gateway channel instances**: per-`channelId` adapter routing so multiple Slack workspaces, distinct channel configs, and correct reply routing coexist in one profile.
@@ -473,6 +519,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release notes for 0.5.19**: see [Release Notes 0.5.19](docs/release-notes-0.5.19.md).
 
 ### Changed
+
 - **Gateway router and IPC**: refactored for channel-instance maps, pending task metadata, and adapter lifecycle consistency.
 - **Video tools**: validate reference media paths before provider calls.
 - **Secure settings categories**: `skills` and `acp` categories for new persistence.
@@ -480,15 +527,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automated tests**: suite now **4,583+ passing tests** across **331+ test files** (`npm run test`; 68 tests skipped in default run).
 
 ### Fixed
+
 - **ACP Vitest stability**: handler tests use an in-memory DB fake to avoid `better-sqlite3` native ABI mismatches in Node test runners.
 - **Gateway edge cases**: router/channel fixes (e.g. `channelId` on pending maps, stricter typing and allowlist behavior) and related adapter tests.
 
 ### Removed
+
 - **Legacy Hermes-named parity helper**: removed in favor of `RuntimeVisibilityService` and updated tests.
 
 ## [0.5.18] - 2026-03-30
 
 ### Fixed
+
 - **macOS CI release pipeline**: explicitly install Electron binary after `npm ci` to prevent silent postinstall failures that blocked the macOS release job.
 - **Shell session manager test portability**: resolve temp directory symlinks at creation time to avoid `/var` vs `/private/var` mismatches on macOS.
 - **Completion hardening**: verified evidence and entropy sweeps wired into execution, step intent alignment scoring, and LLM fallback for oversized workflow steps.
@@ -496,6 +546,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.17] - 2026-03-30
 
 ### Added
+
 - **Release notes for 0.5.17**: added a detailed summary page covering runtime visibility, Discord supervisor mode, Microsoft email OAuth, mailbox hardening, external skill imports, the related Devices/Inbox UX updates, and the release reliability fixes. See [Release Notes 0.5.17](docs/release-notes-0.5.17.md).
 - **Operator runtime visibility**: task completion now surfaces learning progression, unified recall spans tasks/messages/files/workspace notes/memory/knowledge graph, persistent shell sessions preserve task state, and live provider routing/fallback status is visible in task detail and settings.
 - **Discord supervisor mode**: Discord channels can now run a strict worker/supervisor protocol with persisted exchanges, escalation workflows, Mission Control feed integration, resolve actions, and workspace `SUPERVISOR.md` guidance.
@@ -503,6 +554,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Microsoft email OAuth**: Outlook.com, Hotmail, Live, and MSN personal accounts now support Microsoft OAuth with PKCE, token refresh, connector auth wiring, and Outlook-focused email setup presets.
 
 ### Changed
+
 - **Mailbox and email workflows**: mailbox sync, thread actions, and settings now support per-account filtering, no-reply sender handling, Loom recent-message fetches, and OAuth-backed IMAP/SMTP connections with stronger provider validation.
 - **Mission Control and operator UI**: Mission Control now supports an all-workspaces view with workspace badges across board/feed/agent/detail surfaces, task detail shows learning and recall context, and temporary workspaces no longer expose unsupported reporting actions.
 - **Devices and dispatch surfaces**: Dispatch onboarding now lives inside the Devices panel, the standalone Dispatch panel/sidebar entry were removed, Home Dashboard workspace naming now resolves from visible workspaces, and Inbox Agent filter/pulse controls were compacted.
@@ -511,6 +563,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Renderer performance**: in the `CoWork-OS/CoWork-OS` repo, sidebar rows now flatten before virtualization, timeline cards use `@chenglou/pretext` estimates with `ResizeObserver` reconciliation, and the main transcript cap stays conservative until the transcript surface is virtualized.
 
 ### Fixed
+
 - **Release hardening gate**: deterministic eval runs against fresh CI/release databases can now be explicitly configured to allow an empty regression corpus instead of failing every tag-triggered release before packaging starts.
 - **Release validation on macOS**: shell command unit tests no longer pull the full Electron daemon/runtime graph into Vitest, approval mocks are reset between cases, tool-group risk metadata now matches the security invariants, and the shell-session integration test has a CI-safe timeout budget.
 - **Unsupported Outlook manual setup**: manual password-based IMAP/SMTP setup is now rejected for Outlook.com-family consumer accounts, steering users to Microsoft OAuth instead of failing later in the transport stack.
@@ -520,6 +573,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.14] - 2026-03-29
 
 ### Added
+
 - **Release notes for 0.5.14**: added a detailed summary page covering inbox identity, Mission Control handoff, mailbox automation, Google Workspace helpers, and the related UI/branding refresh. See [Release Notes 0.5.14](docs/release-notes-0.5.14.md).
 - **Cross-channel inbox identity**: Inbox Agent now supports unified contact identity linking across email, Slack, Teams, WhatsApp, Signal, iMessage, and CRM-linked handles, with reply targets surfaced from the active channel.
 - **Mission Control handoff**: inbox threads can be turned into company issues with mailbox evidence and operator wake-up context.
@@ -527,18 +581,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Brand refresh assets**: new screenshot, logo, and favicon variants were added for the current product branding.
 
 ### Changed
+
 - **Inbox Agent surfaces**: inbox, settings, workspace selector, Mission Control, and task routing UIs were updated to reflect the new cross-channel inbox workflow.
 - **Google Workspace helpers**: shared Gmail/Calendar/Drive helpers and OAuth normalization were consolidated to support the inbox pipeline and identity linking.
 - **Heartbeat and briefing flow**: mailbox and scheduling signals now feed Heartbeat v3, planner, briefing, playbook, and knowledge-graph paths more directly.
 - **Documentation counts**: README, docs home, feature docs, project status, and comparison docs were synchronized to current product counts and release scope.
 
 ### Fixed
+
 - **Identity-linking conservatism**: ambiguous contact matches stay review-first instead of auto-linking blindly.
 - **Reply routing clarity**: reply actions now prefer real conversation targets rather than generic fallbacks.
 
 ## [0.5.13] - 2026-03-28
 
 ### Added
+
 - **Inbox Agent**: full AI-powered email workspace with LLM thread classification (category, needsReply, priorityScore, urgencyScore, staleFollowup, cleanupCandidate, confidence), SHA-256 fingerprinting to skip unchanged threads, backfill pipeline for existing threads, on-demand `reclassifyThread`/`reclassifyAccount` API, sandboxed HTML email rendering with form neutralization, sort/filter controls (priority/recent, inbox/sent/all, unread, needsReply, commitments, proposals), classification pending badge, draft style profiling, and structured calendar schedule options. See [Inbox Agent](docs/inbox-agent.md).
 - **R&D Council**: `CouncilService` manages multi-LLM research councils with CRUD, cron-scheduled runs, seat rotation by sort order, memo persistence, and file delivery. Includes `CouncilSettings` panel under Automations, IPC wiring, council synthesis prompt, and `council_configs`/`council_runs`/`council_memos` SQLite tables. `AgentConfigSchema` extended with `MultiLlm` participant fields and `ExternalRuntime` shape.
 - **AcpxRuntimeRunner**: spawns the `acpx` binary for Codex child tasks with session management, arg builders, and JSON line parser. Integrated into `TaskExecutor` with automatic `ENOENT` fallback to native execution. `codexRuntimeMode` setting (`native`/`acpx`) added to Built-in Tools settings.
@@ -552,6 +609,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release notes for 0.5.13**: added detailed summary page. See [Release Notes 0.5.13](docs/release-notes-0.5.13.md).
 
 ### Changed
+
 - **`sanitizeToolCallHistory()`**: strips assistant turns with no matching `tool_result` before serializing conversation history, preventing dangling tool-use errors on OpenAI-compatible providers. Logs missing IDs.
 - **Azure OpenAI structured errors**: `buildAzureApiError()` centralizes error construction with `status`, `requestId` (from `x-ms-request-id` / `apim-request-id`), `providerMessage`, `providerCode`, and raw error body. Logger replaces all `console.*` calls.
 - **Source-coverage guard**: Daily AI Agent Trends Research requires Reddit, X, and tech-news evidence before completion; missing categories block the run with a descriptive error.
@@ -567,6 +625,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Apple HealthKit bridge**: runtime and build script improvements.
 
 ### Fixed
+
 - **Broken task FK**: fixed foreign key constraint on `tasks` after `heartbeat_runs` table rename; migration guard added for future renames.
 - **Stale terminal fields**: `completed_at`, `failed_at`, and related fields cleared when a task is patched back to an active status.
 - **Multi-LLM seat assignment**: council participant seats now assigned using the configured sort order; fixed off-by-one on first run.
@@ -580,6 +639,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.12] - 2026-03-22
 
 ### Added
+
 - **Heartbeat v3**: signal-driven Pulse/Dispatch pipeline replaces the queue-first heartbeat internals. `Pulse` runs cheap deterministic gating with no LLM calls; `Dispatch` escalates only when Pulse justifies it. Includes signal ledger with fingerprint-based merging, deferred-state compression, run tracking, heartbeat profiles (`observer`/`operator`/`dispatcher`), dispatch guardrails, foreground suppression, and richer Mission Control status. See [Heartbeat v3](docs/heartbeat-v3.md).
 - **Ideas panel**: curated launch panel with pre-written idea prompts accessible from the sidebar above Sessions. Includes an `/ideas` gateway route and [capabilities reference doc](docs/ideas-capabilities.md).
 - **Azure Anthropic provider**: Azure-hosted Claude deployments are now a built-in provider. Configure API key, endpoint, and deployment in Settings > LLM > Azure Anthropic.
@@ -590,6 +650,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release notes for 0.5.12**: added a detailed summary page. See [Release Notes 0.5.12](docs/release-notes-0.5.12.md).
 
 ### Changed
+
 - **Memory compression**: workspace context summaries compressed in batches, compact summary preservation across session compaction, concise playbook imports, chat prompt summarization on import, and context summary validation.
 - **Task routing and execution**: chat-mode sessions locked to user-configured tasks; tighter execution contracts; strategy tool allowlists per execution mode; skill routing query precision; improved completion contract parsing; more reliable daemon completion flow; better structured input request handling; consistent child task lifecycle.
 - **Agent role labels**: role labels now formatted consistently across Mission Control, collaborative task headers, and agent detail views.
@@ -600,11 +661,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.11] - 2026-03-20
 
 ### Added
+
 - **Release notes for 0.5.11**: added a detailed summary page covering the mission-control surfaces, QA workflow, native HealthKit bridge, new connectors, and runtime routing changes included in this release. See [Release Notes 0.5.11](docs/release-notes-0.5.11.md).
 - **Discord live API tools**: `channel_fetch_discord_messages` fetches up to 100 recent messages directly from Discord (not just the local gateway log). `channel_download_discord_attachment` downloads attachments from any message by ID. Both tools require Discord channel configured and connected. See [Channel Integrations](docs/channels.md#discord) and [Channel Comparison](docs/channel-comparison.md).
 - **14 new MCP connectors** (44 total): Tavily (web search), tldraw (diagrams), Amplitude (analytics), Clerk (auth), Mem (notes), Grafana (monitoring), Mailtrap (email), Socket (dependency security), Metabase (analytics), Shadcn UI (components), GrowthBook (feature flags), Drafts (macOS notes), Fantastical (macOS calendar), Tomba (email finder/verifier). All npm-installable from Settings > Connectors.
 
 ### Changed
+
 - **Mission Control and health surfaces**: new Mission Control tabs, a dedicated Health panel, Dispatch panel, and connector profile view now extend the primary operator surface.
 - **Runtime and agent routing**: chat-mode and context-mode detection, proactive suggestions, managed output paths, tool-policy changes, and executor/provider refreshes tightened task routing.
 - **Operator intelligence**: autonomy/awareness services, heartbeat orchestration, briefing updates, strategic planner changes, mode-suggestion detection, automated-task detection, connector profiles, and health primitives were refreshed.
@@ -614,23 +677,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.1] - 2026-03-18
 
 ### Added
+
 - **HuggingFace Local AI provider**: added `hf-agents` + `llama.cpp` local-model support with installation checks, model selection, and local server lifecycle management from Settings.
 - **Research channels**: Telegram and WhatsApp chats can now be designated as link-research channels that automatically turn posted URLs into a structured findings report.
 - **Tool catalog versioning**: tool discovery now emits a stable SHA-1 catalog hash that covers native tools and MCP state, with immediate snapshot rebuilds after MCP status or `tools_changed` updates.
 
 ### Changed
+
 - **Connector surface consolidation**: the shipped MCP allowlist is now Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend, Discord, and Google Workspace. Google services are consolidated under `google-workspace`; DocuSign, Outreach, and Slack were removed from the shipped Tier-1 connector surface.
 - **Native-first GitHub and Notion routing**: GitHub and Notion workflows now prefer CoWork's direct API paths and fall back to MCP only when needed.
 - **Collaborative task UI**: sidebar/task views now use inline agent headers, Lucide role icons, markdown normalization for collaborative output, and explicit sub-task back-navigation.
 - **Notifications**: task notifications now use cleaner titles, humanized statuses, and direct view actions.
 
 ### Fixed
+
 - **Executor tool cache invalidation**: executor-side tool snapshots are now invalidated consistently when the shared catalog version changes.
 - **Sidebar task navigation polish**: sessions header layout, filter affordance, and sub-task navigation behavior were tightened for collaborative runs.
 
 ## [0.5.0] - 2026-03-15
 
 ### Added
+
 - **Sub-Agent Orchestrator**: Delegated execution lanes with confirmation gates, risk classification, and capability-based model selection. High-risk actions are routed through an approval gate before execution.
 - **Autonomous Self-Improvement Loop**: Bounded improvement campaigns with multi-variant experiment evaluation, winner selection, cooldowns, candidate parking, and direct-apply review. Requires owner enrollment under Settings → Automations → Self-Improve.
 - **Unified Memory Synthesizer**: New `MemorySynthesizer` combines all 6 memory subsystems (UserProfile, RelationshipMemory, Playbook, KnowledgeGraph, Memory, WorkspaceKit) into a single deduplicated context block injected into the system prompt.
@@ -653,6 +720,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Gateway exec approval fallback**: Channel-originated `run_command` requests honor per-agent exec policy and allowlist when approval UI is unavailable.
 
 ### Changed
+
 - **Plan mode rename**: "propose" mode renamed to "plan" mode throughout UI and codebase.
 - **Settings restructure**: Automation group renamed to "Automations"; new Companies and Improvement sections added.
 - **Dashboard**: Shows only automated sessions; Heartbeat-titled tasks treated as automated.
@@ -663,6 +731,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LLM providers**: Improved model listing, error handling, and cache management for `AnthropicCompatibleProvider`; new model refresh endpoint.
 
 ### Fixed
+
 - Fixed remote gateway token and connection flow.
 - Fixed remote device task shadow sync and workspace mapping before remote task creation.
 - Fixed control-plane schema not being created/seeded on startup.
@@ -677,6 +746,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolved TypeScript compilation errors in `AdaptiveStyleEngine` and `ChannelPersonaAdapter`.
 
 ### Added (documentation)
+
 - Zero-human company ops guide.
 - Behavior adaptation guide.
 - Workspace memory flow architecture guide.
@@ -686,6 +756,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Managed Devices and Automations control center docs.
 
 ### Changed (documentation)
+
 - README updated for plan mode and current platform features.
 - Digital-twin personas guide updated for company-linked twins and operator roles.
 - Architecture docs renamed propose mode references to plan mode.
@@ -695,6 +766,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.14] - 2026-03-07
 
 ### Added
+
 - **Unified Memory Synthesizer**: New `MemorySynthesizer` combines all 6 memory subsystems (UserProfile, RelationshipMemory, Playbook, KnowledgeGraph, Memory, WorkspaceKit) into a single deduplicated, relevance-ranked context block injected into the system prompt. Replaces fragmented per-source injection — reduces token waste, eliminates contradictions, and produces a single `<cowork_synthesized_memory>` block with source attribution for audit trails. Located: `src/electron/memory/MemorySynthesizer.ts`.
 - **Adaptive Style Engine**: New `AdaptiveStyleEngine` observes user message patterns (length distribution, emoji frequency, technical vocabulary density) and feedback signals, then gradually adjusts `PersonalityManager` response style preferences. Adaptations are rate-limited by the new `adaptiveStyleMaxDriftPerWeek` guardrail (default 1 shift/week), fully auditable via `getAdaptationHistory()`, and disabled by default (`adaptiveStyleEnabled: false`). Located: `src/electron/memory/AdaptiveStyleEngine.ts`.
 - **Playbook-to-Skill Auto-Promotion Pipeline**: New `PlaybookSkillPromoter` bridges `PlaybookService` and `SkillProposalService`. When a task pattern is reinforced 3+ times (configurable threshold), the service auto-generates a skill proposal with evidence, required tools, and a draft prompt template — routed through the existing admin approval workflow. `PlaybookService` now emits a `pattern-reinforced` event via its new static `EventEmitter`. Per-workspace cooldown (10 min) prevents proposal spam. Located: `src/electron/memory/PlaybookSkillPromoter.ts`.
@@ -704,6 +776,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New briefing section**: `evolution_metrics` added to `BriefingSectionType` and `DEFAULT_BRIEFING_CONFIG` (enabled by default). `DailyBriefingService.generateBriefing` is now async to support the evolution metrics computation.
 
 ### Changed
+
 - **Memory injection in executor**: The system prompt assembly now calls `MemorySynthesizer.synthesize()` in place of 6 independent context calls (`kitContext`, `memoryContext`, `playbookContext`). Falls back to legacy per-source injection if the synthesizer throws. Combined token budget is preserved (1820 tokens).
 - **Personality prompt in executor**: When `task.agentConfig.originChannel` is set, the personality prompt is augmented with a channel-specific directive from `ChannelPersonaAdapter` before being injected into the system prompt.
 - **`AdaptiveStyleEngine.observe()`** hooked into `daemon.ts` after every `UserProfileService.ingestUserMessage()` call. `observeFeedback()` is called alongside `UserProfileService.ingestUserFeedback()`.
@@ -712,6 +785,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.13] - 2026-03-05
 
 ### Added
+
 - **Universal workflow slash skills**: `/simplify` and `/batch` now work across desktop and gateway channels, including inline chaining (`then run /simplify`) and shared parsing/normalization.
 - **Zero-config web search fallback**: DuckDuckGo now acts as a built-in last-resort search provider, so `web_search` works even without paid API keys.
 - **Structured input requests**: plan-mode tasks can use `request_user_input` to pause for persisted multiple-choice decisions, with submission from the desktop UI or Control Plane dashboard.
@@ -723,6 +797,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Developer logging capture**: `npm run dev` can mirror timestamped output to `logs/dev-latest.log`, with `npm run dev:log` forcing capture regardless of the Settings toggle.
 
 ### Changed
+
 - **Adaptive executor defaults**: execution-oriented tasks now default to adaptive turn-window recovery, follow-up safety stops, and bounded context-overflow retries instead of treating window exhaustion as an immediate hard failure.
 - **Path reliability policies**: the executor and file tools can normalize `/workspace/...` aliases and rewrite drifted relative paths back under a pinned task root, with `strict_fail` policies available when hard enforcement is desired.
 - **Timeline rendering**: parallel read-only tool bursts are projected into grouped lane cards, task completion is inferred more reliably from timeline payloads, and input-request / recovery events now map cleanly across shared status and timeline models.
@@ -731,6 +806,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Remote and headless operations**: the Control Plane dashboard now handles pending structured input requests in addition to tasks, approvals, workspaces, and channels.
 
 ### Fixed
+
 - **Shell protocol violations**: `run_command` now rejects direct or wrapped `apply_patch` invocations and tells the agent to use the dedicated patch tool.
 - **Task-root rewrites**: pinned-root recovery no longer skips rewrites just because an unpinned root-level path already exists, preventing drifted writes from mutating the wrong files.
 - **Legacy read-only resumes**: tasks resumed without `executionModeSource` now keep user-selected non-`execute` modes instead of being auto-promoted to mutation-capable execution.
@@ -742,6 +818,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.12] - 2026-02-28
 
 ### Added
+
 - **Agentic Work Unit (AWU) metric**: Usage Insights now tracks agent efficiency via AWU — successfully completed tasks measured against tokens and cost consumed. Shows AWU count, tokens/AWU, cost/AWU, AWUs per dollar, and period-over-period trend comparison.
 - **All Workspaces aggregation**: Usage Insights defaults to "All Workspaces" view, aggregating metrics across every workspace. Individual workspace filtering remains available via dropdown.
 - **Completion output summary payload**: `task_completed` events now support an optional `outputSummary` contract with normalized output metadata (`created`, `modifiedFallback`, `primaryOutputPath`, `outputCount`, `folders`). This keeps completion UX accurate even when renderer event history is capped.
@@ -750,6 +827,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Artifact visibility parity across bridges**: `artifact_created` is now included in collaborative child-file merging and in the control-plane task event bridge allowlist, so artifact-only tasks are visible consistently in all surfaces.
 
 ### Changed
+
 - **Usage Insights UI redesign**: Replaced single-column layout with compact hero stats row (completed, success rate with color-coded progress bar, failed, avg time) and two-column grid for detailed sections (Cost & AWU side-by-side, Activity Day & Hour side-by-side, Skills & Packs side-by-side).
 - **Output detection rule**: completion output detection now prefers newly created outputs (`file_created`, `artifact_created`) and only falls back to modified outputs when no created outputs exist.
 - **Right panel file-output emphasis**: Files section now highlights primary output, shows an output count badge, and adds a separate location context line while keeping filename-only rows.
@@ -757,23 +835,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Status-map coherence for artifact events**: `artifact_created` now maps to `executing` in shared task event status mapping for consistent in-progress state display.
 
 ### Fixed
+
 - **Database startup migration ordering**: moved task evaluation/index-related index creation from bootstrap table creation to post-migration execution so databases created pre-`risk_level` and `eval_*` columns no longer fail on startup (`no such column: risk_level`).
 - **Hidden extensionless outputs in files list**: output files without a dot in the filename are no longer filtered out from the right-panel files section.
 
 ## [0.4.9] - 2026-02-26
 
 ### Fixed
+
 - **Release workflow reliability**: removed the flaky release-time first-install smoke gate from publish workflow execution and moved draft-release preparation to both macOS and Windows runners so packaging does not fail due release-draft timing.
 
 ## [0.4.8] - 2026-02-26
 
 ### Fixed
+
 - **Release pipeline gating for cross-platform packaging**: Windows release leg now skips the full `npm test` gate and focuses on packaging, while macOS remains the test/validation gate for release publication.
 - **Windows test portability**: updated path-sensitive test mocks and shell command fixtures to be platform-safe (`path.basename` handling and cross-platform shell commands), reducing Windows CI false negatives.
 
 ## [0.4.7] - 2026-02-26
 
 ### Fixed
+
 - **Release/CI test stability**: removed hard import-time dependency on Electron in `MCPRegistryManager` by using a safe runtime check for `app.isPackaged`, so test runs no longer fail when Electron binary install scripts are skipped.
 
 ## [0.4.6] - 2026-02-26
@@ -781,6 +863,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 This release is the first recommended Windows install baseline for normal users following the documented GitHub/npm installation steps.
 
 ### Fixed
+
 - **Windows title bar actions alignment**: corrected Windows header layout so action icons stay in the top-right region instead of drifting toward center.
 - **Windows-first release messaging and metadata**: package description/keywords and release notes now explicitly reflect desktop support for both macOS and Windows.
 - **Cross-platform docs consistency**: updated setup, migration, self-hosting, getting-started, and status docs to remove outdated desktop-level macOS-only wording while preserving truly macOS-only feature notes (for example iMessage).
@@ -788,6 +871,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.4.5] - 2026-02-26
 
 ### Fixed
+
 - **Windows black-screen startup guard**: app now detects missing renderer entry (`dist/renderer/index.html`) and shows an explicit installation error page instead of opening a blank window.
 - **Unpackaged runtime resource resolution**: bundled skills, persona templates, and plugin packs now resolve from `process.cwd()/resources` when running from npm-installed (non-packaged) Electron runtime, restoring bundled content loading on Windows/Linux npm installs.
 - **Launcher artifact checks**: `cowork-os` CLI now validates both main and renderer build artifacts before launch and surfaces a clearer recovery message if published assets are incomplete.
@@ -795,12 +879,14 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.4.4] - 2026-02-26
 
 ### Fixed
+
 - **Windows ARM64 startup crash after native setup**: moved `pdf-parse` loading to runtime in `parsePdfBuffer` so Electron startup no longer crashes when `@napi-rs/canvas` bindings are unavailable (`DOMMatrix is not defined` on app boot).
 - **PDF parser failure isolation**: PDF parsing backend load errors are now surfaced only when a PDF is actually parsed, allowing normal app startup and non-PDF workflows to proceed.
 
 ## [0.4.3] - 2026-02-26
 
 ### Fixed
+
 - **Windows ARM64 first-run native setup**: when `better-sqlite3` cannot be rebuilt for `arm64`, setup now automatically falls back to `x64` Electron emulation and validates module loading before launch.
 - **Windows ARM64 fallback robustness**: if npm-based x64 rebuild is insufficient, setup now runs an explicit `@electron/rebuild` pass with `--arch x64 --version <electron>` to avoid npm 11 runtime/target env ambiguity.
 - **Windows node-gyp instructions**: replaced invalid npm config guidance with environment-variable-based setup (`GYP_MSVS_VERSION` / `npm_config_msvs_version`) for MSVC detection compatibility.
@@ -808,6 +894,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.4.0] - 2026-02-26
 
 ### Added
+
 - **Windows support**: CoWork OS now runs natively on Windows with an NSIS installer (.exe), custom frameless title bar with minimize/maximize/close controls, and full feature parity with the macOS version
 - **Windows build target**: electron-builder config produces Windows NSIS installer alongside existing macOS DMG
 - **Windows app icon**: .ico icon with 16x16, 32x32, 48x48, and 256x256 sizes
@@ -822,6 +909,7 @@ This release is the first recommended Windows install baseline for normal users 
 - **Windows CI/CD**: GitHub Actions build matrix includes `windows-latest` for both CI and release workflows
 
 ### Fixed
+
 - **Platform-aware paths**: replaced hardcoded Unix paths (`/tmp`, `~/.local/share`, `/bin/sh`) with platform-aware alternatives across signal-client, sandbox-factory, runner, and control-plane handlers
 - **HOME/USERPROFILE fallback**: all `process.env.HOME` references now include `process.env.USERPROFILE` fallback for Windows across 8 files (main.ts, extensions loader/registry/scaffold/pack-installer, control-plane handlers)
 - **Path separator handling**: replaced `filePath.split("/").pop()` with `path.basename()` in executor-helpers for correct Windows backslash path handling
@@ -829,6 +917,7 @@ This release is the first recommended Windows install baseline for normal users 
 - **npm global install detection**: added Windows system-level path (`Program Files/nodejs/node_modules`) to update-manager detection patterns
 
 ### Changed
+
 - **Window appearance on Windows**: opaque background (`#1a1a1c`) replaces macOS vibrancy/transparency; CSS overrides via `html.platform-win32` class
 - **Tray settings terminology**: dynamically shows "System Tray" on Windows vs "Menu Bar" on macOS; dock icon toggle hidden on Windows
 - **System tray enabled on Windows**: tray icon and quick input window now initialize on both macOS and Windows
@@ -838,6 +927,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.95] - 2026-02-26
 
 ### Added
+
 - **Scoped temp workspace identity**: temp workspaces now use scope prefixes (`ui`, `gateway`, `hooks`, `tray`) for context-specific isolation, replacing the flat ID convention
 - **Temp workspace lease management**: in-memory lease tracking with 6-hour TTL prevents active workspaces from being pruned; UI refreshes leases every 60 seconds
 - **Stale sandbox profile pruning**: automatic periodic cleanup (6-hour interval) of leftover `.sb` sandbox profile files from the system temp directory
@@ -846,12 +936,14 @@ This release is the first recommended Windows install baseline for normal users 
 - **Cascade delete for temp workspaces**: `deleteWorkspaceAndRelatedData` performs transactional deletion that introspects all tables for `workspace_id`/`task_id`/`session_id` columns and removes related rows before deleting the workspace itself
 
 ### Fixed
+
 - **Idle session cleanup**: channel gateway now prunes idle sessions older than 7 days automatically via `deleteIdleOlderThan`
 - **Sandbox profile temp file cleanup**: replaced fixed `setTimeout` cleanup with process-event-driven (`close`/`error`) handlers and idempotent `cleanupOnce` pattern in both `MacOSSandbox` and `SandboxRunner`
 - **Temp workspace init**: renderer no longer forces `createNew: true` on startup, reusing existing temp workspaces instead of creating duplicates
 - **Control plane temp workspace filtering**: uses `isTempWorkspaceId()` instead of exact `TEMP_WORKSPACE_ID` match to correctly filter all scoped variants
 
 ### Changed
+
 - **Active task status filtering**: temp workspace pruning now only considers active task statuses (pending, queued, planning, executing, paused, blocked), ignoring completed/failed tasks
 - **Cron-tools workspace delegation**: removed inline `ensureDedicatedWorkspaceForScheduledJob` from `CronTools`; workspace normalization is handled by CronService's `resolveWorkspaceContext` hook
 - **Build-mode skill**: added routing metadata (useWhen, dontUseWhen, outputs, successCriteria) for intent-based skill matching
@@ -859,6 +951,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.94] - 2026-02-26
 
 ### Added
+
 - **DuckDuckGo free search fallback**: built-in web search provider that requires no API key. Works out of the box by scraping DuckDuckGo's HTML endpoint. Automatically used as a last-resort fallback when paid providers fail or are not configured. The `web_search` tool is now always available — users no longer need to configure a search provider to use web search. Supports web search with region and date range filters. Configured providers still take priority; DuckDuckGo is appended at the end of the fallback chain.
 - **Discord MCP Connector**: full REST API connector for Discord Bot management with 19 tools — guild listing, channel CRUD, message sending with rich embed support, thread creation, role CRUD, reactions, webhooks, and member listing. Includes 429 rate-limit retry (2 attempts, 10s cap), 2000-char message validation, embed schema enforcement (10 embeds max, typed fields), and privileged intent error hints for `list_members` and `get_messages`. Configurable in Settings > Connectors with bot token, application ID, and optional default guild ID.
 - **Mobile Development plugin pack**: new bundled pack with 4 skills (React Native setup, iOS development, Android development, build pipeline) and a mobile-developer agent role. Covers SwiftUI, Jetpack Compose, Fastlane, code signing, and simulator/emulator management.
@@ -910,6 +1003,7 @@ This release is the first recommended Windows install baseline for normal users 
 - **Browser navigation deduplication**: `browser_navigate` tool now normalizes URLs to detect and skip duplicate navigations to the same page.
 
 ### Changed
+
 - **Task queue limits raised**: default concurrent tasks increased from 5 → 8, max configurable ceiling raised from 10 → 20, default timeout increased from 30 → 60 minutes. Existing users who never changed their settings are automatically upgraded to the new defaults.
 - **Sub-agent safety cap**: sub-agents that bypass the normal concurrency limit are now capped at 40 total running tasks (2× max configurable) to prevent runaway resource consumption.
 - **Resumed tasks respect concurrency**: tasks resuming after app restart now respect the concurrency limit instead of all starting simultaneously. Overflow tasks are re-queued at the front and start as slots open.
@@ -919,6 +1013,7 @@ This release is the first recommended Windows install baseline for normal users 
 - **Codebase formatting**: applied oxfmt across ~40 renderer components, IPC handlers, extensions, tray modules, and utility files for consistent line wrapping and indentation.
 
 ### Fixed
+
 - **Focused mode tabs**: Mission Control now correctly included in focused mode tab list.
 - **Bedrock inference profile fallback**: improved profile scoring to prefer same-family models and prevent silent downgrade to a different model family. MaxTokens is now clamped to model-specific limits on the retry path.
 - **Browser HTTP status errors**: browser tools returning HTTP 4xx/5xx no longer immediately circuit-break the tool. These URL-specific failures are now treated as input-dependent with a higher threshold before disabling.
@@ -928,6 +1023,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.91] - 2026-02-24
 
 ### Added
+
 - **Agent-initiated memory (`memory_save` tool)**: agents can now explicitly save observations, decisions, insights, and errors to the workspace memory database during task execution. Memories are persisted across sessions and recalled via hybrid search in future tasks. Respects workspace memory settings, privacy modes, and sensitive data filtering.
 - **Enhanced `search_memories`**: now searches both the memory database AND `.cowork/` workspace markdown files (MEMORY.md, daily logs, project contexts, etc.). Results are merged, deduplicated, and ranked by relevance. Response includes `source` ("db" or "markdown") and file `path` for markdown hits.
 - **Web Scraping (Scrapling integration)**: new scraping subsystem powered by [Scrapling](https://github.com/D4Vinci/Scrapling) with anti-bot bypass, stealth browsing, and structured data extraction. Five new agent tools: `scrape_page` (single URL with TLS fingerprinting, Cloudflare bypass, stealth mode), `scrape_multiple` (batch scrape up to 20 URLs), `scrape_extract` (structured data — tables, lists, headings, metadata), `scrape_session` (multi-step persistent sessions for login→navigate→extract workflows), and `scraping_status` (installation check). Python bridge architecture via stdin/stdout JSON. Configurable fetcher modes (default/stealth/playwright), proxy support, rate limiting, and headless toggle. Settings UI at Settings > Web Scraping. Five new skills: `web-scraper`, `price-tracker`, `site-mapper`, `lead-scraper`, `content-monitor`.
@@ -953,10 +1049,12 @@ This release is the first recommended Windows install baseline for normal users 
 - **Proactive suggestions service** with edge case handling.
 
 ### Changed
+
 - **Execution strategy orchestration** in daemon lifecycle: strategy derivation at task creation, runtime strategy re-application for queued/legacy tasks, relationship-memory outcome recording on top-level task completion.
 - **Friendlier error messages, mode hints, and settings grouping** across the UI.
 
 ### Fixed
+
 - **Task cancellation now cascades to child tasks**: stopping a parent task also cancels all dispatched agent sub-tasks instead of leaving them running.
 - **TypeScript errors in scraping tools** resolved.
 - **Wrap-up skips synthesis phase** due to premature phase transition.
@@ -966,6 +1064,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.90] - 2026-02-23
 
 ### Added
+
 - **Collaborative mode**: multi-agent collaborative thoughts and capability matching.
 - **Multi-LLM orchestration**: config validation and comparison service for running multiple LLM providers.
 - **Git worktree manager**: worktree isolation for parallel agent branches with comparison service.
@@ -976,6 +1075,7 @@ This release is the first recommended Windows install baseline for normal users 
 - **Crypto trading and email marketing skill definitions**.
 
 ### Changed
+
 - **Action-first planning**: executor enhanced with resourcefulness and companion identity.
 - **Context summarization events** surfaced in task timeline.
 - **Image attachment support** for task creation and follow-ups.
@@ -984,6 +1084,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.89] - 2026-02-20
 
 ### Added
+
 - **Declarative plugin system**: connectors, skills, and agent roles defined via JSON manifests.
 - **Built-in plugin packs**: pre-configured plugin bundles for common workflows.
 - **Slash command autocomplete** in input areas.
@@ -991,12 +1092,14 @@ This release is the first recommended Windows install baseline for normal users 
 - **Inline spreadsheet preview** in task view.
 
 ### Changed
+
 - **Sonnet 4.6 model**: added as new model option and updated as Bedrock default.
 - **Oxfmt formatter** and promoted Oxlint rules to errors.
 - **Conway Terminal**: auto-provision API key and inject into MCP server env.
 - **Model selector redesign** and defensive electronAPI guards.
 
 ### Fixed
+
 - **Bedrock transcript mismatches**: repaired and preserved tool-call pairs during compaction.
 - **Follow-up error handling**: prevent pinned message insertion between tool pairs.
 - **Electron sandbox**: disabled for preload and hardened attachment validation.
@@ -1004,6 +1107,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.88] - 2026-02-19
 
 ### Added
+
 - **Vision/image support** across all LLM providers.
 - **LOOM email protocol** support alongside IMAP/SMTP.
 - **Conway Terminal integration** with payment safety caps.
@@ -1011,16 +1115,19 @@ This release is the first recommended Windows install baseline for normal users 
 - **Validation schemas and config sanitization** for security hardening.
 
 ### Changed
+
 - **Executor enhanced** with image attachments and tool approval flow.
 - **Email settings, toast positioning, XLSX viewer, and styling** improvements.
 - **Contextual welcome cards** in the UI.
 
 ### Fixed
+
 - **Electron env variable handling** and strict dev port configuration.
 
 ## [0.3.87] - 2026-02-17
 
 ### Added
+
 - **Intent-routed task strategy runtime**: tasks are now classified into `chat`, `advice`, `planning`, `execution`, or `mixed` and receive derived strategy defaults (conversation mode, turns, quality passes, answer-first flags).
 - **Relationship memory lifecycle APIs**: added relationship memory and commitment IPC/preload surfaces:
   - `memory:relationshipList`
@@ -1038,6 +1145,7 @@ This release is the first recommended Windows install baseline for normal users 
 - **Resend email connector** and expanded gateway router commands.
 
 ### Changed
+
 - **Execution strategy orchestration** in daemon lifecycle: strategy derivation at task creation, runtime strategy re-application for queued/legacy tasks, relationship-memory outcome recording on top-level task completion.
 - **Memory context composition** now combines `UserProfileService` facts with layered relationship memory context for prompt injection.
 - **Soft-deadline behavior** in executor now switches from deep step execution to best-effort finalization before hard timeout.
@@ -1045,6 +1153,7 @@ This release is the first recommended Windows install baseline for normal users 
 - **MCP connectors** kept disabled until configured.
 
 ### Fixed
+
 - **Timeout-abort completion gap**: timeout-triggered cancellation paths now attempt best-effort finalization instead of exiting without a user-facing answer.
 - **Cancellation observability**: executor cancellation logs now include cancellation reason (`user`, `timeout`, `shutdown`, etc.) for clearer diagnosis.
 - **Stuck 'executing' status**: prevented with varied failure loop detection and improved artifact handling.
@@ -1055,12 +1164,14 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.86] - 2026-02-14
 
 ### Added
+
 - **ACP and Canvas control-plane endpoints**: introduced ACP task-delegation handlers and new canvas APIs (`canvas.list/get/snapshot/content/push/eval/checkpoint.*`) with corresponding protocol constants and IPC wiring.
 - **Canvas checkpoint tooling**: added `canvas_checkpoint`, `canvas_restore`, and `canvas_checkpoints` tools, plus in-memory checkpoint history and restore flows in `CanvasManager`.
 - **Renderer i18n support**: added language resources and UI selection for English, Japanese, and Simplified Chinese, with persisted language preference.
 - **Talk Mode UX**: introduced continuous voice talk-mode hook and UI controls for conversational voice interaction in main task view.
 
 ### Changed
+
 - **Agent execution flow hardening**: executor now emits long-running tool heartbeats, tracks recovered failures more precisely, and preflights shell-permission requirements when command execution is required.
 - **Shell approvals and safety**: `run_command` now supports single-approval bundle mode for safe command sequences and normalizes signatures more robustly for duplicate detection.
 - **Gateway routing extensibility**: router now supports channel-level `defaultAgentRoleId`, `defaultWorkspaceId`, and `allowedAgentRoleIds`, plus new `set_agent` router-rule action.
@@ -1068,6 +1179,7 @@ This release is the first recommended Windows install baseline for normal users 
 - **Plugin discovery behavior**: plugin registry initializes at startup and supports incremental discovery of newly-added plugins without full re-init.
 
 ### Fixed
+
 - **Sensitive shell output leakage**: command output now redacts seed phrases and private-key material before logging/model context.
 - **Isolated macOS install keychain prompt safety**: added `COWORK_DISABLE_OS_KEYCHAIN=1` path to bypass OS keychain integration in disposable test environments.
 - **Task activity signaling in UI**: task “working” indicators now consider tool calls/results and tool-execution progress heartbeats, reducing false idle states.
@@ -1076,6 +1188,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.85] - 2026-02-14
 
 ### Fixed
+
 - **Hoisted Electron detection in setup**: `npm run setup` now treats `../electron` as valid in npm-hoisted installs, so first-time setup no longer triggers unnecessary full dependency bootstrap.
 - **Native setup install scope**: missing `better-sqlite3` recovery and rebuild now run from the actual install root (not inside `node_modules/cowork-os`), reducing first-run reify pressure that caused frequent macOS `SIGKILL`.
 - **Release publish gating**: npm/GitHub package publish jobs now depend on the release validation job, and smoke tests fail if setup unexpectedly falls back to dependency bootstrap.
@@ -1084,36 +1197,42 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.84] - 2026-02-14
 
 ### Fixed
+
 - **Release smoke-test module resolution**: installability validation now runs Electron with `cwd` set to the installed `cowork-os` package directory so `require('better-sqlite3')` resolves correctly after setup.
 - **Release continuity**: keeps the 0.3.82 npm SIGKILL regression fix while restoring end-to-end GitHub release packaging path after CI validation.
 
 ## [0.3.83] - 2026-02-14
 
 ### Fixed
+
 - **Release workflow syntax fix**: corrected the installability smoke-test shell step so the release pipeline no longer exits with `syntax error: unexpected end of file` before desktop packaging.
 - **Release continuity**: preserves the 0.3.82 npm SIGKILL fix while restoring full GitHub release asset publishing (DMG/ZIP).
 
 ## [0.3.82] - 2026-02-14
 
 ### Fixed
+
 - **SIGKILL regression fix for npm installs**: `setup_native` no longer uses `npm install --ignore-scripts=false` when recovering missing `better-sqlite3`, preventing `electron-winstaller` lifecycle scripts from being executed during first-time setup.
 - **Recovery install hardening**: missing runtime dependency repair now uses `--omit=dev` and `--package-lock=false` to avoid reifying packaging/dev dependency trees in user runtime installs.
 
 ## [0.3.81] - 2026-02-14
 
 ### Fixed
+
 - **README install path hardening**: `npm run setup` now skips a full dependency reinstall when the Electron dependency is already present, so fresh `/tmp` installs avoid avoidable reinstall-driven SIGKILL pressure.
 - **Native setup reliability**: restores the 0.3.71-style flow with retryable native setup and keeps `better-sqlite3` installation script-safe, then rebuilds it explicitly against Electron ABI.
 
 ## [0.3.80] - 2026-02-14
 
 ### Fixed
+
 - **macOS install reliability hardening**: setup now skips optional dependency reinstall during `npm run setup`, avoids propagating child SIGKILL events from native setup back to the shell, and documents a first-install flow that avoids macOS-terminating paths.
 - **Release validation hardening**: CI now resolves release metadata before install validation and validates installability from either published npm tarball (if already published) or local `npm pack` fallback, preventing release regressions for first-release tags.
 
 ## [0.3.79] - 2026-02-14
 
 ### Fixed
+
 - **macOS install reliability carry-forward**: retained the 0.3.71 SIGKILL workaround for first-time users by documenting and reinforcing the `npm install --ignore-scripts` + `npm run --prefix node_modules/cowork-os setup` flow.
 - **Release workflow hardening**: ensured the macOS release job always creates or reopens the GitHub release as a draft before packaging so `electron-builder` can attach DMG/zip assets without immutable-release failures.
 - **Version alignment**: published metadata now identifies this release as `0.3.79` with the same installability and packaging reliability changes.
@@ -1121,6 +1240,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.78] - 2026-02-14
 
 ### Fixed
+
 - **Release build hardening**: restored the missing `src/electron/agent/executor-helpers.ts` source file so builds can resolve `executor.ts` imports after packaging from a fresh clone.
 - **TypeScript strictness fixes**: fixed implicit `any` errors in `executor.ts` that could break release builds on CI.
 - **TLS fingerprint callback typing fix**: aligned `remote-client.ts` callback signature/type usage with current `ws` client typings to satisfy strict build checks.
@@ -1128,6 +1248,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.77] - 2026-02-14
 
 ### Fixed
+
 - **Setup script safety**: `npm run setup` in a fresh install now runs dependency reinstall with `--ignore-scripts` so optional postinstall hooks like `electron-winstaller` cannot SIGKILL the process during first-run recovery on macOS.
 - **Install reliability carry-forward**: this patch keeps the documented `/tmp` first-install sequence intact while ensuring setup stays stable across npm install layouts.
 - **Version alignment**: published metadata is now aligned on `0.3.77` so the installability fix is included in both npm and GitHub release tracks.
@@ -1135,17 +1256,20 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.76] - 2026-02-14
 
 ### Fixed
+
 - **Installability restoration**: pinned `electron` to `40.2.1` so first-time installs from `npm` pull the known-good Electron patch and avoid `SIGKILL` during `node_modules/electron/install.js` on affected macOS environments.
 - **README alignment**: clarified the first-time CLI install path to reflect the exact commands users should run from a fresh temporary folder.
 
 ## [0.3.75] - 2026-02-14
 
 ### Fixed
+
 - **Installability fix from 0.3.71**: restored Electron lockfile behavior by keeping `electron` at `40.2.1` during publish-time installs, matching the working `0.3.71` state and avoiding default `SIGKILL` during `node_modules/electron/install.js` on affected installs.
 
 ## [0.3.74] - 2026-02-14
 
 ### Fixed
+
 - **Release pipeline reliability**: updated the GitHub release publish step to find and publish the tag created by `electron-builder` instead of assuming the trigger ref matches exactly.
 - **Release docs/notes alignment**: updated release notes and README "What’s new" section for `0.3.74` to reflect install and CI reliability fixes.
 - **Release artifact consistency**: ensured workflow publishes desktop artifacts and release notes from the same release tag path used by electron packaging.
@@ -1153,6 +1277,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.73] - 2026-02-14
 
 ### Fixed
+
 - **Release pipeline fix**: included daemon TypeScript sources in shared ESLint targets so `npm run lint` runs instead of failing with parse errors before build/publish steps.
 - **Workspace/task validation fix**: enforced `PersonalityId` validation for task agent configs to prevent runtime/inference mismatches during task creation.
 - **CLI and release install tests alignment**: updated control-plane and skill validation tests to match current runtime behaviors and skill metadata output.
@@ -1161,6 +1286,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.72] - 2026-02-14
 
 ### Added
+
 - **Session workspace isolation and cleanup**: temp tasks now get session-scoped workspace IDs, dedicated temp directories, and automatic pruning by age + usage caps.
 - **Autonomous task mode** in execution flow and control-plane/web-UI paths, with optional bypass of interactive approval prompts where explicitly enabled.
 - **Companion-mode handling for short conversational prompts** to return concise check-in responses without running task pipeline when appropriate.
@@ -1168,12 +1294,14 @@ This release is the first recommended Windows install baseline for normal users 
 - **PDF parsing compatibility wrapper** with runtime-safe handling for both legacy and v2 parser module shapes.
 
 ### Changed
+
 - **Task completion validation tightened** with final-response contracts (required direct answers, artifact checks, verification evidence).
 - **Stricter tool failure handling** for hard/unavailable/disallowed outcomes to prevent false completion without real progress.
 - **Temporary workspace handling** now uses explicit session-aware IDs and filters temp workspaces from user-visible lists consistently.
 - **Search and file tools** now enforce more bounded scanning behavior and clearer fallback behavior under high-load conditions.
 
 ### Fixed
+
 - **Watch/skip recommendation tasks** now block artifact tools and require direct recommendation output.
 - **Intermittent approval/partial-task updates** reduced by normalizing auto-approved events in UI and task-stream handling.
 - **Temp workspace lifecycle reliability** improved through scheduled pruning and safer restore/create paths.
@@ -1181,6 +1309,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.69] - 2026-02-11
 
 ### Fixed
+
 - `npm install -g cowork-os` could fail on macOS with `fsevents` (`binding.gyp not found`) due an npm 11 rebuild edge case triggered by `playwright`.
 - Switched runtime browser dependency to `playwright-core` via npm alias (`playwright` package name preserved in code) to avoid the failing `fsevents` install path.
 - Added launcher self-heal: on first run, `cowork-os` now verifies direct runtime dependencies and repairs missing packages with a script-free npm install pass before boot.
@@ -1192,6 +1321,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.68] - 2026-02-11
 
 ### Fixed
+
 - `cowork-os` CLI startup could still fail with `better-sqlite3` ABI mismatch on first launch.
 - Launcher now validates `better-sqlite3` by opening an in-memory database (not just requiring the module) and runs native setup when needed.
 - Native setup script now resolves hoisted dependencies correctly (Electron and `better-sqlite3`) so it works in npm-installed layouts.
@@ -1199,9 +1329,11 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.67] - 2026-02-11
 
 ### Added
+
 - Added npm CLI command support: `cowork-os`, `coworkctl`, `coworkd`, and `coworkd-node`.
 
 ### Fixed
+
 - Fixed launcher script to resolve the Electron binary correctly (`require('electron')` instead of `require.resolve`).
 - Included `dist/` in published npm files so the `cowork-os` command can start without requiring a local build step.
 - Moved `electron` to runtime dependencies so CLI launch works after normal npm install.
@@ -1209,18 +1341,21 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.66] - 2026-02-11
 
 ### Fixed
+
 - `npm ci` could hang indefinitely in CI due an `overrides.undici` resolution loop on npm 11.
 - Removed the `undici` override so release and publish jobs can complete.
 
 ## [0.3.65] - 2026-02-11
 
 ### Fixed
+
 - npm publishing no longer waits for the macOS packaging job in `release.yml`.
 - This prevents npm release delays when GitHub macOS runners are stalled while still allowing desktop packaging to run independently.
 
 ## [0.3.64] - 2026-02-11
 
 ### Fixed
+
 - Release workflow could stall for a long time at `Install dependencies` when git-based dependencies attempted SSH transport on GitHub runners.
 - CI now forces GitHub git dependencies to HTTPS before `npm ci` in all release/publish jobs.
 - Added explicit workflow timeouts and `npm ci --no-audit --no-fund` to reduce long-running hangs during release.
@@ -1228,6 +1363,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.63] - 2026-02-11
 
 ### Fixed
+
 - npm installs could still fail with `SIGKILL` in transitive `protobufjs` postinstall hooks under macOS memory pressure.
 - Bundled `@mariozechner/pi-ai` and `@whiskeysockets/baileys` in the published npm tarball so their transitive install scripts are not executed on end-user `npm install`.
 - Restricted published package contents via `files` in `package.json` to remove large non-runtime artifacts and reduce install-time memory pressure.
@@ -1235,12 +1371,14 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.62] - 2026-02-11
 
 ### Fixed
+
 - npm installs could still fail when the package `postinstall` script itself was SIGKILL'd by macOS memory pressure.
 - Removed `postinstall` from the published npm package so `npm install cowork-os@latest` no longer depends on any CoWork lifecycle hook.
 
 ## [0.3.61] - 2026-02-11
 
 ### Fixed
+
 - npm installs could fail with `sh: electron-rebuild: command not found` because `postinstall` depended on a tool not available in all install contexts.
 - `postinstall` now uses a best-effort native setup driver and never fails the overall npm install.
 - `better-sqlite3` is now an optional dependency so transient native build failures no longer abort `npm install`; `npm run setup` now ensures it is installed before rebuild.
@@ -1248,52 +1386,62 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.60] - 2026-02-11
 
 ### Fixed
+
 - npm installs could fail on macOS with `Killed: 9` during dependency lifecycle scripts due to floating dependency upgrades.
 - Pinned `@whiskeysockets/baileys` to `6.7.16` and `better-sqlite3` to `12.6.2` to avoid pulling newer variants that increased install-time instability.
 
 ## [0.3.59] - 2026-02-10
 
 ### Fixed
+
 - Increased default native setup outer retry attempts on macOS so `npm run setup` is more resilient to repeated transient `Killed: 9` SIGKILLs on the first run after install.
 
 ## [0.3.58] - 2026-02-10
 
 ### Fixed
+
 - macOS `npm run setup` could still fail with `Killed: 9` if the native setup retry wrapper itself was SIGKILL’d immediately after install; setup now performs outer retries (with backoff) around native setup so a transient SIGKILL doesn’t require manual re-runs.
 
 ## [0.3.57] - 2026-02-10
 
 ### Fixed
+
 - macOS `npm run setup` could still fail with `Killed: 9` if the nested `npm run setup:native` process was SIGKILL’d; setup now runs the native setup retry wrapper directly (no nested npm process) and propagates SIGKILL as exit code 137 so retries reliably trigger.
 
 ## [0.3.56] - 2026-02-10
 
 ### Fixed
+
 - macOS `npm run setup` could still fail with `Killed: 9` if macOS SIGKILL’d Node before in-process retries could run; native setup now uses a POSIX shell retry wrapper with exponential backoff so users don’t need to re-run commands manually.
 
 ## [0.3.55] - 2026-02-10
 
 ### Fixed
+
 - macOS `npm run setup` could still fail with `Killed: 9` before the retry driver could start; setup now retries native setup at the shell level (multiple attempts) so users don’t need to re-run commands manually.
 
 ## [0.3.54] - 2026-02-10
 
 ### Fixed
+
 - macOS `npm run setup` could still fail with `Killed: 9` on the first run under memory pressure; native setup now runs via a retrying driver and `setup` disables npm audit/fund to reduce peak memory usage.
 
 ## [0.3.53] - 2026-02-10
 
 ### Fixed
+
 - macOS `npm run setup` could still fail with `Killed: 9`; native setup now prefers an Electron-targeted `better-sqlite3` rebuild via `npm rebuild` (often uses prebuilds) and only falls back to `electron-rebuild` when necessary.
 
 ## [0.3.52] - 2026-02-10
 
 ### Fixed
+
 - macOS `npm run setup` could fail with `Killed: 9` during native module rebuild; native setup now defaults to low parallelism for reliability.
 
 ## [0.3.29] - 2025-02-08
 
 ### Added
+
 - **Vision Tool** - Analyze workspace images (screenshots, photos, diagrams) via `analyze_image`
   - Supports OpenAI, Anthropic, and Google Gemini vision providers
   - Workspace-safe file resolution with MIME type detection
@@ -1341,6 +1489,7 @@ This release is the first recommended Windows install baseline for normal users 
   - FTS with relaxed fallback and LIKE-based backup query
 
 ### Changed
+
 - **Task Export** - Moved from `telemetry/` to `reports/` to better reflect purpose (structured task summaries, not telemetry)
 - **Skill Metadata** - Added `requires.bins` and `invocation.disableModelInvocation` to gog and himalaya skills
 - **Local Websearch Skill** - Updated branding (moltbot → cowork) and paths to `Application Support/cowork-os`
@@ -1357,9 +1506,11 @@ This release is the first recommended Windows install baseline for normal users 
 - **Plan Display** - Verification steps hidden from displayed plan step lists (still shown on failure)
 
 ### Added (UI)
+
 - **step_failed Event** - New event type rendered with error styling in task timeline, right panel, and task timeline views
 
 ### Fixed
+
 - **Gateway Message Logging** - Outgoing message persistence is now best-effort (never fails delivery)
 - **Security Docs** - Corrected `userData` paths, documented platform-specific locations
 - **Architecture Docs** - Added vision tool, chat commands, attachment handling, and cron template variable documentation
@@ -1367,6 +1518,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.3.25] - 2025-02-05
 
 ### Added
+
 - **Google Workspace Integration** - Unified access to Gmail, Google Calendar, and Google Drive
   - **Shared OAuth Authentication**: Single sign-in for all Google services
   - **Gmail Tools**: `gmail_action` for sending emails, reading messages, creating drafts, searching
@@ -1479,6 +1631,7 @@ This release is the first recommended Windows install baseline for normal users 
 - New IPC handlers and preload APIs for guardrail settings
 
 ### Changed
+
 - Task executor now tracks token usage, cost, and iterations across LLM calls
 - Shell commands are blocked by guardrails before reaching approval dialog
 - File writes check size limits before writing
@@ -1487,6 +1640,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.1.7] - 2025-01-26
 
 ### Added
+
 - **Shell Command Execution** - AI can now execute shell commands with user approval
   - `run_command` tool for running terminal commands (npm, git, brew, etc.)
   - Each command requires explicit user approval before execution
@@ -1503,6 +1657,7 @@ This release is the first recommended Windows install baseline for normal users 
   - Clear disclaimer of maintainer responsibility
 
 ### Changed
+
 - Workspace permissions now include `shell: boolean` field
 - Updated help text in Discord/Telegram bots to include shell command info
 - Permission model documentation updated in README
@@ -1510,6 +1665,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.1.6] - 2025-01-25
 
 ### Added
+
 - **Discord Bot Integration** - Full Discord support with slash commands and DMs
   - `/start` - Start the bot and get help
   - `/help` - Show available commands
@@ -1529,12 +1685,14 @@ This release is the first recommended Windows install baseline for normal users 
 - Guild-specific or global slash command registration
 
 ### Changed
+
 - Channel gateway now supports both Telegram and Discord adapters
 - Added `discord.js` dependency for Discord API integration
 
 ## [0.1.5] - 2025-01-25
 
 ### Added
+
 - **Browser Automation** - Full browser control using Playwright
   - `browser_navigate` - Navigate to any URL
   - `browser_screenshot` - Capture page or full-page screenshots
@@ -1556,12 +1714,14 @@ This release is the first recommended Windows install baseline for normal users 
 - Headless Chrome browser (Chromium) via Playwright
 
 ### Changed
+
 - Tool registry now includes 17 browser automation tools
 - Executor now handles resource cleanup in finally block
 
 ## [0.1.4] - 2025-01-25
 
 ### Added
+
 - **Real Office Format Support** - Documents now create actual Office files instead of text placeholders
   - Excel (.xlsx) files with `exceljs` - multiple sheets, auto-fit columns, header formatting, filters, frozen rows
   - Word (.docx) files with `docx` - headings, paragraphs, lists, tables, code blocks with proper styling
@@ -1571,6 +1731,7 @@ This release is the first recommended Windows install baseline for normal users 
 - Fallback to CSV/Markdown when those extensions are explicitly requested
 
 ### Changed
+
 - SpreadsheetBuilder now creates real Excel workbooks with formatting
 - DocumentBuilder supports Word, PDF, and Markdown output formats
 - PresentationBuilder creates professional PowerPoint presentations with layouts
@@ -1578,6 +1739,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.1.3] - 2025-01-25
 
 ### Added
+
 - CLI/ASCII terminal-style UI throughout the application
 - Model selection dropdown (Opus 4.5, Sonnet 4.5, Haiku 4.5)
 - AWS Bedrock support as alternative to Anthropic API
@@ -1586,6 +1748,7 @@ This release is the first recommended Windows install baseline for normal users 
 - Ollama support for local LLM inference
 
 ### Changed
+
 - Updated branding to CoWork OS
 - Improved workspace selector with terminal aesthetic
 
@@ -1594,12 +1757,14 @@ This release is the first recommended Windows install baseline for normal users 
 ### Added
 
 #### Core Features
+
 - Task-based workflow with multi-step execution
 - Plan-execute-observe loop for agent orchestration
 - Real-time task timeline with live activity feed
 - Workspace management with folder selection
 
 #### Agent Capabilities
+
 - File operation tools (read, write, list, rename, delete)
 - Built-in skills:
   - Spreadsheet creation (Excel format)
@@ -1608,18 +1773,21 @@ This release is the first recommended Windows install baseline for normal users 
   - Folder organization
 
 #### Security & Permissions
+
 - Sandboxed file operations within selected workspace
 - Permission system for destructive operations
 - Approval dialogs for file deletion and bulk operations
 - Path traversal protection
 
 #### LLM Integration
+
 - Anthropic Claude API support
 - AWS Bedrock support
 - Multiple model selection (Opus, Sonnet, Haiku)
 - Settings UI for API configuration
 
 #### User Interface
+
 - Electron desktop application for macOS
 - React-based UI with dark theme
 - CLI/ASCII terminal aesthetic
@@ -1627,12 +1795,14 @@ This release is the first recommended Windows install baseline for normal users 
 - System monitor panel (progress, files, context)
 
 #### Data Management
+
 - SQLite local database
 - Task and event persistence
 - Workspace history
 - Artifact tracking
 
 ### Technical
+
 - Electron 40 with React 19
 - TypeScript throughout
 - Vite for fast development
@@ -1641,6 +1811,7 @@ This release is the first recommended Windows install baseline for normal users 
 ## [0.0.1] - 2025-01-20
 
 ### Added
+
 - Initial project setup
 - Basic Electron app shell
 - Database schema design
@@ -1650,41 +1821,41 @@ This release is the first recommended Windows install baseline for normal users 
 
 ## Version History Summary
 
-| Version | Date | Highlights |
-|---------|------|------------|
-| 0.5.52 | 2026-08-27 | OpenRouter image generation, OpenCode Zen/Go, SearXNG/Web Search Plus, Atlas Cloud, Electron 44, macOS 13 minimum, and reliability hardening |
-| 0.5.51 | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery |
-| 0.5.50 | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |
-| 0.5.49 | 2026-06-08 | CoWork CLI, Browser Use Cloud, Codex Security workflows, automation outcomes, Usage Insights heatmaps, composer link chips, public adoption stats, and security hardening |
-| 0.5.48 | 2026-05-28 | Side Chat, Secure MCP Tunnels, YouTube video intelligence, timeline/sidebar paging, scheduler/routine reliability, and runtime safety fixes |
-| 0.5.47 | 2026-05-21 | Long-session reliability, off-main-thread memory recall, renderer stability, location approval safety, Maps MCP workflows, and private-memory filtering |
-| 0.5.45 | 2026-05-14 | Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox queue upgrades, runtime policy controls, Dreaming, and multitask lanes |
-| 0.3.91 | 2026-02-24 | Digital twins, web scraping, AI playbook, build mode, knowledge graph, usage insights, infrastructure tools |
-| 0.3.90 | 2026-02-23 | Collaborative mode, multi-LLM orchestration, git worktree isolation, Anthropic streaming |
-| 0.3.89 | 2026-02-20 | Declarative plugin system, built-in packs, Sonnet 4.6, slash command autocomplete |
-| 0.3.88 | 2026-02-19 | Vision support across all LLM providers, LOOM email, Conway Terminal, density mode |
-| 0.3.87 | 2026-02-17 | Intent-routed strategy, relationship memory, timeout recovery, Resend connector |
-| 0.3.86 | 2026-02-14 | ACP canvas endpoints, i18n, talk mode, skill registry |
-| 0.3.84 | 2026-02-14 | Fixes CI installability check module resolution so release validation passes and desktop packaging can continue |
-| 0.3.83 | 2026-02-14 | Fixes release workflow shell parsing so installability validation and desktop asset publishing complete successfully |
-| 0.3.82 | 2026-02-14 | Removes script-enabled recovery installs that triggered electron-winstaller SIGKILL and hardens runtime repair install flags |
-| 0.3.81 | 2026-02-14 | Restored reliable /tmp install flow with retry-safe native setup and CI validation for both registry and npm-pack install paths |
-| 0.3.80 | 2026-02-14 | Fixed macOS first-install runtime setup reliability and hardened release validation so new tags can still run installation checks |
-| 0.3.79 | 2026-02-14 | Retained the 0.3.71 SIGKILL workaround and hardened draft release preparation so desktop assets upload reliably |
-| 0.3.78 | 2026-02-14 | Fixes missing release-time `executor-helpers` source and remaining strict-mode TypeScript blockers |
-| 0.3.77 | 2026-02-14 | Skips lifecycle scripts during setup reinstall and prevents setup-time SIGKILL in user-first installs |
-| 0.3.76 | 2026-02-14 | Pinned Electron to 40.2.1 for first-run installability and aligned README CLI flow |
-| 0.3.75 | 2026-02-14 | Restored 0.3.71-compatible Electron lockfile for installability and release confidence |
-| 0.3.73 | 2026-02-14 | Release automation hardening and task/workspace validation fixes |
-| 0.3.72 | 2026-02-14 | Session-based temp workspaces, autonomous execution mode, safer completion validation |
-| 0.3.29 | 2025-02-08 | Multi-provider image generation, visual annotation, local embeddings, verification UX |
-| 0.3.25 | 2025-02-05 | Google Workspace integration, gateway enhancements, agent retry logic |
-| 0.1.6 | 2025-01-25 | Discord bot integration with slash commands |
-| 0.1.5 | 2025-01-25 | Browser automation with Playwright |
-| 0.1.4 | 2025-01-25 | Real Office format support (Excel, Word, PDF, PowerPoint) |
-| 0.1.3 | 2025-01-25 | Telegram bot, web search, Ollama support |
-| 0.1.0 | 2025-01-24 | First public release with core features |
-| 0.0.1 | 2025-01-20 | Initial development setup |
+| Version | Date       | Highlights                                                                                                                                                                                                        |
+| ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0.5.52  | 2026-08-27 | OpenRouter image generation, OpenCode Zen/Go, SearXNG/Web Search Plus, Atlas Cloud, Electron 44, macOS 13 minimum, and reliability hardening                                                                      |
+| 0.5.51  | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery                               |
+| 0.5.50  | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |
+| 0.5.49  | 2026-06-08 | CoWork CLI, Browser Use Cloud, Codex Security workflows, automation outcomes, Usage Insights heatmaps, composer link chips, public adoption stats, and security hardening                                         |
+| 0.5.48  | 2026-05-28 | Side Chat, Secure MCP Tunnels, YouTube video intelligence, timeline/sidebar paging, scheduler/routine reliability, and runtime safety fixes                                                                       |
+| 0.5.47  | 2026-05-21 | Long-session reliability, off-main-thread memory recall, renderer stability, location approval safety, Maps MCP workflows, and private-memory filtering                                                           |
+| 0.5.45  | 2026-05-14 | Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox queue upgrades, runtime policy controls, Dreaming, and multitask lanes                                         |
+| 0.3.91  | 2026-02-24 | Digital twins, web scraping, AI playbook, build mode, knowledge graph, usage insights, infrastructure tools                                                                                                       |
+| 0.3.90  | 2026-02-23 | Collaborative mode, multi-LLM orchestration, git worktree isolation, Anthropic streaming                                                                                                                          |
+| 0.3.89  | 2026-02-20 | Declarative plugin system, built-in packs, Sonnet 4.6, slash command autocomplete                                                                                                                                 |
+| 0.3.88  | 2026-02-19 | Vision support across all LLM providers, LOOM email, Conway Terminal, density mode                                                                                                                                |
+| 0.3.87  | 2026-02-17 | Intent-routed strategy, relationship memory, timeout recovery, Resend connector                                                                                                                                   |
+| 0.3.86  | 2026-02-14 | ACP canvas endpoints, i18n, talk mode, skill registry                                                                                                                                                             |
+| 0.3.84  | 2026-02-14 | Fixes CI installability check module resolution so release validation passes and desktop packaging can continue                                                                                                   |
+| 0.3.83  | 2026-02-14 | Fixes release workflow shell parsing so installability validation and desktop asset publishing complete successfully                                                                                              |
+| 0.3.82  | 2026-02-14 | Removes script-enabled recovery installs that triggered electron-winstaller SIGKILL and hardens runtime repair install flags                                                                                      |
+| 0.3.81  | 2026-02-14 | Restored reliable /tmp install flow with retry-safe native setup and CI validation for both registry and npm-pack install paths                                                                                   |
+| 0.3.80  | 2026-02-14 | Fixed macOS first-install runtime setup reliability and hardened release validation so new tags can still run installation checks                                                                                 |
+| 0.3.79  | 2026-02-14 | Retained the 0.3.71 SIGKILL workaround and hardened draft release preparation so desktop assets upload reliably                                                                                                   |
+| 0.3.78  | 2026-02-14 | Fixes missing release-time `executor-helpers` source and remaining strict-mode TypeScript blockers                                                                                                                |
+| 0.3.77  | 2026-02-14 | Skips lifecycle scripts during setup reinstall and prevents setup-time SIGKILL in user-first installs                                                                                                             |
+| 0.3.76  | 2026-02-14 | Pinned Electron to 40.2.1 for first-run installability and aligned README CLI flow                                                                                                                                |
+| 0.3.75  | 2026-02-14 | Restored 0.3.71-compatible Electron lockfile for installability and release confidence                                                                                                                            |
+| 0.3.73  | 2026-02-14 | Release automation hardening and task/workspace validation fixes                                                                                                                                                  |
+| 0.3.72  | 2026-02-14 | Session-based temp workspaces, autonomous execution mode, safer completion validation                                                                                                                             |
+| 0.3.29  | 2025-02-08 | Multi-provider image generation, visual annotation, local embeddings, verification UX                                                                                                                             |
+| 0.3.25  | 2025-02-05 | Google Workspace integration, gateway enhancements, agent retry logic                                                                                                                                             |
+| 0.1.6   | 2025-01-25 | Discord bot integration with slash commands                                                                                                                                                                       |
+| 0.1.5   | 2025-01-25 | Browser automation with Playwright                                                                                                                                                                                |
+| 0.1.4   | 2025-01-25 | Real Office format support (Excel, Word, PDF, PowerPoint)                                                                                                                                                         |
+| 0.1.3   | 2025-01-25 | Telegram bot, web search, Ollama support                                                                                                                                                                          |
+| 0.1.0   | 2025-01-24 | First public release with core features                                                                                                                                                                           |
+| 0.0.1   | 2025-01-20 | Initial development setup                                                                                                                                                                                         |
 
 [Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.52...HEAD
 [0.5.52]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...v0.5.52

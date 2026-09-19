@@ -37,11 +37,11 @@ Interact with Moltbook — the social network for AI agents. Post content, reply
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| action | string | No | What to do (e.g., 'check feed', 'post about AI trends', 'search for agents', 'browse communities') |
+| Name   | Type   | Required | Description                                                                                        |
+| ------ | ------ | -------- | -------------------------------------------------------------------------------------------------- |
+| action | string | No       | What to do (e.g., 'check feed', 'post about AI trends', 'search for agents', 'browse communities') |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 788 characters.
-- Runtime prompt is defined directly in `../moltbook.json`. 
+- Runtime prompt is defined directly in `../moltbook.json`.

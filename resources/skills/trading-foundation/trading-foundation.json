@@ -12,14 +12,7 @@
       "description": "Choose workflow",
       "required": true,
       "default": "fetch",
-      "options": [
-        "fetch",
-        "backtest",
-        "paper-run",
-        "portfolio-run",
-        "ml-run",
-        "execute"
-      ]
+      "options": ["fetch", "backtest", "paper-run", "portfolio-run", "ml-run", "execute"]
     },
     {
       "name": "exchange",
@@ -27,11 +20,7 @@
       "description": "Exchange id supported by ccxt",
       "required": false,
       "default": "binance",
-      "options": [
-        "binance",
-        "bybit",
-        "coinbase"
-      ]
+      "options": ["binance", "bybit", "coinbase"]
     },
     {
       "name": "symbol",
@@ -46,10 +35,7 @@
       "description": "Data market family for fetch mode",
       "required": false,
       "default": "crypto",
-      "options": [
-        "crypto",
-        "stock"
-      ]
+      "options": ["crypto", "stock"]
     },
     {
       "name": "provider",
@@ -57,9 +43,7 @@
       "description": "Stock data provider (currently supports yfinance)",
       "required": false,
       "default": "yfinance",
-      "options": [
-        "yfinance"
-      ]
+      "options": ["yfinance"]
     },
     {
       "name": "timeframe",
@@ -150,13 +134,7 @@
       "description": "Mean reversion, momentum, momentum-only, adaptive routing, or stat-arb",
       "required": false,
       "default": "adaptive",
-      "options": [
-        "adaptive",
-        "mean-reversion",
-        "momentum",
-        "momentum-only",
-        "stat-arb"
-      ]
+      "options": ["adaptive", "mean-reversion", "momentum", "momentum-only", "stat-arb"]
     },
     {
       "name": "strategy-correlation-cap",
@@ -274,11 +252,7 @@
       "description": "ML model family",
       "required": false,
       "default": "random_forest",
-      "options": [
-        "random_forest",
-        "xgboost",
-        "logistic"
-      ]
+      "options": ["random_forest", "xgboost", "logistic"]
     },
     {
       "name": "ml_horizon",
@@ -326,10 +300,7 @@
       "type": "select",
       "description": "Trade side",
       "required": false,
-      "options": [
-        "buy",
-        "sell"
-      ]
+      "options": ["buy", "sell"]
     },
     {
       "name": "order_type",
@@ -337,10 +308,7 @@
       "description": "Order type",
       "required": false,
       "default": "market",
-      "options": [
-        "market",
-        "limit"
-      ]
+      "options": ["market", "limit"]
     },
     {
       "name": "amount",
@@ -405,12 +373,8 @@
   ],
   "enabled": true,
   "requires": {
-    "tools": [
-      "run_command"
-    ],
-    "bins": [
-      "python3"
-    ]
+    "tools": ["run_command"],
+    "bins": ["python3"]
   },
   "metadata": {
     "routing": {

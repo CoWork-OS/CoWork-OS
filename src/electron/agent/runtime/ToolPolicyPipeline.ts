@@ -5,7 +5,10 @@ import type {
   Workspace,
 } from "../../../shared/types";
 import type { AgentSecurityEvaluationResult } from "../../../shared/agent-security";
-import { evaluateMontyToolPolicy } from "../../security/monty-tool-policy";
+import {
+  evaluateMontyToolPolicy,
+  TOOL_POLICY_UNAVAILABLE_REASON,
+} from "../../security/monty-tool-policy";
 import { isToolAllowedQuick } from "../../security/policy-manager";
 import {
   evaluateToolAvailability,
@@ -14,6 +17,7 @@ import {
   type ToolPolicyContext,
 } from "../tool-policy-engine";
 import { ToolPolicyTraceBuilder } from "./ToolPolicyTrace";
+import { approvalPromptsDisabled } from "../approval-policy";
 
 export interface ToolPolicyPipelineOptions {
   workspace: Workspace;
@@ -31,6 +35,32 @@ export interface ToolPolicyPipelineOptions {
     approvalType?: ApprovalType | null;
   }) => Promise<PermissionEvaluationResult>;
   agentSecurityEvaluation?: () => Promise<AgentSecurityEvaluationResult>;
+  /**
+   * Optional review. This runs only after deterministic policy and permission
+   * checks have not denied the call. Observe mode records evidence only;
+   * active mode escalates only a concrete concerning assessment into the
+   * existing approval path. Uncertainty or provider unavailability remains
+   * advisory so bounded JEV context cannot add a second blocking policy on
+   * top of the authoritative deterministic checks.
+   */
+  semanticReviewEvaluation?: () => Promise<{
+    mode?: "observe" | "active";
+    status: "benign" | "concerning" | "uncertain" | "unavailable";
+    reasonCodes?: string[];
+    model?: string;
+    latencyMs?: number;
+    stateDigest?: string;
+    requestId?: string;
+  }>;
+  /** Preserve the configured mode if the evaluator throws before returning. */
+  semanticReviewMode?: "observe" | "active";
+  /**
+   * Headless full-authority runtimes cannot surface a second approval prompt.
+   * When explicitly enabled by the caller, an active Jev concern is retained
+   * in the policy trace but does not override an already-authorized operation.
+   * The default remains the interactive approval path.
+   */
+  headlessSemanticReviewPolicy?: "allow_if_authorized";
 }
 
 export interface ToolPolicyPipelineResult {
@@ -38,6 +68,7 @@ export interface ToolPolicyPipelineResult {
   reason?: string;
   trace: ReturnType<ToolPolicyTraceBuilder["build"]>;
   agentSecurity?: AgentSecurityEvaluationResult;
+  approvalSource?: "permission" | "workspace_policy" | "runtime_metadata" | "semantic_review";
 }
 
 function toStageDecision(
@@ -61,6 +92,12 @@ export async function evaluateToolPolicyPipeline(
   const resolvedPermissionApprovalType =
     requestedPermissionApprovalType ?? opts.runtimeApprovalType ?? null;
   let workspaceApprovalReason: string | undefined;
+  let runtimeRequirementAuthorized = false;
+  // The default local runtime is full-auto: permission checks and hard policy
+  // denials still run, but an approval decision never opens a durable prompt.
+  // Operators can restore the legacy queue with COWORK_APPROVAL_PROMPTS=on.
+  const canRequestApproval =
+    !approvalPromptsDisabled() && opts.workspace.permissions.accessApprovalPolicy !== "never";
 
   if (opts.deniedTools?.has(opts.toolName)) {
     trace.add("task_restrictions", "deny", "tool denied by task restrictions");
@@ -154,20 +191,13 @@ export async function evaluateToolPolicyPipeline(
     }
     // Workspace allow/pass does not discharge runtime approval metadata; it is
     // still evaluated by the permission engine or final runtime fallback below.
-  } catch (error) {
-    if (process.env.COWORK_FAIL_CLOSED_TOOL_POLICY === "1") {
-      trace.add("workspace_script", "deny", "workspace policy evaluation failed", {
-        error: String((error as { message?: string })?.message || error || ""),
-      });
-      return {
-        decision: "deny",
-        reason: "workspace policy evaluation failed",
-        trace: trace.build("deny"),
-      };
-    }
-    trace.add("workspace_script", "allow", "workspace policy evaluation failed open", {
-      error: String((error as { message?: string })?.message || error || ""),
-    });
+  } catch {
+    trace.add("workspace_script", "deny", TOOL_POLICY_UNAVAILABLE_REASON);
+    return {
+      decision: "deny",
+      reason: TOOL_POLICY_UNAVAILABLE_REASON,
+      trace: trace.build("deny"),
+    };
   }
 
   let agentSecurity: AgentSecurityEvaluationResult | undefined;
@@ -209,6 +239,8 @@ export async function evaluateToolPolicyPipeline(
       scopePreview: permission.scopePreview,
       matchedRuleSource: permission.matchedRule?.source,
       matchedScopeKind: permission.matchedRule?.scope?.kind,
+      policyVersion: permission.metadata?.accessPolicyVersion,
+      shadowDecision: permission.metadata?.boundaryDecision,
     });
     if (permission.decision === "deny") {
       return {
@@ -219,25 +251,108 @@ export async function evaluateToolPolicyPipeline(
       };
     }
     if (permission.decision === "ask") {
+      if (!canRequestApproval) {
+        const reason =
+          "This operation needs additional authority, but approval requests are disabled.";
+        trace.add("approval", "deny", reason);
+        return { decision: "deny", reason, trace: trace.build("deny"), agentSecurity };
+      }
       return {
         decision: "require_approval",
         reason: permission.reason.summary,
         trace: trace.build("require_approval"),
         agentSecurity,
+        approvalSource: "permission",
       };
     }
+    // Named profiles evaluate typed requirements themselves. Do not reinstate a
+    // blanket shell/destructive/etc gate after the authority has allowed it.
+    // Unknown runtime metadata still requires explicit consent below.
+    runtimeRequirementAuthorized = Boolean(
+      opts.workspace.permissions.accessProfileId &&
+      opts.runtimeApprovalType &&
+      resolvedPermissionApprovalType === opts.runtimeApprovalType,
+    );
   } else {
     trace.add("permissions", "skip");
   }
 
-  if (workspaceApprovalReason || opts.approvalRequired) {
+  const approvalWouldBeDenied =
+    !canRequestApproval &&
+    Boolean(workspaceApprovalReason || (opts.approvalRequired && !runtimeRequirementAuthorized));
+  if (opts.semanticReviewEvaluation && !approvalWouldBeDenied) {
+    let review: Awaited<ReturnType<NonNullable<typeof opts.semanticReviewEvaluation>>>;
+    try {
+      review = await opts.semanticReviewEvaluation();
+    } catch {
+      review = { mode: opts.semanticReviewMode, status: "unavailable" };
+    }
+    const reasonByStatus = {
+      benign: "Jev observation: no concern detected",
+      concerning: "Jev observation: potential concern detected",
+      uncertain: "Jev observation: context was insufficient for a confident assessment",
+      unavailable: "Jev observation unavailable",
+    } as const;
+    const reviewMode = review.mode === "active" ? "active" : "observe";
+    const metadata: Record<string, unknown> = {
+      mode: reviewMode,
+      status: review.status,
+    };
+    if (review.reasonCodes && review.reasonCodes.length > 0) {
+      metadata.reasonCodes = review.reasonCodes.slice(0, 8);
+    }
+    if (review.model) metadata.model = review.model;
+    if (typeof review.latencyMs === "number") metadata.latencyMs = review.latencyMs;
+    if (review.stateDigest) metadata.stateDigest = review.stateDigest;
+    if (review.requestId) metadata.requestId = review.requestId;
+
+    if (reviewMode === "active" && review.status === "concerning") {
+      const reason = reasonByStatus[review.status];
+      if (opts.headlessSemanticReviewPolicy === "allow_if_authorized") {
+        trace.add(
+          "semantic_review",
+          "allow",
+          "Jev concern recorded; explicit headless authority remains authoritative",
+          metadata,
+        );
+        return {
+          decision: "allow",
+          trace: trace.build("allow"),
+          agentSecurity,
+        };
+      }
+      const decision = canRequestApproval ? "require_approval" : "deny";
+      trace.add("semantic_review", decision, reason, metadata);
+      if (decision === "deny") {
+        return {
+          decision: "deny",
+          reason,
+          trace: trace.build("deny"),
+          agentSecurity,
+        };
+      }
+      return {
+        decision: "require_approval",
+        reason,
+        trace: trace.build("require_approval"),
+        agentSecurity,
+        approvalSource: "semantic_review",
+      };
+    }
+
+    trace.add("semantic_review", "allow", reasonByStatus[review.status], metadata);
+  }
+
+  if (workspaceApprovalReason || (opts.approvalRequired && !runtimeRequirementAuthorized)) {
     const reason = workspaceApprovalReason || "approval required by runtime metadata";
-    trace.add("approval", "require_approval", reason);
+    const decision = canRequestApproval ? "require_approval" : "deny";
+    trace.add("approval", decision, reason);
     return {
-      decision: "require_approval",
+      decision,
       reason,
-      trace: trace.build("require_approval"),
+      trace: trace.build(decision),
       agentSecurity,
+      approvalSource: workspaceApprovalReason ? "workspace_policy" : "runtime_metadata",
     };
   }
 

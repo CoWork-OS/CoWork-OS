@@ -38,4 +38,4 @@ Search for places (restaurants, cafes, etc.) via Google Places API proxy on loca
 ## Runtime Prompt
 
 - Current runtime prompt length: 2167 characters.
-- Runtime prompt is defined directly in `../local-places.json`. 
+- Runtime prompt is defined directly in `../local-places.json`.

@@ -37,17 +37,17 @@ Use ccxt (Python) for crypto prices, balances, and order actions across 100+ exc
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| mode | select | Yes | What operation to run (`price`, `balance`, or `order`). |
-| exchange | string | Yes | ccxt exchange id (for example `binance`, `kraken`, `coinbase`) |
-| symbol | string | No | Trading symbol (for example `BTC/USDT`) |
-| side | select | No | Order direction for the order action |
-| order_type | select | No | Order type for the order action |
-| amount | number | No | Order quantity (base unit, required for order mode) |
-| price | number | No | Order price per unit (required when order_type is limit) |
+| Name       | Type   | Required | Description                                                    |
+| ---------- | ------ | -------- | -------------------------------------------------------------- |
+| mode       | select | Yes      | What operation to run (`price`, `balance`, or `order`).        |
+| exchange   | string | Yes      | ccxt exchange id (for example `binance`, `kraken`, `coinbase`) |
+| symbol     | string | No       | Trading symbol (for example `BTC/USDT`)                        |
+| side       | select | No       | Order direction for the order action                           |
+| order_type | select | No       | Order type for the order action                                |
+| amount     | number | No       | Order quantity (base unit, required for order mode)            |
+| price      | number | No       | Order price per unit (required when order_type is limit)       |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1747 characters.
-- Runtime prompt is defined directly in `../crypto-trading.json`. 
+- Runtime prompt is defined directly in `../crypto-trading.json`.

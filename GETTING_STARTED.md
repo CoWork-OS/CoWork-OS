@@ -17,6 +17,7 @@ npm run dev
 ```
 
 This will:
+
 1. Start the Vite dev server (React UI)
 2. Launch Electron with hot reload enabled
 3. Open DevTools automatically
@@ -192,11 +193,13 @@ In **Settings** > **Memory System**:
 ### Approval Dialogs
 
 When the agent needs permission for:
+
 - Deleting files
 - Bulk operations
 - Shell commands
 
 You'll see a dialog with:
+
 - What it wants to do
 - Why it needs to do it
 - Approve or Deny buttons
@@ -207,60 +210,61 @@ You'll see a dialog with:
 
 Open **Settings** > **Provider** tab:
 
-| Provider | Setup |
-|----------|-------|
-| Anthropic | Enter API key from [console.anthropic.com](https://console.anthropic.com) |
-| Google Gemini | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey) |
-| OpenRouter | Enter API key from [openrouter.ai](https://openrouter.ai/keys) |
+| Provider         | Setup                                                                          |
+| ---------------- | ------------------------------------------------------------------------------ |
+| Anthropic        | Enter API key from [console.anthropic.com](https://console.anthropic.com)      |
+| Google Gemini    | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey)   |
+| OpenRouter       | Enter API key from [openrouter.ai](https://openrouter.ai/keys)                 |
 | OpenAI (API Key) | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys) |
-| OpenAI (ChatGPT) | Click "Sign in with ChatGPT" to use your subscription |
-| AWS Bedrock | Enter AWS Access Key, Secret Key, and Region |
-| Ollama | Install Ollama, pull a model, select it |
-| Groq | Enter API key in Settings |
-| xAI (Grok) | Enter API key in Settings |
-| Kimi (Moonshot) | Enter API key in Settings |
+| OpenAI (ChatGPT) | Click "Sign in with ChatGPT" to use your subscription                          |
+| AWS Bedrock      | Enter AWS Access Key, Secret Key, and Region                                   |
+| Ollama           | Install Ollama, pull a model, select it                                        |
+| Groq             | Enter API key in Settings                                                      |
+| xAI (Grok)       | Enter API key in Settings                                                      |
+| Kimi (Moonshot)  | Enter API key in Settings                                                      |
 
 ### Compatible / Gateway Providers
 
 Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, model IDs, and base URLs when required.
 
-| Provider | Setup |
-|----------|-------|
-| OpenCode Zen | API key + base URL in Settings |
-| Google Vertex | Access token + base URL in Settings |
-| Google Antigravity | Access token + base URL in Settings |
-| Google Gemini CLI | Access token + base URL in Settings |
-| Z.AI | API key + base URL in Settings |
-| GLM | API key + base URL in Settings |
-| Vercel AI Gateway | API key in Settings |
-| Cerebras | API key in Settings |
-| Mistral | API key in Settings |
-| GitHub Copilot | GitHub token in Settings |
-| Moonshot (Kimi) | API key in Settings |
-| Qwen Portal | API key in Settings |
-| MiniMax | API key in Settings |
-| MiniMax Portal | API key in Settings |
-| Xiaomi MiMo | API key in Settings |
-| Venice AI | API key in Settings |
-| Synthetic | API key in Settings |
-| Kimi Code | API key in Settings |
-| OpenAI-Compatible (Custom) | API key + base URL in Settings |
-| Anthropic-Compatible (Custom) | API key + base URL in Settings |
+| Provider                      | Setup                               |
+| ----------------------------- | ----------------------------------- |
+| OpenCode Zen                  | API key + base URL in Settings      |
+| Google Vertex                 | Access token + base URL in Settings |
+| Google Antigravity            | Access token + base URL in Settings |
+| Google Gemini CLI             | Access token + base URL in Settings |
+| Z.AI                          | API key + base URL in Settings      |
+| GLM                           | API key + base URL in Settings      |
+| Vercel AI Gateway             | API key in Settings                 |
+| Cerebras                      | API key in Settings                 |
+| Mistral                       | API key in Settings                 |
+| GitHub Copilot                | GitHub token in Settings            |
+| Moonshot (Kimi)               | API key in Settings                 |
+| Qwen Portal                   | API key in Settings                 |
+| MiniMax                       | API key in Settings                 |
+| MiniMax Portal                | API key in Settings                 |
+| Xiaomi MiMo                   | API key in Settings                 |
+| Venice AI                     | API key in Settings                 |
+| Synthetic                     | API key in Settings                 |
+| Kimi Code                     | API key in Settings                 |
+| OpenAI-Compatible (Custom)    | API key + base URL in Settings      |
+| Anthropic-Compatible (Custom) | API key + base URL in Settings      |
 
 ### Search Providers (Optional)
 
 Open **Settings** > **Web Search** tab:
 
-| Provider | Setup |
-|----------|-------|
-| Tavily | Enter API key from [tavily.com](https://tavily.com) |
-| Brave | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
-| SerpAPI | Enter API key from [serpapi.com](https://serpapi.com) |
-| Google | Enter API key and Search Engine ID from Google Cloud Console |
+| Provider | Setup                                                                   |
+| -------- | ----------------------------------------------------------------------- |
+| Tavily   | Enter API key from [tavily.com](https://tavily.com)                     |
+| Brave    | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
+| SerpAPI  | Enter API key from [serpapi.com](https://serpapi.com)                   |
+| Google   | Enter API key and Search Engine ID from Google Cloud Console            |
 
 ### Channel Integrations (Optional)
 
 #### WhatsApp Bot
+
 1. Open **Settings** > **WhatsApp**
 2. Click **Add WhatsApp Channel**
 3. A QR code will appear
@@ -270,12 +274,14 @@ Open **Settings** > **Web Search** tab:
 7. Set a **Response Prefix** (e.g., "🤖") to distinguish bot messages
 
 #### Telegram Bot
+
 1. Create bot with [@BotFather](https://t.me/BotFather)
 2. Open **Settings** > **Channels** > **Telegram**
 3. Enter bot token
 4. Enable and test
 
 #### Discord Bot
+
 1. Create app at [Discord Developer Portal](https://discord.com/developers/applications)
 2. Open **Settings** > **Channels** > **Discord**
 3. Enter bot token and application ID
@@ -283,6 +289,7 @@ Open **Settings** > **Web Search** tab:
 5. Enable and test
 
 #### Slack Bot
+
 1. Create app at [Slack API Apps](https://api.slack.com/apps)
 2. Enable Socket Mode and create App-Level Token (xapp-...)
 3. Add OAuth scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, `users:read`, `files:write`
@@ -307,22 +314,23 @@ Open **Settings** > **Integrations** to connect productivity and storage tools:
 
 Install enterprise connectors from **Settings** > **MCP Servers** > **Browse Registry**:
 
-| Connector | Type | Setup |
-|-----------|------|-------|
-| **Salesforce** | CRM | OAuth or API key |
-| **Jira** | Issue Tracking | API token + domain |
-| **HubSpot** | CRM | API key |
-| **Zendesk** | Support | API key + subdomain |
-| **ServiceNow** | ITSM | OAuth or credentials |
-| **Linear** | Product/Issue | API key |
-| **Asana** | Work Management | Personal access token |
-| **Okta** | Identity | API token + domain |
+| Connector      | Type            | Setup                 |
+| -------------- | --------------- | --------------------- |
+| **Salesforce** | CRM             | OAuth or API key      |
+| **Jira**       | Issue Tracking  | API token + domain    |
+| **HubSpot**    | CRM             | API key               |
+| **Zendesk**    | Support         | API key + subdomain   |
+| **ServiceNow** | ITSM            | OAuth or credentials  |
+| **Linear**     | Product/Issue   | API key               |
+| **Asana**      | Work Management | Personal access token |
+| **Okta**       | Identity        | API token + domain    |
 
 Each connector provides tools like `search`, `get`, `create`, and `update` for its respective service.
 
 ### Social Integrations (Optional)
 
 #### X (Twitter)
+
 1. Open **Settings** > **X (Twitter)**
 2. Choose Browser Cookies or Manual Cookies
 3. Save and test the connection
@@ -361,10 +369,12 @@ src/
 ### Debugging
 
 **Renderer Process (UI)**:
+
 - DevTools open automatically in dev mode
 - Use `console.log()` - shows in DevTools Console
 
 **Main Process (Backend)**:
+
 - Use `console.log()` - shows in terminal
 - Check logs:
   - macOS: `~/Library/Application Support/cowork-os/`
@@ -373,10 +383,12 @@ src/
 ### Database
 
 SQLite database location:
+
 - macOS: `~/Library/Application Support/cowork-os/cowork-os.db`
 - Windows: `%APPDATA%\\cowork-os\\cowork-os.db`
 
 View it with any SQLite browser or:
+
 ```bash
 # macOS
 sqlite3 ~/Library/Application\ Support/cowork-os/cowork-os.db
@@ -412,6 +424,7 @@ Output: `release/*.dmg` (macOS) and `release/*.exe` (Windows)
 ### Issue: Electron won't start
 
 **Solution**: Clear and reinstall:
+
 ```bash
 rm -rf node_modules dist
 npm run setup
@@ -421,6 +434,7 @@ npm run dev
 ### Issue: "Permission denied" for workspace
 
 **Solution**: Choose a folder you have write access to, like:
+
 - `~/Documents/cowork-test`
 - `~/Downloads/test`
 
@@ -429,6 +443,7 @@ Don't use system folders like `/System` or `/Applications`.
 ### Issue: Tasks fail immediately
 
 **Solution**: Check:
+
 1. LLM provider is configured in Settings
 2. API key is valid
 3. Workspace has proper permissions
@@ -438,6 +453,7 @@ Don't use system folders like `/System` or `/Applications`.
 ### Issue: Ollama connection failed
 
 **Solution**:
+
 1. Make sure Ollama is running: `ollama serve`
 2. Check URL is correct (default: `http://localhost:11434`)
 3. Make sure you've pulled a model: `ollama pull llama3.2`

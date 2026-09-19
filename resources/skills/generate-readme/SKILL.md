@@ -38,4 +38,4 @@ Create a README.md for a project
 ## Runtime Prompt
 
 - Current runtime prompt length: 558 characters.
-- Runtime prompt is defined directly in `../generate-readme.json`. 
+- Runtime prompt is defined directly in `../generate-readme.json`.

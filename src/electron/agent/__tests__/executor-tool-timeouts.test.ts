@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { APPROVAL_GATED_TOOL_TIMEOUT_MS } from "../approval-timeouts";
 import { BuiltinToolsSettingsManager } from "../tools/builtin-settings";
 
 vi.mock("electron", () => ({
@@ -143,7 +144,7 @@ describe("TaskExecutor getToolTimeoutMs", () => {
       path: "inbox/finance",
     });
 
-    expect(timeoutMs).toBe(300_000);
+    expect(timeoutMs).toBe(APPROVAL_GATED_TOOL_TIMEOUT_MS);
     timeoutSpy.mockRestore();
   });
 });

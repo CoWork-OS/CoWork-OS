@@ -2,6 +2,7 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { assertResolvedHostAllowed } from "../../security/address-classes";
 import { ProtectedCredentialService } from "../../security/protected-credential-service";
 
 const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
@@ -68,6 +69,10 @@ export class WebFetchTools {
         throw new Error("Only HTTP and HTTPS URLs are supported");
       }
       this.ensureNetworkAllowed(parsedUrl.toString(), toolName);
+      // evaluateNetworkPolicy can only inspect the literal host. Resolve the
+      // name too, so `evil.test` pointing at 169.254.169.254 or a private
+      // range is refused rather than fetched from the user's host.
+      await assertResolvedHostAllowed(parsedUrl.hostname);
 
       const response = await fetch(currentUrl, {
         ...currentInit,
@@ -88,6 +93,7 @@ export class WebFetchTools {
         throw new Error("Only HTTP and HTTPS redirect URLs are supported");
       }
       this.ensureNetworkAllowed(nextUrl.toString(), toolName);
+      await assertResolvedHostAllowed(nextUrl.hostname);
 
       currentUrl = nextUrl.toString();
       currentInit = this.buildRedirectInit(currentInit, response.status);

@@ -1,5 +1,33 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { ExternalRuntimeConfig } from "../../shared/types";
+import type { ExternalRuntimeConfig, WorkspacePermissions } from "../../shared/types";
+import type { AdminPolicies } from "../admin/policies";
+
+/** ACP adapters cannot enforce CoWork's bounded filesystem/network policy. */
+export function assertAcpxExecutionAuthority(
+  permissions: WorkspacePermissions,
+  runtimePolicy: AdminPolicies["runtime"],
+): void {
+  if (
+    permissions.accessSandboxMode !== "danger-full-access" ||
+    permissions.accessProfileScoped ||
+    permissions.accessProfileUnavailable ||
+    permissions.shell !== true ||
+    permissions.read !== true ||
+    permissions.write !== true ||
+    permissions.network !== true ||
+    permissions.accessNetworkMode !== "enabled" ||
+    (permissions.accessFilesystemRules?.length || 0) > 0 ||
+    (permissions.accessDomainRules?.length || 0) > 0 ||
+    runtimePolicy.requireSandboxForShell ||
+    runtimePolicy.network.defaultAction !== "allow" ||
+    runtimePolicy.network.allowedDomains.length > 0 ||
+    runtimePolicy.network.blockedDomains.length > 0
+  ) {
+    throw new Error(
+      "External ACP execution cannot enforce this task's access boundary. Use the native runtime for bounded tasks.",
+    );
+  }
+}
 
 export interface AcpxRuntimeEvent {
   type: string;
@@ -350,10 +378,10 @@ export class AcpxRuntimeRunner {
             ],
             { cwd: this.input.cwd, env: process.env, stdio: "ignore" },
           );
-          fallbackProc.on("close", (code) => {
+          fallbackProc.on("close", () => {
             resolveOnce();
           });
-          fallbackProc.on("error", (error: NodeJS.ErrnoException) => {
+          fallbackProc.on("error", () => {
             resolveOnce();
           });
           return true;

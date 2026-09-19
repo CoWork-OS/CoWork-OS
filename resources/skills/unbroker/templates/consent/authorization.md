@@ -9,7 +9,7 @@ This authorization is limited to data removal. It does not authorize any other u
 
 - Full name: {full_name}
 - Date: {date}
-- Signature: ______________________________
+- Signature: **************\_\_**************
 
 Store the signed copy at the path recorded in the dossier `consent.authorization_artifact`. Required
 only when `consent.method` is `written_authorization` or `poa` (not for `self`).

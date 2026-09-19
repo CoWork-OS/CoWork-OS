@@ -18,13 +18,13 @@ The previous model exposed too much of the reflective internals. It also let the
 
 The new model makes the boundaries explicit:
 
-| Layer | Responsibility | User-facing? |
-|---|---|---|
-| `Memory` | Stores durable preferences, workflow patterns, corrections, open loops, recurring tasks, and ignored-noise signals | Yes, through Memory Hub and retrieved context |
-| `Heartbeat` | Decides when enough fresh signal exists to think again | Mostly visible through Mission Control status |
-| `Reflection` | Evaluates evidence, generates hypotheses, critiques them, and chooses a recommended next action | No, except in diagnostics/settings |
-| `Dreaming` | Reviews recent sessions, memory observations, corrections, and drift signals to propose memory updates | Yes, through reviewable memory candidates |
-| `Suggestions` | Presents reviewable next actions with evidence, confidence, and controls | Yes |
+| Layer         | Responsibility                                                                                                     | User-facing?                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| `Memory`      | Stores durable preferences, workflow patterns, corrections, open loops, recurring tasks, and ignored-noise signals | Yes, through Memory Hub and retrieved context |
+| `Heartbeat`   | Decides when enough fresh signal exists to think again                                                             | Mostly visible through Mission Control status |
+| `Reflection`  | Evaluates evidence, generates hypotheses, critiques them, and chooses a recommended next action                    | No, except in diagnostics/settings            |
+| `Dreaming`    | Reviews recent sessions, memory observations, corrections, and drift signals to propose memory updates             | Yes, through reviewable memory candidates     |
+| `Suggestions` | Presents reviewable next actions with evidence, confidence, and controls                                           | Yes                                           |
 
 `Subconscious` remains an internal compatibility name in some code paths, database tables, artifact folders, and logs. Product copy and docs should use `Workflow Intelligence` unless they are describing those internals directly.
 
@@ -65,13 +65,13 @@ The welcome screen can show these as **Next actions** under the message box when
 
 User response is now part of the learning model:
 
-| Response | Learning effect |
-|---|---|
-| `Act` | Reinforces the suggestion class/source as useful and captures a workflow-pattern memory |
-| `Edit` | Captures a correction memory with the original and edited action |
-| `Snooze` | Hides the suggestion until the snooze time and slightly lowers similar timing/source patterns |
-| `Dismiss` | Captures ignored-noise feedback and lowers similar future suggestions |
-| `Ignore` | If a surfaced suggestion sits stale long enough, it becomes weak ignored-noise feedback |
+| Response  | Learning effect                                                                               |
+| --------- | --------------------------------------------------------------------------------------------- |
+| `Act`     | Reinforces the suggestion class/source as useful and captures a workflow-pattern memory       |
+| `Edit`    | Captures a correction memory with the original and edited action                              |
+| `Snooze`  | Hides the suggestion until the snooze time and slightly lowers similar timing/source patterns |
+| `Dismiss` | Captures ignored-noise feedback and lowers similar future suggestions                         |
+| `Ignore`  | If a surfaced suggestion sits stale long enough, it becomes weak ignored-noise feedback       |
 
 This is the missing loop that turns suggestions from a static list into a system that adapts to the user's workflow.
 

@@ -111,10 +111,15 @@ export function ComputerUseSettings() {
           Computer use
         </h3>
         <p className="settings-description">
-          Pi-style native desktop control for macOS and Windows. The agent targets one controlled
-          window at a time through `screenshot()`, then uses screenshot-relative mouse, keyboard,
-          scroll, and typing actions.
+          Native desktop control for the computer running CoWork OS. The agent targets one
+          controlled window at a time through `screenshot()`, then uses screenshot-relative mouse,
+          keyboard, scroll, and typing actions.
         </p>
+      </div>
+
+      <div className="computer-use-platform-note">
+        Computer use runs on this computer with its local permissions; it does not create a separate
+        hosted computer or VM.
       </div>
 
       {error ? <div className="settings-error">{error}</div> : null}

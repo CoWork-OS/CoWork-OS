@@ -6,15 +6,23 @@ import { TranscriptStore } from "../TranscriptStore";
 import { SessionRecallService } from "../SessionRecallService";
 
 const createdDirs: string[] = [];
+const originalCheckpointLockRoot = process.env.COWORK_CHECKPOINT_LOCK_ROOT;
 
 async function createWorkspace(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-session-recall-"));
-  createdDirs.push(dir);
+  const lockRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-session-recall-locks-"));
+  createdDirs.push(dir, lockRoot);
+  process.env.COWORK_CHECKPOINT_LOCK_ROOT = lockRoot;
   return dir;
 }
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  if (originalCheckpointLockRoot === undefined) {
+    delete process.env.COWORK_CHECKPOINT_LOCK_ROOT;
+  } else {
+    process.env.COWORK_CHECKPOINT_LOCK_ROOT = originalCheckpointLockRoot;
+  }
   await Promise.all(
     createdDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
   );

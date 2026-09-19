@@ -20,9 +20,7 @@
       "dontUseWhen": "Don't use for feature requests or non-debug planning questions.",
       "outputs": "Root-cause analysis and concrete remediation steps.",
       "successCriteria": "Provides plausible cause, fix plan, and verification step.",
-      "expectedArtifacts": [
-        "debug-notes.md"
-      ],
+      "expectedArtifacts": ["debug-notes.md"],
       "examples": {
         "positive": [
           "Use the debug-error skill for this request.",

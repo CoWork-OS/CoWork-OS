@@ -61,6 +61,13 @@ const EXECUTING_EVENT_TYPES = new Set([
   "task_started",
   "step_started",
   "tool_call",
+  "agent_spawn_requested",
+  "agent_spawned",
+  "agent_message",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+  "agent_interrupt_requested",
+  "agent_interrupt_confirmed",
   "assistant_message",
   "user_message",
   "follow_up_tool_lock_forced_finalization",
@@ -106,6 +113,13 @@ const STATUS_EVENT_TYPES = new Set([
   "follow_up_turn_recovery_completed",
   "follow_up_turn_recovery_blocked",
   "safety_stop_triggered",
+  "agent_spawn_requested",
+  "agent_spawned",
+  "agent_message",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+  "agent_interrupt_requested",
+  "agent_interrupt_confirmed",
 ]);
 
 function normalizeEventType(event: TaskEvent): string {
@@ -150,7 +164,10 @@ export function mapTaskEventKind(eventType: string): WorkSessionItemKind {
   if (
     normalized === "user_message" ||
     normalized === "assistant_message" ||
-    normalized === "user_feedback"
+    normalized === "user_feedback" ||
+    normalized === "agent_message" ||
+    normalized === "agent_follow_up_scheduled" ||
+    normalized === "agent_follow_up_started"
   ) {
     return "message";
   }
@@ -228,10 +245,22 @@ function statusForEvent(eventType: string, event: TaskEvent): WorkSessionTurnSta
   if (terminal) return terminal;
   if (WAITING_EVENT_TYPES.has(eventType)) return "waiting";
   if (EXECUTING_EVENT_TYPES.has(eventType)) return "executing";
-  if (event.status === "blocked") return "waiting";
-  if (event.status === "failed") return "failed";
-  if (event.status === "cancelled") return "cancelled";
-  if (event.status === "completed") return "completed";
+
+  // A task_status event can carry a blocked state in the normalized event
+  // status even when its payload uses a non-terminal task status such as
+  // awaiting_verification. This is task-level state, unlike timeline step
+  // status handled below.
+  if (eventType === "task_status") {
+    if (event.status === "blocked") return "waiting";
+    if (event.status === "failed") return "failed";
+    if (event.status === "cancelled") return "cancelled";
+    if (event.status === "completed") return "completed";
+  }
+
+  // TaskEvent.status is also used for timeline-v2 item state. A completed
+  // step/group or a failed timeline item must not terminalize the enclosing
+  // work-session turn. Task-level terminal state is represented by the
+  // explicit payload fields or lifecycle event types handled above.
   return undefined;
 }
 
@@ -481,6 +510,12 @@ export class WorkSessionProtocolService {
       (typeof raw.eventId === "string" && raw.eventId.trim() && raw.eventId.trim()) ||
       item.sourceEventId ||
       item.id;
+    const legacyType =
+      (typeof nested.legacyType === "string" && nested.legacyType.trim()
+        ? nested.legacyType.trim()
+        : typeof raw.legacyType === "string" && raw.legacyType.trim()
+          ? raw.legacyType.trim()
+          : "") || undefined;
     const event: TaskEvent = {
       id: item.sourceEventId || item.id,
       taskId,
@@ -499,7 +534,9 @@ export class WorkSessionProtocolService {
       ...(typeof nested.groupId === "string" ? { groupId: nested.groupId } : {}),
       ...(typeof item.actor === "string" ? { actor: item.actor as TaskEvent["actor"] } : {}),
     };
-    if (sourceType && sourceType !== inferredType) {
+    if (legacyType) {
+      event.legacyType = legacyType as TaskEvent["legacyType"];
+    } else if (sourceType && sourceType !== inferredType) {
       event.legacyType = inferredType as TaskEvent["legacyType"];
     }
     return event;
@@ -638,16 +675,21 @@ export class WorkSessionProtocolService {
 
     let finalTurn = turn;
     if (eventStatus && TERMINAL_EVENT_STATUS[eventType]) {
-      finalTurn = this.repository.completeTurn({
-        sessionId: aggregate.session.id,
-        turnId: turn.id,
-        status: eventStatus as Extract<
-          WorkSessionTurnStatus,
-          "completed" | "partial_success" | "failed" | "cancelled"
-        >,
-        reason: terminalReason(event),
-        actor: actorForEvent(event, eventType),
-      });
+      // Cancellation/finalization can race with orchestration callbacks. The
+      // first terminal outcome wins; retain later terminal events as items but
+      // do not attempt an invalid terminal-to-terminal transition.
+      if (!isTerminalTurnStatus(turn.status)) {
+        finalTurn = this.repository.completeTurn({
+          sessionId: aggregate.session.id,
+          turnId: turn.id,
+          status: eventStatus as Extract<
+            WorkSessionTurnStatus,
+            "completed" | "partial_success" | "failed" | "cancelled"
+          >,
+          reason: terminalReason(event),
+          actor: actorForEvent(event, eventType),
+        });
+      }
     } else if (eventStatus && eventStatus !== turn.status && !isTerminalTurnStatus(turn.status)) {
       finalTurn = this.repository.setTurnStatus(
         aggregate.session.id,

@@ -91,6 +91,17 @@ command-tool, filesystem, network, domain, and approval boundaries, and fails cl
 profile is missing or invalid. `shellAccess` and legacy `permissionMode` values remain compatibility
 inputs only.
 
+Ordinary work inside a named profile's granted boundary does not create an approval request. The
+local daemon also runs without popup approvals by default: an unresolved `ask` becomes an
+assistant message and durable inline **Deny** / **Allow once** input card for interactive tasks.
+This covers network access, credentials, exports, MCP/external side effects, eligible outside-
+workspace paths, and explicit no-auto-approve requests. Automated tasks without a human-input
+channel fail closed. Set `COWORK_APPROVAL_PROMPTS=on` to restore the legacy queue for diagnostics.
+Bounded shell execution still requires an available OS sandbox, and hard denials, administrator
+policy, protected paths, and explicit tool opt-outs remain enforced. `approval: never` suppresses
+requests while retaining the profile's filesystem and network restrictions. Pending approval
+state fails closed across restart.
+
 ## Headless Limitations (Expected)
 
 Some tools are desktop-only (clipboard, screenshot capture, opening files in Finder/Explorer, etc). In the Node daemon these will return a clear error instead of trying to use Electron APIs.

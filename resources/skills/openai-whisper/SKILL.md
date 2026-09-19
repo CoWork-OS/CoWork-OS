@@ -38,4 +38,4 @@ Local speech-to-text with the Whisper CLI (no API key).
 ## Runtime Prompt
 
 - Current runtime prompt length: 380 characters.
-- Runtime prompt is defined directly in `../openai-whisper.json`. 
+- Runtime prompt is defined directly in `../openai-whisper.json`.

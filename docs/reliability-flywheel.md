@@ -29,17 +29,20 @@ domain scope, or turn an unavailable profile into an executable task.
 Schema and migrations are in `src/electron/database/schema.ts`.
 
 Added task-level reliability metadata:
+
 - `tasks.risk_level`
 - `tasks.eval_case_id`
 - `tasks.eval_run_id`
 
 Added eval tables:
+
 - `eval_cases`
 - `eval_suites`
 - `eval_runs`
 - `eval_case_runs`
 
 Added indexes:
+
 - `idx_tasks_risk_level`
 - `idx_tasks_eval_case_id`
 - `idx_tasks_eval_run_id`
@@ -47,6 +50,7 @@ Added indexes:
 ### Shared Types and IPC
 
 Added in `src/shared/types.ts`:
+
 - `AgentConfig.reviewPolicy?: "off" | "balanced" | "strict"`
 - `AgentConfig.entropySweepPolicy?: "off" | "balanced" | "strict"`
 - `AgentConfig.stepIntentAlignmentPolicy?: "off" | "balanced" | "strict"`
@@ -56,6 +60,7 @@ Added in `src/shared/types.ts`:
 - `Task.evalRunId?: string`
 
 IPC channels:
+
 - `eval:listSuites`
 - `eval:runSuite`
 - `eval:getRun`
@@ -63,34 +68,41 @@ IPC channels:
 - `eval:createCaseFromTask`
 
 Wired in:
+
 - `src/electron/ipc/handlers.ts`
 - `src/electron/preload.ts`
 
 ### Eval Runtime Services
 
 Deterministic local eval service:
+
 - `src/electron/eval/EvalService.ts`
 
 Risk scoring + gate decision matrix:
+
 - `src/electron/eval/risk.ts`
 
 Risk scoring defaults:
+
 - `+2` shell/git mutation evidence
 - `+2` more than 5 changed files
 - `+2` tests expected but missing test evidence
 - `+1` repeated tool failures (`>2`)
 
 Risk levels:
+
 - `0-2`: low
 - `3-5`: medium
 - `6+`: high
 
 Review policies:
+
 - `off`: no extra gate behavior
 - `balanced`: quality pass for mutating tasks, strict contract for medium/high, verification agent for high
 - `strict`: quality pass for all, strict contract for all, verification/evidence for medium/high
 
 Post-completion entropy sweep:
+
 - `off`: disabled
 - `balanced`: run for high-risk or clearly mutating tasks
 - `strict`: run for mutating tasks and non-low-risk tasks
@@ -99,6 +111,7 @@ Post-completion entropy sweep:
 ### Daemon Enforcement Path
 
 Completion flow computes risk and applies gate policy in:
+
 - `src/electron/agent/daemon.ts`
 
 Completion flow also passes verified-mode evidence bundles into the quality gate and post-completion verifier, so deterministic checks are visible to the final audit path.
@@ -106,17 +119,38 @@ Completion flow also passes verified-mode evidence bundles into the quality gate
 After completion, the daemon may launch a read-only entropy sweep for the task's blast radius to look for stale docs, contradictions, and dead-code hints. The sweep is non-blocking and only reports findings.
 
 Optional auto-policy defaults (for code/operations domains) can be enabled via env vars:
+
 - `COWORK_REVIEW_POLICY_ENABLE_AUTO`
 - `COWORK_REVIEW_POLICY_AUTO_DEFAULT` (`balanced` or `strict`)
+
+## Required deterministic harness gate
+
+Run `npm run qa:harness` for the portable runtime regression gate. It checks
+native SQLite prerequisites before running runtime, verification, compaction,
+checkpoint, timeline, session/replay, risk, and runner tests, followed by explicitly
+labeled built-in replay fixtures. Database coverage must not silently disappear
+because `better-sqlite3` was built for a different ABI.
+
+CI, nightly, and release jobs run this gate on clean checkouts. It establishes
+local deterministic regression coverage; it does not measure production task
+success or model capability. For a real stored task corpus, use
+`qa:eval:run -- --suite <existing-suite> --mode deterministic` against an explicit
+`COWORK_DB_PATH`. Built-in fixture passes cannot make a missing or skipped selected
+corpus green. Use `qa:eval:run -- --fixtures-only` when only fixtures are intended.
+
+See [the September 2026 harness audit](harness-audit-2026-09-14.md) for reproduced
+failure cases, approach comparisons, and validation limits.
 
 ## Eval Corpus and Replay Workflows
 
 ### Corpus Build
 
 Script:
+
 - `scripts/qa/build_eval_corpus.cjs`
 
 Behavior:
+
 - Extracts failed/partial/failure-class tasks into `eval_cases`.
 - Sanitizes prompts for secrets/PII before storing `sanitized_prompt`.
 - Links source task to case via `tasks.eval_case_id`.
@@ -125,15 +159,18 @@ Behavior:
 ### Suite Replay
 
 Script:
+
 - `scripts/qa/run_eval_suite.cjs`
 
 Modes:
+
 - `deterministic`: evaluates case assertions against source task/events.
 - `hooks`: triggers replay tasks through hooks, then evaluates assertions.
 
 Both scripts use the `sqlite3` CLI (not `better-sqlite3`) and fail fast when the CLI is missing.
 
 Reliability V2 tags promoted into eval assertions/metadata:
+
 - `contract_unmet_write_required`
 - `missing_required_workspace_artifact`
 - `verification_required_fail`
@@ -142,6 +179,7 @@ Reliability V2 tags promoted into eval assertions/metadata:
 ### Baseline Metrics
 
 Computed in `EvalService.getBaselineMetrics(...)`:
+
 - `taskSuccessRate`
 - `toolFailureRateByTool`
 - `retriesPerTask`
@@ -157,9 +195,11 @@ Computed in `EvalService.getBaselineMetrics(...)`:
 ### Modular Prompt Composition
 
 Added shared prompt section module:
+
 - `src/electron/agent/executor-prompt-sections.ts`
 
 Capabilities:
+
 - section-level token budgets
 - session-scoped memoization for stable sections
 - turn-scoped recomputation for dynamic sections
@@ -172,6 +212,7 @@ Capabilities:
 ### Executor Integration
 
 Wired into `src/electron/agent/executor.ts`:
+
 - shared policy core reused across planning/execution/follow-up prompts
 - shared section builder reused by execution and follow-up turns
 - explicit section budgets (role/context/memory/playbook/infra/personality/guidelines/tool descriptions)
@@ -196,15 +237,18 @@ The same prompt architecture now also feeds provider-side prompt caching: stable
 Execution and follow-up turns now share one provider-aware output-budget policy instead of relying on provider defaults or one-off token floors.
 
 Added policy module:
+
 - `src/electron/agent/llm/output-token-policy.ts`
 
 Wired through:
+
 - `src/electron/agent/executor-llm-turn-utils.ts`
 - `src/electron/agent/runtime/SessionRuntime.ts`
 - `src/electron/agent/runtime/turn-kernel.ts`
 - `src/electron/agent/executor-loop-utils.ts`
 
 Capabilities:
+
 - provider-family budgeting for Anthropic, Bedrock Claude, OpenAI, Azure OpenAI, Gemini, OpenRouter, and a conservative generic fallback
 - centralized transport-field mapping for `max_tokens`, `max_completion_tokens`, and `max_output_tokens`
 - explicit output budgets on agentic turns in adaptive mode instead of backend defaults
@@ -218,10 +262,12 @@ This improves truncation recovery while keeping adapter hard caps, task-level ov
 ### Skill Routing Controls
 
 Skill shortlist and budget controls are in:
+
 - `src/electron/agent/custom-skill-loader.ts`
 - `src/electron/agent/tools/registry.ts`
 
 Defaults:
+
 - shortlist size `20`
 - low-confidence threshold `0.55`
 - fallback instruction to use `skill_list`
@@ -232,53 +278,66 @@ Defaults:
 ### PR Regression Policy Gate
 
 New CI job in `.github/workflows/ci.yml`:
+
 - `Regression Policy Gate`
 
 Enforcement script:
+
 - `scripts/qa/enforce_eval_regression_policy.cjs`
 
 Policy:
+
 - if PR indicates a production failure/incident fix, at least one eval case JSON under `scripts/qa/eval-cases/` must be added/updated.
 
 PR template updated in:
+
 - `.github/PULL_REQUEST_TEMPLATE.md`
 
 ### Targeted Eval Gate
 
 Existing targeted eval gate now runs with Node 24 and installs `sqlite3` CLI before replay:
+
 - `.github/workflows/ci.yml`
 
 Path trigger:
+
 - `src/electron/agent/**`
 - `src/electron/agent/tools/**`
 
 ### Nightly Hardening
 
 Workflow:
+
 - `.github/workflows/nightly-hardening.yml`
 
 Runs:
+
 - eval corpus build
 - deterministic eval suite
 - battery suite (when hooks secrets exist)
 
 Artifacts:
+
 - grouped human-readable summary (`summary.md`)
 - machine-readable report (`report.json`)
 
 Stability-window behavior:
+
 - non-blocking before cutoff
 - blocking after cutoff (`HARDENING_REQUIRED_AFTER_UTC`)
 
 ### Release Hardening Gate
 
 Workflow:
+
 - `.github/workflows/release.yml`
 
 Added job:
+
 - `Hardening Release Gate`
 
 Behavior:
+
 - runs deterministic eval and battery checks
 - applies same date-based strictness window
 - blocks release after cutoff when hardening fails
@@ -300,6 +359,7 @@ npm run qa:reliability
 ```
 
 Optional DB override:
+
 ```bash
 COWORK_DB_PATH=/tmp/cowork-eval.db npm run qa:eval:run -- --suite reliability-regressions --mode deterministic
 ```
@@ -313,12 +373,14 @@ COWORK_DB_PATH=/tmp/cowork-eval.db npm run qa:eval:run -- --suite reliability-re
 ## Remaining Non-Code Work
 
 The following require runtime history, not new code:
+
 - 90-day KPI attainment proof (`+15% eval pass`, `-30% repeated tool failure loops`, `-25% verification-failed-after-complete`).
 - Trend monitoring and policy tuning over real task volume.
 
 ## Source Map
 
 Core implementation files:
+
 - `src/electron/eval/EvalService.ts`
 - `src/electron/eval/risk.ts`
 - `src/electron/agent/daemon.ts`
@@ -331,6 +393,7 @@ Core implementation files:
 - `src/shared/types.ts`
 
 Operational scripts and workflows:
+
 - `scripts/qa/build_eval_corpus.cjs`
 - `scripts/qa/run_eval_suite.cjs`
 - `scripts/qa/enforce_eval_regression_policy.cjs`

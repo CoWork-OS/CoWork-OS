@@ -25,7 +25,12 @@
       "category": "Documentation",
       "prompt": "Audit the following documentation.\n\nDocs content or file list:\n{{docs}}\n\nCheck for:\n1. Stale content (references to removed features or old APIs)\n2. Broken internal links\n3. Outdated code examples\n4. Missing sections (installation, configuration, troubleshooting)\n5. Inconsistent terminology\n6. Accuracy against current codebase\n\nPrioritize findings by user impact.",
       "parameters": [
-        { "name": "docs", "type": "string", "description": "Documentation content or file paths to audit", "required": true }
+        {
+          "name": "docs",
+          "type": "string",
+          "description": "Documentation content or file paths to audit",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -37,7 +42,12 @@
       "category": "Documentation",
       "prompt": "Generate a changelog from the following changes.\n\nChanges:\n{{changes}}\n\nFormat using Keep a Changelog (https://keepachangelog.com):\n- Added: new features\n- Changed: modifications to existing features\n- Deprecated: features to be removed\n- Removed: features that were removed\n- Fixed: bug fixes\n- Security: vulnerability fixes\n\nWrite from the user's perspective, not the developer's.",
       "parameters": [
-        { "name": "changes", "type": "string", "description": "Commits, PRs, or release notes to convert", "required": true }
+        {
+          "name": "changes",
+          "type": "string",
+          "description": "Commits, PRs, or release notes to convert",
+          "required": true
+        }
       ],
       "enabled": true
     },
@@ -49,7 +59,12 @@
       "category": "Documentation",
       "prompt": "Write API reference documentation.\n\nAPI details:\n{{api}}\n\nFor each endpoint provide:\n1. HTTP method and path\n2. Description\n3. Authentication requirements\n4. Request parameters (path, query, body) with types\n5. Response schema with examples\n6. Error codes and meanings\n7. Rate limits\n8. Code examples (curl, JavaScript, Python)",
       "parameters": [
-        { "name": "api", "type": "string", "description": "API code, route definitions, or endpoint descriptions", "required": true }
+        {
+          "name": "api",
+          "type": "string",
+          "description": "API code, route definitions, or endpoint descriptions",
+          "required": true
+        }
       ],
       "enabled": true
     }

@@ -332,6 +332,12 @@ enable/disable command. A profile or administrator boundary can still deny an ac
 has approved an individual request, and finite filesystem/domain scopes cannot be widened by an
 approval shortcut.
 
+Most in-scope reads, edits, file creation, and sandboxed local commands run without an approval
+message. That is expected and keeps channel work aligned with the desktop and CLI runtimes. A
+message appears only when the operation needs additional authority, explicit consent, or a
+profile/administrator decision; with `approval: "never"`, missing authority is denied without an
+interactive wait.
+
 When CoWork asks for approval, respond with:
 
 ```text
@@ -599,24 +605,24 @@ If progress messages look noisy:
 
 ## Quick Reference
 
-| Goal | Command |
-|------|---------|
-| Show help | `/help` |
-| Show command catalog | `/commands` |
-| Check status | `/status` |
-| Show current task | `/task` |
-| Start next message fresh | `/new` |
-| Start scratch temporary session | `/new temp` |
-| Stop active task | `/stop` |
-| Pause active task | `/pause` |
-| Resume active task | `/resume` |
-| Send explicit follow-up | `/queue <message>` |
-| Steer active task | `/steer <guidance>` |
-| Start side work | `/background <prompt>` |
-| List workspaces | `/workspaces` |
-| Select workspace | `/workspace <name or number>` |
-| List skills | `/skills` |
-| Toggle skill | `/skill <id>` |
-| Run skill | `/<skill-slug> args` |
-| Approve action | `/approve` or `/yes` |
-| Deny action | `/deny` or `/no` |
+| Goal                            | Command                       |
+| ------------------------------- | ----------------------------- |
+| Show help                       | `/help`                       |
+| Show command catalog            | `/commands`                   |
+| Check status                    | `/status`                     |
+| Show current task               | `/task`                       |
+| Start next message fresh        | `/new`                        |
+| Start scratch temporary session | `/new temp`                   |
+| Stop active task                | `/stop`                       |
+| Pause active task               | `/pause`                      |
+| Resume active task              | `/resume`                     |
+| Send explicit follow-up         | `/queue <message>`            |
+| Steer active task               | `/steer <guidance>`           |
+| Start side work                 | `/background <prompt>`        |
+| List workspaces                 | `/workspaces`                 |
+| Select workspace                | `/workspace <name or number>` |
+| List skills                     | `/skills`                     |
+| Toggle skill                    | `/skill <id>`                 |
+| Run skill                       | `/<skill-slug> args`          |
+| Approve action                  | `/approve` or `/yes`          |
+| Deny action                     | `/deny` or `/no`              |

@@ -34,11 +34,15 @@ import {
   isUntrustedExternalSource,
 } from "../security/export-permission-context";
 import {
+  authorizeToolActionWithFallback,
   canonicalizeAccessPath,
+  createWorkspaceFilesystemApprovalHandlers,
   evaluateWorkspaceFilesystemAccess,
   isProtectedFilesystemPath,
   isAccessPathWithin,
+  preserveLexicalMacAlias,
   resolveAccessControlledPath,
+  resolveWorkspaceFilesystemAccessesWithApproval,
   type AccessFilesystemOperation,
 } from "../../security/access-profile-paths";
 
@@ -63,6 +67,19 @@ interface ReadWindowOptions {
 interface WriteFileOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+}
+
+interface ResolvedFilesystemPath {
+  path: string;
+  externalApprovalGranted: boolean;
+}
+
+interface MutationPathBinding extends ResolvedFilesystemPath {
+  operation: AccessFilesystemOperation;
+  targetRealPath: string | null;
+  targetIdentity: fsSync.Stats | null;
+  parentRealPath: string | null;
+  parentIdentity: fsSync.Stats | null;
 }
 
 function getElectronShell(): Any | null {
@@ -439,49 +456,90 @@ export class FileTools {
     inputPath: string,
     operation: "read" | "write" | "delete",
     label: string,
-  ): Promise<string> {
+  ): Promise<ResolvedFilesystemPath> {
+    let resolvedPath: string | null = null;
+    let resolutionFailed = false;
+    let resolutionError: unknown;
     try {
-      return this.resolvePath(inputPath, operation);
+      resolvedPath = this.resolvePath(inputPath, operation);
     } catch (error) {
-      const candidate = resolveAccessControlledPath(this.workspace.path, inputPath);
-      const access = evaluateWorkspaceFilesystemAccess(this.workspace, candidate, operation);
-      if (access.reason !== "outside_workspace") throw error;
-      if (operation !== "read" && this.isProtectedPath(candidate)) {
-        throw new Error(`Cannot ${operation} protected system path: ${candidate}`);
-      }
+      resolutionFailed = true;
+      resolutionError = error;
+    }
 
-      const daemonAny = this.daemon as Any;
-      let approved =
-        typeof daemonAny.consumeExternalFileApproval === "function" &&
-        daemonAny.consumeExternalFileApproval(this.taskId, candidate, operation) === true;
-      if (!approved && typeof daemonAny.requestApproval === "function") {
-        approved =
-          (await daemonAny.requestApproval(
-            this.taskId,
-            "external_file_access",
-            `Allow ${operation} access to external ${label}: ${candidate}`,
-            {
-              path: candidate,
-              operation,
-              tool: "file_tools",
-            },
-          )) === true;
-        if (approved && typeof daemonAny.consumeExternalFileApproval === "function") {
-          // requestApproval records a one-shot grant; consume it before the
-          // filesystem call so it cannot be reused by another operation.
-          daemonAny.consumeExternalFileApproval(this.taskId, candidate, operation);
+    // `resolvePath` also handles legacy `/workspace` aliases and stale absolute
+    // paths. Reuse that resolved spelling when it succeeded so the central
+    // evaluator checks the actual workspace target instead of treating the
+    // alias itself as an external path.
+    const candidate = resolvedPath ?? resolveAccessControlledPath(this.workspace.path, inputPath);
+    const access = evaluateWorkspaceFilesystemAccess(this.workspace, candidate, operation);
+    if (access.reason !== "outside_workspace") {
+      if (resolutionFailed) throw resolutionError;
+      return {
+        path: preserveLexicalMacAlias(candidate, access.path),
+        externalApprovalGranted: false,
+      };
+    }
+    if (operation !== "read" && this.isProtectedPath(candidate)) {
+      throw new Error(`Cannot ${operation} protected system path: ${candidate}`);
+    }
+
+    const granted = await resolveWorkspaceFilesystemAccessesWithApproval(
+      this.workspace,
+      [{ rawPath: resolvedPath ?? inputPath, operation, label }],
+      createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "file_tools"),
+    );
+    const result = granted[0];
+    if (result.decision !== "allow") {
+      if (resolutionFailed && result.reason !== "outside_workspace") throw resolutionError;
+      if (!resolutionFailed && resolvedPath) {
+        const lexicalWorkspace = path.resolve(this.workspace.path);
+        const lexicalRelative = path.relative(lexicalWorkspace, path.resolve(resolvedPath));
+        if (!lexicalRelative.startsWith("..") && !path.isAbsolute(lexicalRelative)) {
+          // Keep an in-workspace symlink on the normal path so the async
+          // symlink guard reports the boundary that blocked the mutation.
+          return { path: resolvedPath, externalApprovalGranted: false };
         }
       }
-      if (!approved) throw new Error(`External ${label} access was not approved.`);
-
-      const granted = evaluateWorkspaceFilesystemAccess(this.workspace, candidate, operation, {
-        externalApprovalGranted: true,
-      });
-      if (granted.decision !== "allow") {
-        throw new Error(`Access denied for ${label} "${candidate}": ${granted.reason}`);
-      }
-      return this.resolvePath(inputPath, operation, true);
+      throw new Error(`External ${label} access was not approved.`);
     }
+    return {
+      path: preserveLexicalMacAlias(resolvedPath ?? inputPath, result.path),
+      externalApprovalGranted: result.externalApprovalGranted,
+    };
+  }
+
+  private async resolvePathsWithExternalApproval(
+    requests: Array<{
+      inputPath: string;
+      operation: "read" | "write" | "delete";
+      label: string;
+    }>,
+  ): Promise<ResolvedFilesystemPath[]> {
+    const access = await resolveWorkspaceFilesystemAccessesWithApproval(
+      this.workspace,
+      requests.map(({ inputPath, operation, label }) => ({
+        rawPath: inputPath,
+        operation,
+        label,
+      })),
+      createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "file_tools"),
+    );
+    return access.map((result, index) => {
+      if (result.decision !== "allow") {
+        const request = requests[index];
+        if (result.reason === "outside_workspace") {
+          throw new Error(`External ${request.label} access was not approved.`);
+        }
+        throw new Error(
+          `Access denied for ${request.label} "${request.inputPath}": ${result.reason}`,
+        );
+      }
+      return {
+        path: result.path,
+        externalApprovalGranted: result.externalApprovalGranted,
+      };
+    });
   }
 
   private normalizeWorkspaceBoundaryReadPath(
@@ -616,8 +674,11 @@ export class FileTools {
     absolutePath: string,
     operation: AccessFilesystemOperation,
     context: "target" | "parent",
+    externalApprovalGranted = false,
   ): void {
-    const result = evaluateWorkspaceFilesystemAccess(this.workspace, absolutePath, operation);
+    const result = evaluateWorkspaceFilesystemAccess(this.workspace, absolutePath, operation, {
+      externalApprovalGranted,
+    });
     if (result.decision !== "allow") {
       throw new Error(
         `Path resolves outside workspace boundary via symbolic link (${context}). ` +
@@ -710,17 +771,203 @@ export class FileTools {
   private async enforceSymlinkSafeAccess(
     absolutePath: string,
     operation: AccessFilesystemOperation,
+    externalApprovalGranted = false,
   ): Promise<void> {
     const realTarget = await this.realpathIfExists(absolutePath);
     if (realTarget) {
-      this.assertResolvedPathAllowed(realTarget, operation, "target");
+      this.assertResolvedPathAllowed(realTarget, operation, "target", externalApprovalGranted);
     }
 
     if (operation === "write" || operation === "delete") {
       const ancestor = await this.realpathNearestExistingAncestor(path.dirname(absolutePath));
       if (ancestor) {
-        this.assertResolvedPathAllowed(ancestor, operation, "parent");
+        this.assertResolvedPathAllowed(ancestor, operation, "parent", externalApprovalGranted);
       }
+    }
+  }
+
+  private async statIfExists(absolutePath: string): Promise<fsSync.Stats | null> {
+    try {
+      return await fs.stat(absolutePath);
+    } catch (error) {
+      if (this.isNotFoundError(error)) return null;
+      throw error;
+    }
+  }
+
+  private hasSameFilesystemIdentity(
+    expected: fsSync.Stats | null,
+    actual: fsSync.Stats | null,
+  ): boolean {
+    if (!expected || !actual) return expected === actual;
+    if (expected.dev === 0 || actual.dev === 0 || expected.ino === 0 || actual.ino === 0) {
+      return true;
+    }
+    return expected.dev === actual.dev && expected.ino === actual.ino;
+  }
+
+  private async bindMutationPath(
+    resolved: ResolvedFilesystemPath,
+    operation: AccessFilesystemOperation,
+  ): Promise<MutationPathBinding> {
+    const targetRealPath = await this.realpathIfExists(resolved.path);
+    if (targetRealPath) {
+      this.assertResolvedPathAllowed(
+        targetRealPath,
+        operation,
+        "target",
+        resolved.externalApprovalGranted,
+      );
+    }
+
+    const parentRealPath =
+      operation === "write" || operation === "delete"
+        ? await this.realpathNearestExistingAncestor(path.dirname(resolved.path))
+        : null;
+    if (parentRealPath) {
+      this.assertResolvedPathAllowed(
+        parentRealPath,
+        operation,
+        "parent",
+        resolved.externalApprovalGranted,
+      );
+    }
+
+    return {
+      ...resolved,
+      operation,
+      targetRealPath,
+      targetIdentity: targetRealPath ? await this.statIfExists(targetRealPath) : null,
+      parentRealPath,
+      parentIdentity: parentRealPath ? await this.statIfExists(parentRealPath) : null,
+    };
+  }
+
+  private async revalidateMutationPath(
+    binding: MutationPathBinding,
+    phase: string,
+    allowParentGrowth = false,
+  ): Promise<void> {
+    const currentTargetRealPath = await this.realpathIfExists(binding.path);
+    if (currentTargetRealPath !== binding.targetRealPath) {
+      throw new Error(`File target changed during ${phase}`);
+    }
+    if (currentTargetRealPath) {
+      this.assertResolvedPathAllowed(
+        currentTargetRealPath,
+        binding.operation,
+        "target",
+        binding.externalApprovalGranted,
+      );
+      if (
+        !this.hasSameFilesystemIdentity(
+          binding.targetIdentity,
+          await this.statIfExists(currentTargetRealPath),
+        )
+      ) {
+        throw new Error(`File target changed during ${phase}`);
+      }
+    }
+
+    if (binding.operation !== "write" && binding.operation !== "delete") return;
+    const currentParentRealPath = await this.realpathNearestExistingAncestor(
+      path.dirname(binding.path),
+    );
+    if (currentParentRealPath) {
+      this.assertResolvedPathAllowed(
+        currentParentRealPath,
+        binding.operation,
+        "parent",
+        binding.externalApprovalGranted,
+      );
+    }
+    const parentStable =
+      currentParentRealPath === binding.parentRealPath ||
+      (allowParentGrowth &&
+        !!binding.parentRealPath &&
+        !!currentParentRealPath &&
+        isAccessPathWithin(binding.parentRealPath, currentParentRealPath));
+    if (!parentStable) {
+      throw new Error(`File parent changed during ${phase}`);
+    }
+    if (currentParentRealPath && currentParentRealPath === binding.parentRealPath) {
+      if (
+        !this.hasSameFilesystemIdentity(
+          binding.parentIdentity,
+          await this.statIfExists(currentParentRealPath),
+        )
+      ) {
+        throw new Error(`File parent changed during ${phase}`);
+      }
+    }
+  }
+
+  private async writeBoundFile(
+    binding: MutationPathBinding,
+    content: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const noFollow = (fsSync.constants as Any).O_NOFOLLOW;
+    const targetPath = binding.targetRealPath || binding.path;
+    const flags =
+      fsSync.constants.O_WRONLY |
+      (binding.targetRealPath ? 0 : fsSync.constants.O_CREAT | fsSync.constants.O_EXCL) |
+      (typeof noFollow === "number" ? noFollow : 0);
+    const handle = await fs.open(targetPath, flags, 0o666);
+    try {
+      if (
+        binding.targetIdentity &&
+        !this.hasSameFilesystemIdentity(binding.targetIdentity, await handle.stat())
+      ) {
+        throw new Error("File target changed before writing");
+      }
+      await handle.truncate(0);
+      await handle.writeFile(content, { encoding: "utf-8", signal });
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async copyBoundFile(
+    source: MutationPathBinding,
+    destination: MutationPathBinding,
+  ): Promise<void> {
+    const noFollow = (fsSync.constants as Any).O_NOFOLLOW;
+    const sourcePath = source.targetRealPath || source.path;
+    const destinationPath = destination.targetRealPath || destination.path;
+    const noFollowFlag = typeof noFollow === "number" ? noFollow : 0;
+    const sourceHandle = await fs.open(sourcePath, fsSync.constants.O_RDONLY | noFollowFlag);
+    let destinationHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    try {
+      const sourceStats = await sourceHandle.stat();
+      if (
+        source.targetIdentity &&
+        !this.hasSameFilesystemIdentity(source.targetIdentity, sourceStats)
+      ) {
+        throw new Error("Source file changed before copying");
+      }
+      const destinationFlags =
+        fsSync.constants.O_WRONLY |
+        (destination.targetRealPath ? 0 : fsSync.constants.O_CREAT | fsSync.constants.O_EXCL) |
+        noFollowFlag;
+      destinationHandle = await fs.open(destinationPath, destinationFlags, 0o666);
+      if (
+        destination.targetIdentity &&
+        !this.hasSameFilesystemIdentity(destination.targetIdentity, await destinationHandle.stat())
+      ) {
+        throw new Error("Destination file changed before copying");
+      }
+      await destinationHandle.truncate(0);
+      const buffer = Buffer.allocUnsafe(1024 * 1024);
+      while (true) {
+        const { bytesRead } = await sourceHandle.read(buffer, 0, buffer.length, null);
+        if (bytesRead === 0) break;
+        await destinationHandle.write(buffer, 0, bytesRead, null);
+      }
+      await destinationHandle.chmod(sourceStats.mode & 0o666);
+    } finally {
+      await destinationHandle?.close();
+      await sourceHandle.close();
     }
   }
 
@@ -1314,15 +1561,22 @@ export class FileTools {
     }
 
     this.checkPermission("write");
-    const fullPath = await this.resolvePathWithExternalApproval(requestedPath, "write", "file");
+    const resolvedPath = await this.resolvePathWithExternalApproval(requestedPath, "write", "file");
+    const fullPath = resolvedPath.path;
     await this.runWriteFilePhase("enforce project access", requestedPath, options, () =>
       this.enforceProjectAccess(fullPath),
     );
     await this.runWriteFilePhase("enforce symlink safe access", requestedPath, options, () =>
-      this.enforceSymlinkSafeAccess(fullPath, "write"),
+      this.enforceSymlinkSafeAccess(fullPath, "write", resolvedPath.externalApprovalGranted),
     );
     await this.runWriteFilePhase("enforce package manifest safety", requestedPath, options, () =>
       this.enforceRootPackageFileSafety(fullPath, content),
+    );
+    const mutationPath = await this.runWriteFilePhase(
+      "bind mutation target",
+      requestedPath,
+      options,
+      () => this.bindMutationPath(resolvedPath, "write"),
     );
 
     // Check file size against guardrail limits
@@ -1336,15 +1590,17 @@ export class FileTools {
     }
 
     try {
-      await this.daemon.captureTaskMutationBaseline?.(this.taskId, fullPath);
+      await this.daemon.captureTaskMutationBaseline?.(this.taskId, mutationPath.path);
+      await this.revalidateMutationPath(mutationPath, "mutation baseline");
       // Ensure directory exists
       await this.runWriteFilePhase("create parent directory", requestedPath, options, () =>
-        fs.mkdir(path.dirname(fullPath), { recursive: true }),
+        fs.mkdir(path.dirname(mutationPath.path), { recursive: true }),
       );
+      await this.revalidateMutationPath(mutationPath, "parent directory creation", true);
 
       // Write file
       await this.runWriteFilePhase("write file contents", requestedPath, options, (signal) =>
-        fs.writeFile(fullPath, content, { encoding: "utf-8", signal }),
+        this.writeBoundFile(mutationPath, content, signal),
       );
 
       // Build content preview (full content up to 20KB cap)
@@ -1355,7 +1611,7 @@ export class FileTools {
       const previewTruncated = content.length > MAX_PREVIEW_CHARS;
       const ext = path.extname(requestedPath).toLowerCase().replace(".", "");
       const reportedPath =
-        getWorkspaceRelativePosixPath(this.workspace.path, fullPath) || requestedPath;
+        getWorkspaceRelativePosixPath(this.workspace.path, mutationPath.path) || requestedPath;
 
       // Log artifact
       this.daemon.logEvent(this.taskId, "file_created", {
@@ -1461,7 +1717,10 @@ export class FileTools {
   }
 
   private async enforceRootPackageFileSafety(fullPath: string, content: string): Promise<void> {
-    const workspaceRelativePath = getWorkspaceRelativePosixPath(this.workspace.path, fullPath);
+    const workspaceRelativePath = getWorkspaceRelativePosixPath(
+      canonicalizeAccessPath(this.workspace.path),
+      canonicalizeAccessPath(fullPath),
+    );
     if (workspaceRelativePath === "package.json") {
       await this.enforceRootPackageJsonSafety(fullPath, content);
     } else if (workspaceRelativePath === "package-lock.json") {
@@ -1746,22 +2005,34 @@ export class FileTools {
     // would let a write-only profile use rename as an implicit delete.
     this.checkPermission("delete");
     this.checkPermission("write");
-    const oldFullPath = await this.resolvePathWithExternalApproval(oldPath, "delete", "file");
-    const newFullPath = await this.resolvePathWithExternalApproval(newPath, "write", "file");
+    const [oldResolvedPath, newResolvedPath] = await this.resolvePathsWithExternalApproval([
+      { inputPath: oldPath, operation: "delete", label: "source file" },
+      { inputPath: newPath, operation: "write", label: "destination file" },
+    ]);
+    const oldFullPath = oldResolvedPath.path;
+    const newFullPath = newResolvedPath.path;
     await this.enforceProjectAccess(oldFullPath);
     await this.enforceProjectAccess(newFullPath);
-    await this.enforceSymlinkSafeAccess(oldFullPath, "delete");
-    await this.enforceSymlinkSafeAccess(newFullPath, "write");
+    const oldMutationPath = await this.bindMutationPath(oldResolvedPath, "delete");
+    const newMutationPath = await this.bindMutationPath(newResolvedPath, "write");
 
     try {
       await Promise.all([
-        this.daemon.captureTaskMutationBaseline?.(this.taskId, oldFullPath),
-        this.daemon.captureTaskMutationBaseline?.(this.taskId, newFullPath),
+        this.daemon.captureTaskMutationBaseline?.(this.taskId, oldMutationPath.path),
+        this.daemon.captureTaskMutationBaseline?.(this.taskId, newMutationPath.path),
+      ]);
+      await Promise.all([
+        this.revalidateMutationPath(oldMutationPath, "mutation baseline"),
+        this.revalidateMutationPath(newMutationPath, "mutation baseline"),
       ]);
       // Ensure target directory exists
-      await fs.mkdir(path.dirname(newFullPath), { recursive: true });
+      await fs.mkdir(path.dirname(newMutationPath.path), { recursive: true });
+      await Promise.all([
+        this.revalidateMutationPath(oldMutationPath, "parent directory creation"),
+        this.revalidateMutationPath(newMutationPath, "parent directory creation", true),
+      ]);
 
-      await fs.rename(oldFullPath, newFullPath);
+      await fs.rename(oldMutationPath.path, newMutationPath.path);
 
       this.daemon.logEvent(this.taskId, "file_modified", {
         action: "rename",
@@ -1798,24 +2069,32 @@ export class FileTools {
 
     this.checkPermission("read");
     this.checkPermission("write");
-    const sourceFullPath = await this.resolvePathWithExternalApproval(sourcePath, "read", "file");
-    const destFullPath = await this.resolvePathWithExternalApproval(
-      requestedDestPath,
-      "write",
-      "file",
-    );
+    const [sourceResolvedPath, destResolvedPath] = await this.resolvePathsWithExternalApproval([
+      { inputPath: sourcePath, operation: "read", label: "source file" },
+      { inputPath: requestedDestPath, operation: "write", label: "destination file" },
+    ]);
+    const sourceFullPath = sourceResolvedPath.path;
+    const destFullPath = destResolvedPath.path;
     await this.enforceProjectAccess(sourceFullPath);
     await this.enforceProjectAccess(destFullPath);
-    await this.enforceSymlinkSafeAccess(sourceFullPath, "read");
-    await this.enforceSymlinkSafeAccess(destFullPath, "write");
+    const sourceMutationPath = await this.bindMutationPath(sourceResolvedPath, "read");
+    const destMutationPath = await this.bindMutationPath(destResolvedPath, "write");
 
     try {
-      await this.daemon.captureTaskMutationBaseline?.(this.taskId, destFullPath);
+      await this.daemon.captureTaskMutationBaseline?.(this.taskId, destMutationPath.path);
+      await Promise.all([
+        this.revalidateMutationPath(sourceMutationPath, "mutation baseline"),
+        this.revalidateMutationPath(destMutationPath, "mutation baseline"),
+      ]);
       // Ensure target directory exists
-      await fs.mkdir(path.dirname(destFullPath), { recursive: true });
+      await fs.mkdir(path.dirname(destMutationPath.path), { recursive: true });
+      await Promise.all([
+        this.revalidateMutationPath(sourceMutationPath, "parent directory creation"),
+        this.revalidateMutationPath(destMutationPath, "parent directory creation", true),
+      ]);
 
       // Copy file using binary buffer (preserves exact content)
-      await fs.copyFile(sourceFullPath, destFullPath);
+      await this.copyBoundFile(sourceMutationPath, destMutationPath);
 
       this.daemon.logEvent(this.taskId, "file_created", {
         path: requestedDestPath,
@@ -1832,10 +2111,11 @@ export class FileTools {
   }
 
   /**
-   * Delete file (requires approval)
+   * Delete file (requires destructive-operation authorization)
    * Uses shell.trashItem() for protected locations like /Applications
    * Note: We don't check workspace.permissions.delete here because
-   * delete operations always require explicit user approval via requestApproval()
+   * destructive-operation policy remains explicit, while ordinary bounded
+   * writes/edit operations are authorized silently by the execution broker.
    */
   async deleteFile(relativePath: string): Promise<{ success: boolean; movedToTrash?: boolean }> {
     // Validate input
@@ -1843,31 +2123,37 @@ export class FileTools {
       throw new Error("Invalid path: path must be a non-empty string");
     }
 
-    const fullPath = await this.resolvePathWithExternalApproval(relativePath, "delete", "file");
+    const resolvedPath = await this.resolvePathWithExternalApproval(relativePath, "delete", "file");
+    const fullPath = resolvedPath.path;
     await this.enforceProjectAccess(fullPath);
-    await this.enforceSymlinkSafeAccess(fullPath, "delete");
+    const mutationPath = await this.bindMutationPath(resolvedPath, "delete");
 
-    // Request user approval
-    const approved = await this.daemon.requestApproval(
-      this.taskId,
-      "delete_file",
-      `Delete file: ${relativePath}`,
-      { path: relativePath },
-    );
+    // Destructive consent is still a distinct policy decision, but it goes
+    // through the same execution broker as every other tool action.  The
+    // broker can allow an already-authorized bounded delete without creating
+    // an approval lifecycle event.
+    const approved = await authorizeToolActionWithFallback(this.daemon, this.taskId, {
+      toolName: "delete_file",
+      approvalType: "delete_file",
+      description: `Delete file: ${relativePath}`,
+      details: { path: fullPath, requestedPath: relativePath, operation: "delete" },
+      allowAutoApprove: false,
+    });
 
     if (!approved) {
       throw new Error("User denied file deletion");
     }
 
     try {
-      await this.daemon.captureTaskMutationBaseline?.(this.taskId, fullPath);
+      await this.daemon.captureTaskMutationBaseline?.(this.taskId, mutationPath.path);
+      await this.revalidateMutationPath(mutationPath, "mutation baseline");
       // For .app bundles on macOS, use shell.trashItem directly (safer and expected behavior)
-      if (fullPath.endsWith(".app")) {
+      if (mutationPath.path.endsWith(".app")) {
         const shell = getElectronShell();
         if (shell?.trashItem) {
-          await shell.trashItem(fullPath);
+          await shell.trashItem(mutationPath.path);
         } else {
-          await fs.rm(fullPath, { recursive: true, force: true });
+          await fs.rm(mutationPath.path, { recursive: true, force: true });
         }
 
         this.daemon.logEvent(this.taskId, "file_deleted", {
@@ -1879,12 +2165,12 @@ export class FileTools {
       }
 
       // For other files/directories, try direct deletion
-      const stats = await fs.stat(fullPath);
+      const stats = await fs.stat(mutationPath.path);
       if (stats.isDirectory()) {
         // Use force: true to handle read-only files and special cases
-        await fs.rm(fullPath, { recursive: true, force: true });
+        await fs.rm(mutationPath.path, { recursive: true, force: true });
       } else {
-        await fs.unlink(fullPath);
+        await fs.unlink(mutationPath.path);
       }
 
       this.daemon.logEvent(this.taskId, "file_deleted", {
@@ -1907,7 +2193,7 @@ export class FileTools {
           if (!shell?.trashItem) {
             throw new Error("trashItem not available (Electron shell unavailable)");
           }
-          await shell.trashItem(fullPath);
+          await shell.trashItem(mutationPath.path);
 
           this.daemon.logEvent(this.taskId, "file_deleted", {
             path: relativePath,
@@ -1941,13 +2227,14 @@ export class FileTools {
     }
 
     this.checkPermission("write");
-    const fullPath = await this.resolvePathWithExternalApproval(
+    const resolvedPath = await this.resolvePathWithExternalApproval(
       requestedPath,
       "write",
       "directory",
     );
+    const fullPath = resolvedPath.path;
     await this.enforceProjectAccess(fullPath);
-    await this.enforceSymlinkSafeAccess(fullPath, "write");
+    await this.enforceSymlinkSafeAccess(fullPath, "write", resolvedPath.externalApprovalGranted);
 
     try {
       await fs.mkdir(fullPath, { recursive: true });

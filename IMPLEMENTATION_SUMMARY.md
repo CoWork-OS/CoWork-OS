@@ -107,15 +107,16 @@ A **fully functional macOS desktop application** for agentic task automation wit
 
 Multi-provider support with unified interface:
 
-| Provider | File | Features |
-|----------|------|----------|
-| Anthropic | `anthropic-provider.ts` | Claude models, native tool use |
-| Google Gemini | `gemini-provider.ts` | Gemini models, free tier available |
-| OpenRouter | `openrouter-provider.ts` | Multi-model access |
-| AWS Bedrock | `bedrock-provider.ts` | Enterprise AWS integration |
-| Ollama | `ollama-provider.ts` | Local models, free, offline |
+| Provider      | File                     | Features                           |
+| ------------- | ------------------------ | ---------------------------------- |
+| Anthropic     | `anthropic-provider.ts`  | Claude models, native tool use     |
+| Google Gemini | `gemini-provider.ts`     | Gemini models, free tier available |
+| OpenRouter    | `openrouter-provider.ts` | Multi-model access                 |
+| AWS Bedrock   | `bedrock-provider.ts`    | Enterprise AWS integration         |
+| Ollama        | `ollama-provider.ts`     | Local models, free, offline        |
 
 **Provider Factory** (`provider-factory.ts`):
+
 - Dynamic provider selection
 - Model listing per provider
 - Connection testing
@@ -127,15 +128,16 @@ Multi-provider support with unified interface:
 
 Web search with fallback support:
 
-| Provider | File | Capabilities |
-|----------|------|--------------|
-| DuckDuckGo | `duckduckgo-provider.ts` | Web (free, built-in, no API key) |
-| Tavily | `tavily-provider.ts` | Web, News (AI-optimized) |
-| Brave | `brave-provider.ts` | Web, News, Images |
-| SerpAPI | `serpapi-provider.ts` | Web, News, Images (Google results) |
-| Google | `google-provider.ts` | Web, Images |
+| Provider   | File                     | Capabilities                       |
+| ---------- | ------------------------ | ---------------------------------- |
+| DuckDuckGo | `duckduckgo-provider.ts` | Web (free, built-in, no API key)   |
+| Tavily     | `tavily-provider.ts`     | Web, News (AI-optimized)           |
+| Brave      | `brave-provider.ts`      | Web, News, Images                  |
+| SerpAPI    | `serpapi-provider.ts`    | Web, News, Images (Google results) |
+| Google     | `google-provider.ts`     | Web, Images                        |
 
 **Features**:
+
 - Primary + fallback provider configuration
 - DuckDuckGo as automatic last-resort fallback (no API key required)
 - Auto-detection of available providers
@@ -148,16 +150,19 @@ Web search with fallback support:
 Remote task execution via messaging platforms:
 
 #### Telegram (`channels/telegram.ts`)
+
 - Bot commands: `/workspaces`, `/workspace`, `/status`, `/cancel`
 - Streaming responses with Markdown formatting
 - Security modes: Pairing, Allowlist, Open
 
 #### Discord (`channels/discord.ts`)
+
 - Slash commands with auto-registration
 - DM and server channel support
 - Multi-user session management
 
 #### Slack (`channels/slack.ts`)
+
 - Socket Mode for real-time WebSocket connections
 - Direct messages and channel mentions
 - Markdown to Slack mrkdwn conversion
@@ -165,6 +170,7 @@ Remote task execution via messaging platforms:
 - Security modes: Pairing, Allowlist, Open
 
 **Gateway Features**:
+
 - Session management (`session.ts`)
 - Message routing (`router.ts`)
 - Security validation (`security.ts`)
@@ -176,11 +182,13 @@ Remote task execution via messaging platforms:
 Full Playwright integration:
 
 **Browser Service** (`browser-service.ts`):
+
 - Headless or visible browser
 - Page lifecycle management
 - Screenshot and PDF capture
 
 **Browser Tools** (`tools/browser-tools.ts`):
+
 - `browser_navigate` - Go to URL
 - `browser_screenshot` - Capture page
 - `browser_save_pdf` - Save as PDF
@@ -200,14 +208,15 @@ Full Playwright integration:
 
 Production-ready document creation:
 
-| Skill | File | Output | Library |
-|-------|------|--------|---------|
-| Spreadsheet | `spreadsheet.ts` | .xlsx | exceljs |
-| Document | `document.ts` | .docx, .pdf | docx, pdfkit |
-| Presentation | `presentation.ts` | .pptx | pptxgenjs |
-| Organizer | `organizer.ts` | Folders | Native |
+| Skill        | File              | Output      | Library      |
+| ------------ | ----------------- | ----------- | ------------ |
+| Spreadsheet  | `spreadsheet.ts`  | .xlsx       | exceljs      |
+| Document     | `document.ts`     | .docx, .pdf | docx, pdfkit |
+| Presentation | `presentation.ts` | .pptx       | pptxgenjs    |
+| Organizer    | `organizer.ts`    | Folders     | Native       |
 
 **Spreadsheet Features**:
+
 - Multiple sheets
 - Auto-fit columns
 - Cell formatting
@@ -215,6 +224,7 @@ Production-ready document creation:
 - Formula support
 
 **Document Features**:
+
 - Headings (H1-H6)
 - Paragraphs with formatting
 - Bullet/numbered lists
@@ -222,6 +232,7 @@ Production-ready document creation:
 - Code blocks
 
 **Presentation Features**:
+
 - Multiple layouts (Title, Content, Two-column)
 - Themes (Corporate, Creative, Minimal)
 - Speaker notes
@@ -232,6 +243,7 @@ Production-ready document creation:
 **Location**: `src/electron/database/`
 
 SQLite with 6 tables:
+
 - `workspaces` - Folder permissions and metadata
 - `tasks` - Task definitions and status
 - `task_events` - Complete audit trail
@@ -304,6 +316,7 @@ User-defined reusable workflows:
 Customizable agent personality and behavior:
 
 **Components**:
+
 - **PersonalityManager** - Centralized personality settings management
 - **PersonalitySettings** UI - React component for configuration
 - **Personality Tools** - Prompt-based personality control
@@ -332,17 +345,20 @@ Customizable agent personality and behavior:
 | noir | Noir Detective | 1940s detective style |
 
 **Response Style Options**:
+
 - `emoji_usage`: none, minimal, moderate, expressive
 - `response_length`: brief, standard, detailed, comprehensive
 - `code_comments`: none, minimal, moderate, extensive
 - `explanation_depth`: surface, standard, deep, exhaustive
 
 **Quirks**:
+
 - `catchphrase`: Custom phrase used occasionally
 - `sign_off`: Custom message to end conversations
 - `analogy_domain`: cooking, sports, space, music, nature, gaming, movies, construction
 
 **Prompt-Based Control Tools**:
+
 - `set_personality` - Change communication style
 - `set_persona` - Apply character overlay
 - `set_response_style` - Adjust response formatting
@@ -549,89 +565,94 @@ npm run type-check       # Check TypeScript types
 
 ### Completed
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Task management | Production | Full CRUD, real-time updates |
-| File operations | Production | 7 tools with permission checks |
-| Document creation | Production | Real Office formats (.xlsx, .docx, .pdf, .pptx) |
-| Multi-LLM support | Production | 5 providers |
-| Web search | Production | 4 providers with fallback |
-| Browser automation | Production | 12 Playwright tools |
-| Code tools | Production | glob, grep, edit_file |
-| Web fetch tools | Production | web_fetch, http_request |
-| Telegram bot | Production | Full integration |
-| Discord bot | Production | Slash commands + DMs |
-| Slack bot | Production | Socket Mode + DMs + mentions |
-| In-app Settings | Production | Secure storage |
-| Auto-updates | Production | GitHub releases |
-| Approval system | Production | User confirmation for destructive ops |
-| Goal Mode | Production | Success criteria with auto-retry |
-| Dynamic re-planning | Production | Agent revises plan mid-execution |
-| Configurable guardrails | Production | Token/cost budgets, blocked commands |
-| System tools | Production | Screenshots, clipboard, open apps |
-| Auto-approve commands | Production | Skip approval for trusted patterns |
-| Parallel task queue | Production | Run 1-10 tasks concurrently |
-| Quick Task FAB | Production | Floating action button |
-| Toast notifications | Production | Task completion alerts |
-| Custom Skills | Production | User-defined reusable workflows |
-| MCP Client | Production | Connect to external MCP servers |
-| MCP Host | Production | Expose tools as MCP server |
-| MCP Registry | Production | One-click server installation |
-| MCP SSE/WebSocket | Production | Web-based MCP transports |
-| In-app file viewer | Production | View artifacts without leaving app |
-| Personality System | Production | Customizable agent behavior, personas, response styles |
-| Citation Engine | Production | Auto-tracks web sources with deduplication and inline references |
-| Scratchpad Tools | Production | Session-scoped note-taking for agents during long tasks |
-| Workflow Pipeline | Production | Multi-phase task decomposition and sequential execution |
-| Deep Work Mode | Production | Extended execution with progress journaling |
-| Document Generation Tools | Production | PDF, PPTX, XLSX generation as agent tools |
-| Event Triggers | Production | Condition-based automation (cron, webhook, channel) |
-| File Hub | Production | Unified file aggregation across workspace, artifacts, cloud |
-| Web Access Server | Production | HTTP/WebSocket server for browser-based access |
-| Vision Tools (enhanced) | Production | Result caching, auto-downscaling, multi-provider fallback |
-| DuckDuckGo Search | Production | Free built-in web search, always available |
-| Discord MCP Connector | Production | 19-tool REST API connector for Discord bots |
-| OAuth Connectors | Production | Google Workspace, DocuSign, Outreach, Slack OAuth flows |
-| Financial Plugin Packs | Production | 5 packs: Equity Research, Financial Analysis, IB, PE, Wealth |
-| Scoped Temp Workspaces | Production | Scope-aware isolation (ui, gateway, hooks, tray) with lease protection |
-| Sandbox Profile Cleanup | Production | Periodic pruning of stale .sb files from temp directory |
-| Managed Cron Workspaces | Production | Deterministic paths under userData with per-run directories |
-| Cron Workspace Context | Production | Runtime workspace migration, template variables for run paths |
-| Idle Session Cleanup | Production | Gateway auto-prunes idle sessions older than 7 days |
-| Workspace Cascade Delete | Production | Transactional deletion of workspace + all related data |
+| Feature                   | Status     | Notes                                                                  |
+| ------------------------- | ---------- | ---------------------------------------------------------------------- |
+| Task management           | Production | Full CRUD, real-time updates                                           |
+| File operations           | Production | 7 tools with permission checks                                         |
+| Document creation         | Production | Real Office formats (.xlsx, .docx, .pdf, .pptx)                        |
+| Multi-LLM support         | Production | 5 providers                                                            |
+| Web search                | Production | 4 providers with fallback                                              |
+| Browser automation        | Production | 12 Playwright tools                                                    |
+| Code tools                | Production | glob, grep, edit_file                                                  |
+| Web fetch tools           | Production | web_fetch, http_request                                                |
+| Telegram bot              | Production | Full integration                                                       |
+| Discord bot               | Production | Slash commands + DMs                                                   |
+| Slack bot                 | Production | Socket Mode + DMs + mentions                                           |
+| In-app Settings           | Production | Secure storage                                                         |
+| Auto-updates              | Production | GitHub releases                                                        |
+| Approval system           | Production | User confirmation for destructive ops                                  |
+| Goal Mode                 | Production | Success criteria with auto-retry                                       |
+| Dynamic re-planning       | Production | Agent revises plan mid-execution                                       |
+| Configurable guardrails   | Production | Token/cost budgets, blocked commands                                   |
+| System tools              | Production | Screenshots, clipboard, open apps                                      |
+| Auto-approve commands     | Production | Skip approval for trusted patterns                                     |
+| Parallel task queue       | Production | Run 1-10 tasks concurrently                                            |
+| Quick Task FAB            | Production | Floating action button                                                 |
+| Toast notifications       | Production | Task completion alerts                                                 |
+| Custom Skills             | Production | User-defined reusable workflows                                        |
+| MCP Client                | Production | Connect to external MCP servers                                        |
+| MCP Host                  | Production | Expose tools as MCP server                                             |
+| MCP Registry              | Production | One-click server installation                                          |
+| MCP SSE/WebSocket         | Production | Web-based MCP transports                                               |
+| In-app file viewer        | Production | View artifacts without leaving app                                     |
+| Personality System        | Production | Customizable agent behavior, personas, response styles                 |
+| Citation Engine           | Production | Auto-tracks web sources with deduplication and inline references       |
+| Scratchpad Tools          | Production | Session-scoped note-taking for agents during long tasks                |
+| Workflow Pipeline         | Production | Multi-phase task decomposition and sequential execution                |
+| Deep Work Mode            | Production | Extended execution with progress journaling                            |
+| Document Generation Tools | Production | PDF, PPTX, XLSX generation as agent tools                              |
+| Event Triggers            | Production | Condition-based automation (cron, webhook, channel)                    |
+| File Hub                  | Production | Unified file aggregation across workspace, artifacts, cloud            |
+| Web Access Server         | Production | HTTP/WebSocket server for browser-based access                         |
+| Vision Tools (enhanced)   | Production | Result caching, auto-downscaling, multi-provider fallback              |
+| DuckDuckGo Search         | Production | Free built-in web search, always available                             |
+| Discord MCP Connector     | Production | 19-tool REST API connector for Discord bots                            |
+| OAuth Connectors          | Production | Google Workspace, DocuSign, Outreach, Slack OAuth flows                |
+| Financial Plugin Packs    | Production | 5 packs: Equity Research, Financial Analysis, IB, PE, Wealth           |
+| Scoped Temp Workspaces    | Production | Scope-aware isolation (ui, gateway, hooks, tray) with lease protection |
+| Sandbox Profile Cleanup   | Production | Periodic pruning of stale .sb files from temp directory                |
+| Managed Cron Workspaces   | Production | Deterministic paths under userData with per-run directories            |
+| Cron Workspace Context    | Production | Runtime workspace migration, template variables for run paths          |
+| Idle Session Cleanup      | Production | Gateway auto-prunes idle sessions older than 7 days                    |
+| Workspace Cascade Delete  | Production | Transactional deletion of workspace + all related data                 |
 
 ### Planned
 
-| Feature | Status | Complexity |
-|---------|--------|------------|
-| VM sandbox | Not started | High |
-| Sub-agent coordination | Not started | High |
-| Network egress controls | Not started | Medium |
+| Feature                 | Status      | Complexity |
+| ----------------------- | ----------- | ---------- |
+| VM sandbox              | Not started | High       |
+| Sub-agent coordination  | Not started | High       |
+| Network egress controls | Not started | Medium     |
 
 ## Technology Stack
 
 ### Frontend
+
 - React 19
 - TypeScript 5.7
 - Vite 7
 
 ### Backend
+
 - Electron 40
 - Node.js 20+
 - better-sqlite3
 
 ### Document Libraries
+
 - exceljs (Excel)
 - docx (Word)
 - pdfkit (PDF)
 - pptxgenjs (PowerPoint)
 
 ### AI/ML
+
 - @anthropic-ai/sdk
 - @google/generative-ai
 - @aws-sdk/client-bedrock-runtime
 
 ### Automation
+
 - Playwright (browser)
 - discord.js (Discord)
 - grammy (Telegram)
@@ -658,29 +679,29 @@ npm run type-check       # Check TypeScript types
 
 ## Comparison to Original Cowork Concept
 
-| Feature | Target | Current | Status |
-|---------|--------|---------|--------|
-| Task-based UI | Yes | Yes | Complete |
-| Multi-step execution | Yes | Yes | Complete |
-| File operations | Yes | Yes | Complete |
-| Approval system | Yes | Yes | Complete |
-| Real-time timeline | Yes | Yes | Complete |
-| Workspace isolation | Yes | Yes | Complete |
-| Document creation | Yes | Yes (real Office) | Complete |
-| Web search | Yes | Yes | Complete |
-| Browser automation | Yes | Yes | Complete |
-| Multi-provider LLM | Yes | Yes | Complete |
-| Remote channels | Yes | Yes (WhatsApp, Telegram, Discord, Slack) | Complete |
-| Goal Mode | Yes | Yes | Complete |
-| Dynamic re-planning | Yes | Yes | Complete |
-| System tools | Yes | Yes | Complete |
-| Configurable guardrails | Yes | Yes | Complete |
-| Custom Skills | Yes | Yes | Complete |
-| MCP connectors | Yes | Yes (Client, Host, Registry) | Complete |
-| Parallel task queue | Yes | Yes | Complete |
-| Personality System | Yes | Yes (6 personalities, 9 personas) | Complete |
-| VM sandbox | Yes | No | Planned |
-| Sub-agents | Yes | No | Planned |
+| Feature                 | Target | Current                                  | Status   |
+| ----------------------- | ------ | ---------------------------------------- | -------- |
+| Task-based UI           | Yes    | Yes                                      | Complete |
+| Multi-step execution    | Yes    | Yes                                      | Complete |
+| File operations         | Yes    | Yes                                      | Complete |
+| Approval system         | Yes    | Yes                                      | Complete |
+| Real-time timeline      | Yes    | Yes                                      | Complete |
+| Workspace isolation     | Yes    | Yes                                      | Complete |
+| Document creation       | Yes    | Yes (real Office)                        | Complete |
+| Web search              | Yes    | Yes                                      | Complete |
+| Browser automation      | Yes    | Yes                                      | Complete |
+| Multi-provider LLM      | Yes    | Yes                                      | Complete |
+| Remote channels         | Yes    | Yes (WhatsApp, Telegram, Discord, Slack) | Complete |
+| Goal Mode               | Yes    | Yes                                      | Complete |
+| Dynamic re-planning     | Yes    | Yes                                      | Complete |
+| System tools            | Yes    | Yes                                      | Complete |
+| Configurable guardrails | Yes    | Yes                                      | Complete |
+| Custom Skills           | Yes    | Yes                                      | Complete |
+| MCP connectors          | Yes    | Yes (Client, Host, Registry)             | Complete |
+| Parallel task queue     | Yes    | Yes                                      | Complete |
+| Personality System      | Yes    | Yes (6 personalities, 9 personas)        | Complete |
+| VM sandbox              | Yes    | No                                       | Planned  |
+| Sub-agents              | Yes    | No                                       | Planned  |
 
 **Overall Implementation**: ~95%
 

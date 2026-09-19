@@ -164,9 +164,7 @@ export function validateSkillManifest(skillPath, skill, options = {}) {
       const options = Array.isArray(param.options) ? param.options : [];
       const invalidOption = options.find((option) => typeof option !== "string");
       if (invalidOption !== undefined) {
-        errors.push(
-          `Parameter \"${param.name}\" has invalid select options; expected string[]`,
-        );
+        errors.push(`Parameter \"${param.name}\" has invalid select options; expected string[]`);
       }
     }
   }

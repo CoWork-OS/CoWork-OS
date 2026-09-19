@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { ThemeMode, AccentColor, VisualTheme, UiDensity, ACCENT_COLORS } from "../../shared/types";
+import {
+  ThemeMode,
+  AccentColor,
+  VisualTheme,
+  UiDensity,
+  CommandOutputStyle,
+  ACCENT_COLORS,
+} from "../../shared/types";
 import {
   SUPPORTED_LANGUAGES,
   LANGUAGE_NAMES,
@@ -18,6 +25,8 @@ interface AppearanceSettingsProps {
   onTransparencyEffectsEnabledChange: (enabled: boolean) => void;
   uiDensity: UiDensity;
   onUiDensityChange: (density: UiDensity) => void;
+  commandOutputStyle: CommandOutputStyle;
+  onCommandOutputStyleChange: (style: CommandOutputStyle) => void;
   devRunLoggingEnabled: boolean;
   onDevRunLoggingEnabledChange: (enabled: boolean) => void;
   homeResearchVaultEnabled: boolean;
@@ -39,6 +48,8 @@ export function AppearanceSettings({
   onTransparencyEffectsEnabledChange,
   uiDensity,
   onUiDensityChange,
+  commandOutputStyle,
+  onCommandOutputStyleChange,
   devRunLoggingEnabled,
   onDevRunLoggingEnabledChange,
   homeResearchVaultEnabled,
@@ -203,6 +214,62 @@ export function AppearanceSettings({
               <line x1="15" y1="3" x2="15" y2="21" />
             </svg>
             <span className="theme-option-label">Power</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Command Output Style */}
+      <div className="appearance-section">
+        <h4>Command output</h4>
+        <p className="settings-description">
+          How shell commands are shown inside steps. Terminal shows a full window with scrollback.
+          Minimal shows a single compact line with the output collapsed.
+        </p>
+        <div className="theme-switcher">
+          <button
+            className={`theme-option ${commandOutputStyle === "terminal" ? "selected" : ""}`}
+            onClick={() => onCommandOutputStyleChange("terminal")}
+          >
+            <svg
+              className="theme-option-icon"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <line x1="3" y1="8" x2="21" y2="8" />
+              <polyline points="7 12 9.5 14 7 16" />
+              <line x1="12" y1="16" x2="16" y2="16" />
+            </svg>
+            <span className="theme-option-label">Terminal</span>
+          </button>
+
+          <button
+            className={`theme-option ${commandOutputStyle === "minimal" ? "selected" : ""}`}
+            onClick={() => onCommandOutputStyleChange("minimal")}
+          >
+            <svg
+              className="theme-option-icon"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="5" cy="7" r="1.5" />
+              <line x1="9" y1="7" x2="20" y2="7" />
+              <line x1="9" y1="12" x2="18" y2="12" />
+              <line x1="9" y1="17" x2="14" y2="17" />
+            </svg>
+            <span className="theme-option-label">Minimal</span>
           </button>
         </div>
       </div>

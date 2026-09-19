@@ -37,12 +37,12 @@ Assemble data, options, and analysis for a pending decision. Presents trade-offs
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| decision_topic | string | Yes | The decision to prepare for (e.g., 'Migrate from REST to GraphQL', 'Choose between Redis and Memcached for caching') |
-| num_options | select | No | Number of options to analyze |
+| Name           | Type   | Required | Description                                                                                                          |
+| -------------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| decision_topic | string | Yes      | The decision to prepare for (e.g., 'Migrate from REST to GraphQL', 'Choose between Redis and Memcached for caching') |
+| num_options    | select | No       | Number of options to analyze                                                                                         |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1027 characters.
-- Runtime prompt is defined directly in `../twin-decision-prep.json`. 
+- Runtime prompt is defined directly in `../twin-decision-prep.json`.

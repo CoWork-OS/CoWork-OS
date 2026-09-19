@@ -5,13 +5,14 @@ You are an Android development specialist. Use the `run_command` tool to execute
 ## Jetpack Compose Patterns
 
 ### Screen with ViewModel
+
 ```kotlin
 @Composable
 fun ItemListScreen(
     viewModel: ItemViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("Items") }) },
         floatingActionButton = {
@@ -36,15 +37,16 @@ fun ItemListScreen(
 ```
 
 ### ViewModel with StateFlow
+
 ```kotlin
 @HiltViewModel
 class ItemViewModel @Inject constructor(
     private val repository: ItemRepository
 ) : ViewModel() {
-    
+
     private val _uiState = MutableStateFlow<UiState<List<Item>>>(UiState.Loading)
     val uiState: StateFlow<UiState<List<Item>>> = _uiState.asStateFlow()
-    
+
     init {
         viewModelScope.launch {
             repository.getItems()
@@ -64,6 +66,7 @@ sealed interface UiState<out T> {
 ## Data Layer
 
 ### Room Database
+
 ```kotlin
 @Entity(tableName = "items")
 data class ItemEntity(
@@ -77,13 +80,13 @@ data class ItemEntity(
 interface ItemDao {
     @Query("SELECT * FROM items ORDER BY createdAt DESC")
     fun getAll(): Flow<List<ItemEntity>>
-    
+
     @Query("SELECT * FROM items WHERE id = :id")
     suspend fun getById(id: Long): ItemEntity?
-    
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(item: ItemEntity): Long
-    
+
     @Delete
     suspend fun delete(item: ItemEntity)
 }
@@ -95,14 +98,15 @@ abstract class AppDatabase : RoomDatabase() {
 ```
 
 ### Retrofit API
+
 ```kotlin
 interface ApiService {
     @GET("items")
     suspend fun getItems(): List<ItemDto>
-    
+
     @POST("items")
     suspend fun createItem(@Body item: CreateItemRequest): ItemDto
-    
+
     @GET("items/{id}")
     suspend fun getItem(@Path("id") id: Long): ItemDto
 }
@@ -117,7 +121,7 @@ object NetworkModule {
         .baseUrl("https://api.example.com/")
         .addConverterFactory(GsonConverterFactory.create())
         .build()
-    
+
     @Provides
     @Singleton
     fun provideApiService(retrofit: Retrofit): ApiService =
@@ -126,6 +130,7 @@ object NetworkModule {
 ```
 
 ### Repository Pattern
+
 ```kotlin
 class ItemRepository @Inject constructor(
     private val api: ApiService,
@@ -134,7 +139,7 @@ class ItemRepository @Inject constructor(
     fun getItems(): Flow<List<Item>> = dao.getAll().map { entities ->
         entities.map { it.toDomain() }
     }
-    
+
     suspend fun refresh() {
         val remote = api.getItems()
         dao.insertAll(remote.map { it.toEntity() })
@@ -143,6 +148,7 @@ class ItemRepository @Inject constructor(
 ```
 
 ## Dependency Injection (Hilt)
+
 ```kotlin
 @HiltAndroidApp
 class MyApp : Application()
@@ -159,6 +165,7 @@ class MainActivity : ComponentActivity() {
 ```
 
 ## Navigation (Compose)
+
 ```kotlin
 @Composable
 fun AppNavigation() {
@@ -175,6 +182,7 @@ fun AppNavigation() {
 ```
 
 ## Firebase Integration
+
 ```kotlin
 // FCM Token
 FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
@@ -220,6 +228,7 @@ adb pull /sdcard/screenshot.png ./        # Pull file from device
 ```
 
 ## ProGuard / R8 (Release)
+
 ```proguard
 # Keep data classes for Gson
 -keep class com.example.app.data.model.** { *; }
@@ -232,6 +241,7 @@ adb pull /sdcard/screenshot.png ./        # Pull file from device
 ```
 
 ## Play Store Submission
+
 1. Generate signed AAB: `./gradlew bundleRelease`
 2. Upload to Play Console (internal -> closed -> open -> production track)
 3. Fill store listing (screenshots, description, categorization)
@@ -240,6 +250,7 @@ adb pull /sdcard/screenshot.png ./        # Pull file from device
 6. Submit for review
 
 ## Best Practices
+
 - Use Jetpack Compose for all new UI code
 - Follow single-activity architecture with Compose Navigation
 - Use Hilt for dependency injection

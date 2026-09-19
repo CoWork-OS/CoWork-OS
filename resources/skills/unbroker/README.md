@@ -61,22 +61,22 @@ hear from it twice: at intake, and with one digest of anything only a human can 
 
 The underlying CLI (run via CoWork shell/run_command, as `python3 scripts/pdd.py <cmd>`):
 
-| Command | Purpose |
-|---|---|
-| `pdd.py setup --auto` / `doctor` | Self-configure (most-autonomous valid config) and readiness check |
-| `pdd.py intake` | Create a consenting subject (captures aliases, multiple emails/phones, prior addresses) |
-| `pdd.py next` | The loop driver: ordered agent actions right now, the human digest, and the next wake time |
-| `pdd.py brokers` / `refresh-brokers` | List people-search brokers, or pull the latest BADBOOL list plus the CA registry |
-| `pdd.py registry` | State data-broker registry coverage (CA ~545 ingested; VT/OR/TX portals); `--search` to find one |
-| `pdd.py drop` | The CA DROP one-shot: delete from all registered brokers in a single request |
-| `pdd.py plan` | Per-broker tier, method, search vectors, and the exact fields to disclose |
-| `pdd.py fanout` | Batch brokers into parallel CoWork subagents when available |
-| `pdd.py record` | Update the ledger (validated state machine); auto-stamps recheck dates |
-| `pdd.py send-email` | Render and send an opt-out / CCPA / GDPR request (recipient locked to the broker's own address) |
-| `pdd.py poll-verification` / `verify-link` | Resolve email-verification links (IMAP poll, or browser-mode from pasted text) |
-| `pdd.py render-email` | Draft-only fallback (least-disclosure) |
-| `pdd.py due` / `tasks` | Recheck queue for cron, and the consolidated human-task digest |
-| `pdd.py status` / `report` | Per-subject status, plus optional Google Sheets rows |
+| Command                                    | Purpose                                                                                          |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `pdd.py setup --auto` / `doctor`           | Self-configure (most-autonomous valid config) and readiness check                                |
+| `pdd.py intake`                            | Create a consenting subject (captures aliases, multiple emails/phones, prior addresses)          |
+| `pdd.py next`                              | The loop driver: ordered agent actions right now, the human digest, and the next wake time       |
+| `pdd.py brokers` / `refresh-brokers`       | List people-search brokers, or pull the latest BADBOOL list plus the CA registry                 |
+| `pdd.py registry`                          | State data-broker registry coverage (CA ~545 ingested; VT/OR/TX portals); `--search` to find one |
+| `pdd.py drop`                              | The CA DROP one-shot: delete from all registered brokers in a single request                     |
+| `pdd.py plan`                              | Per-broker tier, method, search vectors, and the exact fields to disclose                        |
+| `pdd.py fanout`                            | Batch brokers into parallel CoWork subagents when available                                      |
+| `pdd.py record`                            | Update the ledger (validated state machine); auto-stamps recheck dates                           |
+| `pdd.py send-email`                        | Render and send an opt-out / CCPA / GDPR request (recipient locked to the broker's own address)  |
+| `pdd.py poll-verification` / `verify-link` | Resolve email-verification links (IMAP poll, or browser-mode from pasted text)                   |
+| `pdd.py render-email`                      | Draft-only fallback (least-disclosure)                                                           |
+| `pdd.py due` / `tasks`                     | Recheck queue for cron, and the consolidated human-task digest                                   |
+| `pdd.py status` / `report`                 | Per-subject status, plus optional Google Sheets rows                                             |
 
 ## How it works
 

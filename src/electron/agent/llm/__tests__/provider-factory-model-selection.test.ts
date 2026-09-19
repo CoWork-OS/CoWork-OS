@@ -136,13 +136,35 @@ describe("LLMProviderFactory model status", () => {
 
     const status = LLMProviderFactory.getConfigStatus();
 
-    expect(status.currentModel).toBe("gpt-5.5");
+    expect(status.currentModel).toBe("gpt-6-astra");
+    expect(status.models.map((model) => model.key)).toContain("gpt-6-astra");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.6-sol");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.6-terra");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.6-luna");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.5");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.4");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.3-codex-spark");
+  });
+
+  it("infers the ChatGPT route for legacy OAuth settings without authMethod", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "gpt-4o-mini",
+      openai: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        model: "gpt-4o-mini",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+    vi.spyOn(LLMProviderFactory, "getAvailableProviders").mockReturnValue([]);
+
+    const status = LLMProviderFactory.getConfigStatus();
+
+    expect(status.currentModel).toBe("gpt-6-astra");
+    expect(status.models.find((model) => model.key === "gpt-6-astra")).toMatchObject({
+      openaiAuthMethod: "oauth",
+    });
   });
 
   it("lists enabled MoA presets as provider models", () => {
@@ -259,8 +281,8 @@ describe("LLMProviderFactory model status", () => {
     });
 
     expect(resolved.modelSource).toBe("provider_default");
-    expect(resolved.modelKey).toBe("gpt-5.5");
-    expect(resolved.modelId).toBe("gpt-5.5");
+    expect(resolved.modelKey).toBe("gpt-6-astra");
+    expect(resolved.modelId).toBe("gpt-6-astra");
   });
 
   it("normalizes explicitly allowed stale OpenAI OAuth model overrides", () => {
@@ -289,10 +311,10 @@ describe("LLMProviderFactory model status", () => {
 
     expect(resolved.modelSource).toBe("explicit_override");
     expect(resolved.modelKey).toBe("gpt-4o-mini");
-    expect(resolved.modelId).toBe("gpt-5.5");
+    expect(resolved.modelId).toBe("gpt-6-astra");
   });
 
-  it.each(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])(
+  it.each(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])(
     "preserves the supported ChatGPT subscription model %s",
     (model) => {
       const settings: LLMSettings = {
@@ -999,4 +1021,19 @@ describe("LLMProviderFactory provider failover chain", () => {
       expect.arrayContaining([expect.objectContaining({ modelId: "minimax/minimax-m2.5:free" })]),
     );
   });
+});
+
+describe("OpenAI model access metadata", () => {
+  it.each(["oauth", "api_key"] as const)(
+    "preserves the %s route for picker labels",
+    (authMethod) => {
+      const status = LLMProviderFactory.getProviderModelStatus({
+        providerType: "openai",
+        openai: { authMethod, model: "gpt-5.6-luna" },
+      } as LLMSettings);
+      const model = status.models.find((model) => model.key === "gpt-5.6-luna");
+      expect(model).toMatchObject({ openaiAuthMethod: authMethod });
+      expect(model?.reasoningEfforts).not.toContain("ultra");
+    },
+  );
 });

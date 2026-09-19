@@ -6,7 +6,6 @@ import type {
   IntegrationMentionSelection,
 } from "../../../shared/types";
 import type { AccessProfileId } from "../../../shared/access-profiles";
-import type { InteractionModeSelection } from "../../../shared/interaction-mode";
 
 export type SettingsTab =
   | "appearance"
@@ -51,7 +50,6 @@ export interface CreateTaskOptions {
   multiLlmMode?: boolean;
   multiLlmConfig?: import("../../../shared/types").MultiLlmConfig;
   verificationAgent?: boolean;
-  interactionMode?: InteractionModeSelection;
   executionMode?: ExecutionMode;
   assignedAgentRoleId?: string;
   taskDomain?: TaskDomain;

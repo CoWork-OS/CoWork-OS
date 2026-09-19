@@ -37,11 +37,11 @@ Track and compare prices across e-commerce websites using stealth scraping.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| urls | string | Yes | Product URL(s) to track (comma-separated for multiple) |
+| Name | Type   | Required | Description                                            |
+| ---- | ------ | -------- | ------------------------------------------------------ |
+| urls | string | Yes      | Product URL(s) to track (comma-separated for multiple) |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 856 characters.
-- Runtime prompt is defined directly in `../price-tracker.json`. 
+- Runtime prompt is defined directly in `../price-tracker.json`.

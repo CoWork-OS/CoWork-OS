@@ -3,8 +3,24 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const CONTENT_DIRS = ["entities", "concepts", "projects", "comparisons", "queries", "maps", "_meta"];
-const REQUIRED_FRONTMATTER_FIELDS = ["title", "created", "updated", "type", "tags", "status", "sources"];
+const CONTENT_DIRS = [
+  "entities",
+  "concepts",
+  "projects",
+  "comparisons",
+  "queries",
+  "maps",
+  "_meta",
+];
+const REQUIRED_FRONTMATTER_FIELDS = [
+  "title",
+  "created",
+  "updated",
+  "type",
+  "tags",
+  "status",
+  "sources",
+];
 const WIKILINK_RE = /\[\[([^[\]\n]+)\]\]/g;
 
 function parseArgs(argv) {
@@ -59,12 +75,7 @@ function slugifyTarget(rawTarget) {
     .replace(/\.md$/i, "")
     .split("/")
     .filter(Boolean)
-    .map((segment) =>
-      segment
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, "-"),
-    )
+    .map((segment) => segment.trim().toLowerCase().replace(/\s+/g, "-"))
     .join("/");
 }
 
@@ -302,9 +313,7 @@ function buildReport(vaultPath) {
     .filter((page) => page.betweenness > 0)
     .sort(
       (a, b) =>
-        b.betweenness - a.betweenness ||
-        b.degree - a.degree ||
-        a.page.localeCompare(b.page),
+        b.betweenness - a.betweenness || b.degree - a.degree || a.page.localeCompare(b.page),
     )
     .slice(0, 5);
 
@@ -328,9 +337,7 @@ function buildReport(vaultPath) {
     })
     .sort(
       (a, b) =>
-        b.score - a.score ||
-        a.source.localeCompare(b.source) ||
-        a.target.localeCompare(b.target),
+        b.score - a.score || a.source.localeCompare(b.source) || a.target.localeCompare(b.target),
     );
 
   const surprisingConnections = [];
@@ -417,7 +424,9 @@ function buildReport(vaultPath) {
     });
   }
   for (const entry of orphans.slice(0, 2)) {
-    const page = pageBySlug.get(entry.replace(/\.md$/i, "").toLowerCase()) || pages.find((candidate) => candidate.relPath === entry);
+    const page =
+      pageBySlug.get(entry.replace(/\.md$/i, "").toLowerCase()) ||
+      pages.find((candidate) => candidate.relPath === entry);
     suggestedQuestions.push({
       type: "orphan_page",
       question: `How should [[${page ? getPageTitle(page) : path.basename(entry, ".md")}]] connect back into the vault?`,
@@ -501,8 +510,7 @@ function formatMarkdown(report) {
     missingFromIndex,
     ambiguousIndexLinks,
     frontmatterIssues,
-  } =
-    report;
+  } = report;
   lines.push(
     `**${stats.wikiPages} wiki pages, ${stats.rawSources} raw sources, ${stats.totalCrossReferences} cross-references, ${stats.uniqueLinkTargets} unique link targets**`,
   );
@@ -566,7 +574,9 @@ function formatMarkdown(report) {
   if (ambiguousLinks.length > 0) {
     lines.push("## Ambiguous Links");
     for (const entry of ambiguousLinks.slice(0, 20)) {
-      lines.push(`- ${entry.source} -> [[${entry.target}]] (candidates: ${entry.candidates.join(", ")})`);
+      lines.push(
+        `- ${entry.source} -> [[${entry.target}]] (candidates: ${entry.candidates.join(", ")})`,
+      );
     }
     lines.push("");
   }

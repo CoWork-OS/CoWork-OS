@@ -25,6 +25,9 @@ export interface AdaptiveOutputBudgetState {
   escalationAttempted: boolean;
   truncationClassification: OutputTruncationClassification | null;
   continuationAllowed: boolean;
+  localProfileId?: string;
+  localProfileVersion?: number;
+  localProfileTraceKey?: string;
   guidanceMessage?: string;
 }
 
@@ -99,6 +102,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
     taskMaxTokens: opts.getTaskMaxTokens(),
     requestKind,
     phase: "initial",
+    tools: availableTools,
   });
   const adaptiveMode = isAdaptiveOutputTokenPolicyEnabled();
   const hasTools = availableTools.length > 0;
@@ -187,6 +191,14 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
     capSource: initialBudget.capSource,
     contextLimit: initialBudget.contextLimit,
     knownHardCap: initialBudget.knownHardCap,
+    ...(initialBudget.localProfileId
+      ? {
+          localProfileId: initialBudget.localProfileId,
+          localProfileVersion: initialBudget.localProfileVersion,
+          localProfileTraceKey: initialBudget.localProfileTrace?.traceKey,
+          localRequestBudget: initialBudget.localRequestBudget,
+        }
+      : {}),
   });
 
   const firstAttempt = await issueRequest(initialBudget.transport.value, "");
@@ -210,6 +222,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
       taskMaxTokens: opts.getTaskMaxTokens(),
       requestKind,
       phase: "escalated",
+      tools: availableTools,
     });
     if (escalatedBudget.transport.value > initialBudget.transport.value) {
       escalationAttempted = true;
@@ -278,6 +291,13 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
       escalationAttempted,
       truncationClassification,
       continuationAllowed,
+      ...(initialBudget.localProfileId
+        ? {
+            localProfileId: initialBudget.localProfileId,
+            localProfileVersion: initialBudget.localProfileVersion,
+            localProfileTraceKey: initialBudget.localProfileTrace?.traceKey,
+          }
+        : {}),
       ...(guidanceMessage ? { guidanceMessage } : {}),
     },
   };

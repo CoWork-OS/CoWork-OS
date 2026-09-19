@@ -38,4 +38,4 @@ Manage Trello boards, lists, and cards via the Trello REST API.
 ## Runtime Prompt
 
 - Current runtime prompt length: 2392 characters.
-- Runtime prompt is defined directly in `../trello.json`. 
+- Runtime prompt is defined directly in `../trello.json`.

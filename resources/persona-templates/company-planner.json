@@ -19,11 +19,7 @@
     "staggerOffset": 6
   },
   "cognitiveOffload": {
-    "primaryCategories": [
-      "decision-preparation",
-      "dependency-tracking",
-      "routine-automation"
-    ],
+    "primaryCategories": ["decision-preparation", "dependency-tracking", "routine-automation"],
     "proactiveTasks": [
       {
         "id": "goal-to-work-audit",

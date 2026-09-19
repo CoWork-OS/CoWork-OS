@@ -45,23 +45,23 @@ Inbox Agent helps you move from "read everything" to "act on what matters":
 
 ## Core Surfaces
 
-| Surface | Current Behavior |
-|---------|------------------|
-| Classic mode | Three-pane mailbox with filters, thread list, detail pane, and Agent Rail. |
-| Today mode | Groups current threads into `Needs action`, `Happening today`, `Good to know`, and `More to browse`. |
-| Inbox pulse | Shows unread, needs-reply, suggested-action, and open-commitment counts. |
-| View filters | Switch between `Inbox`, `Sent`, and `All`. |
-| Category filters | Filter by priority, calendar, follow-up, promotions, updates, and saved views. |
-| Domain filters | Filter by domains such as travel, packages, receipts, bills, newsletters, shopping, work, and all domains. |
-| Sort controls | Toggle between `Recent` and `Priority`. |
-| Thread cards | Show sender, subject, snippet, account, message count, priority/cleanup chips, attachment chips, and stronger unread styling. |
-| Thread detail | Shows subject, participants, provider/account chips, AI summary, manual compose, editable AI draft, attachments, received/sent messages, and commitments. |
-| Agent Rail | Cleanup, follow-up, reply, forward, mark done, prep thread, extract todos, schedule, refresh intel, handoff, quick replies, snippets, automations, and quick actions. |
-| Ask Inbox | Right-sidebar chat for mailbox questions. Shows the question, live agentic steps, final answer, and matched email evidence with source labels. |
-| Sender cleanup | Ranks noisy senders by recent volume, cleanup candidates, read/action rate signals, and estimated weekly reduction. |
-| Client readiness | Shows provider backends, capabilities, folders, labels, identities, signatures, compose drafts, queued actions, failed actions, and sync health. |
-| Mission Control handoff | Turns a thread into a company issue with mailbox evidence and an operator wake-up. |
-| Research rail | Shows contact identity, linked channels, relationship timeline, recent subjects, and preferred channel hints. |
+| Surface                 | Current Behavior                                                                                                                                                      |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Classic mode            | Three-pane mailbox with filters, thread list, detail pane, and Agent Rail.                                                                                            |
+| Today mode              | Groups current threads into `Needs action`, `Happening today`, `Good to know`, and `More to browse`.                                                                  |
+| Inbox pulse             | Shows unread, needs-reply, suggested-action, and open-commitment counts.                                                                                              |
+| View filters            | Switch between `Inbox`, `Sent`, and `All`.                                                                                                                            |
+| Category filters        | Filter by priority, calendar, follow-up, promotions, updates, and saved views.                                                                                        |
+| Domain filters          | Filter by domains such as travel, packages, receipts, bills, newsletters, shopping, work, and all domains.                                                            |
+| Sort controls           | Toggle between `Recent` and `Priority`.                                                                                                                               |
+| Thread cards            | Show sender, subject, snippet, account, message count, priority/cleanup chips, attachment chips, and stronger unread styling.                                         |
+| Thread detail           | Shows subject, participants, provider/account chips, AI summary, manual compose, editable AI draft, attachments, received/sent messages, and commitments.             |
+| Agent Rail              | Cleanup, follow-up, reply, forward, mark done, prep thread, extract todos, schedule, refresh intel, handoff, quick replies, snippets, automations, and quick actions. |
+| Ask Inbox               | Right-sidebar chat for mailbox questions. Shows the question, live agentic steps, final answer, and matched email evidence with source labels.                        |
+| Sender cleanup          | Ranks noisy senders by recent volume, cleanup candidates, read/action rate signals, and estimated weekly reduction.                                                   |
+| Client readiness        | Shows provider backends, capabilities, folders, labels, identities, signatures, compose drafts, queued actions, failed actions, and sync health.                      |
+| Mission Control handoff | Turns a thread into a company issue with mailbox evidence and an operator wake-up.                                                                                    |
+| Research rail           | Shows contact identity, linked channels, relationship timeline, recent subjects, and preferred channel hints.                                                         |
 
 ## Normal Email Client Actions
 
@@ -177,11 +177,11 @@ Desktop behavior:
 
 ## Provider Support
 
-| Provider | Current Status |
-|----------|----------------|
-| Gmail | First-class sync, classification, attachment metadata, read/unread, archive/trash where modify scope is granted, Gmail API send for replies, Ask Inbox, and Gmail forwarding automations. |
-| IMAP/SMTP | Sync/read through IMAP and send through SMTP. Read/unread support depends on account connection and provider capability. Archive/trash/labels are more limited than Gmail. |
-| AgentMail | AgentMail sync and reply-all support for AgentMail threads. Manual forwarding is not yet available for AgentMail threads. |
+| Provider                  | Current Status                                                                                                                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gmail                     | First-class sync, classification, attachment metadata, read/unread, archive/trash where modify scope is granted, Gmail API send for replies, Ask Inbox, and Gmail forwarding automations.               |
+| IMAP/SMTP                 | Sync/read through IMAP and send through SMTP. Read/unread support depends on account connection and provider capability. Archive/trash/labels are more limited than Gmail.                              |
+| AgentMail                 | AgentMail sync and reply-all support for AgentMail threads. Manual forwarding is not yet available for AgentMail threads.                                                                               |
 | Outlook / Microsoft Graph | Represented in the provider model and capability surface. Dedicated Microsoft Graph mail execution is still planned; existing Outlook-style accounts currently use IMAP/SMTP fallback where configured. |
 
 ## Replacement Client Foundation

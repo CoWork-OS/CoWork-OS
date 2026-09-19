@@ -38,4 +38,4 @@ ElevenLabs text-to-speech with mac-style say UX.
 ## Runtime Prompt
 
 - Current runtime prompt length: 1761 characters.
-- Runtime prompt is defined directly in `../sag.json`. 
+- Runtime prompt is defined directly in `../sag.json`.

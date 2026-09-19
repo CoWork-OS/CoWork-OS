@@ -2,6 +2,10 @@
 
 Computer use lets the agent drive **native desktop applications** on macOS and Windows through real mouse, keyboard, and screen capture—when integrations, browser automation, and shell are not the right tool for the job.
 
+Actions run on the computer where CoWork OS is running, using that computer's
+local permissions. Computer use does not provision a separate hosted computer
+or virtual machine; cloud sandbox tools are a separate execution surface.
+
 This page is the **authoritative product guide** for the feature. For a short summary, see [Features → Computer use](features.md#computer-use).
 
 ## What it is for
@@ -44,9 +48,9 @@ its transport to bypass the local profile.
 
 Two system permissions gate computer use:
 
-| Permission | Why it matters |
-|------------|----------------|
-| **Accessibility** | AX-first focus, press, and value-setting require the helper to be trusted for accessibility control. |
+| Permission           | Why it matters                                                                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Accessibility**    | AX-first focus, press, and value-setting require the helper to be trusted for accessibility control.                                                               |
 | **Screen Recording** | Capturing the controlled window for `screenshot()` and follow-up action refreshes uses the helper’s ScreenCaptureKit path, which macOS treats as screen recording. |
 
 **Where to enable in the product**
@@ -82,16 +86,16 @@ The session is torn down when the task finishes or the session ends cleanly afte
 
 All of these are part of the **`computer_use` built-in tool family**. They are registered together and can be enabled or prioritized alongside other built-in categories in **Settings → Tools → Built-in tools**.
 
-| Tool | Role |
-|------|------|
-| `screenshot` | Select or refresh the current controlled window and return a fresh screenshot plus `captureId`. |
-| `click` / `double_click` | Click inside the current controlled window using screenshot-relative coordinates. |
-| `move_mouse` | Move the pointer without clicking. |
-| `drag` | Drag through a screenshot-relative path in the controlled window. |
-| `scroll` | Scroll at a screenshot-relative point in the controlled window. |
-| `type_text` | Type or set text into the currently focused control. |
-| `keypress` | Emit key chords or special keys; dangerous combinations are blocklisted at the tool layer. |
-| `wait` | Pause briefly, then refresh the controlled-window screenshot. |
+| Tool                     | Role                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `screenshot`             | Select or refresh the current controlled window and return a fresh screenshot plus `captureId`. |
+| `click` / `double_click` | Click inside the current controlled window using screenshot-relative coordinates.               |
+| `move_mouse`             | Move the pointer without clicking.                                                              |
+| `drag`                   | Drag through a screenshot-relative path in the controlled window.                               |
+| `scroll`                 | Scroll at a screenshot-relative point in the controlled window.                                 |
+| `type_text`              | Type or set text into the currently focused control.                                            |
+| `keypress`               | Emit key chords or special keys; dangerous combinations are blocklisted at the tool layer.      |
+| `wait`                   | Pause briefly, then refresh the controlled-window screenshot.                                   |
 
 Key contract details:
 
@@ -136,24 +140,24 @@ For how this fits the wider tool-risk model, see [Security guide → Computer us
 
 ## Troubleshooting
 
-| Symptom | Things to check |
-|---------|------------------|
-| Screenshot or capture errors / timeouts | macOS: Screen Recording for the helper path shown in settings; restart app after granting. Windows: target window visible, non-minimized, and not protected/elevated above CoWork. |
-| Clicks or keys do nothing | macOS: Accessibility trust for the helper path shown in settings. Windows: target app is not elevated/protected and no other app is stealing focus. |
-| Agent uses shell or browser instead of desktop | Task may not read as native GUI; rephrase with explicit app/window/dialog language, or ensure built-in `computer_use` is enabled. |
-| Agent asks for a screenshot when the task is really “what is this on screen?” | This may be a Chronicle case rather than a computer-use case; enable Chronicle and test `screen_context_resolve` with a clear on-screen prompt first. |
-| Permission bootstrap repeats | macOS: re-check that both Accessibility and Screen Recording are granted to the helper binary, not just to CoWork OS or Terminal. |
-| Session feels “stuck” | Use **Esc** to abort the computer-use session, then cancel or adjust the task. |
+| Symptom                                                                       | Things to check                                                                                                                                                                    |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Screenshot or capture errors / timeouts                                       | macOS: Screen Recording for the helper path shown in settings; restart app after granting. Windows: target window visible, non-minimized, and not protected/elevated above CoWork. |
+| Clicks or keys do nothing                                                     | macOS: Accessibility trust for the helper path shown in settings. Windows: target app is not elevated/protected and no other app is stealing focus.                                |
+| Agent uses shell or browser instead of desktop                                | Task may not read as native GUI; rephrase with explicit app/window/dialog language, or ensure built-in `computer_use` is enabled.                                                  |
+| Agent asks for a screenshot when the task is really “what is this on screen?” | This may be a Chronicle case rather than a computer-use case; enable Chronicle and test `screen_context_resolve` with a clear on-screen prompt first.                              |
+| Permission bootstrap repeats                                                  | macOS: re-check that both Accessibility and Screen Recording are granted to the helper binary, not just to CoWork OS or Terminal.                                                  |
+| Session feels “stuck”                                                         | Use **Esc** to abort the computer-use session, then cancel or adjust the task.                                                                                                     |
 
 ## Implementation map (for contributors)
 
-| Area | Location |
-|------|----------|
-| Tool definitions and execution | `src/electron/agent/tools/computer-use-tools.ts` |
-| Helper runtime + providers | `src/electron/computer-use/helper-runtime.ts`, `src/electron/computer-use/provider.ts`, `resources/computer-use/bridge.swift`, `resources/computer-use/bridge.ps1` |
-| Session lifecycle | `src/electron/computer-use/session-manager.ts`, `shortcut-guard.ts` |
-| Policy / routing | `src/electron/agent/tool-policy-engine.ts`, `src/electron/agent/executor.ts` |
-| Settings / IPC | `src/renderer/components/ComputerUseSettings.tsx`, IPC handlers |
+| Area                           | Location                                                                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tool definitions and execution | `src/electron/agent/tools/computer-use-tools.ts`                                                                                                                   |
+| Helper runtime + providers     | `src/electron/computer-use/helper-runtime.ts`, `src/electron/computer-use/provider.ts`, `resources/computer-use/bridge.swift`, `resources/computer-use/bridge.ps1` |
+| Session lifecycle              | `src/electron/computer-use/session-manager.ts`, `shortcut-guard.ts`                                                                                                |
+| Policy / routing               | `src/electron/agent/tool-policy-engine.ts`, `src/electron/agent/executor.ts`                                                                                       |
+| Settings / IPC                 | `src/renderer/components/ComputerUseSettings.tsx`, IPC handlers                                                                                                    |
 
 ---
 

@@ -26230,7 +26230,7 @@ a,
 .density-focused .cli-task-status-leading {
   position: absolute;
   top: 50%;
-  left: 4px;
+  left: 10px;
   width: 12px;
   height: 12px;
   margin: 0;

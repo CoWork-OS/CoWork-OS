@@ -4,58 +4,58 @@
 # Core areas
 electron:
   - changed-files:
-      - any-glob-to-any-file: 'src/electron/**/*'
+      - any-glob-to-any-file: "src/electron/**/*"
 
 renderer:
   - changed-files:
-      - any-glob-to-any-file: 'src/renderer/**/*'
+      - any-glob-to-any-file: "src/renderer/**/*"
 
 shared:
   - changed-files:
-      - any-glob-to-any-file: 'src/shared/**/*'
+      - any-glob-to-any-file: "src/shared/**/*"
 
 # Feature areas
 agent:
   - changed-files:
-      - any-glob-to-any-file: 'src/electron/agent/**/*'
+      - any-glob-to-any-file: "src/electron/agent/**/*"
 
 mcp:
   - changed-files:
-      - any-glob-to-any-file: 'src/electron/mcp/**/*'
+      - any-glob-to-any-file: "src/electron/mcp/**/*"
 
 database:
   - changed-files:
-      - any-glob-to-any-file: 'src/electron/database/**/*'
+      - any-glob-to-any-file: "src/electron/database/**/*"
 
 ui:
   - changed-files:
       - any-glob-to-any-file:
-          - 'src/renderer/components/**/*'
-          - 'src/renderer/styles/**/*'
+          - "src/renderer/components/**/*"
+          - "src/renderer/styles/**/*"
 
 # Maintenance
 documentation:
   - changed-files:
       - any-glob-to-any-file:
-          - '**/*.md'
-          - 'docs/**/*'
+          - "**/*.md"
+          - "docs/**/*"
 
 tests:
   - changed-files:
       - any-glob-to-any-file:
-          - 'tests/**/*'
-          - '**/*.test.ts'
-          - '**/*.spec.ts'
+          - "tests/**/*"
+          - "**/*.test.ts"
+          - "**/*.spec.ts"
 
 ci:
   - changed-files:
-      - any-glob-to-any-file: '.github/**/*'
+      - any-glob-to-any-file: ".github/**/*"
 
 build:
   - changed-files:
       - any-glob-to-any-file:
-          - 'package.json'
-          - 'package-lock.json'
-          - 'tsconfig*.json'
-          - 'vite.config.ts'
-          - 'build/**/*'
+          - "package.json"
+          - "package-lock.json"
+          - "tsconfig*.json"
+          - "vite.config.ts"
+          - "build/**/*"

@@ -1,4 +1,20 @@
 import {
+  getInteractionModeSelection,
+  isChatActionShortcut,
+  type InteractionModeSelection,
+} from "../../../shared/interaction-mode";
+import { InteractionModePicker } from "./InteractionModePicker";
+import {
+  BotProfileDialog,
+  BOT_PROFILE_DELETED_EVENT,
+  BOT_PROFILE_UPDATED_EVENT,
+} from "../BotProfileDialog";
+import { BotGlyph } from "../BotGlyph";
+import {
+  BOT_CONVERSATION_HISTORY_OPEN_EVENT,
+  getConversationActionLabels,
+} from "../../utils/bot-conversations";
+import {
   memo,
   useState,
   useEffect,
@@ -37,11 +53,7 @@ import {
   IntegrationMentionOption,
   IntegrationMentionSelection,
 } from "../../../shared/types";
-import {
-  getInteractionModeSelection,
-  isChatActionShortcut,
-  type InteractionModeSelection,
-} from "../../../shared/interaction-mode";
+import type { ComposerDraft, DraftAttachmentRef } from "../../../shared/composer-drafts";
 import type { ChatInlineFrame } from "../../../shared/mailbox";
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
@@ -109,11 +121,18 @@ import {
   resolveTaskOutputSummaryFromTask,
 } from "../../utils/task-outputs";
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
+import {
+  isSameComposerDraftSubmission,
+  isTaskCreationAccepted,
+} from "../../utils/composer-draft-fencing";
 import { shouldShowPersistentNeedsUserActionBanner } from "../../utils/task-completion-ux";
 import {
   filterAdjacentDuplicateTimelineFailures,
   filterResolvedApprovalNarration,
   filterVerboseTimelineNoise,
+  isDuplicateContextSummaryEvent,
+  isRedundantStageTransitionGroupEvent,
+  isResolvedContextCompactionStartEvent,
   shouldShowTaskEventInStepFeed,
   shouldShowTaskEventInSummaryMode,
 } from "../../utils/task-event-visibility";
@@ -148,6 +167,7 @@ import {
   Folder,
   GitFork,
   Globe,
+  History,
   Link as LinkIcon,
   Loader2,
   MessageCircle,
@@ -172,6 +192,7 @@ import { ReplayControlsBar } from "../ReplayControls";
 import { DebugSessionPanel } from "../DebugSessionPanel";
 import { TaskPauseBanner } from "../TaskPauseBanner";
 import { buildMarkdownComponents } from "../markdown-components";
+import { MarkdownRenderer } from "../MarkdownRenderer";
 import { useVirtualList } from "../../hooks/useVirtualList";
 import { formatDuration, useTaskDuration } from "../../hooks/useTaskDuration";
 import type { ReplayControls } from "../../hooks/useReplayMode";
@@ -257,7 +278,6 @@ import {
   summarizeQuotedAssistantMessage,
 } from "./message-ui";
 import { ModelDropdown } from "./ModelDropdown";
-import { InteractionModePicker } from "./InteractionModePicker";
 import { StructuredInputPromptCard } from "./StructuredInputPromptCard";
 import { LegalDemandIntakePromptCard, GenericLegalWorkflowPromptCard } from "./legal-prompt-cards";
 import {
@@ -274,6 +294,7 @@ import {
   isTurnThisIntoRoutinePrompt,
   taskCanBecomeRoutineFromFollowUp,
 } from "./TaskAutomationModal";
+import { BotConversationHistory } from "../BotConversationHistory";
 
 const VISUAL_ATTACHMENT_MIME_SET = new Set([
   "image/jpeg",
@@ -348,6 +369,7 @@ import {
   canStepEventOwnParallelChildren,
   renderEventTitle,
   renderEventDetails,
+  getAgentLifecycleRecapLine,
 } from "./timeline-event-rendering";
 
 type MentionOption = {
@@ -430,6 +452,11 @@ function getIntegrationMentionSearchRank(option: IntegrationMentionOption, query
 }
 import { replaceEmojisInChildren } from "../../utils/emoji-replacer";
 import { CommandOutput } from "../CommandOutput";
+import {
+  COMMAND_OUTPUT_STYLE_CHANGED_EVENT,
+  isCommandOutputStyle,
+  readCommandOutputStyle,
+} from "../../utils/command-output-style";
 import { CanvasPreview } from "../CanvasPreview";
 import { StepFeed } from "../timeline/StepFeed";
 import { ParallelGroupFeed } from "../timeline/ParallelGroupFeed";
@@ -448,6 +475,7 @@ import {
   type DisclosureScope,
 } from "../../utils/disclosure-state";
 import { useTaskDisclosureIntents } from "../../hooks/useTaskDisclosureIntents";
+import type { TaskSurfaceKey } from "../../state/task-view-cache";
 
 const MAX_COMMAND_OUTPUT_SESSION_CHARS = 50 * 1024;
 const MAX_COMMAND_OUTPUT_SESSIONS = 12;
@@ -481,18 +509,43 @@ interface MainContentProps {
   onSelectChildTask?: (taskId: string) => void;
   onOpenChildAgentSidebar?: (taskId: string) => void;
   onSelectTask?: (taskId: string | null) => void;
+  botConversations?: Task[];
+  isLoadingBotConversations?: boolean;
+  onSelectBotConversation?: (conversationId: string) => void | Promise<void>;
+  onNewBotConversation?: (botRoleId: string) => void | Promise<void>;
+  draftValue?: string;
+  draftRevision?: number;
+  onDraftValueChange?: (value: string) => ComposerDraft | void;
+  onDraftAccepted?: (revision: number) => void | boolean | Promise<void | boolean>;
+  draftSnapshot?: ComposerDraft | null;
+  onDraftPatch?: (
+    patch: Partial<Pick<ComposerDraft, "mentions" | "quotedAssistantMessage" | "attachments">>,
+  ) => ComposerDraft | void;
+  onStageDraftAttachment?: (attachment: {
+    name: string;
+    size: number;
+    mimeType?: string;
+    path?: string;
+    dataBase64?: string;
+  }) => Promise<DraftAttachmentRef | null>;
+  onResolveDraftAttachment?: (
+    refId: string,
+  ) => Promise<{ ref: DraftAttachmentRef; path: string } | null>;
+  onReleaseDraftAttachment?: (refId: string) => Promise<void>;
   onSendMessage: (
     message: string,
     images?: ImageAttachment[],
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
       interactionMode?: InteractionModeSelection;
+      deliveryMode?: "message" | "follow_up";
+      messageId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
     },
-  ) => void;
+  ) => void | boolean | Promise<void | boolean>;
   onOpenSideChat?: (request: {
     taskId: string;
     fromEventId?: string;
@@ -505,7 +558,7 @@ interface MainContentProps {
     prompt: string,
     options?: CreateTaskOptions,
     images?: ImageAttachment[],
-  ) => void | Promise<void>;
+  ) => void | boolean | Promise<void | boolean>;
   onAskInbox?: (query: string) => void;
   onChangeWorkspace?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
@@ -547,7 +600,7 @@ interface MainContentProps {
   hasMoreTimelineHistory?: boolean;
   isLoadingTimelineHistory?: boolean;
   timelineHistoryError?: string | null;
-  onLoadMoreTimelineHistory?: () => void | Promise<void>;
+  onLoadMoreTimelineHistory?: (options?: { loadAll?: boolean }) => void | Promise<void>;
   onLoadTaskEventDetail?: (eventId: string, taskId: string) => void | Promise<void>;
   onReleaseTaskEventDetail?: (eventId: string, taskId: string) => void;
   remoteSession?: { deviceId: string; deviceName: string } | null;
@@ -599,7 +652,7 @@ function getPreviousUserMessageText(events: TaskEvent[], beforeIndex: number): s
   return "";
 }
 
-function AgentReasoningPanel(props: {
+export function AgentReasoningPanel(props: {
   currentStep: { description: string } | null;
   state: AgentReasoningPanelState;
 }) {
@@ -663,11 +716,16 @@ function AgentReasoningPanel(props: {
         onScroll={handleScroll}
       >
         {hasStreamText ? (
-          <div className="agent-reasoning-stream-text">{state.activeStreamText}</div>
+          <div className="agent-reasoning-stream-text markdown-content">
+            <MarkdownRenderer withBreaks>{state.activeStreamText}</MarkdownRenderer>
+          </div>
         ) : (
           state.recentUpdates.map((message, index) => (
-            <div key={`${index}:${message.slice(0, 48)}`} className="agent-reasoning-update">
-              {message}
+            <div
+              key={`${index}:${message.slice(0, 48)}`}
+              className="agent-reasoning-update markdown-content"
+            >
+              <MarkdownRenderer withBreaks>{message}</MarkdownRenderer>
             </div>
           ))
         )}
@@ -871,13 +929,15 @@ const TaskConversationRenderedRows = memo(
     mainBodyRef,
     timelineRef,
     getRenderedFeedRow,
+    newActivityCount = 0,
+    onNewActivityCountChange,
   }: {
     taskId: string | undefined;
     taskSwitchId?: string | null;
     hasMoreTimelineHistory?: boolean;
     isLoadingTimelineHistory?: boolean;
     timelineHistoryError?: string | null;
-    onLoadMoreTimelineHistory?: () => void | Promise<void>;
+    onLoadMoreTimelineHistory?: (options?: { loadAll?: boolean }) => void | Promise<void>;
     rendererPerfLoggingEnabled: boolean;
     visibleFeedRows: TaskFeedRow[];
     isChatTask: boolean;
@@ -895,6 +955,8 @@ const TaskConversationRenderedRows = memo(
     mainBodyRef: React.RefObject<HTMLDivElement | null>;
     timelineRef: React.RefObject<HTMLDivElement | null>;
     getRenderedFeedRow: (row: TaskFeedRow) => React.ReactNode;
+    newActivityCount?: number;
+    onNewActivityCountChange?: React.Dispatch<React.SetStateAction<number>>;
   }) {
     recordRendererRender(
       "MainContent.taskConversationFlow",
@@ -913,22 +975,38 @@ const TaskConversationRenderedRows = memo(
       observedLoading: boolean;
     } | null>(null);
     const [suppressVirtualAutoScroll, setSuppressVirtualAutoScroll] = useState(false);
+    const previousFeedTaskIdRef = useRef(taskId);
+    const previousFeedRowCountRef = useRef(visibleFeedRows.length);
 
     const renderableFeedRows = useMemo(() => visibleFeedRows, [visibleFeedRows]);
-    const handleLoadMoreTimelineHistory = useCallback(() => {
-      const container = mainBodyRef.current;
-      if (container) {
-        historyPrependAnchorRef.current = {
-          taskId,
-          scrollTop: container.scrollTop,
-          scrollHeight: container.scrollHeight,
-          rowCount: renderableFeedRows.length,
-          observedLoading: false,
-        };
-      }
-      setSuppressVirtualAutoScroll(true);
-      void onLoadMoreTimelineHistory?.();
-    }, [mainBodyRef, onLoadMoreTimelineHistory, renderableFeedRows.length, taskId]);
+    const handleLoadMoreTimelineHistory = useCallback(
+      (options?: { loadAll?: boolean }) => {
+        // Live and delivery transcripts only render a slice of the feed, so loading
+        // older pages there would fetch steps the user still could not see. Expand to
+        // the full transcript first — it keeps the current verbose setting.
+        if (transcriptMode !== "inspect") onShowFullTimeline();
+        const container = mainBodyRef.current;
+        if (container) {
+          historyPrependAnchorRef.current = {
+            taskId,
+            scrollTop: container.scrollTop,
+            scrollHeight: container.scrollHeight,
+            rowCount: renderableFeedRows.length,
+            observedLoading: false,
+          };
+        }
+        setSuppressVirtualAutoScroll(true);
+        void onLoadMoreTimelineHistory?.(options);
+      },
+      [
+        mainBodyRef,
+        onLoadMoreTimelineHistory,
+        onShowFullTimeline,
+        renderableFeedRows.length,
+        taskId,
+        transcriptMode,
+      ],
+    );
     const startupRowsMarkedRef = useRef(false);
     const timelineRowsMarkedTaskIdsRef = useRef<Set<string>>(new Set());
     useEffect(() => {
@@ -1088,6 +1166,7 @@ const TaskConversationRenderedRows = memo(
       totalHeight: virtualFeedTotalHeight,
       visibleStartIndex,
       isAtBottom,
+      scrollToBottom,
     } = useVirtualList({
       items: renderableFeedRows,
       containerRef: mainBodyRef as React.RefObject<HTMLElement | null>,
@@ -1097,9 +1176,38 @@ const TaskConversationRenderedRows = memo(
       enabled: useVirtualizedFeed,
       scrollOffsetTop: conversationFlowOffsetTop,
       suppressAutoScrollOnItemsChange: suppressVirtualAutoScroll,
+      scrollAnchorKey: taskId ?? "new",
     });
     useEffect(() => {
+      if (previousFeedTaskIdRef.current !== taskId) {
+        previousFeedTaskIdRef.current = taskId;
+        previousFeedRowCountRef.current = renderableFeedRows.length;
+        onNewActivityCountChange?.(0);
+        return;
+      }
+      const added = Math.max(0, renderableFeedRows.length - previousFeedRowCountRef.current);
+      previousFeedRowCountRef.current = renderableFeedRows.length;
+      const loadingEarlierHistory = historyPrependAnchorRef.current?.observedLoading === true;
+      if (loadingEarlierHistory) return;
+      if (!useVirtualizedFeed || added === 0) {
+        if (isAtBottom) onNewActivityCountChange?.(0);
+        return;
+      }
+      if (isAtBottom) {
+        onNewActivityCountChange?.(0);
+      } else {
+        onNewActivityCountChange?.((count) => count + added);
+      }
+    }, [
+      isAtBottom,
+      onNewActivityCountChange,
+      renderableFeedRows.length,
+      taskId,
+      useVirtualizedFeed,
+    ]);
+    useEffect(() => {
       if (
+        transcriptMode !== "inspect" ||
         !useVirtualizedFeed ||
         !hasMoreTimelineHistory ||
         isLoadingTimelineHistory ||
@@ -1108,12 +1216,13 @@ const TaskConversationRenderedRows = memo(
       ) {
         return;
       }
-      handleLoadMoreTimelineHistory();
+      handleLoadMoreTimelineHistory({ loadAll: false });
     }, [
       handleLoadMoreTimelineHistory,
       hasMoreTimelineHistory,
       isAtBottom,
       isLoadingTimelineHistory,
+      transcriptMode,
       useVirtualizedFeed,
       visibleStartIndex,
     ]);
@@ -1134,9 +1243,9 @@ const TaskConversationRenderedRows = memo(
                       type="button"
                       className="action-block-show-all-btn"
                       disabled={row.isLoading}
-                      onClick={handleLoadMoreTimelineHistory}
+                      onClick={() => handleLoadMoreTimelineHistory({ loadAll: true })}
                     >
-                      {row.isLoading ? "Loading earlier history..." : "Load earlier history"}
+                      {row.isLoading ? "Loading earlier history..." : "Load all earlier history"}
                     </button>
                   ) : null}
                 </div>
@@ -1257,6 +1366,19 @@ const TaskConversationRenderedRows = memo(
           </div>
         )}
         {reasoningPanel}
+        {newActivityCount > 0 && (
+          <button
+            type="button"
+            className="activity-new-items timeline-new-activity"
+            onClick={() => {
+              onNewActivityCountChange?.(0);
+              scrollToBottom();
+            }}
+          >
+            {newActivityCount} new activit
+            {newActivityCount === 1 ? "y" : "ies"}
+          </button>
+        )}
         {showBootstrapProgress ? (
           <StepFeed
             title={
@@ -1314,6 +1436,8 @@ const TaskConversationRenderedRows = memo(
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.isChatTask === next.isChatTask &&
     prev.isTaskWorking === next.isTaskWorking &&
+    prev.newActivityCount === next.newActivityCount &&
+    prev.onNewActivityCountChange === next.onNewActivityCountChange &&
     prev.task?.status === next.task?.status &&
     prev.task?.createdAt === next.task?.createdAt &&
     prev.formatTime === next.formatTime &&
@@ -1366,6 +1490,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const handleStepFeedback = props.handleStepFeedback as (...args: any[]) => void;
   const isChatTask = props.isChatTask as boolean;
   const isTaskWorking = props.isTaskWorking as boolean;
+  const newActivityCount = props.newActivityCount as number;
+  const onNewActivityCountChange = props.onNewActivityCountChange as React.Dispatch<
+    React.SetStateAction<number>
+  >;
   const isReplayMode = props.isReplayMode as boolean;
   const defaultTranscriptMode = props.defaultTranscriptMode as TranscriptMode;
   const transcriptMode = props.transcriptMode as TranscriptMode;
@@ -1433,6 +1561,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const suppressedParallelEventIds = props.suppressedParallelEventIds as Set<string>;
   const task = props.task as Task;
   const isBotConversation = task?.agentConfig?.botConversation === true;
+  const botName = props.botName as string | undefined;
   const timelineItems = props.timelineItems as Array<any>;
   const timelineRef = props.timelineRef as React.RefObject<HTMLDivElement | null>;
   const toggleEventExpanded = props.toggleEventExpanded as (eventId: string) => void;
@@ -2206,6 +2335,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       showConnectorAbove={showConnectorAbove}
                       showConnectorBelow={showConnectorBelow}
                       lastStepLabel={lastStepLabel}
+                      startedAt={item.events[0]?.timestamp ?? item.timestamp}
                       replay={isReplayMode}
                     >
                       {(() => {
@@ -2354,6 +2484,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             agentContext,
                             { summaryMode: !verboseSteps },
                           );
+                          const eventRecapLine = getAgentLifecycleRecapLine(renderEvent);
                           const eventDetails = hasEventDetails(event)
                             ? renderEventDetails(event, voiceEnabled, markdownComponents, {
                                 workspacePath: workspace?.path,
@@ -2362,8 +2493,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 onOpenDocumentArtifact,
                                 onOpenPresentationArtifact,
                                 onOpenWebArtifact,
+                                onOpenAgent: onOpenChildAgentSidebar ?? onSelectChildTask,
                                 onQuoteAssistantMessage,
-                                onForkTaskSession: onForkTaskSessionFromEvent,
+                                onForkTaskSession: isBotConversation
+                                  ? undefined
+                                  : onForkTaskSessionFromEvent,
                                 isLastAssistantMessage: isLastAssistantMessageEvent(
                                   event,
                                   lastAssistantMessage,
@@ -2396,6 +2530,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 titleTooltip={
                                   typeof eventTitle === "string" ? eventTitle : undefined
                                 }
+                                subtitle={eventRecapLine}
+                                subtitleTooltip={eventRecapLine ?? undefined}
                                 timeLabel={formatTime(event.timestamp)}
                                 hideTime
                                 indicator={resolveTimelineIndicator(renderEvent, {
@@ -2524,7 +2660,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
 
               // Render user messages as chat bubbles on the right
               if (isUserMessage) {
+                const isAgentInboundMessage = event.payload?.messageSource === "agent";
                 if (
+                  !isAgentInboundMessage &&
                   shouldSuppressInitialPromptUserEvent({
                     event,
                     initialPromptEventId,
@@ -2537,6 +2675,33 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   }
                   return (
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
+                    </Fragment>
+                  );
+                }
+                if (isAgentInboundMessage) {
+                  const inboundMessage =
+                    typeof event.payload?.message === "string"
+                      ? normalizeInitialPromptText(event.payload.message)
+                      : "Agent message";
+                  const senderLabel =
+                    typeof event.payload?.senderLabel === "string" &&
+                    event.payload.senderLabel.trim().length > 0
+                      ? event.payload.senderLabel.trim()
+                      : "Parent agent";
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      <div className="agent-inbound-message">
+                        <div className="agent-inbound-message-label">
+                          Message from {senderLabel}
+                        </div>
+                        <div className="agent-inbound-message-body markdown-content">
+                          <UserMessageText
+                            text={inboundMessage}
+                            markdownComponents={markdownComponents}
+                          />
+                        </div>
+                      </div>
                       {renderCommandOutputs(commandOutputsAfterEvent)}
                     </Fragment>
                   );
@@ -2675,7 +2840,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       (value): value is string =>
                         typeof value === "string" && value.trim().length > 0,
                     )
-                    ?.trim() || task.title;
+                    ?.trim() ||
+                  botName ||
+                  "Bot";
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div className="chat-message assistant-message">
@@ -2697,26 +2864,25 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           />
                         </div>
                       </div>
-                      {!isBotConversation &&
-                        (inlineFrames.length > 0 || (isAssistantMessage && event.id)) && (
-                          <div className="chat-inline-frames">
-                            {inlineFrames.map((frame) => (
-                              <MailComposeFrame
-                                key={`${frame.kind}:${frame.draftId}`}
-                                frame={frame}
-                              />
-                            ))}
-                            {inlineFrames.length === 0 && isLastAssistant && !isTaskWorking && (
-                              <AutoMailComposeFrame
-                                eventId={event.id}
-                                taskId={event.taskId}
-                                assistantMessage={cleanedMessageText}
-                                sourceUserMessage={sourceUserMessage}
-                                allowCreate={true}
-                              />
-                            )}
-                          </div>
-                        )}
+                      {(inlineFrames.length > 0 || (isAssistantMessage && event.id)) && (
+                        <div className="chat-inline-frames">
+                          {inlineFrames.map((frame) => (
+                            <MailComposeFrame
+                              key={`${frame.kind}:${frame.draftId}`}
+                              frame={frame}
+                            />
+                          ))}
+                          {inlineFrames.length === 0 && isLastAssistant && !isTaskWorking && (
+                            <AutoMailComposeFrame
+                              eventId={event.id}
+                              taskId={event.taskId}
+                              assistantMessage={cleanedMessageText}
+                              sourceUserMessage={sourceUserMessage}
+                              allowCreate={true}
+                            />
+                          )}
+                        </div>
+                      )}
                       <div className="message-actions">
                         <MessageCopyButton text={messageText} />
                         <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
@@ -2725,9 +2891,12 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             onQuote={() => onQuoteAssistantMessage(quotedAssistantMessage)}
                           />
                         )}
-                        {event.id && onForkTaskSessionFromEvent && isLastAssistant && (
-                          <MessageForkButton onFork={() => onForkTaskSessionFromEvent(event)} />
-                        )}
+                        {event.id &&
+                          onForkTaskSessionFromEvent &&
+                          !isBotConversation &&
+                          isLastAssistant && (
+                            <MessageForkButton onFork={() => onForkTaskSessionFromEvent(event)} />
+                          )}
                         {isLastAssistant && event.id && !isTaskWorking && (
                           <>
                             <button
@@ -2951,6 +3120,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 agentContext,
                 { summaryMode: !verboseSteps },
               );
+              const eventRecapLine = getAgentLifecycleRecapLine(renderEvent2);
 
               return (
                 <Fragment key={event.id || `event-${item.eventIndex}`}>
@@ -2965,6 +3135,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       )
                     }
                     titleTooltip={typeof eventTitle === "string" ? eventTitle : undefined}
+                    subtitle={eventRecapLine}
+                    subtitleTooltip={eventRecapLine ?? undefined}
                     timeLabel={formatTime(event.timestamp)}
                     hideTime
                     indicator={resolveTimelineIndicator(renderEvent2, {
@@ -2986,6 +3158,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             onOpenDocumentArtifact,
                             onOpenPresentationArtifact,
                             onOpenWebArtifact,
+                            onOpenAgent: onOpenChildAgentSidebar ?? onSelectChildTask,
                             onQuoteAssistantMessage,
                             isLastAssistantMessage: isLastAssistantMessageEvent(
                               event,
@@ -3059,6 +3232,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 mainBodyRef={mainBodyRef}
                 timelineRef={timelineRef}
                 getRenderedFeedRow={getRenderedFeedRow}
+                newActivityCount={newActivityCount}
+                onNewActivityCountChange={onNewActivityCountChange}
               />
             );
           })()}
@@ -3086,6 +3261,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       isLoadingTimelineHistory,
       timelineHistoryError,
       isBotConversation,
+      botName,
       isChatTask,
       isTaskWorking,
       isReplayMode,
@@ -3147,6 +3323,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.isLoadingTimelineHistory === next.isLoadingTimelineHistory &&
     prev.timelineHistoryError === next.timelineHistoryError &&
     prev.onLoadMoreTimelineHistory === next.onLoadMoreTimelineHistory &&
+    prev.botName === next.botName &&
     prev.agentContext === next.agentContext &&
     prev.activityGroupsById === next.activityGroupsById &&
     prev.childEvents === next.childEvents &&
@@ -3342,6 +3519,19 @@ function MainContentComponent({
   onSelectChildTask,
   onOpenChildAgentSidebar,
   onSelectTask,
+  botConversations = [],
+  isLoadingBotConversations = false,
+  onSelectBotConversation,
+  onNewBotConversation,
+  draftValue,
+  draftRevision = 0,
+  onDraftValueChange,
+  onDraftAccepted,
+  draftSnapshot = null,
+  onDraftPatch,
+  onStageDraftAttachment,
+  onResolveDraftAttachment,
+  onReleaseDraftAttachment,
   onSendMessage,
   onOpenSideChat,
   onStartOnboarding,
@@ -3437,6 +3627,10 @@ function MainContentComponent({
       }),
     [isReplayMode, rawEvents, sharedTaskEventUi, task, workspace],
   );
+  const [newActivityCount, setNewActivityCount] = useState(0);
+  useEffect(() => {
+    setNewActivityCount(0);
+  }, [task?.id]);
   const taskStatusStripEnabled = useMemo(
     () => localStorage.getItem("task-status-strip-enabled") !== "false",
     [],
@@ -3453,6 +3647,15 @@ function MainContentComponent({
       normalizeEventsForTimelineUi(rawEvents),
     );
   }, [rawEvents, rendererPerfLoggingEnabled, effectiveSharedTaskEventUi]);
+  const taskStatusStripModel = useMemo(
+    () => ({
+      ...statusTaskEventUi.taskStatusStrip,
+      newActivityCount,
+      hasUnreadActivity: newActivityCount > 0,
+      latestActivityId: events.at(-1)?.id,
+    }),
+    [events, newActivityCount, statusTaskEventUi.taskStatusStrip],
+  );
   const childEvents = useMemo(
     () =>
       measureRendererPerf("MainContent.normalizeChildEvents", rendererPerfLoggingEnabled, () =>
@@ -3464,6 +3667,7 @@ function MainContentComponent({
   // Agent personality context for personalized messages
   const agentContext = useAgentContext();
   const [inputValue, setInputValue] = useState("");
+  const inputValueRef = useRef("");
   const [activeWelcomeSuggestionDraft, setActiveWelcomeSuggestionDraft] =
     useState<ActiveWelcomeSuggestionDraft | null>(null);
   const [quotedAssistantMessage, setQuotedAssistantMessage] =
@@ -3489,6 +3693,11 @@ function MainContentComponent({
   const [slashTarget, setSlashTarget] = useState<{ start: number; end: number } | null>(null);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const [showTaskHeaderMenu, setShowTaskHeaderMenu] = useState(false);
+  const [showBotAdvanced, setShowBotAdvanced] = useState(false);
+  const [showBotHistory, setShowBotHistory] = useState(false);
+  const [showBotProfile, setShowBotProfile] = useState(false);
+  const [botRole, setBotRole] = useState<AgentRoleData | null>(null);
+  const [headerActionError, setHeaderActionError] = useState<string | null>(null);
   const [showTaskAutomationModal, setShowTaskAutomationModal] = useState(false);
   const [routineCreationNotice, setRoutineCreationNotice] = useState<{
     taskId: string;
@@ -3498,18 +3707,64 @@ function MainContentComponent({
   } | null>(null);
   const taskHeaderMenuRef = useRef<HTMLDivElement>(null);
   const taskHeaderMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const previousTaskIdRef = useRef<string | undefined>(task?.id);
+  const stagingAttachmentIdsRef = useRef<Set<string>>(new Set());
+  const pendingAttachmentIdsRef = useRef<Set<string>>(new Set());
+  const lastDraftAttachmentSyncRef = useRef("");
+  const previousTaskIdRef = useRef<string | undefined>(undefined);
+  const previousDraftKeyRef = useRef<string | undefined>(undefined);
+  const draftRevisionRef = useRef(draftRevision);
+  const draftKeyRef = useRef<string | undefined>(draftSnapshot?.draftKey);
+  const renderedDraftKey = draftSnapshot?.draftKey;
+  if (draftKeyRef.current !== renderedDraftKey) {
+    // A key change is an owner transition, so reset the revision fence for
+    // the newly rendered task/draft. Within one key, revisions are monotonic;
+    // keep a synchronous input mutation from being overwritten by a stale
+    // parent render.
+    draftKeyRef.current = renderedDraftKey;
+    draftRevisionRef.current = draftRevision;
+  } else {
+    draftRevisionRef.current = Math.max(draftRevisionRef.current, draftRevision);
+  }
+
+  const recordDraftMutation = useCallback((draft: ComposerDraft | void): void => {
+    if (!draft) return;
+    // Draft-store updates are synchronous, while the parent props update on
+    // the next React render. Keep submission fencing aligned with the exact
+    // revision produced by the keystroke that may immediately precede Enter.
+    draftRevisionRef.current = draft.revision;
+    draftKeyRef.current = draft.draftKey;
+  }, []);
+
+  useEffect(() => {
+    inputValueRef.current = inputValue;
+  }, [inputValue]);
+  pendingAttachmentIdsRef.current = new Set(pendingAttachments.map((attachment) => attachment.id));
 
   // A composer draft belongs to the task it was written for. When the user
   // presses New (or opens another history row), MainContent is retained and
   // only its task prop changes; without clearing this state the previous
   // prompt remains visible in the fresh composer.
   useEffect(() => {
-    if (previousTaskIdRef.current !== task?.id) {
-      setInputValue("");
-      setPendingAttachments([]);
-      setIntegrationMentionSpans([]);
+    const draftKey = draftSnapshot?.draftKey;
+    const taskChanged = previousTaskIdRef.current !== task?.id;
+    const draftChanged = previousDraftKeyRef.current !== draftKey;
+    const restoredAttachments = (draftSnapshot?.attachments ?? []).map((attachment) => ({
+      id: attachment.refId,
+      draftRefId: attachment.refId,
+      draftSha256: attachment.sha256,
+      name: attachment.name,
+      size: attachment.size,
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      status: "unavailable" as const,
+    }));
+
+    if (taskChanged || draftChanged) {
+      setInputValue(draftValue ?? "");
+      setPendingAttachments(restoredAttachments);
+      setIntegrationMentionSpans((draftSnapshot?.mentions ?? []) as IntegrationMentionSpan[]);
+      setQuotedAssistantMessage(draftSnapshot?.quotedAssistantMessage ?? null);
       setAttachmentError(null);
+      setShowBotHistory(false);
       setMentionOpen(false);
       setMentionQuery("");
       setMentionTarget(null);
@@ -3517,9 +3772,73 @@ function MainContentComponent({
       setSlashQuery("");
       setSlashTarget(null);
       setModeSuggestions([]);
+      if (restoredAttachments.length > 0 && onResolveDraftAttachment && draftSnapshot?.draftKey) {
+        const draftKeyAtRestore = draftSnapshot.draftKey;
+        const draftRevisionAtRestore = draftRevision;
+        void Promise.all(
+          restoredAttachments.map(async (attachment) => ({
+            attachment,
+            resolved: await onResolveDraftAttachment(attachment.draftRefId as string),
+          })),
+        ).then((resolvedAttachments) => {
+          if (
+            draftSnapshot?.draftKey !== draftKeyAtRestore ||
+            draftRevisionRef.current !== draftRevisionAtRestore
+          ) {
+            return;
+          }
+          const unavailableRefs = new Set<string>();
+          setPendingAttachments((current) =>
+            current.map((candidate) => {
+              const result = resolvedAttachments.find(
+                (entry) => entry.attachment.id === candidate.id,
+              )?.resolved;
+              if (!result) {
+                if (candidate.draftRefId) unavailableRefs.add(candidate.draftRefId);
+                return { ...candidate, status: "unavailable" as const };
+              }
+              return {
+                ...candidate,
+                path: result.path,
+                size: result.ref.size,
+                ...(result.ref.mimeType ? { mimeType: result.ref.mimeType } : {}),
+                status: "available" as const,
+              };
+            }),
+          );
+          if (unavailableRefs.size > 0) {
+            onDraftPatch?.({
+              attachments: (draftSnapshot.attachments ?? []).map((attachment) =>
+                unavailableRefs.has(attachment.refId)
+                  ? { ...attachment, status: "unavailable" as const }
+                  : attachment,
+              ),
+            });
+          } else {
+            onDraftPatch?.({
+              attachments: (draftSnapshot.attachments ?? []).map((attachment) => ({
+                ...attachment,
+                status: "available" as const,
+              })),
+            });
+          }
+        });
+      } else if (restoredAttachments.length > 0) {
+        onDraftPatch?.({
+          attachments: (draftSnapshot?.attachments ?? []).map((attachment) => ({
+            ...attachment,
+            status: "unavailable" as const,
+          })),
+        });
+      }
+    } else if (draftValue !== undefined && draftValue !== inputValueRef.current) {
+      // Draft hydration is asynchronous. Restore it only when the composer
+      // has not diverged locally, so a late response cannot overwrite typing.
+      setInputValue(draftValue);
     }
     previousTaskIdRef.current = task?.id;
-  }, [task?.id]);
+    previousDraftKeyRef.current = draftKey;
+  }, [draftRevision, draftSnapshot, draftValue, onDraftPatch, onResolveDraftAttachment, task?.id]);
 
   // Focused mode card pool - pick random cards on mount
   const focusedCards = useMemo(() => pickFocusedCards(FOCUSED_CARD_POOL, CARDS_TO_SHOW), []);
@@ -3531,9 +3850,11 @@ function MainContentComponent({
   const placeholderRequestIdRef = useRef(0);
 
   useEffect(() => {
-    setQuotedAssistantMessage(null);
     setShowTaskHeaderMenu(false);
     setShowTaskAutomationModal(false);
+    setShowBotProfile(false);
+    setShowBotAdvanced(false);
+    setHeaderActionError(null);
     setRoutineCreationNotice(null);
   }, [task?.id]);
 
@@ -3689,6 +4010,9 @@ function MainContentComponent({
   const [chronicleEnabledForTask, setChronicleEnabledForTask] = useState(true);
   const [modeDrafts, setModeDrafts] = useState<Record<string, InteractionModeSelection>>({});
   const modeDraftKey = selectedTaskId ?? "new";
+  const activeModeDraftKeyRef = useRef(modeDraftKey);
+  const modeSubmissionRevisionRef = useRef(0);
+  activeModeDraftKeyRef.current = modeDraftKey;
   const selectedInteractionMode =
     modeDrafts[modeDraftKey] ??
     getInteractionModeSelection(task?.agentConfig) ??
@@ -3715,9 +4039,8 @@ function MainContentComponent({
       if (
         !previous[modeDraftKey] ||
         JSON.stringify(previous[modeDraftKey]) !== JSON.stringify(accepted)
-      ) {
+      )
         return previous;
-      }
       const next = { ...previous };
       delete next[modeDraftKey];
       return next;
@@ -3841,6 +4164,39 @@ function MainContentComponent({
     (isChatExecutionTask(task?.agentConfig?.executionMode) &&
       task?.agentConfig?.executionModeSource === "user");
   const isBotConversation = task?.agentConfig?.botConversation === true;
+  const botName = botRole && botRole.id === task?.assignedAgentRoleId ? botRole.displayName : "Bot";
+  const actionLabels = getConversationActionLabels(isBotConversation);
+  const menuLabel = isBotConversation ? "Bot options" : actionLabels.menu;
+  useEffect(() => {
+    const openHistory = () => {
+      if (isBotConversation) setShowBotHistory(true);
+    };
+    window.addEventListener(BOT_CONVERSATION_HISTORY_OPEN_EVENT, openHistory);
+    return () => window.removeEventListener(BOT_CONVERSATION_HISTORY_OPEN_EVENT, openHistory);
+  }, [isBotConversation]);
+  useEffect(() => {
+    const roleId = task?.assignedAgentRoleId;
+    setBotRole(null);
+    if (!isBotConversation || !roleId || remoteSession) return;
+    let cancelled = false;
+    const refresh = () => {
+      void window.electronAPI
+        .getAgentRole(roleId)
+        .then((role) => {
+          if (!cancelled) setBotRole(role || null);
+        })
+        .catch((error) => console.error("Failed to load conversation bot:", error));
+    };
+    refresh();
+    window.addEventListener(BOT_PROFILE_UPDATED_EVENT, refresh);
+    window.addEventListener(BOT_PROFILE_DELETED_EVENT, refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(BOT_PROFILE_UPDATED_EVENT, refresh);
+      window.removeEventListener(BOT_PROFILE_DELETED_EVENT, refresh);
+    };
+  }, [isBotConversation, task?.assignedAgentRoleId, remoteSession]);
+
   const setAutonomousModeSelection = useCallback((enabled: boolean) => {
     setAutonomousModeEnabled(enabled);
     if (enabled) {
@@ -3869,11 +4225,21 @@ function MainContentComponent({
   // Collaborative team run detection for current task
   const [collaborativeRun, setCollaborativeRun] = useState<AgentTeamRun | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const disclosureSurfaceKey = useMemo<TaskSurfaceKey>(
+    () => ({
+      scope: remoteSession ? "remote" : "local",
+      workspaceId: task?.workspaceId || workspace?.id || "unscoped-workspace",
+      taskId: task?.id || "new",
+      ...(remoteSession?.deviceId ? { deviceId: remoteSession.deviceId } : {}),
+      surface: "main",
+    }),
+    [remoteSession?.deviceId, task?.id, task?.workspaceId, workspace?.id],
+  );
   const {
     state: disclosureIntents,
     intentFor: disclosureIntentFor,
     toggle: toggleDisclosureIntent,
-  } = useTaskDisclosureIntents(task?.id);
+  } = useTaskDisclosureIntents(task?.id, disclosureSurfaceKey);
   const [appVersion, setAppVersion] = useState<string>("");
   const [customSkills, setCustomSkills] = useState<CustomSkill[]>([]);
   const [pluginSlashCommands, setPluginSlashCommands] = useState<PluginSlashCommandAlias[]>([]);
@@ -3916,7 +4282,9 @@ function MainContentComponent({
     onTranscript: (text) => {
       // Append transcribed text to input
       pendingProgrammaticResizeRef.current = true;
-      setInputValue((prev) => (prev ? `${prev} ${text}` : text));
+      const nextValue = inputValue ? `${inputValue} ${text}` : text;
+      setInputValue(nextValue);
+      recordDraftMutation(onDraftValueChange?.(nextValue));
     },
     onError: (error) => {
       console.error("Voice input error:", error);
@@ -3941,12 +4309,12 @@ function MainContentComponent({
         onCreateTask(title, text, {
           generateTitle: true,
           ...(executionMode === "chat" ? { executionMode } : {}),
-          ...(selectedInteractionMode ? { agentConfig: { interactionMode: selectedInteractionMode } } : {}),
+          agentConfig: { interactionMode: selectedInteractionMode },
           ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
         });
       } else {
         onSendMessage(text, undefined, undefined, {
-          ...(selectedInteractionMode ? { interactionMode: selectedInteractionMode } : {}),
+          interactionMode: selectedInteractionMode,
           ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
         });
       }
@@ -4306,6 +4674,7 @@ function MainContentComponent({
   const [workspacesList, setWorkspacesList] = useState<Workspace[]>([]);
   // Verbose mode - default to summary and persist per user profile.
   const [verboseSteps, setVerboseSteps] = useState(false);
+  const [commandOutputStyle, setCommandOutputStyle] = useState(readCommandOutputStyle);
   // Code previews expanded by default (true = open, false = collapsed)
   const [codePreviewsExpanded, setCodePreviewsExpanded] = useState(() => {
     const saved = localStorage.getItem(CODE_PREVIEWS_EXPANDED_KEY);
@@ -5042,10 +5411,27 @@ function MainContentComponent({
       .getAppearanceSettings()
       .then((settings) => {
         setVerboseSteps(settings.timelineVerbosity === "verbose");
+        if (isCommandOutputStyle(settings.commandOutputStyle)) {
+          setCommandOutputStyle(settings.commandOutputStyle);
+        }
       })
       .catch(() => {
         // Keep summary default on load failure
       });
+  }, []);
+
+  // Apply command output style changes made in Settings without a reload.
+  useEffect(() => {
+    const handleStyleChange = (event: Event) => {
+      const next = (event as CustomEvent<unknown>).detail;
+      if (isCommandOutputStyle(next)) {
+        setCommandOutputStyle(next);
+      }
+    };
+    window.addEventListener(COMMAND_OUTPUT_STYLE_CHANGED_EVENT, handleStyleChange);
+    return () => {
+      window.removeEventListener(COMMAND_OUTPUT_STYLE_CHANGED_EVENT, handleStyleChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -5262,9 +5648,11 @@ function MainContentComponent({
           span.end <= inputValue.length &&
           inputValue.slice(span.start, span.end) === `@${span.mention.label}`,
       );
-      return next.length === current.length ? current : next;
+      if (next.length === current.length) return current;
+      recordDraftMutation(onDraftPatch?.({ mentions: next }));
+      return next;
     });
-  }, [inputValue]);
+  }, [inputValue, onDraftPatch]);
 
   const selectedIntegrationMentions = useMemo<IntegrationMentionSelection[]>(() => {
     const byId = new Map<string, IntegrationMentionSelection>();
@@ -5360,11 +5748,12 @@ function MainContentComponent({
           exitCode={session.exitCode}
           cwd={session.cwd}
           taskId={task?.id}
+          variant={commandOutputStyle}
           onClose={() => handleDismissCommandOutput(session.id)}
         />
       ));
     },
-    [handleDismissCommandOutput, task?.id],
+    [commandOutputStyle, handleDismissCommandOutput, task?.id],
   );
 
   // Filter skills based on search query
@@ -5753,17 +6142,18 @@ function MainContentComponent({
       // No parameters, just set the prompt directly
       pendingProgrammaticResizeRef.current = true;
       setInputValue(skill.prompt);
+      recordDraftMutation(onDraftValueChange?.(skill.prompt));
     }
   };
 
   const handleSkillParamSubmit = (values: SkillParameterFormValues) => {
-    const modalState = selectedSkillForParams;
-    setSelectedSkillForParams(null);
-    if (!modalState) return;
     if (displayedInteractionMode.mode === "chat") {
       setAttachmentError("Switch to Smart before running a skill. Your parameters have been kept.");
       return;
     }
+    const modalState = selectedSkillForParams;
+    setSelectedSkillForParams(null);
+    if (!modalState) return;
     if (onCreateTask) {
       if (modalState.launchMode === "slash") {
         const commandName = modalState.commandName || modalState.skill.id;
@@ -5784,13 +6174,13 @@ function MainContentComponent({
   };
 
   const handleSkillAskInChat = (values: SkillParameterFormValues) => {
-    const modalState = selectedSkillForParams;
-    setSelectedSkillForParams(null);
-    if (!modalState || modalState.launchMode !== "slash" || !onCreateTask) return;
     if (displayedInteractionMode.mode === "chat") {
       setAttachmentError("Switch to Smart before running a skill. Your parameters have been kept.");
       return;
     }
+    const modalState = selectedSkillForParams;
+    setSelectedSkillForParams(null);
+    if (!modalState || modalState.launchMode !== "slash" || !onCreateTask) return;
     const commandName = modalState.commandName || modalState.skill.id;
     const slashPrompt = buildSlashSkillPrompt(commandName, values);
     const title = buildTaskTitle(`Run /${commandName}`);
@@ -5878,6 +6268,16 @@ function MainContentComponent({
   const shouldRenderTimelineEventInStepFeed = useCallback(
     (event: TaskEvent): boolean => {
       const effectiveType = getEffectiveTaskEventType(event);
+      if (isDuplicateContextSummaryEvent(event, events)) {
+        return false;
+      }
+      // A finished compaction should read as "compacted", not keep a spinner on "compacting".
+      if (isResolvedContextCompactionStartEvent(event, events)) {
+        return false;
+      }
+      if (isRedundantStageTransitionGroupEvent(event, events)) {
+        return false;
+      }
       if (effectiveType === "user_message" || effectiveType === "assistant_message") {
         return false;
       }
@@ -5899,6 +6299,29 @@ function MainContentComponent({
     [toolCallPairing.claimedResultIds, events, verboseSteps],
   );
 
+  // While the task is working, the live action block header already renders "Working" plus a
+  // live timer right above the step feed. Showing the same status in the controls strip put
+  // the identical state on two adjacent lines, so the strip yields its label to the header.
+  const liveActivityHeaderVisible = useMemo(() => {
+    if (!isTaskWorking) return false;
+    for (let i = timelineItems.length - 1; i >= 0; i -= 1) {
+      const item = timelineItems[i];
+      if (item.kind !== "action_block") continue;
+      return item.events.some(
+        (event: TaskEvent) =>
+          parallelGroupsByAnchorEventId.has(event.id) ||
+          (!suppressedParallelEventIds.has(event.id) && shouldRenderTimelineEventInStepFeed(event)),
+      );
+    }
+    return false;
+  }, [
+    isTaskWorking,
+    parallelGroupsByAnchorEventId,
+    shouldRenderTimelineEventInStepFeed,
+    suppressedParallelEventIds,
+    timelineItems,
+  ]);
+
   // Check if an event has details to show
   const hasEventDetails = useCallback(
     (event: TaskEvent): boolean => {
@@ -5912,6 +6335,14 @@ function MainContentComponent({
       if (isPresentationFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
       if (workspace?.path && getStepCompletionPreviewPath(event)) return true;
       if (effectiveType === "follow_up_completed") return true;
+      if (
+        effectiveType === "context_compaction_started" ||
+        effectiveType === "context_compaction_completed" ||
+        effectiveType === "context_compaction_failed" ||
+        effectiveType === "context_summarized"
+      ) {
+        return true;
+      }
       if (effectiveType === "task_completed") {
         return (
           hasTaskOutputs(resolveTaskOutputSummaryFromCompletionEvent(event, events)) ||
@@ -5984,6 +6415,15 @@ function MainContentComponent({
         "error",
         "step_failed",
         "approval_requested",
+        "agent_spawn_requested",
+        "agent_spawned",
+        "agent_message",
+        "agent_completed",
+        "agent_failed",
+        "agent_follow_up_scheduled",
+        "agent_follow_up_started",
+        "agent_interrupt_requested",
+        "agent_interrupt_confirmed",
       ].includes(effectiveType);
     },
     [
@@ -6048,12 +6488,13 @@ function MainContentComponent({
   const handleQuoteAssistantMessage = useCallback(
     (quote: QuotedAssistantMessage) => {
       setQuotedAssistantMessage(quote);
+      recordDraftMutation(onDraftPatch?.({ quotedAssistantMessage: quote }));
       const input = promptInputRef.current;
       input?.focus();
       const cursorPosition = inputValue.length;
       input?.setSelectionRange(cursorPosition, cursorPosition);
     },
-    [inputValue.length],
+    [inputValue.length, onDraftPatch, recordDraftMutation],
   );
 
   // Programmatic input updates still need a resize pass.
@@ -6239,8 +6680,95 @@ function MainContentComponent({
   };
 
   const handleRemoveAttachment = (id: string) => {
+    const removed = pendingAttachments.find((attachment) => attachment.id === id);
+    if (removed?.draftRefId) {
+      void onReleaseDraftAttachment?.(removed.draftRefId);
+    }
     setPendingAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
   };
+
+  useEffect(() => {
+    if (!onStageDraftAttachment) return;
+    const draftKeyAtStage = draftSnapshot?.draftKey;
+    for (const attachment of pendingAttachments) {
+      if (
+        attachment.draftRefId ||
+        stagingAttachmentIdsRef.current.has(attachment.id) ||
+        (!attachment.path && !attachment.dataBase64)
+      ) {
+        continue;
+      }
+      stagingAttachmentIdsRef.current.add(attachment.id);
+      void onStageDraftAttachment(attachment).then((ref) => {
+        stagingAttachmentIdsRef.current.delete(attachment.id);
+        if (!pendingAttachmentIdsRef.current.has(attachment.id)) {
+          if (ref?.refId) void onReleaseDraftAttachment?.(ref.refId);
+          return;
+        }
+        if (draftKeyAtStage && draftSnapshot?.draftKey !== draftKeyAtStage) {
+          if (ref?.refId) void onReleaseDraftAttachment?.(ref.refId);
+          return;
+        }
+        setPendingAttachments((current) =>
+          current.map((candidate) =>
+            candidate.id === attachment.id
+              ? {
+                  ...candidate,
+                  ...(ref?.refId ? { draftRefId: ref.refId } : {}),
+                  ...(ref?.sha256 ? { draftSha256: ref.sha256 } : {}),
+                  status: ref ? "available" : "unavailable",
+                }
+              : candidate,
+          ),
+        );
+        if (!ref) reportAttachmentError(`Could not save ${attachment.name} for later.`);
+      });
+    }
+  }, [
+    draftSnapshot?.draftKey,
+    onReleaseDraftAttachment,
+    onStageDraftAttachment,
+    pendingAttachments,
+  ]);
+
+  useEffect(() => {
+    if (!onDraftPatch || !draftSnapshot?.draftKey) return;
+    const activeRefIds = new Set(
+      pendingAttachments
+        .map((attachment) => attachment.draftRefId)
+        .filter((refId): refId is string => Boolean(refId)),
+    );
+    const nextRefs = [
+      ...(draftSnapshot.attachments ?? []).filter((attachment) =>
+        activeRefIds.has(attachment.refId),
+      ),
+      ...pendingAttachments
+        .filter(
+          (attachment) =>
+            attachment.draftRefId &&
+            !draftSnapshot.attachments.some((ref) => ref.refId === attachment.draftRefId),
+        )
+        .map(
+          (attachment): DraftAttachmentRef => ({
+            refId: attachment.draftRefId as string,
+            name: attachment.name,
+            ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+            size: attachment.size,
+            sha256: attachment.draftSha256 ?? "",
+            status: attachment.status ?? "available",
+          }),
+        ),
+    ];
+    const deduped = [
+      ...new Map(nextRefs.map((attachment) => [attachment.refId, attachment])).values(),
+    ];
+    const signature = JSON.stringify(deduped);
+    if (signature === lastDraftAttachmentSyncRef.current) return;
+    lastDraftAttachmentSyncRef.current = signature;
+    if (JSON.stringify(draftSnapshot.attachments ?? []) !== signature) {
+      onDraftPatch({ attachments: deduped });
+    }
+  }, [draftSnapshot, onDraftPatch, pendingAttachments]);
 
   const isFileDrag = (event: React.DragEvent) =>
     Array.from(event.dataTransfer.types || []).includes("Files");
@@ -6267,15 +6795,6 @@ function MainContentComponent({
       const pending = await Promise.all(
         droppedFiles.map(async (file) => {
           const filePath = (file as File & { path?: string }).path;
-          if (filePath) {
-            return {
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              path: filePath,
-              name: file.name,
-              size: file.size,
-              mimeType: file.type || undefined,
-            } satisfies PendingAttachment;
-          }
           const dataBase64 = await readFileAsBase64(file);
           return {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -6283,6 +6802,10 @@ function MainContentComponent({
             size: file.size,
             mimeType: file.type || undefined,
             dataBase64,
+            // Keep the native path only as a de-duplication hint. Bytes from
+            // drag-and-drop are sent through the renderer-owned data channel;
+            // arbitrary renderer paths must never become attachment authority.
+            ...(filePath ? { path: undefined } : {}),
           } satisfies PendingAttachment;
         }),
       );
@@ -6426,6 +6949,11 @@ function MainContentComponent({
 
     const trimmedInput = inputValue.trim();
     const hasAttachments = pendingAttachments.length > 0;
+    const unavailableAttachments = pendingAttachments.filter(
+      (attachment) =>
+        attachment.status === "unavailable" ||
+        (Boolean(attachment.draftRefId) && !attachment.path && !attachment.dataBase64),
+    );
     const onboardingSlashCommand = parseOnboardingSlashCommand(trimmedInput);
     const appSlashCommand = parseLeadingMessageAppShortcut(trimmedInput);
     const goalSlashCommand = parseLeadingGoalSlashCommand(trimmedInput);
@@ -6441,13 +6969,26 @@ function MainContentComponent({
     }
 
     if (!trimmedInput && !hasAttachments) return;
+    if (unavailableAttachments.length > 0) {
+      setAttachmentError(
+        `Reattach ${unavailableAttachments[0]?.name || "the missing file"} before sending.`,
+      );
+      return;
+    }
     if (
       appSlashCommand.matched &&
       appSlashCommand.shortcut?.action === "clear" &&
       !hasAttachments
     ) {
+      if (isBotConversation) {
+        setAttachmentError(
+          "Use New conversation to start a separate bot conversation; /clear is unavailable here.",
+        );
+        return;
+      }
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
+      void onDraftAccepted?.(draftRevision);
       setPendingAttachments([]);
       setMentionOpen(false);
       setMentionQuery("");
@@ -6466,6 +7007,7 @@ function MainContentComponent({
     if (onboardingSlashCommand.matched && !hasAttachments && onStartOnboarding) {
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
+      void onDraftAccepted?.(draftRevision);
       setPendingAttachments([]);
       setMentionOpen(false);
       setMentionQuery("");
@@ -6490,6 +7032,7 @@ function MainContentComponent({
       }
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
+      void onDraftAccepted?.(draftRevision);
       setPendingAttachments([]);
       setIntegrationMentionSpans([]);
       setMentionOpen(false);
@@ -6518,6 +7061,7 @@ function MainContentComponent({
       const sideQuestion = String(appSlashCommand.args || "").trim();
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
+      void onDraftAccepted?.(draftRevision);
       setPendingAttachments([]);
       setIntegrationMentionSpans([]);
       setMentionOpen(false);
@@ -6544,6 +7088,7 @@ function MainContentComponent({
     ) {
       pendingProgrammaticResizeRef.current = true;
       setInputValue("");
+      void onDraftAccepted?.(draftRevision);
       setPendingAttachments([]);
       setIntegrationMentionSpans([]);
       setMentionOpen(false);
@@ -6564,6 +7109,52 @@ function MainContentComponent({
     setIsPreparingMessage(true);
     setAttachmentError(null);
     let sendFailed = false;
+    const submittedInputValue = inputValue;
+    const submittedDraftKey = draftKeyRef.current;
+    const submittedDraftRevision = draftRevisionRef.current;
+    const isSubmittedDraftCurrent = () =>
+      isSameComposerDraftSubmission({
+        submittedDraftKey,
+        currentDraftKey: draftKeyRef.current,
+        submittedRevision: submittedDraftRevision,
+        currentRevision: draftRevisionRef.current,
+        submittedText: submittedInputValue,
+        currentText: inputValueRef.current,
+      });
+    const clearComposer = (verifySubmission = true) => {
+      if (verifySubmission && !isSubmittedDraftCurrent()) return;
+      pendingProgrammaticResizeRef.current = true;
+      setInputValue("");
+      setActiveWelcomeSuggestionDraft(null);
+      setQuotedAssistantMessage(null);
+      setPendingAttachments([]);
+      setIntegrationMentionSpans([]);
+      setMentionOpen(false);
+      setMentionQuery("");
+      setMentionTarget(null);
+      setSlashOpen(false);
+      setSlashQuery("");
+      setSlashTarget(null);
+      setModeSuggestions([]);
+    };
+    const clearAcceptedComposer = async (): Promise<boolean> => {
+      if (!isSubmittedDraftCurrent()) return false;
+      const accepted = await onDraftAccepted?.(submittedDraftRevision);
+      if (accepted === false) return false;
+      // The successful store clear removes the draft snapshot, so the normal
+      // revision fence is no longer expected to match. Only clear the local
+      // editor if the submitted text/owner is still the one on screen.
+      if (
+        inputValueRef.current !== submittedInputValue ||
+        (draftKeyRef.current && draftKeyRef.current !== submittedDraftKey)
+      ) {
+        return false;
+      }
+      clearComposer(false);
+      return true;
+    };
+    let shouldDeferComposerClear = false;
+    let submissionResult: void | boolean | Promise<void | boolean> = undefined;
     if (hasAttachments) {
       setIsUploadingAttachments(true);
     }
@@ -6642,7 +7233,7 @@ function MainContentComponent({
         );
         const prompt = buildPersistentGoalPrompt(objective, hasAttachments ? message : undefined);
         const title = buildTaskTitle(`/goal ${objective}`);
-        await onCreateTask(
+        const created = await onCreateTask(
           title,
           prompt,
           {
@@ -6654,19 +7245,13 @@ function MainContentComponent({
           },
           imagePayload,
         );
+        if (!isTaskCreationAccepted(created)) {
+          sendFailed = true;
+          return;
+        }
 
-        pendingProgrammaticResizeRef.current = true;
-        setInputValue("");
+        await clearAcceptedComposer();
         setActiveWelcomeSuggestionDraft(null);
-        setQuotedAssistantMessage(null);
-        setPendingAttachments([]);
-        setMentionOpen(false);
-        setMentionQuery("");
-        setMentionTarget(null);
-        setSlashOpen(false);
-        setSlashQuery("");
-        setSlashTarget(null);
-        setModeSuggestions([]);
         setAutonomousModeEnabled(false);
         setClarifyingCheckinsEnabled(false);
         setCollaborativeModeEnabled(false);
@@ -6749,20 +7334,14 @@ function MainContentComponent({
                     ...(newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {}),
                     ...createIntegrationMentionOptions,
                   };
-        await onCreateTask(title, prompt, options, imagePayload);
+        const created = await onCreateTask(title, prompt, options, imagePayload);
+        if (!isTaskCreationAccepted(created)) {
+          sendFailed = true;
+          return;
+        }
 
-        pendingProgrammaticResizeRef.current = true;
-        setInputValue("");
+        await clearAcceptedComposer();
         setActiveWelcomeSuggestionDraft(null);
-        setQuotedAssistantMessage(null);
-        setPendingAttachments([]);
-        setMentionOpen(false);
-        setMentionQuery("");
-        setMentionTarget(null);
-        setSlashOpen(false);
-        setSlashQuery("");
-        setSlashTarget(null);
-        setModeSuggestions([]);
         return;
       }
 
@@ -6788,7 +7367,7 @@ function MainContentComponent({
           chronicleMode: chronicleEnabledForTask ? "inherit" : "disabled",
           videoGenerationMode: taskDomain === "media" ? true : undefined,
           agentConfig: {
-            ...(selectedInteractionMode ? { interactionMode: selectedInteractionMode } : {}),
+            interactionMode: selectedInteractionMode,
             ...(clarifyingCheckinsEnabled
               ? { humanInputPolicy: "legacy_interactive" as const }
               : {}),
@@ -6809,7 +7388,16 @@ function MainContentComponent({
           generateTitle: true,
           ...(verificationAgentEnabled ? { verificationAgent: true } : {}),
         };
-        await onCreateTask(title, message, options, imagePayload);
+        const created = await onCreateTask(title, message, options, imagePayload);
+        if (!isTaskCreationAccepted(created)) {
+          sendFailed = true;
+          return;
+        }
+        setModeDrafts((previous) => {
+          const next = { ...previous };
+          delete next.new;
+          return next;
+        });
         // Reset task mode state
         setAutonomousModeEnabled(false);
         setCollaborativeModeEnabled(false);
@@ -6821,11 +7409,43 @@ function MainContentComponent({
         setVerificationAgentEnabled(false);
       } else {
         // Task is selected (even if not in current list) - send follow-up message
-        onSendMessage(message, imagePayload, quotedAssistantMessage ?? undefined, {
-          ...(selectedInteractionMode ? { interactionMode: selectedInteractionMode } : {}),
-          integrationMentions: selectedIntegrationMentions,
-          ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
-        });
+        const submissionRevision = ++modeSubmissionRevisionRef.current;
+        const submission = onSendMessage(
+          message,
+          imagePayload,
+          quotedAssistantMessage ?? undefined,
+          {
+            interactionMode: selectedInteractionMode,
+            integrationMentions: selectedIntegrationMentions,
+            ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
+          },
+        );
+        submissionResult = submission;
+        shouldDeferComposerClear = true;
+        // IPC can remain pending for the full turn. Keep the composer available
+        // for steering, but restore a failed draft if the user has not moved on.
+        void Promise.resolve(submission)
+          .then((sent) => {
+            if (
+              sent === false &&
+              activeModeDraftKeyRef.current === modeDraftKey &&
+              modeSubmissionRevisionRef.current === submissionRevision
+            ) {
+              setInputValue((current) => current || trimmedInput);
+              setPendingAttachments((current) => (current.length ? current : pendingAttachments));
+            }
+          })
+          .catch((error) => {
+            if (
+              activeModeDraftKeyRef.current === modeDraftKey &&
+              modeSubmissionRevisionRef.current === submissionRevision
+            ) {
+              setInputValue((current) => current || trimmedInput);
+              reportAttachmentError(
+                error instanceof Error ? error.message : "Failed to send message.",
+              );
+            }
+          });
       }
 
       const submittedWelcomeSuggestionDraft = activeWelcomeSuggestionDraft;
@@ -6855,15 +7475,24 @@ function MainContentComponent({
         });
       }
 
-      pendingProgrammaticResizeRef.current = true;
-      setInputValue("");
-      setActiveWelcomeSuggestionDraft(null);
-      setQuotedAssistantMessage(null);
-      setPendingAttachments([]);
-      setMentionOpen(false);
-      setMentionQuery("");
-      setMentionTarget(null);
-      setModeSuggestions([]);
+      if (shouldDeferComposerClear) {
+        void Promise.resolve(submissionResult)
+          .then(async (sent) => {
+            if (!isTaskCreationAccepted(sent) || !isSubmittedDraftCurrent()) {
+              return;
+            }
+            // Clear the durable draft before clearing the local input. Task
+            // progress events can re-render this component while the IPC
+            // clear is in flight; clearing local state first lets the still
+            // persisted draft hydrate the just-sent text back into the box.
+            await clearAcceptedComposer();
+          })
+          .catch(() => {
+            // The primary submission handler restores the draft and reports the error.
+          });
+      } else {
+        await clearAcceptedComposer();
+      }
     } catch (error) {
       console.error("Failed to send message:", error);
       sendFailed = true;
@@ -7120,6 +7749,7 @@ function MainContentComponent({
         commandName,
       });
       setInputValue(nextValue);
+      recordDraftMutation(onDraftValueChange?.(nextValue));
       requestAnimationFrame(() => {
         const input = promptInputRef.current;
         if (input) {
@@ -7133,7 +7763,14 @@ function MainContentComponent({
       pendingProgrammaticResizeRef.current = true;
       setModeSuggestions([]);
       if (option.shortcut.action === "clear") {
+        if (isBotConversation) {
+          setAttachmentError(
+            "Use New conversation to start a separate bot conversation; /clear is unavailable here.",
+          );
+          return;
+        }
         setInputValue("");
+        void onDraftAccepted?.(draftRevision);
         setPendingAttachments([]);
         setMentionOpen(false);
         setMentionQuery("");
@@ -7156,6 +7793,7 @@ function MainContentComponent({
       setModeSuggestions([]);
       if (onStartOnboarding) {
         setInputValue("");
+        void onDraftAccepted?.(draftRevision);
         onStartOnboarding();
       }
       return;
@@ -7172,6 +7810,8 @@ function MainContentComponent({
   ) => {
     autoResizeTextarea(undefined, shrink || value.length < inputValue.length);
     setInputValue(value);
+    recordDraftMutation(onDraftValueChange?.(value));
+    recordDraftMutation(onDraftPatch?.({ mentions: nextIntegrationMentionSpans }));
     setIntegrationMentionSpans(nextIntegrationMentionSpans);
     // Defer mention/slash autocomplete updates so typing stays responsive
     startTransition(() => {
@@ -7244,11 +7884,17 @@ function MainContentComponent({
             },
           }
         : undefined;
-    setIntegrationMentionSpans(
-      replaceIntegrationMentionRange(mentionTarget.start, mentionTarget.end, insertText, nextSpan),
+    const nextMentionSpans = replaceIntegrationMentionRange(
+      mentionTarget.start,
+      mentionTarget.end,
+      insertText,
+      nextSpan,
     );
+    setIntegrationMentionSpans(nextMentionSpans);
+    recordDraftMutation(onDraftPatch?.({ mentions: nextMentionSpans }));
     pendingProgrammaticResizeRef.current = true;
     setInputValue(nextValue);
+    recordDraftMutation(onDraftValueChange?.(nextValue));
     setMentionOpen(false);
     setMentionQuery("");
     setMentionTarget(null);
@@ -7470,7 +8116,9 @@ function MainContentComponent({
   const handleQuickAction = (action: string) => {
     pendingProgrammaticResizeRef.current = true;
     setInputValue(action);
+    recordDraftMutation(onDraftValueChange?.(action));
     setIntegrationMentionSpans([]);
+    recordDraftMutation(onDraftPatch?.({ mentions: [] }));
     setActiveWelcomeSuggestionDraft(null);
   };
 
@@ -7849,6 +8497,10 @@ function MainContentComponent({
   const taskWorkingDirectory = task?.worktreePath || workspace?.path || "";
   const taskIdCopyValue = task?.id || "";
   const taskDeeplink = task ? `cowork://tasks/${task.id}` : "";
+  const botDeeplink =
+    task && isBotConversation && task.assignedAgentRoleId
+      ? `cowork://bots/${task.assignedAgentRoleId}/conversations/${task.id}`
+      : taskDeeplink;
   const taskOutputSummary = useMemo(
     () => resolveTaskOutputSummaryFromTask(task, events),
     [events, task],
@@ -7864,7 +8516,7 @@ function MainContentComponent({
       `- Task ID: ${task.id}`,
       task.sessionId ? `- Session ID: ${task.sessionId}` : null,
       taskWorkingDirectory ? `- Working directory: ${taskWorkingDirectory}` : null,
-      `- Link: ${taskDeeplink}`,
+      `- Link: ${botDeeplink}`,
       task.semanticSummary ? `- Summary: ${task.semanticSummary}` : null,
       "",
       "## Prompt",
@@ -7873,9 +8525,51 @@ function MainContentComponent({
     ]
       .filter((line): line is string => line !== null)
       .join("\n");
-  }, [cleanedDisplayPrompt, task, taskDeeplink, taskWorkingDirectory]);
+  }, [botDeeplink, cleanedDisplayPrompt, task, taskWorkingDirectory]);
+  const botTranscriptMarkdown = useMemo(() => {
+    if (!task || !isBotConversation) return taskMarkdown;
+    const transcriptRows = events
+      .map((event) => {
+        const type = getEffectiveTaskEventType(event);
+        if (type === "user_message") {
+          const message = getUserEventDisplayMessage(event);
+          return message ? `### You\n\n${message}` : "";
+        }
+        if (type === "assistant_message" || type === "task_completed") {
+          const message = getAssistantOrCompletionText(event);
+          return message ? `### ${botName || "Bot"}\n\n${message}` : "";
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n---\n\n");
+    return [
+      `# ${botName || task.title}`,
+      "",
+      `- Status: ${task.status}`,
+      `- Conversation ID: ${task.id}`,
+      `- Conversation link: ${botDeeplink}`,
+      "",
+      "## Transcript",
+      "",
+      transcriptRows || "_No messages yet._",
+    ].join("\n");
+  }, [botDeeplink, botName, events, isBotConversation, task, taskMarkdown]);
   const taskAutomationDefaultPrompt = useMemo(() => {
     if (!task) return "";
+    if (isBotConversation) {
+      // A routine needs a concrete instruction, not the dormant chat seed.
+      const latestMessage = [...events]
+        .reverse()
+        .find(
+          (event) =>
+            getEffectiveTaskEventType(event) === "user_message" &&
+            typeof event.payload?.message === "string" &&
+            event.payload.message.trim() &&
+            event.payload.message.trim() !== task.prompt?.trim(),
+        );
+      return latestMessage?.payload?.message?.trim() || "";
+    }
     return (
       cleanedDisplayPrompt ||
       task.userPrompt ||
@@ -7884,10 +8578,11 @@ function MainContentComponent({
       task.title ||
       ""
     ).trim();
-  }, [cleanedDisplayPrompt, task]);
+  }, [cleanedDisplayPrompt, events, isBotConversation, task]);
 
   const closeTaskHeaderMenu = useCallback(() => {
     setShowTaskHeaderMenu(false);
+    setShowBotAdvanced(false);
   }, []);
 
   const copyTaskHeaderMenuText = useCallback(async (text: string) => {
@@ -7959,15 +8654,16 @@ function MainContentComponent({
   const handleTaskHeaderRename = useCallback(async () => {
     if (!task || remoteSession) return;
     closeTaskHeaderMenu();
-    const nextTitle = window.prompt("Rename task", task.title)?.trim();
+    const nextTitle = window.prompt(actionLabels.rename, task.title)?.trim();
     if (!nextTitle || nextTitle === task.title) return;
     try {
       await window.electronAPI.renameTask(task.id, nextTitle);
       await onTasksChanged?.();
     } catch (error) {
       console.error("Failed to rename task from header:", error);
+      setHeaderActionError("Could not rename. Please try again.");
     }
-  }, [closeTaskHeaderMenu, onTasksChanged, remoteSession, task]);
+  }, [actionLabels.rename, closeTaskHeaderMenu, onTasksChanged, remoteSession, task]);
 
   const handleTaskHeaderArchive = useCallback(async () => {
     if (!task || remoteSession) return;
@@ -7978,6 +8674,7 @@ function MainContentComponent({
       await onTasksChanged?.();
     } catch (error) {
       console.error("Failed to archive task from header:", error);
+      setHeaderActionError("Could not archive. Please try again.");
     }
   }, [closeTaskHeaderMenu, onSelectTask, onTasksChanged, remoteSession, task]);
 
@@ -7995,6 +8692,7 @@ function MainContentComponent({
       }
     } catch (error) {
       console.error("Failed to fork task session from header:", error);
+      setHeaderActionError("Could not fork this task. Please try again.");
     }
   }, [closeTaskHeaderMenu, onSelectTask, onTasksChanged, remoteSession, task]);
 
@@ -9575,6 +10273,8 @@ function MainContentComponent({
       handleStepFeedback={handleStepFeedback}
       isChatTask={isChatTask}
       isTaskWorking={isTaskWorking}
+      newActivityCount={newActivityCount}
+      onNewActivityCountChange={setNewActivityCount}
       isReplayMode={isReplayMode}
       defaultTranscriptMode={defaultTranscriptMode}
       transcriptMode={transcriptMode}
@@ -9589,6 +10289,7 @@ function MainContentComponent({
       onOpenPresentationArtifact={openPresentationArtifact}
       onOpenWebArtifact={openWebArtifact}
       onQuoteAssistantMessage={handleQuoteAssistantMessage}
+      botName={botName}
       onForkTaskSessionFromEvent={remoteSession ? undefined : handleForkTaskSessionFromEvent}
       onSelectChildTask={onSelectChildTask}
       onOpenChildAgentSidebar={onOpenChildAgentSidebar}
@@ -9632,7 +10333,7 @@ function MainContentComponent({
     <div className={`main-content${isBotConversation ? " bot-conversation" : ""}`}>
       {/* Header */}
       <div className="main-header">
-        {(task?.parentTaskId || task?.branchFromTaskId) && onSelectTask && (
+        {!isBotConversation && (task?.parentTaskId || task?.branchFromTaskId) && onSelectTask && (
           <button
             type="button"
             className="main-header-parent-thread-btn"
@@ -9645,7 +10346,25 @@ function MainContentComponent({
           </button>
         )}
         <div className="main-header-title-group">
-          {(showHeaderTitle || task) && headerTitle.trim().length > 0 && (
+          {isBotConversation && (
+            <button
+              type="button"
+              className="bot-conversation-identity"
+              disabled={Boolean(remoteSession) || !task?.assignedAgentRoleId}
+              onClick={() => setShowBotProfile(true)}
+              title="Edit bot"
+              aria-label={`Edit bot ${botName}`}
+            >
+              <span className="bot-conversation-identity-avatar" aria-hidden="true">
+                <BotGlyph size={17} />
+              </span>
+              <span className="bot-conversation-identity-copy">
+                <strong>{botName}</strong>
+                <small>Bot</small>
+              </span>
+            </button>
+          )}
+          {!isBotConversation && (showHeaderTitle || task) && headerTitle.trim().length > 0 && (
             <div className="main-header-title" title={headerTooltip}>
               {headerTitle}
             </div>
@@ -9659,8 +10378,8 @@ function MainContentComponent({
                 aria-haspopup="menu"
                 aria-expanded={showTaskHeaderMenu}
                 aria-controls="main-header-task-menu"
-                aria-label="Task actions"
-                title="Task actions"
+                aria-label={menuLabel}
+                title={menuLabel}
                 onClick={(event) => {
                   event.stopPropagation();
                   setShowTaskHeaderMenu((open) => !open);
@@ -9674,48 +10393,134 @@ function MainContentComponent({
                   id="main-header-task-menu"
                   className="main-header-task-menu"
                   role="menu"
-                  aria-label="Task actions"
+                  aria-label={menuLabel}
                   onClick={(event) => event.stopPropagation()}
                   onKeyDown={handleTaskHeaderMenuKeyDown}
                 >
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    disabled={Boolean(remoteSession)}
-                    onClick={handleTaskHeaderPin}
-                  >
-                    {task.pinned ? (
-                      <PinOff size={17} aria-hidden="true" />
-                    ) : (
-                      <Pin size={17} aria-hidden="true" />
-                    )}
-                    <span>{task.pinned ? "Unpin task" : "Pin task"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    disabled={Boolean(remoteSession)}
-                    onClick={handleTaskHeaderRename}
-                  >
-                    <Pencil size={17} aria-hidden="true" />
-                    <span>Rename task</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    disabled={Boolean(remoteSession)}
-                    onClick={handleTaskHeaderArchive}
-                  >
-                    <ArchiveIcon size={17} aria-hidden="true" />
-                    <span>Archive task</span>
-                  </button>
-                  <div className="main-header-task-menu-divider" role="separator" />
+                  {isBotConversation ? (
+                    <>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession) || !task.assignedAgentRoleId}
+                        onClick={() => {
+                          closeTaskHeaderMenu();
+                          setShowBotProfile(true);
+                        }}
+                      >
+                        <BotGlyph size={17} weight="regular" />
+                        <span>Edit bot</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession) || !task.assignedAgentRoleId}
+                        onClick={() => {
+                          closeTaskHeaderMenu();
+                          void onNewBotConversation?.(task.assignedAgentRoleId!);
+                        }}
+                      >
+                        <Plus size={17} aria-hidden="true" />
+                        <span>New conversation</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        onClick={() => {
+                          closeTaskHeaderMenu();
+                          setShowBotHistory((open) => !open);
+                        }}
+                        aria-expanded={showBotHistory}
+                      >
+                        <History size={17} aria-hidden="true" />
+                        <span>Conversation history</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession)}
+                        onClick={handleTaskHeaderPin}
+                      >
+                        {task.pinned ? (
+                          <PinOff size={17} aria-hidden="true" />
+                        ) : (
+                          <Pin size={17} aria-hidden="true" />
+                        )}
+                        <span>{task.pinned ? actionLabels.unpin : actionLabels.pin}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession)}
+                        onClick={handleTaskHeaderRename}
+                      >
+                        <Pencil size={17} aria-hidden="true" />
+                        <span>{actionLabels.rename}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession)}
+                        onClick={handleTaskHeaderArchive}
+                      >
+                        <ArchiveIcon size={17} aria-hidden="true" />
+                        <span>{actionLabels.archive}</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession)}
+                        onClick={handleTaskHeaderPin}
+                      >
+                        {task.pinned ? (
+                          <PinOff size={17} aria-hidden="true" />
+                        ) : (
+                          <Pin size={17} aria-hidden="true" />
+                        )}
+                        <span>{task.pinned ? actionLabels.unpin : actionLabels.pin}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession)}
+                        onClick={handleTaskHeaderRename}
+                      >
+                        <Pencil size={17} aria-hidden="true" />
+                        <span>{actionLabels.rename}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession)}
+                        onClick={handleTaskHeaderArchive}
+                      >
+                        <ArchiveIcon size={17} aria-hidden="true" />
+                        <span>{actionLabels.archive}</span>
+                      </button>
+                      <div className="main-header-task-menu-divider" role="separator" />
+                    </>
+                  )}
                   <button
                     type="button"
                     className="main-header-task-menu-item"
@@ -9729,46 +10534,50 @@ function MainContentComponent({
                     <Globe size={17} aria-hidden="true" />
                     <span>Open browser</span>
                   </button>
+                  {!isBotConversation && (
+                    <>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={!taskWorkingDirectory}
+                        onClick={() => {
+                          closeTaskHeaderMenu();
+                          void copyTaskHeaderMenuText(taskWorkingDirectory);
+                        }}
+                      >
+                        <Folder size={17} aria-hidden="true" />
+                        <span>Copy working directory</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={!taskIdCopyValue}
+                        onClick={() => {
+                          closeTaskHeaderMenu();
+                          void copyTaskHeaderMenuText(taskIdCopyValue);
+                        }}
+                      >
+                        <Copy size={17} aria-hidden="true" />
+                        <span>{actionLabels.copyId}</span>
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     className="main-header-task-menu-item"
                     role="menuitem"
                     data-task-header-menu-option
-                    disabled={!taskWorkingDirectory}
                     onClick={() => {
                       closeTaskHeaderMenu();
-                      void copyTaskHeaderMenuText(taskWorkingDirectory);
-                    }}
-                  >
-                    <Folder size={17} aria-hidden="true" />
-                    <span>Copy working directory</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    disabled={!taskIdCopyValue}
-                    onClick={() => {
-                      closeTaskHeaderMenu();
-                      void copyTaskHeaderMenuText(taskIdCopyValue);
-                    }}
-                  >
-                    <Copy size={17} aria-hidden="true" />
-                    <span>Copy task ID</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    onClick={() => {
-                      closeTaskHeaderMenu();
-                      void copyTaskHeaderMenuText(taskDeeplink);
+                      void copyTaskHeaderMenuText(botDeeplink);
                     }}
                   >
                     <LinkIcon size={17} aria-hidden="true" />
-                    <span>Copy deeplink</span>
+                    <span>{actionLabels.copyLink}</span>
                   </button>
                   <button
                     type="button"
@@ -9777,36 +10586,69 @@ function MainContentComponent({
                     data-task-header-menu-option
                     onClick={() => {
                       closeTaskHeaderMenu();
-                      void copyTaskHeaderMenuText(taskMarkdown);
+                      void copyTaskHeaderMenuText(
+                        isBotConversation ? botTranscriptMarkdown : taskMarkdown,
+                      );
                     }}
                   >
                     <ClipboardCopy size={17} aria-hidden="true" />
                     <span>Copy as Markdown</span>
                   </button>
-                  <div className="main-header-task-menu-divider" role="separator" />
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    disabled={Boolean(remoteSession)}
-                    onClick={handleTaskHeaderFork}
-                  >
-                    <GitFork size={17} aria-hidden="true" />
-                    <span>Fork session</span>
-                  </button>
-                  {onOpenSideChat && (
-                    <button
-                      type="button"
-                      className="main-header-task-menu-item"
-                      role="menuitem"
-                      data-task-header-menu-option
-                      disabled={Boolean(remoteSession)}
-                      onClick={handleTaskHeaderSideChat}
-                    >
-                      <MessageCircle size={17} aria-hidden="true" />
-                      <span>Open side chat</span>
-                    </button>
+                  {isBotConversation ? (
+                    <>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession)}
+                        onClick={handleTaskHeaderFork}
+                      >
+                        <GitFork size={17} aria-hidden="true" />
+                        <span>{actionLabels.fork}</span>
+                      </button>
+                      {onOpenSideChat && (
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={Boolean(remoteSession)}
+                          onClick={handleTaskHeaderSideChat}
+                        >
+                          <MessageCircle size={17} aria-hidden="true" />
+                          <span>Open side chat</span>
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="main-header-task-menu-divider" role="separator" />
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={Boolean(remoteSession)}
+                        onClick={handleTaskHeaderFork}
+                      >
+                        <GitFork size={17} aria-hidden="true" />
+                        <span>{actionLabels.fork}</span>
+                      </button>
+                      {onOpenSideChat && (
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={Boolean(remoteSession)}
+                          onClick={handleTaskHeaderSideChat}
+                        >
+                          <MessageCircle size={17} aria-hidden="true" />
+                          <span>Open side chat</span>
+                        </button>
+                      )}
+                    </>
                   )}
                   <button
                     type="button"
@@ -9834,12 +10676,69 @@ function MainContentComponent({
                       <span>View outputs</span>
                     </button>
                   )}
+                  {isBotConversation && (
+                    <button
+                      type="button"
+                      className="main-header-task-menu-item"
+                      role="menuitem"
+                      data-task-header-menu-option
+                      aria-expanded={showBotAdvanced}
+                      aria-controls="bot-advanced-actions"
+                      onClick={() => setShowBotAdvanced((open) => !open)}
+                    >
+                      <SlidersHorizontal size={17} aria-hidden="true" />
+                      <span>Advanced</span>
+                    </button>
+                  )}
+                  {isBotConversation && showBotAdvanced && (
+                    <div id="bot-advanced-actions" role="group" aria-label="Advanced actions">
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={!taskWorkingDirectory}
+                        onClick={() => {
+                          closeTaskHeaderMenu();
+                          void copyTaskHeaderMenuText(taskWorkingDirectory);
+                        }}
+                      >
+                        <Folder size={17} aria-hidden="true" />
+                        <span>Copy working directory</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="main-header-task-menu-item"
+                        role="menuitem"
+                        data-task-header-menu-option
+                        disabled={!taskIdCopyValue}
+                        onClick={() => {
+                          closeTaskHeaderMenu();
+                          void copyTaskHeaderMenuText(taskIdCopyValue);
+                        }}
+                      >
+                        <Copy size={17} aria-hidden="true" />
+                        <span>{actionLabels.copyId}</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
         </div>
       </div>
+      {isBotConversation && showBotHistory && (
+        <BotConversationHistory
+          botName={botName || "Bot"}
+          botRoleId={task?.assignedAgentRoleId}
+          selectedConversationId={task?.id}
+          conversations={botConversations}
+          loading={isLoadingBotConversations}
+          onSelectConversation={onSelectBotConversation || onSelectTask || undefined}
+          onNewConversation={onNewBotConversation}
+        />
+      )}
       {/* Body */}
       <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
         <div className="task-content">
@@ -9891,131 +10790,132 @@ function MainContentComponent({
           )}
 
           {/* Timeline controls - show right after original prompt */}
-          {!isBotConversation && (hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
-            <div className="timeline-controls">
-              <div className="timeline-controls-status">
-                {canToggleCompletedTranscript ? (
+          {(!isBotConversation || !isChatTask) &&
+            (hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
+              <div className="timeline-controls">
+                <div className="timeline-controls-status">
+                  {canToggleCompletedTranscript ? (
+                    <button
+                      type="button"
+                      className="timeline-controls-label timeline-controls-label-button with-duration"
+                      onClick={toggleCompletedTranscriptMode}
+                      aria-expanded={transcriptMode !== "delivery"}
+                      title={
+                        transcriptMode === "delivery"
+                          ? "Show full timeline"
+                          : "Show only final output"
+                      }
+                    >
+                      <span>{workDurationLabel}</span>
+                      <span className="timeline-controls-label-chevron" aria-hidden="true">
+                        {transcriptMode === "delivery" ? ">" : "v"}
+                      </span>
+                    </button>
+                  ) : liveActivityHeaderVisible ? null : (
+                    <span
+                      className={`timeline-controls-label ${
+                        isTaskWorking || isTaskFinished ? "with-duration" : ""
+                      }`}
+                    >
+                      {workDurationLabel}
+                    </span>
+                  )}
+                  {isTaskWorking && continuationStatusChip && (
+                    <span className="header-continuation-chip" title="Adaptive continuation status">
+                      <span>{continuationStatusChip.window}</span>
+                      {continuationStatusChip.progress && (
+                        <span className="header-continuation-chip-sep">·</span>
+                      )}
+                      {continuationStatusChip.progress && (
+                        <span>{continuationStatusChip.progress}</span>
+                      )}
+                      {continuationStatusChip.loopRisk && (
+                        <span className="header-continuation-chip-sep">·</span>
+                      )}
+                      {continuationStatusChip.loopRisk && (
+                        <span>{continuationStatusChip.loopRisk}</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+                <div className="timeline-controls-actions">
                   <button
                     type="button"
-                    className="timeline-controls-label timeline-controls-label-button with-duration"
-                    onClick={toggleCompletedTranscriptMode}
-                    aria-expanded={transcriptMode !== "delivery"}
+                    className="verbose-switch"
+                    role="switch"
+                    aria-checked={verboseSteps}
+                    aria-label={`Verbose mode ${verboseSteps ? "on" : "off"}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      toggleVerboseSteps();
+                    }}
+                    title={`Verbose mode ${verboseSteps ? "on" : "off"} (click to toggle)`}
+                  >
+                    <span className="goal-mode-toggle-switch-content">
+                      <span className="goal-mode-toggle-text">
+                        <span className="verbose-switch-label">Verbose</span>
+                      </span>
+                      <span
+                        className={`goal-mode-switch-track ${verboseSteps ? "on" : ""}`}
+                        aria-hidden="true"
+                      >
+                        <span className="goal-mode-switch-thumb" />
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    className={`verbose-toggle-btn ${codePreviewsExpanded ? "active" : ""}`}
+                    onClick={toggleCodePreviews}
                     title={
-                      transcriptMode === "delivery"
-                        ? "Show full timeline"
-                        : "Show only final output"
+                      codePreviewsExpanded
+                        ? "Collapse code previews by default"
+                        : "Expand code previews by default"
                     }
                   >
-                    <span>{workDurationLabel}</span>
-                    <span className="timeline-controls-label-chevron" aria-hidden="true">
-                      {transcriptMode === "delivery" ? ">" : "v"}
-                    </span>
+                    {codePreviewsExpanded ? "Code: Open" : "Code: Collapsed"}
                   </button>
-                ) : (
-                  <span
-                    className={`timeline-controls-label ${
-                      isTaskWorking || isTaskFinished ? "with-duration" : ""
-                    }`}
-                  >
-                    {workDurationLabel}
-                  </span>
-                )}
-                {isTaskWorking && continuationStatusChip && (
-                  <span className="header-continuation-chip" title="Adaptive continuation status">
-                    <span>{continuationStatusChip.window}</span>
-                    {continuationStatusChip.progress && (
-                      <span className="header-continuation-chip-sep">·</span>
+                  {replayControls &&
+                    !replayControls.isReplayMode &&
+                    (task?.status === "completed" ||
+                      task?.status === "failed" ||
+                      task?.status === "cancelled") && (
+                      <button
+                        className="replay-entry-btn"
+                        onClick={replayControls.startReplay}
+                        title="Replay this session step by step"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                        Replay
+                      </button>
                     )}
-                    {continuationStatusChip.progress && (
-                      <span>{continuationStatusChip.progress}</span>
-                    )}
-                    {continuationStatusChip.loopRisk && (
-                      <span className="header-continuation-chip-sep">·</span>
-                    )}
-                    {continuationStatusChip.loopRisk && (
-                      <span>{continuationStatusChip.loopRisk}</span>
-                    )}
-                  </span>
-                )}
-              </div>
-              <div className="timeline-controls-actions">
-                <button
-                  type="button"
-                  className="verbose-switch"
-                  role="switch"
-                  aria-checked={verboseSteps}
-                  aria-label={`Verbose mode ${verboseSteps ? "on" : "off"}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    toggleVerboseSteps();
-                  }}
-                  title={`Verbose mode ${verboseSteps ? "on" : "off"} (click to toggle)`}
-                >
-                  <span className="goal-mode-toggle-switch-content">
-                    <span className="goal-mode-toggle-text">
-                      <span className="verbose-switch-label">Verbose</span>
-                    </span>
-                    <span
-                      className={`goal-mode-switch-track ${verboseSteps ? "on" : ""}`}
-                      aria-hidden="true"
-                    >
-                      <span className="goal-mode-switch-thumb" />
-                    </span>
-                  </span>
-                </button>
-                <button
-                  className={`verbose-toggle-btn ${codePreviewsExpanded ? "active" : ""}`}
-                  onClick={toggleCodePreviews}
-                  title={
-                    codePreviewsExpanded
-                      ? "Collapse code previews by default"
-                      : "Expand code previews by default"
-                  }
-                >
-                  {codePreviewsExpanded ? "Code: Open" : "Code: Collapsed"}
-                </button>
-                {replayControls &&
-                  !replayControls.isReplayMode &&
-                  (task?.status === "completed" ||
-                    task?.status === "failed" ||
-                    task?.status === "cancelled") && (
+                  {replayControls?.isReplayMode && !replayControls.areControlsVisible && (
                     <button
                       className="replay-entry-btn"
-                      onClick={replayControls.startReplay}
-                      title="Replay this session step by step"
+                      onClick={replayControls.showControls}
+                      title="Show replay controls"
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                      Replay
+                      <SlidersHorizontal aria-hidden="true" />
+                      Replay controls
                     </button>
                   )}
-                {replayControls?.isReplayMode && !replayControls.areControlsVisible && (
-                  <button
-                    className="replay-entry-btn"
-                    onClick={replayControls.showControls}
-                    title="Show replay controls"
-                  >
-                    <SlidersHorizontal aria-hidden="true" />
-                    Replay controls
-                  </button>
-                )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Replay controls bar — shown when replay mode is active */}
-          {!isBotConversation &&
-            replayControls?.isReplayMode &&
-            replayControls.areControlsVisible && <ReplayControlsBar controls={replayControls} />}
+          {replayControls?.isReplayMode && replayControls.areControlsVisible && (
+            <ReplayControlsBar controls={replayControls} />
+          )}
 
           {conversationFlow}
           {!isBotConversation && (
@@ -10024,6 +10924,18 @@ function MainContentComponent({
         </div>
       </div>
 
+      {headerActionError && (
+        <div className="task-header-action-error" role="alert">
+          {headerActionError}
+        </div>
+      )}
+      {showBotProfile && task?.assignedAgentRoleId && !remoteSession && (
+        <BotProfileDialog
+          botId={task.assignedAgentRoleId}
+          onClose={() => setShowBotProfile(false)}
+          onDeleted={() => onSelectTask?.(null)}
+        />
+      )}
       {/* Footer with Input */}
       <div className="main-footer">
         {/* Scroll to bottom button — only when there is actually content above the fold */}
@@ -10064,35 +10976,46 @@ function MainContentComponent({
           )}
         {renderAttachmentPanel()}
         <div
-          className={`input-container ${isDraggingFiles ? "drag-over" : ""} ${collaborativeRun && (onOpenChildAgentSidebar || onSelectChildTask) ? "input-container-with-agents" : ""}`}
+          className={`input-container ${isDraggingFiles ? "drag-over" : ""} ${(collaborativeRun || childTasks.length > 0) && (onOpenChildAgentSidebar || onSelectChildTask) ? "input-container-with-agents" : ""}`}
           onDragOver={handleDragOver}
           onDragEnter={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
           {/* Collaborative agent lines — extension of input box, inside same container */}
-          {collaborativeRun && (onOpenChildAgentSidebar || onSelectChildTask) && (
-            <CollaborativeAgentLines
-              collaborativeRun={collaborativeRun}
-              childTasks={childTasks}
-              childEvents={childEvents}
-              onOpenAgent={(taskId) => (onOpenChildAgentSidebar ?? onSelectChildTask)?.(taskId)}
-              mainTaskCompleted={
-                !!task && ["completed", "failed", "cancelled"].includes(task.status)
-              }
-              onWrapUp={
-                onWrapUpTask
-                  ? () => {
-                      if (!wrappingUp) {
-                        setWrappingUp(true);
-                        onWrapUpTask();
+          {(collaborativeRun || childTasks.length > 0) &&
+            (onOpenChildAgentSidebar || onSelectChildTask) && (
+              <CollaborativeAgentLines
+                collaborativeRun={collaborativeRun}
+                childTasks={childTasks}
+                childEvents={childEvents}
+                onOpenAgent={(taskId) => (onOpenChildAgentSidebar ?? onSelectChildTask)?.(taskId)}
+                onShowAllAgents={
+                  childTasks.length > 0 && (onOpenChildAgentSidebar || onSelectChildTask)
+                    ? () => {
+                        const firstTaskId = childTasks[0]?.id;
+                        if (firstTaskId) {
+                          (onOpenChildAgentSidebar ?? onSelectChildTask)?.(firstTaskId);
+                        }
                       }
-                    }
-                  : undefined
-              }
-              isWrappingUp={wrappingUp}
-            />
-          )}
+                    : undefined
+                }
+                mainTaskCompleted={
+                  !!task && ["completed", "failed", "cancelled"].includes(task.status)
+                }
+                onWrapUp={
+                  onWrapUpTask
+                    ? () => {
+                        if (!wrappingUp) {
+                          setWrappingUp(true);
+                          onWrapUpTask();
+                        }
+                      }
+                    : undefined
+                }
+                isWrappingUp={wrappingUp}
+              />
+            )}
           {routineCreationNotice?.taskId === task.id && (
             <div className="task-automation-created-response" role="status">
               <div>
@@ -10238,9 +11161,10 @@ function MainContentComponent({
             )}
           {taskStatusStripEnabled && (
             <TaskStatusStrip
-              model={statusTaskEventUi.taskStatusStrip}
+              model={taskStatusStripModel}
               activityGroups={statusTaskEventUi.activityGroups}
               outcomeMetrics={statusTaskEventUi.outcomeMetrics}
+              markdownComponents={markdownComponents}
               replay={isReplayMode}
               telemetryEnabled={rendererPerfLoggingEnabled}
               onOpenOutput={(outputPath) => {
@@ -10263,7 +11187,10 @@ function MainContentComponent({
               <button
                 type="button"
                 className="composer-quoted-assistant-clear"
-                onClick={() => setQuotedAssistantMessage(null)}
+                onClick={() => {
+                  setQuotedAssistantMessage(null);
+                  recordDraftMutation(onDraftPatch?.({ quotedAssistantMessage: undefined }));
+                }}
                 title="Remove quoted message"
                 aria-label="Remove quoted message"
               >
@@ -10363,7 +11290,7 @@ function MainContentComponent({
                 className="input-field input-textarea"
                 placeholder={
                   isBotConversation
-                    ? `Message ${headerTitle.trim() || task.title}`
+                    ? `Message ${botName}`
                     : agentContext.getMessage("placeholderActive")
                 }
                 value={inputValue}
@@ -10677,7 +11604,7 @@ function MainContentComponent({
           workspace={workspace}
           defaultName={headerTitle.trim() || task.title}
           defaultPrompt={taskAutomationDefaultPrompt}
-          deeplink={taskDeeplink}
+          deeplink={isBotConversation ? botDeeplink : taskDeeplink}
           onClose={() => setShowTaskAutomationModal(false)}
           onCreated={async (routine) => {
             await onTasksChanged?.();
@@ -10739,6 +11666,7 @@ function getMainContentTaskSignature(task: Task | undefined): string {
     task.userPrompt ?? "",
     task.rawPrompt ?? "",
     task.agentConfig?.botConversation ? "bot" : "",
+    task.assignedAgentRoleId ?? "",
   ].join(":");
 }
 
@@ -10784,12 +11712,25 @@ function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps
     prev.workspace?.path === next.workspace?.path &&
     prev.events === next.events &&
     prev.sharedTaskEventUi === next.sharedTaskEventUi &&
+    prev.botConversations === next.botConversations &&
+    prev.isLoadingBotConversations === next.isLoadingBotConversations &&
+    prev.onSelectBotConversation === next.onSelectBotConversation &&
+    prev.onNewBotConversation === next.onNewBotConversation &&
     prev.childTasks === next.childTasks &&
     prev.childEvents === next.childEvents &&
     getMainContentInputRequestSignature(prev.inputRequest) ===
       getMainContentInputRequestSignature(next.inputRequest) &&
     getMainContentInputRequestsSignature(prev.pendingInputRequests) ===
       getMainContentInputRequestsSignature(next.pendingInputRequests) &&
+    prev.draftValue === next.draftValue &&
+    prev.draftRevision === next.draftRevision &&
+    prev.draftSnapshot === next.draftSnapshot &&
+    prev.onDraftValueChange === next.onDraftValueChange &&
+    prev.onDraftAccepted === next.onDraftAccepted &&
+    prev.onDraftPatch === next.onDraftPatch &&
+    prev.onStageDraftAttachment === next.onStageDraftAttachment &&
+    prev.onResolveDraftAttachment === next.onResolveDraftAttachment &&
+    prev.onReleaseDraftAttachment === next.onReleaseDraftAttachment &&
     prev.selectedModel === next.selectedModel &&
     prev.selectedProvider === next.selectedProvider &&
     prev.selectedReasoningEffort === next.selectedReasoningEffort &&

@@ -37,16 +37,16 @@ Orchestrate pi-finder and optional pi-librarian to produce a compact context pac
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| query | string | Yes | What to implement or investigate |
-| scope_hint | string | No | Optional local directories/files/symbols to prioritize |
-| repo_hints | string | No | Optional external repo hints (owner/repo list) |
-| owner_hints | string | No | Optional org/user hints for GitHub research |
-| run_librarian | boolean | No | Whether to include GitHub research in addition to local scouting |
-| max_search_results | number | No | Maximum GitHub search results requested by librarian |
+| Name               | Type    | Required | Description                                                      |
+| ------------------ | ------- | -------- | ---------------------------------------------------------------- |
+| query              | string  | Yes      | What to implement or investigate                                 |
+| scope_hint         | string  | No       | Optional local directories/files/symbols to prioritize           |
+| repo_hints         | string  | No       | Optional external repo hints (owner/repo list)                   |
+| owner_hints        | string  | No       | Optional org/user hints for GitHub research                      |
+| run_librarian      | boolean | No       | Whether to include GitHub research in addition to local scouting |
+| max_search_results | number  | No       | Maximum GitHub search results requested by librarian             |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 2187 characters.
-- Runtime prompt is defined directly in `../pi-context-pipeline.json`. 
+- Runtime prompt is defined directly in `../pi-context-pipeline.json`.

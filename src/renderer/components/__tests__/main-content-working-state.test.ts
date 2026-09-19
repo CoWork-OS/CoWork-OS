@@ -35,6 +35,7 @@ import {
   TaskAutomationModal,
   TaskSessionLineageFooter,
 } from "../MainContent";
+import { AgentReasoningPanel } from "../MainContent/MainContent";
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
 import {
   buildTaskAutomationCronJobCreate,
@@ -566,7 +567,7 @@ describe("sidechat session forking", () => {
     const appSource = readFileSync(appPath, "utf8");
 
     expect(mainContentSource).toContain("onOpenSideChat({ taskId: task.id })");
-    expect(mainContentSource).toContain("<span>Fork session</span>");
+    expect(mainContentSource).toContain("<span>{actionLabels.fork}</span>");
     expect(mainContentSource).toContain("<span>Open side chat</span>");
     expect(mainContentSource).toContain('branchLabel: "fork"');
     expect(mainContentSource).toContain("initialMessage: sideQuestion");
@@ -576,6 +577,27 @@ describe("sidechat session forking", () => {
     expect(appSource).toContain("parentTask={sideChat.parentTask}");
     expect(appSource).toContain("<SideChatPanel");
     expect(appSource).not.toContain(".deleteTask(sideTaskId)");
+  });
+});
+
+describe("bot transcript surface", () => {
+  it("keeps bot conversations on one screen with explicit history actions", () => {
+    const mainContentSource = readFileSync(mainContentPath, "utf8");
+    const appSource = readFileSync(appPath, "utf8");
+
+    expect(mainContentSource).toContain('const menuLabel = isBotConversation ? "Bot options"');
+    expect(mainContentSource).toContain("<span>Edit bot</span>");
+    // The bot header is just the identity chip; there is no breadcrumb tail.
+    expect(mainContentSource).not.toContain("bot-conversation-header-context");
+    expect(mainContentSource).toMatch(/onForkTaskSessionFromEvent &&\s*!isBotConversation/);
+    expect(mainContentSource).toMatch(/onForkTaskSession:\s*isBotConversation/);
+    expect(mainContentSource).toContain("<span>New conversation</span>");
+    expect(mainContentSource).toContain("<span>Conversation history</span>");
+    expect(mainContentSource).toContain("<span>Copy as Markdown</span>");
+    expect(mainContentSource).toContain("<BotConversationHistory");
+    expect(mainContentSource).not.toContain("Bot chats keep one continuous transcript");
+    expect(appSource).toContain("botConversationTasks");
+    expect(appSource).toContain("bot.displayName,");
   });
 });
 
@@ -984,6 +1006,80 @@ describe("isTaskActivelyWorking", () => {
     expect(isTaskActivelyWorking(task, events, false, 2_500)).toBe(false);
   });
 
+  it("stops a pending bot chat turn when the assistant reply is already visible", () => {
+    const task = makeTask({
+      status: "pending",
+      agentConfig: {
+        botConversation: true,
+        executionMode: "chat",
+        conversationMode: "chat",
+        interactionMode: { mode: "chat" },
+      } as Task["agentConfig"],
+    });
+    const events = [
+      makeEvent("bot-user", 1_000, "timeline_step_updated", {
+        legacyType: "user_message",
+        message: "Hey",
+      }),
+      makeEvent("bot-answer", 2_000, "timeline_step_updated", {
+        legacyType: "assistant_message",
+        message: "Hello",
+      }),
+      makeEvent("bot-status", 2_001, "timeline_step_updated", {
+        legacyType: "task_status",
+        status: "pending",
+      }),
+    ];
+
+    expect(isTaskActivelyWorking(task, events, false, 2_500)).toBe(false);
+  });
+
+  it("keeps a pending bot chat turn active after a newer user message", () => {
+    const task = makeTask({
+      status: "pending",
+      agentConfig: {
+        botConversation: true,
+        executionMode: "chat",
+        conversationMode: "chat",
+        interactionMode: { mode: "chat" },
+      } as Task["agentConfig"],
+    });
+    const events = [
+      makeEvent("bot-answer", 1_000, "assistant_message", { message: "Hello" }),
+      makeEvent("bot-user", 2_000, "user_message", { message: "What about tomorrow?" }),
+      makeEvent("bot-executing", 2_001, "executing"),
+    ];
+
+    expect(isTaskActivelyWorking(task, events, false, 2_500)).toBe(true);
+  });
+
+  it("does not let an internal assistant event hide an active bot turn", () => {
+    const task = makeTask({
+      status: "pending",
+      agentConfig: { botConversation: true, executionMode: "chat" } as Task["agentConfig"],
+    });
+    const events = [
+      makeEvent("bot-user", 1_000, "user_message", { message: "Hey" }),
+      makeEvent("bot-progress", 2_000, "executing"),
+      makeEvent("bot-internal", 3_000, "assistant_message", {
+        internal: true,
+        message: "Preparing the response",
+      }),
+    ];
+
+    expect(isTaskActivelyWorking(task, events, false, 3_500)).toBe(true);
+  });
+
+  it("treats a failed bot follow-up as idle once the error is rendered", () => {
+    const task = makeTask({
+      status: "executing",
+      agentConfig: { botConversation: true, executionMode: "chat" } as Task["agentConfig"],
+    });
+    const events = [makeEvent("bot-failed", 2_000, "follow_up_failed")];
+
+    expect(isTaskActivelyWorking(task, events, false, 2_500)).toBe(false);
+  });
+
   it("does not treat generic error events as terminal while the task is still executing", () => {
     const task = makeTask();
     const events = [
@@ -1127,6 +1223,43 @@ describe("isTaskActivelyWorking", () => {
     expect(state.activeStreamText).toBe("I'm checking the repo and runtime state first.");
     expect(state.isStreaming).toBe(true);
     expect(state.recentUpdates).toEqual(["Inspecting repository"]);
+  });
+
+  it("renders Markdown in recent reasoning updates", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(AgentReasoningPanel, {
+        currentStep: null,
+        state: {
+          activeStreamText: "",
+          isStreaming: false,
+          recentUpdates: [
+            "**Task:** Inspect the repo.\n\n- Read the relevant component\n- Verify the fix",
+          ],
+        },
+      }),
+    );
+
+    expect(markup).toContain("<strong>Task:</strong> Inspect the repo.");
+    expect(markup).toContain("<ul>");
+    expect(markup).toContain("<li>Read the relevant component</li>");
+    expect(markup).not.toContain("**Task:**");
+    expect(markup).not.toContain("- Read the relevant component");
+  });
+
+  it("renders Markdown in the active reasoning stream", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(AgentReasoningPanel, {
+        currentStep: null,
+        state: {
+          activeStreamText: "Use `rg` to inspect the source.",
+          isStreaming: true,
+          recentUpdates: [],
+        },
+      }),
+    );
+
+    expect(markup).toContain("<code>rg</code>");
+    expect(markup).not.toContain("`rg`");
   });
 
   it("falls back to recent user-facing progress updates when no reasoning stream is active", () => {
@@ -1324,7 +1457,7 @@ describe("isTaskActivelyWorking", () => {
     expect(result.visibleFeedRows[0]?.key).toBe("timeline-history-control");
   });
 
-  it("keeps history controls out of the bounded live transcript", () => {
+  it("pins the history control above the bounded live transcript", () => {
     const rows = [
       {
         kind: "history-control",
@@ -1355,15 +1488,14 @@ describe("isTaskActivelyWorking", () => {
 
     const result = selectVisibleTaskFeedRows(rows, "live");
 
-    expect(result.visibleFeedRows.some((row) => row.key === "timeline-history-control")).toBe(
-      false,
-    );
+    expect(result.visibleFeedRows[0]?.key).toBe("timeline-history-control");
     expect(result.hiddenLiveFeedRowCount).toBe(
-      rows.filter((row) => row.kind !== "history-control").length - result.visibleFeedRows.length,
+      rows.filter((row) => row.kind !== "history-control").length -
+        result.visibleFeedRows.filter((row) => row.kind !== "history-control").length,
     );
   });
 
-  it("keeps history controls out of short live transcripts", () => {
+  it("keeps the history control in short live transcripts", () => {
     const rows = [
       {
         kind: "history-control",
@@ -1391,8 +1523,58 @@ describe("isTaskActivelyWorking", () => {
 
     const result = selectVisibleTaskFeedRows(rows, "live");
 
-    expect(result.visibleFeedRows.map((row) => row.key)).toEqual(["assistant-1"]);
+    expect(result.visibleFeedRows.map((row) => row.key)).toEqual([
+      "timeline-history-control",
+      "assistant-1",
+    ]);
     expect(result.hiddenLiveFeedRowCount).toBe(0);
+  });
+
+  it("pins the history control above the delivery transcript", () => {
+    const rows = [
+      {
+        kind: "history-control",
+        key: "timeline-history-control",
+        estimatedHeight: 44,
+        hasMoreHistory: true,
+        isLoading: false,
+        error: null,
+        revision: "more:idle:none",
+        visiblePerfEventId: null,
+      },
+      {
+        kind: "timeline",
+        key: "progress-1",
+        estimatedHeight: 100,
+        timelineIndex: 0,
+        visiblePerfEventId: "progress-1",
+        revision: "progress-1",
+        item: {
+          kind: "event",
+          event: makeEvent("progress-1", 100, "timeline_step_updated", {
+            legacyType: "progress_update",
+            message: "Working",
+          }),
+        },
+      },
+      {
+        kind: "timeline",
+        key: "assistant-1",
+        estimatedHeight: 100,
+        timelineIndex: 1,
+        visiblePerfEventId: "assistant-1",
+        revision: "assistant-1",
+        item: {
+          kind: "event",
+          event: makeEvent("assistant-1", 200, "assistant_message", { message: "Done" }),
+        },
+      },
+    ] as Any[];
+
+    const result = selectVisibleTaskFeedRows(rows, "delivery");
+
+    expect(result.visibleFeedRows[0]?.key).toBe("timeline-history-control");
+    expect(result.visibleFeedRows.some((row) => row.key === "assistant-1")).toBe(true);
   });
 
   it("projects completed delivery mode to final output rows", () => {

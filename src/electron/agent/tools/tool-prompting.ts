@@ -99,6 +99,12 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
     compactDescription:
       "Run 2-8 independent delegated tasks in parallel. Do not split one blocking serial task across nodes.",
   })),
+  send_agent_message: createPromptMetadata(() => ({
+    appendDescription:
+      "Queue a focused instruction or correction for a descendant agent, or use bot= to message a named teammate in the current persistent bot team. Bot-team messages wake the addressed bot after durable acceptance; child-agent messages remain queue-only. Reuse message_id when retrying the same message.",
+    compactDescription:
+      "Message a child task or a named bot teammate; bot-team delivery is durable and wakes the recipient.",
+  })),
   run_command: createPromptMetadata(() => ({
     appendDescription:
       "Use for shell, test, build, packaging, git, and local CLI work. Prefer this over browser or web tools for local execution. Do not use this for simple workspace file creation or overwrite when write_file can do it. Do not use this for native desktop GUI control when screenshot/click/type_text/keypress and related computer-use tools are available. If a test or build fails, inspect the output, fix the cause, then rerun.",

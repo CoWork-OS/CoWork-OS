@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import os from "node:os";
 import { DatabaseManager } from "../electron/database/schema";
 import { SecureSettingsRepository } from "../electron/database/SecureSettingsRepository";
+import { PulseService } from "../electron/telemetry/pulse-service";
 import { AgentDaemon } from "../electron/agent/daemon";
 import { LLMProviderFactory } from "../electron/agent/llm";
 import { SearchProviderFactory } from "../electron/agent/search";
@@ -58,6 +59,7 @@ import {
 } from "../electron/control-plane/StrategicPlannerService";
 import { attachControlPlaneTaskLifecycleSync } from "../electron/control-plane/task-run-sync";
 import { NumbatService } from "../electron/security/numbat";
+import { runShutdownSteps, type ShutdownStep } from "../electron/utils/graceful-shutdown";
 
 interface StartedControlPlane {
   server: ControlPlaneServer;
@@ -244,6 +246,10 @@ async function main(): Promise<void> {
   const dbManager = new DatabaseManager();
   new SecureSettingsRepository(dbManager.getDatabase());
   console.log("[Daemon] SecureSettingsRepository initialized");
+  new PulseService(dbManager.getDatabase(), {
+    version: process.env.npm_package_version || "0.0.0",
+    runtime: "daemon",
+  }).start();
 
   // Initialize provider factories (loads settings from disk, migrates legacy files).
   LLMProviderFactory.initialize();
@@ -400,6 +406,9 @@ async function main(): Promise<void> {
           title: params.title,
           prompt: params.prompt,
           workspaceId: params.workspaceId,
+          ...(params.assignedAgentRoleId
+            ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
+            : {}),
           agentConfig: mergedAgentConfig,
         });
         return { id: task.id };
@@ -650,65 +659,107 @@ async function main(): Promise<void> {
     console.log("[Daemon] Control Plane disabled (skipping auto-start)");
   }
 
-  const shutdown = async (reason: string) => {
-    console.log(`[Daemon] Shutting down (${reason})...`);
-    try {
-      await shutdownRemoteGatewayClient();
-    } catch {
-      // ignore
-    }
-    try {
-      if (startedControlPlane?.detachAgentBridge) startedControlPlane.detachAgentBridge();
-    } catch {
-      // ignore
-    }
-    try {
-      if (startedControlPlane?.server?.isRunning) await startedControlPlane.server.stop();
-    } catch (error) {
-      console.warn("[Daemon] Failed to stop Control Plane:", error);
-    }
-    try {
-      if (xMentionBridgeService) {
-        xMentionBridgeService.stop();
-        xMentionBridgeService = null;
+  let shutdownPromise: Promise<void> | undefined;
+  let fatalShutdownRequested = false;
+  const shutdown = (reason: string): Promise<void> => {
+    if (reason === "uncaughtException") fatalShutdownRequested = true;
+    if (shutdownPromise) return shutdownPromise;
+
+    shutdownPromise = (async () => {
+      console.log(`[Daemon] Shutting down (${reason})...`);
+      const steps: readonly ShutdownStep[] = [
+        // Fence and drain the agent before closing anything it may still use.
+        { name: "agent daemon", run: () => agentDaemon.shutdown() },
+        {
+          name: "remote gateway",
+          requiresQuiescence: true,
+          run: () => shutdownRemoteGatewayClient(),
+        },
+        {
+          name: "control plane bridge",
+          requiresQuiescence: true,
+          run: () => startedControlPlane?.detachAgentBridge?.(),
+        },
+        {
+          name: "control plane",
+          requiresQuiescence: true,
+          run: async () => {
+            if (startedControlPlane?.server?.isRunning) await startedControlPlane.server.stop();
+          },
+        },
+        {
+          name: "X mention bridge",
+          requiresQuiescence: true,
+          run: () => {
+            xMentionBridgeService?.stop();
+            xMentionBridgeService = null;
+          },
+        },
+        {
+          name: "channel gateway",
+          requiresQuiescence: true,
+          run: () => channelGateway.shutdown(),
+        },
+        {
+          name: "strategic planner",
+          requiresQuiescence: true,
+          run: () => {
+            strategicPlannerService?.stop();
+            setStrategicPlannerService(null);
+          },
+        },
+        {
+          name: "cron",
+          requiresQuiescence: true,
+          run: async () => {
+            if (cronService) await cronService.stop();
+          },
+        },
+        { name: "task lifecycle sync", run: () => detachTaskLifecycleSync() },
+        {
+          name: "security monitor",
+          requiresQuiescence: true,
+          run: () => NumbatService.getInstance()?.shutdown(),
+        },
+        {
+          name: "MCP servers",
+          requiresQuiescence: true,
+          run: () => mcpClientManager?.shutdown(),
+        },
+        {
+          name: "memory",
+          requiresQuiescence: true,
+          run: () => MemoryService.shutdown(),
+        },
+        {
+          name: "database",
+          requiresQuiescence: true,
+          run: () => dbManager.close(),
+        },
+      ];
+
+      let quiescent = false;
+      try {
+        const result = await runShutdownSteps(
+          steps,
+          (step, error) => console.warn(`[Daemon] Failed to stop ${step}:`, error),
+          10_000,
+        );
+        quiescent = result.quiescent;
+        if (result.skippedSteps.length > 0) {
+          console.warn(
+            `[Daemon] Skipped dependent shutdown steps after non-quiescent stop: ${result.skippedSteps.join(", ")}`,
+          );
+        }
+      } catch (error) {
+        console.error("[Daemon] Shutdown coordinator failed:", error);
       }
-    } catch (error) {
-      console.warn("[Daemon] Failed to stop X mention bridge service:", error);
-    }
-    try {
-      await channelGateway.shutdown();
-    } catch (error) {
-      console.warn("[Daemon] Failed to shutdown Channel Gateway:", error);
-    }
-    try {
-      strategicPlannerService?.stop();
-      setStrategicPlannerService(null);
-    } catch (error) {
-      console.warn("[Daemon] Failed to stop Strategic Planner:", error);
-    }
-    try {
-      if (cronService) await cronService.stop();
-    } catch (error) {
-      console.warn("[Daemon] Failed to stop Cron Service:", error);
-    }
-    try {
-      if (mcpClientManager) await mcpClientManager.shutdown();
-    } catch (error) {
-      console.warn("[Daemon] Failed to shutdown MCP Client Manager:", error);
-    }
-    try {
-      detachTaskLifecycleSync();
-    } catch (error) {
-      console.warn("[Daemon] Failed to detach task lifecycle sync:", error);
-    }
-    try {
-      NumbatService.getInstance()?.shutdown();
-      await agentDaemon.shutdown();
-    } catch (error) {
-      console.warn("[Daemon] Failed to shutdown AgentDaemon:", error);
-    }
-    // eslint-disable-next-line no-process-exit
-    process.exit(0);
+
+      // eslint-disable-next-line no-process-exit
+      process.exit(fatalShutdownRequested || !quiescent ? 1 : 0);
+    })();
+
+    return shutdownPromise;
   };
 
   process.on("SIGINT", () => {

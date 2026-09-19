@@ -1,9 +1,112 @@
 import { describe, expect, it } from "vitest";
 import {
+  fromOpenAICompatibleResponse,
+  parseOpenAICompatibleToolArguments,
   sanitizeToolCallHistory,
   toOpenAICompatibleMessages,
   toOpenAICompatibleTools,
 } from "../openai-compatible";
+
+describe("parseOpenAICompatibleToolArguments", () => {
+  it.each([
+    ["valid object", '{"query":"status"}', { query: "status" }, undefined],
+    ["already decoded object", { query: "status" }, { query: "status" }, undefined],
+    ["explicit empty object", "{}", {}, undefined],
+  ])("accepts %s", (_label, value, input, inputError) => {
+    const result = parseOpenAICompatibleToolArguments(value);
+    expect(result.input).toEqual(input);
+    expect(result.inputError).toBe(inputError);
+  });
+
+  it.each([
+    ["malformed JSON", "{", "malformed_json"],
+    ["scalar", "42", "invalid_shape"],
+    ["array", "[]", "invalid_shape"],
+    ["null", "null", "invalid_shape"],
+    ["decoded null", null, "invalid_shape"],
+    ["blank", "   ", "malformed_json"],
+    ["missing", undefined, "malformed_json"],
+  ])("rejects %s without throwing", (_label, value, code) => {
+    const result = parseOpenAICompatibleToolArguments(value);
+    expect(result.input).toEqual({});
+    expect(result.inputError?.code).toBe(code);
+    expect(result.inputError?.message).toContain("JSON");
+  });
+});
+
+describe("fromOpenAICompatibleResponse", () => {
+  it("keeps valid siblings and rejects malformed arguments by call ID", () => {
+    const response = fromOpenAICompatibleResponse({
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            content: "I will inspect these.",
+            tool_calls: [
+              {
+                type: "function",
+                id: "call_valid",
+                function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+              },
+              {
+                type: "function",
+                id: "call_bad",
+                function: { name: "write_file", arguments: '{"path":' },
+              },
+              {
+                type: "function",
+                id: "call_array",
+                function: { name: "glob", arguments: "[]" },
+              },
+              {
+                type: "function",
+                id: "call_empty_object",
+                function: { name: "noop", arguments: "{}" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(response.stopReason).toBe("tool_use");
+    expect(response.content).toEqual([
+      { type: "text", text: "I will inspect these." },
+      {
+        type: "tool_use",
+        id: "call_valid",
+        name: "read_file",
+        input: { path: "a.ts" },
+      },
+      {
+        type: "tool_use",
+        id: "call_bad",
+        name: "write_file",
+        input: {},
+        inputError: {
+          code: "malformed_json",
+          message: "Tool call arguments must be valid JSON.",
+        },
+      },
+      {
+        type: "tool_use",
+        id: "call_array",
+        name: "glob",
+        input: {},
+        inputError: {
+          code: "invalid_shape",
+          message: "Tool call arguments must be a JSON object.",
+        },
+      },
+      {
+        type: "tool_use",
+        id: "call_empty_object",
+        name: "noop",
+        input: {},
+      },
+    ]);
+  });
+});
 
 describe("toOpenAICompatibleMessages", () => {
   it("splits stable and turn-scoped system blocks into separate leading system messages", () => {

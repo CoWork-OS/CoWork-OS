@@ -920,9 +920,7 @@ const TaskConversationRenderedRows = memo(
     formatTime,
     isReplayMode,
     transcriptMode,
-    hiddenLiveFeedRowCount,
     canReturnToLiveView,
-    onShowFullTimeline,
     onBackToLiveView,
     reasoningPanel,
     reasoningPanelSignature,
@@ -946,9 +944,7 @@ const TaskConversationRenderedRows = memo(
     formatTime: (timestamp: number) => string;
     isReplayMode: boolean;
     transcriptMode: TranscriptMode;
-    hiddenLiveFeedRowCount: number;
     canReturnToLiveView: boolean;
-    onShowFullTimeline: () => void;
     onBackToLiveView: () => void;
     reasoningPanel?: React.ReactNode;
     reasoningPanelSignature: string;
@@ -981,10 +977,9 @@ const TaskConversationRenderedRows = memo(
     const renderableFeedRows = useMemo(() => visibleFeedRows, [visibleFeedRows]);
     const handleLoadMoreTimelineHistory = useCallback(
       (options?: { loadAll?: boolean }) => {
-        // Live and delivery transcripts only render a slice of the feed, so loading
-        // older pages there would fetch steps the user still could not see. Expand to
-        // the full transcript first — it keeps the current verbose setting.
-        if (transcriptMode !== "inspect") onShowFullTimeline();
+        // Older pages are only fetched while the user is inspecting the transcript. The
+        // live view keeps every conversation message and compact action row visible without
+        // exposing a separate "load all history" control.
         const container = mainBodyRef.current;
         if (container) {
           historyPrependAnchorRef.current = {
@@ -998,14 +993,7 @@ const TaskConversationRenderedRows = memo(
         setSuppressVirtualAutoScroll(true);
         void onLoadMoreTimelineHistory?.(options);
       },
-      [
-        mainBodyRef,
-        onLoadMoreTimelineHistory,
-        onShowFullTimeline,
-        renderableFeedRows.length,
-        taskId,
-        transcriptMode,
-      ],
+      [mainBodyRef, onLoadMoreTimelineHistory, renderableFeedRows.length, taskId],
     );
     const startupRowsMarkedRef = useRef(false);
     const timelineRowsMarkedTaskIdsRef = useRef<Set<string>>(new Set());
@@ -1234,24 +1222,7 @@ const TaskConversationRenderedRows = memo(
       () =>
         new Map(
           renderedFeedRows.map((row) => {
-            const node =
-              row.kind === "history-control" ? (
-                <div className="timeline-history-control">
-                  {row.error ? <span className="timeline-history-error">{row.error}</span> : null}
-                  {row.hasMoreHistory ? (
-                    <button
-                      type="button"
-                      className="action-block-show-all-btn"
-                      disabled={row.isLoading}
-                      onClick={() => handleLoadMoreTimelineHistory({ loadAll: true })}
-                    >
-                      {row.isLoading ? "Loading earlier history..." : "Load all earlier history"}
-                    </button>
-                  ) : null}
-                </div>
-              ) : (
-                getRenderedFeedRow(row)
-              );
+            const node = row.kind === "history-control" ? null : getRenderedFeedRow(row);
             return [row.key, node] as const;
           }),
         ),
@@ -1306,42 +1277,6 @@ const TaskConversationRenderedRows = memo(
 
     return (
       <div className="conversation-flow" ref={setConversationFlowNode}>
-        {transcriptMode === "live" && hiddenLiveFeedRowCount > 0 && (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: "10px 12px",
-              border: "1px solid var(--border-color, rgba(255,255,255,0.12))",
-              borderRadius: 10,
-              background: "var(--surface-secondary, rgba(255,255,255,0.04))",
-              color: "var(--text-secondary, rgba(255,255,255,0.72))",
-              fontSize: 12,
-              lineHeight: 1.45,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <span>
-                Showing the current live work. {hiddenLiveFeedRowCount} earlier
-                {hiddenLiveFeedRowCount === 1 ? " item is" : " items are"} hidden while the task is
-                running.
-              </span>
-              <button
-                type="button"
-                className="action-block-show-all-btn"
-                onClick={onShowFullTimeline}
-              >
-                Show full timeline
-              </button>
-            </div>
-          </div>
-        )}
         {transcriptMode === "inspect" && canReturnToLiveView && (
           <div
             style={{
@@ -1443,9 +1378,7 @@ const TaskConversationRenderedRows = memo(
     prev.formatTime === next.formatTime &&
     prev.isReplayMode === next.isReplayMode &&
     prev.transcriptMode === next.transcriptMode &&
-    prev.hiddenLiveFeedRowCount === next.hiddenLiveFeedRowCount &&
     prev.canReturnToLiveView === next.canReturnToLiveView &&
-    prev.onShowFullTimeline === next.onShowFullTimeline &&
     prev.onBackToLiveView === next.onBackToLiveView &&
     prev.reasoningPanelSignature === next.reasoningPanelSignature &&
     prev.mainBodyRef === next.mainBodyRef &&
@@ -1569,7 +1502,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const voiceEnabled = props.voiceEnabled as boolean;
   const wrappingUp = props.wrappingUp as boolean;
   const workspace = props.workspace as Workspace | null;
-  const showFullTimeline = props.showFullTimeline as () => void;
   const returnToDefaultTranscript = props.returnToDefaultTranscript as () => void;
 
   recordRendererRender(
@@ -1727,23 +1659,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       });
     }
 
-    if (hasMoreTimelineHistory || timelineHistoryError) {
-      rows.unshift({
-        kind: "history-control",
-        key: "timeline-history-control",
-        estimatedHeight: timelineHistoryError ? 64 : 44,
-        hasMoreHistory: Boolean(hasMoreTimelineHistory),
-        isLoading: Boolean(isLoadingTimelineHistory),
-        error: timelineHistoryError ?? null,
-        revision: [
-          hasMoreTimelineHistory ? "more" : "done",
-          isLoadingTimelineHistory ? "loading" : "idle",
-          timelineHistoryError ?? "none",
-        ].join(":"),
-        visiblePerfEventId: null,
-      });
-    }
-
     timelineItems.forEach((item, timelineIndex) => {
       let visiblePerfEventId: string | null = null;
       const key =
@@ -1816,6 +1731,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 const expanded = resolveDisclosureExpanded({
                   intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
                   isCurrent: isActive,
+                  defaultExpanded: verboseSteps || isReplayMode,
                 });
                 const visibleEventCount = expanded ? actionBlockState.visibleBlockEvents.length : 0;
                 return estimateTaskFeedRowHeight(item, {
@@ -1854,6 +1770,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     getActionBlockRenderState,
     events,
     expandedArtifactStacks,
+    verboseSteps,
   ]);
   const displayFeedRows = useMemo(
     () =>
@@ -1923,7 +1840,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       workspace?.path,
     ],
   );
-  const { visibleFeedRows, hiddenLiveFeedRowCount } = useMemo(
+  const { visibleFeedRows } = useMemo(
     () => selectVisibleTaskFeedRows(displayFeedRows, transcriptMode),
     [displayFeedRows, transcriptMode],
   );
@@ -2278,8 +2195,14 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 const expanded = resolveDisclosureExpanded({
                   intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
                   isCurrent: isActive,
+                  defaultExpanded: verboseSteps || isReplayMode,
                 });
-                const onToggle = () => toggleDisclosureIntent("group", item.blockId, isActive);
+                const onToggle = () =>
+                  toggleDisclosureIntent(
+                    "group",
+                    item.blockId,
+                    isActive && (verboseSteps || isReplayMode),
+                  );
                 const indicatorPosition = stepFeedTimelineIndexPosition.get(timelineIndex);
                 const showConnectorAbove =
                   typeof indicatorPosition === "number" && indicatorPosition > 0;
@@ -2335,8 +2258,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       showConnectorAbove={showConnectorAbove}
                       showConnectorBelow={showConnectorBelow}
                       lastStepLabel={lastStepLabel}
+                      compactLabel={summary}
                       startedAt={item.events[0]?.timestamp ?? item.timestamp}
                       replay={isReplayMode}
+                      minimal={!verboseSteps}
                     >
                       {(() => {
                         const nestedParallelEventIds = new Set<string>();
@@ -3219,9 +3144,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 formatTime={formatTime}
                 isReplayMode={isReplayMode}
                 transcriptMode={transcriptMode}
-                hiddenLiveFeedRowCount={hiddenLiveFeedRowCount}
                 canReturnToLiveView={defaultTranscriptMode === "live"}
-                onShowFullTimeline={showFullTimeline}
                 onBackToLiveView={returnToDefaultTranscript}
                 reasoningPanel={
                   showReasoningPanel ? (
@@ -3293,13 +3216,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       task?.status,
       task?.terminalStatus,
       feedRows,
-      hiddenLiveFeedRowCount,
       transcriptMode,
       defaultTranscriptMode,
       lastActionBlockTimelineIndex,
       lastAssistantMessage,
       returnToDefaultTranscript,
-      showFullTimeline,
       timelineItems,
       timelineRef,
       toggleEventExpanded,
@@ -3375,7 +3296,6 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.formatTime === next.formatTime &&
     prev.renderCommandOutputs === next.renderCommandOutputs &&
     prev.toggleEventExpanded === next.toggleEventExpanded &&
-    prev.showFullTimeline === next.showFullTimeline &&
     prev.returnToDefaultTranscript === next.returnToDefaultTranscript &&
     prev.onOpenBrowserView === next.onOpenBrowserView &&
     prev.onOpenSpreadsheetArtifact === next.onOpenSpreadsheetArtifact &&
@@ -4989,9 +4909,6 @@ function MainContentComponent({
       setTranscriptModeOverride(null);
     }
   }, [defaultTranscriptMode, transcriptModeOverride]);
-  const showFullTimeline = useCallback(() => {
-    setTranscriptModeOverride("inspect");
-  }, []);
   const returnToDefaultTranscript = useCallback(() => {
     setTranscriptModeOverride(null);
   }, []);
@@ -6299,11 +6216,11 @@ function MainContentComponent({
     [toolCallPairing.claimedResultIds, events, verboseSteps],
   );
 
-  // While the task is working, the live action block header already renders "Working" plus a
-  // live timer right above the step feed. Showing the same status in the controls strip put
-  // the identical state on two adjacent lines, so the strip yields its label to the header.
+  // Verbose mode keeps the detailed action header (including its duration metadata) as the
+  // status affordance. Summary mode uses a quiet activity row, so keep the turn-level timer
+  // visible above the conversation like the reference transcript.
   const liveActivityHeaderVisible = useMemo(() => {
-    if (!isTaskWorking) return false;
+    if (!isTaskWorking || !verboseSteps) return false;
     for (let i = timelineItems.length - 1; i >= 0; i -= 1) {
       const item = timelineItems[i];
       if (item.kind !== "action_block") continue;
@@ -6320,6 +6237,7 @@ function MainContentComponent({
     shouldRenderTimelineEventInStepFeed,
     suppressedParallelEventIds,
     timelineItems,
+    verboseSteps,
   ]);
 
   // Check if an event has details to show
@@ -10278,7 +10196,6 @@ function MainContentComponent({
       isReplayMode={isReplayMode}
       defaultTranscriptMode={defaultTranscriptMode}
       transcriptMode={transcriptMode}
-      showFullTimeline={showFullTimeline}
       returnToDefaultTranscript={returnToDefaultTranscript}
       markdownComponents={markdownComponents}
       mainBodyRef={mainBodyRef}

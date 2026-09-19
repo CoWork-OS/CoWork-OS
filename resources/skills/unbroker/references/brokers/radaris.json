@@ -3,19 +3,13 @@
   "name": "Radaris",
   "category": "people_search",
   "priority": "crucial",
-  "jurisdictions": [
-    "US"
-  ],
+  "jurisdictions": ["US"],
   "search": {
     "method": "url_pattern",
     "url": "https://radaris.com/",
     "fetch": "web_extract",
     "match_signal": "View Profile",
-    "by": [
-      "name",
-      "phone",
-      "address"
-    ],
+    "by": ["name", "phone", "address"],
     "url_patterns": {
       "name": "https://radaris.com/p/{First}/{Last}/"
     },
@@ -38,10 +32,7 @@
       "phone_callback": false,
       "payment": false
     },
-    "inputs": [
-      "profile_url",
-      "contact_email"
-    ],
+    "inputs": ["profile_url", "contact_email"],
     "notes": "Multi-step control-privacy wizard: step 1 NEXT -> step 2 'identify your personal page' (paste the NUMBERED profile URL into the 'Or Enter URL of your page' field; typing reveals a NEXT submit button) -> then user_email + Google reCAPTCHA -> emailed verification link. If there is no View Profile button for the subject, email customer-service@radaris.com and reply to the auto-response until removed.",
     "email": "customer-service@radaris.com",
     "quirks": [

@@ -29,11 +29,11 @@ Mission Control now sits alongside the other operational entry points:
 
 Mission Control is split into three panels:
 
-| Panel | Purpose |
-|-------|---------|
-| **Left — Agents** | Heartbeat-enabled agent list with Pulse/Dispatch state, automation-profile-backed cadence, idle/running state, and manual trigger controls |
-| **Center — Mission Board** | Kanban board with 5 columns for tracked work lifecycle management |
-| **Right — Feed & Details** | Live activity feed and selected task details with comments/mentions |
+| Panel                      | Purpose                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Left — Agents**          | Heartbeat-enabled agent list with Pulse/Dispatch state, automation-profile-backed cadence, idle/running state, and manual trigger controls |
+| **Center — Mission Board** | Kanban board with 5 columns for tracked work lifecycle management                                                                          |
+| **Right — Feed & Details** | Live activity feed and selected task details with comments/mentions                                                                        |
 
 The header bar shows workspace selector, current time, and operational counters grouped by source:
 
@@ -53,6 +53,7 @@ View and manage enabled agents in the current workspace. An enabled agent is not
 ### Agent Information
 
 Each agent card shows:
+
 - Display name, role description, and avatar
 - Current running task title, tracked task title, or "No active task"
 - **Autonomy level badge**: LEAD, SPC (Specialist), or INT (Intern)
@@ -64,16 +65,17 @@ Each agent card shows:
 
 ### Agent Actions
 
-| Action | Result |
-|--------|--------|
-| **Click** agent | Select/deselect — filters the activity feed to that agent |
-| **Double-click** agent | Open Agent Role Editor to edit configuration |
-| **Trigger Pulse** button | Manually trigger Heartbeat v3 review immediately |
-| **"Add Agent"** button | Create a new agent role with configuration modal |
+| Action                   | Result                                                    |
+| ------------------------ | --------------------------------------------------------- |
+| **Click** agent          | Select/deselect — filters the activity feed to that agent |
+| **Double-click** agent   | Open Agent Role Editor to edit configuration              |
+| **Trigger Pulse** button | Manually trigger Heartbeat v3 review immediately          |
+| **"Add Agent"** button   | Create a new agent role with configuration modal          |
 
 ### Agent Role Editor
 
 Configure agent roles with:
+
 - Display name, description, icon, and color
 - Personality and model preferences
 - Capabilities and tool restrictions
@@ -88,17 +90,18 @@ Heartbeat, Dreaming, and Workflow Intelligence ownership no longer live directly
 
 A 5-column Kanban board for managing tracked work. Drag tasks between columns to change their status. This board is separate from the live global runtime queue: runtime tasks can be running or waiting even when the board has no open work in the current view.
 
-| Column | Status | Description |
-|--------|--------|-------------|
-| **INBOX** | Backlog | Unassigned items waiting for triage |
-| **ASSIGNED** | Todo | Assigned board work ready to start |
-| **IN PROGRESS** | Active | Board work currently being executed or planned |
-| **REVIEW** | Pending review | Awaiting approval or human review |
-| **DONE** | Completed | Finished tasks |
+| Column          | Status         | Description                                    |
+| --------------- | -------------- | ---------------------------------------------- |
+| **INBOX**       | Backlog        | Unassigned items waiting for triage            |
+| **ASSIGNED**    | Todo           | Assigned board work ready to start             |
+| **IN PROGRESS** | Active         | Board work currently being executed or planned |
+| **REVIEW**      | Pending review | Awaiting approval or human review              |
+| **DONE**        | Completed      | Finished tasks                                 |
 
 ### Task Cards
 
 Each card shows:
+
 - Task title
 - Assigned agent (avatar + name)
 - Status pill with color coding
@@ -134,6 +137,7 @@ Tabbed panel with three views.
 Real-time activity stream for the current workspace.
 
 **Filter by event type:**
+
 - ALL — Everything
 - TASKS — Task creation and status changes
 - COMMENTS — Comments and mentions
@@ -142,6 +146,7 @@ Real-time activity stream for the current workspace.
 **Filter by agent:** Click agent chips to show only that agent's activity.
 
 **Event types shown:**
+
 - Pulse results (`idle`, `deferred`, `suggestion`, `dispatch_task`, `dispatch_runbook`, `handoff_to_cron`)
 - Dispatch results (`silent`, `suggestion`, `task`, `runbook`, `cron_handoff`)
 - Task comments and mentions
@@ -314,40 +319,40 @@ Access from the **Standup** button in the header.
 
 Mission Control subscribes to live event streams — no manual refresh needed:
 
-| Event Stream | What It Updates |
-|-------------|-----------------|
-| **Heartbeat v3 events** | Agent status dots, pulse/dispatch indicators, deferred state, feed items |
-| **Core harness events** | Failure clusters, eval upkeep, experiment progression, and learning summaries |
-| **Activity events** | Comments, mentions, assignments in the feed |
-| **Learning events** | Post-task learning progression, skill promotion states, and evidence-linked completion summaries |
-| **Routing events** | Provider/model switches, fallback transitions, and route-reason updates |
-| **Task events** | New tasks, status changes on the Kanban board |
-| **Task board events** | Column moves, priority changes, label/date updates |
-| **Runtime queue events** | Global running/waiting counts and queue task summaries in the Brief tab |
-| **Team run events** | Team and member changes, run progress, item status |
-| **Mention events** | Pending mention count in header, mention list in task details |
+| Event Stream             | What It Updates                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| **Heartbeat v3 events**  | Agent status dots, pulse/dispatch indicators, deferred state, feed items                         |
+| **Core harness events**  | Failure clusters, eval upkeep, experiment progression, and learning summaries                    |
+| **Activity events**      | Comments, mentions, assignments in the feed                                                      |
+| **Learning events**      | Post-task learning progression, skill promotion states, and evidence-linked completion summaries |
+| **Routing events**       | Provider/model switches, fallback transitions, and route-reason updates                          |
+| **Task events**          | New tasks, status changes on the Kanban board                                                    |
+| **Task board events**    | Column moves, priority changes, label/date updates                                               |
+| **Runtime queue events** | Global running/waiting counts and queue task summaries in the Brief tab                          |
+| **Team run events**      | Team and member changes, run progress, item status                                               |
+| **Mention events**       | Pending mention count in header, mention list in task details                                    |
 
 ---
 
 ## Quick Reference
 
-| Action | How |
-|--------|-----|
-| Open Mission Control | Settings > Mission Control |
-| Open company-scoped Mission Control | Settings > Companies > Open in Mission Control |
-| Add a new agent | Click "Add Agent" in the agents panel |
-| Add a digital twin | Click "Add Digital Twin" in the agents panel ([details](digital-twins.md)) |
-| Review core automation learning | Open the `Core Harness` view |
-| Configure the company planner | Use the planner strip above the board |
-| Inspect company ops | Open the `Ops` tab in the right panel |
-| Edit an agent | Double-click the agent card |
-| Trigger immediate heartbeat review | Click `Trigger Pulse` on the agent card |
-| Move a task to a new stage | Drag the task card to the target column |
-| View task details | Click any task card |
-| Post an update on a task | Select task, type in the comment box, click "Post Update" |
-| Filter feed by agent | Click an agent chip in the feed panel |
-| Create a team | Header > Teams > create team |
-| Generate a performance review | Header > Reviews > select agent > Generate |
-| Generate a standup report | Header > Standup > Generate Standup Report |
+| Action                              | How                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------- |
+| Open Mission Control                | Settings > Mission Control                                                 |
+| Open company-scoped Mission Control | Settings > Companies > Open in Mission Control                             |
+| Add a new agent                     | Click "Add Agent" in the agents panel                                      |
+| Add a digital twin                  | Click "Add Digital Twin" in the agents panel ([details](digital-twins.md)) |
+| Review core automation learning     | Open the `Core Harness` view                                               |
+| Configure the company planner       | Use the planner strip above the board                                      |
+| Inspect company ops                 | Open the `Ops` tab in the right panel                                      |
+| Edit an agent                       | Double-click the agent card                                                |
+| Trigger immediate heartbeat review  | Click `Trigger Pulse` on the agent card                                    |
+| Move a task to a new stage          | Drag the task card to the target column                                    |
+| View task details                   | Click any task card                                                        |
+| Post an update on a task            | Select task, type in the comment box, click "Post Update"                  |
+| Filter feed by agent                | Click an agent chip in the feed panel                                      |
+| Create a team                       | Header > Teams > create team                                               |
+| Generate a performance review       | Header > Reviews > select agent > Generate                                 |
+| Generate a standup report           | Header > Standup > Generate Standup Report                                 |
 
 For a full founder-directed autonomous-company setup, see [Zero-Human Company Operations](zero-human-company.md).

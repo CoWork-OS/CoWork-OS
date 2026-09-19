@@ -37,15 +37,15 @@ Environmental, Social, and Governance scoring with SASB materiality mapping, TCF
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| company | string | Yes | Company name or ticker symbol |
-| framework | select | Yes | ESG framework to apply |
-| question | string | Yes | Your specific ESG analysis question |
-| sector | string | No | Company sector for materiality mapping (e.g., Technology, Healthcare, Energy) |
-| focusArea | select | Yes | Primary ESG pillar to focus on |
+| Name      | Type   | Required | Description                                                                   |
+| --------- | ------ | -------- | ----------------------------------------------------------------------------- |
+| company   | string | Yes      | Company name or ticker symbol                                                 |
+| framework | select | Yes      | ESG framework to apply                                                        |
+| question  | string | Yes      | Your specific ESG analysis question                                           |
+| sector    | string | No       | Company sector for materiality mapping (e.g., Technology, Healthcare, Energy) |
+| focusArea | select | Yes      | Primary ESG pillar to focus on                                                |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1171 characters.
-- Runtime prompt is defined directly in `../esg-scorer.json`. 
+- Runtime prompt is defined directly in `../esg-scorer.json`.

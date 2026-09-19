@@ -76,7 +76,9 @@ describe("TaskExecutor entrypoint guards", () => {
     executor.sendMessageUnified = vi.fn(async () => undefined);
     executor.sendMessageLegacy = vi.fn(async () => undefined);
     await executor.sendMessageUnlocked("hello");
-    expect(executor.sendMessageUnified).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(executor.sendMessageUnified).toHaveBeenCalledWith("hello", undefined, undefined, {
+      messageContext: undefined,
+    });
     expect(executor.sendMessageLegacy).not.toHaveBeenCalled();
   });
 
@@ -102,7 +104,12 @@ describe("TaskExecutor entrypoint guards", () => {
 
     await executor.sendMessageUnlocked("hello");
 
-    expect(executor.sendMessageWithAcpxRuntime).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(executor.sendMessageWithAcpxRuntime).toHaveBeenCalledWith(
+      "hello",
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(executor.sendMessageUnified).not.toHaveBeenCalled();
     expect(executor.sendMessageLegacy).not.toHaveBeenCalled();
   });
@@ -132,7 +139,33 @@ describe("TaskExecutor entrypoint guards", () => {
     await executor.sendMessageUnlocked("hello");
 
     expect(executor.disableExternalRuntimeForFallback).toHaveBeenCalledTimes(1);
-    expect(executor.sendMessageUnified).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(executor.sendMessageUnified).toHaveBeenCalledWith("hello", undefined, undefined, {
+      messageContext: undefined,
+    });
+  });
+
+  it("cancels an admitted acpx runner even after authority is narrowed", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const cancelRunner = vi.fn(async () => undefined);
+
+    executor.abortController = new AbortController();
+    executor.acpxRuntimeRunner = { cancel: cancelRunner };
+    executor.isAcpxExternalRuntimeTask = vi.fn(() => true);
+    executor.getAcpxRuntimeRunner = vi.fn(() => {
+      throw new Error("start/follow-up authority must not gate cancellation");
+    });
+    executor.endDebugRuntimeSessionIfNeeded = vi.fn();
+    executor.stopProgressJournal = vi.fn();
+    executor.killShellProcess = vi.fn();
+    executor.closeAcpxRuntimeSession = vi.fn(async () => undefined);
+    executor.discardProvisionalBootstrapArtifacts = vi.fn();
+    executor.sandboxRunner = { cleanup: vi.fn() };
+
+    await (TaskExecutor.prototype as Any).cancel.call(executor, "user");
+
+    expect(cancelRunner).toHaveBeenCalledTimes(1);
+    expect(executor.getAcpxRuntimeRunner).not.toHaveBeenCalled();
+    expect(executor.killShellProcess).toHaveBeenCalledWith(true);
   });
 
   it("preserves quoted assistant metadata when routing user messages through the timeline emitter", () => {

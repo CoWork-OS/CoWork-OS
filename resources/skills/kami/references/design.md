@@ -29,8 +29,8 @@ kami 的审美可以浓缩成一句话：**暖米纸底，油墨蓝点缀，seri
 ### 主调 · 品牌色
 
 ```css
---brand:        #1B365D;   /* Ink Blue Brand - 唯一的彩色，用于 CTA、强调、section-title 左侧竖线 */
---brand-light:  #2D5A8A;   /* 更亮的变体，深色底上的链接偶尔用 */
+--brand: #1b365d; /* Ink Blue Brand - 唯一的彩色，用于 CTA、强调、section-title 左侧竖线 */
+--brand-light: #2d5a8a; /* 更亮的变体，深色底上的链接偶尔用 */
 ```
 
 **使用规则**：油墨蓝 `#1B365D` 全文档不超过 **5% 的面积**。超过就是堆砌，不是克制。
@@ -38,11 +38,11 @@ kami 的审美可以浓缩成一句话：**暖米纸底，油墨蓝点缀，seri
 ### 画布 · 背景色
 
 ```css
---parchment:    #f5f4ed;   /* 主页面背景 - 温暖米色，整个设计的情感基础 */
---ivory:        #faf9f5;   /* 卡片/浮起容器 - 比 parchment 更亮的暖白 */
---warm-sand:    #e8e6dc;   /* 按钮默认背景 / 明显的交互表面 */
---dark-surface: #30302e;   /* 深色主题容器 - 暖炭灰 */
---deep-dark:    #141413;   /* 深色主题页面底色 - 不是纯黑，有橄榄绿底色 */
+--parchment: #f5f4ed; /* 主页面背景 - 温暖米色，整个设计的情感基础 */
+--ivory: #faf9f5; /* 卡片/浮起容器 - 比 parchment 更亮的暖白 */
+--warm-sand: #e8e6dc; /* 按钮默认背景 / 明显的交互表面 */
+--dark-surface: #30302e; /* 深色主题容器 - 暖炭灰 */
+--deep-dark: #141413; /* 深色主题页面底色 - 不是纯黑，有橄榄绿底色 */
 ```
 
 **绝对禁止**：`#ffffff` 纯白作页面底 · 任何 `#f8f9fa` / `#f3f4f6` 这类冷灰底。
@@ -50,12 +50,12 @@ kami 的审美可以浓缩成一句话：**暖米纸底，油墨蓝点缀，seri
 ### 中性文字色
 
 ```css
---near-black:   #141413;   /* 主文本 - 最深但不是纯黑，有暖橄榄底色 */
---dark-warm:    #3d3d3a;   /* 次级深色文字 / 深色链接 */
---charcoal:     #4d4c48;   /* 按钮文字 / 高密度正文 */
---olive:        #5e5d59;   /* 副文本 - 描述、caption 等 */
---stone:        #87867f;   /* 三级文字 - 日期、元信息 */
---warm-silver:  #b0aea5;   /* 深色底上的浅色文字 */
+--near-black: #141413; /* 主文本 - 最深但不是纯黑，有暖橄榄底色 */
+--dark-warm: #3d3d3a; /* 次级深色文字 / 深色链接 */
+--charcoal: #4d4c48; /* 按钮文字 / 高密度正文 */
+--olive: #5e5d59; /* 副文本 - 描述、caption 等 */
+--stone: #87867f; /* 三级文字 - 日期、元信息 */
+--warm-silver: #b0aea5; /* 深色底上的浅色文字 */
 ```
 
 **记忆法**：每个灰都有 **yellow-brown undertone**。如果你在 `rgb()` 里看到 R ≈ G > B（或 R > G > B 且差距很小），基本就是暖灰。冷灰是 R < G < B（偏蓝）或 R = G = B（中性）。
@@ -63,24 +63,24 @@ kami 的审美可以浓缩成一句话：**暖米纸底，油墨蓝点缀，seri
 ### 边框与分隔
 
 ```css
---border-cream: #e8e5da;   /* 最柔的边框 - 卡片默认 */
---border-warm:  #e0ddd2;   /* 明显的边框 - section 分隔 */
---border-soft:  #e5e3d8;   /* 更淡的虚线分隔 - 列表项之间 */
---border-dark:  #30302e;   /* 深色主题下的边框 */
+--border-cream: #e8e5da; /* 最柔的边框 - 卡片默认 */
+--border-warm: #e0ddd2; /* 明显的边框 - section 分隔 */
+--border-soft: #e5e3d8; /* 更淡的虚线分隔 - 列表项之间 */
+--border-dark: #30302e; /* 深色主题下的边框 */
 ```
 
 ### Ring 阴影（不用传统 box-shadow）
 
 ```css
---ring-warm:    #d1cfc5;   /* 按钮 hover/focus 环 */
---ring-deep:    #c2c0b6;   /* 按下状态 */
+--ring-warm: #d1cfc5; /* 按钮 hover/focus 环 */
+--ring-deep: #c2c0b6; /* 按下状态 */
 ```
 
 ### 功能色（尽量少用）
 
 ```css
---error:     #b53333;   /* 错误 - 深暖红，不刺眼 */
---focus:     #3898ec;   /* 聚焦蓝 - 唯一的冷色，只用于 input focus ring，无障碍必要 */
+--error: #b53333; /* 错误 - 深暖红，不刺眼 */
+--focus: #3898ec; /* 聚焦蓝 - 唯一的冷色，只用于 input focus ring，无障碍必要 */
 ```
 
 ### 半透明对应实色对照表（TAG / 标签必须实色）
@@ -89,13 +89,13 @@ kami 的审美可以浓缩成一句话：**暖米纸底，油墨蓝点缀，seri
 
 油墨蓝 `#1B365D` 叠加在 parchment `#f5f4ed` 上的等效实色：
 
-| 想要的 rgba 透明度 | 等效实色 hex |
-|---|---|
-| 0.08 | `#EEF2F7` |
-| 0.14 | `#E4ECF5` |
-| **0.18** | **`#E4ECF5`** ← tag 推荐默认 |
-| 0.22 | `#D0DCE9` |
-| 0.30 | `#D6E1EE` |
+| 想要的 rgba 透明度 | 等效实色 hex                 |
+| ------------------ | ---------------------------- |
+| 0.08               | `#EEF2F7`                    |
+| 0.14               | `#E4ECF5`                    |
+| **0.18**           | **`#E4ECF5`** ← tag 推荐默认 |
+| 0.22               | `#D0DCE9`                    |
+| 0.30               | `#D6E1EE`                    |
 
 ---
 
@@ -105,42 +105,49 @@ kami 的审美可以浓缩成一句话：**暖米纸底，油墨蓝点缀，seri
 
 ```css
 /* Serif 标题（中英文） */
-font-family: "TsangerJinKai02",       /* 仓耳今楷，需自备 .ttf */
-             "Source Han Serif SC",    /* 思源宋体（免费，Adobe/Google 联合出品）*/
-             "Noto Serif CJK SC",      /* 思源宋体的 Google 命名 */
-             "Songti SC",              /* macOS 系统宋体 */
-             "STSong",                 /* Windows 中文宋体 */
-             Georgia, serif;
+font-family:
+  "TsangerJinKai02",
+  /* 仓耳今楷，需自备 .ttf */ "Source Han Serif SC",
+  /* 思源宋体（免费，Adobe/Google 联合出品）*/ "Noto Serif CJK SC",
+  /* 思源宋体的 Google 命名 */ "Songti SC",
+  /* macOS 系统宋体 */ "STSong",
+  /* Windows 中文宋体 */ Georgia,
+  serif;
 
 /* Sans 正文/UI（中英文） */
-font-family: "Inter", "TsangerJinKai02",
-             -apple-system, BlinkMacSystemFont,
-             "Source Han Sans SC", "Noto Sans CJK SC",
-             "PingFang SC", "Microsoft YaHei",
-             Arial, sans-serif;
+font-family:
+  "Inter",
+  "TsangerJinKai02",
+  -apple-system,
+  BlinkMacSystemFont,
+  "Source Han Sans SC",
+  "Noto Sans CJK SC",
+  "PingFang SC",
+  "Microsoft YaHei",
+  Arial,
+  sans-serif;
 
 /* Mono 代码 */
-font-family: "JetBrains Mono", "Fira Code",
-             "SF Mono", Consolas, Monaco,
-             "Source Han Mono", monospace;
+font-family:
+  "JetBrains Mono", "Fira Code", "SF Mono", Consolas, Monaco, "Source Han Mono", monospace;
 ```
 
 ### 字号层级（pt 用于 PDF，px 用于屏幕）
 
 **印刷品（A4 PDF）用 pt**：
 
-| 角色 | 字号 | 字重 | line-height | 用途 |
-|---|---|---|---|---|
-| Display | 36-48 pt | 500 | 1.10 | 封面大标题、one-pager 主标题 |
-| H1 Section | 18-22 pt | 500 | 1.20 | 章节大标题 |
-| H2 | 14-16 pt | 500 | 1.25 | 子章节 |
-| H3 | 12-13 pt | 500 | 1.30 | 条目标题 |
-| Body Lead | 11 pt | 400 | 1.55 | 导语、intro |
-| Body | 9.5-10 pt | 400 | 1.55 | 正文 |
-| Body Dense | 9-9.2 pt | 400 | 1.40 | 密集排版（简历、one-pager 等） |
-| Caption | 8.5-9 pt | 400 | 1.45 | 说明文字、图注 |
-| Label | 7.5-8 pt | 600 | 1.35 | 小标签、角标 |
-| Tiny | 7 pt | 400 | 1.40 | 页脚、minor metadata |
+| 角色       | 字号      | 字重 | line-height | 用途                           |
+| ---------- | --------- | ---- | ----------- | ------------------------------ |
+| Display    | 36-48 pt  | 500  | 1.10        | 封面大标题、one-pager 主标题   |
+| H1 Section | 18-22 pt  | 500  | 1.20        | 章节大标题                     |
+| H2         | 14-16 pt  | 500  | 1.25        | 子章节                         |
+| H3         | 12-13 pt  | 500  | 1.30        | 条目标题                       |
+| Body Lead  | 11 pt     | 400  | 1.55        | 导语、intro                    |
+| Body       | 9.5-10 pt | 400  | 1.55        | 正文                           |
+| Body Dense | 9-9.2 pt  | 400  | 1.40        | 密集排版（简历、one-pager 等） |
+| Caption    | 8.5-9 pt  | 400  | 1.45        | 说明文字、图注                 |
+| Label      | 7.5-8 pt  | 600  | 1.35        | 小标签、角标                   |
+| Tiny       | 7 pt      | 400  | 1.40        | 页脚、minor metadata           |
 
 **屏幕（网页/PPT）用 px**：乘以约 1.33 得到等效 px（9 pt ≈ 12 px，18 pt ≈ 24 px）。
 
@@ -155,14 +162,15 @@ font-family: "JetBrains Mono", "Fira Code",
 
 中文印刷品比英文网页**更紧凑**。英文网页常见的 1.6-1.75 是针对英文字母和非 fixed-width 的 body 优化的，放在中文 pt 字号的印刷品里会显得松散。
 
-| 档位 | 值 | 用于 |
-|---|---|---|
-| 紧凑标题 | 1.10-1.30 | 大标题、Display、H1、H2 |
-| 密排正文 | 1.40-1.45 | Body Dense（简历、one-pager、名片、索引卡） |
-| 阅读型正文 | 1.50-1.55 | Body（long-doc 章节正文、letter 正文） |
-| 标签 / caption | 1.30-1.40 | 小字标签、多行 metadata |
+| 档位           | 值        | 用于                                        |
+| -------------- | --------- | ------------------------------------------- |
+| 紧凑标题       | 1.10-1.30 | 大标题、Display、H1、H2                     |
+| 密排正文       | 1.40-1.45 | Body Dense（简历、one-pager、名片、索引卡） |
+| 阅读型正文     | 1.50-1.55 | Body（long-doc 章节正文、letter 正文）      |
+| 标签 / caption | 1.30-1.40 | 小字标签、多行 metadata                     |
 
 **禁用**：
+
 - 1.60+ - 英文网页的节奏，中文印刷会显得松散
 - 1.00-1.05 - 除非极致紧凑标题，否则上下文字会粘连
 
@@ -179,25 +187,25 @@ font-family: "JetBrains Mono", "Fira Code",
 
 ### 基础单位：4 pt（或 4 px 屏幕）
 
-| 尺度 | 值 | 用途 |
-|---|---|---|
-| xs | 2-3 pt | 同行内元素间距 |
-| sm | 4-5 pt | tag padding、紧凑布局 |
-| md | 8-10 pt | 组件内部 |
-| lg | 16-20 pt | 组件之间、卡片 padding |
-| xl | 24-32 pt | section 标题 margin |
-| 2xl | 40-60 pt | 大 section 之间 |
-| 3xl | 80-120 pt | 章节之间（长文档）|
+| 尺度 | 值        | 用途                   |
+| ---- | --------- | ---------------------- |
+| xs   | 2-3 pt    | 同行内元素间距         |
+| sm   | 4-5 pt    | tag padding、紧凑布局  |
+| md   | 8-10 pt   | 组件内部               |
+| lg   | 16-20 pt  | 组件之间、卡片 padding |
+| xl   | 24-32 pt  | section 标题 margin    |
+| 2xl  | 40-60 pt  | 大 section 之间        |
+| 3xl  | 80-120 pt | 章节之间（长文档）     |
 
 ### 页面 margin（A4）
 
-| 文档类型 | 上 | 右 | 下 | 左 |
-|---|---|---|---|---|
-| Resume（紧凑）| 9 mm | 13 mm | 9 mm | 13 mm |
-| One-Pager | 15 mm | 18 mm | 15 mm | 18 mm |
-| Long Doc | 20 mm | 22 mm | 22 mm | 22 mm |
-| Letter | 25 mm | 25 mm | 25 mm | 25 mm |
-| Portfolio | 12 mm | 15 mm | 12 mm | 15 mm |
+| 文档类型       | 上    | 右    | 下    | 左    |
+| -------------- | ----- | ----- | ----- | ----- |
+| Resume（紧凑） | 9 mm  | 13 mm | 9 mm  | 13 mm |
+| One-Pager      | 15 mm | 18 mm | 15 mm | 18 mm |
+| Long Doc       | 20 mm | 22 mm | 22 mm | 22 mm |
+| Letter         | 25 mm | 25 mm | 25 mm | 25 mm |
+| Portfolio      | 12 mm | 15 mm | 12 mm | 15 mm |
 
 **规律**：密度越高 margin 越小，越正式（letter）margin 越大。
 
@@ -206,10 +214,11 @@ font-family: "JetBrains Mono", "Fira Code",
 印刷品用 mm/pt，Slide（屏幕）用 px，尺度关系不同：
 
 ```css
---slide-pad: 80px;   /* slide 四边 padding baseline */
+--slide-pad: 80px; /* slide 四边 padding baseline */
 ```
 
 **关键规则**：
+
 - Slide padding-top 72-80px（印刷品是 96-120px，slide 的视觉呼吸感已足够）
 - Letter-spacing slide = 印刷值 / 2，8px tracking 照搬到屏幕会"散架"
 - 宏观尺度（字号、padding）相较印刷 pt 值乘以约 1.6
@@ -223,16 +232,16 @@ font-family: "JetBrains Mono", "Fira Code",
 
 ```css
 .card {
-  background: var(--ivory);                /* 比 parchment 略浮起 */
+  background: var(--ivory); /* 比 parchment 略浮起 */
   border: 0.5pt solid var(--border-cream);
-  border-radius: 8pt;                       /* 舒适圆角 */
+  border-radius: 8pt; /* 舒适圆角 */
   padding: 16pt 20pt;
 }
 
 /* 特色卡片 */
 .card-featured {
-  border-radius: 16pt;                      /* 更大圆角 */
-  box-shadow: 0 4pt 24pt rgba(0,0,0,0.05); /* whisper shadow */
+  border-radius: 16pt; /* 更大圆角 */
+  box-shadow: 0 4pt 24pt rgba(0, 0, 0, 0.05); /* whisper shadow */
 }
 ```
 
@@ -247,7 +256,7 @@ font-family: "JetBrains Mono", "Fira Code",
   color: var(--ivory);
   padding: 8pt 16pt;
   border-radius: 8pt;
-  box-shadow: 0 0 0 1pt var(--brand);    /* ring shadow，不是外阴影 */
+  box-shadow: 0 0 0 1pt var(--brand); /* ring shadow，不是外阴影 */
 }
 
 /* Secondary（warm sand） */
@@ -265,9 +274,10 @@ font-family: "JetBrains Mono", "Fira Code",
 三个档位的 tag 样式，按视觉冲击力从弱到强选：
 
 **极淡实色**（最克制、最灵动、推荐默认）：
+
 ```css
 .tag {
-  background: #EEF2F7;           /* rgba(201,100,66, 0.08) 等效色 */
+  background: #eef2f7; /* rgba(201,100,66, 0.08) 等效色 */
   color: var(--brand);
   font-size: 8pt;
   font-weight: 500;
@@ -278,9 +288,10 @@ font-family: "JetBrains Mono", "Fira Code",
 ```
 
 **标准实色**（需要稍强区分度，如多种 tag 混排时）：
+
 ```css
 .tag {
-  background: #E4ECF5;           /* rgba(201,100,66, 0.18) 等效色 */
+  background: #e4ecf5; /* rgba(201,100,66, 0.18) 等效色 */
   color: var(--brand);
   padding: 1pt 6pt;
   border-radius: 4pt;
@@ -288,9 +299,10 @@ font-family: "JetBrains Mono", "Fira Code",
 ```
 
 **笔刷渐变**（仅在需要强化"手感"时用，慎用）：
+
 ```css
 .tag {
-  background: linear-gradient(to right, #D6E1EE, #E4ECF5 70%, #EEF2F7);
+  background: linear-gradient(to right, #d6e1ee, #e4ecf5 70%, #eef2f7);
   color: var(--brand);
   padding: 1pt 5pt;
   border-radius: 2pt;
@@ -304,20 +316,26 @@ font-family: "JetBrains Mono", "Fira Code",
 ### 列表
 
 ```css
-ul, ol {
+ul,
+ol {
   padding-left: 16pt;
   line-height: 1.55;
 }
 ul li::marker {
-  color: var(--brand);   /* bullet 点用品牌色 */
+  color: var(--brand); /* bullet 点用品牌色 */
 }
 ```
 
 或者更有书卷气的**短横线代替圆点**：
 
 ```css
-ul.dash { list-style: none; padding-left: 0; }
-ul.dash li { padding-left: 14pt; }
+ul.dash {
+  list-style: none;
+  padding-left: 0;
+}
+ul.dash li {
+  padding-left: 14pt;
+}
 ul.dash li::before {
   content: "\2013";
   color: var(--brand);
@@ -354,7 +372,7 @@ ul.dash li::before {
 
 ```css
 .section-title {
-  font-family: serif;           /* 用 serif 承担所有标题 */
+  font-family: serif; /* 用 serif 承担所有标题 */
   font-size: 14pt;
   font-weight: 500;
   color: var(--near-black);
@@ -385,7 +403,7 @@ ul.dash li::before {
   font-size: 16pt;
   font-weight: 500;
   color: var(--brand);
-  font-variant-numeric: tabular-nums;   /* 数字等宽对齐 */
+  font-variant-numeric: tabular-nums; /* 数字等宽对齐 */
 }
 .metric-label {
   font-size: 9pt;
@@ -403,7 +421,7 @@ ul.dash li::before {
 }
 .kami-section-header .eyebrow {
   display: flex;
-  align-items: center;             /* 圆点是几何图形，center 比 baseline 好 */
+  align-items: center; /* 圆点是几何图形，center 比 baseline 好 */
   gap: 8px;
   font-family: var(--sans);
   font-size: 12px;
@@ -416,7 +434,8 @@ ul.dash li::before {
 .kami-section-header .eyebrow::before {
   content: "";
   display: inline-block;
-  width: 6px; height: 6px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--brand);
   flex-shrink: 0;
@@ -424,7 +443,7 @@ ul.dash li::before {
 .kami-section-header .rule {
   height: 1px;
   background: var(--border-warm);
-  margin-bottom: 36px;             /* 横线下方 gap >= 36px（上方 14px 的 2 倍以上）*/
+  margin-bottom: 36px; /* 横线下方 gap >= 36px（上方 14px 的 2 倍以上）*/
 }
 .kami-section-header h1 {
   font-family: var(--serif);
@@ -451,15 +470,19 @@ ul.dash li::before {
 }
 .kami-code-card pre {
   font-family: var(--mono);
-  font-size: 13px;                 /* 或 14px，slide 上更大 */
+  font-size: 13px; /* 或 14px，slide 上更大 */
   line-height: 1.55;
   color: var(--near-black);
   margin: 0;
   white-space: pre;
 }
 /* 语法色：只用现有 token，不引入新颜色 */
-.kami-code-card .k { color: var(--brand); }    /* keyword / string */
-.kami-code-card .c { color: var(--stone); }    /* comment */
+.kami-code-card .k {
+  color: var(--brand);
+} /* keyword / string */
+.kami-code-card .c {
+  color: var(--stone);
+} /* comment */
 
 /* 可选行号：左侧 1px divider */
 .kami-code-card.numbered {
@@ -533,7 +556,9 @@ figure,
 ### 强制分页
 
 ```css
-.page-break { break-before: page; }
+.page-break {
+  break-before: page;
+}
 ```
 
 用于封面与正文之间、章节之间。
@@ -544,7 +569,7 @@ figure,
 @page {
   size: A4;
   margin: 20mm 22mm;
-  background: #f5f4ed;   /* 背景延伸到 margin 外，避免打印时留白边 */
+  background: #f5f4ed; /* 背景延伸到 margin 外，避免打印时留白边 */
 }
 ```
 
@@ -554,19 +579,19 @@ figure,
 
 遇到 "该用什么" 的时候查这张表：
 
-| 要做什么 | 怎么做 |
-|---|---|
-| 大标题 | serif 500，字号根据层级，line-height 1.10-1.30 |
-| 正文阅读 | sans 400，9.5-10 pt，line-height 1.55 |
-| 强调一个数字 | `color: var(--brand)`，不要粗体 |
-| 分隔两段内容 | 2.5pt 品牌色左侧竖线，或 0.5pt 暖灰虚线 |
-| 引用某人的话 | 左 2pt 品牌色实线 + olive 色 |
-| 展示代码 | ivory 底 + 0.5pt border + 6pt 圆角 + mono 字体 |
-| 区分主次按钮 | Primary 用品牌色填充 + 白字，Secondary 用 warm-sand + charcoal |
+| 要做什么                   | 怎么做                                                                      |
+| -------------------------- | --------------------------------------------------------------------------- |
+| 大标题                     | serif 500，字号根据层级，line-height 1.10-1.30                              |
+| 正文阅读                   | sans 400，9.5-10 pt，line-height 1.55                                       |
+| 强调一个数字               | `color: var(--brand)`，不要粗体                                             |
+| 分隔两段内容               | 2.5pt 品牌色左侧竖线，或 0.5pt 暖灰虚线                                     |
+| 引用某人的话               | 左 2pt 品牌色实线 + olive 色                                                |
+| 展示代码                   | ivory 底 + 0.5pt border + 6pt 圆角 + mono 字体                              |
+| 区分主次按钮               | Primary 用品牌色填充 + 白字，Secondary 用 warm-sand + charcoal              |
 | 在卡片列表里区分某张特殊的 | `border: 0.5pt solid var(--brand)` 或 `border-left: 3pt solid var(--brand)` |
-| 章节开始 | serif 标题 + 左侧 2.5pt 品牌色竖线 |
-| 文档封面 | 单页 Display 字号标题 + 作者/日期 right align，中间大量留白 |
-| 一张数据卡 | ivory 底 + 8 pt 圆角 + serif 大数字 + sans 小标签 |
+| 章节开始                   | serif 标题 + 左侧 2.5pt 品牌色竖线                                          |
+| 文档封面                   | 单页 Display 字号标题 + 作者/日期 right align，中间大量留白                 |
+| 一张数据卡                 | ivory 底 + 8 pt 圆角 + serif 大数字 + sans 小标签                           |
 
 不在这张表里的情况 -> 回到原则：**serif 承担权威，sans 承担功能，暖灰承担节奏，油墨蓝承担焦点**。
 
@@ -576,14 +601,14 @@ figure,
 
 长 deck (> 20 slides) 必须遵循以下规则表。条目来自实战经验沉淀，违反前先想清楚原因。
 
-| 规则 | 内容 |
-|------|------|
-| R1 | Slide 容器固定 1920×1080，外部 scale 适配。不用 vh/vw 动态单位 |
-| R2 | Slide 标题用 Display (64px)，不用 H1 (30px)。H1 是印刷品的层级 |
-| R4 | Slide letter-spacing = 印刷值 / 2。8px tracking 在屏幕上会"散架" |
-| R5 | Section header 横线下方 gap ≥ 36px（上方 gap 的 2 倍以上） |
-| R6 | Eyebrow 圆点用 `align-items: center`，不用 baseline（圆点是几何图形） |
-| R7 | Slide padding-top 72-80px（印刷品 96-120px，slide 更紧凑） |
-| R8 | 图片用 `object-fit: contain` + flex 居中，不拉伸不裁切 |
-| R9 | 统一用 `.kami-slide-footer` 放置页码和 deck 标识，绝对定位到 bottom |
-| R10 | 代码用伪代码风格：注释行数 > 代码行数，读者看逻辑不看语法 |
+| 规则 | 内容                                                                  |
+| ---- | --------------------------------------------------------------------- |
+| R1   | Slide 容器固定 1920×1080，外部 scale 适配。不用 vh/vw 动态单位        |
+| R2   | Slide 标题用 Display (64px)，不用 H1 (30px)。H1 是印刷品的层级        |
+| R4   | Slide letter-spacing = 印刷值 / 2。8px tracking 在屏幕上会"散架"      |
+| R5   | Section header 横线下方 gap ≥ 36px（上方 gap 的 2 倍以上）            |
+| R6   | Eyebrow 圆点用 `align-items: center`，不用 baseline（圆点是几何图形） |
+| R7   | Slide padding-top 72-80px（印刷品 96-120px，slide 更紧凑）            |
+| R8   | 图片用 `object-fit: contain` + flex 居中，不拉伸不裁切                |
+| R9   | 统一用 `.kami-slide-footer` 放置页码和 deck 标识，绝对定位到 bottom   |
+| R10  | 代码用伪代码风格：注释行数 > 代码行数，读者看逻辑不看语法             |

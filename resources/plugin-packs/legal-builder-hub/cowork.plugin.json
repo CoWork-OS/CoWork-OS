@@ -7,19 +7,10 @@
   "author": "Anthropic",
   "license": "Apache-2.0",
   "homepage": "https://github.com/anthropics/claude-for-legal/tree/993f6619fc2f321cfdd65daa6919ad6cd2c56d92/legal-builder-hub",
-  "keywords": [
-    "legal",
-    "law",
-    "compliance",
-    "legal-builder-hub"
-  ],
+  "keywords": ["legal", "law", "compliance", "legal-builder-hub"],
   "icon": "⚖️",
   "category": "Legal",
-  "recommendedConnectors": [
-    "Google Drive",
-    "Lawve AI",
-    "Slack"
-  ],
+  "recommendedConnectors": ["Google Drive", "Lawve AI", "Slack"],
   "tryAsking": [
     "Use Legal Builder Hub Auto Updater for this legal workflow",
     "Use Legal Builder Hub Cold Start Interview for this legal workflow",
@@ -377,13 +368,7 @@
       "description": "Finds, evaluates, and installs community legal skills — with a security review gate before anything lands in your environment.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "research",
-        "review",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "research", "review", "summarize", "triage"],
       "systemPrompt": "You are a Legal Builder Hub assistant in CoWork OS. Produce draft legal work product for attorney review, preserve citations and source provenance, flag uncertainty, and require explicit confirmation before irreversible actions. This pack also includes upstream scheduled-agent workflows: Registry Sync. In CoWork OS, keep those recurring workflows opt-in through routines or automation profiles."
     },
     {
@@ -392,12 +377,7 @@
       "description": "Periodic check of watched registries for new and updated skills. Posts notifications per update preferences. Trigger: \"sync registries\", \"anything new\", or on schedule.",
       "icon": "⚖️",
       "color": "#2563eb",
-      "capabilities": [
-        "legal-draft",
-        "monitor",
-        "summarize",
-        "triage"
-      ],
+      "capabilities": ["legal-draft", "monitor", "summarize", "triage"],
       "systemPrompt": "CoWork OS adaptation of the upstream legal-builder-hub/registry-sync scheduled agent.\n\nRecurring execution is opt-in. Use CoWork routines or automation profiles when the user asks to schedule this workflow.\n\n# Registry Sync Agent\n\n## Purpose\n\nThe community ships skills. This agent notices.\n\n## Schedule\n\nWeekly by default.\n\n## What it does\n\n1. Read `~/.claude/plugins/config/claude-for-legal/legal-builder-hub/CLAUDE.md` → watched registries, installed skills, update preferences.\n2. For each registry: fetch index, compare to last sync.\n3. New skills: filter by practice profile match, note.\n4. Updated skills: check against installed list, diff.\n5. Post digest per preferences.\n\n## Output\n\n```\n🧰 **Registry sync — [date]**\n\n**Updates available for installed skills:**\n• [skill] — [version] → [version] — [one-line changelog]\n\n**New skills matching your profile:**\n• [skill] from [registry] — [description]\n\n[If auto-update on: \"Applied N updates.\"]\n```\n\n## What it does NOT do\n\n- Install anything without auto-update being explicitly enabled\n- Recommend skills outside your practice profile (unless asked)"
     }
   ],
@@ -414,11 +394,7 @@
       "pluginName": "legal-builder-hub",
       "license": "Apache-2.0",
       "connectors": {
-        "recommendedCategories": [
-          "legal-skills-registry",
-          "chat",
-          "documents"
-        ],
+        "recommendedCategories": ["legal-skills-registry", "chat", "documents"],
         "mcpServers": {
           "Slack": {
             "type": "http",

@@ -93,6 +93,79 @@ describe("AgentDaemon structured input requests", () => {
     );
   });
 
+  it("surfaces a required approval as an assistant message and inline input", async () => {
+    const repo = createInMemoryInputRequestRepo("req-approval-1");
+    const runtime = {
+      recordPermissionSuccess: vi.fn(),
+      recordPermissionDenial: vi.fn(),
+    };
+    const daemonLike = {
+      inputRequestRepo: repo,
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({ id: "task-approval", status: "executing" }),
+      },
+      pendingInputRequests: new Map(),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+    daemonLike.requestUserInput = AgentDaemon.prototype.requestUserInput.bind(daemonLike);
+
+    const approvalPromise = AgentDaemon.prototype["requestAssistantApproval"].call(
+      daemonLike,
+      "task-approval",
+      "external_service",
+      "Allow web_fetch to send this request?",
+      {
+        tool: "http_request",
+        permissionPrompt: { scopePreview: "domain api.example.com" },
+      },
+      runtime,
+      "domain:http_request:api.example.com",
+    );
+
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-approval",
+      "assistant_message",
+      expect.objectContaining({
+        source: "assistant_approval_request",
+        message: expect.stringContaining("I need your decision"),
+      }),
+    );
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        questions: [
+          expect.objectContaining({
+            id: "approval_decision",
+            options: [
+              expect.objectContaining({ label: "Deny" }),
+              expect.objectContaining({ label: "Allow once" }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const response = await AgentDaemon.prototype.respondToInputRequest.call(daemonLike, {
+      requestId: "req-approval-1",
+      status: "submitted",
+      answers: { approval_decision: { optionLabel: "Allow once" } },
+    });
+
+    expect(response).toEqual({ status: "handled", requestId: "req-approval-1" });
+    await expect(approvalPromise).resolves.toBe(true);
+    expect(runtime.recordPermissionSuccess).toHaveBeenCalledWith(
+      "domain:http_request:api.example.com",
+    );
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-approval",
+      "approval_granted",
+      expect.objectContaining({
+        requestId: "req-approval-1",
+        assistantInput: true,
+      }),
+    );
+  });
+
   it("rejects the waiting promise when input request is dismissed", async () => {
     const repo = createInMemoryInputRequestRepo("req-dismiss-1");
     const taskRepo = {
@@ -218,12 +291,20 @@ describe("AgentDaemon structured input requests", () => {
     );
   });
 
-  it("rehydrates pending approval and input rows into visible task wait states", () => {
+  it("fails pending approval rows closed while rehydrating ordinary input rows", () => {
+    const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+    process.env.COWORK_APPROVAL_PROMPTS = "off";
     const daemonLike = {
       approvalRepo: {
-        findPending: vi
-          .fn()
-          .mockReturnValue([{ id: "approval-1", taskId: "task-approval", status: "pending" }]),
+        findPending: vi.fn().mockReturnValue([
+          {
+            id: "approval-1",
+            taskId: "task-approval",
+            type: "network_access",
+            status: "pending",
+          },
+        ]),
+        update: vi.fn(),
       },
       inputRequestRepo: {
         list: vi
@@ -241,25 +322,91 @@ describe("AgentDaemon structured input requests", () => {
       logEvent: vi.fn(),
     } as Any;
 
-    AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
+    try {
+      AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
+    } finally {
+      if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+      else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+    }
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
       "task-approval",
-      expect.objectContaining({ status: "blocked", terminalStatus: "awaiting_approval" }),
+      expect.objectContaining({ status: "failed", terminalStatus: "failed" }),
     );
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
       "task-input",
       expect.objectContaining({ status: "paused", terminalStatus: "needs_user_action" }),
     );
+    expect(daemonLike.approvalRepo.update).toHaveBeenCalledWith("approval-1", "denied");
     expect(daemonLike.logEvent).toHaveBeenCalledWith(
       "task-approval",
-      "approval_wait_rehydrated",
-      expect.anything(),
+      "approval_denied",
+      expect.objectContaining({ recoveredAfterRestart: true }),
     );
     expect(daemonLike.logEvent).toHaveBeenCalledWith(
       "task-input",
       "input_wait_rehydrated",
       expect.anything(),
+    );
+  });
+
+  it("fails assistant approval cards closed instead of rehydrating them after restart", () => {
+    const daemonLike = {
+      approvalRepo: {
+        findAllPending: vi.fn().mockReturnValue([]),
+        findPendingByTaskId: vi.fn().mockReturnValue([]),
+      },
+      inputRequestRepo: {
+        findAllPending: vi.fn().mockReturnValue([
+          {
+            id: "request-approval-restart",
+            taskId: "task-approval-restart",
+            status: "pending",
+            requestedAt: Date.now(),
+            questions: [
+              {
+                header: "Permission",
+                id: "approval_decision",
+                question: "Continue?",
+                options: [
+                  { label: "Deny", description: "Stop." },
+                  { label: "Allow once", description: "Continue once." },
+                ],
+              },
+            ],
+          },
+        ]),
+        resolve: vi.fn(),
+      },
+      taskRepo: {
+        findByStatus: vi.fn().mockReturnValue([]),
+        findById: vi.fn().mockReturnValue({
+          id: "task-approval-restart",
+          status: "paused",
+          terminalStatus: "needs_user_action",
+        }),
+        update: vi.fn(),
+      },
+      logEvent: vi.fn(),
+    } as Any;
+
+    AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
+
+    expect(daemonLike.inputRequestRepo.resolve).toHaveBeenCalledWith(
+      "request-approval-restart",
+      "dismissed",
+    );
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-approval-restart",
+      expect.objectContaining({ status: "failed", terminalStatus: "failed" }),
+    );
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-approval-restart",
+      "approval_denied",
+      expect.objectContaining({
+        reason: "assistant_approval_failed_closed_after_restart",
+        recoveredAfterRestart: true,
+      }),
     );
   });
 

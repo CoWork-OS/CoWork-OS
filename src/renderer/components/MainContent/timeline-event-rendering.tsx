@@ -36,6 +36,11 @@ import {
   resolveTaskOutputSummaryFromCompletionEvent,
 } from "../../utils/task-outputs";
 import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-text-sanitizer";
+import {
+  buildSpawnInstructionsPreview,
+  formatSpawnRecapLine,
+  formatSpawnedAgentLabel,
+} from "../../../shared/subagent-presentation";
 import { isVerificationStepDescription } from "../../../shared/plan-utils";
 import { isWordDocumentArtifactFile } from "../../../shared/document-formats";
 import { getMessage } from "../../utils/agentMessages";
@@ -272,6 +277,168 @@ export function getSummaryStageLabel(stage: string): string | null {
   }
 }
 
+export interface CompactionDetailsPayload {
+  compactionId?: string;
+  trigger?: string;
+  phase?: string;
+  reason?: string;
+  error?: string;
+  summary?: string;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  inputTokens?: number;
+  replacementTokens?: number;
+  removedMessages?: number;
+  summarizedMessages?: number;
+  inputMessageCount?: number;
+  replacementMessageCount?: number;
+  contextRatio?: number;
+  thresholdRatio?: number;
+  targetRatio?: number;
+  durationMs?: number;
+  fallbackUsed?: boolean;
+}
+
+function readFiniteNumber(payload: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function readTrimmedString(payload: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function readBoolean(payload: Record<string, unknown>, keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
+export function getCompactionDetailsPayload(event: TaskEvent): CompactionDetailsPayload {
+  const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+  const value = payload as Record<string, unknown>;
+  return {
+    compactionId: readTrimmedString(value, ["compactionId", "compaction_id"]),
+    trigger: readTrimmedString(value, ["trigger", "reasonType"]),
+    phase: readTrimmedString(value, ["phase"]),
+    reason: readTrimmedString(value, ["reason", "compactionReason"]),
+    error: readTrimmedString(value, ["error", "message", "failureReason"]),
+    summary: readTrimmedString(value, ["summary", "summaryText", "summaryPreview"]),
+    tokensBefore: readFiniteNumber(value, ["tokensBefore", "inputTokens"]),
+    tokensAfter: readFiniteNumber(value, ["tokensAfter", "replacementTokens"]),
+    inputTokens: readFiniteNumber(value, ["inputTokens", "tokensBefore"]),
+    replacementTokens: readFiniteNumber(value, ["replacementTokens", "tokensAfter"]),
+    removedMessages: readFiniteNumber(value, [
+      "removedMessages",
+      "removedCount",
+      "removedMessageCount",
+    ]),
+    summarizedMessages: readFiniteNumber(value, ["summarizedMessages", "summarizedMessageCount"]),
+    inputMessageCount: readFiniteNumber(value, ["inputMessageCount"]),
+    replacementMessageCount: readFiniteNumber(value, ["replacementMessageCount"]),
+    contextRatio: readFiniteNumber(value, ["contextRatio", "usageRatio"]),
+    thresholdRatio: readFiniteNumber(value, ["thresholdRatio"]),
+    targetRatio: readFiniteNumber(value, ["targetRatio"]),
+    durationMs: readFiniteNumber(value, ["durationMs", "duration"]),
+    fallbackUsed: readBoolean(value, ["fallbackUsed", "usedFallback"]),
+  };
+}
+
+function formatCompactionTokenCount(value: number): string {
+  return `${Math.max(0, Math.round(value)).toLocaleString("en-US")} tokens`;
+}
+
+function formatCompactionRatio(value: number): string {
+  const ratio = value > 1 ? value / 100 : value;
+  return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+}
+
+function formatCompactionDuration(value: number): string {
+  if (value < 1000) return `${Math.max(0, Math.round(value))}ms`;
+  return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}s`;
+}
+
+function renderCompactionDetails(event: TaskEvent): React.ReactNode {
+  const details = getCompactionDetailsPayload(event);
+  const effectiveType = getEffectiveTaskEventType(event);
+  const isFailure = effectiveType === "context_compaction_failed";
+  const summary = details.summary ? truncateForDisplay(details.summary, 6000) : "";
+  const messageCount = details.summarizedMessages ?? details.removedMessages;
+  const hasStats =
+    details.tokensBefore !== undefined ||
+    details.tokensAfter !== undefined ||
+    messageCount !== undefined ||
+    details.inputMessageCount !== undefined ||
+    details.replacementMessageCount !== undefined ||
+    details.contextRatio !== undefined ||
+    details.durationMs !== undefined;
+
+  return (
+    <div className={`event-details context-summary${isFailure ? " event-details-failure" : ""}`}>
+      {details.reason ? <div>Reason: {details.reason}</div> : null}
+      {details.trigger ? <div>Trigger: {details.trigger}</div> : null}
+      {details.phase ? <div>Phase: {details.phase}</div> : null}
+      {hasStats ? (
+        <div className="context-summary-stats">
+          {details.tokensBefore !== undefined && details.tokensAfter !== undefined ? (
+            <div>
+              Context: {formatCompactionTokenCount(details.tokensBefore)} →{" "}
+              {formatCompactionTokenCount(details.tokensAfter)}
+            </div>
+          ) : details.tokensBefore !== undefined ? (
+            <div>Context before: {formatCompactionTokenCount(details.tokensBefore)}</div>
+          ) : details.tokensAfter !== undefined ? (
+            <div>Context after: {formatCompactionTokenCount(details.tokensAfter)}</div>
+          ) : null}
+          {messageCount !== undefined ? (
+            <div>Messages summarized: {Math.max(0, Math.round(messageCount))}</div>
+          ) : null}
+          {details.inputMessageCount !== undefined ||
+          details.replacementMessageCount !== undefined ? (
+            <div>
+              Messages: {details.inputMessageCount ?? "—"} →{" "}
+              {details.replacementMessageCount ?? "—"}
+            </div>
+          ) : null}
+          {details.contextRatio !== undefined ? (
+            <div>Context usage: {formatCompactionRatio(details.contextRatio)}</div>
+          ) : null}
+          {details.thresholdRatio !== undefined ? (
+            <div>Automatic threshold: {formatCompactionRatio(details.thresholdRatio)}</div>
+          ) : null}
+          {details.targetRatio !== undefined ? (
+            <div>Compaction target: {formatCompactionRatio(details.targetRatio)}</div>
+          ) : null}
+          {details.durationMs !== undefined ? (
+            <div>Duration: {formatCompactionDuration(details.durationMs)}</div>
+          ) : null}
+        </div>
+      ) : null}
+      {details.fallbackUsed ? <div>Fallback summary used</div> : null}
+      {summary ? (
+        <>
+          <div className="context-summary-header">Summary</div>
+          <div className="context-summary-body">{summary}</div>
+        </>
+      ) : null}
+      {isFailure ? (
+        <div className="event-details-failure">
+          {details.error || "Context compaction did not complete."}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function getApprovalPayload(event: TaskEvent): Any | null {
   if (!event?.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) {
     return null;
@@ -351,6 +518,118 @@ export function canStepEventOwnParallelChildren(event: TaskEvent): boolean {
     effectiveType === "step_started" ||
     (event.type === "timeline_step_updated" && effectiveType === "progress_update")
   );
+}
+
+const SPAWN_RECAP_EVENT_TYPES = new Set(["agent_spawn_requested", "agent_spawned"]);
+
+/** Lifecycle rows keep a fixed headline and push the specifics into the recap. */
+export const AGENT_LIFECYCLE_EVENT_TYPES = new Set([
+  "agent_spawn_requested",
+  "agent_spawned",
+  "agent_completed",
+  "agent_failed",
+  "agent_message",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+]);
+
+/** Recap detail is one line, so long summaries and errors get clipped. */
+const LIFECYCLE_RECAP_DETAIL_LIMIT = 200;
+
+function readPayloadText(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getSpawnAgentLabel(event: TaskEvent, fallback?: string): string {
+  const payload = (event.payload || {}) as Record<string, unknown>;
+  const explicit = readPayloadText(payload, "childAgentLabel");
+  if (explicit) return explicit;
+  return formatSpawnedAgentLabel({
+    title: payload.childTaskTitle,
+    workerRole: payload.workerRole,
+    fallback,
+  });
+}
+
+function getSpawnInstructions(event: TaskEvent): string {
+  const payload = (event.payload || {}) as Record<string, unknown>;
+  const preview = readPayloadText(payload, "instructionsPreview");
+  if (preview) return preview;
+  return buildSpawnInstructionsPreview(payload.prompt);
+}
+
+function isDispatchFailureEvent(event: TaskEvent): boolean {
+  const payload = (event.payload || {}) as Record<string, unknown>;
+  return readPayloadText(payload, "phase") === "dispatch";
+}
+
+function getAgentRecipientLabel(event: TaskEvent): string {
+  const payload = (event.payload || {}) as Record<string, unknown>;
+  return readPayloadText(payload, "recipientLabel") || "the agent";
+}
+
+/** Append ": detail" only when there is a detail worth showing. */
+function withRecapDetail(lead: string, detail: string): string {
+  const trimmed = buildSpawnInstructionsPreview(detail, LIFECYCLE_RECAP_DETAIL_LIMIT);
+  return trimmed ? `${lead}: ${trimmed}` : lead;
+}
+
+/**
+ * Muted single line under an agent lifecycle headline: which agent it was, and
+ * the brief, result, error, or message body behind the row. Returns null for
+ * every other event type, and for rows where it would only repeat the headline.
+ */
+export function getAgentLifecycleRecapLine(event: TaskEvent): string | null {
+  const effectiveType = getEffectiveTaskEventType(event);
+  if (!AGENT_LIFECYCLE_EVENT_TYPES.has(effectiveType)) return null;
+  const payload = (event.payload || {}) as Record<string, unknown>;
+
+  if (SPAWN_RECAP_EVENT_TYPES.has(effectiveType)) {
+    const label = getSpawnAgentLabel(event);
+    const instructions = getSpawnInstructions(event);
+    if (label === "an agent" && !instructions) return null;
+    return formatSpawnRecapLine({
+      label,
+      instructions,
+      pending: effectiveType === "agent_spawn_requested",
+    });
+  }
+
+  if (effectiveType === "agent_failed") {
+    const label = getSpawnAgentLabel(event, "the agent");
+    const error = readPayloadText(payload, "error");
+    if (label === "the agent" && !error) return null;
+    const lead = isDispatchFailureEvent(event) ? `Could not create ${label}` : `${label} failed`;
+    return withRecapDetail(lead, error);
+  }
+
+  if (effectiveType === "agent_completed") {
+    const label = getSpawnAgentLabel(event, "the agent");
+    const summary = readPayloadText(payload, "resultSummary");
+    if (label === "the agent" && !summary) return null;
+    return withRecapDetail(`${label} finished`, summary);
+  }
+
+  const recipient = getAgentRecipientLabel(event);
+  const message = readPayloadText(payload, "message");
+  const error = readPayloadText(payload, "error");
+
+  if (effectiveType === "agent_message") {
+    const failed = readPayloadText(payload, "status") === "failed";
+    if (recipient === "the agent" && !message && !error) return null;
+    return withRecapDetail(
+      failed ? `Couldn't message ${recipient}` : `Messaged ${recipient}`,
+      failed ? error || message : message,
+    );
+  }
+
+  if (recipient === "the agent" && !message) return null;
+  const lead =
+    effectiveType === "agent_follow_up_started"
+      ? `Started follow-up for ${recipient}`
+      : `Queued follow-up for ${recipient}`;
+  return withRecapDetail(lead, message);
 }
 
 export function renderEventTitle(
@@ -494,6 +773,29 @@ export function renderEventTitle(
   }
 
   switch (effectiveType) {
+    // Every agent lifecycle row keeps a fixed headline; the agent's name and the
+    // brief, result, error, or message body live in the muted recap line
+    // underneath (see getAgentLifecycleRecapLine).
+    case "agent_spawn_requested":
+      return "Creating an agent";
+    case "agent_spawned":
+      return "Created an agent";
+    case "agent_message":
+      return String(event.payload?.status || "") === "failed"
+        ? "Couldn't message an agent"
+        : "Messaged an agent";
+    case "agent_follow_up_scheduled":
+      return "Queued a follow-up";
+    case "agent_follow_up_started":
+      return "Started a follow-up";
+    case "agent_interrupt_requested":
+      return "Interruption requested";
+    case "agent_interrupt_confirmed":
+      return "Interruption confirmed";
+    case "agent_completed":
+      return "Closed an agent";
+    case "agent_failed":
+      return isDispatchFailureEvent(event) ? "Failed to create an agent" : "An agent failed";
     case "task_created":
       return getMessage("taskStart", msgCtx);
     case "task_completed":
@@ -541,11 +843,13 @@ export function renderEventTitle(
     case "auto_continuation_blocked":
       return "Paused before continuing";
     case "context_compaction_started":
-      return "Making room to continue";
+      return "Context automatically compacting";
     case "context_compaction_completed":
-      return "Ready to continue";
+      return "Context automatically compacted";
+    case "context_summarized":
+      return "Context automatically compacted";
     case "context_compaction_failed":
-      return "Continuing with available context";
+      return "Context compaction failed";
     case "step_contract_escalated":
       return typeof event.payload?.reason === "string"
         ? formatStepContractEscalatedMessage(event.payload.reason)
@@ -794,6 +1098,7 @@ export function renderEventDetails(
     summaryMode?: boolean;
     task?: Task | null;
     childTasks?: Task[];
+    onOpenAgent?: (taskId: string) => void;
     commandOutputSessions?: CommandOutputSession[];
     renderCommandOutput?: (sessions: CommandOutputSession[]) => React.ReactNode;
     deferEndOfTaskArtifactCards?: boolean;
@@ -814,6 +1119,26 @@ export function renderEventDetails(
     options?.task?.id === event.taskId
       ? options.task
       : (options?.childTasks?.find((t) => t.id === event.taskId) ?? options?.task);
+  const linkedAgentTaskId =
+    typeof event.payload?.childTaskId === "string"
+      ? event.payload.childTaskId
+      : typeof event.payload?.targetTaskId === "string"
+        ? event.payload.targetTaskId
+        : "";
+  const canOpenLinkedAgent =
+    Boolean(linkedAgentTaskId) &&
+    Boolean(options?.onOpenAgent) &&
+    Boolean(options?.childTasks?.some((child) => child.id === linkedAgentTaskId));
+  const renderOpenLinkedAgent = () =>
+    canOpenLinkedAgent ? (
+      <button
+        type="button"
+        className="timeline-agent-open-button"
+        onClick={() => options?.onOpenAgent?.(linkedAgentTaskId)}
+      >
+        Open agent
+      </button>
+    ) : null;
   const effectiveType = getEffectiveTaskEventType(event);
   const stepCompletionPreviewPath = getStepCompletionPreviewPath(event);
   const shouldRenderOpenArtifactCard = (artifactPath: string) => {
@@ -887,6 +1212,97 @@ export function renderEventDetails(
       </div>
     );
   };
+
+  if (
+    effectiveType === "context_compaction_started" ||
+    effectiveType === "context_compaction_completed" ||
+    effectiveType === "context_compaction_failed" ||
+    effectiveType === "context_summarized"
+  ) {
+    return renderCompactionDetails(event);
+  }
+
+  if (
+    effectiveType === "agent_spawn_requested" ||
+    effectiveType === "agent_spawned" ||
+    effectiveType === "agent_completed" ||
+    effectiveType === "agent_failed" ||
+    effectiveType === "agent_interrupt_requested" ||
+    effectiveType === "agent_interrupt_confirmed"
+  ) {
+    const error = typeof event.payload?.error === "string" ? event.payload.error.trim() : "";
+    const isSpawnEvent = SPAWN_RECAP_EVENT_TYPES.has(effectiveType);
+    // Spawn rows expand to the brief they were handed; result rows to the
+    // summary they came back with. The recap line only shows a clipped version.
+    const briefBody = isSpawnEvent
+      ? getSpawnInstructions(event)
+      : effectiveType === "agent_completed"
+        ? typeof event.payload?.resultSummary === "string"
+          ? event.payload.resultSummary.trim()
+          : ""
+        : "";
+    return (
+      <div className="event-details agent-lifecycle-event-details">
+        {briefBody ? (
+          <div className="agent-spawn-brief">
+            <div className="agent-spawn-brief-label">
+              {getSpawnAgentLabel(event, isSpawnEvent ? undefined : "The agent")}
+            </div>
+            <div className="agent-spawn-brief-instructions">{briefBody}</div>
+          </div>
+        ) : null}
+        {error ? <div className="event-details-failure">{error}</div> : null}
+        {renderOpenLinkedAgent()}
+      </div>
+    );
+  }
+
+  if (
+    effectiveType === "agent_message" ||
+    effectiveType === "agent_follow_up_scheduled" ||
+    effectiveType === "agent_follow_up_started"
+  ) {
+    const message = typeof event.payload?.message === "string" ? event.payload.message.trim() : "";
+    const rawStatus =
+      typeof event.payload?.status === "string"
+        ? event.payload.status
+        : typeof event.payload?.deliveryStatus === "string"
+          ? event.payload.deliveryStatus
+          : "";
+    const status =
+      rawStatus === "queued" || rawStatus === "failed" || rawStatus === "delivered"
+        ? rawStatus
+        : "accepted";
+    const sender =
+      event.payload?.senderType === "agent"
+        ? typeof event.payload?.senderLabel === "string"
+          ? `Agent ${event.payload.senderLabel}`
+          : "Agent"
+        : "You";
+    return (
+      <div className="event-details agent-message-event-details">
+        <div>
+          {sender} → {event.payload?.recipientLabel || "agent"}
+        </div>
+        {message ? <div className="agent-message-preview">{message}</div> : null}
+        <div className={`agent-message-delivery agent-message-delivery-${status}`}>
+          {event.payload?.duplicate === true
+            ? status === "queued"
+              ? "Already queued; duplicate ignored"
+              : "Already delivered; duplicate ignored"
+            : status === "queued"
+              ? "Queued for the next turn"
+              : status === "failed"
+                ? "Delivery failed"
+                : "Delivered"}
+        </div>
+        {typeof event.payload?.error === "string" && event.payload.error.trim() ? (
+          <div className="event-details-failure">{event.payload.error}</div>
+        ) : null}
+        {renderOpenLinkedAgent()}
+      </div>
+    );
+  }
 
   if (event.type === "timeline_group_started" || event.type === "timeline_group_finished") {
     if (summaryMode) return null;

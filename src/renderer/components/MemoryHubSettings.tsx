@@ -960,7 +960,7 @@ export function MemoryHubSettings(props?: {
         </div>
 
         <div className="settings-form-group">
-          <label className="settings-label">Memory Write Approval</label>
+          <label className="settings-label">Memory Write Review (optional)</label>
           <select
             value={features.memoryWriteApprovalMode || "off"}
             onChange={(e) =>
@@ -979,8 +979,9 @@ export function MemoryHubSettings(props?: {
             <option value="all">All durable memory writes</option>
           </select>
           <p className="settings-form-hint">
-            Staged writes appear in the pending queue before they change hot memory, archive memory,
-            or external memory providers.
+            The normal no-prompt runtime commits new writes immediately. Review modes are kept for
+            controlled runs and only stage writes when COWORK_MEMORY_WRITE_APPROVAL_MODE is set;
+            they never open an approval popup.
           </p>
         </div>
       </div>
@@ -2347,7 +2348,8 @@ export function MemoryHubSettings(props?: {
                 <div className="memory-hub-grow">
                   <div className="memory-hub-primary-label">Pending Memory Writes</div>
                   <p className="settings-form-hint memory-hub-hint-tight">
-                    Review staged archive, curated, and external memory writes for this workspace.
+                    Staged archive, curated, and external memory writes from an explicit review run.
+                    The default no-prompt runtime commits new writes immediately.
                   </p>
                 </div>
                 <div className="memory-hub-stack-gap">

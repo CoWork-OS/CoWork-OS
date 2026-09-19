@@ -5,6 +5,7 @@ Live Canvas is an agent-driven visual workspace that allows CoWork OS agents to 
 ## Overview
 
 Live Canvas enables agents to:
+
 - Render interactive visualizations, dashboards, and forms
 - Display data analysis results with charts and graphs
 - Create prototypes and mockups
@@ -47,20 +48,20 @@ The preview supports two modes, toggled with the **I** key or the pointer button
 
 ### Preview Controls
 
-| Button | Action | Keyboard |
-|--------|--------|----------|
-| 🖱️ Pointer | Toggle interactive/snapshot mode | I |
-| 📋 Copy | Copy snapshot to clipboard | C |
-| 💾 Save | Save snapshot as PNG file | S |
-| 🕐 History | Show/hide snapshot history | H |
-| 📺 Console | Show/hide console logs | L |
-| 📤 Export | Export options menu | E |
-| ⏸️ Pause/▶️ Resume | Toggle auto-refresh on/off | P |
-| 🔄 Refresh | Force immediate snapshot update | R |
-| 🌐 Browser | Open canvas in system browser | B |
-| ↗️ Open in window | Open full interactive canvas window | O |
-| ➖ Minimize | Collapse preview to header only | M |
-| ✕ Close | Close the canvas session | - |
+| Button             | Action                              | Keyboard |
+| ------------------ | ----------------------------------- | -------- |
+| 🖱️ Pointer         | Toggle interactive/snapshot mode    | I        |
+| 📋 Copy            | Copy snapshot to clipboard          | C        |
+| 💾 Save            | Save snapshot as PNG file           | S        |
+| 🕐 History         | Show/hide snapshot history          | H        |
+| 📺 Console         | Show/hide console logs              | L        |
+| 📤 Export          | Export options menu                 | E        |
+| ⏸️ Pause/▶️ Resume | Toggle auto-refresh on/off          | P        |
+| 🔄 Refresh         | Force immediate snapshot update     | R        |
+| 🌐 Browser         | Open canvas in system browser       | B        |
+| ↗️ Open in window  | Open full interactive canvas window | O        |
+| ➖ Minimize        | Collapse preview to header only     | M        |
+| ✕ Close            | Close the canvas session            | -        |
 
 **Note:** Keyboard shortcuts work when the preview is focused (click on it first).
 
@@ -98,12 +99,12 @@ Build Mode is a dedicated "idea → working prototype" workflow layered on top o
 
 ### Phases
 
-| Phase | What Happens |
-|-------|-------------|
-| **Concept** | Agent restates the idea, identifies core requirements, and selects a tech stack |
-| **Plan** | Breaks down into components, defines file structure, outlines implementation steps |
-| **Scaffold** | Generates working code, pushes to canvas, creates a checkpoint |
-| **Iterate** | Refines based on feedback — adds features, fixes bugs, polishes UI |
+| Phase        | What Happens                                                                       |
+| ------------ | ---------------------------------------------------------------------------------- |
+| **Concept**  | Agent restates the idea, identifies core requirements, and selects a tech stack    |
+| **Plan**     | Breaks down into components, defines file structure, outlines implementation steps |
+| **Scaffold** | Generates working code, pushes to canvas, creates a checkpoint                     |
+| **Iterate**  | Refines based on feedback — adds features, fixes bugs, polishes UI                 |
 
 ### Using Build Mode
 
@@ -134,17 +135,17 @@ Canvas sessions support named checkpoints for saving, restoring, and comparing c
 
 ### Checkpoint Tools
 
-| Tool | Description |
-|------|-------------|
-| `canvas_checkpoint` | Save current state with an optional label |
-| `canvas_restore` | Restore a previous checkpoint by ID |
-| `canvas_checkpoints` | List all checkpoints for a session |
+| Tool                 | Description                               |
+| -------------------- | ----------------------------------------- |
+| `canvas_checkpoint`  | Save current state with an optional label |
+| `canvas_restore`     | Restore a previous checkpoint by ID       |
+| `canvas_checkpoints` | List all checkpoints for a session        |
 
 ### Advanced Checkpoint Methods
 
-| Method | Description |
-|--------|-------------|
-| `findCheckpointByLabel(sessionId, label)` | Look up a checkpoint by its label name |
+| Method                                     | Description                                                           |
+| ------------------------------------------ | --------------------------------------------------------------------- |
+| `findCheckpointByLabel(sessionId, label)`  | Look up a checkpoint by its label name                                |
 | `diffCheckpoints(sessionId, fromId, toId)` | Compare two checkpoints and return added, removed, and modified files |
 
 ---
@@ -205,6 +206,7 @@ Creates a new canvas session.
 | `title` | string | No | Window title (default: "Canvas {timestamp}") |
 
 **Output:**
+
 ```json
 {
   "sessionId": "abc123-def456",
@@ -224,6 +226,7 @@ Pushes content to the canvas session.
 | `filename` | string | No | Filename (default: "index.html") |
 
 **Output:**
+
 ```json
 {
   "success": true
@@ -240,6 +243,7 @@ Shows the canvas window and brings it to focus.
 | `session_id` | string | Yes | Canvas session ID |
 
 **Output:**
+
 ```json
 {
   "success": true
@@ -256,6 +260,7 @@ Hides the canvas window without closing the session.
 | `session_id` | string | Yes | Canvas session ID |
 
 **Output:**
+
 ```json
 {
   "success": true
@@ -272,6 +277,7 @@ Closes the canvas session and its window.
 | `session_id` | string | Yes | Canvas session ID |
 
 **Output:**
+
 ```json
 {
   "success": true
@@ -289,6 +295,7 @@ Executes JavaScript in the canvas context.
 | `script` | string | Yes | JavaScript code to execute |
 
 **Output:**
+
 ```json
 {
   "result": <any>
@@ -305,6 +312,7 @@ Takes a screenshot of the canvas content.
 | `session_id` | string | Yes | Canvas session ID |
 
 **Output:**
+
 ```json
 {
   "imageBase64": "iVBORw0KGgo...",
@@ -320,6 +328,7 @@ Lists all canvas sessions for the current task.
 **Input:** None
 
 **Output:**
+
 ```json
 {
   "sessions": [
@@ -372,7 +381,7 @@ await canvas_push({
       </script>
     </body>
     </html>
-  `
+  `,
 });
 
 // The in-app preview automatically shows the content!
@@ -429,7 +438,7 @@ await canvas_push({
       </script>
     </body>
     </html>
-  `
+  `,
 });
 
 // For interactive forms, show the canvas window so user can interact
@@ -501,6 +510,7 @@ Live Canvas uses the following directory for session storage:
 ```
 
 Sessions are automatically cleaned up when:
+
 - The session is explicitly closed via `canvas_close`
 - The application exits
 - The parent task is deleted
@@ -509,26 +519,27 @@ Sessions are automatically cleaned up when:
 
 ### File Types
 
-| Extension | MIME Type |
-|-----------|-----------|
-| `.html`, `.htm` | `text/html` |
-| `.css` | `text/css` |
-| `.js`, `.mjs` | `application/javascript` |
-| `.json` | `application/json` |
-| `.png` | `image/png` |
-| `.jpg`, `.jpeg` | `image/jpeg` |
-| `.svg` | `image/svg+xml` |
-| `.gif` | `image/gif` |
-| `.webp` | `image/webp` |
+| Extension         | MIME Type                 |
+| ----------------- | ------------------------- |
+| `.html`, `.htm`   | `text/html`               |
+| `.css`            | `text/css`                |
+| `.js`, `.mjs`     | `application/javascript`  |
+| `.json`           | `application/json`        |
+| `.png`            | `image/png`               |
+| `.jpg`, `.jpeg`   | `image/jpeg`              |
+| `.svg`            | `image/svg+xml`           |
+| `.gif`            | `image/gif`               |
+| `.webp`           | `image/webp`              |
 | `.woff`, `.woff2` | `font/woff`, `font/woff2` |
-| `.ttf`, `.otf` | `font/ttf`, `font/otf` |
-| `.mp3` | `audio/mpeg` |
-| `.mp4` | `video/mp4` |
-| `.pdf` | `application/pdf` |
+| `.ttf`, `.otf`    | `font/ttf`, `font/otf`    |
+| `.mp3`            | `audio/mpeg`              |
+| `.mp4`            | `video/mp4`               |
+| `.pdf`            | `application/pdf`         |
 
 ### External Resources
 
 Canvas content can load external resources via CDN:
+
 - Chart.js, D3.js for visualizations
 - Tailwind CSS, Bootstrap for styling
 - Any other libraries via script/link tags
@@ -537,14 +548,14 @@ Canvas content can load external resources via CDN:
 
 The Canvas Manager emits events that can be observed in the main process:
 
-| Event | Description |
-|-------|-------------|
-| `session_created` | New canvas session created |
-| `session_closed` | Canvas session closed |
-| `content_pushed` | Content pushed to canvas |
-| `window_opened` | Canvas window opened |
-| `window_closed` | Canvas window closed |
-| `a2ui_action` | User interaction from canvas |
+| Event             | Description                  |
+| ----------------- | ---------------------------- |
+| `session_created` | New canvas session created   |
+| `session_closed`  | Canvas session closed        |
+| `content_pushed`  | Content pushed to canvas     |
+| `window_opened`   | Canvas window opened         |
+| `window_closed`   | Canvas window closed         |
+| `a2ui_action`     | User interaction from canvas |
 
 ## Troubleshooting
 

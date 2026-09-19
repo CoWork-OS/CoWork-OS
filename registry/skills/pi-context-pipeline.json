@@ -50,9 +50,7 @@
   ],
   "enabled": true,
   "requires": {
-    "bins": [
-      "pi"
-    ]
+    "bins": ["pi"]
   },
   "install": [
     {
@@ -60,9 +58,7 @@
       "kind": "npm",
       "package": "@mariozechner/pi-coding-agent",
       "label": "Install Pi CLI (npm i -g @mariozechner/pi-coding-agent)",
-      "bins": [
-        "pi"
-      ]
+      "bins": ["pi"]
     },
     {
       "id": "finder-package",
@@ -81,23 +77,14 @@
       "kind": "brew",
       "formula": "gh",
       "label": "Install GitHub CLI for librarian mode (brew install gh)",
-      "bins": [
-        "gh"
-      ],
-      "os": [
-        "darwin"
-      ]
+      "bins": ["gh"],
+      "os": ["darwin"]
     }
   ],
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "pi",
-      "context",
-      "subagent",
-      "codex"
-    ],
+    "tags": ["pi", "context", "subagent", "codex"],
     "routing": {
       "useWhen": "Use when users want a Finder plus Librarian pre-coding pipeline that narrows context and prepares a coding handoff prompt.",
       "dontUseWhen": "Do not use for direct coding changes that are already scoped to a few known files.",

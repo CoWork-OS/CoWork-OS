@@ -1,4 +1,5 @@
 import type { EventType, TaskEvent, TaskStatus } from "../../shared/types";
+import { inferTimelineSubStageLabel } from "../../shared/timeline-v2";
 import { getEffectiveTaskEventType, getTimelineErrorText } from "./task-event-compat";
 import { hasAssistantMediaDirective } from "./assistant-media-directives";
 import {
@@ -17,6 +18,15 @@ export const IMPORTANT_EVENT_TYPES: EventType[] = [
   "step_failed",
   "assistant_message",
   "user_message",
+  "agent_spawn_requested",
+  "agent_spawned",
+  "agent_message",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+  "agent_interrupt_requested",
+  "agent_interrupt_confirmed",
+  "agent_failed",
+  "agent_completed",
   "file_created",
   "file_modified",
   "file_deleted",
@@ -34,6 +44,7 @@ export const IMPORTANT_EVENT_TYPES: EventType[] = [
   "context_compaction_started",
   "context_compaction_completed",
   "context_compaction_failed",
+  "context_summarized",
   "no_progress_circuit_breaker",
   "step_contract_escalated",
   "approval_requested",
@@ -62,6 +73,7 @@ export const ALWAYS_VISIBLE_TECHNICAL_EVENT_TYPES: ReadonlySet<EventType> = new 
   "context_compaction_started",
   "context_compaction_completed",
   "context_compaction_failed",
+  "context_summarized",
   "no_progress_circuit_breaker",
   "step_contract_escalated",
   "task_completed",
@@ -91,6 +103,124 @@ const SUMMARY_HIDDEN_GROUP_LABEL_PATTERN = /\b(?:follow-up\s+)?tool\s+batch\b/i;
 function asObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function getCompactionPayloadText(event: TaskEvent, keys: string[]): string {
+  const payload = asObject(event.payload);
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+/**
+ * `context_summarized` is an older persistence event emitted alongside the
+ * visible compaction lifecycle. Keep it for legacy sessions, but hide it when
+ * a matching completed lifecycle event is present so the feed has one row.
+ */
+export function isDuplicateContextSummaryEvent(
+  event: TaskEvent,
+  events: readonly TaskEvent[],
+): boolean {
+  if (getEffectiveTaskEventType(event) !== "context_summarized") return false;
+
+  const compactionId = getCompactionPayloadText(event, ["compactionId", "compaction_id"]);
+  const summary = getCompactionPayloadText(event, ["summary", "summaryText", "summaryPreview"]);
+  return events.some((candidate) => {
+    if (candidate === event || candidate.taskId !== event.taskId) return false;
+    const candidateType = getEffectiveTaskEventType(candidate);
+    if (
+      candidateType !== "context_compaction_completed" &&
+      candidateType !== "context_compaction_failed"
+    ) {
+      return false;
+    }
+
+    const candidateCompactionId = getCompactionPayloadText(candidate, [
+      "compactionId",
+      "compaction_id",
+    ]);
+    if (compactionId && candidateCompactionId) return compactionId === candidateCompactionId;
+
+    const candidateSummary = getCompactionPayloadText(candidate, [
+      "summary",
+      "summaryText",
+      "summaryPreview",
+    ]);
+    return Boolean(
+      summary &&
+      candidateSummary &&
+      summary === candidateSummary &&
+      Math.abs(candidate.timestamp - event.timestamp) <= 10_000,
+    );
+  });
+}
+
+const CONTEXT_COMPACTION_RESOLUTION_TYPES = new Set<string>([
+  "context_compaction_completed",
+  "context_compaction_failed",
+  "context_summarized",
+]);
+
+/**
+ * "Context automatically compacting" is a live progress marker with a spinner. Once its
+ * lifecycle resolves, the completed (or failed) row states the outcome, so keeping the start
+ * row leaves the feed showing both tenses at once and still animating a finished step.
+ */
+export function isResolvedContextCompactionStartEvent(
+  event: TaskEvent,
+  events: readonly TaskEvent[],
+): boolean {
+  if (getEffectiveTaskEventType(event) !== "context_compaction_started") return false;
+
+  const compactionId = getCompactionPayloadText(event, ["compactionId", "compaction_id"]);
+  return events.some((candidate) => {
+    if (candidate === event || candidate.taskId !== event.taskId) return false;
+    if (!CONTEXT_COMPACTION_RESOLUTION_TYPES.has(getEffectiveTaskEventType(candidate))) {
+      return false;
+    }
+    if (candidate.timestamp < event.timestamp) return false;
+    const candidateCompactionId = getCompactionPayloadText(candidate, [
+      "compactionId",
+      "compaction_id",
+    ]);
+    // Sessions predating the lifecycle id carry no correlation key; a later resolution in the
+    // same task is the only signal available, and compaction runs are never interleaved.
+    if (!compactionId || !candidateCompactionId) return true;
+    return compactionId === candidateCompactionId;
+  });
+}
+
+/** Stage transitions are emitted from inside the source event's own log call. */
+const STAGE_TRANSITION_SOURCE_WINDOW_MS = 2_000;
+
+/**
+ * A stage transition borrows its label from the event that triggered it (the daemon passes
+ * `inferTimelineSubStageLabel(sourceType)` as the group label), so the group row and that
+ * event's own row print the same sentence back to back. The event row is the richer of the
+ * two — it carries lifecycle status, spinner state and expandable details — so drop the group.
+ */
+export function isRedundantStageTransitionGroupEvent(
+  event: TaskEvent,
+  events: readonly TaskEvent[],
+): boolean {
+  if (event.type !== "timeline_group_started") return false;
+  if (!isSubStageTimelineGroupEvent(event)) return false;
+
+  const groupLabel = getTimelineGroupLabel(event);
+  if (!groupLabel) return false;
+
+  return events.some((candidate) => {
+    if (candidate === event || candidate.taskId !== event.taskId) return false;
+    // The source event is persisted with the timestamp it captured before the re-entrant
+    // transition, so it can land on either side of the group event.
+    if (Math.abs(candidate.timestamp - event.timestamp) > STAGE_TRANSITION_SOURCE_WINDOW_MS) {
+      return false;
+    }
+    const candidateType = getEffectiveTaskEventType(candidate) as EventType;
+    return inferTimelineSubStageLabel(candidateType) === groupLabel;
+  });
 }
 
 function getPayloadText(payload: Record<string, unknown>, key: string): string {

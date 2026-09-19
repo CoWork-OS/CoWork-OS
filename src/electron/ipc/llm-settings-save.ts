@@ -110,6 +110,37 @@ function normalizeAzureAnthropicSettings(
   };
 }
 
+function normalizeJevSettings(
+  incoming?: LLMSettingsData["jev"],
+  existing?: LLMSettingsData["jev"],
+): LLMSettingsData["jev"] | undefined {
+  if (!incoming && !existing) return undefined;
+
+  const mergeJevProviderSettings = <T extends { apiKey?: string; clearApiKey?: boolean }>(
+    next?: T,
+    previous?: T,
+  ): T | undefined => {
+    const merged = mergeProviderSettings(next, previous);
+    if (!merged) return undefined;
+    // Renderer settings are intentionally redacted. An omitted key means
+    // "keep the stored credential"; an explicit empty string still clears it.
+    if (next?.clearApiKey === true) {
+      delete merged.apiKey;
+    } else if (next && next.apiKey === undefined && previous?.apiKey) {
+      merged.apiKey = previous.apiKey;
+    }
+    delete merged.clearApiKey;
+    return cleanProviderSettings(merged);
+  };
+
+  return {
+    ...existing,
+    ...incoming,
+    typesafe: mergeJevProviderSettings(incoming?.typesafe, existing?.typesafe),
+    openrouter: mergeJevProviderSettings(incoming?.openrouter, existing?.openrouter),
+  };
+}
+
 export function buildSavedLLMSettings(
   validated: LLMSettingsData,
   existingSettings: LLMSettingsData,
@@ -175,6 +206,7 @@ export function buildSavedLLMSettings(
       ? validated.failoverPrimaryRetryCooldownSeconds
       : existingSettings.failoverPrimaryRetryCooldownSeconds,
     promptCaching: validated.promptCaching ?? existingSettings.promptCaching,
+    jev: normalizeJevSettings(validated.jev, existingSettings.jev),
     anthropic: cleanProviderSettings(
       mergeProviderSettings(validated.anthropic, existingSettings.anthropic),
     ),

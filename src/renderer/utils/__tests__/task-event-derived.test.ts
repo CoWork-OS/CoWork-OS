@@ -24,6 +24,79 @@ function makeEvent(
 }
 
 describe("deriveSharedTaskEventUiState action blocks", () => {
+  it("keeps one action block when an assistant turn has nothing to display", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("start", 100, "step_started", {
+          step: { id: "collect", description: "Collect the details" },
+        }),
+        makeEvent("silent", 110, "assistant_message", {
+          message: '<tool_call>{"name":"read_file"}</tool_call>',
+        }),
+        makeEvent("done", 120, "step_completed", {
+          step: { id: "collect", description: "Collect the details" },
+        }),
+      ],
+      task: { id: "task-1", status: "executing" } as Any,
+      workspace: null,
+      verboseSteps: false,
+    });
+
+    expect(shared.baseTimelineItems.map((item) => item.kind)).toEqual(["action_block"]);
+    // The silent turn stays in the block so command output anchored to it still renders.
+    expect(
+      shared.baseTimelineItems.flatMap((item) =>
+        item.kind === "action_block" ? item.events.map((event) => event.id) : [],
+      ),
+    ).toEqual(["start", "silent", "done"]);
+  });
+
+  it("still splits action blocks on an assistant turn that renders text", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("start", 100, "step_started", {
+          step: { id: "collect", description: "Collect the details" },
+        }),
+        makeEvent("spoken", 110, "assistant_message", { message: "Here is what I found." }),
+        makeEvent("done", 120, "step_completed", {
+          step: { id: "collect", description: "Collect the details" },
+        }),
+      ],
+      task: { id: "task-1", status: "executing" } as Any,
+      workspace: null,
+      verboseSteps: false,
+    });
+
+    expect(shared.baseTimelineItems.map((item) => item.kind)).toEqual([
+      "action_block",
+      "event",
+      "action_block",
+    ]);
+  });
+
+  // Guards the assumption behind the block-merge above: a directive-only turn still renders,
+  // so it must keep its own slot instead of being folded into the surrounding block.
+  it("splits on a media-only assistant turn so the attachment keeps its slot", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("start", 100, "step_started", {
+          step: { id: "collect", description: "Collect the details" },
+        }),
+        makeEvent("media", 110, "assistant_message", {
+          message: '::video{path="/tmp/clip.mp4"}',
+        }),
+        makeEvent("done", 120, "step_completed", {
+          step: { id: "collect", description: "Collect the details" },
+        }),
+      ],
+      task: { id: "task-1", status: "executing" } as Any,
+      workspace: null,
+      verboseSteps: false,
+    });
+
+    expect(shared.baseTimelineItems.map((item) => item.kind)).toContain("event");
+  });
+
   it("keeps only genuinely pending approvals in compact projection", () => {
     const shared = deriveSharedTaskEventUiState({
       rawEvents: [

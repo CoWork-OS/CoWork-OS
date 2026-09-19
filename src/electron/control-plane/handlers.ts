@@ -101,6 +101,7 @@ import { EverydayAgentService } from "../everyday-agent/EverydayAgentService";
 import { normalizeImagesForRemote, sanitizeTaskMessageParams } from "./sanitize";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import { AgentConfigSchema, validateInput } from "../utils/validation";
 import {
@@ -1474,12 +1475,14 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         quotedAssistantMessage,
         expectedTurnId,
         interactionMode,
+        deliveryMode,
+        messageId,
         permissionMode,
         accessProfileId,
         shellAccess,
         integrationMentions,
       } = sanitizeTaskMessageParams(params);
-      await controlPlaneDeps.agentDaemon.sendMessage(
+      const result = await controlPlaneDeps.agentDaemon.sendMessage(
         taskId,
         message,
         images,
@@ -1487,13 +1490,15 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         {
           ...(expectedTurnId ? { expectedTurnId } : {}),
           ...(interactionMode ? { interactionMode } : {}),
+          ...(deliveryMode ? { deliveryMode } : {}),
+          ...(messageId ? { messageId } : {}),
           ...(permissionMode ? { permissionMode } : {}),
           ...(accessProfileId ? { accessProfileId } : {}),
           ...(shellAccess !== undefined ? { shellAccess } : {}),
           ...(integrationMentions !== undefined ? { integrationMentions } : {}),
         },
       );
-      return { ok: true };
+      return { ok: true, ...result };
     }
     case Methods.APPROVAL_LIST: {
       const { limit, offset, taskId } = sanitizeApprovalListParams(params);
@@ -2172,7 +2177,11 @@ function maskSecretString(value: string): string {
   return `${trimmed.slice(0, 2)}...${trimmed.slice(-4)}`;
 }
 
-function redactObjectSecrets(input: unknown, depth = 0): unknown {
+/**
+ * Mask any secret-looking string field in an arbitrary object graph. Used on
+ * every remote-facing payload that carries settings; exported for testing.
+ */
+export function redactObjectSecrets(input: unknown, depth = 0): unknown {
   if (depth > 8) return "[truncated]";
   if (input === null || input === undefined) return input;
   if (typeof input === "string") return input;
@@ -2600,6 +2609,10 @@ function registerACPMethodsOnServer(
         prompt: params.prompt,
         status: "pending",
         workspaceId,
+        agentConfig: taskAgentConfigForCreation(
+          undefined,
+          PermissionSettingsManager.loadSettings(),
+        ),
         assignedAgentRoleId: params.assignedAgentRoleId,
       } as any);
       await deps.agentDaemon.startTask(task);
@@ -3272,22 +3285,30 @@ function registerTaskAndWorkspaceMethods(
     const hasNamedAccessProfile =
       typeof validated.agentConfig?.accessProfileId === "string" &&
       validated.agentConfig.accessProfileId.trim().length > 0;
+    // `shellAccess` predates named profiles and is still accepted by remote
+    // control-plane clients. Preserve an explicit false as a compatibility
+    // ceiling before applying the shared creation normalizer; dropping it
+    // here would let a newly configured default turn shell access back on.
+    // An explicit true with no named profile maps to the bounded built-in
+    // profile, retaining the historical control-plane behavior.
     const compatibilityAgentConfig =
-      validated.shellAccess === true && !hasNamedAccessProfile
-        ? {
+      validated.shellAccess === undefined
+        ? validated.agentConfig
+        : {
             ...(validated.agentConfig || {}),
-            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
-          }
-        : validated.agentConfig;
+            shellAccess: validated.shellAccess,
+            ...(validated.shellAccess === true && !hasNamedAccessProfile
+              ? { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval }
+              : {}),
+          };
 
-    // Create task record
-    const normalizedAgentConfig =
-      validated.shellAccess !== undefined
-        ? compatibilityAgentConfig
-        : applyDefaultAccessProfile(
-            compatibilityAgentConfig,
-            PermissionSettingsManager.loadSettings(),
-          );
+    // Create task record through the same authority normalizer as every other
+    // direct task root. Explicit profiles and legacy permission/shell fields
+    // are preserved by the helper.
+    const normalizedAgentConfig = applyDefaultAccessProfile(
+      compatibilityAgentConfig,
+      PermissionSettingsManager.loadSettings(),
+    );
     const taskAgentConfig = normalizedAgentConfig
       ? {
           ...normalizedAgentConfig,
@@ -3418,20 +3439,24 @@ function registerTaskAndWorkspaceMethods(
       quotedAssistantMessage,
       expectedTurnId,
       interactionMode,
+      deliveryMode,
+      messageId,
       permissionMode,
       accessProfileId,
       shellAccess,
       integrationMentions,
     } = sanitizeTaskMessageParams(params);
-    await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
+    const result = await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
       ...(expectedTurnId ? { expectedTurnId } : {}),
       ...(interactionMode ? { interactionMode } : {}),
+      ...(deliveryMode ? { deliveryMode } : {}),
+      ...(messageId ? { messageId } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       ...(accessProfileId ? { accessProfileId } : {}),
       ...(shellAccess !== undefined ? { shellAccess } : {}),
       ...(integrationMentions !== undefined ? { integrationMentions } : {}),
     });
-    return { ok: true };
+    return { ok: true, ...result };
   });
 
   // Approvals
@@ -3759,7 +3784,16 @@ function registerTaskAndWorkspaceMethods(
 
     const searchStatus = SearchProviderFactory.getConfigStatus();
 
-    const controlPlane = ControlPlaneSettingsManager.getSettingsForDisplay();
+    // Redacted unconditionally: `config.get` is gated at `read` scope, which is
+    // what companion "node" clients hold, and the raw settings carry `token`
+    // (the admin credential), `nodeToken`, and per-device tokens. Redacting for
+    // admins too keeps the token out of `cowork doctor --json` stdout.
+    //
+    // The raw settings are kept separately for the deployment-posture check
+    // below, which inspects the real token values; only the copy that leaves
+    // this process is redacted.
+    const controlPlaneSettings = ControlPlaneSettingsManager.loadSettingsWithSecrets();
+    const controlPlane = redactObjectSecrets(controlPlaneSettings) as typeof controlPlaneSettings;
     const envImport = {
       enabled: shouldImportEnvSettingsFromArgsOrEnv(),
       mode: getEnvSettingsImportModeFromArgsOrEnv(),
@@ -3778,7 +3812,7 @@ function registerTaskAndWorkspaceMethods(
       importEnvSettings: envImport,
     };
     const deploymentPosture = evaluateControlPlaneDeploymentPosture({
-      settings: controlPlane,
+      settings: controlPlaneSettings,
       headless: runtime.headless,
       managedDeployment: shouldUseManagedDeploymentModeFromEnv(),
       bindContext: getControlPlaneBindContextFromEnv(),
@@ -3874,11 +3908,13 @@ export function setupControlPlaneHandlers(
   TailscaleSettingsManager.initialize();
   ensureFleetManager();
 
-  // Get settings (with masked token)
+  // Returns the raw token on purpose: the Settings panel shows it behind a
+  // show/hide toggle so the user can copy it into the CLI. This channel is
+  // local-renderer only — do not reuse it for anything remote-facing.
   ipcMain.handle(
     IPC_CHANNELS.CONTROL_PLANE_GET_SETTINGS,
     async (): Promise<ControlPlaneSettingsData> => {
-      return ControlPlaneSettingsManager.getSettingsForDisplay();
+      return ControlPlaneSettingsManager.loadSettingsWithSecrets();
     },
   );
 
@@ -4923,13 +4959,14 @@ export function setupControlPlaneHandlers(
           } else if (params.accessProfileId) {
             taskCreateParams.agentConfig = { accessProfileId: params.accessProfileId };
           }
-          if (
-            params.shellAccess === true &&
-            typeof taskCreateParams.agentConfig?.accessProfileId !== "string"
-          ) {
+          if (params.shellAccess !== undefined) {
             taskCreateParams.agentConfig = {
               ...(taskCreateParams.agentConfig || {}),
-              accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+              shellAccess: params.shellAccess,
+              ...(params.shellAccess === true &&
+              typeof taskCreateParams.agentConfig?.accessProfileId !== "string"
+                ? { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval }
+                : {}),
             };
           }
           remoteTaskRes = await remoteClient.request(Methods.TASK_CREATE, taskCreateParams, 15000);

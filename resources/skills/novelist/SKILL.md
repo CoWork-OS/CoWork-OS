@@ -9,11 +9,13 @@ metadata:
 # Novelist
 
 ## Goal
+
 - Produce a complete long-form fiction pipeline with minimal back-and-forth.
 - Default to doing the work, not repeatedly asking for permission between phases.
 - Leave a durable workspace trail that can be resumed cleanly.
 
 ## Inputs
+
 - Required: `seed`
 - Optional with defaults: `genre`, `target_words`, `chapter_count`, `packaging`, `canon_mode`
 
@@ -21,9 +23,11 @@ If the user invoked `/novelist` without optional parameters, use the defaults an
 If `seed` is missing, ask only for the seed and pause.
 
 ## Artifact Root
+
 - Write everything under `artifacts/skills/novelist/`
 
 Expected files:
+
 - `brief.md`
 - `world.md`
 - `characters.md`
@@ -38,12 +42,14 @@ Expected files:
 - Optional packaged outputs such as `.epub` and `.pdf`
 
 ## Operating Mode
+
 - Resume if artifacts already exist.
 - Do not restart completed phases unless the user explicitly asks for a rewrite.
 - Do not ask for chapter-by-chapter approval.
 - Ask at most one extra question only when a single missing decision would materially change the manuscript.
 
 ## Workflow
+
 1. Create or refresh `brief.md`.
    - Capture premise, protagonist, stakes, setting, tone, target length, and packaging plan.
    - If the request references an existing franchise, mark whether this is `fanfiction` or `inspired-by`.
@@ -79,15 +85,18 @@ Expected files:
    - Deliver the manuscript and any successful outputs instead of looping.
 
 ## Franchise Requests
+
 - If the user asks for an established universe, label the result clearly as fan fiction or an unofficial derivative work.
 - Preserve internal continuity for the requested universe, but do not claim official canon.
 
 ## Completion Criteria
+
 - `manuscript_complete.md` exists.
 - `manifest.md` exists and lists files produced plus remaining blockers.
 - At least one packaged output exists if packaging was requested; otherwise the manifest must record the exact blocker.
 
 ## Final Response
+
 - Report:
   - total manuscript word count
   - chapter count

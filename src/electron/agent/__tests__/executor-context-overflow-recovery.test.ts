@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { TaskExecutor } from "../executor";
-import { SessionRuntime } from "../runtime/SessionRuntime";
+import { ContextCapacityExhaustedError, SessionRuntime } from "../runtime/SessionRuntime";
 
 function makeExecutor(): Any {
   const executor = Object.create(TaskExecutor.prototype) as Any;
@@ -103,5 +103,37 @@ describe("TaskExecutor context-overflow recovery", () => {
         reason: "retries_exhausted",
       }),
     );
+  });
+
+  it("classifies hard retained-context exhaustion as terminal budget failure", () => {
+    const executor = makeExecutor();
+    const error = new ContextCapacityExhaustedError({
+      phase: "step",
+      contextLabel: "step:context-overflow",
+      availableTokens: 100,
+      tokensBefore: 240,
+      tokensAfter: 220,
+    });
+
+    expect((executor as Any).isContextCapacityExhaustedError(error)).toBe(true);
+    expect((executor as Any).isBudgetExhaustionError(error)).toBe(true);
+    expect((executor as Any).shouldFinalizeAsPartialSuccess(error)).toBe(false);
+    expect(
+      (executor as Any).isContextCapacityExhaustedError({
+        code: error.code,
+        message: error.message,
+      }),
+    ).toBe(true);
+  });
+
+  it("tags exhausted follow-up recovery with the terminal context code", () => {
+    const executor = makeExecutor();
+    const error = (executor as Any).createContextCapacityRecoveryExhaustedError(
+      "Context capacity recovery exhausted during follow-up processing.",
+    );
+
+    expect(error).toMatchObject({ code: "CONTEXT_CAPACITY_RECOVERY_EXHAUSTED" });
+    expect((executor as Any).isContextCapacityExhaustedError(error)).toBe(true);
+    expect((executor as Any).classifyFailure(error)).toBe("budget_exhausted");
   });
 });

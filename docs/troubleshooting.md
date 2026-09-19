@@ -165,6 +165,42 @@ Local one-shot CLI runs prefer a hidden Electron app-entry mode so OS-encrypted 
 
 See [CoWork OS CLI](cli.md) for the full local-vs-remote model.
 
+### JEV calls are absent or headless tool review is stuck
+
+JEV provider configuration and the optional harness are separate switches:
+
+1. In **Settings > AI & Models > Jev**, confirm **Enable Jev decision support**,
+   the selected provider/key, **Enable optional JEV harness**, and
+   **Contextual tool review** set to **Observe** or **Active**.
+2. In **Active** mode, confirm the specific decision-family checkbox is still
+   enabled. The adaptive families default to enabled when omitted from saved
+   settings, but each can be disabled independently.
+3. Remember that eligibility is intentional: low-complexity, explicit,
+   delegated/child, background, fixed-profile, and already-orchestrated work
+   can bypass the relevant decision. Tool review also excludes ordinary
+   read-only calls.
+4. Inspect the task timeline for `jev_decision` events and Usage Insights for
+   the separate Jev usage section. A selected decision, safe abstention,
+   provider-unavailable result, and deterministic fallback are different
+   outcomes.
+
+For a source checkout, rebuild both runtime trees:
+
+```bash
+npm run build:electron
+npm run build:cli
+```
+
+The direct CLI imports its own compiled Electron tree under `dist/cli`; a
+desktop-only rebuild can leave headless tasks on stale Jev migration or policy
+code. A `cowork run` task with an explicit non-interactive full-access profile
+must not wait for a renderer approval card merely because Active Jev review is
+concerning. If it still reports `approval_unavailable` or
+`interactive_approval_unavailable`, rebuild both trees and verify that the
+operation itself is authorized. Missing authority, hard policy, Numbat, path,
+network, and operating-system consent failures remain expected fail-closed
+outcomes.
+
 ## Access profile issues
 
 If the composer shows **Unavailable access profile**, the named profile is
@@ -503,7 +539,11 @@ If **Turn on** fails, read the inline validation message and check required fiel
 
 If a Google starter does not fire, confirm the flow is on, inspect the active version rather than a newer draft, reconnect Google Workspace when scopes are missing, and allow the first poll to establish a non-replay baseline cursor. Gmail and Drive page tokens continue across bounded poll windows, so large backlogs may require later polls.
 
-If Activity shows a step waiting for approval after restart, verify whether the remote action already happened before selecting **Approve once**. The runtime intentionally does not repeat an interrupted action whose external outcome is unknown.
+If Activity shows a step that was waiting for approval before restart, the pending decision was
+failed closed and is not resumed. Retry the operation to receive a fresh assistant message and
+inline **Deny** / **Allow once** card. The runtime does not repeat an interrupted external action
+whose outcome is unknown. If you still see a popup, check whether `COWORK_APPROVAL_PROMPTS=on` is
+set in the process environment; that variable intentionally restores the legacy diagnostic queue.
 
 If startup reports a missing `workflow_run_id` column, do not delete the app database. Current `RoutineService.ensureSchema()` adds compatibility columns before creating their indexes. Confirm the current Electron build is running and inspect the migration failure in the dev log.
 
@@ -611,6 +651,7 @@ cowork-os
 ```
 
 Windows ARM64 note:
+
 - Setup now auto-tries x64 Electron emulation if ARM64 native rebuild fails.
 - To disable that fallback and force native ARM64 only, set `COWORK_SETUP_SKIP_X64_FALLBACK=1`.
 

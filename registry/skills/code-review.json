@@ -21,9 +21,7 @@
       "dontUseWhen": "Don't use when the task is a broad architecture rewrite or only formatting fixes.",
       "outputs": "Findings grouped by severity and file-level recommendations.",
       "successCriteria": "Returns prioritized issues with concrete fixes and no false-critical claims.",
-      "expectedArtifacts": [
-        "review-notes.md"
-      ],
+      "expectedArtifacts": ["review-notes.md"],
       "examples": {
         "positive": [
           "Use the code-review skill for this request.",

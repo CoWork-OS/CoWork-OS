@@ -37,23 +37,14 @@
       "type": "select",
       "description": "Confidence level for VaR calculations",
       "required": true,
-      "options": [
-        "90%",
-        "95%",
-        "99%"
-      ]
+      "options": ["90%", "95%", "99%"]
     },
     {
       "name": "horizon",
       "type": "select",
       "description": "Time horizon for risk measurement",
       "required": true,
-      "options": [
-        "1 Day",
-        "1 Week",
-        "1 Month",
-        "1 Year"
-      ]
+      "options": ["1 Day", "1 Week", "1 Month", "1 Year"]
     }
   ],
   "enabled": true,

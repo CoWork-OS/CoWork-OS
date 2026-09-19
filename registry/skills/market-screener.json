@@ -11,12 +11,7 @@
       "type": "select",
       "description": "Asset class to screen",
       "required": true,
-      "options": [
-        "Equities",
-        "ETFs",
-        "Bonds",
-        "All"
-      ]
+      "options": ["Equities", "ETFs", "Bonds", "All"]
     },
     {
       "name": "criteria",
@@ -35,24 +30,14 @@
       "type": "select",
       "description": "Market region to screen",
       "required": true,
-      "options": [
-        "US",
-        "Europe",
-        "Asia-Pacific",
-        "Global"
-      ]
+      "options": ["US", "Europe", "Asia-Pacific", "Global"]
     },
     {
       "name": "maxResults",
       "type": "select",
       "description": "Maximum number of results to return",
       "required": true,
-      "options": [
-        "10",
-        "25",
-        "50",
-        "100"
-      ]
+      "options": ["10", "25", "50", "100"]
     }
   ],
   "enabled": true,

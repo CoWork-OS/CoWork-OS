@@ -37,11 +37,11 @@ Review code for best practices and potential issues
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| path | string | Yes | Path to the file or folder to review |
+| Name | Type   | Required | Description                          |
+| ---- | ------ | -------- | ------------------------------------ |
+| path | string | Yes      | Path to the file or folder to review |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 320 characters.
-- Runtime prompt is defined directly in `../code-review.json`. 
+- Runtime prompt is defined directly in `../code-review.json`.

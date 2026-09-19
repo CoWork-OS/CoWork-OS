@@ -24,4 +24,3 @@
   "include": ["src/daemon/**/*"],
   "exclude": ["node_modules", "dist", "**/__tests__/**", "**/*.test.ts"]
 }
-

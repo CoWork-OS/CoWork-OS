@@ -37,13 +37,13 @@ Research a topic from the past X days using web search. Specify the number of da
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| topic | string | Yes | The topic to research (e.g., 'AI agents', 'prompting techniques', 'Apple announcements') |
-| days | number | No | Number of days to look back (e.g., 1, 7, 14, 30, 90). Defaults to 7. |
-| tool | select | No | Target AI tool for the prompts (optional context) |
+| Name  | Type   | Required | Description                                                                              |
+| ----- | ------ | -------- | ---------------------------------------------------------------------------------------- |
+| topic | string | Yes      | The topic to research (e.g., 'AI agents', 'prompting techniques', 'Apple announcements') |
+| days  | number | No       | Number of days to look back (e.g., 1, 7, 14, 30, 90). Defaults to 7.                     |
+| tool  | select | No       | Target AI tool for the prompts (optional context)                                        |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1668 characters.
-- Runtime prompt is defined directly in `../research-last-days.json`. 
+- Runtime prompt is defined directly in `../research-last-days.json`.

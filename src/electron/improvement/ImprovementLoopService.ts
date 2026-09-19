@@ -31,6 +31,9 @@ import {
 import { saveImprovementResetBaselineAt } from "./ImprovementHistoryState";
 import { ImprovementSettingsManager } from "./ImprovementSettingsManager";
 import { evaluateNetworkPolicy } from "../security/network-policy";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
+import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 
 type Any = any;
 type ImprovementStageTransition = { stage: string; at: number; detail?: string };
@@ -353,15 +356,24 @@ export class ImprovementLoopService {
       depth: 0,
       budgetTokens: settings.campaignTokenBudget,
       budgetCost: settings.campaignCostBudget,
-      agentConfig: {
-        autonomousMode: true,
-        allowUserInput: false,
-        executionMode: "verified",
-        taskDomain: "code",
-        reviewPolicy: "strict",
-        gatewayContext: "private",
-        maxTokens: settings.campaignTokenBudget,
-      },
+      agentConfig: taskAgentConfigForCreation(
+        {
+          autonomousMode: true,
+          allowUserInput: false,
+          executionMode: "verified",
+          taskDomain: "code",
+          reviewPolicy: "strict",
+          gatewayContext: "private",
+          maxTokens: settings.campaignTokenBudget,
+          // Improvement campaigns are unattended by design. Keep their
+          // authority explicit and narrow the automatic exception to the
+          // command needed for the campaign's verification stages.
+          accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+          autoApproveTypes: ["run_command"],
+          pauseForRequiredDecision: false,
+        },
+        PermissionSettingsManager.loadSettings(),
+      ),
       resultSummary: "Preparing staged self-improvement campaign.",
     });
 

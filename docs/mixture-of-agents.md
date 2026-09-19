@@ -24,10 +24,10 @@ Enabled presets appear as model choices when **Mixture of Agents** is selected a
 
 Each MoA preset has two layers:
 
-| Layer | What it does | Tool access |
-|-------|--------------|-------------|
-| Reference advisors | Review the prompt first and produce concise guidance, critiques, alternatives, or domain-specific notes | No tools |
-| Aggregator | Receives the original task plus the advisor notes and produces the task response | Original tools and tool choice |
+| Layer              | What it does                                                                                            | Tool access                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Reference advisors | Review the prompt first and produce concise guidance, critiques, alternatives, or domain-specific notes | No tools                       |
+| Aggregator         | Receives the original task plus the advisor notes and produces the task response                        | Original tools and tool choice |
 
 The aggregator is the only model that executes the real task. Advisors are there to improve the aggregator's context, not to call tools or mutate the workspace.
 
@@ -48,17 +48,17 @@ The advisory context is appended as a separate user message instead of rewriting
 
 ## Preset Fields
 
-| Field | Purpose |
-|-------|---------|
-| Name | The preset label shown in the model picker |
-| Description | Optional operator note for what the preset is for |
-| Enabled | Whether the preset can be selected for tasks |
-| Default preset | The preset CoWork should choose by default for MoA |
-| Aggregator | The final provider/model that answers and can use tools |
-| Reference advisors | Provider/model slots consulted before the aggregator |
-| Max reference tokens | Per-advisor output budget |
-| Max reference chars per model | How much advisor text can enter the aggregator context |
-| Concurrency | How many advisor calls can run at the same time |
+| Field                         | Purpose                                                 |
+| ----------------------------- | ------------------------------------------------------- |
+| Name                          | The preset label shown in the model picker              |
+| Description                   | Optional operator note for what the preset is for       |
+| Enabled                       | Whether the preset can be selected for tasks            |
+| Default preset                | The preset CoWork should choose by default for MoA      |
+| Aggregator                    | The final provider/model that answers and can use tools |
+| Reference advisors            | Provider/model slots consulted before the aggregator    |
+| Max reference tokens          | Per-advisor output budget                               |
+| Max reference chars per model | How much advisor text can enter the aggregator context  |
+| Concurrency                   | How many advisor calls can run at the same time         |
 
 Reference slots can also carry a short role instruction, such as "focus on security risk" or "check factual assumptions". Keep those instructions narrow. Broad role prompts make advisors verbose and less useful.
 
@@ -73,11 +73,11 @@ Good default setup:
 
 Examples:
 
-| Preset | Aggregator | Advisors |
-|--------|------------|----------|
-| Coding review | OpenAI or Azure OpenAI GPT route | Claude, Gemini, OpenRouter coding model |
-| Research synthesis | Claude or OpenAI | Gemini, OpenRouter, local Ollama or MLX-LM |
-| Low-cost drafting | A capable mid-tier model | one cheap model plus one local model |
+| Preset             | Aggregator                       | Advisors                                   |
+| ------------------ | -------------------------------- | ------------------------------------------ |
+| Coding review      | OpenAI or Azure OpenAI GPT route | Claude, Gemini, OpenRouter coding model    |
+| Research synthesis | Claude or OpenAI                 | Gemini, OpenRouter, local Ollama or MLX-LM |
+| Low-cost drafting  | A capable mid-tier model         | one cheap model plus one local model       |
 
 Avoid adding many advisors by default. Latency and cost scale with the number of advisor calls plus the aggregator call.
 
@@ -168,13 +168,13 @@ This affects OpenAI inside MoA the same way it affects normal OpenAI provider ca
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---------|--------------|-----|
-| The MoA provider is visible but no preset is selectable | No enabled preset | Create or enable a preset, then save settings |
-| Advisors run but the task fails | Aggregator failed | Test the aggregator provider directly or add slot failover |
-| OpenAI works outside MoA but fails inside MoA | Stale dev run, slot fallback, or TLS trust mismatch | Restart the dev app, verify the selected preset, and check developer logs |
-| Advisor calls try to use tools | Bug or stale build | Restart after pulling/building and verify logs show `toolsOffered: 0` |
-| MoA falls back to an unexpected provider | Provider-level failover is configured for a slot or MoA provider fallback is configured | Review both the slot provider's failover chain and the MoA provider failover panel |
+| Symptom                                                 | Likely cause                                                                            | Fix                                                                                |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| The MoA provider is visible but no preset is selectable | No enabled preset                                                                       | Create or enable a preset, then save settings                                      |
+| Advisors run but the task fails                         | Aggregator failed                                                                       | Test the aggregator provider directly or add slot failover                         |
+| OpenAI works outside MoA but fails inside MoA           | Stale dev run, slot fallback, or TLS trust mismatch                                     | Restart the dev app, verify the selected preset, and check developer logs          |
+| Advisor calls try to use tools                          | Bug or stale build                                                                      | Restart after pulling/building and verify logs show `toolsOffered: 0`              |
+| MoA falls back to an unexpected provider                | Provider-level failover is configured for a slot or MoA provider fallback is configured | Review both the slot provider's failover chain and the MoA provider failover panel |
 
 For current failures, turn on **Settings > Appearance > Developer logging** or start with:
 

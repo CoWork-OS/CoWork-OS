@@ -37,12 +37,12 @@ Manually record an insight, correction, preference, or rule that the agent shoul
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| what | string | Yes | The insight, correction, preference, or rule to remember |
-| category | select | No | Type of learning |
+| Name     | Type   | Required | Description                                              |
+| -------- | ------ | -------- | -------------------------------------------------------- |
+| what     | string | Yes      | The insight, correction, preference, or rule to remember |
+| category | select | No       | Type of learning                                         |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 1153 characters.
-- Runtime prompt is defined directly in `../learn.json`. 
+- Runtime prompt is defined directly in `../learn.json`.

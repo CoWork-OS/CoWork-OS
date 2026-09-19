@@ -254,7 +254,7 @@ describe("Sidebar top-level destinations", () => {
     expect(markup).toContain("Active session");
     const source = readFileSync(stylesPath, "utf8");
     expect(source).toMatch(
-      /\.density-focused \.cli-task-status-leading\s*\{[\s\S]*position:\s*absolute;[\s\S]*left:\s*4px;/,
+      /\.density-focused \.cli-task-status-leading\s*\{[\s\S]*position:\s*absolute;[\s\S]*left:\s*10px;/,
     );
   });
 

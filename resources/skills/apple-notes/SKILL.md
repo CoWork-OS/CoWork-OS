@@ -38,4 +38,4 @@ Manage Apple Notes via the `memo` CLI on macOS (create, view, edit, delete, sear
 ## Runtime Prompt
 
 - Current runtime prompt length: 1390 characters.
-- Runtime prompt is defined directly in `../apple-notes.json`. 
+- Runtime prompt is defined directly in `../apple-notes.json`.

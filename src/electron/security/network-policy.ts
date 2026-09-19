@@ -1,6 +1,7 @@
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { loadPolicies } from "../admin/policies";
 import type { AccessDomainRule } from "../../shared/access-profiles";
+import { assertResolvedHostAllowed, isBlockedInternalHost } from "./address-classes";
 
 export interface NetworkPolicyDecision {
   action: "allow" | "deny";
@@ -76,6 +77,41 @@ export function evaluateNetworkPolicy(request: NetworkPolicyRequest): NetworkPol
 
   const domain = parsed.hostname.toLowerCase();
   const logSafeUrl = toLogSafeNetworkPolicyUrl(parsed);
+
+  // Internal-address boundary, checked before the general allowlists so a
+  // broad `allowedDomains` entry or a permissive default cannot open it.
+  // Decisions here were previously made purely on hostname strings, which let
+  // an agent-supplied URL reach cloud metadata (169.254.169.254) and private
+  // ranges from the user's host and relay the response back into model context.
+  //
+  // Loopback stays reachable: the agent legitimately fetches dev servers it
+  // starts, and the app's own loopback services all require bearer tokens.
+  //
+  // `runtime.network.allowedInternalHosts` is the deliberate escape hatch, and
+  // the only one. Self-hosted deployments legitimately live on the LAN — a
+  // SearXNG or Ollama box, an intranet webhook target — and without a way to
+  // re-open a named host those configurations become unusable with no
+  // available fix. It is admin-policy-only (never agent- or renderer-writable)
+  // and rejects `*`/`**.` wildcards, so re-opening one host does not re-open
+  // the metadata endpoint.
+  if (isBlockedInternalHost(domain, true)) {
+    // `?? []` keeps this fail-closed against a policy object written before
+    // the field existed (or a partial one supplied by a caller/test).
+    const internalAllowMatch = (loadPolicies().runtime.network.allowedInternalHosts ?? []).find(
+      (pattern) => domainMatches(domain, pattern),
+    );
+    if (!internalAllowMatch) {
+      return {
+        action: "deny",
+        url: logSafeUrl,
+        domain,
+        toolName: request.toolName,
+        reason: "internal_address_blocked",
+        ruleSource: "admin_policy",
+      };
+    }
+  }
+
   if (request.accessNetworkMode === "disabled") {
     return {
       action: "deny",
@@ -203,4 +239,32 @@ export function assertNetworkPolicyAllowed(request: NetworkPolicyRequest): Netwo
     return decision;
   }
   throw new Error(`Network access denied for "${request.url}": ${decision.reason}`);
+}
+
+/**
+ * Policy check plus DNS resolution, for any caller about to actually connect.
+ *
+ * `evaluateNetworkPolicy` can only inspect the literal host, so it passes an
+ * attacker-supplied `evil.test` whose A record is 169.254.169.254 — the agent
+ * then fetches cloud metadata and the body comes back into model context.
+ * Resolving here is what closes that, and doing it in the shared entry point is
+ * what keeps every egress path covered instead of only the one tool that
+ * remembered to call it.
+ *
+ * Prefer this over `evaluateNetworkPolicy`/`assertNetworkPolicyAllowed`
+ * wherever a request is about to be issued, and call it again for each redirect
+ * hop.
+ */
+export async function assertNetworkDestinationAllowed(
+  request: NetworkPolicyRequest,
+): Promise<NetworkPolicyDecision> {
+  const decision = assertNetworkPolicyAllowed(request);
+  let hostname: string;
+  try {
+    hostname = new URL(request.url).hostname;
+  } catch {
+    throw new Error(`Network access denied for "${request.url}": malformed_url`);
+  }
+  await assertResolvedHostAllowed(hostname);
+  return decision;
 }

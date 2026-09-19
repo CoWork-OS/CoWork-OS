@@ -28,7 +28,14 @@
       "icon": "🧭",
       "category": "Planning",
       "prompt": "Create a strategic canvas for this request.\n\nInput: {{input}}\n\nCover vision, goals, audience, positioning, business model, pricing considerations, launch plan, risks, assumptions, and next actions. Keep the result practical and decision-ready.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Optional strategy topic or context", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Optional strategy topic or context",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -38,7 +45,14 @@
       "icon": "✅",
       "category": "Quality",
       "prompt": "Create a custom review checklist for this work.\n\nInput: {{input}}\n\nTailor the checklist to the work type, include pass/fail criteria, common risks, and a concise final review procedure.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Optional work type or artifact to review", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Optional work type or artifact to review",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -48,7 +62,14 @@
       "icon": "🧠",
       "category": "Diagnostics",
       "prompt": "Help debug likely context or memory issues for this request.\n\nInput: {{input}}\n\nIdentify loaded context signals, possible stale or conflicting assumptions, what to verify, and how to proceed without compounding wrong context.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Optional symptom or task context", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Optional symptom or task context",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -58,7 +79,14 @@
       "icon": "🏷️",
       "category": "Files",
       "prompt": "Plan and execute an intelligent batch rename workflow.\n\nInput: {{input}}\n\nInspect target files before renaming, infer useful names from contents, use a clear naming convention such as YYYY-MM-DD_description_type when appropriate, and summarize every proposed or completed rename.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Folder, naming convention, or constraints", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Folder, naming convention, or constraints",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -68,7 +96,14 @@
       "icon": "🧬",
       "category": "Files",
       "prompt": "Find duplicate and near-duplicate files for this request.\n\nInput: {{input}}\n\nCompare names, sizes, hashes, and content where useful. Show candidates, confidence, and recommended action. Do not delete anything without explicit approval.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Folders or duplicate criteria", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Folders or duplicate criteria",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -78,7 +113,14 @@
       "icon": "📁",
       "category": "Files",
       "prompt": "Create a logical folder structure for this request.\n\nInput: {{input}}\n\nInspect the current files, propose a structure, move or organize only when allowed, avoid active or sensitive files unless requested, and summarize what went where.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Folder and organization goals", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Folder and organization goals",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -88,7 +130,14 @@
       "icon": "🗄️",
       "category": "Files",
       "prompt": "Archive stale files for this request.\n\nInput: {{input}}\n\nIdentify stale files using the requested age or access criteria, explicitly protect active paths, show the archive plan, and avoid destructive deletion unless separately approved.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Folder, age threshold, and protected paths", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Folder, age threshold, and protected paths",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -98,7 +147,14 @@
       "icon": "📄",
       "category": "Writing",
       "prompt": "Generate a reusable template from completed examples.\n\nInput: {{input}}\n\nIdentify the recurring structure, required sections, optional sections, tone, placeholders, and quality checks. Produce a clean blank template.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Example files or desired template type", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Example files or desired template type",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -108,7 +164,14 @@
       "icon": "🔎",
       "category": "Research",
       "prompt": "Search and extract relevant passages for this request.\n\nInput: {{input}}\n\nSearch across the target documents, extract useful passages, preserve source file and page or location when available, and compile the findings into a single organized brief.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Topic, folder, or source constraints", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Topic, folder, or source constraints",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -118,7 +181,14 @@
       "icon": "🔁",
       "category": "Files",
       "prompt": "Convert files for this request.\n\nInput: {{input}}\n\nPreserve formatting, headings, bullets, filenames, and folder structure where possible. Report unsupported files and verify converted outputs before finishing.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Source format, target format, and folder", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Source format, target format, and folder",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -128,7 +198,14 @@
       "icon": "📦",
       "category": "Files",
       "prompt": "Run a storage size audit.\n\nInput: {{input}}\n\nFind the largest files, estimate what can be archived or removed based on age and context, and show recommendations without deleting anything.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Folder and cleanup threshold", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Folder and cleanup threshold",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -138,7 +215,14 @@
       "icon": "📬",
       "category": "Email",
       "prompt": "Triage email and save a summary.\n\nInput: {{input}}\n\nCategorize messages into urgent, needs response, FYI, and low priority. Draft routine replies but do not send without approval. Save or prepare a dated summary when Drive access is available.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Mailbox scope, date, or Drive destination", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Mailbox scope, date, or Drive destination",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -148,7 +232,14 @@
       "icon": "📆",
       "category": "Calendar",
       "prompt": "Prepare meeting briefs.\n\nInput: {{input}}\n\nReview the requested calendar window, identify meetings and attendees, gather useful context when available, and create concise prep briefs with goals, background, risks, and questions.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Calendar window or meeting scope", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Calendar window or meeting scope",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -158,7 +249,14 @@
       "icon": "💬",
       "category": "Chat",
       "prompt": "Extract Slack action items.\n\nInput: {{input}}\n\nScan the requested Slack scope, find action items directed at the user, group them by channel or project, rank urgency, and save or summarize the task list.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Channels, date window, or project", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Channels, date window, or project",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -168,7 +266,14 @@
       "icon": "📊",
       "category": "Presentations",
       "prompt": "Analyze Drive or spreadsheet data and create a concise slide narrative.\n\nInput: {{input}}\n\nFind the top insights, build clear charts when useful, and prepare a short deck with recommendations and source notes.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Spreadsheet, Drive file, or analysis question", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Spreadsheet, Drive file, or analysis question",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -178,7 +283,14 @@
       "icon": "✉️",
       "category": "Email",
       "prompt": "Resolve an email chain.\n\nInput: {{input}}\n\nFind or review the thread, summarize decisions, open issues, owners, and deadlines, then draft a follow-up that moves the conversation forward. Do not send without approval.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Project, sender, or thread details", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Project, sender, or thread details",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -188,7 +300,14 @@
       "icon": "🧾",
       "category": "Reports",
       "prompt": "Build a multi-source report.\n\nInput: {{input}}\n\nPull together the requested sources, reconcile conflicts, cite where information came from, and produce a formatted report with summary, details, and next actions.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Sources, topic, and output format", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Sources, topic, and output format",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -198,7 +317,14 @@
       "icon": "📝",
       "category": "Meetings",
       "prompt": "Process meeting notes for distribution.\n\nInput: {{input}}\n\nExtract action items with owners and deadlines, draft concise follow-ups for each person, and show drafts before sending.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Meeting notes or distribution rules", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Meeting notes or distribution rules",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -208,7 +334,14 @@
       "icon": "🧩",
       "category": "Research",
       "prompt": "Run a cross-platform search.\n\nInput: {{input}}\n\nSearch the requested connected sources, organize results by source, deduplicate overlaps, and compile a useful project dossier.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Project name and sources", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Project name and sources",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -218,7 +351,14 @@
       "icon": "🎙️",
       "category": "Writing",
       "prompt": "Turn a voice transcript into a polished draft.\n\nInput: {{input}}\n\nPreserve the user's natural voice, add structure, clarify ideas, remove filler, and make the result publication-ready.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Transcript or target format", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Transcript or target format",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -228,7 +368,14 @@
       "icon": "🎧",
       "category": "Meetings",
       "prompt": "Process a meeting transcript into structured notes.\n\nInput: {{input}}\n\nExtract decisions, action items with owners and deadlines, open questions, and key points. Format the result as clear markdown.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Transcript or desired note format", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Transcript or desired note format",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -238,7 +385,14 @@
       "icon": "📚",
       "category": "Research",
       "prompt": "Create an executive research brief.\n\nInput: {{input}}\n\nSynthesize the sources, flag conflicting viewpoints, recommend actions, and include source notes. Keep it concise and executive-ready.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Research folder, sources, or topic", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Research folder, sources, or topic",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -248,7 +402,14 @@
       "icon": "📑",
       "category": "Writing",
       "prompt": "Customize a proposal.\n\nInput: {{input}}\n\nUse the template structure, tailor every section to the client brief, preserve a professional tone, and call out assumptions or missing client details.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Template, client brief, and constraints", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Template, client brief, and constraints",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -258,7 +419,14 @@
       "icon": "⚖️",
       "category": "Legal",
       "prompt": "Summarize a contract in plain English.\n\nInput: {{input}}\n\nIdentify key terms, deadlines, renewal clauses, liability caps, unusual provisions, and practical questions. This is a first-pass summary, not legal advice.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Contract path or review focus", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Contract path or review focus",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -268,7 +436,14 @@
       "icon": "📈",
       "category": "Data",
       "prompt": "Write a narrative from spreadsheet data.\n\nInput: {{input}}\n\nIdentify top trends, anomalies, and recommended actions. Include important numbers and explain what they mean for a non-technical audience.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Spreadsheet or audience context", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Spreadsheet or audience context",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -278,7 +453,14 @@
       "icon": "📣",
       "category": "Marketing",
       "prompt": "Repurpose content across channels.\n\nInput: {{input}}\n\nCreate channel-specific versions while preserving the core message. Include options for short posts, LinkedIn, captions, newsletter teaser, and any requested formats.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Source content and target channels", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Source content and target channels",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -288,7 +470,14 @@
       "icon": "📰",
       "category": "Marketing",
       "prompt": "Assemble a weekly newsletter.\n\nInput: {{input}}\n\nReview available drafts, pick the strongest items, write an intro, teasers, transitions, and sign-off, then produce a polished newsletter draft.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Draft folder, theme, or audience", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Draft folder, theme, or audience",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -298,7 +487,14 @@
       "icon": "📥",
       "category": "Email",
       "prompt": "Run or prepare a daily inbox-zero routine.\n\nInput: {{input}}\n\nCategorize unread emails, draft routine responses, flag urgent items, and save a summary. If scheduling is requested, use the app's scheduling flow and confirm before external side effects.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Mailbox scope or schedule details", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Mailbox scope or schedule details",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -308,7 +504,14 @@
       "icon": "🧹",
       "category": "Files",
       "prompt": "Run or prepare a weekly file cleanup workflow.\n\nInput: {{input}}\n\nSort target folders by type and project, protect important paths, identify stale files, and confirm before deleting anything.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Folder, schedule, and cleanup rules", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Folder, schedule, and cleanup rules",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -318,7 +521,14 @@
       "icon": "🗓️",
       "category": "Planning",
       "prompt": "Create a Monday planning brief.\n\nInput: {{input}}\n\nReview the requested week, calendar, prep materials, and open items when available. Produce priorities, deadlines, risks, and next actions.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Week, sources, or schedule details", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Week, sources, or schedule details",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -328,7 +538,14 @@
       "icon": "🧾",
       "category": "Finance",
       "prompt": "Organize monthly financial records.\n\nInput: {{input}}\n\nExtract vendor, amount, date, and category from receipts or statements when available, build a categorized expense table, and flag missing or uncertain fields.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Receipt folder, month, or categories", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Receipt folder, month, or categories",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -338,7 +555,14 @@
       "icon": "🏁",
       "category": "Research",
       "prompt": "Run a competitive scan.\n\nInput: {{input}}\n\nCheck the requested competitors for recent news, pricing changes, launches, hiring signals, and material differences from prior scans. Save a concise intelligence brief.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Competitors, market, or cadence", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Competitors, market, or cadence",
+          "required": false
+        }
+      ],
       "enabled": true
     },
     {
@@ -348,43 +572,182 @@
       "icon": "🌙",
       "category": "Planning",
       "prompt": "Create an end-of-day work log.\n\nInput: {{input}}\n\nReview available context, files changed or created when accessible, and current tasks. Summarize accomplishments, in-progress work, blockers, and tomorrow's priorities.",
-      "parameters": [{ "name": "input", "type": "string", "description": "Day, workspace, or log destination", "required": false }],
+      "parameters": [
+        {
+          "name": "input",
+          "type": "string",
+          "description": "Day, workspace, or log destination",
+          "required": false
+        }
+      ],
       "enabled": true
     }
   ],
   "slashCommands": [
-    { "name": "strategy", "description": "Build a strategic canvas for a product, business, or project", "skillId": "strategy" },
-    { "name": "review", "description": "Review local changes or a pull request in the current workspace", "skillId": "code-reviewer" },
-    { "name": "memory", "description": "Debug likely memory or context issues", "skillId": "memory" },
-    { "name": "batch-rename", "description": "Rename files with consistent intelligent names", "skillId": "batch-rename" },
-    { "name": "smart-deduplication", "description": "Find duplicate and near-duplicate files safely", "skillId": "smart-deduplication" },
-    { "name": "folder-structure", "description": "Organize a messy folder into a logical structure", "skillId": "folder-structure" },
-    { "name": "archive-stale-files", "description": "Archive old files while protecting active work", "skillId": "archive-stale-files" },
-    { "name": "template-generator", "description": "Generate a blank template from completed work", "skillId": "template-generator" },
-    { "name": "recursive-search-extract", "description": "Search documents and extract sourced passages", "skillId": "recursive-search-extract" },
-    { "name": "format-converter", "description": "Batch convert files while preserving structure", "skillId": "format-converter" },
-    { "name": "size-audit", "description": "Find large files and cleanup opportunities", "skillId": "size-audit" },
-    { "name": "gmail-summary-drive", "description": "Triage email and save a dated summary", "skillId": "gmail-summary-drive" },
-    { "name": "calendar-prep-brief", "description": "Prepare briefs for upcoming meetings", "skillId": "calendar-prep-brief" },
-    { "name": "slack-action-items", "description": "Extract action items from recent Slack", "skillId": "slack-action-items" },
-    { "name": "drive-analysis-slides", "description": "Turn spreadsheet insights into slides", "skillId": "drive-analysis-slides" },
-    { "name": "email-chain-resolver", "description": "Summarize a thread and draft a follow-up", "skillId": "email-chain-resolver" },
-    { "name": "multi-source-report", "description": "Combine multiple sources into one report", "skillId": "multi-source-report" },
-    { "name": "meeting-notes-distributor", "description": "Draft targeted follow-ups from meeting notes", "skillId": "meeting-notes-distributor" },
-    { "name": "cross-platform-search", "description": "Find project context across connected sources", "skillId": "cross-platform-search" },
-    { "name": "voice-note-draft", "description": "Turn a transcript into a polished draft", "skillId": "voice-note-draft" },
-    { "name": "meeting-recording-notes", "description": "Structure meeting transcripts into notes", "skillId": "meeting-recording-notes" },
-    { "name": "research-executive-brief", "description": "Synthesize research into an executive brief", "skillId": "research-executive-brief" },
-    { "name": "proposal-customizer", "description": "Tailor a proposal to a client brief", "skillId": "proposal-customizer" },
-    { "name": "contract-plain-english", "description": "Summarize a contract in plain English", "skillId": "contract-plain-english" },
-    { "name": "spreadsheet-narrative", "description": "Explain spreadsheet trends clearly", "skillId": "spreadsheet-narrative" },
-    { "name": "content-repurposing", "description": "Repurpose content across channels", "skillId": "content-repurposing" },
-    { "name": "weekly-newsletter", "description": "Assemble drafts into a newsletter", "skillId": "weekly-newsletter" },
-    { "name": "daily-inbox-zero", "description": "Run or set up daily inbox triage", "skillId": "daily-inbox-zero" },
-    { "name": "weekly-file-cleanup", "description": "Run or set up weekly file cleanup", "skillId": "weekly-file-cleanup" },
-    { "name": "monday-planning-brief", "description": "Create a weekly planning brief", "skillId": "monday-planning-brief" },
-    { "name": "monthly-financial-organizer", "description": "Organize receipts and expenses", "skillId": "monthly-financial-organizer" },
-    { "name": "competitive-scan", "description": "Scan competitor changes and news", "skillId": "competitive-scan" },
-    { "name": "end-of-day-log", "description": "Write an end-of-day work log", "skillId": "end-of-day-log" }
+    {
+      "name": "strategy",
+      "description": "Build a strategic canvas for a product, business, or project",
+      "skillId": "strategy"
+    },
+    {
+      "name": "review",
+      "description": "Review local changes or a pull request in the current workspace",
+      "skillId": "code-reviewer"
+    },
+    {
+      "name": "memory",
+      "description": "Debug likely memory or context issues",
+      "skillId": "memory"
+    },
+    {
+      "name": "batch-rename",
+      "description": "Rename files with consistent intelligent names",
+      "skillId": "batch-rename"
+    },
+    {
+      "name": "smart-deduplication",
+      "description": "Find duplicate and near-duplicate files safely",
+      "skillId": "smart-deduplication"
+    },
+    {
+      "name": "folder-structure",
+      "description": "Organize a messy folder into a logical structure",
+      "skillId": "folder-structure"
+    },
+    {
+      "name": "archive-stale-files",
+      "description": "Archive old files while protecting active work",
+      "skillId": "archive-stale-files"
+    },
+    {
+      "name": "template-generator",
+      "description": "Generate a blank template from completed work",
+      "skillId": "template-generator"
+    },
+    {
+      "name": "recursive-search-extract",
+      "description": "Search documents and extract sourced passages",
+      "skillId": "recursive-search-extract"
+    },
+    {
+      "name": "format-converter",
+      "description": "Batch convert files while preserving structure",
+      "skillId": "format-converter"
+    },
+    {
+      "name": "size-audit",
+      "description": "Find large files and cleanup opportunities",
+      "skillId": "size-audit"
+    },
+    {
+      "name": "gmail-summary-drive",
+      "description": "Triage email and save a dated summary",
+      "skillId": "gmail-summary-drive"
+    },
+    {
+      "name": "calendar-prep-brief",
+      "description": "Prepare briefs for upcoming meetings",
+      "skillId": "calendar-prep-brief"
+    },
+    {
+      "name": "slack-action-items",
+      "description": "Extract action items from recent Slack",
+      "skillId": "slack-action-items"
+    },
+    {
+      "name": "drive-analysis-slides",
+      "description": "Turn spreadsheet insights into slides",
+      "skillId": "drive-analysis-slides"
+    },
+    {
+      "name": "email-chain-resolver",
+      "description": "Summarize a thread and draft a follow-up",
+      "skillId": "email-chain-resolver"
+    },
+    {
+      "name": "multi-source-report",
+      "description": "Combine multiple sources into one report",
+      "skillId": "multi-source-report"
+    },
+    {
+      "name": "meeting-notes-distributor",
+      "description": "Draft targeted follow-ups from meeting notes",
+      "skillId": "meeting-notes-distributor"
+    },
+    {
+      "name": "cross-platform-search",
+      "description": "Find project context across connected sources",
+      "skillId": "cross-platform-search"
+    },
+    {
+      "name": "voice-note-draft",
+      "description": "Turn a transcript into a polished draft",
+      "skillId": "voice-note-draft"
+    },
+    {
+      "name": "meeting-recording-notes",
+      "description": "Structure meeting transcripts into notes",
+      "skillId": "meeting-recording-notes"
+    },
+    {
+      "name": "research-executive-brief",
+      "description": "Synthesize research into an executive brief",
+      "skillId": "research-executive-brief"
+    },
+    {
+      "name": "proposal-customizer",
+      "description": "Tailor a proposal to a client brief",
+      "skillId": "proposal-customizer"
+    },
+    {
+      "name": "contract-plain-english",
+      "description": "Summarize a contract in plain English",
+      "skillId": "contract-plain-english"
+    },
+    {
+      "name": "spreadsheet-narrative",
+      "description": "Explain spreadsheet trends clearly",
+      "skillId": "spreadsheet-narrative"
+    },
+    {
+      "name": "content-repurposing",
+      "description": "Repurpose content across channels",
+      "skillId": "content-repurposing"
+    },
+    {
+      "name": "weekly-newsletter",
+      "description": "Assemble drafts into a newsletter",
+      "skillId": "weekly-newsletter"
+    },
+    {
+      "name": "daily-inbox-zero",
+      "description": "Run or set up daily inbox triage",
+      "skillId": "daily-inbox-zero"
+    },
+    {
+      "name": "weekly-file-cleanup",
+      "description": "Run or set up weekly file cleanup",
+      "skillId": "weekly-file-cleanup"
+    },
+    {
+      "name": "monday-planning-brief",
+      "description": "Create a weekly planning brief",
+      "skillId": "monday-planning-brief"
+    },
+    {
+      "name": "monthly-financial-organizer",
+      "description": "Organize receipts and expenses",
+      "skillId": "monthly-financial-organizer"
+    },
+    {
+      "name": "competitive-scan",
+      "description": "Scan competitor changes and news",
+      "skillId": "competitive-scan"
+    },
+    {
+      "name": "end-of-day-log",
+      "description": "Write an end-of-day work log",
+      "skillId": "end-of-day-log"
+    }
   ]
 }

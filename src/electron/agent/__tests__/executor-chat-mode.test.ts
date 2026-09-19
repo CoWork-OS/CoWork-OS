@@ -36,6 +36,151 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 describe("TaskExecutor chat mode", () => {
+  it.each([false, true])(
+    "incorporates queued chat before provider execution (snapshot fails=%s)",
+    async (fails) => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.task = {
+        id: "queued-chat",
+        agentConfig: { executionMode: "chat", retainMemory: false },
+      };
+      executor.provider = { type: "openai" };
+      executor.conversationHistory = [];
+      executor.buildUserProfileBlock = () => "";
+      executor.getRoleContextPrompt = () => "";
+      executor.getEffectiveExecutionMode = () => "chat";
+      executor.getEffectiveTaskDomain = () => "general";
+      executor.isExplicitChatExecutionMode = () => true;
+      executor.buildChatOrThinkSystemBlocks = () => [];
+      executor.setPromptCacheContext = () => "system";
+      executor.buildExplicitChatMessages = async () => [{ role: "user", content: "Queued chat" }];
+      executor.buildUserContent = async (message: string) => [{ type: "text", text: message }];
+      executor.appendConversationHistory = (message: Any) =>
+        executor.conversationHistory.push(message);
+      executor.updateConversationHistory = (messages: Any[]) => {
+        executor.conversationHistory = messages;
+      };
+      executor.resolveLLMMaxTokens = () => 1024;
+      executor.emitEvent = vi.fn();
+      executor.saveConversationSnapshot = vi.fn(() => true);
+      executor.finalizeFollowUpCompletion = vi.fn();
+      executor.generateCompanionFallbackResponse = () => "fallback";
+      executor.restoreFollowUpStatusAfterFailure = vi.fn();
+      executor.runTextTurnKernel = vi.fn(async () => ({
+        assistantText: "Done",
+        messages: [
+          { role: "user", content: "Queued chat" },
+          { role: "assistant", content: "Done" },
+        ],
+      }));
+      const onIncorporated = vi.fn(async () => {
+        expect(executor.conversationHistory).toEqual([
+          { role: "user", content: [{ type: "text", text: "Queued chat" }] },
+        ]);
+        expect(executor.runTextTurnKernel).not.toHaveBeenCalled();
+        if (fails) throw new Error("snapshot unavailable");
+      });
+      const turn = executor.respondInChatMode("Queued chat", undefined, undefined, onIncorporated);
+      if (fails) {
+        await expect(turn).rejects.toThrow("snapshot unavailable");
+        expect(executor.runTextTurnKernel).not.toHaveBeenCalled();
+        expect(executor.emitEvent).not.toHaveBeenCalledWith("assistant_message", expect.anything());
+      } else {
+        await turn;
+        expect(executor.runTextTurnKernel).toHaveBeenCalledTimes(1);
+      }
+      expect(onIncorporated).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([false, true])(
+    "does not persist temporary overrides when a turn fails=%s",
+    async (fails) => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      const stored = {
+        agentConfig: { interactionMode: { mode: "smart" }, accessProfileId: "read_only" },
+      } as Any;
+      const override = { autonomousMode: true, toolRestrictions: ["shell"] };
+      executor.task = { id: "temporary", agentConfig: { ...stored.agentConfig, ...override } };
+      executor.daemon = {
+        getTask: () => stored,
+        updateTask: (_id: string, patch: Any) => {
+          stored.agentConfig = patch.agentConfig;
+        },
+      };
+      executor.getLifecycleMutex = () => ({ runExclusive: (fn: Any) => fn() });
+      executor.isAcpxExternalRuntimeTask = () => false;
+      executor.updateTaskAgentConfig = (config: Any) => {
+        executor.task.agentConfig = config;
+      };
+      executor.sendMessageUnified = async () => {
+        expect(executor.task.agentConfig).toMatchObject(override);
+        if (fails) throw new Error("turn failed");
+      };
+      const turn = executor.sendMessage("Discuss this", undefined, undefined, {
+        interactionMode: { mode: "chat" },
+        agentConfigOverride: override,
+      });
+      if (fails) await expect(turn).rejects.toThrow("turn failed");
+      else await turn;
+      expect(stored.agentConfig.autonomousMode).toBeUndefined();
+      expect(stored.agentConfig.toolRestrictions).toBeUndefined();
+      expect(stored.agentConfig.interactionMode).toEqual({ mode: "chat" });
+      expect(stored.agentConfig.accessProfileId).toBe("read_only");
+      expect(executor.task.agentConfig).toEqual(stored.agentConfig);
+    },
+  );
+
+  it("includes follow-up images in the explicit Chat model messages", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.provider = { type: "openai" };
+    executor.conversationHistory = [];
+    const messages = await executor.buildExplicitChatMessages("Describe this", "system", [
+      { data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 },
+    ]);
+    expect(messages.at(-1).content).toEqual(
+      expect.arrayContaining([
+        { type: "text", text: "Describe this" },
+        expect.objectContaining({ type: "image", data: "aGVsbG8=", mimeType: "image/png" }),
+      ]),
+    );
+  });
+  it("applies a follow-up selection before routing and persists it", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "mode-turn", agentConfig: { executionMode: "plan" } };
+    executor.isAcpxExternalRuntimeTask = () => false;
+    executor.updateTaskAgentConfig = vi.fn((config) => {
+      executor.task.agentConfig = config;
+    });
+    executor.daemon = { updateTask: vi.fn() };
+    executor.sendMessageUnified = vi.fn(async () => {
+      expect(executor.task.agentConfig.executionMode).toBe("chat");
+    });
+    await executor.sendMessageUnlocked("Discuss this", undefined, undefined, {
+      interactionMode: { mode: "chat" },
+    });
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith("mode-turn", {
+      agentConfig: expect.objectContaining({
+        interactionMode: { mode: "chat" },
+        executionMode: "chat",
+      }),
+    });
+  });
+  it("keeps interactive Chat in Chat even with execution requests and PDF paths", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      agentConfig: {
+        interactionMode: { mode: "chat" },
+        executionMode: "chat",
+        executionModeSource: "user",
+        conversationMode: "chat",
+      },
+    };
+    executor.hasUploadedPdfAttachmentContext = () => true;
+    expect(executor.shouldUseReadOnlyPdfAttachmentMode()).toBe(false);
+    expect(executor.resolveConversationMode("Run npm install")).toBe("chat");
+    expect(executor.getEffectiveExecutionMode()).toBe("chat");
+  });
   const createInferredChatExecutor = (
     prompt: string,
     agentConfig: Record<string, unknown> = {},
@@ -608,6 +753,169 @@ describe("TaskExecutor chat mode", () => {
     expect(
       typeof second[0].content === "string" ? second[0].content : JSON.stringify(second[0].content),
     ).toContain("<cowork_compaction_summary>");
+  });
+
+  it("merges newly aged chat messages into the cached summary", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const buildCompactionSummaryBlock = vi
+      .fn()
+      .mockResolvedValueOnce("<cowork_compaction_summary>first summary</cowork_compaction_summary>")
+      .mockResolvedValueOnce(
+        "<cowork_compaction_summary>merged summary</cowork_compaction_summary>",
+      );
+
+    executor.conversationHistory = Array.from({ length: 30 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: [{ type: "text", text: `${index % 2 === 0 ? "User" : "Assistant"} turn ${index}` }],
+    }));
+    executor.buildCompactionSummaryBlock = buildCompactionSummaryBlock;
+    executor.explicitChatSummaryBlock = null;
+    executor.explicitChatSummaryCreatedAt = 0;
+    executor.explicitChatSummarySourceMessageCount = 0;
+
+    const first = await (TaskExecutor as Any).prototype.buildExplicitChatMessages.call(
+      executor,
+      "First follow up",
+      "system prompt",
+    );
+    executor.conversationHistory = [
+      first[0],
+      { role: "user", content: [{ type: "text", text: "newly dropped user fact" }] },
+      { role: "assistant", content: [{ type: "text", text: "newly dropped answer" }] },
+      { role: "user", content: [{ type: "text", text: "newly dropped correction" }] },
+      ...first.slice(1, -1),
+    ];
+
+    await (TaskExecutor as Any).prototype.buildExplicitChatMessages.call(
+      executor,
+      "Second follow up",
+      "system prompt",
+    );
+
+    expect(buildCompactionSummaryBlock).toHaveBeenCalledTimes(2);
+    expect(buildCompactionSummaryBlock.mock.calls[1][0]).toMatchObject({
+      contextLabel: "incremental chat session compaction",
+    });
+    expect(buildCompactionSummaryBlock.mock.calls[1][0].removedMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: expect.stringContaining("first summary") }),
+        expect.objectContaining({
+          content: expect.arrayContaining([
+            expect.objectContaining({ text: expect.stringContaining("newly dropped correction") }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it("correlates explicit chat lifecycle events with the history generation", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    let historyGeneration = 7;
+    executor.task = { id: "chat-compaction" };
+    executor.daemon = {};
+    executor._runtime = { getHistoryGeneration: () => historyGeneration };
+    executor.emitEvent = vi.fn();
+
+    (TaskExecutor as Any).prototype.beginExplicitChatCompaction.call(executor, 9000, 18);
+    historyGeneration = 8;
+    (TaskExecutor as Any).prototype.completeExplicitChatCompaction.call(executor, [
+      { role: "user", content: "replacement" },
+    ]);
+
+    const started = executor.emitEvent.mock.calls.find(
+      ([type]: [string]) => type === "context_compaction_started",
+    )?.[1];
+    const completed = executor.emitEvent.mock.calls.find(
+      ([type]: [string]) => type === "context_compaction_completed",
+    )?.[1];
+    expect(started.compactionId).toBe(completed.compactionId);
+    expect(started.attemptId).toBe(completed.attemptId);
+    expect(started.historyGenerationBefore).toBe(7);
+    expect(completed.historyGenerationBefore).toBe(7);
+    expect(completed.historyGenerationAfter).toBe(8);
+  });
+
+  it("delegates explicit chat lifecycle durability to SessionRuntime", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const handle = {
+      compactionId: "runtime-compaction",
+      attemptId: "runtime-attempt",
+      trigger: "automatic",
+      phase: "pre_turn",
+    };
+    executor._runtime = {
+      getHistoryGeneration: () => 4,
+      beginCompactionLifecycle: vi.fn().mockReturnValue(handle),
+      completeCompactionLifecycle: vi.fn().mockReturnValue(true),
+      failCompactionLifecycle: vi.fn(),
+    };
+    executor.task = { id: "runtime-chat" };
+
+    (TaskExecutor as Any).prototype.beginExplicitChatCompaction.call(executor, 12_000, 24);
+    const completed = (TaskExecutor as Any).prototype.completeExplicitChatCompaction.call(
+      executor,
+      [{ role: "user", content: "replacement" }],
+    );
+
+    expect(executor._runtime.beginCompactionLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: "automatic",
+        phase: "pre_turn",
+        reason: "chat_history_threshold",
+      }),
+    );
+    expect(executor._runtime.completeCompactionLifecycle).toHaveBeenCalledWith(
+      handle,
+      expect.objectContaining({ reason: "context_replacement_installed" }),
+    );
+    expect(completed).toBe(true);
+  });
+
+  it("uses a deterministic handoff when the compaction provider returns an empty summary", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.contextManager = { getAvailableTokens: () => 20_000 };
+    executor.modelId = "test-model";
+    executor.callLLMWithRetry = vi.fn(async (request: Any) => request(0));
+    executor.createMessageWithTimeout = vi.fn().mockResolvedValue({ content: [] });
+    executor.updateTracking = vi.fn();
+
+    const summary = await (TaskExecutor as Any).prototype.buildCompactionSummaryBlock.call(
+      executor,
+      {
+        removedMessages: [
+          { role: "user", content: "Remember this user decision." },
+          { role: "assistant", content: "The decision was recorded." },
+        ],
+        maxOutputTokens: 512,
+        contextLabel: "chat session",
+      },
+    );
+
+    expect(summary).toContain("<cowork_compaction_summary>");
+    expect(summary).toContain("Dropped context (raw, truncated):");
+    expect(summary).toContain("Remember this user decision.");
+  });
+
+  it("compacts a single oversized prior chat message instead of bypassing the token trigger", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const summary =
+      "<cowork_compaction_summary>Oversized context retained.</cowork_compaction_summary>";
+    executor.conversationHistory = [{ role: "user", content: "x".repeat(60_000) }];
+    executor.buildCompactionSummaryBlock = vi.fn().mockResolvedValue(summary);
+    executor.explicitChatSummaryBlock = null;
+    executor.explicitChatSummaryInputSignature = "";
+    executor.explicitChatSummaryCreatedAt = 0;
+    executor.explicitChatSummarySourceMessageCount = 0;
+
+    const messages = await (TaskExecutor as Any).prototype.buildExplicitChatMessages.call(
+      executor,
+      "Keep going",
+      "system prompt",
+    );
+
+    expect(executor.buildCompactionSummaryBlock).toHaveBeenCalledTimes(1);
+    expect(messages[0]).toMatchObject({ role: "user", content: summary });
+    expect(messages.at(-1)).toMatchObject({ role: "user" });
   });
 
   it("routes long sub-agent chat synthesis through the shared text turn kernel flow", async () => {

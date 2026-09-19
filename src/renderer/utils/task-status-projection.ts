@@ -14,6 +14,7 @@ import { getEffectiveTaskEventType } from "./task-event-compat";
 import { friendlyToolLaneCompletedLabel, friendlyToolRunningLabel } from "./timeline-tool-labels";
 import { selectTaskStatusMetricSlots } from "./task-impact-metrics";
 import { deriveApprovalEventState } from "./approval-event-state";
+import { isTaskActivelyWorking } from "./task-working-state";
 
 interface ActivityBlockSource {
   kind: "action_block";
@@ -200,6 +201,27 @@ export function deriveRevisionAwarePlanSteps(events: TaskEvent[]): PlanStep[] {
   );
 }
 
+/**
+ * Plan step descriptions are model-authored and can carry markdown emphasis; headers render
+ * plain text, so normalize them the same way activity labels are normalized.
+ */
+function planStepLabel(description: string | undefined): string {
+  const trimmed = (description || "").trim();
+  if (!trimmed) return "";
+  return formatTimelineActivityLabel(trimmed) || trimmed;
+}
+
+/** Two labels that read the same add no information when stacked in one header. */
+export function labelsAreEquivalent(a: string | undefined, b: string | undefined): boolean {
+  const normalize = (value: string | undefined) =>
+    (value || "")
+      .trim()
+      .replace(/[.\u2026\s]+$/, "")
+      .toLowerCase();
+  const left = normalize(a);
+  return left.length > 0 && left === normalize(b);
+}
+
 function activityLabel(event: TaskEvent, running: boolean): string {
   const payload = asObject(event.payload);
   const step = asObject(payload.step);
@@ -275,12 +297,23 @@ export function deriveActivityGroups(args: {
   const blocks = args.timelineItems.filter(
     (item): item is ActivityBlockSource => item.kind === "action_block",
   );
-  const taskWorking =
+  const statusIndicatesWorking =
     args.task?.status === "planning" ||
     args.task?.status === "executing" ||
     args.task?.status === "paused" ||
     args.task?.status === "blocked" ||
     args.task?.status === "interrupted";
+  const activityEvents =
+    args.fallbackEvents && args.fallbackEvents.length > 0
+      ? args.fallbackEvents
+      : blocks.flatMap((block) => block.events);
+  // Keep this projection in sync with the header's working state. In
+  // particular, a task can remain `pending`/`queued` for a short period after
+  // its first start/tool event has arrived.
+  const taskWorking =
+    statusIndicatesWorking ||
+    isTaskActivelyWorking(args.task, activityEvents, false) ||
+    args.isReplayMode === true;
 
   const groups = blocks.map((block, index) => {
     const isLatest = index === blocks.length - 1;
@@ -289,12 +322,7 @@ export function deriveActivityGroups(args: {
     const hasExplicitFinish = block.events.some(
       (event) => event.type === "timeline_group_finished",
     );
-    const running =
-      isLatest &&
-      !hasExplicitFinish &&
-      !failed &&
-      !blocked &&
-      (taskWorking || args.isReplayMode === true);
+    const running = isLatest && !hasExplicitFinish && !failed && !blocked && taskWorking;
     const status: ActivityGroupViewModel["status"] = blocked
       ? "blocked"
       : failed
@@ -312,14 +340,14 @@ export function deriveActivityGroups(args: {
           ? "Activity failed"
           : status === "blocked"
             ? "Waiting"
-            : planStep?.description || "Activity complete";
+            : planStepLabel(planStep?.description) || "Activity complete";
     return {
       id: block.blockId,
       status,
       summary,
       latestActivityLabel: latestEvent
         ? activityLabel(latestEvent, status === "running")
-        : planStep?.description || summary,
+        : planStepLabel(planStep?.description) || summary,
       activityIds: block.events.map((event) => event.id).filter(Boolean),
       startedAt: block.events[0]?.timestamp ?? block.timestamp,
       ...(status === "running" ? {} : { finishedAt: latestEvent?.timestamp ?? block.timestamp }),
@@ -520,10 +548,13 @@ export function deriveTaskStatusStrip(args: {
     state,
     tone: toneForState(state),
     primaryLabel,
-    ...(currentGroup?.latestActivityLabel
+    // The strip already shows `primaryLabel`; a phase label that reads the same (a running
+    // group whose latest event resolves to "Working") would print the state twice.
+    ...(currentGroup?.latestActivityLabel &&
+    !labelsAreEquivalent(currentGroup.latestActivityLabel, primaryLabel)
       ? { phaseLabel: currentGroup.latestActivityLabel }
-      : activeStep?.description
-        ? { phaseLabel: activeStep.description }
+      : activeStep?.description && !labelsAreEquivalent(activeStep.description, primaryLabel)
+        ? { phaseLabel: planStepLabel(activeStep.description) }
         : {}),
     compactMetricSlots: selectTaskStatusMetricSlots(args.outcomeMetrics, 2),
     planSteps: args.planSteps,

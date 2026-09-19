@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from "react";
-import { MessageCircle, Wrench, Bot, Plug, Package } from "lucide-react";
+import { MessageCircle, Wrench, Plug, Package } from "lucide-react";
+import { BotGlyph } from "./BotGlyph";
 import { ExtensionData, TunnelStatusData } from "../../shared/types";
 
 type ExtensionType = "channel" | "tool" | "provider" | "integration";
@@ -174,7 +175,7 @@ export function ExtensionsSettings() {
       case "tool":
         return <Wrench {...p} />;
       case "provider":
-        return <Bot {...p} />;
+        return <BotGlyph {...p} />;
       case "integration":
         return <Plug {...p} />;
       default:

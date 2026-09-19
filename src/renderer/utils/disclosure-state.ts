@@ -52,10 +52,15 @@ function withBoundedEntry(
 export function resolveDisclosureExpanded(args: {
   intent?: DisclosureIntent;
   isCurrent?: boolean;
+  /**
+   * Controls whether an uncustomized current item opens automatically. Summary
+   * mode uses false so the live activity stays compact until the user opens it.
+   */
+  defaultExpanded?: boolean;
 }): boolean {
   if (args.intent === "expanded") return true;
   if (args.intent === "collapsed") return false;
-  return args.isCurrent === true;
+  return args.defaultExpanded !== false && args.isCurrent === true;
 }
 
 export function disclosureIntentReducer(

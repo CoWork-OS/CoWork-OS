@@ -301,8 +301,22 @@ export async function loadPlugin(pluginPath: string): Promise<PluginLoadResult> 
       return { success: true, plugin: loadedPlugin };
     }
 
-    // Resolve entry point
-    const entryPoint = path.join(pluginPath, normalizedManifest.main);
+    // Resolve entry point, confined to the pack directory. `main` comes from
+    // the pack's own manifest, so `"main": "../../../evil.js"` would otherwise
+    // require() a file outside the pack — including outside the tree the
+    // install-time security scanner hashed and scanned. registry.ts already
+    // enforces this; this path did not.
+    const packRoot = path.resolve(pluginPath);
+    const entryPoint = path.resolve(packRoot, normalizedManifest.main);
+    const relativeEntry = path.relative(packRoot, entryPoint);
+    if (!relativeEntry || relativeEntry.startsWith("..") || path.isAbsolute(relativeEntry)) {
+      return {
+        success: false,
+        error: new Error(
+          `Plugin entry point must stay inside the pack directory: ${normalizedManifest.main}`,
+        ),
+      };
+    }
     if (!fs.existsSync(entryPoint)) {
       return {
         success: false,

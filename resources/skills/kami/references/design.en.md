@@ -29,8 +29,8 @@ This system is a fusion of Anthropic's visual language and real Chinese / Englis
 ### Brand
 
 ```css
---brand:       #1B365D;   /* Ink Blue - the only chromatic color. CTAs, accents, section-title left bar. */
---brand-light: #2D5A8A;   /* Coral - brighter variant, for links on dark surfaces. */
+--brand: #1b365d; /* Ink Blue - the only chromatic color. CTAs, accents, section-title left bar. */
+--brand-light: #2d5a8a; /* Coral - brighter variant, for links on dark surfaces. */
 ```
 
 **Rule**: ink-blue covers ≤ **5% of document surface area**. More than that is ornament, not restraint.
@@ -38,11 +38,11 @@ This system is a fusion of Anthropic's visual language and real Chinese / Englis
 ### Surface
 
 ```css
---parchment:    #f5f4ed;   /* Page background - warm cream, the emotional foundation */
---ivory:        #faf9f5;   /* Card / lifted container - brighter than parchment */
---warm-sand:    #e8e6dc;   /* Button default / interactive surface */
---dark-surface: #30302e;   /* Dark-theme container - warm charcoal */
---deep-dark:    #141413;   /* Dark-theme page background - not pure black, slight olive undertone */
+--parchment: #f5f4ed; /* Page background - warm cream, the emotional foundation */
+--ivory: #faf9f5; /* Card / lifted container - brighter than parchment */
+--warm-sand: #e8e6dc; /* Button default / interactive surface */
+--dark-surface: #30302e; /* Dark-theme container - warm charcoal */
+--deep-dark: #141413; /* Dark-theme page background - not pure black, slight olive undertone */
 ```
 
 **Never**: `#ffffff` pure white as page background. `#f8f9fa` / `#f3f4f6` or any cool-gray surface.
@@ -50,12 +50,12 @@ This system is a fusion of Anthropic's visual language and real Chinese / Englis
 ### Text
 
 ```css
---near-black:  #141413;   /* Primary text - deepest but not pure black, warm olive undertone */
---dark-warm:   #3d3d3a;   /* Secondary dark / dark link color */
---charcoal:    #4d4c48;   /* Button text / dense body */
---olive:       #5e5d59;   /* Subtext - descriptions, captions */
---stone:       #87867f;   /* Tertiary - dates, metadata */
---warm-silver: #b0aea5;   /* Light text on dark surfaces */
+--near-black: #141413; /* Primary text - deepest but not pure black, warm olive undertone */
+--dark-warm: #3d3d3a; /* Secondary dark / dark link color */
+--charcoal: #4d4c48; /* Button text / dense body */
+--olive: #5e5d59; /* Subtext - descriptions, captions */
+--stone: #87867f; /* Tertiary - dates, metadata */
+--warm-silver: #b0aea5; /* Light text on dark surfaces */
 ```
 
 **Mnemonic**: every gray has a **yellow-brown undertone**. In `rgb()`, warm gray is R ≈ G > B (or R > G > B with small gaps). Cool gray is R < G < B or R = G = B (neutral).
@@ -63,24 +63,24 @@ This system is a fusion of Anthropic's visual language and real Chinese / Englis
 ### Border
 
 ```css
---border-cream: #e8e5da;   /* Softest border - default cards */
---border-warm:  #e0ddd2;   /* Prominent border - section dividers */
---border-soft:  #e5e3d8;   /* Dotted divider - between list items */
---border-dark:  #30302e;   /* Border on dark surfaces */
+--border-cream: #e8e5da; /* Softest border - default cards */
+--border-warm: #e0ddd2; /* Prominent border - section dividers */
+--border-soft: #e5e3d8; /* Dotted divider - between list items */
+--border-dark: #30302e; /* Border on dark surfaces */
 ```
 
 ### Ring shadow (not traditional box-shadow)
 
 ```css
---ring-warm: #d1cfc5;   /* Button hover / focus */
---ring-deep: #c2c0b6;   /* Pressed state */
+--ring-warm: #d1cfc5; /* Button hover / focus */
+--ring-deep: #c2c0b6; /* Pressed state */
 ```
 
 ### Functional (use sparingly)
 
 ```css
---error: #b53333;   /* Deep warm red - serious without alarming */
---focus: #3898ec;   /* Focus ring blue - the only cool color, strictly for accessibility */
+--error: #b53333; /* Deep warm red - serious without alarming */
+--focus: #3898ec; /* Focus ring blue - the only cool color, strictly for accessibility */
 ```
 
 ### Translucent -> Solid conversion (TAGS MUST BE SOLID)
@@ -89,13 +89,13 @@ This system is a fusion of Anthropic's visual language and real Chinese / Englis
 
 Ink Blue `#1B365D` over parchment `#f5f4ed`:
 
-| rgba alpha | Solid hex |
-|---|---|
-| 0.08 | `#EEF2F7` |
-| 0.14 | `#E4ECF5` |
-| **0.18** | **`#E4ECF5`** ← default tag |
-| 0.22 | `#D0DCE9` |
-| 0.30 | `#D6E1EE` |
+| rgba alpha | Solid hex                   |
+| ---------- | --------------------------- |
+| 0.08       | `#EEF2F7`                   |
+| 0.14       | `#E4ECF5`                   |
+| **0.18**   | **`#E4ECF5`** ← default tag |
+| 0.22       | `#D0DCE9`                   |
+| 0.30       | `#D6E1EE`                   |
 
 ---
 
@@ -105,19 +105,27 @@ Ink Blue `#1B365D` over parchment `#f5f4ed`:
 
 ```css
 /* Serif for headlines - Silicon Valley editorial */
-font-family: "Newsreader",             /* Google Fonts - preferred */
-             "Source Serif 4", "Source Serif Pro",
-             "Charter",                /* macOS system font */
-             Georgia, "Times New Roman", serif;
+font-family:
+  "Newsreader",
+  /* Google Fonts - preferred */ "Source Serif 4",
+  "Source Serif Pro",
+  "Charter",
+  /* macOS system font */ Georgia,
+  "Times New Roman",
+  serif;
 
 /* Sans for UI elements - Silicon Valley default */
-font-family: "Inter", "TsangerJinKai02",
-             -apple-system, BlinkMacSystemFont,
-             "Helvetica Neue", Arial, sans-serif;
+font-family:
+  "Inter",
+  "TsangerJinKai02",
+  -apple-system,
+  BlinkMacSystemFont,
+  "Helvetica Neue",
+  Arial,
+  sans-serif;
 
 /* Mono for code */
-font-family: "JetBrains Mono", "SF Mono", "Fira Code",
-             Consolas, Monaco, monospace;
+font-family: "JetBrains Mono", "SF Mono", "Fira Code", Consolas, Monaco, monospace;
 ```
 
 For Chinese documents, see `design.md` for the TsangerJinKai02 + Source Han stack.
@@ -126,18 +134,18 @@ For Chinese documents, see `design.md` for the TsangerJinKai02 + Source Han stac
 
 **Print:**
 
-| Role | Size | Weight | Line-height | Use |
-|---|---|---|---|---|
-| Display | 36-48pt | 500 | 1.10 | Cover title, one-pager hero |
-| H1 Section | 18-22pt | 500 | 1.20 | Chapter titles |
-| H2 | 14-16pt | 500 | 1.25 | Subsection |
-| H3 | 12-13pt | 500 | 1.30 | Item titles |
-| Body Lead | 11pt | 400 | 1.55 | Intro paragraphs |
-| Body | 9.5-10pt | 400 | 1.55 | Reading body |
-| Body Dense | 9-9.2pt | 400 | 1.42 | Dense body (resume, one-pager) |
-| Caption | 8.5-9pt | 400 | 1.45 | Notes, figure captions |
-| Label | 7.5-8pt | 600 | 1.35 | Small labels, corner tags |
-| Tiny | 7pt | 400 | 1.40 | Footer, minor metadata |
+| Role       | Size     | Weight | Line-height | Use                            |
+| ---------- | -------- | ------ | ----------- | ------------------------------ |
+| Display    | 36-48pt  | 500    | 1.10        | Cover title, one-pager hero    |
+| H1 Section | 18-22pt  | 500    | 1.20        | Chapter titles                 |
+| H2         | 14-16pt  | 500    | 1.25        | Subsection                     |
+| H3         | 12-13pt  | 500    | 1.30        | Item titles                    |
+| Body Lead  | 11pt     | 400    | 1.55        | Intro paragraphs               |
+| Body       | 9.5-10pt | 400    | 1.55        | Reading body                   |
+| Body Dense | 9-9.2pt  | 400    | 1.42        | Dense body (resume, one-pager) |
+| Caption    | 8.5-9pt  | 400    | 1.45        | Notes, figure captions         |
+| Label      | 7.5-8pt  | 600    | 1.35        | Small labels, corner tags      |
+| Tiny       | 7pt      | 400    | 1.40        | Footer, minor metadata         |
 
 **Screen (px)** ≈ pt × 1.33 (9pt ≈ 12px, 18pt ≈ 24px).
 
@@ -152,14 +160,15 @@ For Chinese documents, see `design.md` for the TsangerJinKai02 + Source Han stac
 
 Print documents are **tighter** than English web body. English web typically runs 1.6-1.75; in print at pt sizes that feels loose and floats.
 
-| Tier | Value | Use |
-|---|---|---|
-| Tight headline | 1.10-1.30 | Display, H1, H2 |
-| Dense body | 1.40-1.45 | Resume, one-pager, dense information |
-| Reading body | 1.50-1.55 | Long-doc chapters, letters |
-| Label / caption | 1.30-1.40 | Small labels, multi-line metadata |
+| Tier            | Value     | Use                                  |
+| --------------- | --------- | ------------------------------------ |
+| Tight headline  | 1.10-1.30 | Display, H1, H2                      |
+| Dense body      | 1.40-1.45 | Resume, one-pager, dense information |
+| Reading body    | 1.50-1.55 | Long-doc chapters, letters           |
+| Label / caption | 1.30-1.40 | Small labels, multi-line metadata    |
 
 **Forbidden**:
+
 - 1.60+ - loose feel, web rhythm, not print
 - 1.00-1.05 - lines collide except at extreme display sizes
 
@@ -176,25 +185,25 @@ Print documents are **tighter** than English web body. English web typically run
 
 ### Base unit: 4pt (4px on screen)
 
-| Tier | Value | Use |
-|---|---|---|
-| xs | 2-3pt | Inline adjacent elements |
-| sm | 4-5pt | Tag padding, dense layout |
-| md | 8-10pt | Component interior |
-| lg | 16-20pt | Between components / card padding |
-| xl | 24-32pt | Section-title margins |
-| 2xl | 40-60pt | Between major sections |
-| 3xl | 80-120pt | Between chapters (long docs) |
+| Tier | Value    | Use                               |
+| ---- | -------- | --------------------------------- |
+| xs   | 2-3pt    | Inline adjacent elements          |
+| sm   | 4-5pt    | Tag padding, dense layout         |
+| md   | 8-10pt   | Component interior                |
+| lg   | 16-20pt  | Between components / card padding |
+| xl   | 24-32pt  | Section-title margins             |
+| 2xl  | 40-60pt  | Between major sections            |
+| 3xl  | 80-120pt | Between chapters (long docs)      |
 
 ### Page margins (A4)
 
-| Document | Top | Right | Bottom | Left |
-|---|---|---|---|---|
-| Resume (dense) | 11mm | 13mm | 11mm | 13mm |
-| One-Pager | 15mm | 18mm | 15mm | 18mm |
-| Long Doc | 20mm | 22mm | 22mm | 22mm |
-| Letter | 25mm | 25mm | 25mm | 25mm |
-| Portfolio | 12mm | 15mm | 12mm | 15mm |
+| Document       | Top  | Right | Bottom | Left |
+| -------------- | ---- | ----- | ------ | ---- |
+| Resume (dense) | 11mm | 13mm  | 11mm   | 13mm |
+| One-Pager      | 15mm | 18mm  | 15mm   | 18mm |
+| Long Doc       | 20mm | 22mm  | 22mm   | 22mm |
+| Letter         | 25mm | 25mm  | 25mm   | 25mm |
+| Portfolio      | 12mm | 15mm  | 12mm   | 15mm |
 
 **Rule**: denser = smaller margins, more formal (letter) = larger margins.
 
@@ -203,10 +212,11 @@ Print documents are **tighter** than English web body. English web typically run
 Print uses mm/pt; slides (screen) use px. The scale relationships differ:
 
 ```css
---slide-pad: 80px;   /* slide four-side padding baseline */
+--slide-pad: 80px; /* slide four-side padding baseline */
 ```
 
 **Key rules**:
+
 - Slide padding-top: 72-80px (print is 96-120px; slides are more compact)
 - Slide letter-spacing = print value / 2 (8px tracking "falls apart" on screen; halve it)
 - Macro scale (font size, padding): multiply print pt values by ~1.6
@@ -228,7 +238,7 @@ Print uses mm/pt; slides (screen) use px. The scale relationships differ:
 
 .card-featured {
   border-radius: 16pt;
-  box-shadow: 0 4pt 24pt rgba(0,0,0,0.05);   /* whisper shadow */
+  box-shadow: 0 4pt 24pt rgba(0, 0, 0, 0.05); /* whisper shadow */
 }
 ```
 
@@ -243,7 +253,7 @@ Radius scale: 4pt -> 6pt -> 8pt (default) -> 12pt -> 16pt -> 24pt -> 32pt (hero 
   color: var(--ivory);
   padding: 8pt 16pt;
   border-radius: 8pt;
-  box-shadow: 0 0 0 1pt var(--brand);   /* ring shadow */
+  box-shadow: 0 0 0 1pt var(--brand); /* ring shadow */
 }
 
 /* Secondary - warm-sand */
@@ -261,9 +271,10 @@ Radius scale: 4pt -> 6pt -> 8pt (default) -> 12pt -> 16pt -> 24pt -> 32pt (hero 
 Three tiers from weak to strong visual weight:
 
 **Lightest solid** (default, most restrained):
+
 ```css
 .tag {
-  background: #EEF2F7;      /* 0.08 solid equivalent */
+  background: #eef2f7; /* 0.08 solid equivalent */
   color: var(--brand);
   font-size: 8pt;
   font-weight: 600;
@@ -275,9 +286,10 @@ Three tiers from weak to strong visual weight:
 ```
 
 **Standard solid** (when more contrast needed):
+
 ```css
 .tag {
-  background: #E4ECF5;      /* 0.18 solid equivalent */
+  background: #e4ecf5; /* 0.18 solid equivalent */
   color: var(--brand);
   padding: 1pt 6pt;
   border-radius: 4pt;
@@ -285,9 +297,10 @@ Three tiers from weak to strong visual weight:
 ```
 
 **Gradient brush** (only when "hand-painted" feel is required - use sparingly):
+
 ```css
 .tag {
-  background: linear-gradient(to right, #D6E1EE, #E4ECF5 70%, #EEF2F7);
+  background: linear-gradient(to right, #d6e1ee, #e4ecf5 70%, #eef2f7);
   color: var(--brand);
   padding: 1pt 5pt;
   border-radius: 2pt;
@@ -301,18 +314,26 @@ Three tiers from weak to strong visual weight:
 ### Lists
 
 ```css
-ul, ol {
+ul,
+ol {
   padding-left: 16pt;
   line-height: 1.55;
 }
-ul li::marker { color: var(--brand); }
+ul li::marker {
+  color: var(--brand);
+}
 ```
 
 Editorial bookish variant - **en-dash instead of bullet**:
 
 ```css
-ul.dash { list-style: none; padding-left: 0; }
-ul.dash li { padding-left: 14pt; }
+ul.dash {
+  list-style: none;
+  padding-left: 0;
+}
+ul.dash li {
+  padding-left: 14pt;
+}
 ul.dash li::before {
   content: "\2013";
   color: var(--brand);
@@ -364,16 +385,27 @@ ul.dash li::before {
 Key numbers side-by-side (one-pager header, resume top, portfolio cover):
 
 ```css
-.metrics { display: flex; gap: 24pt; }
-.metric  { flex: 1; display: flex; align-items: baseline; gap: 6pt; }
+.metrics {
+  display: flex;
+  gap: 24pt;
+}
+.metric {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6pt;
+}
 .metric-value {
   font-family: var(--serif);
   font-size: 16pt;
   font-weight: 500;
   color: var(--brand);
-  font-variant-numeric: tabular-nums;   /* align digits in columns */
+  font-variant-numeric: tabular-nums; /* align digits in columns */
 }
-.metric-label { font-size: 9pt; color: var(--olive); }
+.metric-label {
+  font-size: 9pt;
+  color: var(--olive);
+}
 ```
 
 ### Section Header (`.kami-section-header`)
@@ -386,7 +418,7 @@ Lightweight section opener for content slides. Has an eyebrow and a horizontal r
 }
 .kami-section-header .eyebrow {
   display: flex;
-  align-items: center;             /* dot is geometric, center beats baseline */
+  align-items: center; /* dot is geometric, center beats baseline */
   gap: 8px;
   font-family: var(--sans);
   font-size: 12px;
@@ -399,7 +431,8 @@ Lightweight section opener for content slides. Has an eyebrow and a horizontal r
 .kami-section-header .eyebrow::before {
   content: "";
   display: inline-block;
-  width: 6px; height: 6px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--brand);
   flex-shrink: 0;
@@ -407,7 +440,7 @@ Lightweight section opener for content slides. Has an eyebrow and a horizontal r
 .kami-section-header .rule {
   height: 1px;
   background: var(--border-warm);
-  margin-bottom: 36px;             /* gap below rule >= 36px (>= 2x the gap above) */
+  margin-bottom: 36px; /* gap below rule >= 36px (>= 2x the gap above) */
 }
 .kami-section-header h1 {
   font-family: var(--serif);
@@ -434,15 +467,19 @@ For displaying pseudocode or code snippets in slides. More structured than a pla
 }
 .kami-code-card pre {
   font-family: var(--mono);
-  font-size: 13px;                 /* 14px for larger slides */
+  font-size: 13px; /* 14px for larger slides */
   line-height: 1.55;
   color: var(--near-black);
   margin: 0;
   white-space: pre;
 }
 /* Syntax colors: existing tokens only, no new colors */
-.kami-code-card .k { color: var(--brand); }    /* keyword / string */
-.kami-code-card .c { color: var(--stone); }    /* comment */
+.kami-code-card .k {
+  color: var(--brand);
+} /* keyword / string */
+.kami-code-card .c {
+  color: var(--stone);
+} /* comment */
 
 /* Optional line numbers: 1px left divider */
 .kami-code-card.numbered {
@@ -474,7 +511,7 @@ For displaying pseudocode or code snippets in slides. More structured than a pla
 
 ```css
 box-shadow: 0 0 0 1pt var(--ring-warm);
-box-shadow: 0 0 0 1pt var(--ring-deep);   /* hover / active */
+box-shadow: 0 0 0 1pt var(--ring-deep); /* hover / active */
 ```
 
 ### 2. Whisper shadow (barely visible lift)
@@ -496,7 +533,13 @@ Long docs alternate parchment `#f5f4ed` and `#141413` dark sections. The entire 
 ### break-inside protection
 
 ```css
-.card, .metric, .project-item, .quote, .code-block, figure, .callout {
+.card,
+.metric,
+.project-item,
+.quote,
+.code-block,
+figure,
+.callout {
   break-inside: avoid;
 }
 ```
@@ -504,7 +547,9 @@ Long docs alternate parchment `#f5f4ed` and `#141413` dark sections. The entire 
 ### Force break
 
 ```css
-.page-break { break-before: page; }
+.page-break {
+  break-before: page;
+}
 ```
 
 ### Page background extending past margins
@@ -513,7 +558,7 @@ Long docs alternate parchment `#f5f4ed` and `#141413` dark sections. The entire 
 @page {
   size: A4;
   margin: 20mm 22mm;
-  background: #f5f4ed;   /* extends past margin area, prevents printed white edges */
+  background: #f5f4ed; /* extends past margin area, prevents printed white edges */
 }
 ```
 
@@ -523,20 +568,20 @@ Long docs alternate parchment `#f5f4ed` and `#141413` dark sections. The entire 
 
 When you're not sure "what should I use":
 
-| Need | Use |
-|---|---|
-| Big headline | serif 500, size by level, line-height 1.10-1.30 |
-| Reading body (EN) | serif 400, 9.5-10pt, line-height 1.55 |
-| Reading body (CN) | sans 400, 9.5-10pt, line-height 1.55 |
-| Emphasize a number | `color: var(--brand)`, no bold |
-| Divide two sections | 2.5pt brand left bar, or 0.5pt warm-gray dotted |
-| Quote someone | 2pt brand left border + olive color |
-| Show code | ivory background + 0.5pt border + 6pt radius + mono |
-| Primary vs secondary button | Primary = brand fill + ivory text; Secondary = warm-sand + charcoal |
+| Need                         | Use                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| Big headline                 | serif 500, size by level, line-height 1.10-1.30                             |
+| Reading body (EN)            | serif 400, 9.5-10pt, line-height 1.55                                       |
+| Reading body (CN)            | sans 400, 9.5-10pt, line-height 1.55                                        |
+| Emphasize a number           | `color: var(--brand)`, no bold                                              |
+| Divide two sections          | 2.5pt brand left bar, or 0.5pt warm-gray dotted                             |
+| Quote someone                | 2pt brand left border + olive color                                         |
+| Show code                    | ivory background + 0.5pt border + 6pt radius + mono                         |
+| Primary vs secondary button  | Primary = brand fill + ivory text; Secondary = warm-sand + charcoal         |
 | Highlight one card in a list | `border: 0.5pt solid var(--brand)` or `border-left: 3pt solid var(--brand)` |
-| Start a chapter | serif heading + 2.5pt brand left bar |
-| Cover page | Display-size heading + right-aligned author/date + heavy whitespace |
-| Data card | ivory background + 8pt radius + serif big number + sans small label |
+| Start a chapter              | serif heading + 2.5pt brand left bar                                        |
+| Cover page                   | Display-size heading + right-aligned author/date + heavy whitespace         |
+| Data card                    | ivory background + 8pt radius + serif big number + sans small label         |
 
 Not on this table -> return to first principles: **serif carries authority, sans carries utility, warm gray carries rhythm, ink-blue carries focus**.
 
@@ -546,14 +591,14 @@ Not on this table -> return to first principles: **serif carries authority, sans
 
 For decks longer than 20 slides, the following rules apply. Each came from real production work.
 
-| Rule | Content |
-|------|---------|
-| R1 | Slide container fixed at 1920×1080, scaled externally. No dynamic vh/vw units |
-| R2 | Slide titles use Display (64px), not H1 (30px). H1 is a print hierarchy level |
-| R4 | Slide letter-spacing = print value / 2. 8px tracking "falls apart" on screen |
-| R5 | Section header: gap below rule ≥ 36px (at least 2x the gap above) |
-| R6 | Eyebrow dot uses `align-items: center`, not baseline (dot is geometric, not text) |
-| R7 | Slide padding-top 72-80px (print is 96-120px; slides are more compact) |
-| R8 | Images use `object-fit: contain` + flex centering. Never stretch or crop |
-| R9 | Use `.kami-slide-footer` for page number and deck mark, absolutely positioned to bottom |
-| R10 | Code uses pseudocode style: more comment lines than code lines. Show logic, not syntax |
+| Rule | Content                                                                                 |
+| ---- | --------------------------------------------------------------------------------------- |
+| R1   | Slide container fixed at 1920×1080, scaled externally. No dynamic vh/vw units           |
+| R2   | Slide titles use Display (64px), not H1 (30px). H1 is a print hierarchy level           |
+| R4   | Slide letter-spacing = print value / 2. 8px tracking "falls apart" on screen            |
+| R5   | Section header: gap below rule ≥ 36px (at least 2x the gap above)                       |
+| R6   | Eyebrow dot uses `align-items: center`, not baseline (dot is geometric, not text)       |
+| R7   | Slide padding-top 72-80px (print is 96-120px; slides are more compact)                  |
+| R8   | Images use `object-fit: contain` + flex centering. Never stretch or crop                |
+| R9   | Use `.kami-slide-footer` for page number and deck mark, absolutely positioned to bottom |
+| R10  | Code uses pseudocode style: more comment lines than code lines. Show logic, not syntax  |

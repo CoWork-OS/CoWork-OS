@@ -23,7 +23,11 @@ function parsePort(value, fallback = DEFAULT_PORT) {
 }
 
 function normalizeDevLogLevel(env) {
-  if (String(env.COWORK_LOG_LEVEL || "").trim().toLowerCase() !== "debug") {
+  if (
+    String(env.COWORK_LOG_LEVEL || "")
+      .trim()
+      .toLowerCase() !== "debug"
+  ) {
     return;
   }
   env.COWORK_LOG_LEVEL = "info";
@@ -175,8 +179,7 @@ function getNativeSqliteStatus(env) {
   const firstLine = output.split(/\r?\n/).find(Boolean);
   return {
     ready: false,
-    reason:
-      firstLine || `better-sqlite3 failed to load in Electron (exit ${result.status ?? 1}).`,
+    reason: firstLine || `better-sqlite3 failed to load in Electron (exit ${result.status ?? 1}).`,
   };
 }
 
@@ -282,10 +285,7 @@ enableSystemCaForMacDev(childEnv);
 const electronStatus = getElectronBinaryStatus();
 if (electronStatus.installed && !electronStatus.ready) {
   try {
-    repairNativeInstall(
-      childEnv,
-      "Electron package is present but its binary is missing.",
-    );
+    repairNativeInstall(childEnv, "Electron package is present but its binary is missing.");
   } catch (error) {
     process.stderr.write(`[dev-start] ${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
@@ -316,7 +316,9 @@ if (electronStatus.installed && electronStatus.ready) {
         `better-sqlite3 is not usable in Electron: ${sqliteStatus.reason}`,
       );
     } catch (error) {
-      process.stderr.write(`[dev-start] ${error instanceof Error ? error.message : String(error)}\n`);
+      process.stderr.write(
+        `[dev-start] ${error instanceof Error ? error.message : String(error)}\n`,
+      );
       process.exit(1);
     }
   }

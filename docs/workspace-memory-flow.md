@@ -37,16 +37,27 @@ Chronicle fits this model as a **screen-context evidence source**, not as a fift
 
 ## Memory Write Governance
 
-Durable memory writes pass through `MemoryWriteGate` before they commit when approval is enabled. The default mode is `off`, which preserves existing behavior. Stricter modes can be set through memory feature settings, or with `COWORK_MEMORY_WRITE_APPROVAL_MODE` for headless/local validation:
+Durable memory writes pass through `MemoryWriteGate` before they commit when an
+explicit review mode is enabled. CoWork's normal local runtime has no approval
+prompts, so it commits new memory writes immediately. This remains true when a
+previous session saved a review mode in Memory Hub; the saved setting is kept
+for compatibility, but it cannot recreate an approval surface while the
+no-prompt policy is active. To exercise the review queue deliberately in a
+headless or controlled run, set `COWORK_MEMORY_WRITE_APPROVAL_MODE`:
 
 - `curated_only`: stage writes to the hot `.cowork/USER.md` / `.cowork/MEMORY.md` layer.
 - `external_only`: stage writes before anything is saved or mirrored to Supermemory.
 - `background_only`: stage background, distillation, Dreaming, and mirror writes while allowing explicit agent tool saves.
 - `all`: stage every durable archive, curated, and external memory write.
 
+The queue is therefore an opt-in compatibility path. It is separate from the
+task approval flow and never opens a popup. A queued write can be reviewed from
+Memory Hub or resolved through `MemoryWriteGate`; if a decision is required by
+the task policy, the task uses the assistant message/input flow instead.
+
 Pending writes are stored in `pending_memory_writes` with target layer, action, origin, proposed value, old value when available, evidence metadata, and risk score. The main SQLite database is a normal `better-sqlite3` database with selected encrypted settings/fields, not a whole-file SQLCipher database, so sensitive external-memory payloads are blocked before they are persisted to the approval queue. Explicit tools return the pending id when a write is staged so the runtime can surface the review item instead of reporting a committed write.
 
-Approving a pending write first atomically claims the row as `applying`, replays the stored payload with the write gate bypassed, then marks the row `applied`. Rejecting a write marks it `rejected` without calling the target memory service. Failed replays are marked `failed` with the error text for audit.
+Approving a pending write first atomically claims the row as `applying`, replays the stored payload with the write gate bypassed, then marks the row `applied`. Rejecting a write marks it `rejected` without calling the target memory service. Failed replays are marked `failed` with the error text for audit. The no-prompt migration exposes `MemoryWriteGate.rejectAllPending()`, which marks the old unresolved backlog as `rejected` without replaying any stored payload; in-flight `applying` rows are left for their current replay to finish. Take a SQLite backup before a one-time backlog cleanup and verify `pendingCount()` afterward; database deletion is not part of this migration.
 
 The approval gate sits in front of all durable memory write surfaces:
 

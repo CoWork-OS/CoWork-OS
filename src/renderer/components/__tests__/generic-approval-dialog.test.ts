@@ -34,6 +34,34 @@ function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
 }
 
 describe("GenericApprovalDialog", () => {
+  it("keeps persistent policy scopes behind the advanced control", () => {
+    const approval = makeApproval();
+    const details = approval.details as Any;
+    details.accessProfile = { id: "ask_for_approval" };
+    details.permissionPrompt.suggestedActions = [
+      "once",
+      "session",
+      "workspace",
+      "profile",
+      "recurring",
+    ].flatMap((scope) => [
+      { action: `allow_${scope}`, label: `Allow ${scope}`, effect: "allow" },
+      { action: `deny_${scope}`, label: `Deny ${scope}`, effect: "deny" },
+    ]);
+    const html = renderToStaticMarkup(
+      React.createElement(GenericApprovalDialog, {
+        approval,
+        onRespond: vi.fn(),
+        onApproveAllSession: vi.fn(),
+      }),
+    );
+    expect(html).toContain("Advanced permission rules");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain(">Workspace</button>");
+    expect(html).not.toContain(">Profile</button>");
+    expect(html).not.toContain("Approve all for");
+  });
+
   it("explains open_application approvals with the concrete app and system action", () => {
     const html = renderToStaticMarkup(
       React.createElement(GenericApprovalDialog, {

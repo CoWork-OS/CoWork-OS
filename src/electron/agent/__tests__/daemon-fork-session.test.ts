@@ -27,6 +27,7 @@ describe("AgentDaemon.forkTaskSession", () => {
           userPrompt: "Fix the bug",
           workspaceId: "workspace-1",
           agentConfig: { executionMode: "execute" },
+          assignedAgentRoleId: "agent-1",
           source: "manual",
         }),
       },
@@ -59,6 +60,7 @@ describe("AgentDaemon.forkTaskSession", () => {
           branchFromTaskId: "task-1",
           branchFromEventId: "event-7",
           branchLabel: "investigate",
+          assignedAgentRoleId: "agent-1",
         }),
       }),
     );

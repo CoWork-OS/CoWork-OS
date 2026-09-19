@@ -37,13 +37,13 @@ Draft a daily digest based on calendar + tasks. Stops before sending.
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| range | select | No | Time range to summarize |
-| recipient | string | No | Who this digest is for (e.g., "my parents", "my partner") |
-| tone | select | No | Writing tone |
+| Name      | Type   | Required | Description                                               |
+| --------- | ------ | -------- | --------------------------------------------------------- |
+| range     | select | No       | Time range to summarize                                   |
+| recipient | string | No       | Who this digest is for (e.g., "my parents", "my partner") |
+| tone      | select | No       | Writing tone                                              |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 696 characters.
-- Runtime prompt is defined directly in `../usecase-family-digest.json`. 
+- Runtime prompt is defined directly in `../usecase-family-digest.json`.

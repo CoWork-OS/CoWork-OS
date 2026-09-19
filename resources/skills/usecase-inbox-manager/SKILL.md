@@ -37,12 +37,12 @@ Triage Inbox Agent Today lanes, search mailbox evidence, prepare manual or AI-as
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| mode | select | No | Inbox manager mode |
-| message_limit | number | No | Maximum number of messages to inspect |
-| time_window | string | No | Lookback window (e.g., "24h", "3d") |
-| output_format | select | No | How to format the final report |
+| Name          | Type   | Required | Description                           |
+| ------------- | ------ | -------- | ------------------------------------- |
+| mode          | select | No       | Inbox manager mode                    |
+| message_limit | number | No       | Maximum number of messages to inspect |
+| time_window   | string | No       | Lookback window (e.g., "24h", "3d")   |
+| output_format | select | No       | How to format the final report        |
 
 ## Runtime Prompt
 

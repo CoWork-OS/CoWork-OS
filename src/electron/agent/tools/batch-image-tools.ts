@@ -1,4 +1,6 @@
-import { exec, execFile } from "child_process";
+// Intentionally no `exec` import: every external command here takes paths
+// derived from tool arguments and must be invoked argv-style via execFile.
+import { execFile } from "child_process";
 import { promisify } from "util";
 import * as os from "os";
 import * as path from "path";
@@ -13,12 +15,12 @@ import {
   evaluateWorkspaceFilesystemAccess,
   isAccessPathWithin,
   isProtectedFilesystemPath,
+  preserveLexicalMacAlias,
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 
 type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const PROCESS_TIMEOUT_MS = 60_000;
 export type ImageOutputFormat = "png" | "jpeg" | "webp";
@@ -129,7 +131,7 @@ export class BatchImageTools {
       }
       throw new Error("Image path must be inside the workspace or an approved Allowed Path.");
     }
-    const resolvedPath = access.path;
+    const resolvedPath = preserveLexicalMacAlias(candidate, access.path);
 
     const stats = fsSync.statSync(resolvedPath);
     if (!stats.isFile()) {
@@ -167,7 +169,7 @@ export class BatchImageTools {
       }
       throw new Error("Output path must be inside the workspace or an approved Allowed Path.");
     }
-    const resolvedPath = access.path;
+    const resolvedPath = preserveLexicalMacAlias(candidatePath, access.path);
     const isInsideWorkspace = isAccessPathWithin(
       canonicalizeAccessPath(this.workspace.path),
       resolvedPath,
@@ -383,9 +385,23 @@ export class BatchImageTools {
         { timeout: PROCESS_TIMEOUT_MS },
       );
     } catch {
-      // Fallback: try with `magick composite` (ImageMagick 7)
-      await execAsync(
-        `magick composite -dissolve ${opacity} -gravity ${gravity} ${JSON.stringify(wmPath)} ${JSON.stringify(inputPath)} ${JSON.stringify(outputPath)}`,
+      // Fallback: ImageMagick 7 exposes composite as a `magick` subcommand.
+      // Must stay argv-based like the call above: these paths derive from tool
+      // arguments, and JSON.stringify is not a shell-quoting function — it
+      // leaves `$` and backticks intact, which /bin/sh expands inside double
+      // quotes.
+      await execFileAsync(
+        "magick",
+        [
+          "composite",
+          "-dissolve",
+          String(opacity),
+          "-gravity",
+          gravity,
+          wmPath,
+          inputPath,
+          outputPath,
+        ],
         { timeout: PROCESS_TIMEOUT_MS },
       );
     }

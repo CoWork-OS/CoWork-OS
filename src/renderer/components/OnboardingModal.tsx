@@ -501,7 +501,7 @@ export function OnboardingModal({
         if (selectedProvider === "anthropic") {
           settings.anthropic = { apiKey };
         } else if (selectedProvider === "openai") {
-          settings.openai = { apiKey, authMethod: "api_key", model: "gpt-4o-mini" };
+          settings.openai = { apiKey, authMethod: "api_key", model: "gpt-6-astra" };
         } else if (selectedProvider === "gemini") {
           settings.gemini = { apiKey, model: "gemini-2.0-flash" };
         } else if (selectedProvider === "openrouter") {
@@ -561,7 +561,7 @@ export function OnboardingModal({
       case "anthropic":
         return "sonnet-4";
       case "openai":
-        return "gpt-4o-mini";
+        return "gpt-6-astra";
       case "gemini":
         return "gemini-2.0-flash";
       case "ollama":

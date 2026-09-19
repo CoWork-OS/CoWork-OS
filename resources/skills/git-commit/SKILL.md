@@ -38,4 +38,4 @@ Create a well-formatted commit message from staged changes
 ## Runtime Prompt
 
 - Current runtime prompt length: 494 characters.
-- Runtime prompt is defined directly in `../git-commit.json`. 
+- Runtime prompt is defined directly in `../git-commit.json`.

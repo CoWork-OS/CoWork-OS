@@ -13,6 +13,7 @@ pip install weasyprint pypdf --break-system-packages --quiet
 ```
 
 Linux first-time:
+
 ```bash
 apt install -y libpango-1.0-0 libpangoft2-1.0-0 fonts-noto-cjk
 ```
@@ -37,11 +38,13 @@ python3 -c "from weasyprint import HTML; HTML('doc.html').write_pdf('out.pdf')"
 
 ```html
 <style>
-@font-face {
-  font-family: "Newsreader";
-  src: url("Newsreader-VariableFont.ttf");
-}
-body { font-family: "Newsreader", serif; }
+  @font-face {
+    font-family: "Newsreader";
+    src: url("Newsreader-VariableFont.ttf");
+  }
+  body {
+    font-family: "Newsreader", serif;
+  }
 </style>
 ```
 
@@ -49,12 +52,11 @@ body { font-family: "Newsreader", serif; }
 
 ```css
 /* English */
-font-family: "Newsreader", "Source Serif 4", "Charter",
-             Georgia, serif;
+font-family: "Newsreader", "Source Serif 4", "Charter", Georgia, serif;
 
 /* Chinese */
-font-family: "TsangerJinKai02", "Source Han Serif SC",
-             "Noto Serif CJK SC", "Songti SC", Georgia, serif;
+font-family:
+  "TsangerJinKai02", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", Georgia, serif;
 ```
 
 **Font fallback affects page count**. Any font swap requires re-running the page-count check. If it overflows: lower `font-size` first, then tighten margins, then cut content.
@@ -63,9 +65,9 @@ font-family: "TsangerJinKai02", "Source Han Serif SC",
 
 ```css
 @page {
-  size: A4;                     /* or 210mm 297mm / A4 landscape / 13in 10in */
+  size: A4; /* or 210mm 297mm / A4 landscape / 13in 10in */
   margin: 20mm 22mm;
-  background: #f5f4ed;          /* extend past margins to avoid white printed edge */
+  background: #f5f4ed; /* extend past margins to avoid white printed edge */
 }
 ```
 
@@ -75,30 +77,37 @@ font-family: "TsangerJinKai02", "Source Han Serif SC",
 @page {
   @top-right {
     content: counter(page);
-    font-family: serif; font-size: 9pt; color: #87867f;
+    font-family: serif;
+    font-size: 9pt;
+    color: #87867f;
   }
   @bottom-center {
     content: "{{DOC_NAME}} · {{AUTHOR}}";
-    font-size: 8.5pt; color: #87867f;
+    font-size: 8.5pt;
+    color: #87867f;
   }
 }
 
 @page:first {
-  @top-right { content: ""; }
-  @bottom-center { content: ""; }
+  @top-right {
+    content: "";
+  }
+  @bottom-center {
+    content: "";
+  }
 }
 ```
 
 ### WeasyPrint support matrix
 
-| Solid | Partial | Unsupported |
-|---|---|---|
-| CSS Grid / Flexbox | CSS filter / transform (partial) | JavaScript |
-| `@page` rules | inline SVG (some attrs) | `position: sticky` |
-| `@font-face` | gradients (slow, use sparingly) | CSS animations / transitions |
-| `break-before` / `break-inside: avoid` | | |
-| CSS variables `var(--name)` | | |
-| `::before` / `::after` | | |
+| Solid                                  | Partial                          | Unsupported                  |
+| -------------------------------------- | -------------------------------- | ---------------------------- |
+| CSS Grid / Flexbox                     | CSS filter / transform (partial) | JavaScript                   |
+| `@page` rules                          | inline SVG (some attrs)          | `position: sticky`           |
+| `@font-face`                           | gradients (slow, use sparingly)  | CSS animations / transitions |
+| `break-before` / `break-inside: avoid` |                                  |                              |
+| CSS variables `var(--name)`            |                                  |                              |
+| `::before` / `::after`                 |                                  |                              |
 
 ---
 
@@ -150,17 +159,18 @@ const theme = {
 
 ### Type (bigger than print, optimized for projection)
 
-| Role | Size | Font |
-|---|---|---|
-| Title | 48pt | Serif 500 |
-| Subtitle | 24pt | Sans 400 |
-| H2 chapter | 32pt | Serif 500 |
+| Role        | Size | Font      |
+| ----------- | ---- | --------- |
+| Title       | 48pt | Serif 500 |
+| Subtitle    | 24pt | Sans 400  |
+| H2 chapter  | 32pt | Serif 500 |
 | H3 subtitle | 20pt | Serif 500 |
-| Body | 18pt | Sans 400 |
-| Caption | 14pt | Sans 400 |
-| Footer | 12pt | Sans 400 |
+| Body        | 18pt | Sans 400  |
+| Caption     | 14pt | Sans 400  |
+| Footer      | 12pt | Sans 400  |
 
 English stack on PowerPoint:
+
 - Serif: `Newsreader` -> `Charter` -> `Georgia`
 - Sans: `Inter` -> `Helvetica Neue` -> `Arial`
 
@@ -305,26 +315,34 @@ Every entry below came from a real failure. Check here first when something look
 **Fix**: Tag backgrounds must be solid hex. No rgba.
 
 ```css
-/* ❌ */ .tag { background: rgba(201, 100, 66, 0.18); }
-/* ✅ */ .tag { background: #E4ECF5; }
+/* ❌ */
+.tag {
+  background: rgba(201, 100, 66, 0.18);
+}
+/* ✅ */
+.tag {
+  background: #e4ecf5;
+}
 ```
 
 **rgba -> solid conversion** (parchment `#f5f4ed` base + ink-blue `#1B365D`):
 
-| rgba alpha | Solid hex |
-|---|---|
-| 0.08 | `#EEF2F7` |
-| 0.14 | `#E4ECF5` |
-| **0.18** | **`#E4ECF5`** ← default |
-| 0.22 | `#D0DCE9` |
-| 0.30 | `#D6E1EE` |
+| rgba alpha | Solid hex               |
+| ---------- | ----------------------- |
+| 0.08       | `#EEF2F7`               |
+| 0.14       | `#E4ECF5`               |
+| **0.18**   | **`#E4ECF5`** ← default |
+| 0.22       | `#D0DCE9`               |
+| 0.30       | `#D6E1EE`               |
 
 Formula: `solid_channel = base + (foreground - base) × alpha`. Different base colors (e.g. ivory) need re-computing.
 
 **Want "breathing" texture?** Use `linear-gradient` - the whole tag rasterizes as one bitmap, no alpha compositing:
 
 ```css
-.tag { background: linear-gradient(to right, #D6E1EE, #E4ECF5 70%, #EEF2F7); }
+.tag {
+  background: linear-gradient(to right, #d6e1ee, #e4ecf5 70%, #eef2f7);
+}
 ```
 
 **Aesthetic warning**: gradients work engineering-wise but usually oversell the tag. Priority order: lightest solid (`#EEF2F7`) > standard solid (`#E4ECF5`) > gradient (rarely). If the reader's eye lands on the tag background shape before the text inside - you went too far.
@@ -336,6 +354,7 @@ Formula: `solid_channel = base + (foreground - base) × alpha`. Different base c
 **Root cause**: WeasyPrint strokes border inner and outer paths separately when `< 1pt` + rounded corners - at thin widths they can't overlap.
 
 **Fix (pick one)**:
+
 1. Use background fill instead (preferred, design-consistent)
 2. Border ≥ 1pt
 3. Drop `border-radius`
@@ -349,6 +368,7 @@ For resume, one-pager, and other length-capped docs.
 **Diagnose**: `pdffonts output.pdf` to verify what actually loaded.
 
 **Fix (priority)**:
+
 1. Cut redundant qualifiers ("deeply researched" -> "researched")
 2. Merge related data points in the same section
 3. Drop non-essential items whole (not piecemeal)
@@ -388,8 +408,13 @@ mkdir -p ~/.fonts && cp *.ttf ~/.fonts/ && fc-cache -f
   <span class="metric-label">GitHub Stars</span>
 </div>
 ```
+
 ```css
-.metric { display: flex; align-items: baseline; gap: 6pt; }
+.metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6pt;
+}
 ```
 
 ### 6. Full-width vs half-width spaces (Chinese mode)
@@ -400,13 +425,14 @@ mkdir -p ~/.fonts && cp *.ttf ~/.fonts/ && fc-cache -f
 
 ### 7. Thousands / percent / arrows - be consistent
 
-| ✅ | ❌ |
-|---|---|
-| `5,000+` | `5000+` |
-| `90%` | `90 %` (pre-space) |
-| `->` | `->` / `-&gt;` |
+| ✅       | ❌                 |
+| -------- | ------------------ |
+| `5,000+` | `5000+`            |
+| `90%`    | `90 %` (pre-space) |
+| `->`     | `->` / `-&gt;`     |
 
 Self-check:
+
 ```bash
 grep -oE '->|->|⟶|⇒' doc.html | sort | uniq -c
 grep -oE '[0-9]{4,}' doc.html | sort -u
@@ -431,7 +457,7 @@ Healthy ratio: one emphasis per 80-150 words.
 
 ```css
 .cover {
-  min-height: 257mm;                   /* A4 height 297 - 40mm margins */
+  min-height: 257mm; /* A4 height 297 - 40mm margins */
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -451,16 +477,23 @@ Healthy ratio: one emphasis per 80-150 words.
   <div class="card-wrapper"><div class="card">...</div></div>
 </div>
 ```
+
 ```css
-.row { display: flex; }
-.card-wrapper { break-inside: avoid; }
+.row {
+  display: flex;
+}
+.card-wrapper {
+  break-inside: avoid;
+}
 ```
 
 ### 11. Hide page number on the first page
 
 ```css
 @page:first {
-  @top-right { content: ""; }
+  @top-right {
+    content: "";
+  }
 }
 ```
 
@@ -474,8 +507,9 @@ Healthy ratio: one emphasis per 80-150 words.
 
 ```css
 @page {
-  size: A4; margin: 20mm;
-  background: #f5f4ed;    /* extends past margins */
+  size: A4;
+  margin: 20mm;
+  background: #f5f4ed; /* extends past margins */
 }
 ```
 
@@ -522,12 +556,12 @@ pdftoppm -png -r 300 out.pdf inspect    # when in doubt
 
 Chevron templates (tip at endpoint, 8px arm length):
 
-| Direction | chevron path |
-|---|---|
-| down | `M (x-8) (y-8) L x y L (x+8) (y-8)` |
-| left | `M (x+8) (y-8) L x y L (x+8) (y+8)` |
-| up | `M (x-8) (y+8) L x y L (x+8) (y+8)` |
-| right | `M (x-8) (y-8) L x y L (x-8) (y+8)` |
+| Direction | chevron path                        |
+| --------- | ----------------------------------- |
+| down      | `M (x-8) (y-8) L x y L (x+8) (y-8)` |
+| left      | `M (x+8) (y-8) L x y L (x+8) (y+8)` |
+| up        | `M (x-8) (y+8) L x y L (x+8) (y+8)` |
+| right     | `M (x-8) (y-8) L x y L (x-8) (y+8)` |
 
 ### 16. Slide letter-spacing must be halved
 
@@ -539,8 +573,12 @@ Chevron templates (tip at endpoint, 8px arm length):
 
 ```css
 /* Print eyebrow */
-.eyebrow { letter-spacing: 6px; }
+.eyebrow {
+  letter-spacing: 6px;
+}
 
 /* Slide eyebrow */
-.slide .eyebrow { letter-spacing: 3px; }   /* halved */
+.slide .eyebrow {
+  letter-spacing: 3px;
+} /* halved */
 ```

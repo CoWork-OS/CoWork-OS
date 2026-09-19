@@ -18,6 +18,7 @@ import {
   buildOpenAICompatibleSystemMessages,
   createToolCallIdMapper,
   fromOpenAICompatibleResponse,
+  parseOpenAICompatibleToolArguments,
   toOpenAICompatibleMessages,
   toOpenAICompatibleTools,
 } from "./openai-compatible";
@@ -167,7 +168,7 @@ export class AzureOpenAIProvider implements LLMProvider {
             tool_choice: request.toolChoice || "auto",
           }
         : {}),
-      ...buildOpenAIPromptCacheFields(request.promptCache),
+      ...buildOpenAIPromptCacheFields(request.promptCache, request.model),
     };
   }
 
@@ -322,7 +323,7 @@ export class AzureOpenAIProvider implements LLMProvider {
             tool_choice: request.toolChoice || "auto",
           }
         : {}),
-      ...buildOpenAIPromptCacheFields(request.promptCache),
+      ...buildOpenAIPromptCacheFields(request.promptCache, request.model),
     };
   }
 
@@ -577,11 +578,13 @@ export class AzureOpenAIProvider implements LLMProvider {
       if (!toolCall.name) {
         continue;
       }
+      const parsedArguments = parseOpenAICompatibleToolArguments(toolCall.argumentsText);
       content.push({
         type: "tool_use",
         id: toolCall.id || `call_${index}`,
         name: toolCall.name,
-        input: this.parseFunctionCallArguments(toolCall.argumentsText),
+        input: parsedArguments.input,
+        ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
       });
     }
     if (content.length === 0) {
@@ -608,10 +611,14 @@ export class AzureOpenAIProvider implements LLMProvider {
     request: LLMRequest,
     startedAt: number,
   ): Promise<LLMResponse> {
-    const streamedToolCalls = new Map<
-      string,
-      { order: number; id: string; name?: string; argumentsText: string }
-    >();
+    type StreamedToolCall = {
+      order: number;
+      id: string;
+      name?: string;
+      argumentsText: string;
+    };
+    const streamedToolCalls = new Map<string, StreamedToolCall>();
+    const streamedToolCallAliases = new Map<string, string>();
     let nextToolOrder = 0;
     let completedResponse: Any | undefined;
     let contentText = "";
@@ -620,6 +627,57 @@ export class AzureOpenAIProvider implements LLMProvider {
     let cachedTokens = 0;
     let cacheWriteTokens = 0;
     let finishReason: LLMResponse["stopReason"] = "end_turn";
+
+    const normalizeStreamedToolCallIdentifier = (value: unknown): string | undefined => {
+      if (value === undefined || value === null) {
+        return undefined;
+      }
+      const normalized = String(value).trim();
+      return normalized || undefined;
+    };
+
+    const getStreamedToolCall = (identifiers: {
+      callId?: unknown;
+      itemId?: unknown;
+      outputIndex?: unknown;
+      itemIndex?: unknown;
+    }): StreamedToolCall => {
+      const callId = normalizeStreamedToolCallIdentifier(identifiers.callId);
+      const itemId = normalizeStreamedToolCallIdentifier(identifiers.itemId);
+      const outputIndex = normalizeStreamedToolCallIdentifier(identifiers.outputIndex);
+      const itemIndex = normalizeStreamedToolCallIdentifier(identifiers.itemIndex);
+      const aliases = [
+        callId ? `call:${callId}` : undefined,
+        itemId ? `item:${itemId}` : callId ? `item:${callId}` : undefined,
+        outputIndex ? `output:${outputIndex}` : undefined,
+        itemIndex ? `item-index:${itemIndex}` : undefined,
+      ].filter((alias): alias is string => Boolean(alias));
+      const existingKey = aliases
+        .map((alias) => streamedToolCallAliases.get(alias))
+        .find((key): key is string => Boolean(key));
+      const key = existingKey ?? `streamed_tool_call_${nextToolOrder}`;
+      const existing = streamedToolCalls.get(key) ?? {
+        order: nextToolOrder++,
+        id: callId || itemId || key,
+        argumentsText: "",
+      };
+
+      // Responses uses both call_id and item_id for the same function call. Some
+      // Azure streams omit item.id and repeat call_id as item_id, so retain that
+      // compatibility alias while keeping identifiers namespaced.
+      if (callId) {
+        existing.id = callId;
+      } else if (!existing.id && itemId) {
+        existing.id = itemId;
+      }
+      for (const alias of aliases) {
+        if (!streamedToolCallAliases.has(alias)) {
+          streamedToolCallAliases.set(alias, key);
+        }
+      }
+      streamedToolCalls.set(key, existing);
+      return existing;
+    };
 
     await this.consumeSseEvents(response, (eventData) => {
       if (!eventData || eventData === "[DONE]") return;
@@ -663,63 +721,46 @@ export class AzureOpenAIProvider implements LLMProvider {
         case "response.output_item.done": {
           const item = payload.item;
           if (item?.type === "function_call") {
-            const key =
-              String(
-                item.call_id || item.id || payload.output_index || payload.item_index || "",
-              ).trim() || `call_${nextToolOrder}`;
-            const existing = streamedToolCalls.get(key) ?? {
-              order: nextToolOrder++,
-              id: String(item.call_id || item.id || key),
-              argumentsText: "",
-            };
+            const existing = getStreamedToolCall({
+              callId: item.call_id,
+              itemId: item.id,
+              outputIndex: payload.output_index,
+              itemIndex: payload.item_index,
+            });
             if (typeof item.name === "string" && item.name.trim()) {
               existing.name = item.name;
             }
-            if (typeof item.arguments === "string") {
+            if (typeof item.arguments === "string" && (item.arguments || !existing.argumentsText)) {
               existing.argumentsText = item.arguments;
             }
-            streamedToolCalls.set(key, existing);
           }
           break;
         }
         case "response.function_call_arguments.delta": {
-          const key =
-            String(
-              payload.call_id ||
-                payload.item_id ||
-                payload.output_index ||
-                payload.item_index ||
-                "",
-            ).trim() || `call_${nextToolOrder}`;
-          const existing = streamedToolCalls.get(key) ?? {
-            order: nextToolOrder++,
-            id: String(payload.call_id || payload.item_id || key),
-            argumentsText: "",
-          };
+          const existing = getStreamedToolCall({
+            callId: payload.call_id,
+            itemId: payload.item_id,
+            outputIndex: payload.output_index,
+            itemIndex: payload.item_index,
+          });
           if (typeof payload.delta === "string" && payload.delta) {
             existing.argumentsText += payload.delta;
           }
-          streamedToolCalls.set(key, existing);
           break;
         }
         case "response.function_call_arguments.done": {
-          const key =
-            String(
-              payload.call_id ||
-                payload.item_id ||
-                payload.output_index ||
-                payload.item_index ||
-                "",
-            ).trim() || `call_${nextToolOrder}`;
-          const existing = streamedToolCalls.get(key) ?? {
-            order: nextToolOrder++,
-            id: String(payload.call_id || payload.item_id || key),
-            argumentsText: "",
-          };
-          if (typeof payload.arguments === "string") {
+          const existing = getStreamedToolCall({
+            callId: payload.call_id,
+            itemId: payload.item_id,
+            outputIndex: payload.output_index,
+            itemIndex: payload.item_index,
+          });
+          if (
+            typeof payload.arguments === "string" &&
+            (payload.arguments || !existing.argumentsText)
+          ) {
             existing.argumentsText = payload.arguments;
           }
-          streamedToolCalls.set(key, existing);
           break;
         }
         case "response.completed":
@@ -738,20 +779,21 @@ export class AzureOpenAIProvider implements LLMProvider {
             for (const [index, item] of payload.response.output.entries()) {
               if (item?.type === "function_call") {
                 finishReason = "tool_use";
-                const key =
-                  String(item.call_id || item.id || index).trim() || `call_${nextToolOrder}`;
-                const existing = streamedToolCalls.get(key) ?? {
-                  order: nextToolOrder++,
-                  id: String(item.call_id || item.id || key),
-                  argumentsText: "",
-                };
+                const existing = getStreamedToolCall({
+                  callId: item.call_id,
+                  itemId: item.id,
+                  outputIndex: item.output_index ?? index,
+                  itemIndex: item.item_index ?? index,
+                });
                 if (typeof item.name === "string" && item.name.trim()) {
                   existing.name = item.name;
                 }
-                if (typeof item.arguments === "string") {
+                if (
+                  typeof item.arguments === "string" &&
+                  (item.arguments || !existing.argumentsText)
+                ) {
                   existing.argumentsText = item.arguments;
                 }
-                streamedToolCalls.set(key, existing);
               }
             }
           }
@@ -804,11 +846,13 @@ export class AzureOpenAIProvider implements LLMProvider {
       if (!toolCall.name) {
         continue;
       }
+      const parsedArguments = parseOpenAICompatibleToolArguments(toolCall.argumentsText);
       content.push({
         type: "tool_use",
         id: toolCall.id,
         name: toolCall.name,
-        input: this.parseFunctionCallArguments(toolCall.argumentsText),
+        input: parsedArguments.input,
+        ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
       });
     }
     if (content.length === 0) {
@@ -817,7 +861,7 @@ export class AzureOpenAIProvider implements LLMProvider {
 
     return {
       content,
-      stopReason: finishReason,
+      stopReason: content.some((block) => block.type === "tool_use") ? "tool_use" : finishReason,
       usage:
         inputTokens || outputTokens || cachedTokens || cacheWriteTokens
           ? {
@@ -828,17 +872,6 @@ export class AzureOpenAIProvider implements LLMProvider {
             }
           : undefined,
     };
-  }
-
-  private parseFunctionCallArguments(value: Any): Record<string, Any> {
-    if (!value) return {};
-    if (typeof value === "object") return value;
-    if (typeof value !== "string") return {};
-    try {
-      return JSON.parse(value);
-    } catch {
-      return {};
-    }
   }
 
   private fromResponsesApiResponse(response: Any): LLMResponse {
@@ -857,11 +890,13 @@ export class AzureOpenAIProvider implements LLMProvider {
         } else if (item.type === "function_call") {
           sawToolCall = true;
           const id = item.call_id || item.id || `call_${index}`;
+          const parsedArguments = parseOpenAICompatibleToolArguments(item.arguments);
           content.push({
             type: "tool_use",
             id,
             name: item.name,
-            input: this.parseFunctionCallArguments(item.arguments),
+            input: parsedArguments.input,
+            ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
           });
         }
       });

@@ -47,6 +47,8 @@ import {
   isTempWorkspaceId,
 } from "../../shared/types";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import * as os from "os";
 import { LLMProviderFactory, LLMSettings } from "../agent/llm/provider-factory";
 import { LLMProviderType } from "../agent/llm/types";
@@ -183,6 +185,7 @@ export class MessageRouter {
   private mainWindow: BrowserWindow | null = null;
   private agentDaemon?: AgentDaemon;
   private db: Database.Database;
+  private shuttingDown = false;
 
   // Repositories
   private channelRepo: ChannelRepository;
@@ -1112,6 +1115,7 @@ export class MessageRouter {
 
     // Set up status handler
     adapter.onStatusChange((status, error) => {
+      if (this.shuttingDown) return;
       const eventType = status === "connected" ? "channel:connected" : "channel:disconnected";
       this.emitEvent({
         type: eventType,
@@ -1195,6 +1199,7 @@ export class MessageRouter {
    * Connect all enabled adapters
    */
   async connectAll(options: ConnectAllOptions = {}): Promise<void> {
+    this.shuttingDown = false;
     const enabledChannels = this.channelRepo.findEnabled();
 
     await Promise.all(
@@ -1516,6 +1521,7 @@ export class MessageRouter {
    * Disconnect all adapters
    */
   async disconnectAll(): Promise<void> {
+    this.shuttingDown = true;
     for (const adapter of this.adapters.values()) {
       if (adapter.status === "connected") {
         try {
@@ -4466,13 +4472,17 @@ export class MessageRouter {
       prompt: params.prompt,
       status: "pending",
       // Ensure this is read-only and cannot pause for user input.
-      agentConfig: {
-        gatewayContext,
-        toolRestrictions,
-        originChannel: adapter.type,
-        allowUserInput: false,
-        retainMemory: false,
-      },
+      agentConfig: taskAgentConfigForCreation(
+        {
+          gatewayContext,
+          toolRestrictions,
+          originChannel: adapter.type,
+          allowUserInput: false,
+          retainMemory: false,
+          readOnlyExecution: true,
+        },
+        PermissionSettingsManager.loadSettings(),
+      ),
     });
 
     const routedChannel = this.getChannelForAdapter(adapter);
@@ -4593,11 +4603,14 @@ export class MessageRouter {
       title: params.title,
       prompt: params.prompt,
       status: "pending",
-      agentConfig: {
-        gatewayContext,
-        ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
-        originChannel: adapter.type,
-      },
+      agentConfig: taskAgentConfigForCreation(
+        {
+          gatewayContext,
+          ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
+          originChannel: adapter.type,
+        },
+        PermissionSettingsManager.loadSettings(),
+      ),
     });
 
     const routedChannel = this.getChannelForAdapter(adapter);
@@ -6050,6 +6063,7 @@ export class MessageRouter {
         } else {
           // Default OpenAI models
           models = [
+            { key: "gpt-6-astra", displayName: "GPT-6 Astra" },
             { key: "gpt-4o", displayName: "GPT-4o" },
             { key: "gpt-4o-mini", displayName: "GPT-4o Mini" },
             { key: "gpt-4-turbo", displayName: "GPT-4 Turbo" },
@@ -6221,6 +6235,7 @@ export class MessageRouter {
           models = cachedOpenAI;
         } else {
           models = [
+            { key: "gpt-6-astra", displayName: "GPT-6 Astra" },
             { key: "gpt-4o", displayName: "GPT-4o" },
             { key: "gpt-4o-mini", displayName: "GPT-4o Mini" },
             { key: "gpt-4-turbo", displayName: "GPT-4 Turbo" },
@@ -6847,23 +6862,26 @@ export class MessageRouter {
       title: taskTitle,
       prompt: taskPrompt,
       status: "pending",
-      agentConfig: {
-        gatewayContext,
-        ...(allowSharedContextMemory ? { allowSharedContextMemory: true } : {}),
-        ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
-        ...(securityContext?.channelSpecialization?.id
-          ? { channelSpecializationId: securityContext.channelSpecialization.id }
-          : {}),
-        originChannel: adapter.type,
-        ...(securityContext?.researchWorkflowPreset
-          ? {
-              researchWorkflow: {
-                enabled: true,
-                emitSemanticProgress: true,
-              },
-            }
-          : {}),
-      },
+      agentConfig: taskAgentConfigForCreation(
+        {
+          gatewayContext,
+          ...(allowSharedContextMemory ? { allowSharedContextMemory: true } : {}),
+          ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
+          ...(securityContext?.channelSpecialization?.id
+            ? { channelSpecializationId: securityContext.channelSpecialization.id }
+            : {}),
+          originChannel: adapter.type,
+          ...(securityContext?.researchWorkflowPreset
+            ? {
+                researchWorkflow: {
+                  enabled: true,
+                  emitSemanticProgress: true,
+                },
+              }
+            : {}),
+        },
+        PermissionSettingsManager.loadSettings(),
+      ),
     });
 
     // Apply agent role assignment when routing determines one.
@@ -8259,19 +8277,19 @@ export class MessageRouter {
       return;
     }
 
-    // Group chat safety: only the user who triggered the approval request can respond.
-    // This prevents group-hijack of dangerous approvals.
-    if (
-      data.contextType === "group" &&
-      data.requestingUserId &&
-      message.userId !== data.requestingUserId
-    ) {
+    // Only the user who triggered the approval request can respond. Enforced in
+    // every context, not just group chats: an approval satisfies the tool
+    // permission gate, and inbound sender identity is attacker-controlled on
+    // any channel whose callback authenticity is not verified. Restricting this
+    // to `contextType === "group"` let a 1:1 message approve someone else's
+    // pending dangerous tool call.
+    if (data.requestingUserId && message.userId !== data.requestingUserId) {
       const who = data.requestingUserName
         ? `*${data.requestingUserName}*`
         : "the original requester";
       await adapter.sendMessage({
         chatId: message.chatId,
-        text: `⚠️ Only ${who} can approve/deny this request in a group chat.`,
+        text: `⚠️ Only ${who} can approve/deny this request.`,
         parseMode: "markdown",
         replyTo: message.messageId,
       });

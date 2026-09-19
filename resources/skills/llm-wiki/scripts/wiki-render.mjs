@@ -11,14 +11,7 @@ import {
   writeText,
 } from "./wiki-workbench-lib.mjs";
 
-const CHART_PALETTE = [
-  "#2f6fed",
-  "#1ea672",
-  "#d97706",
-  "#c2410c",
-  "#7c3aed",
-  "#0f766e",
-];
+const CHART_PALETTE = ["#2f6fed", "#1ea672", "#d97706", "#c2410c", "#7c3aed", "#0f766e"];
 
 function parseArgs(argv) {
   const args = {
@@ -173,7 +166,8 @@ function renderBarChartSvg(spec) {
     24,
     Math.floor((plotWidth - barGap * Math.max(0, spec.series.length - 1)) / spec.series.length),
   );
-  const totalBarsWidth = barWidth * spec.series.length + barGap * Math.max(0, spec.series.length - 1);
+  const totalBarsWidth =
+    barWidth * spec.series.length + barGap * Math.max(0, spec.series.length - 1);
   const startX = margin.left + Math.max(0, Math.floor((plotWidth - totalBarsWidth) / 2));
   const gridTicks = 5;
 
@@ -225,11 +219,7 @@ function renderMarpOutput(args) {
   const bodyText = readText(args.bodyFile);
   const slug = getSafeFileStem(args.slug || args.title, "slides");
   const outputPath = buildOutputTargetPath(path.resolve(args.vault), "marp", `${slug}.md`);
-  const metadataPath = buildOutputTargetPath(
-    path.resolve(args.vault),
-    "marp",
-    `${slug}.meta.json`,
-  );
+  const metadataPath = buildOutputTargetPath(path.resolve(args.vault), "marp", `${slug}.meta.json`);
 
   ensureDir(path.dirname(outputPath));
   writeText(

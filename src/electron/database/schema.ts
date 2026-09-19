@@ -1035,6 +1035,34 @@ export class DatabaseManager {
         updated_at INTEGER NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS composer_drafts (
+        draft_key TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        task_id TEXT,
+        surface TEXT NOT NULL CHECK (surface IN ('main', 'side-chat')),
+        remote_device_id TEXT,
+        payload_json TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        expires_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_composer_drafts_expiry
+        ON composer_drafts(expires_at);
+
+      CREATE INDEX IF NOT EXISTS idx_composer_drafts_workspace
+        ON composer_drafts(workspace_id, surface, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS bot_notification_preferences (
+        agent_role_id TEXT PRIMARY KEY,
+        on_finish INTEGER NOT NULL DEFAULT 1,
+        on_input_required INTEGER NOT NULL DEFAULT 1,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_bot_notification_preferences_updated
+        ON bot_notification_preferences(updated_at);
+
       CREATE TABLE IF NOT EXISTS eval_cases (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -7102,7 +7130,47 @@ export class DatabaseManager {
           ON llm_call_events(source_kind, source_id);
       `);
     } catch {
-      // Table or indexes already exist, ignore
+      // An older database may contain duplicate LLM source ids. Do not let a
+      // repairable legacy index failure suppress unrelated Jev telemetry DDL.
+    }
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS jev_call_events (
+          id TEXT PRIMARY KEY,
+          timestamp INTEGER NOT NULL,
+          workspace_id TEXT,
+          task_id TEXT,
+          source_kind TEXT NOT NULL,
+          source_id TEXT,
+          provider_type TEXT,
+          model_id TEXT,
+          purpose TEXT NOT NULL,
+          input_tokens INTEGER NOT NULL DEFAULT 0,
+          output_tokens INTEGER NOT NULL DEFAULT 0,
+          cost REAL NOT NULL DEFAULT 0,
+          latency_ms INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL,
+          from_cache INTEGER NOT NULL DEFAULT 0,
+          success INTEGER NOT NULL DEFAULT 1,
+          request_id TEXT,
+          error_code TEXT,
+          error_message TEXT,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+          FOREIGN KEY (task_id) REFERENCES tasks(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_jev_call_events_timestamp
+          ON jev_call_events(timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_jev_call_events_workspace
+          ON jev_call_events(workspace_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_jev_call_events_task
+          ON jev_call_events(task_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_jev_call_events_purpose
+          ON jev_call_events(purpose, timestamp DESC);
+      `);
+    } catch {
+      // Table or indexes already exist, or an older database lacks a referenced
+      // table. Jev telemetry is best effort and must never block startup.
     }
     try {
       this.db.exec(`
@@ -7400,6 +7468,15 @@ export class DatabaseManager {
         cached: number;
       };
       const models: P[] = [
+        // ── OpenAI 6 ──
+        {
+          key: "gpt-6-astra",
+          provider: "OpenAI",
+          display: "GPT-6 Astra",
+          input: 10.0,
+          output: 50.0,
+          cached: 1.0,
+        },
         // ── OpenAI 5.4 ──
         {
           key: "gpt-5.4",

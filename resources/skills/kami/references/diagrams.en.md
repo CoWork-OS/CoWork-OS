@@ -8,13 +8,14 @@ Every diagram is a **self-contained HTML + inline SVG**. No Mermaid, no JS, no b
 
 ## 1. Selection
 
-| Showing… | Use | Template |
-|---|---|---|
-| System components + connections | **Architecture** | `assets/diagrams/architecture.html` |
-| Decision branches, "if A then B else C" | **Flowchart** | `assets/diagrams/flowchart.html` |
-| Two-axis positioning / prioritization | **Quadrant** | `assets/diagrams/quadrant.html` |
+| Showing…                                | Use              | Template                            |
+| --------------------------------------- | ---------------- | ----------------------------------- |
+| System components + connections         | **Architecture** | `assets/diagrams/architecture.html` |
+| Decision branches, "if A then B else C" | **Flowchart**    | `assets/diagrams/flowchart.html`    |
+| Two-axis positioning / prioritization   | **Quadrant**     | `assets/diagrams/quadrant.html`     |
 
 Not on the list:
+
 - **Time / stages**: use the built-in timeline component in `resume.html` or `one-pager.html`. Don't reinvent.
 - **Compare two things**: use a table. A three-column table beats any diagram of a binary contrast.
 - **Hierarchy / nested lists**: a nested markdown `ul` is enough.
@@ -80,24 +81,24 @@ Edit the `<text>` and `<rect>` values directly. Rules:
 
 Shared tokens across the three diagrams, mapping directly to kami's design system:
 
-| SVG role | kami token | Value |
-|---|---|---|
-| Canvas | `--parchment` | `#f5f4ed` |
-| Standard node fill | (white) | `#ffffff` |
-| Standard node stroke | `--near-black` | `#141413` |
-| Store node fill | near-black 5% | `rgba(20,20,19,0.05)` |
-| Store node stroke | `--olive` | `#5e5d59` |
-| Cloud node fill | near-black 3% | `rgba(20,20,19,0.03)` |
-| Cloud node stroke | near-black 30% | `rgba(20,20,19,0.30)` |
-| External node fill | olive 8% | `rgba(94,93,89,0.08)` |
-| External node stroke | `--stone` | `#87867f` |
-| **Focal fill** | `--brand-tint` | `#EEF2F7` |
-| **Focal stroke** | `--brand` | `#1B365D` |
-| Standard arrow | `--olive` | `#5e5d59` |
-| Focal arrow | `--brand` | `#1B365D` |
-| Primary text | `--near-black` | `#141413` |
-| Secondary text | `--olive` | `#5e5d59` |
-| Tertiary text / small mono label | `--stone` | `#87867f` |
+| SVG role                         | kami token     | Value                 |
+| -------------------------------- | -------------- | --------------------- |
+| Canvas                           | `--parchment`  | `#f5f4ed`             |
+| Standard node fill               | (white)        | `#ffffff`             |
+| Standard node stroke             | `--near-black` | `#141413`             |
+| Store node fill                  | near-black 5%  | `rgba(20,20,19,0.05)` |
+| Store node stroke                | `--olive`      | `#5e5d59`             |
+| Cloud node fill                  | near-black 3%  | `rgba(20,20,19,0.03)` |
+| Cloud node stroke                | near-black 30% | `rgba(20,20,19,0.30)` |
+| External node fill               | olive 8%       | `rgba(94,93,89,0.08)` |
+| External node stroke             | `--stone`      | `#87867f`             |
+| **Focal fill**                   | `--brand-tint` | `#EEF2F7`             |
+| **Focal stroke**                 | `--brand`      | `#1B365D`             |
+| Standard arrow                   | `--olive`      | `#5e5d59`             |
+| Focal arrow                      | `--brand`      | `#1B365D`             |
+| Primary text                     | `--near-black` | `#141413`             |
+| Secondary text                   | `--olive`      | `#5e5d59`             |
+| Tertiary text / small mono label | `--stone`      | `#87867f`             |
 
 Don't add a fourth state ("warning amber", "success green"). kami has one accent.
 
@@ -107,48 +108,53 @@ Don't add a fourth state ("warning amber", "success green"). kami has one accent
 
 Scan for these when drawing or reviewing:
 
-| Anti-pattern | Why it fails |
-|---|---|
-| Dark mode + cyan / purple glow | Cheap "technical" signifier with no design decision |
-| All nodes identical size | Destroys hierarchy |
-| JetBrains Mono as the universal "dev" font | Mono is for technical content (ports, URLs, fields). Names go in sans. |
-| Legend floating inside the diagram area | Collides with nodes |
-| Arrow labels without a masking rect | Line bleeds through the text |
-| Vertical `writing-mode` text on arrows | Unreadable |
-| Three equal-width summary cards as a default | Template feel. Vary widths. |
-| `box-shadow` on anything | kami only permits ring / whisper |
-| `rounded-2xl` / border-radius above 10px | Max 6-10px. Beyond, it starts to look like App Store chrome. |
-| Ink Blue on every "important" node | Focal rule is 1-2, not a signaling system |
-| Emoji icons 🚀 📊 💡 | Disaster |
-| Gradient backgrounds | kami forbids them |
-| Focal color contradicts the caption's claim | Caption says "Simple **core**", but the ACT node is painted ink-blue - two focals competing. Focal color must match the word emphasized (`<span class="hl">`) in the caption |
-| Cycle diagram with a dashed ring AND four directed arcs | Same loop drawn twice; reader thinks there are two flows |
-| SVG text clipped at the viewBox top | `text` y is the baseline; cap letters extend above y=0. Pad the top by font-size × 1.2 or adjust the viewBox |
-| 5-10px gap between arrow endpoint and node edge | Reads as "arrow floating in space". Anchor endpoints to exact `box.x / box.x+w / box.y / box.y+h` |
-| Per-node custom widths within one diagram | Four steps at widths 60 / 76 / 80 / 100 feel hand-patched. Small diagram: 2 tiers. Large: 3 tiers. That's the full budget |
+| Anti-pattern                                                                             | Why it fails                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dark mode + cyan / purple glow                                                           | Cheap "technical" signifier with no design decision                                                                                                                                              |
+| All nodes identical size                                                                 | Destroys hierarchy                                                                                                                                                                               |
+| JetBrains Mono as the universal "dev" font                                               | Mono is for technical content (ports, URLs, fields). Names go in sans.                                                                                                                           |
+| Legend floating inside the diagram area                                                  | Collides with nodes                                                                                                                                                                              |
+| Arrow labels without a masking rect                                                      | Line bleeds through the text                                                                                                                                                                     |
+| Vertical `writing-mode` text on arrows                                                   | Unreadable                                                                                                                                                                                       |
+| Three equal-width summary cards as a default                                             | Template feel. Vary widths.                                                                                                                                                                      |
+| `box-shadow` on anything                                                                 | kami only permits ring / whisper                                                                                                                                                                 |
+| `rounded-2xl` / border-radius above 10px                                                 | Max 6-10px. Beyond, it starts to look like App Store chrome.                                                                                                                                     |
+| Ink Blue on every "important" node                                                       | Focal rule is 1-2, not a signaling system                                                                                                                                                        |
+| Emoji icons 🚀 📊 💡                                                                     | Disaster                                                                                                                                                                                         |
+| Gradient backgrounds                                                                     | kami forbids them                                                                                                                                                                                |
+| Focal color contradicts the caption's claim                                              | Caption says "Simple **core**", but the ACT node is painted ink-blue - two focals competing. Focal color must match the word emphasized (`<span class="hl">`) in the caption                     |
+| Cycle diagram with a dashed ring AND four directed arcs                                  | Same loop drawn twice; reader thinks there are two flows                                                                                                                                         |
+| SVG text clipped at the viewBox top                                                      | `text` y is the baseline; cap letters extend above y=0. Pad the top by font-size × 1.2 or adjust the viewBox                                                                                     |
+| 5-10px gap between arrow endpoint and node edge                                          | Reads as "arrow floating in space". Anchor endpoints to exact `box.x / box.x+w / box.y / box.y+h`                                                                                                |
+| Per-node custom widths within one diagram                                                | Four steps at widths 60 / 76 / 80 / 100 feel hand-patched. Small diagram: 2 tiers. Large: 3 tiers. That's the full budget                                                                        |
 | Porting an external diagram with one accent color per node type (purple/amber/green/red) | kami has one accent. When adapting external diagrams, migrate the focal to whichever element the caption's `<span class="hl">` emphasizes; concentrate color there, keep all other nodes neutral |
-| Ring diagram: every node is a single word, center is empty | Four labeled boxes looping with no anchor. Either add a subtitle to each node or place one line of text at the center (exit condition, LOC count, etc.). Pick one. |
+| Ring diagram: every node is a single word, center is empty                               | Four labeled boxes looping with no anchor. Either add a subtitle to each node or place one line of text at the center (exit condition, LOC count, etc.). Pick one.                               |
 
 ---
 
 ## 5. Common pairings
 
 ### Technical white paper
+
 - Architecture (system overview) + built-in timeline (from long-doc)
 - One architecture diagram per chapter, maximum. If you want two, the chapter is covering two topics and should split.
 
 ### Portfolio project page
+
 - Quadrant (competitive positioning) or architecture (the layer you owned)
 - **Not every project needs a diagram.** Only when the diagram says something prose can't.
 
 ### One-pager
+
 - Quadrant (priority) or flowchart (decision path)
 - One diagram only. If you're tempted to add a second, kill the weaker one.
 
 ### Resume
+
 - **No diagrams.** Resume real-estate costs more than diagrams. Rare exception: a URL to a portfolio diagram when showing system-level capability.
 
 ### Slides
+
 - One diagram per slide, max. The diagram is the body. Text is caption, not a sidebar.
 
 ---

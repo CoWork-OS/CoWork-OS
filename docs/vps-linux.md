@@ -532,7 +532,7 @@ export COWORK_CONTROL_PLANE_PORT=18789
 node bin/coworkd-node.js
 ```
 
-Keep `host=127.0.0.1` unless you *fully* understand the security implications of binding to `0.0.0.0`.
+Keep `host=127.0.0.1` unless you _fully_ understand the security implications of binding to `0.0.0.0`.
 
 Headless and managed deployments fail closed on unsafe Control Plane exposure. If `COWORK_MANAGED_DEPLOYMENT=1` or the daemon is running headless, `0.0.0.0`/`::` binds are blocked unless one of these is true:
 

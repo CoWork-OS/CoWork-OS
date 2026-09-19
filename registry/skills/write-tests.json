@@ -18,13 +18,7 @@
       "description": "Testing framework to use",
       "required": true,
       "default": "jest",
-      "options": [
-        "jest",
-        "mocha",
-        "vitest",
-        "pytest",
-        "unittest"
-      ]
+      "options": ["jest", "mocha", "vitest", "pytest", "unittest"]
     }
   ],
   "enabled": true,
@@ -34,9 +28,7 @@
       "dontUseWhen": "Don't use for snapshot tests or manual QA-only validation.",
       "outputs": "Prioritized test plan and test cases with clear coverage mapping.",
       "successCriteria": "Includes positive/negative cases and test setup assumptions.",
-      "expectedArtifacts": [
-        "tests.md"
-      ],
+      "expectedArtifacts": ["tests.md"],
       "examples": {
         "positive": [
           "Use the write-tests skill for this request.",

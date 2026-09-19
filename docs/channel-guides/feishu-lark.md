@@ -40,6 +40,10 @@ Use commands in busy groups so normal conversation does not become task input.
 ## Watch-Outs
 
 - Callback URLs, verification token, and encryption key must match the app configuration.
+- **At least one of Encrypt Key or Verification Token is required.** The callback server
+  will not start without one, and events lacking a valid signature or token are rejected.
+  Both fields were previously optional; leaving them blank meant events were accepted
+  unverified.
 - Enterprise app permissions can affect event delivery.
 - Broad tenant access can create unwanted task routing.
 

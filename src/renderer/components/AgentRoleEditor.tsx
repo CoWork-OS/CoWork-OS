@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AgentRoleData, AgentCapability } from "../../electron/preload";
 import { TWIN_ICON_KEYS, resolveTwinIcon } from "../utils/twin-icons";
+import { BOT_COLOR_PRESETS } from "../utils/bot-colors";
 
 // Alias for UI usage
 type AgentRole = AgentRoleData;
@@ -42,17 +43,6 @@ const ALL_CAPABILITIES: {
   { value: "plan", label: "Plan", icon: "📋", description: "Plan and break down tasks" },
   { value: "design", label: "Design", icon: "🎨", description: "Design systems and architectures" },
   { value: "analyze", label: "Analyze", icon: "📊", description: "Analyze data and performance" },
-];
-
-const PRESET_COLORS = [
-  "#3b82f6", // Blue
-  "#8b5cf6", // Purple
-  "#22c55e", // Green
-  "#f59e0b", // Amber
-  "#ef4444", // Red
-  "#ec4899", // Pink
-  "#06b6d4", // Cyan
-  "#6366f1", // Indigo
 ];
 
 const AUTONOMY_LEVELS = [
@@ -206,14 +196,16 @@ export function AgentRoleEditor({
                   {showColorPicker && (
                     <div className="picker-dropdown">
                       <div className="picker-grid">
-                        {PRESET_COLORS.map((color) => (
+                        {BOT_COLOR_PRESETS.map((preset) => (
                           <button
-                            key={color}
+                            key={preset.value}
                             type="button"
-                            className={`picker-item color ${editedRole.color === color ? "selected" : ""}`}
-                            style={{ backgroundColor: color }}
+                            aria-label={preset.label}
+                            title={preset.label}
+                            className={`picker-item color ${editedRole.color === preset.value ? "selected" : ""}`}
+                            style={{ backgroundColor: preset.value }}
                             onClick={() => {
-                              handleChange("color", color);
+                              handleChange("color", preset.value);
                               setShowColorPicker(false);
                             }}
                           />

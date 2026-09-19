@@ -3,6 +3,7 @@
 This document defines the HTTP contract expected by CoWork OS when `wallet.provider = "coinbase_agentic"`.
 
 Implementation reference:
+
 - `src/electron/infra/providers/coinbase-agentic-wallet-provider.ts`
 
 ## Purpose
@@ -20,9 +21,11 @@ payment actions behind their explicit confirmation and hard-guardrail paths.
 Configure in **Settings > Infrastructure > Wallet > Signer Endpoint**.
 
 Example:
+
 - `https://signer.example.com`
 
 CoWork OS will call:
+
 - `POST /wallet/status`
 - `POST /wallet/ensure`
 - `POST /x402/check`
@@ -106,6 +109,14 @@ Any JSON object is accepted by CoWork OS (result is not parsed deeply), but reco
 
 Checks whether a URL requires x402 payment and returns payment metadata if required.
 
+CoWork OS uses the canonical x402 v2 wire format. `PAYMENT-REQUIRED` is a
+base64-encoded object with `x402Version: 2`, a resource object, and an
+`accepts` array. For the exact EVM scheme, `amount` is an atomic USDC string;
+`1000` means 0.001 USDC and must remain `1000` when it is signed.
+The retry `PAYMENT-SIGNATURE` contains the v2 `PaymentPayload` with the
+selected `accepted` requirement and an EIP-3009 `payload.authorization` whose
+`value` is that same atomic string.
+
 ### Request
 
 ```json
@@ -132,13 +143,20 @@ Checks whether a URL requires x402 payment and returns payment metadata if requi
   "requires402": true,
   "url": "https://paid-api.example.com/data",
   "paymentDetails": {
-    "payTo": "0xmerchant...",
-    "amount": "0.25",
-    "currency": "USDC",
-    "network": "base",
-    "resource": "/data",
-    "description": "Premium endpoint access",
-    "expires": 1735689600
+    "x402Version": 2,
+    "resource": {
+      "url": "https://paid-api.example.com/data",
+      "description": "Premium endpoint access"
+    },
+    "accepts": [{
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "250000",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "payTo": "0xmerchant...",
+      "maxTimeoutSeconds": 300,
+      "extra": { "name": "USD Coin", "version": "2", "assetTransferMethod": "eip3009" }
+    }]
   }
 }
 ```
@@ -174,21 +192,61 @@ payment challenge and must be checked against the policy envelope before signing
       "requires402": true,
       "url": "https://paid-api.example.com/data",
       "paymentDetails": {
+        "x402Version": 2,
+        "resource": { "url": "https://paid-api.example.com/data" },
+        "accepts": [{
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "amount": "250000",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "payTo": "0xmerchant...",
+          "maxTimeoutSeconds": 300,
+          "extra": { "name": "USD Coin", "version": "2", "assetTransferMethod": "eip3009" }
+        }],
+        "selectedRequirement": {
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "amount": "250000",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "payTo": "0xmerchant...",
+          "maxTimeoutSeconds": 300,
+          "extra": { "name": "USD Coin", "version": "2", "assetTransferMethod": "eip3009" }
+        },
+        "resourceUrl": "https://paid-api.example.com/data",
         "scheme": "exact",
         "payTo": "0xmerchant...",
-        "maxAmountRequired": "250000",
+        "amount": "250000",
         "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "network": "eip155:8453",
-        "resource": "/data"
+        "network": "eip155:8453"
       }
     },
     "approvedPaymentDetails": {
+      "x402Version": 2,
+      "resource": { "url": "https://paid-api.example.com/data" },
+      "accepts": [{
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "250000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0xmerchant...",
+        "maxTimeoutSeconds": 300,
+        "extra": { "name": "USD Coin", "version": "2", "assetTransferMethod": "eip3009" }
+      }],
+      "selectedRequirement": {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "amount": "250000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "payTo": "0xmerchant...",
+        "maxTimeoutSeconds": 300,
+        "extra": { "name": "USD Coin", "version": "2", "assetTransferMethod": "eip3009" }
+      },
+      "resourceUrl": "https://paid-api.example.com/data",
       "scheme": "exact",
       "payTo": "0xmerchant...",
-      "maxAmountRequired": "250000",
+      "amount": "250000",
       "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-      "network": "eip155:8453",
-      "resource": "/data"
+      "network": "eip155:8453"
     },
     "approvedAt": "2026-06-01T10:00:00.000Z"
   }
@@ -205,15 +263,26 @@ payment challenge and must be checked against the policy envelope before signing
     "content-type": "application/json"
   },
   "paymentMade": true,
-  "amountPaid": "0.25",
+  "amountPaid": "250000",
   "paymentPolicyEnforced": true,
   "paymentDetails": {
+    "x402Version": 2,
+    "resource": { "url": "https://paid-api.example.com/data" },
+    "accepts": [{
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "250000",
+      "asset": "0x833589fCD6eDb6E08f4c7C32d4f71b54bda02913",
+      "payTo": "0xmerchant...",
+      "maxTimeoutSeconds": 300,
+      "extra": { "name": "USD Coin", "version": "2", "assetTransferMethod": "eip3009" }
+    }],
+    "resourceUrl": "https://paid-api.example.com/data",
     "scheme": "exact",
     "payTo": "0xmerchant...",
-    "maxAmountRequired": "250000",
-    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "network": "eip155:8453",
-    "resource": "/data"
+    "amount": "250000",
+    "asset": "0x833589fCD6eDb6E08f4c7C32d4f71b54bdA02913",
+    "network": "eip155:8453"
   }
 }
 ```
@@ -222,7 +291,7 @@ payment challenge and must be checked against the policy envelope before signing
 - `body` (string): upstream response body as text.
 - `headers` (object): flattened response headers.
 - `paymentMade` (boolean): whether payment/signature flow was used.
-- `amountPaid` (string, optional): decimal USDC amount.
+- `amountPaid` (string, optional): atomic USDC amount from the selected v2 requirement.
 - `paymentPolicyEnforced` (boolean, required when `paymentMade=true`): signer
   confirmed it enforced the supplied policy envelope before signing.
 - `paymentDetails` (object, required when `paymentMade=true`): exact upstream
@@ -243,6 +312,7 @@ payment challenge and must be checked against the policy envelope before signing
 ```
 
 Suggested codes:
+
 - `SIGNER_UNAUTHORIZED`
 - `SIGNER_POLICY_BLOCKED`
 - `X402_PAYMENT_REQUIREMENT_CHANGED`
@@ -259,14 +329,17 @@ Suggested codes:
    - host allowlist, per-request max, per-day budget, account scoping.
 3. Enforce the desktop `paymentPolicy` envelope before signing:
    - reject missing or unsupported `policyVersion`
-   - reject if the real upstream payment amount exceeds `effectiveHardLimitUsd`
-   - reject unsupported asset/currency/network combinations. Supported USDC
+   - reject if the real upstream atomic payment amount exceeds `effectiveHardLimitUsd`
+   - reject unsupported scheme/asset/currency/network combinations. Supported USDC
      assets are Base mainnet `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
      and Base Sepolia `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
    - reject resources that do not match the requested URL
-   - when `approvedPaymentDetails` is present, reject if the real upstream
-     challenge differs in `scheme`, `payTo`, `amount`, `maxAmountRequired`,
-     `asset`, `currency`, `network`, `resource`, or `expires`
+   - require `x402Version: 2`, an absolute resource URL matching the request,
+     exactly one supported exact EVM Base USDC requirement, and EIP-3009 token
+     domain metadata in `extra`
+   - when `approvedPaymentDetails` is present, compare the complete canonical
+     challenge, including `resource`, every `accepts` entry, the selected
+     requirement, `maxTimeoutSeconds`, token-domain metadata, and extensions
    - when `requireApproval` is true and no exact approved payment details are
      present, reject instead of signing silently
 4. Never expose private keys over API.
@@ -276,6 +349,7 @@ Suggested codes:
 ## CoWork OS Policy Interaction
 
 Desktop-side policy is enforced at two points:
+
 - Optional host allowlist (`payments.allowedHosts`)
 - Advisory preflight estimate (`/x402/check`), when available
 - Final policy/approval gate on the real upstream `402` challenge

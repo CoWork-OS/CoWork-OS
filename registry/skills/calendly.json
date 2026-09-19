@@ -20,14 +20,7 @@
   "metadata": {
     "version": "1.0.0",
     "author": "CoWork OS",
-    "tags": [
-      "calendly",
-      "scheduling",
-      "calendar",
-      "meetings",
-      "booking",
-      "availability"
-    ],
+    "tags": ["calendly", "scheduling", "calendar", "meetings", "booking", "availability"],
     "routing": {
       "useWhen": "User asks about Calendly meetings, scheduling links, availability, booking, upcoming events, or wants to manage their Calendly calendar",
       "dontUseWhen": "User asks about Google Calendar, Apple Calendar, Outlook calendar, or general time management without Calendly",

@@ -37,12 +37,12 @@ Write viral, persuasive tweets and threads optimized for X's algorithm. Research
 
 ## Parameters
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| topic | string | Yes | The niche, topic, or specific message to write about |
-| goal | string | No | What you want to achieve: engagement, followers, conversions, brand awareness, etc. |
+| Name  | Type   | Required | Description                                                                         |
+| ----- | ------ | -------- | ----------------------------------------------------------------------------------- |
+| topic | string | Yes      | The niche, topic, or specific message to write about                                |
+| goal  | string | No       | What you want to achieve: engagement, followers, conversions, brand awareness, etc. |
 
 ## Runtime Prompt
 
 - Current runtime prompt length: 3288 characters.
-- Runtime prompt is defined directly in `../twitter.json`. 
+- Runtime prompt is defined directly in `../twitter.json`.

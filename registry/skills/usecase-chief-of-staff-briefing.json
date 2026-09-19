@@ -12,12 +12,7 @@
       "description": "Time horizon for the briefing",
       "required": false,
       "default": "morning",
-      "options": [
-        "morning",
-        "today",
-        "tomorrow",
-        "week"
-      ]
+      "options": ["morning", "today", "tomorrow", "week"]
     },
     {
       "name": "audience_style",
@@ -25,11 +20,7 @@
       "description": "How executive vs detailed the brief should be",
       "required": false,
       "default": "executive",
-      "options": [
-        "executive",
-        "concise",
-        "detailed"
-      ]
+      "options": ["executive", "concise", "detailed"]
     },
     {
       "name": "include_optional_signals",
@@ -37,10 +28,7 @@
       "description": "Include weather/ops/revenue signals when connectors exist",
       "required": false,
       "default": "yes",
-      "options": [
-        "yes",
-        "no"
-      ]
+      "options": ["yes", "no"]
     },
     {
       "name": "delivery_style",
@@ -48,10 +36,7 @@
       "description": "Formatting style for final output",
       "required": false,
       "default": "mobile",
-      "options": [
-        "mobile",
-        "report"
-      ]
+      "options": ["mobile", "report"]
     }
   ],
   "enabled": true,

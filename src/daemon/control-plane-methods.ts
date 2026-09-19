@@ -988,19 +988,22 @@ export function registerControlPlaneMethods(
       typeof validated.agentConfig?.accessProfileId === "string" &&
       validated.agentConfig.accessProfileId.trim().length > 0;
     const compatibilityAgentConfig =
-      validated.shellAccess === true && !hasNamedAccessProfile
-        ? {
+      validated.shellAccess === undefined
+        ? validated.agentConfig
+        : {
             ...(validated.agentConfig || {}),
-            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
-          }
-        : validated.agentConfig;
-    const normalizedAgentConfig =
-      validated.shellAccess !== undefined
-        ? compatibilityAgentConfig
-        : applyDefaultAccessProfile(
-            compatibilityAgentConfig,
-            PermissionSettingsManager.loadSettings(),
-          );
+            // Keep an explicit legacy shell=false as a task-level ceiling;
+            // otherwise the configured named default could silently enable
+            // command tools on this direct daemon entry point.
+            shellAccess: validated.shellAccess,
+            ...(validated.shellAccess === true && !hasNamedAccessProfile
+              ? { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval }
+              : {}),
+          };
+    const normalizedAgentConfig = applyDefaultAccessProfile(
+      compatibilityAgentConfig,
+      PermissionSettingsManager.loadSettings(),
+    );
 
     const task = taskRepo.create({
       title: validated.title,
@@ -1483,7 +1486,16 @@ export function registerControlPlaneMethods(
 
     const searchStatus = SearchProviderFactory.getConfigStatus();
 
-    const controlPlane = ControlPlaneSettingsManager.getSettingsForDisplay();
+    // Redacted unconditionally: `config.get` is gated at `read` scope, which is
+    // what companion "node" clients hold, and the raw settings carry `token`
+    // (the admin credential), `nodeToken`, and per-device tokens. Redacting for
+    // admins too keeps the token out of `cowork doctor --json` stdout.
+    //
+    // The raw settings are kept separately for the deployment-posture check
+    // below, which inspects the real token values; only the copy that leaves
+    // this process is redacted.
+    const controlPlaneSettings = ControlPlaneSettingsManager.loadSettingsWithSecrets();
+    const controlPlane = redactObjectSecrets(controlPlaneSettings);
     const envImport = {
       enabled: shouldImportEnvSettingsFromArgsOrEnv(),
       mode: getEnvSettingsImportModeFromArgsOrEnv(),
@@ -1501,7 +1513,7 @@ export function registerControlPlaneMethods(
       importEnvSettings: envImport,
     };
     const deploymentPosture = evaluateControlPlaneDeploymentPosture({
-      settings: controlPlane,
+      settings: controlPlaneSettings,
       headless: runtime.headless,
       managedDeployment: shouldUseManagedDeploymentModeFromEnv(),
       bindContext: getControlPlaneBindContextFromEnv(),

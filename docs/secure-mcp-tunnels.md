@@ -38,13 +38,13 @@ Remote CoWork caller
 
 Webhook tunnels such as ngrok/localtunnel expose a local HTTP port publicly. Secure MCP Tunnels do not.
 
-| Capability | Webhook tunnel | Secure MCP tunnel |
-|---|---|---|
-| Primary use | Public webhook ingress | MCP JSON-RPC forwarding |
-| Network direction from user machine | Public inbound URL to local port | Outbound WebSocket to relay |
-| Target scope | Any HTTP path on exposed port | Configured MCP endpoint only |
-| Policy layer | Channel/webhook auth | Tool allowlist, read-only mode, size/time limits |
-| Recommended for MCP tools | No | Yes |
+| Capability                          | Webhook tunnel                   | Secure MCP tunnel                                |
+| ----------------------------------- | -------------------------------- | ------------------------------------------------ |
+| Primary use                         | Public webhook ingress           | MCP JSON-RPC forwarding                          |
+| Network direction from user machine | Public inbound URL to local port | Outbound WebSocket to relay                      |
+| Target scope                        | Any HTTP path on exposed port    | Configured MCP endpoint only                     |
+| Policy layer                        | Channel/webhook auth             | Tool allowlist, read-only mode, size/time limits |
+| Recommended for MCP tools           | No                               | Yes                                              |
 
 Keep webhook tunnels for channels that need public webhook callbacks. Use Secure MCP Tunnels for private MCP tool access.
 
@@ -118,12 +118,12 @@ The relay listens on `127.0.0.1:8787` by default.
 
 Optional relay environment variables:
 
-| Variable | Default | Purpose |
-|---|---:|---|
-| `COWORK_TUNNEL_RELAY_PORT` | `8787` | Relay HTTP/WebSocket port |
-| `COWORK_TUNNEL_RELAY_HOST` | `127.0.0.1` | Bind host |
-| `COWORK_TUNNEL_RELAY_ADMIN_TOKEN` | unset | Required to create tunnel credentials |
-| `COWORK_TUNNEL_RELAY_ALLOW_DEV_ADMIN` | unset | Set to `1` only for local tests that intentionally skip admin auth |
+| Variable                              |     Default | Purpose                                                            |
+| ------------------------------------- | ----------: | ------------------------------------------------------------------ |
+| `COWORK_TUNNEL_RELAY_PORT`            |      `8787` | Relay HTTP/WebSocket port                                          |
+| `COWORK_TUNNEL_RELAY_HOST`            | `127.0.0.1` | Bind host                                                          |
+| `COWORK_TUNNEL_RELAY_ADMIN_TOKEN`     |       unset | Required to create tunnel credentials                              |
+| `COWORK_TUNNEL_RELAY_ALLOW_DEV_ADMIN` |       unset | Set to `1` only for local tests that intentionally skip admin auth |
 
 The relay fails closed for credential creation when no admin token is configured. Do not set `COWORK_TUNNEL_RELAY_ALLOW_DEV_ADMIN=1` outside local development tests.
 
@@ -233,13 +233,13 @@ Security controls:
 
 Default policy limits:
 
-| Setting | Default |
-|---|---:|
-| `maxRequestBytes` | `262144` |
-| `maxResponseBytes` | `1048576` |
-| `requestTimeoutMs` | `60000` |
-| `allowedTools` | empty means all tools |
-| `readOnly` | `false` |
+| Setting            |               Default |
+| ------------------ | --------------------: |
+| `maxRequestBytes`  |              `262144` |
+| `maxResponseBytes` |             `1048576` |
+| `requestTimeoutMs` |               `60000` |
+| `allowedTools`     | empty means all tools |
+| `readOnly`         |               `false` |
 
 Read-only mode uses a conservative tool-name heuristic. It blocks tool names containing write-like tokens such as `write`, `create`, `update`, `delete`, `remove`, `send`, `publish`, `execute`, `run`, `install`, `deploy`, `commit`, and `push`. For stronger production control, use explicit `allowedTools`.
 

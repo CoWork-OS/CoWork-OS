@@ -5,20 +5,12 @@ import { createRequire } from "node:module";
 import { afterEach, describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const {
-  getNpmInstallModeArgs,
-  getRuntimeDependencyRepairArgs,
-  isSourceCheckout,
-} = require(
-  "../scripts/npm_install_mode.cjs",
-) as {
-  getNpmInstallModeArgs: (rootDir: string) => string[];
-  getRuntimeDependencyRepairArgs: (
-    rootDir: string,
-    missingSpecs: string[],
-  ) => string[];
-  isSourceCheckout: (rootDir: string) => boolean;
-};
+const { getNpmInstallModeArgs, getRuntimeDependencyRepairArgs, isSourceCheckout } =
+  require("../scripts/npm_install_mode.cjs") as {
+    getNpmInstallModeArgs: (rootDir: string) => string[];
+    getRuntimeDependencyRepairArgs: (rootDir: string, missingSpecs: string[]) => string[];
+    isSourceCheckout: (rootDir: string) => boolean;
+  };
 
 const tempDirs: string[] = [];
 
@@ -41,9 +33,9 @@ describe("npm dependency repair mode", () => {
 
     expect(isSourceCheckout(rootDir)).toBe(true);
     expect(getNpmInstallModeArgs(rootDir)).toEqual(["--include=dev"]);
-    expect(
-      getRuntimeDependencyRepairArgs(rootDir, ["electron@^40.4.1"]),
-    ).toEqual(["--include=dev"]);
+    expect(getRuntimeDependencyRepairArgs(rootDir, ["electron@^40.4.1"])).toEqual([
+      "--include=dev",
+    ]);
   });
 
   it("preserves development dependencies in a git worktree", () => {
@@ -58,13 +50,8 @@ describe("npm dependency repair mode", () => {
     const rootDir = createTempRoot();
 
     expect(isSourceCheckout(rootDir)).toBe(false);
-    expect(getNpmInstallModeArgs(rootDir)).toEqual([
-      "--omit=dev",
-      "--package-lock=false",
-    ]);
-    expect(
-      getRuntimeDependencyRepairArgs(rootDir, ["electron@^40.4.1"]),
-    ).toEqual([
+    expect(getNpmInstallModeArgs(rootDir)).toEqual(["--omit=dev", "--package-lock=false"]);
+    expect(getRuntimeDependencyRepairArgs(rootDir, ["electron@^40.4.1"])).toEqual([
       "--omit=dev",
       "--package-lock=false",
       "electron@^40.4.1",

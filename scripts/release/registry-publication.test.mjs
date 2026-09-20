@@ -441,6 +441,66 @@ test("default publisher uses an isolated npm config and exact publish flags", as
   }
 });
 
+test("GitHub Packages publisher leaves access mode at the registry default", async () => {
+  const githubEntry = {
+    ...entry,
+    id: "github",
+    name: "@cowork-os/cowork-os",
+    registry: "https://npm.pkg.github.com",
+  };
+  const fakeBin = await mkdtemp(join(tmpdir(), "registry-publication-github-npm-"));
+  const captureFile = join(fakeBin, "capture.json");
+  const fakeNpm = join(fakeBin, "npm");
+  await writeFile(
+    fakeNpm,
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "fs.writeFileSync(process.env.COWORK_CAPTURE_FILE, JSON.stringify({ argv: process.argv.slice(2) }));",
+    ].join("\n"),
+  );
+  await chmod(fakeNpm, 0o755);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}:${oldPath || ""}`;
+  process.env.COWORK_CAPTURE_FILE = captureFile;
+  try {
+    await withBundle(githubEntry, bytes, async (directory) => {
+      let lookups = 0;
+      const result = await publishPackage(githubEntry, {
+        directory,
+        token: "private-token",
+        fetchImpl: async (url) => {
+          if (String(url).endsWith(".tgz")) return new Response(bytes);
+          lookups += 1;
+          return response(
+            200,
+            lookups === 1
+              ? packument(githubEntry)
+              : matchingPackument(
+                  githubEntry,
+                  `${githubEntry.registry}/@cowork-os/cowork-os/-/cowork-os.tgz`,
+                ),
+          );
+        },
+        sleep: async () => {},
+      });
+      assert.equal(result.status, "published");
+      const capture = JSON.parse(await readFile(captureFile, "utf8"));
+      assert.deepEqual(capture.argv.slice(2), [
+        "--registry",
+        githubEntry.registry,
+        "--ignore-scripts",
+        "--tag",
+        "latest",
+      ]);
+    });
+  } finally {
+    process.env.PATH = oldPath;
+    delete process.env.COWORK_CAPTURE_FILE;
+    await rm(fakeBin, { recursive: true, force: true });
+  }
+});
+
 test("CLI verify rejects an absent package", async () => {
   await assert.rejects(
     () =>

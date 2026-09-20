@@ -14,6 +14,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const NPM_CMD = process.platform === "win32" ? "npm.cmd" : "npm";
 const NPM_EXEC_PATH = (() => {
@@ -37,10 +38,16 @@ function isKilled(res) {
   return res.signal === "SIGKILL" || res.status === 137 || res.status === 9;
 }
 
-function electronPresent() {
-  const local = path.join(process.cwd(), "node_modules", "electron", "package.json");
-  const parent = path.join(process.cwd(), "..", "electron", "package.json");
-  return fs.existsSync(local) || fs.existsSync(parent);
+export function electronPresent(cwd = process.cwd()) {
+  let cursor = path.resolve(cwd);
+  while (true) {
+    if (fs.existsSync(path.join(cursor, "node_modules", "electron", "package.json"))) {
+      return true;
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) return false;
+    cursor = parent;
+  }
 }
 
 function installGitHooks() {
@@ -106,7 +113,9 @@ async function main() {
   process.exit(lastStatus);
 }
 
-main().catch((err) => {
-  console.error("[cowork] setup failed:", err);
-  process.exit(1);
-});
+if (import.meta.url === pathToFileURL(path.resolve(process.argv[1] || "")).href) {
+  main().catch((err) => {
+    console.error("[cowork] setup failed:", err);
+    process.exit(1);
+  });
+}

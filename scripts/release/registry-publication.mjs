@@ -187,11 +187,10 @@ async function defaultPublish({ entry, directory, token, distTag }) {
     "--registry",
     entry.registry,
     "--ignore-scripts",
-    "--access",
-    "public",
     "--tag",
     distTag,
   ];
+  if (entry.id === "npm") args.splice(5, 0, "--access", "public");
   const temp = await mkdtemp(join(tmpdir(), "cowork-publish-"));
   const npmrc = join(temp, ".npmrc");
   const host = new URL(entry.registry).host;

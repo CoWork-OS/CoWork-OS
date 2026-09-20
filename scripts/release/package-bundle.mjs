@@ -320,14 +320,19 @@ async function githubResponse(
   fail("GitHub redirect limit exceeded");
 }
 
-async function github(apiPath, context) {
+async function githubJson(apiPath, context, { allowNotFound = false } = {}) {
   const response = await githubResponse(`https://api.github.com${apiPath}`, context);
+  if (response.status === 404 && allowNotFound) return null;
   if (response.status !== 200) fail(`GitHub API returned HTTP ${response.status}`);
   try {
     return await response.json();
   } catch {
     fail("malformed GitHub response");
   }
+}
+
+async function github(apiPath, context) {
+  return githubJson(apiPath, context);
 }
 
 async function getRelease(context) {
@@ -341,10 +346,17 @@ async function getRelease(context) {
   }
   if (object?.type !== "commit" || object.sha !== sourceSha)
     fail("release tag does not point at RELEASE_SHA");
-  const release = await github(
+  let release = await githubJson(
     `/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`,
     context,
+    { allowNotFound: true },
   );
+  if (!release) {
+    const releases = await github(`/repos/${repository}/releases?per_page=100`, context);
+    if (!Array.isArray(releases)) fail("invalid release list");
+    release = releases.find((candidate) => candidate?.tag_name === tag);
+  }
+  if (!release) fail("release not found");
   if (
     release.tag_name !== tag ||
     !Array.isArray(release.assets) ||

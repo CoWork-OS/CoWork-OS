@@ -240,6 +240,8 @@ features:
     details: Bundled legal practice packs expose upstream-style slash commands through CoWork's plugin-pack system. Legal workflow selections are editable before launch, and matter-heavy tasks can show structured main-view intake cards such as the dedicated demand-letter intake form.
   - title: Multitask Command
     details: `/multitask [N] <task>` starts a fresh collaborative run, splits the prompt into 2-8 lane-specific child tasks, respects the global task queue, and synthesizes the lane outputs through the existing team orchestration flow.
+  - title: Release 0.5.54
+    details: Release publication recovery now preserves exact registry bundles, validates checksums before parsing, resolves draft releases reliably, keeps GitHub Packages access scoped correctly, and refreshes public adoption reporting.
   - title: Release 0.5.53
     details: Profile-first approval boundaries, MLX/Atomic Chat/Jev local execution, durable WorkSessions, bot collaboration, Box Brain, CoWork Pulse, and security/release hardening.
   - title: Inbox Agent

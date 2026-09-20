@@ -44,7 +44,7 @@ function trustedUrl(value, { registryHost, allowDownload = false } = {}) {
     url.hostname !== registryHost &&
     !(allowDownload && GITHUB_DOWNLOAD_HOSTS.has(url.hostname))
   ) {
-    fail("Registry response points to an untrusted host");
+    fail(`Registry response points to an untrusted host: ${url.hostname}`);
   }
   return url;
 }

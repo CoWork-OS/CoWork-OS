@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.54] - 2026-09-20
+
+### Changed
+
+- **Release publication**: registry bundles now retain exact package bytes across retries, resolve draft GitHub releases through the release list fallback, and keep scoped GitHub Packages access at the registry default.
+- **Public adoption reporting**: refreshed generated README signals, detailed snapshot data, and append-only history from the public GitHub/npm sources.
+
+### Fixed
+
+- **Release integrity**: package checksums are validated before archive parsing, and recovery workflow paths work on GitHub-hosted runners without unsupported job-level runner contexts.
+- **Release notes**: see [Release Notes 0.5.54](release-notes-0.5.54.md).
+
 ## [0.5.53] - 2026-09-20
 
 ### Added
@@ -1409,6 +1421,7 @@ for the defect, fix, and enforcement point of each item.
 
 | Version | Date       | Highlights                                                                                                                                                                                                        |
 | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0.5.54  | 2026-09-20 | Registry publication recovery, exact package/checksum validation, corrected GitHub Packages access behavior, portable recovery CI, and refreshed public adoption reporting                                      |
 | 0.5.53  | 2026-09-20 | Profile-first approvals, MLX/Atomic Chat/Jev execution, durable WorkSessions, bot collaboration, Box Brain, CoWork Pulse, security hardening, and release tooling                   |
 | 0.5.52  | 2026-08-27 | OpenRouter image generation, OpenCode Zen/Go, SearXNG/Web Search Plus, Atlas Cloud, Electron 44, macOS 13 minimum, and reliability hardening                                                                      |
 | 0.5.51  | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery                               |
@@ -1439,7 +1452,8 @@ for the defect, fix, and enforcement point of each item.
 | 0.1.0   | 2025-01-24 | First public release with core features                                                                                                                                                                           |
 | 0.0.1   | 2025-01-20 | Initial development setup                                                                                                                                                                                         |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.53...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.54...HEAD
+[0.5.54]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.53...v0.5.54
 [0.5.53]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.52...v0.5.53
 [0.5.52]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.51...v0.5.52
 [0.5.51]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.5.50...v0.5.51

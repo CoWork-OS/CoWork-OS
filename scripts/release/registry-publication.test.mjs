@@ -364,6 +364,31 @@ test("auth is only sent to registry host and absent on off-host download redirec
   assert.equal(calls[2].headers.authorization, undefined);
 });
 
+test("GitHub package tarballs accept the package-container redirect host", async () => {
+  const github = {
+    ...entry,
+    id: "github",
+    name: "@cowork-os/cowork-os",
+    registry: "https://npm.pkg.github.com",
+  };
+  const calls = [];
+  const tarball = "https://npm.pkg.github.com/download/@cowork-os/cowork-os/1.2.3/pkg.tgz";
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), headers: options.headers });
+    if (String(url) === tarball)
+      return response(302, undefined, {
+        location: "https://pkg-containers.githubusercontent.com/ghcr1/blobs/pkg.tgz",
+      });
+    if (String(url).includes("pkg-containers.githubusercontent.com")) return new Response(bytes);
+    return response(200, matchingPackument(github, tarball));
+  };
+
+  assert.equal(await inspectRegistry(github, { token: "secret", fetchImpl }), "matching");
+  assert.equal(calls[0].headers.authorization, "Bearer secret");
+  assert.equal(calls[1].headers.authorization, "Bearer secret");
+  assert.equal(calls[2].headers.authorization, undefined);
+});
+
 test("malicious registry target is rejected before network", async () => {
   let calls = 0;
   await assert.rejects(

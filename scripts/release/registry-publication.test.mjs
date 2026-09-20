@@ -389,6 +389,26 @@ test("GitHub package tarballs accept the package-container redirect host", async
   assert.equal(calls[2].headers.authorization, undefined);
 });
 
+test("GitHub package tarballs accept the npm package redirect host", async () => {
+  const github = {
+    ...entry,
+    id: "github",
+    name: "@cowork-os/cowork-os",
+    registry: "https://npm.pkg.github.com",
+  };
+  const tarball = "https://npm.pkg.github.com/download/@cowork-os/cowork-os/1.2.3/pkg.tgz";
+  const fetchImpl = async (url) => {
+    if (String(url) === tarball)
+      return response(302, undefined, {
+        location: "https://pkg-npm.githubusercontent.com/download/pkg.tgz",
+      });
+    if (String(url).includes("pkg-npm.githubusercontent.com")) return new Response(bytes);
+    return response(200, matchingPackument(github, tarball));
+  };
+
+  assert.equal(await inspectRegistry(github, { token: "secret", fetchImpl }), "matching");
+});
+
 test("malicious registry target is rejected before network", async () => {
   let calls = 0;
   await assert.rejects(

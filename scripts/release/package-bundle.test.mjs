@@ -531,3 +531,37 @@ test("missing bundle permits only authenticated first preparation with both vers
     /indeterminate 404/,
   );
 });
+
+test("finds draft release from the release list when tag lookup returns 404", async () => {
+  const context = {
+    tag: "v1.2.3",
+    sourceSha: "a".repeat(40),
+    repository: "owner/repo",
+    token: "fake",
+    npmToken: "fake",
+  };
+  let listReads = 0;
+  const fetchImpl = async (url) => {
+    const href = String(url);
+    if (href.includes("/git/ref/tags/"))
+      return new Response(JSON.stringify({ object: { type: "commit", sha: context.sourceSha } }));
+    if (href.includes("/releases/tags/")) return new Response(null, { status: 404 });
+    if (href.includes("/releases?per_page=100")) {
+      listReads++;
+      return new Response(
+        JSON.stringify([{ id: 4, tag_name: context.tag, draft: true, assets: [] }]),
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        name: href.includes("npm.pkg.github.com") ? "@cowork-os/cowork-os" : "cowork-os",
+        versions: {},
+      }),
+    );
+  };
+  assert.deepEqual(
+    await restoreBundle({ ...context, fetchImpl, allowMissing: true, runAttempt: 1 }),
+    { restored: false },
+  );
+  assert.equal(listReads, 1);
+});

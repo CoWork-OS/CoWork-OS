@@ -31,7 +31,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag }}
       RELEASE_SHA: ${{ inputs.source_sha }}
-      RELEASE_BUNDLE_DIR: ${{ runner.temp }}/registry-bundle
+      RELEASE_BUNDLE_DIR: registry-bundle
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6

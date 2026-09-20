@@ -5,8 +5,15 @@ import {
   computePromptCacheKey,
   computeStablePrefixHash,
   computeToolSchemaHash,
+  buildSystemBlock,
+  extractAnthropicUsage,
+  isPromptCacheRequestUnsupportedError,
+  buildOpenAIPromptCacheFields,
   mapPromptCacheTtlToOpenAIRetention,
+  mapPromptCacheTtlToPiAiRetention,
   normalizePromptCachingSettings,
+  normalizeSystemBlocks,
+  prependVolatileSystemContextToMessages,
   resolvePromptCacheProviderFamily,
 } from "../prompt-cache";
 
@@ -259,6 +266,31 @@ describe("prompt-cache stable prefix hashing", () => {
     expect(alternateExecutionKey).not.toBe(planningKey);
   });
 
+  it("keeps automatic OpenRouter cache sessions scoped to the routed model", async () => {
+    const basePrompt = await ContentBuilder.buildExecutionPrompt({
+      ...basePromptParams,
+      currentTimePrompt: "Current time: 2026-04-04T10:00:00Z",
+    });
+    const geminiKey = computePromptCacheKey({
+      providerFamily: "openrouter-implicit",
+      modelId: "google/gemini-2.5-flash",
+      toolSchemaHash: sampleToolSchemaHash,
+      executionMode: "execute",
+      taskDomain: "code",
+      systemBlocks: basePrompt.stableSystemBlocks,
+    });
+    const grokKey = computePromptCacheKey({
+      providerFamily: "openrouter-implicit",
+      modelId: "x-ai/grok-4.1-fast",
+      toolSchemaHash: sampleToolSchemaHash,
+      executionMode: "execute",
+      taskDomain: "code",
+      systemBlocks: basePrompt.stableSystemBlocks,
+    });
+
+    expect(grokKey).not.toBe(geminiKey);
+  });
+
   it("resolves OpenAI-family provider families and retention mapping", () => {
     expect(resolvePromptCacheProviderFamily("openai", "gpt-5.4")).toBe("openai");
     expect(resolvePromptCacheProviderFamily("azure", "gpt-5.4")).toBe("azure-openai");
@@ -268,7 +300,104 @@ describe("prompt-cache stable prefix hashing", () => {
     expect(resolvePromptCacheProviderFamily("openrouter", "anthropic/claude-sonnet-4-5")).toBe(
       "openrouter-claude",
     );
+    expect(resolvePromptCacheProviderFamily("openrouter", "qwen/qwen3-max")).toBe(
+      "openrouter-explicit",
+    );
+    expect(resolvePromptCacheProviderFamily("openrouter", "google/gemini-2.5-flash")).toBe(
+      "openrouter-implicit",
+    );
+    expect(resolvePromptCacheProviderFamily("bedrock", "us.anthropic.claude-sonnet-4-5-v1:0")).toBe(
+      "bedrock-anthropic",
+    );
+    expect(resolvePromptCacheProviderFamily("bedrock", "us.amazon.nova-pro-v1:0")).toBe(
+      "bedrock-nova",
+    );
+    expect(resolvePromptCacheProviderFamily("pi", "claude-sonnet-4-5")).toBe("pi-anthropic");
+    expect(resolvePromptCacheProviderFamily("pi", "gpt-5.4")).toBe("pi-openai");
+    expect(resolvePromptCacheProviderFamily("openai-compatible", "gpt-5.6-sol")).toBe(
+      "openai-compatible",
+    );
+    expect(resolvePromptCacheProviderFamily("opencode", "gpt-5.5")).toBe("openai-compatible");
+    expect(resolvePromptCacheProviderFamily("opencode", "claude-sonnet-4-6")).toBe(
+      "anthropic-compatible",
+    );
     expect(mapPromptCacheTtlToOpenAIRetention("5m")).toBeUndefined();
     expect(mapPromptCacheTtlToOpenAIRetention("1h")).toBe("24h");
+    expect(mapPromptCacheTtlToPiAiRetention()).toBe("none");
+    expect(
+      mapPromptCacheTtlToPiAiRetention({
+        mode: "anthropic_auto",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+      }),
+    ).toBe("long");
+    expect(
+      mapPromptCacheTtlToPiAiRetention({
+        mode: "disabled",
+        ttl: "5m",
+        explicitRecentMessages: 3,
+      }),
+    ).toBe("none");
+  });
+
+  it("uses modern implicit cache-write controls for GPT-5.6 and later", () => {
+    expect(
+      buildOpenAIPromptCacheFields(
+        {
+          mode: "openai_key",
+          ttl: "1h",
+          explicitRecentMessages: 3,
+          cacheKey: "stable-prefix",
+          retention: "24h",
+        },
+        "gpt-5.7-sol",
+      ),
+    ).toEqual({
+      prompt_cache_key: "stable-prefix",
+      prompt_cache_options: { mode: "implicit", ttl: "30m" },
+    });
+  });
+
+  it("puts stable session blocks before volatile turn blocks", () => {
+    const blocks = normalizeSystemBlocks("", [
+      buildSystemBlock("turn", "Current time: now", "turn", false),
+      buildSystemBlock("session", "Stable instructions", "session", true),
+    ]);
+
+    expect(blocks.map((block) => block.stableKey)).toEqual(["session", "turn"]);
+  });
+
+  it("moves volatile context into the first user turn for Pi cache prefixes", () => {
+    const messages = prependVolatileSystemContextToMessages(
+      [{ role: "user", content: "Do the work" }],
+      "Current time: now",
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toContain("<cowork_turn_context>");
+    expect(messages[0].content).toContain("Do the work");
+  });
+
+  it("preserves Anthropic cache-write TTL details for accounting", () => {
+    expect(
+      extractAnthropicUsage({
+        input_tokens: 100,
+        output_tokens: 5,
+        cache_read_input_tokens: 20,
+        cache_creation: { ephemeral_1h_input_tokens: 80 },
+      }),
+    ).toMatchObject({
+      inputTokens: 100,
+      cachedTokens: 20,
+      cacheWriteTokens: 80,
+      cacheWriteTtl: "1h",
+    });
+  });
+
+  it("only disables caching for errors that identify cache request incompatibility", () => {
+    expect(isPromptCacheRequestUnsupportedError(400, "Unknown parameter: prompt_cache_key")).toBe(
+      true,
+    );
+    expect(isPromptCacheRequestUnsupportedError(400, "Invalid API key")).toBe(false);
   });
 });

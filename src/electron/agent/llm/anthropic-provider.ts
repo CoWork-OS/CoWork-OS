@@ -17,6 +17,7 @@ import {
   convertSystemBlocksToTextParts,
   extractAnthropicUsage,
   isPromptCacheAutoUnsupportedError,
+  isPromptCacheRequestUnsupportedError,
   normalizeSystemBlocks,
 } from "./prompt-cache";
 import { createLogger } from "../../utils/logger";
@@ -111,6 +112,17 @@ export class AnthropicProvider implements LLMProvider {
           tools,
         );
         return this.convertResponse(streamedResponse);
+      }
+
+      if (
+        effectivePromptCache &&
+        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
+      ) {
+        logger.warn("Prompt cache controls rejected; retrying without cache controls", {
+          model,
+          status: error?.status,
+        });
+        return this.createMessage({ ...request, promptCache: undefined });
       }
 
       // Handle abort errors gracefully

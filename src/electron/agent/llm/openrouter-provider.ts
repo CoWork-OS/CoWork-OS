@@ -14,6 +14,7 @@ import {
   applyExplicitSystemBlockMarker,
   convertSystemBlocksToTextParts,
   extractOpenAICompatibleCacheUsage,
+  isPromptCacheRequestUnsupportedError,
   normalizeSystemBlocks,
 } from "./prompt-cache";
 import {
@@ -134,6 +135,7 @@ export class OpenRouterProvider implements LLMProvider {
         maxTokens: request.maxTokens,
         tools,
         toolChoice: request.toolChoice,
+        promptCache,
         signal: request.signal,
       });
       return this.convertResponse(data);
@@ -142,6 +144,20 @@ export class OpenRouterProvider implements LLMProvider {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         logger.info("Request aborted");
         throw new Error("Request cancelled");
+      }
+
+      if (
+        promptCache &&
+        isPromptCacheRequestUnsupportedError(
+          error?.status,
+          error?.providerMessage || error?.message,
+        )
+      ) {
+        logger.warn("OpenRouter prompt cache controls rejected; retrying without cache controls", {
+          model,
+          status: error?.status,
+        });
+        return this.createMessage({ ...request, promptCache: undefined });
       }
 
       if (this.shouldDemoteErrorLog(error)) {
@@ -360,6 +376,7 @@ export class OpenRouterProvider implements LLMProvider {
       };
     }>;
     toolChoice?: LLMRequest["toolChoice"];
+    promptCache?: LLMRequest["promptCache"];
     signal?: AbortSignal;
   }): Promise<Any> {
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -373,6 +390,11 @@ export class OpenRouterProvider implements LLMProvider {
         model: params.model,
         messages: params.messages,
         max_tokens: params.maxTokens,
+        ...(params.promptCache?.cacheKey &&
+        (params.promptCache.mode === "openrouter_implicit" ||
+          params.promptCache.mode === "anthropic_explicit")
+          ? { session_id: params.promptCache.cacheKey }
+          : {}),
         ...this.getParetoRouterPluginBody(params.model),
         ...(params.tools && params.tools.length > 0
           ? {

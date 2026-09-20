@@ -422,6 +422,39 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
+  it("retries a Responses request without cache controls when the endpoint rejects them", async () => {
+    responsesCreateMock
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Unknown parameter: prompt_cache_options"), { status: 400 }),
+      )
+      .mockResolvedValueOnce({
+        output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+      });
+
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.6-sol",
+      openaiApiKey: "sk-test",
+    });
+
+    await provider.createMessage({
+      model: "gpt-5.6-sol",
+      maxTokens: 64,
+      system: "system",
+      promptCache: {
+        mode: "openai_key",
+        ttl: "5m",
+        explicitRecentMessages: 3,
+        cacheKey: "stable-prefix",
+      },
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(responsesCreateMock).toHaveBeenCalledTimes(2);
+    expect(responsesCreateMock.mock.calls[0][0]).toHaveProperty("prompt_cache_key");
+    expect(responsesCreateMock.mock.calls[1][0]).not.toHaveProperty("prompt_cache_key");
+  });
+
   it("strips provider and profile routing suffixes before an Astra API request", async () => {
     responsesCreateMock.mockResolvedValue({
       output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
@@ -696,6 +729,7 @@ describe("OpenAIProvider structured errors", () => {
       expect.any(Object),
       expect.objectContaining({
         sessionId: "codex-session",
+        cacheRetention: "long",
       }),
     );
   });
@@ -754,6 +788,35 @@ describe("OpenAIProvider structured errors", () => {
         textVerbosity: "high",
       }),
     );
+  });
+
+  it("injects modern cache-write options into the subscription transport payload", async () => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    });
+    getModelsMock.mockReturnValue([{ id: "gpt-5.6-sol" }]);
+    const provider = new OpenAIProvider({ ...makeConfig(), model: "gpt-5.6-sol" });
+
+    await provider.createMessage({
+      ...makeRequest(),
+      model: "gpt-5.6-sol",
+      promptCache: {
+        mode: "openai_key",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+        cacheKey: "codex-session",
+      },
+    });
+
+    const options = completeMock.mock.calls.at(-1)?.[2] as Any;
+    expect(options.cacheRetention).toBe("long");
+    expect(options.sessionId).toBe("codex-session");
+    expect(options.onPayload({ prompt_cache_key: "codex-session" })).toEqual({
+      prompt_cache_key: "codex-session",
+      prompt_cache_options: { mode: "implicit", ttl: "30m" },
+    });
   });
 
   it("forwards GPT-6 Astra Ultra reasoning and response verbosity to the ChatGPT backend", async () => {

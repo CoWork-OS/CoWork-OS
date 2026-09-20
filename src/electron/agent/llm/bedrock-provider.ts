@@ -17,8 +17,14 @@ import {
   LLMResponse,
   LLMContent,
   LLMMessage,
+  LLMSystemBlock,
   LLMTool,
 } from "./types";
+import {
+  convertSystemBlocksToTextParts,
+  isPromptCacheRequestUnsupportedError,
+  normalizeSystemBlocks,
+} from "./prompt-cache";
 
 /**
  * AWS Bedrock provider implementation
@@ -66,11 +72,14 @@ export class BedrockProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
-    const toolNameMap = request.tools ? this.buildToolNameMap(request.tools) : undefined;
+    const toolNameMap = request.tools?.length ? this.buildToolNameMap(request.tools) : undefined;
     const preparedMessages = this.prepareMessagesForConverse(request.messages);
-    const messages = this.convertMessages(preparedMessages, toolNameMap);
-    const system = this.convertSystem(request.system);
-    const toolConfig = request.tools ? this.convertTools(request.tools, toolNameMap) : undefined;
+    const messages = this.convertMessages(preparedMessages, toolNameMap, request.promptCache);
+    const system = this.convertSystem(request.system, request.systemBlocks, request.promptCache);
+    const toolConfig =
+      request.tools && request.tools.length > 0
+        ? this.convertTools(request.tools, toolNameMap, request.promptCache)
+        : undefined;
 
     const resolvedModelId = await this.resolveModelId(request.model);
     const clampedMaxTokens = this.clampToKnownOutputLimit(resolvedModelId, request.maxTokens);
@@ -133,6 +142,14 @@ export class BedrockProvider implements LLMProvider {
           `Model ${request.model} requires an inference profile in AWS Bedrock, but none could be resolved automatically. ` +
             `Select an inference profile ID/ARN (often starts with "us.") in Settings.`,
         );
+      }
+
+      if (
+        request.promptCache?.mode !== "disabled" &&
+        isPromptCacheRequestUnsupportedError(error?.$metadata?.httpStatusCode, rawMessage)
+      ) {
+        console.warn(`${logTag} Prompt cache unsupported; retrying without cache controls`);
+        return this.createMessage({ ...request, promptCache: undefined });
       }
 
       console.error(`${logTag} API error:`, {
@@ -419,8 +436,30 @@ export class BedrockProvider implements LLMProvider {
     return requestedMaxTokens;
   }
 
-  private convertSystem(system: string): SystemContentBlock[] {
-    return [{ text: system }];
+  private convertSystem(
+    system: string,
+    systemBlocks?: LLMSystemBlock[],
+    promptCache?: LLMRequest["promptCache"],
+  ): SystemContentBlock[] {
+    const blocks = normalizeSystemBlocks(system, systemBlocks);
+    if (blocks.length === 0) {
+      return [{ text: system }];
+    }
+
+    const textParts = convertSystemBlocksToTextParts(system, systemBlocks);
+    const result: SystemContentBlock[] = textParts.map((part) => ({ text: part.text }));
+    if (!this.isPromptCacheEnabled(promptCache)) {
+      return result;
+    }
+
+    const stableIndex = blocks.reduce(
+      (lastIndex, block, index) =>
+        block.scope === "session" && block.cacheable ? index : lastIndex,
+      -1,
+    );
+    const cachePoint = this.buildCachePoint(promptCache?.ttl);
+    result.splice(stableIndex >= 0 ? stableIndex + 1 : result.length, 0, cachePoint);
+    return result;
   }
 
   private ensureConversationEndsWithUserMessage(messages: LLMMessage[]): LLMMessage[] {
@@ -668,8 +707,12 @@ export class BedrockProvider implements LLMProvider {
     return ids;
   }
 
-  private convertMessages(messages: LLMMessage[], toolNameMap?: ToolNameMap): Message[] {
-    return messages.map((msg) => {
+  private convertMessages(
+    messages: LLMMessage[],
+    toolNameMap?: ToolNameMap,
+    promptCache?: LLMRequest["promptCache"],
+  ): Message[] {
+    const result = messages.map((msg) => {
       const content: ContentBlock[] = [];
 
       if (typeof msg.content === "string") {
@@ -713,19 +756,48 @@ export class BedrockProvider implements LLMProvider {
         content,
       };
     });
+
+    if (this.isPromptCacheEnabled(promptCache)) {
+      const lastUserMessage = [...result].reverse().find((message) => message.role === "user");
+      if (lastUserMessage) {
+        lastUserMessage.content.push(this.buildCachePoint(promptCache?.ttl));
+      }
+    }
+
+    return result;
   }
 
-  private convertTools(tools: LLMTool[], toolNameMap?: ToolNameMap): ToolConfiguration {
+  private convertTools(
+    tools: LLMTool[],
+    toolNameMap?: ToolNameMap,
+    promptCache?: LLMRequest["promptCache"],
+  ): ToolConfiguration | undefined {
+    if (!tools.length) return undefined;
+    const bedrockTools: Any[] = tools.map((tool) => ({
+      toolSpec: {
+        name: toolNameMap?.toProvider.get(tool.name) || tool.name,
+        description: tool.description,
+        inputSchema: {
+          json: tool.input_schema,
+        } as ToolInputSchema,
+      },
+    }));
+    if (this.isPromptCacheEnabled(promptCache)) {
+      bedrockTools.push(this.buildCachePoint(promptCache?.ttl));
+    }
+    return { tools: bedrockTools } as ToolConfiguration;
+  }
+
+  private isPromptCacheEnabled(promptCache?: LLMRequest["promptCache"]): boolean {
+    return Boolean(promptCache && promptCache.mode !== "disabled");
+  }
+
+  private buildCachePoint(ttl?: NonNullable<LLMRequest["promptCache"]>["ttl"]): Any {
     return {
-      tools: tools.map((tool) => ({
-        toolSpec: {
-          name: toolNameMap?.toProvider.get(tool.name) || tool.name,
-          description: tool.description,
-          inputSchema: {
-            json: tool.input_schema,
-          } as ToolInputSchema,
-        },
-      })),
+      cachePoint: {
+        type: "default",
+        ...(ttl === "1h" ? { ttl: "1h" } : {}),
+      },
     };
   }
 
@@ -752,6 +824,13 @@ export class BedrockProvider implements LLMProvider {
       }
     }
 
+    const cacheWriteTokens = Number(response.usage?.cacheWriteInputTokens || 0);
+    const cacheWriteTtl =
+      cacheWriteTokens > 0
+        ? response.usage?.cacheDetails?.find((detail: Any) => Number(detail?.inputTokens || 0) > 0)
+            ?.ttl
+        : undefined;
+
     return {
       content,
       stopReason: this.mapStopReason(response.stopReason),
@@ -759,6 +838,9 @@ export class BedrockProvider implements LLMProvider {
         ? {
             inputTokens: response.usage.inputTokens || 0,
             outputTokens: response.usage.outputTokens || 0,
+            cachedTokens: response.usage.cacheReadInputTokens || undefined,
+            cacheWriteTokens: cacheWriteTokens || undefined,
+            ...(cacheWriteTtl === "5m" || cacheWriteTtl === "1h" ? { cacheWriteTtl } : {}),
           }
         : undefined,
     };

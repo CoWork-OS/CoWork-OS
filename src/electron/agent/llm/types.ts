@@ -306,7 +306,9 @@ export type LLMPromptCacheMode =
   | "anthropic_auto"
   | "anthropic_explicit"
   | "openai_key"
-  | "openrouter_implicit";
+  | "openrouter_implicit"
+  | "bedrock"
+  | "pi";
 
 export type PromptCacheProviderFamily =
   | "unsupported"
@@ -314,9 +316,16 @@ export type PromptCacheProviderFamily =
   | "azure-anthropic"
   | "anthropic-compatible"
   | "openrouter-claude"
+  | "openrouter-explicit"
   | "openai"
   | "azure-openai"
-  | "openrouter-openai";
+  | "openai-compatible"
+  | "openrouter-openai"
+  | "openrouter-implicit"
+  | "bedrock-anthropic"
+  | "bedrock-nova"
+  | "pi-anthropic"
+  | "pi-openai";
 
 export interface LLMPromptCacheConfig {
   mode: LLMPromptCacheMode;
@@ -370,6 +379,8 @@ export interface LLMResponse {
     cachedTokens?: number;
     /** Tokens used to create or extend a provider-side prompt cache entry. */
     cacheWriteTokens?: number;
+    /** TTL reported by the provider for the cache write, when available. */
+    cacheWriteTtl?: "5m" | "1h";
   };
 }
 

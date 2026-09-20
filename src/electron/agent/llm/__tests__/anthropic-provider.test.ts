@@ -80,6 +80,28 @@ describe("AnthropicProvider", () => {
     });
   });
 
+  it("uses the same cache-write request controls for Claude subscription tokens", async () => {
+    const provider = new AnthropicProvider({
+      type: "anthropic",
+      model: "claude-sonnet-4-6",
+      anthropicApiKey: "sk-ant-oat01-subscription-token",
+    });
+
+    await provider.createMessage({
+      ...makeRequest(),
+      promptCache: {
+        mode: "anthropic_auto",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+      },
+    });
+
+    expect(anthropicCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ cache_control: { type: "ephemeral", ttl: "1h" } }),
+      undefined,
+    );
+  });
+
   it("normalizes legacy Claude snapshot IDs before making requests", async () => {
     const provider = new AnthropicProvider({
       type: "anthropic",

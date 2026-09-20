@@ -5,6 +5,7 @@ import { BedrockProvider } from "../bedrock-provider";
 // Keep provider initialization predictable; no profile creds needed
 
 let capturedConverseInput: Any = null;
+let mockUsage: Any = { inputTokens: 10, outputTokens: 20 };
 
 vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
   BedrockRuntimeClient: vi.fn().mockImplementation(function (this: Any) {
@@ -17,10 +18,7 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
           },
         },
         stopReason: "end_turn",
-        usage: {
-          inputTokens: 10,
-          outputTokens: 20,
-        },
+        usage: mockUsage,
       };
     });
   }),
@@ -38,6 +36,7 @@ const config: LLMProviderConfig = {
 describe("BedrockProvider", () => {
   beforeEach(() => {
     capturedConverseInput = null;
+    mockUsage = { inputTokens: 10, outputTokens: 20 };
     vi.clearAllMocks();
   });
 
@@ -94,6 +93,79 @@ describe("BedrockProvider", () => {
       role: "assistant",
       content: [{ text: "I completed the step." }],
     });
+  });
+
+  it("writes Bedrock cache points and returns cache usage separately", async () => {
+    mockUsage = {
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadInputTokens: 60,
+      cacheWriteInputTokens: 40,
+      cacheDetails: [{ inputTokens: 40, ttl: "1h" }],
+    };
+    const provider = new BedrockProvider(config);
+
+    const response = await provider.createMessage({
+      model: config.model,
+      maxTokens: 128,
+      system: "stable instructions\n\ncurrent turn context",
+      systemBlocks: [
+        {
+          text: "current turn context",
+          scope: "turn",
+          cacheable: false,
+          stableKey: "time:1",
+        },
+        {
+          text: "stable instructions",
+          scope: "session",
+          cacheable: true,
+          stableKey: "identity:1",
+        },
+      ],
+      promptCache: {
+        mode: "bedrock",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+      },
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(capturedConverseInput.system).toEqual([
+      { text: "stable instructions" },
+      { cachePoint: { type: "default", ttl: "1h" } },
+      { text: "current turn context" },
+    ]);
+    expect(capturedConverseInput.messages.at(-1).content).toEqual([
+      { text: "hello" },
+      { cachePoint: { type: "default", ttl: "1h" } },
+    ]);
+    expect(response.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      cachedTokens: 60,
+      cacheWriteTokens: 40,
+      cacheWriteTtl: "1h",
+    });
+  });
+
+  it("does not send an empty cache-only tool configuration", async () => {
+    const provider = new BedrockProvider(config);
+
+    await provider.createMessage({
+      model: config.model,
+      maxTokens: 64,
+      system: "stable instructions",
+      promptCache: {
+        mode: "bedrock",
+        ttl: "5m",
+        explicitRecentMessages: 3,
+      },
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+    });
+
+    expect(capturedConverseInput.toolConfig).toBeUndefined();
   });
 
   it("merges consecutive user turns and keeps valid tool_result blocks aligned", async () => {

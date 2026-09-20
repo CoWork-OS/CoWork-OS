@@ -147,7 +147,7 @@ import { loadPolicies } from "../admin/policies";
 import { resolveEffectiveAccessProfile } from "../security/access-profile-resolver";
 import { PersonalityManager } from "../settings/personality-manager";
 import { detectContextMode } from "./context-mode-detector";
-import { calculateCost, formatCost } from "./llm/pricing";
+import { calculateCost, formatCost, getCacheTokenAccounting } from "./llm/pricing";
 import {
   getProviderImageCaps,
   loadImageFromFile,
@@ -164,6 +164,7 @@ import {
   mapPromptCacheTtlToOpenAIRetention,
   mergeStableSystemBlocks,
   normalizePromptCachingSettings,
+  orderSystemBlocksForStablePrefix,
   resolvePromptCacheProviderFamily,
 } from "./llm/prompt-cache";
 import { assertNormalizedTurnTranscript } from "./runtime/turn-transcript-normalizer";
@@ -919,6 +920,7 @@ export class TaskExecutor {
   private toolSchemaHash = "";
   private promptCacheMode: LLMPromptCacheMode = "disabled";
   private promptCacheProviderFamily: PromptCacheProviderFamily = "unsupported";
+  private promptCacheTtl: "5m" | "1h" = "5m";
   private emittedVideoPreviewArtifactPaths = new Set<string>();
   private promptCacheInvalidationReason: string | null = null;
   private currentPromptCacheContext: {
@@ -5642,6 +5644,7 @@ ${transcript}
           response.usage.outputTokens,
           response.usage.cachedTokens,
           response.usage.cacheWriteTokens,
+          response.usage.cacheWriteTtl,
         );
       }
 
@@ -6856,6 +6859,7 @@ ${transcript}
         toolSchemaHash: String(self.toolSchemaHash || ""),
         promptCacheMode: self.promptCacheMode || "disabled",
         promptCacheProviderFamily: self.promptCacheProviderFamily || "unsupported",
+        promptCacheTtl: self.promptCacheTtl || "5m",
         promptCacheInvalidationReason:
           typeof self.promptCacheInvalidationReason === "string"
             ? self.promptCacheInvalidationReason
@@ -7344,6 +7348,13 @@ ${transcript}
       () => runtime.state.promptCache.promptCacheProviderFamily,
       (value) => {
         runtime.state.promptCache.promptCacheProviderFamily = value || "unsupported";
+      },
+    );
+    this.installRuntimeFieldProxy(
+      "promptCacheTtl",
+      () => runtime.state.promptCache.promptCacheTtl,
+      (value) => {
+        runtime.state.promptCache.promptCacheTtl = value === "1h" ? "1h" : "5m";
       },
     );
     this.installRuntimeFieldProxy(
@@ -9967,6 +9978,7 @@ ${transcript}
     outputTokens: number,
     cachedTokens = 0,
     cacheWriteTokens = 0,
+    cacheWriteTtl?: "5m" | "1h",
   ): void {
     const safeInput = Number.isFinite(inputTokens) ? inputTokens : 0;
     const safeOutput = Number.isFinite(outputTokens) ? outputTokens : 0;
@@ -9978,6 +9990,11 @@ ${transcript}
       safeOutput,
       safeCached,
       safeCacheWrite,
+      getCacheTokenAccounting(this.provider?.type, this.modelId),
+      {
+        providerType: this.provider?.type,
+        cacheTtl: cacheWriteTtl || this.promptCacheTtl,
+      },
     );
 
     this.totalInputTokens += safeInput;
@@ -10008,6 +10025,7 @@ ${transcript}
           outputTokens: safeOutput,
           cachedTokens: safeCached,
           ...(safeCacheWrite > 0 ? { cacheWriteTokens: safeCacheWrite } : {}),
+          ...(cacheWriteTtl ? { cacheWriteTtl } : {}),
           totalTokens: safeInput + safeOutput,
           cost: deltaCost,
         },
@@ -14146,6 +14164,7 @@ ${transcript}
           response.usage.outputTokens,
           response.usage.cachedTokens,
           response.usage.cacheWriteTokens,
+          response.usage.cacheWriteTtl,
         );
       }
 
@@ -15724,7 +15743,9 @@ ${transcript}
     return (
       providerFamily === "openai" ||
       providerFamily === "azure-openai" ||
-      providerFamily === "openrouter-openai"
+      providerFamily === "openai-compatible" ||
+      providerFamily === "openrouter-openai" ||
+      providerFamily === "openrouter-implicit"
     );
   }
 
@@ -15765,8 +15786,8 @@ ${transcript}
     taskDomain: TaskDomain;
   }): string {
     const settings = this.getEffectivePromptCachingSettings();
-    const normalizedBlocks = context.systemBlocks.filter(
-      (block) => String(block?.text || "").trim().length > 0,
+    const normalizedBlocks = orderSystemBlocksForStablePrefix(
+      context.systemBlocks.filter((block) => String(block?.text || "").trim().length > 0),
     );
     const candidateStableBlocks = normalizedBlocks.filter(
       (block) => block.scope === "session" && block.cacheable,
@@ -15828,6 +15849,7 @@ ${transcript}
     }
 
     const settings = this.getEffectivePromptCachingSettings();
+    this.promptCacheTtl = settings.ttl;
     const providerType = this.getProviderTypeForRuntime();
     if (providerType === "unknown") {
       return {};
@@ -15838,15 +15860,27 @@ ${transcript}
         ? "disabled"
         : providerFamily === "openrouter-claude"
           ? "anthropic_explicit"
-          : providerFamily === "anthropic" ||
-              providerFamily === "azure-anthropic" ||
-              providerFamily === "anthropic-compatible"
-            ? "anthropic_auto"
-            : providerFamily === "openai" || providerFamily === "azure-openai"
-              ? "openai_key"
-              : providerFamily === "openrouter-openai"
-                ? "openrouter_implicit"
-                : "disabled";
+          : providerFamily === "openrouter-explicit"
+            ? "anthropic_explicit"
+            : providerFamily === "bedrock-anthropic"
+              ? "bedrock"
+              : providerFamily === "bedrock-nova"
+                ? "bedrock"
+                : providerFamily === "anthropic" ||
+                    providerFamily === "azure-anthropic" ||
+                    providerFamily === "anthropic-compatible"
+                  ? "anthropic_auto"
+                  : providerFamily === "pi-anthropic" || providerFamily === "pi-openai"
+                    ? "pi"
+                    : providerFamily === "openai" ||
+                        providerFamily === "azure-openai" ||
+                        providerFamily === "openai-compatible"
+                      ? "openai_key"
+                      : providerFamily === "openrouter-openai"
+                        ? "openrouter_implicit"
+                        : providerFamily === "openrouter-implicit"
+                          ? "openrouter_implicit"
+                          : "disabled";
 
     const toolSchemaHash = computeToolSchemaHash((args.tools || []) as LLMTool[]);
     const stableBlocks = context.systemBlocks.filter(
@@ -15905,7 +15939,11 @@ ${transcript}
         mode: promptCacheMode,
         ttl: settings.ttl,
         explicitRecentMessages: 3,
-        ...(promptCacheMode === "openai_key" || promptCacheMode === "openrouter_implicit"
+        ...(promptCacheMode === "openai_key" ||
+        promptCacheMode === "openrouter_implicit" ||
+        promptCacheMode === "pi" ||
+        (promptCacheMode === "anthropic_explicit" &&
+          (providerFamily === "openrouter-claude" || providerFamily === "openrouter-explicit"))
           ? { cacheKey: promptCacheKey }
           : {}),
         ...(promptCacheMode === "openai_key"
@@ -25222,6 +25260,7 @@ You are continuing a previous conversation. The context from the previous conver
               contResponse.usage.outputTokens,
               contResponse.usage.cachedTokens,
               contResponse.usage.cacheWriteTokens,
+              contResponse.usage.cacheWriteTtl,
             );
           }
           const contText = this.extractTextFromLLMContent(contResponse.content || []);
@@ -26654,6 +26693,7 @@ Return ONLY a JSON object:
           response.usage.outputTokens,
           response.usage.cachedTokens,
           response.usage.cacheWriteTokens,
+          response.usage.cacheWriteTtl,
         );
       }
 
@@ -27320,6 +27360,7 @@ Return ONLY a JSON object:
         response.usage.outputTokens,
         response.usage.cachedTokens,
         response.usage.cacheWriteTokens,
+        response.usage.cacheWriteTtl,
       );
     }
 
@@ -35463,6 +35504,7 @@ Return ONLY a JSON object:
           response.usage.outputTokens,
           response.usage.cachedTokens,
           response.usage.cacheWriteTokens,
+          response.usage.cacheWriteTtl,
         );
       }
 

@@ -21,6 +21,13 @@ import {
 import { imageToTextFallback } from "./image-utils";
 import { loadPiAiModule } from "./pi-ai-loader";
 import { parseOpenAICompatibleToolArguments } from "./openai-compatible";
+import {
+  buildOpenAIPromptCacheFields,
+  isPromptCacheRequestUnsupportedError,
+  mapPromptCacheTtlToPiAiRetention,
+  prependVolatileSystemContextToMessages,
+  splitSystemBlocksForOpenAIPrefix,
+} from "./prompt-cache";
 
 const DEFAULT_PI_PROVIDER: KnownProvider = "anthropic";
 
@@ -78,24 +85,58 @@ export class PiProvider implements LLMProvider {
         `[Pi] Calling ${this.piProvider} with model: ${model.id} (requested: ${request.model})`,
       );
 
+      const { stableText, volatileText } = splitSystemBlocksForOpenAIPrefix(
+        request.system || "",
+        request.systemBlocks,
+      );
+      const piMessageInput =
+        request.promptCache && request.promptCache.mode !== "disabled"
+          ? prependVolatileSystemContextToMessages(request.messages, volatileText)
+          : request.messages;
+
       // Convert messages to pi-ai format
-      const piAiMessages = this.convertMessagesToPiAi(request.messages);
+      const piAiMessages = this.convertMessagesToPiAi(piMessageInput);
 
       // Convert tools to pi-ai format
       const piAiTools = request.tools ? this.convertToolsToPiAi(request.tools) : undefined;
 
       // Build context
       const context: PiAiContext = {
-        systemPrompt: request.system,
+        systemPrompt: stableText || request.system,
         messages: piAiMessages,
         tools: piAiTools,
       };
 
       // Make the API call using pi-ai
+      const cacheRetention = mapPromptCacheTtlToPiAiRetention(request.promptCache);
+      const sessionId =
+        cacheRetention === "none" ? undefined : request.promptCache?.cacheKey || undefined;
+      const isOpenAIPiModel =
+        String((model as Any).api || "")
+          .toLowerCase()
+          .includes("openai") || /(?:^|[-/.])(?:gpt|o[1-9])(?:[-/.]|$)/i.test(model.id);
+      const cacheFields = isOpenAIPiModel
+        ? buildOpenAIPromptCacheFields(
+            request.promptCache && request.promptCache.mode !== "disabled"
+              ? { ...request.promptCache, mode: "openai_key" }
+              : undefined,
+            model.id,
+          )
+        : {};
       const response = await piAiComplete(model, context, {
         apiKey: this.apiKey,
         maxTokens: request.maxTokens,
         signal: request.signal,
+        cacheRetention,
+        ...(sessionId ? { sessionId } : {}),
+        ...(Object.keys(cacheFields).length > 0
+          ? {
+              onPayload: (payload: unknown) => ({
+                ...((payload || {}) as Record<string, Any>),
+                ...cacheFields,
+              }),
+            }
+          : {}),
       });
 
       // Convert pi-ai response to CoWork OS format
@@ -104,6 +145,17 @@ export class PiProvider implements LLMProvider {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[Pi] Request aborted`);
         throw new Error("Request cancelled");
+      }
+
+      if (
+        request.promptCache &&
+        isPromptCacheRequestUnsupportedError(
+          error?.status,
+          error?.providerMessage || error?.message,
+        )
+      ) {
+        console.warn(`[Pi] Prompt cache controls rejected; retrying without cache controls`);
+        return this.createMessage({ ...request, promptCache: undefined });
       }
 
       console.error(`[Pi] API error (${this.piProvider}):`, {
@@ -374,6 +426,8 @@ export class PiProvider implements LLMProvider {
         ? {
             inputTokens: response.usage.input || 0,
             outputTokens: response.usage.output || 0,
+            cachedTokens: response.usage.cacheRead || undefined,
+            cacheWriteTokens: response.usage.cacheWrite || undefined,
           }
         : undefined,
     };

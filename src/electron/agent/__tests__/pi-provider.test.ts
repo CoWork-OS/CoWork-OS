@@ -110,6 +110,98 @@ describe("PiProvider", () => {
     });
   });
 
+  describe("prompt caching", () => {
+    it("forwards cache retention and session affinity to pi-ai", async () => {
+      completeMock.mockResolvedValue({
+        content: [{ type: "text", text: "cached" }],
+        stopReason: "stop",
+        usage: {
+          input: 100,
+          output: 5,
+          cacheRead: 80,
+          cacheWrite: 20,
+        },
+      });
+
+      const provider = new PiProvider(createConfig());
+      const response = await provider.createMessage({
+        model: "claude-sonnet-4-5-20250514",
+        maxTokens: 128,
+        system: "stable system",
+        messages: [{ role: "user", content: "hello" }],
+        promptCache: {
+          mode: "anthropic_auto",
+          ttl: "1h",
+          explicitRecentMessages: 3,
+          cacheKey: "pi-session",
+        },
+      });
+
+      expect(completeMock).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Object),
+        expect.objectContaining({
+          cacheRetention: "long",
+          sessionId: "pi-session",
+        }),
+      );
+      expect(response.usage).toEqual({
+        inputTokens: 100,
+        outputTokens: 5,
+        cachedTokens: 80,
+        cacheWriteTokens: 20,
+      });
+    });
+
+    it("disables cache retention when the request explicitly disables caching", async () => {
+      completeMock.mockResolvedValue({
+        content: [{ type: "text", text: "ok" }],
+        stopReason: "stop",
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      });
+
+      const provider = new PiProvider(createConfig());
+      await provider.createMessage({
+        model: "claude-sonnet-4-5-20250514",
+        maxTokens: 16,
+        system: "system",
+        messages: [{ role: "user", content: "hello" }],
+        promptCache: {
+          mode: "disabled",
+          ttl: "5m",
+          explicitRecentMessages: 3,
+          cacheKey: "must-not-be-used",
+        },
+      });
+
+      expect(completeMock).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Object),
+        expect.objectContaining({ cacheRetention: "none" }),
+      );
+      expect(completeMock.mock.calls.at(-1)?.[2]).not.toHaveProperty("sessionId");
+    });
+
+    it("does not opt side calls into cache writes when no cache config is supplied", async () => {
+      completeMock.mockResolvedValue({
+        content: [{ type: "text", text: "ok" }],
+        stopReason: "stop",
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      });
+
+      const provider = new PiProvider(createConfig());
+      await provider.createMessage({
+        model: "claude-sonnet-4-5-20250514",
+        maxTokens: 16,
+        system: "system",
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      expect(completeMock.mock.calls.at(-1)?.[2]).toMatchObject({ cacheRetention: "none" });
+      expect(completeMock.mock.calls.at(-1)?.[2]).not.toHaveProperty("sessionId");
+    });
+  });
+
   describe("convertMessagesToPiAi", () => {
     it("should convert a simple user string message", () => {
       const provider = new PiProvider(createConfig());

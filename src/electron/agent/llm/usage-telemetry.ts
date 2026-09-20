@@ -3,7 +3,7 @@ import type { LLMResponse } from "./types";
 import { DatabaseManager } from "../../database/schema";
 import { UsageInsightsProjector } from "../../reports/UsageInsightsProjector";
 import { normalizeLlmProviderType } from "../../../shared/llmProviderDisplay";
-import { calculateCost } from "./pricing";
+import { calculateCost, getCacheTokenAccounting } from "./pricing";
 
 type LlmCallTelemetryInput = {
   workspaceId?: string | null;
@@ -54,7 +54,18 @@ export function recordLlmCallSuccess(
   const providerType = normalizeLlmProviderType(input.providerType) || null;
   const cost =
     inputTokens > 0 || outputTokens > 0 || cachedTokens > 0 || cacheWriteTokens > 0
-      ? calculateCost(modelId, inputTokens, outputTokens, cachedTokens, cacheWriteTokens)
+      ? calculateCost(
+          modelId,
+          inputTokens,
+          outputTokens,
+          cachedTokens,
+          cacheWriteTokens,
+          getCacheTokenAccounting(providerType, modelId),
+          {
+            providerType,
+            cacheTtl: usage?.cacheWriteTtl,
+          },
+        )
       : 0;
 
   try {

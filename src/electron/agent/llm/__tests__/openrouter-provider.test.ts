@@ -313,6 +313,7 @@ describe("OpenRouterProvider attribution headers", () => {
         mode: "anthropic_explicit",
         ttl: "5m",
         explicitRecentMessages: 3,
+        cacheKey: "claude-session",
       },
       messages: [
         { role: "user", content: "m1" },
@@ -331,6 +332,7 @@ describe("OpenRouterProvider attribution headers", () => {
     expect(capturedBody.messages[4].content[0].cache_control).toEqual({ type: "ephemeral" });
     expect(capturedBody.messages[5].content[0].cache_control).toEqual({ type: "ephemeral" });
     expect(countCacheMarkers(capturedBody.messages)).toBe(4);
+    expect(capturedBody.session_id).toBe("claude-session");
   });
 
   it("never applies cache_control to OpenRouter tool messages", async () => {
@@ -462,6 +464,54 @@ describe("OpenRouterProvider attribution headers", () => {
       { role: "user", content: "hello" },
     ]);
     expect(countCacheMarkers(capturedBody.messages)).toBe(0);
+    expect(capturedBody.session_id).toBe("stable-prefix-hash");
+  });
+
+  it("retries once without cache controls when a route rejects them", async () => {
+    const requestBodies: Any[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      requestBodies.push(JSON.parse(String(init?.body || "{}")));
+      if (requestBodies.length === 1) {
+        return {
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          json: vi.fn().mockResolvedValue({
+            error: { message: "Unknown parameter: prompt_cache_options" },
+          }),
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        }),
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      model: "google/gemini-2.5-flash",
+      openrouterApiKey: "test-key",
+    });
+
+    await provider.createMessage({
+      model: "google/gemini-2.5-flash",
+      maxTokens: 32,
+      system: "stable",
+      promptCache: {
+        mode: "openrouter_implicit",
+        ttl: "5m",
+        explicitRecentMessages: 3,
+        cacheKey: "session-key",
+      },
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestBodies[0].session_id).toBe("session-key");
+    expect(requestBodies[1].session_id).toBeUndefined();
   });
 
   it("honors toolChoice=none for OpenAI-family requests", async () => {

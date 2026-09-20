@@ -12,7 +12,7 @@ import {
   fromOpenAICompatibleResponse,
   type OpenAICompatibleToolOptions,
 } from "./openai-compatible";
-import { buildOpenAIPromptCacheFields } from "./prompt-cache";
+import { buildOpenAIPromptCacheFields, isPromptCacheRequestUnsupportedError } from "./prompt-cache";
 
 const OPENCODE_GO_KIMI_MAX_COMPLETION_TOKENS = 32_768;
 
@@ -419,10 +419,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
         if (this.isAtomicChatProvider()) {
           throw this.classifyAtomicHttpError(response.status, errorMessage);
         }
-        throw new Error(
+        const error = new Error(
           `${this.providerName} API error: ${response.status} ${response.statusText}` +
             (errorMessage ? ` - ${errorMessage}` : ""),
-        );
+        ) as LLMProviderError;
+        error.status = response.status;
+        error.providerMessage = errorMessage || undefined;
+        error.errorData = errorData;
+        throw error;
       }
 
       let data: Any;
@@ -475,6 +479,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
       return fromOpenAICompatibleResponse(data);
     } catch (error: Any) {
+      if (
+        request.promptCache &&
+        isPromptCacheRequestUnsupportedError(
+          error?.status,
+          error?.providerMessage || error?.message,
+        )
+      ) {
+        console.warn(
+          `[${this.providerName}] Prompt cache controls rejected; retrying without cache controls`,
+        );
+        return this.createMessage({ ...request, promptCache: undefined });
+      }
+
       if (error instanceof AtomicChatProviderError) {
         throw error;
       }

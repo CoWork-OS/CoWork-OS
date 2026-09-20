@@ -1,3 +1,5 @@
+import { CUSTOM_PROVIDER_MAP } from "../../../shared/llm-provider-catalog";
+
 /**
  * Model Pricing Table
  *
@@ -12,6 +14,47 @@ export interface ModelPricing {
   cachedInputPer1M?: number;
   /** Cost per 1M cache-write tokens. Defaults to inputPer1M for legacy providers. */
   cacheWritePer1M?: number;
+}
+
+export type CacheTokenAccounting = "inclusive" | "disjoint";
+
+export interface CacheCostOptions {
+  /** Provider route used to choose provider-specific cache-write pricing. */
+  providerType?: string | null;
+  /** Requested or provider-reported cache-write TTL. */
+  cacheTtl?: "5m" | "1h";
+}
+
+export function getCacheTokenAccounting(
+  providerType?: string | null,
+  modelId?: string | null,
+): CacheTokenAccounting {
+  const provider = String(providerType || "")
+    .trim()
+    .toLowerCase();
+  if (
+    provider === "anthropic" ||
+    provider === "azure-anthropic" ||
+    provider === "anthropic-compatible" ||
+    provider === "bedrock"
+  ) {
+    return "disjoint";
+  }
+
+  if (CUSTOM_PROVIDER_MAP.get(provider)?.compatibility === "anthropic") {
+    return "disjoint";
+  }
+
+  // Pi is a transport over several upstreams. Its Anthropic and Bedrock
+  // backends expose the same disjoint usage counters as their native APIs.
+  if (
+    provider === "pi" &&
+    /(?:^|[./_-])(?:claude|anthropic)(?:[./_-]|$)/i.test(String(modelId || ""))
+  ) {
+    return "disjoint";
+  }
+
+  return "inclusive";
 }
 
 /**
@@ -110,6 +153,48 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     cachedInputPer1M: 1.0,
     cacheWritePer1M: 12.5,
   },
+  "gpt-5.6-sol": {
+    inputPer1M: 4.0,
+    outputPer1M: 20.0,
+    cachedInputPer1M: 0.4,
+    cacheWritePer1M: 5.0,
+  },
+  "gpt-5.6-terra": {
+    inputPer1M: 2.0,
+    outputPer1M: 12.0,
+    cachedInputPer1M: 0.2,
+    cacheWritePer1M: 2.5,
+  },
+  "gpt-5.6-luna": {
+    inputPer1M: 0.2,
+    outputPer1M: 1.2,
+    cachedInputPer1M: 0.02,
+    cacheWritePer1M: 0.25,
+  },
+  "gpt-5.5": {
+    inputPer1M: 5.0,
+    outputPer1M: 30.0,
+    cachedInputPer1M: 0.5,
+    cacheWritePer1M: 0,
+  },
+  "gpt-5.4": {
+    inputPer1M: 2.5,
+    outputPer1M: 15.0,
+    cachedInputPer1M: 0.25,
+    cacheWritePer1M: 0,
+  },
+  "gpt-5.4-mini": {
+    inputPer1M: 0.75,
+    outputPer1M: 4.5,
+    cachedInputPer1M: 0.075,
+    cacheWritePer1M: 0,
+  },
+  "gpt-5.4-nano": {
+    inputPer1M: 0.2,
+    outputPer1M: 1.25,
+    cachedInputPer1M: 0.02,
+    cacheWritePer1M: 0,
+  },
   "gpt-4o": { inputPer1M: 2.5, outputPer1M: 10.0 },
   "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.6 },
   "gpt-4-turbo": { inputPer1M: 10.0, outputPer1M: 30.0 },
@@ -164,6 +249,8 @@ export function calculateCost(
   outputTokens: number,
   cachedTokens = 0,
   cacheWriteTokens = 0,
+  cacheTokenAccounting?: CacheTokenAccounting,
+  cacheCostOptions?: CacheCostOptions,
 ): number {
   // Try exact match first
   let pricing = MODEL_PRICING[modelId];
@@ -200,7 +287,7 @@ export function calculateCost(
   // Discount rate varies by provider: Anthropic = 10% of input price, OpenAI/Azure = 50%.
   // Models with a known cachedInputPer1M use it; others fall back to 50% of inputPer1M.
   const cachedRate = pricing.cachedInputPer1M ?? pricing.inputPer1M * 0.5;
-  const cacheWriteRate = pricing.cacheWritePer1M ?? pricing.inputPer1M;
+  const cacheWriteRate = resolveCacheWriteRate(pricing, normalizedModelId, cacheCostOptions);
 
   // Providers disagree on whether the cache counters live INSIDE inputTokens:
   //
@@ -217,7 +304,12 @@ export function calculateCost(
   // they are disjoint; treat them as additive in that case.
   const safeCached = Math.max(0, cachedTokens);
   const safeCacheWrite = Math.max(0, cacheWriteTokens);
-  const cacheCountersAreInclusive = safeCached + safeCacheWrite <= inputTokens;
+  const cacheCountersAreInclusive =
+    cacheTokenAccounting === "inclusive"
+      ? true
+      : cacheTokenAccounting === "disjoint"
+        ? false
+        : safeCached + safeCacheWrite <= inputTokens;
   const regularInputTokens = cacheCountersAreInclusive
     ? inputTokens - safeCached - safeCacheWrite
     : inputTokens;
@@ -228,6 +320,51 @@ export function calculateCost(
   const outputCost = (outputTokens / 1_000_000) * pricing.outputPer1M * outputRateMultiplier;
 
   return inputCost + outputCost;
+}
+
+function resolveCacheWriteRate(
+  pricing: ModelPricing,
+  normalizedModelId: string,
+  options?: CacheCostOptions,
+): number {
+  // An explicit zero is meaningful: GPT-5.4/GPT-5.5 cache writes are not
+  // charged as a separate line item. Keep the table authoritative.
+  if (pricing.cacheWritePer1M !== undefined) return pricing.cacheWritePer1M;
+  // Preserve the legacy standalone helper behavior for callers that do not
+  // know the provider route yet.
+  if (!options) return pricing.inputPer1M;
+
+  const provider = String(options.providerType || "")
+    .trim()
+    .toLowerCase();
+  const anthropicRoute =
+    provider === "anthropic" ||
+    provider === "azure-anthropic" ||
+    provider === "anthropic-compatible" ||
+    provider === "bedrock" ||
+    /(?:^|[./_-])(?:claude|anthropic)(?:[./_-]|$)/i.test(normalizedModelId);
+  if (anthropicRoute) {
+    return pricing.inputPer1M * (options.cacheTtl === "1h" ? 2 : 1.25);
+  }
+
+  // OpenAI's newer GPT-5.6+ models charge a premium for cache creation when
+  // the table does not yet have a model-specific entry.
+  const modernOpenAI = /^gpt-(?:[6-9]|5\.(?:6|[7-9]))(?:[.-]|$)/i.test(normalizedModelId);
+  if (modernOpenAI) return pricing.inputPer1M * 1.25;
+
+  // OpenAI-compatible routes generally inherit OpenAI's no-extra-write-fee
+  // behavior for older models; unknown non-OpenAI providers retain the safer
+  // legacy estimate of regular input pricing.
+  if (
+    provider === "openai" ||
+    provider === "azure" ||
+    provider === "openrouter" ||
+    provider === "openai-compatible" ||
+    provider === "pi"
+  ) {
+    return 0;
+  }
+  return pricing.inputPer1M;
 }
 
 /**

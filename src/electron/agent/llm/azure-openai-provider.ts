@@ -25,6 +25,7 @@ import {
 import {
   buildOpenAIPromptCacheFields,
   extractOpenAICompatibleCacheUsage,
+  isPromptCacheRequestUnsupportedError,
   splitSystemBlocksForOpenAIPrefix,
 } from "./prompt-cache";
 import { createLogger } from "../../utils/logger";
@@ -1146,6 +1147,20 @@ export class AzureOpenAIProvider implements LLMProvider {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         logger.debug("[Azure OpenAI] Request aborted");
         throw new Error("Request cancelled");
+      }
+
+      if (
+        request.promptCache &&
+        isPromptCacheRequestUnsupportedError(
+          error?.status,
+          error?.providerMessage || error?.message || "",
+        )
+      ) {
+        logger.warn("Azure prompt cache controls rejected; retrying without cache controls", {
+          model: request.model,
+          status: error?.status,
+        });
+        return this.createMessage({ ...request, promptCache: undefined });
       }
 
       const structuredError = this.toStructuredProviderError(error);

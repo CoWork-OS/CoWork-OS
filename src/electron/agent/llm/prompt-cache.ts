@@ -149,6 +149,7 @@ export function computeStablePrefixHash(params: {
   const modelScope =
     params.providerFamily === "openai" ||
     params.providerFamily === "azure-openai" ||
+    params.providerFamily === "openai-compatible" ||
     params.providerFamily === "openrouter-openai"
       ? "__shared_openai_family__"
       : String(params.modelId || "").trim();
@@ -183,6 +184,7 @@ export function computePromptCacheKey(params: {
   const isOpenAIFamily =
     params.providerFamily === "openai" ||
     params.providerFamily === "azure-openai" ||
+    params.providerFamily === "openai-compatible" ||
     params.providerFamily === "openrouter-openai";
 
   return createHash("sha256")
@@ -221,6 +223,26 @@ function isLikelyOpenAIModelId(modelId: string): boolean {
   );
 }
 
+function isLikelyAnthropicModelId(modelId: string): boolean {
+  return /(?:^|[./_-])(?:claude|anthropic)(?:[./_-]|$)/i.test(String(modelId || ""));
+}
+
+function isLikelyBedrockNovaModelId(modelId: string): boolean {
+  return /(?:^|[./_-])amazon[./_-]nova(?:[./_-]|$)/i.test(String(modelId || ""));
+}
+
+function isLikelyOpenRouterExplicitCacheModelId(modelId: string): boolean {
+  const normalized = String(modelId || "")
+    .trim()
+    .toLowerCase()
+    .split(":", 1)[0];
+  return (
+    /(?:^|\/)qwen(?:\/|$)/.test(normalized) ||
+    normalized === "deepseek/deepseek-v3.2" ||
+    normalized.startsWith("deepseek/deepseek-v3.2-")
+  );
+}
+
 export function resolvePromptCacheProviderFamily(
   providerType: LLMProviderType,
   modelId: string,
@@ -230,16 +252,39 @@ export function resolvePromptCacheProviderFamily(
   if (providerType === "anthropic") return "anthropic";
   if (providerType === "azure-anthropic") return "azure-anthropic";
   if (providerType === "anthropic-compatible") return "anthropic-compatible";
+  if (providerType === "openai-compatible") return "openai-compatible";
+  if (providerType === "bedrock") {
+    if (isLikelyAnthropicModelId(modelId)) return "bedrock-anthropic";
+    return isLikelyBedrockNovaModelId(modelId) ? "bedrock-nova" : "unsupported";
+  }
+  if (providerType === "pi") {
+    if (isLikelyAnthropicModelId(modelId)) return "pi-anthropic";
+    return isLikelyOpenAIModelId(modelId) ? "pi-openai" : "unsupported";
+  }
   if (providerType === "openrouter") {
     if (/(?:^|\/)claude|anthropic\/claude/i.test(String(modelId || ""))) {
       return "openrouter-claude";
     }
-    return isLikelyOpenAIModelId(modelId) ? "openrouter-openai" : "unsupported";
+    if (isLikelyOpenRouterExplicitCacheModelId(modelId)) return "openrouter-explicit";
+    // OpenRouter documents automatic caching for providers that do not expose
+    // Anthropic-style cache_control. Keep the family model-scoped so a model
+    // switch cannot accidentally reuse a session affinity key from another
+    // upstream route.
+    return isLikelyOpenAIModelId(modelId) ? "openrouter-openai" : "openrouter-implicit";
   }
 
   const customProvider = CUSTOM_PROVIDER_MAP.get(providerType);
   if (customProvider?.compatibility === "anthropic") {
     return "anthropic-compatible";
+  }
+  if (customProvider?.compatibility === "openai") {
+    if (
+      (providerType === "opencode" || providerType === "opencode-go") &&
+      isLikelyAnthropicModelId(modelId)
+    ) {
+      return "anthropic-compatible";
+    }
+    return "openai-compatible";
   }
 
   return "unsupported";
@@ -333,22 +378,37 @@ export function applyAnthropicExplicitCacheControl<T extends Record<string, Any>
   return messages;
 }
 
-export function extractAnthropicUsage(
-  usage: Any,
-):
-  | { inputTokens: number; outputTokens: number; cachedTokens?: number; cacheWriteTokens?: number }
+export function extractAnthropicUsage(usage: Any):
+  | {
+      inputTokens: number;
+      outputTokens: number;
+      cachedTokens?: number;
+      cacheWriteTokens?: number;
+      cacheWriteTtl?: "5m" | "1h";
+    }
   | undefined {
   if (!usage || typeof usage !== "object") return undefined;
   const inputTokens = Number(usage.input_tokens ?? 0);
   const outputTokens = Number(usage.output_tokens ?? 0);
   const cachedTokens = Number(usage.cache_read_input_tokens ?? 0);
-  const cacheWriteTokens = Number(usage.cache_creation_input_tokens ?? 0);
+  const cacheWrite5mTokens = Number(usage.cache_creation?.ephemeral_5m_input_tokens ?? 0);
+  const cacheWrite1hTokens = Number(usage.cache_creation?.ephemeral_1h_input_tokens ?? 0);
+  const reportedCacheWriteTokens = Number(usage.cache_creation_input_tokens ?? 0);
+  const cacheWriteTokens =
+    Number.isFinite(reportedCacheWriteTokens) && reportedCacheWriteTokens > 0
+      ? reportedCacheWriteTokens
+      : cacheWrite5mTokens + cacheWrite1hTokens;
 
   return {
     inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
     outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
     ...(Number.isFinite(cachedTokens) && cachedTokens > 0 ? { cachedTokens } : {}),
     ...(Number.isFinite(cacheWriteTokens) && cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+    ...(cacheWrite1hTokens > 0
+      ? { cacheWriteTtl: "1h" as const }
+      : cacheWrite5mTokens > 0
+        ? { cacheWriteTtl: "5m" as const }
+        : {}),
   };
 }
 
@@ -387,6 +447,13 @@ export function mapPromptCacheTtlToOpenAIRetention(
   return ttl === "1h" ? "24h" : undefined;
 }
 
+export function mapPromptCacheTtlToPiAiRetention(
+  promptCache?: LLMPromptCacheConfig,
+): "none" | "short" | "long" {
+  if (!promptCache || promptCache.mode === "disabled") return "none";
+  return promptCache?.ttl === "1h" ? "long" : "short";
+}
+
 export function buildOpenAIPromptCacheFields(
   promptCache?: LLMPromptCacheConfig,
   modelId?: string,
@@ -407,10 +474,15 @@ export function buildOpenAIPromptCacheFields(
   const normalizedModelId = String(modelId || "")
     .trim()
     .toLowerCase()
-    .replace(/^(?:openai-codex|openai)\//, "")
+    .split("/")
+    .pop()
+    ?.replace(/^(?:openai-codex|openai)\//, "")
     .split("@", 1)[0];
+  const versionMatch = normalizedModelId.match(/^gpt-(\d+)(?:\.(\d+))?(?:-|$)/);
   const modernCacheModel =
-    normalizedModelId === "gpt-6-astra" || normalizedModelId.startsWith("gpt-5.6");
+    versionMatch != null &&
+    (Number(versionMatch[1]) > 5 ||
+      (Number(versionMatch[1]) === 5 && Number(versionMatch[2] || 0) >= 6));
 
   if (modernCacheModel) {
     return {
@@ -436,14 +508,31 @@ export function normalizeSystemBlocks(
   systemBlocks?: LLMSystemBlock[],
 ): LLMSystemBlock[] {
   if (Array.isArray(systemBlocks) && systemBlocks.length > 0) {
-    return systemBlocks
-      .map((block) => ({
-        ...block,
-        text: String(block?.text || "").trim(),
-      }))
-      .filter((block) => block.text.length > 0);
+    return orderSystemBlocksForStablePrefix(
+      systemBlocks
+        .map((block) => ({
+          ...block,
+          text: String(block?.text || "").trim(),
+        }))
+        .filter((block) => block.text.length > 0),
+    );
   }
   return buildLegacySystemBlocks(system);
+}
+
+/**
+ * Providers cache a prefix, not an arbitrary set of system blocks. Keep all
+ * session-stable blocks contiguous before turn-scoped or other volatile text
+ * so a changing timestamp/memory section cannot invalidate the cached prefix.
+ */
+export function orderSystemBlocksForStablePrefix(blocks: LLMSystemBlock[]): LLMSystemBlock[] {
+  const stable: LLMSystemBlock[] = [];
+  const volatile: LLMSystemBlock[] = [];
+  for (const block of blocks || []) {
+    if (block.scope === "session" && block.cacheable) stable.push(block);
+    else volatile.push(block);
+  }
+  return [...stable, ...volatile];
 }
 
 export function splitSystemBlocksForOpenAIPrefix(
@@ -465,6 +554,40 @@ export function splitSystemBlocksForOpenAIPrefix(
     stableText: flattenSystemBlocks(stableBlocks),
     volatileText: flattenSystemBlocks(volatileBlocks),
   };
+}
+
+/**
+ * Pi's native adapters accept only one system prompt. Move volatile context
+ * into the first user turn so the system prefix remains cacheable while the
+ * current-turn data still reaches the model on every request.
+ */
+export function prependVolatileSystemContextToMessages(
+  messages: LLMMessage[],
+  volatileText: string,
+): LLMMessage[] {
+  const text = String(volatileText || "").trim();
+  if (!text) return messages;
+
+  const prefix = `<cowork_turn_context>\n${text}\n</cowork_turn_context>\n\n`;
+  const next = messages.map((message) => ({ ...message }));
+  const userIndex = next.findIndex((message) => message.role === "user");
+  if (userIndex < 0) {
+    return [
+      {
+        role: "user",
+        content: [{ type: "text", text: prefix }],
+      },
+      ...next,
+    ];
+  }
+
+  const message = next[userIndex];
+  if (typeof message.content === "string") {
+    message.content = `${prefix}${message.content}`;
+  } else {
+    message.content = [{ type: "text", text: prefix }, ...message.content];
+  }
+  return next;
 }
 
 export function convertSystemBlocksToTextParts(
@@ -515,6 +638,25 @@ export function isPromptCacheAutoUnsupportedError(
     normalizedStatus === 404 ||
     normalizedStatus === 422 ||
     normalizedStatus === 501
+  );
+}
+
+/** Return true when a provider rejected the optional cache request itself. */
+export function isPromptCacheRequestUnsupportedError(
+  status: number | undefined,
+  message: string,
+): boolean {
+  const normalizedStatus = Number(status || 0);
+  const lower = String(message || "").toLowerCase();
+  if (!lower) return false;
+  const mentionsCache =
+    /cache[_\s-]?control|prompt cach|automatic cach|cache breakpoint|cachepoint|session[_\s-]?id|prompt_cache/.test(
+      lower,
+    );
+  if (!mentionsCache) return false;
+  return (
+    [400, 404, 422, 501].includes(normalizedStatus) ||
+    /unsupported|not support|unknown|unrecognized|unexpected|invalid/.test(lower)
   );
 }
 

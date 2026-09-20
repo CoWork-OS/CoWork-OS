@@ -157,7 +157,10 @@ CoWork OS enables prompt caching by default in `auto` mode for supported model r
 - **Claude API / Azure Anthropic / Anthropic-compatible**: CoWork sends structured `systemBlocks` and prefers Anthropic automatic caching. If a route rejects automatic cache control, the session downgrades to explicit Anthropic breakpoints.
 - **OpenRouter Claude**: CoWork uses explicit cache breakpoints over the stable system prefix plus the last 3 non-system messages, with a maximum of 4 total breakpoints.
 - **OpenAI / Azure OpenAI**: CoWork derives a deterministic stable-prefix cache key and sends it through OpenAI-style prompt-cache fields. This keeps GPT routes such as `gpt-5.4` and `gpt-5.4-mini` aligned under the same stable-prefix strategy.
-- **OpenRouter GPT-style routes**: CoWork participates in the same stable-prefix partitioning and cache-epoch tracking, but without Anthropic-specific markers.
+- **OpenAI ChatGPT subscriptions**: CoWork forwards the stable cache session and the configured short/long retention to the Codex Responses transport, so subscription calls use the provider's cache-write path as well as API-key calls.
+- **OpenRouter automatic routes**: CoWork participates in stable-prefix partitioning and cache-epoch tracking, sends model-scoped OpenRouter session affinity, and does not add Anthropic-specific markers.
+- **OpenRouter Qwen/DeepSeek explicit-cache routes**: CoWork uses Anthropic-compatible `cache_control` breakpoints where OpenRouter documents that syntax; other OpenRouter models use router-managed implicit caching and fall back cleanly if a route rejects the optional metadata.
+- **Bedrock Claude and Pi-backed Claude/OpenAI routes**: CoWork forwards the provider-native cache retention controls (Bedrock cache points or pi-ai cache options) and preserves cache-read/cache-write usage in telemetry.
 
 ### What stays cacheable
 
@@ -185,6 +188,7 @@ When an upstream provider reports prompt-cache usage, CoWork records:
 
 - `cachedTokens`: tokens served from the provider cache
 - `cacheWriteTokens`: tokens spent creating or extending the cache entry, when available
+- `cacheWriteTtl`: the provider-reported `5m` or `1h` write window when available; otherwise CoWork uses the configured request TTL for local cost estimation
 
 These values flow into Usage Insights and cost accounting.
 

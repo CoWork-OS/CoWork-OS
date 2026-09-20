@@ -1,6 +1,7 @@
 import {
   LLMProvider,
   LLMProviderType,
+  LLMProviderError,
   LLMRequest,
   LLMResponse,
   LLMContent,
@@ -15,6 +16,7 @@ import {
   convertSystemBlocksToTextParts,
   extractAnthropicUsage,
   isPromptCacheAutoUnsupportedError,
+  isPromptCacheRequestUnsupportedError,
   normalizeSystemBlocks,
 } from "./prompt-cache";
 import { isOpenCodeGoBaseUrl, normalizeOpenCodeGoModelId } from "./opencode-go-routing";
@@ -138,6 +140,25 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[${this.providerName}] Request aborted`);
         throw new Error("Request cancelled");
+      }
+
+      if (
+        effectivePromptCache &&
+        isPromptCacheRequestUnsupportedError(
+          error?.status,
+          error?.providerMessage || error?.message,
+        )
+      ) {
+        console.warn(
+          `[${this.providerName}] Prompt cache controls rejected; retrying without cache controls`,
+        );
+        return await this.sendRequest({
+          request,
+          normalizedMessages,
+          tools,
+          model,
+          promptCache: undefined,
+        });
       }
 
       console.error(`[${this.providerName}] API error:`, {
@@ -350,10 +371,14 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         });
       }
 
-      throw new Error(
+      const error = new Error(
         `${this.providerName} API error: ${response.status} ${response.statusText}` +
           (providerMessage ? ` - ${providerMessage}` : ""),
-      );
+      ) as LLMProviderError;
+      error.status = response.status;
+      error.providerMessage = providerMessage || undefined;
+      error.errorData = errorData;
+      throw error;
     }
 
     const data = (await response.json()) as Any;

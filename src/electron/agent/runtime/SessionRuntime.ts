@@ -49,7 +49,7 @@ import type {
   StreamProgressCallback,
 } from "../llm";
 import { estimateTokens, estimateTotalTokens, type ContextManager } from "../context-manager";
-import { calculateCost } from "../llm/pricing";
+import { calculateCost, getCacheTokenAccounting } from "../llm/pricing";
 import { sanitizeToolCallHistory } from "../llm/openai-compatible";
 import {
   FileOperationTracker,
@@ -296,6 +296,7 @@ export interface SessionRuntimeSnapshotV2 {
     promptCacheMode: LLMPromptCacheMode;
     promptCacheProviderFamily: PromptCacheProviderFamily;
     promptCacheInvalidationReason: string | null;
+    promptCacheTtl?: "5m" | "1h";
   };
   usageTotals: {
     inputTokens: number;
@@ -418,6 +419,7 @@ export interface SessionRuntimeState {
     promptCacheMode: LLMPromptCacheMode;
     promptCacheProviderFamily: PromptCacheProviderFamily;
     promptCacheInvalidationReason: string | null;
+    promptCacheTtl?: "5m" | "1h";
   };
   usage: {
     totalInputTokens: number;
@@ -769,6 +771,9 @@ export class SessionRuntime {
                 tools: [],
               })
             : {};
+          if (promptCacheExtras.promptCache?.ttl) {
+            this.state.promptCache.promptCacheTtl = promptCacheExtras.promptCache.ttl;
+          }
           const response = await this.deps.callLLMWithRetry(
             () =>
               this.deps.createMessageWithTimeout(
@@ -798,6 +803,7 @@ export class SessionRuntime {
               response.usage.outputTokens,
               response.usage.cachedTokens,
               response.usage.cacheWriteTokens,
+              response.usage.cacheWriteTtl,
             );
           }
           return {
@@ -1065,6 +1071,7 @@ export class SessionRuntime {
     outputTokens: number,
     cachedTokens = 0,
     cacheWriteTokens = 0,
+    cacheWriteTtl?: "5m" | "1h",
   ): void {
     const safeInput = Number.isFinite(inputTokens) ? inputTokens : 0;
     const safeOutput = Number.isFinite(outputTokens) ? outputTokens : 0;
@@ -1076,6 +1083,14 @@ export class SessionRuntime {
       safeOutput,
       safeCached,
       safeCacheWrite,
+      getCacheTokenAccounting(
+        this.deps.getModelMetadata().providerType,
+        this.deps.getModelMetadata().modelId,
+      ),
+      {
+        providerType: this.deps.getModelMetadata().providerType,
+        cacheTtl: cacheWriteTtl || this.state.promptCache.promptCacheTtl,
+      },
     );
 
     this.state.usage.totalInputTokens += safeInput;
@@ -1095,6 +1110,7 @@ export class SessionRuntime {
           outputTokens: safeOutput,
           cachedTokens: safeCached,
           ...(safeCacheWrite > 0 ? { cacheWriteTokens: safeCacheWrite } : {}),
+          ...(cacheWriteTtl ? { cacheWriteTtl } : {}),
           cost: deltaCost,
         },
         totals: {
@@ -1892,8 +1908,14 @@ export class SessionRuntime {
       createMessageWithTimeout: (request, timeoutMs, operation) =>
         this.deps.createMessageWithTimeout(request, timeoutMs, operation),
       buildPromptCacheRequestExtras: this.deps.buildPromptCacheRequestExtras,
-      updateTracking: (inputTokens, outputTokens, cachedTokens, cacheWriteTokens) =>
-        this.updateTracking(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
+      updateTracking: (inputTokens, outputTokens, cachedTokens, cacheWriteTokens, cacheWriteTtl) =>
+        this.updateTracking(
+          inputTokens,
+          outputTokens,
+          cachedTokens,
+          cacheWriteTokens,
+          cacheWriteTtl,
+        ),
       emitEvent: (type, payload) => this.deps.emitEvent(type, payload),
       log: (message) => this.deps.log(message),
     });
@@ -3432,6 +3454,7 @@ export class SessionRuntime {
           toolSchemaHash: this.state.promptCache.toolSchemaHash,
           promptCacheMode: this.state.promptCache.promptCacheMode,
           promptCacheProviderFamily: this.state.promptCache.promptCacheProviderFamily,
+          promptCacheTtl: this.state.promptCache.promptCacheTtl,
           promptCacheInvalidationReason: this.state.promptCache.promptCacheInvalidationReason,
         },
         timestamp: Date.now(),
@@ -4518,6 +4541,7 @@ export class SessionRuntime {
     this.state.promptCache.promptCacheMode = payload.promptCache?.promptCacheMode || "disabled";
     this.state.promptCache.promptCacheProviderFamily =
       payload.promptCache?.promptCacheProviderFamily || "unsupported";
+    this.state.promptCache.promptCacheTtl = payload.promptCache?.promptCacheTtl;
     this.state.promptCache.promptCacheInvalidationReason =
       payload.promptCache?.promptCacheInvalidationReason || null;
     this.restoreTaskListState(this.getTaskListStateFromPayload(payload));

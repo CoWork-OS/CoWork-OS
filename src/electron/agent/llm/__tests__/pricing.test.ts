@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { calculateCost, getModelPricing } from "../pricing";
+import { calculateCost, getCacheTokenAccounting, getModelPricing } from "../pricing";
 
 describe("Astra pricing", () => {
   it("exposes the documented standard and cache rates", () => {
@@ -24,5 +24,49 @@ describe("Astra pricing", () => {
       0.3 * 10 * 2 + 0.1 * 50 * 1.5,
       8,
     );
+  });
+
+  it("treats Anthropic and Bedrock cache counters as disjoint from regular input", () => {
+    const cost = calculateCost("claude-sonnet-4-5", 100, 0, 50, 50, "disjoint");
+
+    expect(cost).toBeCloseTo(
+      (100 / 1_000_000) * 3 + (50 / 1_000_000) * 0.3 + (50 / 1_000_000) * 3,
+      10,
+    );
+    expect(getCacheTokenAccounting("anthropic", "claude-sonnet-4-5")).toBe("disjoint");
+    expect(getCacheTokenAccounting("bedrock", "anthropic.claude-sonnet-4-5")).toBe("disjoint");
+    expect(getCacheTokenAccounting("qwen-portal", "qwen3-coder")).toBe("disjoint");
+    expect(getCacheTokenAccounting("openai", "gpt-5.6-sol")).toBe("inclusive");
+  });
+});
+
+describe("current OpenAI prompt-cache pricing", () => {
+  it("recognizes GPT-5.6 model rates instead of treating them as free", () => {
+    expect(getModelPricing("gpt-5.6-sol")).toMatchObject({
+      inputPer1M: 4,
+      cachedInputPer1M: 0.4,
+      cacheWritePer1M: 5,
+    });
+    expect(
+      calculateCost("gpt-5.6-sol", 1_000_000, 0, 0, 1_000_000, "inclusive", {
+        providerType: "openai",
+        cacheTtl: "5m",
+      }),
+    ).toBeCloseTo(5, 10);
+  });
+
+  it("uses the Anthropic TTL multiplier for cache writes", () => {
+    expect(
+      calculateCost("claude-sonnet-4-5", 0, 0, 0, 1_000_000, "disjoint", {
+        providerType: "anthropic",
+        cacheTtl: "5m",
+      }),
+    ).toBeCloseTo(3.75, 10);
+    expect(
+      calculateCost("claude-sonnet-4-5", 0, 0, 0, 1_000_000, "disjoint", {
+        providerType: "anthropic",
+        cacheTtl: "1h",
+      }),
+    ).toBeCloseTo(6, 10);
   });
 });

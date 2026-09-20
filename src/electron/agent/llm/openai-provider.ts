@@ -32,6 +32,9 @@ import { resolveOutputTokenParamName } from "./output-token-policy";
 import {
   buildOpenAIPromptCacheFields,
   extractOpenAICompatibleCacheUsage,
+  isPromptCacheRequestUnsupportedError,
+  mapPromptCacheTtlToPiAiRetention,
+  prependVolatileSystemContextToMessages,
   splitSystemBlocksForOpenAIPrefix,
 } from "./prompt-cache";
 import { createLogger } from "../../utils/logger";
@@ -296,6 +299,17 @@ export class OpenAIProvider implements LLMProvider {
         throw new Error("Request cancelled");
       }
 
+      if (
+        request.promptCache &&
+        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
+      ) {
+        logger.warn("Prompt cache controls rejected; retrying without cache controls", {
+          model,
+          status: error?.status,
+        });
+        return this.createMessageWithApiKey({ ...request, promptCache: undefined });
+      }
+
       logger.error("API error:", {
         status: error.status,
         message: error.message,
@@ -485,6 +499,17 @@ export class OpenAIProvider implements LLMProvider {
         throw new Error("Request cancelled");
       }
 
+      if (
+        request.promptCache &&
+        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
+      ) {
+        logger.warn("Responses prompt cache controls rejected; retrying without cache controls", {
+          model: request.model,
+          status: error?.status,
+        });
+        return this.createResponsesMessageWithApiKey({ ...request, promptCache: undefined });
+      }
+
       logger.error("Responses API error:", {
         status: error.status,
         message: error.message,
@@ -606,9 +631,18 @@ export class OpenAIProvider implements LLMProvider {
         throw new Error(`Model not available: ${codexModelId}`);
       }
 
+      const { stableText, volatileText } = splitSystemBlocksForOpenAIPrefix(
+        request.system || "",
+        request.systemBlocks,
+      );
+      const piMessageInput =
+        request.promptCache && request.promptCache.mode !== "disabled"
+          ? prependVolatileSystemContextToMessages(request.messages, volatileText)
+          : request.messages;
+
       // Convert messages to pi-ai format
       const piAiMessages = this.convertMessagesToPiAi(
-        request.messages,
+        piMessageInput,
         Array.isArray((model as Any).input) && (model as Any).input.includes("image"),
       );
 
@@ -631,17 +665,35 @@ export class OpenAIProvider implements LLMProvider {
 
       // Build context
       const context: PiAiContext = {
-        systemPrompt: request.system,
+        systemPrompt: stableText || request.system,
         messages: piAiMessages,
         tools: piAiTools,
       };
 
       // Make the API call using pi-ai SDK
+      const cacheRetention = mapPromptCacheTtlToPiAiRetention(request.promptCache);
+      const sessionId =
+        cacheRetention === "none" ? undefined : request.promptCache?.cacheKey || undefined;
+      const cacheFields = buildOpenAIPromptCacheFields(
+        request.promptCache && request.promptCache.mode !== "disabled"
+          ? { ...request.promptCache, mode: "openai_key" }
+          : undefined,
+        codexModelId,
+      );
       const response = await piAiComplete(model, context, {
         apiKey,
         maxTokens: request.maxTokens,
         signal: request.signal,
-        sessionId: request.promptCache?.cacheKey,
+        cacheRetention,
+        ...(sessionId ? { sessionId } : {}),
+        ...(Object.keys(cacheFields).length > 0
+          ? {
+              onPayload: (payload: unknown) => ({
+                ...((payload || {}) as Record<string, Any>),
+                ...cacheFields,
+              }),
+            }
+          : {}),
         reasoningEffort: this.getOpenAIReasoningEffort(request),
         textVerbosity: this.getOpenAITextVerbosity(request),
       });
@@ -665,6 +717,17 @@ export class OpenAIProvider implements LLMProvider {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         logger.info("Request aborted");
         throw new Error("Request cancelled");
+      }
+
+      if (
+        request.promptCache &&
+        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
+      ) {
+        logger.warn("ChatGPT prompt cache controls rejected; retrying without cache controls", {
+          model: request.model,
+          status: error?.status,
+        });
+        return this.createMessageWithOAuth({ ...request, promptCache: undefined });
       }
 
       logger.error("ChatGPT API error:", {

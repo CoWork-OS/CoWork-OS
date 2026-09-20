@@ -1,9 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { electronPresent } from "../setup.mjs";
+
+test("setup detects hoisted Electron for scoped package installs", () => {
+  const directory = mkdtempSync(join(tmpdir(), "cowork-setup-electron-"));
+  try {
+    const scopedPackage = join(directory, "node_modules", "@cowork-os", "cowork-os");
+    const electronPackage = join(directory, "node_modules", "electron");
+    mkdirSync(electronPackage, { recursive: true });
+    writeFileSync(join(electronPackage, "package.json"), "{}\n");
+    assert.equal(electronPresent(scopedPackage), true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 for (const name of ["cowork-os", "@cowork-os/cowork-os"]) {
   test(

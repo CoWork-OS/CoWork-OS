@@ -22,6 +22,34 @@ function makeEvent(id: string, taskId: string, type: TaskEvent["type"], payload:
 }
 
 describe("AgentDaemon agent-message receipts", () => {
+  it("wakes a dormant bot through the accepted-message drain instead of its seed prompt", () => {
+    const executor = { isRunning: false };
+    const processOrphanedFollowUps = vi.fn();
+    const startTask = vi.fn();
+    const task = {
+      id: "bot-task",
+      status: "pending",
+    };
+    const daemonLike = {
+      activeTasks: new Map([[task.id, { executor }]]),
+      taskRepo: { findById: vi.fn().mockReturnValue(task) },
+      processOrphanedFollowUps,
+      startTask,
+      logEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    (AgentDaemon.prototype as Any).wakeBotConversationAfterAccepted.call(
+      daemonLike,
+      task,
+      "bot-message-1",
+      "parent-task",
+    );
+
+    expect(processOrphanedFollowUps).toHaveBeenCalledWith(task.id, executor);
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
   it("deduplicates a previously accepted queue-only message", () => {
     const prior = makeEvent("receipt-1", "child-task", "user_message", {
       messageId: "message-1",
@@ -518,6 +546,77 @@ describe("AgentDaemon agent-message receipts", () => {
       deliveryStatus: "delivered",
     });
     expect(sendMessage.mock.calls[0]?.[3]?.onAccepted).toBeUndefined();
+  });
+
+  it("returns ordinary follow-ups at durable admission while execution continues", async () => {
+    const task = {
+      id: "child-task",
+      title: "Child",
+      prompt: "Prompt",
+      workspaceId: "workspace-1",
+      agentConfig: {},
+    };
+    const workspace = {
+      id: "workspace-1",
+      name: "Workspace",
+      path: "/tmp/workspace",
+      permissions: { read: true, write: true, delete: false, network: true, shell: false },
+      createdAt: 1,
+    };
+    let finishExecution!: () => void;
+    const executionFinished = new Promise<void>((resolve) => {
+      finishExecution = resolve;
+    });
+    const sendMessage = vi.fn().mockImplementation(async (...args: Any[]) => {
+      await args[3]?.onExecutionAccepted?.();
+      await executionFinished;
+    });
+    const executor = {
+      isRunning: false,
+      sendMessage,
+      suppressNextUserMessageEvent: vi.fn(),
+      updateTaskAgentConfig: vi.fn(),
+      updateWorkspace: vi.fn(),
+    };
+    const daemonLike = {
+      activeTasks: new Map([["child-task", { executor, lastAccessed: 0, status: "active" }]]),
+      taskRepo: {
+        findById: vi.fn().mockReturnValue(task),
+        touch: vi.fn(),
+      },
+      workspaceRepo: { findById: vi.fn().mockReturnValue(workspace) },
+      annotationRepo: { listOpenByTask: vi.fn().mockReturnValue([]) },
+      getTaskEvents: vi.fn().mockReturnValue([]),
+      processOrphanedFollowUps: vi.fn(),
+      isSideChatTask: vi.fn().mockReturnValue(false),
+      buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
+      applyTaskFollowUpOverrides: vi.fn((nextTask: Any) => ({ changed: false, task: nextTask })),
+      applyAgentRoleOverrides: vi.fn((nextTask: Any) => ({ task: nextTask })),
+      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, nextWorkspace: Any) => nextWorkspace),
+      logEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const resultPromise = AgentDaemon.prototype.sendMessage.call(
+      daemonLike,
+      "child-task",
+      "Continue normally",
+      undefined,
+      undefined,
+      { returnOnAccepted: true },
+    );
+
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    await expect(resultPromise).resolves.toMatchObject({
+      queued: false,
+      deliveryMode: "follow_up",
+      deliveryStatus: "accepted",
+      acceptedAt: expect.any(Number),
+    });
+    expect(daemonLike.processOrphanedFollowUps).not.toHaveBeenCalled();
+
+    finishExecution();
+    await vi.waitFor(() => expect(daemonLike.processOrphanedFollowUps).toHaveBeenCalledTimes(1));
   });
 
   it("retains the full queue item when a worker becomes busy during orphan recovery", async () => {

@@ -46,6 +46,59 @@ describe("agent message timeline rows", () => {
     expect(details).toContain("Queued for the next turn");
   });
 
+  it("renders accepted delivery explicitly and uses it as the fallback state", () => {
+    const explicitAccepted = makeMessageEvent({
+      recipientLabel: "Backend",
+      message: "The request was accepted.",
+      status: "accepted",
+    });
+    const defaultAccepted = makeMessageEvent({
+      recipientLabel: "Backend",
+      message: "The legacy receipt has no status.",
+    });
+
+    const explicitDetails = renderToStaticMarkup(
+      React.createElement(React.Fragment, null, renderEventDetails(explicitAccepted, false, {})),
+    );
+    const defaultDetails = renderToStaticMarkup(
+      React.createElement(React.Fragment, null, renderEventDetails(defaultAccepted, false, {})),
+    );
+
+    expect(explicitDetails).toContain("Accepted");
+    expect(explicitDetails).not.toContain("Delivered");
+    expect(defaultDetails).toContain("Accepted");
+    expect(defaultDetails).not.toContain("Delivered");
+  });
+
+  it("adds stable delivery attributes and omits absent identifiers", () => {
+    const event = makeMessageEvent({
+      messageId: "message-1",
+      senderTaskId: "sender-task",
+      targetTaskId: "target-task",
+      message: "Inspect the delivery receipt.",
+      status: "delivered",
+    });
+    const details = renderToStaticMarkup(
+      React.createElement(React.Fragment, null, renderEventDetails(event, false, {})),
+    );
+
+    expect(details).toContain('data-message-id="message-1"');
+    expect(details).toContain('data-delivery-state="delivered"');
+    expect(details).toContain('data-sender-task-id="sender-task"');
+    expect(details).toContain('data-target-task-id="target-task"');
+
+    const withoutIdentifiers = renderToStaticMarkup(
+      React.createElement(
+        React.Fragment,
+        null,
+        renderEventDetails(makeMessageEvent({ message: "No identifiers." }), false, {}),
+      ),
+    );
+    expect(withoutIdentifiers).not.toContain("data-message-id=");
+    expect(withoutIdentifiers).not.toContain("data-sender-task-id=");
+    expect(withoutIdentifiers).not.toContain("data-target-task-id=");
+  });
+
   it("renders a failed delivery as an actionable error", () => {
     const event = makeMessageEvent({
       recipientLabel: "Backend",

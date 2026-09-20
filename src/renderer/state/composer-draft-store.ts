@@ -6,6 +6,7 @@ import {
   type ComposerDraftClearRequest,
   type ComposerDraftGetRequest,
   type ComposerDraftKeyInput,
+  type ComposerDraftScope,
 } from "../../shared/composer-drafts";
 
 export interface ComposerDraftTransport {
@@ -31,6 +32,7 @@ export class ComposerDraftStore {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly loadGenerations = new Map<string, number>();
   private readonly writeChains = new Map<string, Promise<void>>();
+  private readonly clearChains = new Map<string, Promise<boolean>>();
   private readonly debounceMs: number;
   private readonly transport: ComposerDraftTransport;
   private readonly now: () => number;
@@ -136,6 +138,14 @@ export class ComposerDraftStore {
       clearTimeout(timer);
       this.timers.delete(key);
     }
+
+    const pendingClear = this.clearChains.get(key);
+    if (pendingClear) {
+      await pendingClear.catch(() => false);
+      if (this.drafts.has(key)) await this.flush(key);
+      return;
+    }
+
     const draft = this.drafts.get(key);
     if (!draft || !this.transport.upsert) return;
     const revision = draft.revision;
@@ -167,6 +177,37 @@ export class ComposerDraftStore {
     submittedRevision: number,
   ): Promise<boolean> {
     const key = buildComposerDraftKey(input);
+    return this.clearAfterAcceptedAtKey(input, key, submittedRevision);
+  }
+
+  async clearAfterAcceptedDraft(
+    submittedDraft: ComposerDraft,
+    submittedRevision: number,
+  ): Promise<boolean> {
+    const scope: ComposerDraftScope = submittedDraft.remoteDeviceId ? "remote" : "local";
+    const input: ComposerDraftKeyInput = {
+      scope,
+      workspaceId: submittedDraft.workspaceId,
+      taskId: submittedDraft.taskId,
+      surface: submittedDraft.surface,
+      ...(submittedDraft.remoteDeviceId ? { remoteDeviceId: submittedDraft.remoteDeviceId } : {}),
+    };
+    const key = buildComposerDraftKey(input);
+    if (key !== submittedDraft.draftKey) return false;
+    return this.clearAfterAcceptedAtKey(input, key, submittedRevision);
+  }
+
+  private async clearAfterAcceptedAtKey(
+    input: ComposerDraftKeyInput,
+    key: string,
+    submittedRevision: number,
+  ): Promise<boolean> {
+    const pendingClear = this.clearChains.get(key);
+    if (pendingClear) {
+      await pendingClear.catch(() => false);
+      return this.clearAfterAcceptedAtKey(input, key, submittedRevision);
+    }
+
     const current = this.drafts.get(key);
     if (!current || current.revision !== submittedRevision) return false;
     const timer = this.timers.get(key);
@@ -174,6 +215,33 @@ export class ComposerDraftStore {
       clearTimeout(timer);
       this.timers.delete(key);
     }
+
+    const pendingWrite = this.writeChains.get(key);
+    const clear = this.finishAcceptedClear(input, key, submittedRevision, pendingWrite);
+    this.clearChains.set(key, clear);
+    try {
+      return await clear;
+    } finally {
+      if (this.clearChains.get(key) === clear) this.clearChains.delete(key);
+    }
+  }
+
+  private async finishAcceptedClear(
+    input: ComposerDraftKeyInput,
+    key: string,
+    submittedRevision: number,
+    pendingWrite?: Promise<void>,
+  ): Promise<boolean> {
+    // Any load that started before acceptance must not be allowed to restore
+    // the just-accepted revision after the durable clear completes.
+    this.loadGenerations.set(key, (this.loadGenerations.get(key) ?? 0) + 1);
+
+    // A blur/unmount flush may already be writing this revision. Wait for it
+    // before deleting the persisted row; otherwise that older upsert can
+    // finish after the delete and resurrect the accepted draft.
+    if (pendingWrite) await pendingWrite.catch(() => undefined);
+    if (this.drafts.get(key)?.revision !== submittedRevision) return false;
+
     if (this.transport.clear) {
       const result = await this.transport.clear({
         draftKey: key,

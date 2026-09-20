@@ -516,7 +516,10 @@ interface MainContentProps {
   draftValue?: string;
   draftRevision?: number;
   onDraftValueChange?: (value: string) => ComposerDraft | void;
-  onDraftAccepted?: (revision: number) => void | boolean | Promise<void | boolean>;
+  onDraftAccepted?: (
+    revision: number,
+    submittedDraft?: ComposerDraft | null,
+  ) => void | boolean | Promise<void | boolean>;
   draftSnapshot?: ComposerDraft | null;
   onDraftPatch?: (
     patch: Partial<Pick<ComposerDraft, "mentions" | "quotedAssistantMessage" | "attachments">>,
@@ -544,6 +547,7 @@ interface MainContentProps {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
+      returnOnAccepted?: boolean;
     },
   ) => void | boolean | Promise<void | boolean>;
   onOpenSideChat?: (request: {
@@ -2609,6 +2613,20 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     typeof event.payload?.message === "string"
                       ? normalizeInitialPromptText(event.payload.message)
                       : "Agent message";
+                  const inboundMessageId =
+                    typeof event.payload?.messageId === "string"
+                      ? event.payload.messageId.trim()
+                      : "";
+                  const inboundDeliveryStatus =
+                    typeof event.payload?.deliveryStatus === "string"
+                      ? event.payload.deliveryStatus.trim()
+                      : typeof event.payload?.status === "string"
+                        ? event.payload.status.trim()
+                        : "";
+                  const inboundSenderTaskId =
+                    typeof event.payload?.senderTaskId === "string"
+                      ? event.payload.senderTaskId.trim()
+                      : "";
                   const senderLabel =
                     typeof event.payload?.senderLabel === "string" &&
                     event.payload.senderLabel.trim().length > 0
@@ -2616,7 +2634,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       : "Parent agent";
                   return (
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
-                      <div className="agent-inbound-message">
+                      <div
+                        className="agent-inbound-message"
+                        data-message-id={inboundMessageId || undefined}
+                        data-delivery-state={inboundDeliveryStatus || undefined}
+                        data-sender-task-id={inboundSenderTaskId || undefined}
+                        data-target-task-id={task?.id || undefined}
+                      >
                         <div className="agent-inbound-message-label">
                           Message from {senderLabel}
                         </div>
@@ -3634,6 +3658,7 @@ function MainContentComponent({
   const previousDraftKeyRef = useRef<string | undefined>(undefined);
   const draftRevisionRef = useRef(draftRevision);
   const draftKeyRef = useRef<string | undefined>(draftSnapshot?.draftKey);
+  const draftSnapshotRef = useRef<ComposerDraft | null>(draftSnapshot);
   const renderedDraftKey = draftSnapshot?.draftKey;
   if (draftKeyRef.current !== renderedDraftKey) {
     // A key change is an owner transition, so reset the revision fence for
@@ -3642,8 +3667,12 @@ function MainContentComponent({
     // parent render.
     draftKeyRef.current = renderedDraftKey;
     draftRevisionRef.current = draftRevision;
+    draftSnapshotRef.current = draftSnapshot;
   } else {
     draftRevisionRef.current = Math.max(draftRevisionRef.current, draftRevision);
+    if (draftSnapshot && draftSnapshot.revision >= (draftSnapshotRef.current?.revision ?? -1)) {
+      draftSnapshotRef.current = draftSnapshot;
+    }
   }
 
   const recordDraftMutation = useCallback((draft: ComposerDraft | void): void => {
@@ -3653,6 +3682,7 @@ function MainContentComponent({
     // revision produced by the keystroke that may immediately precede Enter.
     draftRevisionRef.current = draft.revision;
     draftKeyRef.current = draft.draftKey;
+    draftSnapshotRef.current = draft;
   }, []);
 
   useEffect(() => {
@@ -7030,6 +7060,7 @@ function MainContentComponent({
     const submittedInputValue = inputValue;
     const submittedDraftKey = draftKeyRef.current;
     const submittedDraftRevision = draftRevisionRef.current;
+    const submittedDraft = draftSnapshotRef.current;
     const isSubmittedDraftCurrent = () =>
       isSameComposerDraftSubmission({
         submittedDraftKey,
@@ -7057,7 +7088,7 @@ function MainContentComponent({
     };
     const clearAcceptedComposer = async (): Promise<boolean> => {
       if (!isSubmittedDraftCurrent()) return false;
-      const accepted = await onDraftAccepted?.(submittedDraftRevision);
+      const accepted = await onDraftAccepted?.(submittedDraftRevision, submittedDraft);
       if (accepted === false) return false;
       // The successful store clear removes the draft snapshot, so the normal
       // revision fence is no longer expected to match. Only clear the local
@@ -7335,6 +7366,7 @@ function MainContentComponent({
           {
             interactionMode: selectedInteractionMode,
             integrationMentions: selectedIntegrationMentions,
+            returnOnAccepted: true,
             ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
           },
         );

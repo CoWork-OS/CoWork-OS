@@ -81,6 +81,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
     outputTokens: number,
     cachedTokens?: number,
     cacheWriteTokens?: number,
+    cacheWriteTtl?: "5m" | "1h",
   ) => void;
   emitEvent?: (type: string, payload: Record<string, unknown>) => void;
   log: (message: string) => void;
@@ -121,6 +122,7 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
       response.usage.outputTokens,
       response.usage.cachedTokens,
       response.usage.cacheWriteTokens,
+      response.usage.cacheWriteTtl,
     );
   };
 

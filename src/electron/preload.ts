@@ -2843,6 +2843,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       expectedTurnId?: string;
       interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       deliveryMode?: "message" | "follow_up";
+      returnOnAccepted?: boolean;
       messageId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
@@ -2859,6 +2860,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ...(options?.expectedTurnId ? { expectedTurnId: options.expectedTurnId } : {}),
       ...(options?.interactionMode ? { interactionMode: options.interactionMode } : {}),
       ...(options?.deliveryMode ? { deliveryMode: options.deliveryMode } : {}),
+      ...(options?.returnOnAccepted ? { returnOnAccepted: true } : {}),
       ...(options?.messageId ? { messageId: options.messageId } : {}),
       ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
       ...(options?.shellAccess !== undefined ? { shellAccess: options.shellAccess } : {}),
@@ -6032,6 +6034,7 @@ export interface ElectronAPI {
       expectedTurnId?: string;
       interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
       deliveryMode?: "message" | "follow_up";
+      returnOnAccepted?: boolean;
       messageId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
@@ -6043,6 +6046,8 @@ export interface ElectronAPI {
     duplicate?: boolean;
     messageId?: string;
     deliveryMode?: "message" | "follow_up";
+    deliveryStatus?: "accepted" | "queued" | "delivered" | "failed";
+    acceptedAt?: number;
   }>;
   sendStepFeedback: (
     taskId: string,

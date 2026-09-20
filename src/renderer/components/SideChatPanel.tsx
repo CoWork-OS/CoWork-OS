@@ -15,8 +15,12 @@ type SideChatPanelProps = {
   onSendMessage: (message: string) => void | boolean | Promise<void | boolean>;
   draftValue?: string;
   draftRevision?: number;
+  draftSnapshot?: ComposerDraft | null;
   onDraftValueChange?: (value: string) => ComposerDraft | void;
-  onDraftAccepted?: (revision: number) => void | boolean | Promise<void | boolean>;
+  onDraftAccepted?: (
+    revision: number,
+    submittedDraft?: ComposerDraft | null,
+  ) => void | boolean | Promise<void | boolean>;
   onClose: () => void;
   onOpenSideTask?: (taskId: string) => void;
 };
@@ -101,6 +105,7 @@ export const SideChatPanel = memo(function SideChatPanel({
   onSendMessage,
   draftValue = "",
   draftRevision = 0,
+  draftSnapshot = null,
   onDraftValueChange,
   onDraftAccepted,
   onClose,
@@ -108,7 +113,16 @@ export const SideChatPanel = memo(function SideChatPanel({
 }: SideChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const draftRevisionRef = useRef(draftRevision);
-  draftRevisionRef.current = draftRevision;
+  const draftSnapshotRef = useRef<ComposerDraft | null>(draftSnapshot);
+  if (draftSnapshotRef.current?.draftKey !== draftSnapshot?.draftKey) {
+    draftRevisionRef.current = draftRevision;
+    draftSnapshotRef.current = draftSnapshot;
+  } else {
+    draftRevisionRef.current = Math.max(draftRevisionRef.current, draftRevision);
+    if (draftSnapshot && draftSnapshot.revision >= (draftSnapshotRef.current?.revision ?? -1)) {
+      draftSnapshotRef.current = draftSnapshot;
+    }
+  }
   const messages = useMemo(() => deriveMessages(events), [events]);
   const parentStatus = getTaskStatusLabel(parentTask);
   const sideStatus = getTaskStatusLabel(sideTask);
@@ -125,10 +139,11 @@ export const SideChatPanel = memo(function SideChatPanel({
     const message = draftValue.trim();
     if (!message || !sideTask || sending) return;
     const submittedRevision = draftRevisionRef.current;
+    const submittedDraft = draftSnapshotRef.current;
     void Promise.resolve(onSendMessage(message))
       .then(async (sent) => {
         if (sent === false || draftRevisionRef.current !== submittedRevision) return;
-        const accepted = await onDraftAccepted?.(submittedRevision);
+        const accepted = await onDraftAccepted?.(submittedRevision, submittedDraft);
         if (accepted === false) return;
         // The accepted callback owns the durable draft deletion. Its store
         // emission drives the controlled value to empty; updating it again
@@ -228,7 +243,10 @@ export const SideChatPanel = memo(function SideChatPanel({
           value={draftValue}
           onChange={(event) => {
             const draft = onDraftValueChange?.(event.target.value);
-            if (draft) draftRevisionRef.current = draft.revision;
+            if (draft) {
+              draftRevisionRef.current = draft.revision;
+              draftSnapshotRef.current = draft;
+            }
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {

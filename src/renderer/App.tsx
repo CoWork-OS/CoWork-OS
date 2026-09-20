@@ -695,7 +695,10 @@ type SelectedTaskWorkspaceViewProps = {
   draftValue: string;
   draftRevision: number;
   onDraftValueChange: (value: string) => ComposerDraft | void;
-  onDraftAccepted: (revision: number) => void | boolean | Promise<void | boolean>;
+  onDraftAccepted: (
+    revision: number,
+    submittedDraft?: ComposerDraft | null,
+  ) => void | boolean | Promise<void | boolean>;
   draftSnapshot: ComposerDraft | null;
   onDraftPatch: (
     patch: Partial<Pick<ComposerDraft, "mentions" | "quotedAssistantMessage" | "attachments">>,
@@ -738,8 +741,12 @@ type SelectedTaskWorkspaceViewProps = {
   sideChat: SideChatState | null;
   sideChatDraftValue: string;
   sideChatDraftRevision: number;
+  sideChatDraftSnapshot: ComposerDraft | null;
   onSideChatDraftValueChange: (value: string) => ComposerDraft | void;
-  onSideChatDraftAccepted: (revision: number) => void | boolean | Promise<void | boolean>;
+  onSideChatDraftAccepted: (
+    revision: number,
+    submittedDraft?: ComposerDraft | null,
+  ) => void | boolean | Promise<void | boolean>;
   rightPanelInput: {
     task: Task | undefined;
     workspace: Workspace | null;
@@ -767,6 +774,7 @@ type SelectedTaskWorkspaceViewProps = {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
+      returnOnAccepted?: boolean;
     },
   ) => Promise<void | boolean>;
   onOpenSideChat: (request: {
@@ -897,6 +905,7 @@ const SelectedTaskWorkspaceView = memo(
     sideChat,
     sideChatDraftValue,
     sideChatDraftRevision,
+    sideChatDraftSnapshot,
     onSideChatDraftValueChange,
     onSideChatDraftAccepted,
     rightPanelInput,
@@ -1602,6 +1611,7 @@ const SelectedTaskWorkspaceView = memo(
                     onSendMessage={onSendSideChatMessage}
                     draftValue={sideChatDraftValue}
                     draftRevision={sideChatDraftRevision}
+                    draftSnapshot={sideChatDraftSnapshot}
                     onDraftValueChange={onSideChatDraftValueChange}
                     onDraftAccepted={onSideChatDraftAccepted}
                     onClose={onCloseSideChat}
@@ -1814,6 +1824,7 @@ const SelectedTaskWorkspaceView = memo(
     prev.sideChat === next.sideChat &&
     prev.sideChatDraftValue === next.sideChatDraftValue &&
     prev.sideChatDraftRevision === next.sideChatDraftRevision &&
+    prev.sideChatDraftSnapshot === next.sideChatDraftSnapshot &&
     prev.onSideChatDraftValueChange === next.onSideChatDraftValueChange &&
     prev.onSideChatDraftAccepted === next.onSideChatDraftAccepted &&
     prev.rightPanelInput === next.rightPanelInput,
@@ -2328,11 +2339,14 @@ export function App() {
     [composerDraft.update, composerDraftReady],
   );
   const handleComposerDraftAccepted = useCallback(
-    async (revision: number): Promise<boolean> => {
+    async (revision: number, submittedDraft?: ComposerDraft | null): Promise<boolean> => {
       if (!composerDraftReady) return false;
+      if (submittedDraft) {
+        return composerDraft.clearAfterAcceptedDraft(submittedDraft, revision);
+      }
       return composerDraft.clearAfterAccepted(revision);
     },
-    [composerDraft.clearAfterAccepted, composerDraftReady],
+    [composerDraft.clearAfterAccepted, composerDraft.clearAfterAcceptedDraft, composerDraftReady],
   );
   const handleComposerDraftPatch = useCallback(
     (
@@ -2351,11 +2365,14 @@ export function App() {
     [sideChatDraft.update, sideChatDraftReady],
   );
   const handleSideChatDraftAccepted = useCallback(
-    async (revision: number): Promise<boolean> => {
+    async (revision: number, submittedDraft?: ComposerDraft | null): Promise<boolean> => {
       if (!sideChatDraftReady) return false;
+      if (submittedDraft) {
+        return sideChatDraft.clearAfterAcceptedDraft(submittedDraft, revision);
+      }
       return sideChatDraft.clearAfterAccepted(revision);
     },
-    [sideChatDraft.clearAfterAccepted, sideChatDraftReady],
+    [sideChatDraft.clearAfterAccepted, sideChatDraft.clearAfterAcceptedDraft, sideChatDraftReady],
   );
   const handleStageDraftAttachment = useCallback(
     async (attachment: {
@@ -5772,7 +5789,9 @@ export function App() {
     if (!trimmed || !sideTaskId) return;
     setSideChat((prev) => (prev?.task?.id === sideTaskId ? { ...prev, sending: true } : prev));
     try {
-      await window.electronAPI.sendMessage(sideTaskId, trimmed);
+      await window.electronAPI.sendMessage(sideTaskId, trimmed, undefined, undefined, {
+        returnOnAccepted: true,
+      });
       const [updatedTask, updatedEvents] = await Promise.all([
         window.electronAPI.getTask(sideTaskId).catch(() => null),
         window.electronAPI.getTaskEvents(sideTaskId).catch(() => []),
@@ -6139,6 +6158,7 @@ export function App() {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
+      returnOnAccepted?: boolean;
     },
   ) => {
     if (!selectedTaskId) return;
@@ -7586,6 +7606,7 @@ export function App() {
                   sideChat={sideChat}
                   sideChatDraftValue={sideChatDraft.draft?.text ?? ""}
                   sideChatDraftRevision={sideChatDraft.draft?.revision ?? 0}
+                  sideChatDraftSnapshot={sideChatDraft.draft}
                   onSideChatDraftValueChange={handleSideChatDraftValueChange}
                   onSideChatDraftAccepted={handleSideChatDraftAccepted}
                   rightPanelInput={visibleRightPanelInput}

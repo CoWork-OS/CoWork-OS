@@ -72,6 +72,11 @@ export function useComposerDraft(options: UseComposerDraftOptions) {
     (submittedRevision: number) => store.clearAfterAccepted(input, submittedRevision),
     [input, store],
   );
+  const clearAfterAcceptedDraft = useCallback(
+    (submittedDraft: ComposerDraft, submittedRevision: number) =>
+      store.clearAfterAcceptedDraft(submittedDraft, submittedRevision),
+    [store],
+  );
 
-  return { draft, draftKey, update, flush, clearAfterAccepted };
+  return { draft, draftKey, update, flush, clearAfterAccepted, clearAfterAcceptedDraft };
 }

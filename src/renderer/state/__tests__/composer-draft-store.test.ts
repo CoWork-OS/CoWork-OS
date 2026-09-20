@@ -70,6 +70,22 @@ describe("ComposerDraftStore", () => {
     expect(store.get(submitted.draftKey)?.text).toBe("second");
   });
 
+  it("clears a submitted draft using its original owner after the active owner changes", async () => {
+    const clear = vi.fn(async () => ({ cleared: true, releasedAttachments: 0 }));
+    const store = new ComposerDraftStore({ transport: { clear } });
+    const submittedInput = { scope: "local" as const, workspaceId: "w", taskId: "old-task" };
+    const submitted = store.update(submittedInput, { text: "accepted before task switch" });
+    const nextInput = { scope: "local" as const, workspaceId: "w", taskId: "new-task" };
+    store.update(nextInput, { text: "new task draft" });
+
+    expect(await store.clearAfterAcceptedDraft(submitted, submitted.revision)).toBe(true);
+    expect(clear).toHaveBeenCalledWith(
+      expect.objectContaining({ draftKey: submitted.draftKey, taskId: "old-task" }),
+    );
+    expect(store.get(submitted.draftKey)).toBeNull();
+    expect(store.get("local:w:new-task:main")?.text).toBe("new task draft");
+  });
+
   it("does not let a late persisted load overwrite local typing", async () => {
     let resolveLoad: ((draft: ReturnType<typeof createEmptyComposerDraft>) => void) | undefined;
     const store = new ComposerDraftStore({
@@ -86,6 +102,31 @@ describe("ComposerDraftStore", () => {
     await loading;
 
     expect(store.get(current.draftKey)?.text).toBe("typed locally");
+  });
+
+  it("does not let an in-flight load resurrect an accepted draft", async () => {
+    let resolveLoad:
+      | ((draft: ReturnType<typeof createEmptyComposerDraft> | null) => void)
+      | undefined;
+    const clear = vi.fn(async () => ({ cleared: true, releasedAttachments: 0 }));
+    const store = new ComposerDraftStore({
+      transport: {
+        get: () => new Promise((resolve) => (resolveLoad = resolve)),
+        clear,
+      },
+    });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: "a" };
+    const submitted = store.update(input, { text: "accepted while loading" });
+    const loading = store.load(input);
+    const clearing = store.clearAfterAccepted(input, submitted.revision);
+
+    await expect(clearing).resolves.toBe(true);
+    const persisted = createEmptyComposerDraft(input, submitted.revision);
+    persisted.text = submitted.text;
+    resolveLoad?.(persisted);
+    await loading;
+
+    expect(store.get(submitted.draftKey)).toBeNull();
   });
 
   it("clears exactly the accepted revision", async () => {
@@ -128,6 +169,69 @@ describe("ComposerDraftStore", () => {
 
     resolveClear?.({ cleared: true, releasedAttachments: 0 });
     await expect(clearing).resolves.toBe(true);
+    expect(store.get(submitted.draftKey)).toBeNull();
+  });
+
+  it("waits for an in-flight upsert before clearing an accepted draft", async () => {
+    const events: string[] = [];
+    let resolveUpsert: (() => void) | undefined;
+    const upsert = vi.fn(
+      () =>
+        new Promise<{ accepted: boolean; draft: ReturnType<typeof createEmptyComposerDraft> }>(
+          (resolve) => {
+            events.push("upsert:start");
+            resolveUpsert = () => {
+              events.push("upsert:end");
+              resolve({ accepted: true, draft: submitted });
+            };
+          },
+        ),
+    );
+    const clear = vi.fn(async () => {
+      events.push("clear");
+      return { cleared: true, releasedAttachments: 0 };
+    });
+    const store = new ComposerDraftStore({ transport: { upsert, clear }, debounceMs: 0 });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: "a" };
+    const submitted = store.update(input, { text: "accepted while flushing" });
+    const flushing = store.flush(submitted.draftKey);
+    await vi.waitFor(() => expect(upsert).toHaveBeenCalledOnce());
+
+    const clearing = store.clearAfterAccepted(input, submitted.revision);
+    expect(clear).not.toHaveBeenCalled();
+
+    resolveUpsert?.();
+    await flushing;
+    await expect(clearing).resolves.toBe(true);
+    expect(events).toEqual(["upsert:start", "upsert:end", "clear"]);
+    expect(store.get(submitted.draftKey)).toBeNull();
+  });
+
+  it("blocks a flush that starts during an accepted clear", async () => {
+    let resolveClear: (() => void) | undefined;
+    const clear = vi.fn(
+      () =>
+        new Promise<{ cleared: boolean; releasedAttachments: number }>((resolve) => {
+          resolveClear = () => resolve({ cleared: true, releasedAttachments: 0 });
+        }),
+    );
+    const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => ({
+      accepted: true,
+      draft,
+    }));
+    const store = new ComposerDraftStore({ transport: { clear, upsert } });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: "a" };
+    const submitted = store.update(input, { text: "accepted before a late flush" });
+    const clearing = store.clearAfterAccepted(input, submitted.revision);
+    await vi.waitFor(() => expect(clear).toHaveBeenCalledOnce());
+
+    const flushing = store.flush(submitted.draftKey);
+    await Promise.resolve();
+    expect(upsert).not.toHaveBeenCalled();
+
+    resolveClear?.();
+    await Promise.all([clearing, flushing]);
+    expect(upsert).not.toHaveBeenCalled();
     expect(store.get(submitted.draftKey)).toBeNull();
   });
 });

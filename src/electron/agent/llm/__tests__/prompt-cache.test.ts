@@ -378,6 +378,40 @@ describe("prompt-cache stable prefix hashing", () => {
     expect(messages[0].content).toContain("Do the work");
   });
 
+  it("does not mix volatile context into a tool-result message", () => {
+    const messages = prependVolatileSystemContextToMessages(
+      [
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "call-1", content: "ok" }],
+        },
+        { role: "user", content: "Continue the work" },
+      ],
+      "Current time: now",
+    );
+
+    expect(messages[0].content).toEqual([
+      { type: "tool_result", tool_use_id: "call-1", content: "ok" },
+    ]);
+    expect(messages[1].content).toContain("<cowork_turn_context>");
+    expect(messages[1].content).toContain("Continue the work");
+  });
+
+  it("handles a missing model id when building OpenAI cache fields", () => {
+    expect(
+      buildOpenAIPromptCacheFields({
+        mode: "openai_key",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+        cacheKey: "stable-prefix",
+        retention: "24h",
+      }),
+    ).toEqual({
+      prompt_cache_key: "stable-prefix",
+      prompt_cache_retention: "24h",
+    });
+  });
+
   it("preserves Anthropic cache-write TTL details for accounting", () => {
     expect(
       extractAnthropicUsage({

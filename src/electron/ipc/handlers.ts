@@ -5929,6 +5929,7 @@ export async function setupIpcHandlers(
           ...(validated.expectedTurnId ? { expectedTurnId: validated.expectedTurnId } : {}),
           ...(validated.interactionMode ? { interactionMode: validated.interactionMode } : {}),
           ...(validated.deliveryMode ? { deliveryMode: validated.deliveryMode } : {}),
+          ...(validated.returnOnAccepted ? { returnOnAccepted: true } : {}),
           ...(validated.messageId ? { messageId: validated.messageId } : {}),
           ...(validated.permissionMode ? { permissionMode: validated.permissionMode } : {}),
           ...(validated.shellAccess !== undefined ? { shellAccess: validated.shellAccess } : {}),

@@ -1,5 +1,6 @@
 import type {
   AssistantMessage,
+  CacheRetention,
   Context,
   Model,
   OAuthAuthInfo,
@@ -12,6 +13,11 @@ type PiAiCompleteOptions = {
   maxTokens?: number;
   signal?: AbortSignal;
   sessionId?: string;
+  cacheRetention?: CacheRetention;
+  onPayload?: (
+    payload: unknown,
+    model: Model<Any>,
+  ) => unknown | undefined | Promise<unknown | undefined>;
   reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   textVerbosity?: "low" | "medium" | "high";
 };

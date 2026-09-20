@@ -477,6 +477,8 @@ type DaemonFollowUpOptions = Pick<
   | "senderTaskId"
   | "senderLabel"
 > & {
+  /** Return to the renderer once the follow-up is durably admitted, not after provider completion. */
+  returnOnAccepted?: boolean;
   /** Called once the executor has durably incorporated this message. */
   onAccepted?: () => void | Promise<void>;
   /** Internal queue recovery flag; consumed by the executor before its turn. */
@@ -13086,33 +13088,88 @@ export class AgentDaemon extends EventEmitter {
         deliveredAt: Date.now(),
       };
     }
-    try {
-      await executor.sendMessage(effectiveMessage, images, quotedAssistantMessage, {
-        agentConfigOverride: effectiveOptions?.agentConfigOverride,
-        interactionMode:
-          effectiveOptions?.interactionMode ?? effectiveTask.agentConfig?.interactionMode,
-        messageSource: effectiveOptions?.messageSource,
-        messageId: effectiveOptions?.messageId,
-        senderTaskId: effectiveOptions?.senderTaskId,
-        senderLabel: effectiveOptions?.senderLabel,
-        onAccepted: onAgentMessageAccepted,
-        suppressUserMessageEvent:
-          effectiveOptions?.suppressUserMessageEvent === true || queuedAgentMessageId !== undefined,
-        queuedFollowUp: effectiveOptions?.queuedFollowUp,
-      });
-      if (onAgentMessageAccepted && !agentMessageAcceptanceCompleted) {
-        throw new Error(
-          `Queued agent message ${queuedAgentMessageId} did not reach the executor acceptance boundary.`,
-        );
+    // Renderer follow-ups need the durable admission boundary, not the end of
+    // the provider turn. Native executors expose that boundary after the task
+    // status and user_message event have been persisted. ACP keeps its legacy
+    // full-turn response because it does not expose the same guarantee.
+    const returnOnAccepted =
+      effectiveOptions?.returnOnAccepted === true &&
+      effectiveTask.agentConfig?.externalRuntime?.kind !== "acpx";
+    let executionAcceptedAt: number | undefined;
+    let resolveExecutionAccepted: ((acceptedAt: number) => void) | undefined;
+    let rejectExecutionAccepted: ((error: unknown) => void) | undefined;
+    const executionAcceptance = returnOnAccepted
+      ? new Promise<number>((resolve, reject) => {
+          resolveExecutionAccepted = resolve;
+          rejectExecutionAccepted = reject;
+        })
+      : undefined;
+    const onExecutionAccepted = returnOnAccepted
+      ? () => {
+          if (executionAcceptedAt !== undefined) return;
+          executionAcceptedAt = Date.now();
+          resolveExecutionAccepted?.(executionAcceptedAt);
+        }
+      : undefined;
+    const executeFollowUp = async (): Promise<void> => {
+      try {
+        await executor.sendMessage(effectiveMessage, images, quotedAssistantMessage, {
+          agentConfigOverride: effectiveOptions?.agentConfigOverride,
+          interactionMode:
+            effectiveOptions?.interactionMode ?? effectiveTask.agentConfig?.interactionMode,
+          messageSource: effectiveOptions?.messageSource,
+          messageId: effectiveOptions?.messageId,
+          senderTaskId: effectiveOptions?.senderTaskId,
+          senderLabel: effectiveOptions?.senderLabel,
+          onAccepted: onAgentMessageAccepted,
+          onExecutionAccepted,
+          suppressUserMessageEvent:
+            effectiveOptions?.suppressUserMessageEvent === true ||
+            queuedAgentMessageId !== undefined,
+          queuedFollowUp: effectiveOptions?.queuedFollowUp,
+        });
+        if (onAgentMessageAccepted && !agentMessageAcceptanceCompleted) {
+          throw new Error(
+            `Queued agent message ${queuedAgentMessageId} did not reach the executor acceptance boundary.`,
+          );
+        }
+      } finally {
+        if (effectiveOptions?.agentConfigOverride) {
+          this.clearTransientTaskAgentConfig(taskId);
+          const stableWorkspace = this.getEffectiveWorkspaceForTask(taskId);
+          if (stableWorkspace) executor.updateWorkspace(stableWorkspace);
+        }
+        this.processOrphanedFollowUps(taskId, executor);
       }
-    } finally {
-      if (effectiveOptions?.agentConfigOverride) {
-        this.clearTransientTaskAgentConfig(taskId);
-        const stableWorkspace = this.getEffectiveWorkspaceForTask(taskId);
-        if (stableWorkspace) executor.updateWorkspace(stableWorkspace);
-      }
-      this.processOrphanedFollowUps(taskId, executor);
+    };
+
+    if (returnOnAccepted && executionAcceptance) {
+      void executeFollowUp().then(
+        () => {
+          if (executionAcceptedAt === undefined) {
+            rejectExecutionAccepted?.(
+              new Error("Follow-up ended before reaching the durable acceptance boundary."),
+            );
+          }
+        },
+        (error) => {
+          if (executionAcceptedAt === undefined) {
+            rejectExecutionAccepted?.(error);
+          } else {
+            log.error(`[follow-up] Background execution failed for ${taskId}:`, error);
+          }
+        },
+      );
+      const acceptedAt = await executionAcceptance;
+      return {
+        queued: false,
+        deliveryMode: "follow_up",
+        deliveryStatus: "accepted",
+        acceptedAt,
+      };
     }
+
+    await executeFollowUp();
     return {
       queued: false,
       deliveryMode: "follow_up",
@@ -13425,13 +13482,22 @@ export class AgentDaemon extends EventEmitter {
     if (cached?.executor.isRunning) return;
     const refreshed = this.taskRepo.findById(task.id) || task;
     if (refreshed.status === "executing" || refreshed.status === "planning") return;
-    void this.startTask(refreshed).catch((error) => {
-      this.logEvent(task.id, "error", {
-        message: "Bot teammate message was accepted but could not start the recipient.",
-        error: error instanceof Error ? error.message : String(error),
-        messageId,
-        senderTaskId,
-      });
+    // queueMessageOnly creates the executor before reaching this method. Drain
+    // that exact accepted message through the normal follow-up path instead of
+    // calling startTask: dormant bot conversations have a synthetic seed prompt
+    // ("Start chatting with ...") that must never run before the real handoff.
+    // processOrphanedFollowUps owns the per-task drain guard, so duplicate
+    // retries cannot launch concurrent recipient executions.
+    if (cached?.executor) {
+      this.processOrphanedFollowUps(task.id, cached.executor);
+      return;
+    }
+
+    this.logEvent(task.id, "error", {
+      message: "Bot teammate message was accepted but its recipient runtime was unavailable.",
+      error: "BOT_RUNTIME_UNAVAILABLE",
+      messageId,
+      senderTaskId,
     });
   }
 

@@ -1956,6 +1956,39 @@ describe("SessionRuntime", () => {
     }
   });
 
+  it("preserves cache-write TTL in usage telemetry", async () => {
+    const harness = createHarness();
+    harness.createMessageWithTimeout.mockResolvedValueOnce({
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "done" }],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cachedTokens: 2,
+        cacheWriteTokens: 3,
+        cacheWriteTtl: "1h",
+      },
+    });
+
+    await harness.runtime.requestLLMResponseWithAdaptiveBudget({
+      messages: [{ role: "user", content: "Start" }],
+      retryLabel: "cache ttl",
+      operation: "Cache TTL test",
+    });
+
+    expect(harness.emittedEvents).toContainEqual(
+      expect.objectContaining({
+        type: "llm_usage",
+        payload: expect.objectContaining({
+          delta: expect.objectContaining({
+            cacheWriteTokens: 3,
+            cacheWriteTtl: "1h",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("marks repeated thinking-only truncation as non-continuable after escalation", async () => {
     const previousPolicy = process.env.COWORK_LLM_OUTPUT_POLICY;
     try {

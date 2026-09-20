@@ -1270,9 +1270,18 @@ export function renderEventDetails(
           ? event.payload.deliveryStatus
           : "";
     const status =
-      rawStatus === "queued" || rawStatus === "failed" || rawStatus === "delivered"
+      rawStatus === "accepted" ||
+      rawStatus === "queued" ||
+      rawStatus === "failed" ||
+      rawStatus === "delivered"
         ? rawStatus
         : "accepted";
+    const messageId =
+      typeof event.payload?.messageId === "string" ? event.payload.messageId.trim() : "";
+    const senderTaskId =
+      typeof event.payload?.senderTaskId === "string" ? event.payload.senderTaskId.trim() : "";
+    const targetTaskId =
+      typeof event.payload?.targetTaskId === "string" ? event.payload.targetTaskId.trim() : "";
     const sender =
       event.payload?.senderType === "agent"
         ? typeof event.payload?.senderLabel === "string"
@@ -1280,7 +1289,13 @@ export function renderEventDetails(
           : "Agent"
         : "You";
     return (
-      <div className="event-details agent-message-event-details">
+      <div
+        className="event-details agent-message-event-details"
+        data-message-id={messageId || undefined}
+        data-delivery-state={status}
+        data-sender-task-id={senderTaskId || undefined}
+        data-target-task-id={targetTaskId || undefined}
+      >
         <div>
           {sender} → {event.payload?.recipientLabel || "agent"}
         </div>
@@ -1294,7 +1309,9 @@ export function renderEventDetails(
               ? "Queued for the next turn"
               : status === "failed"
                 ? "Delivery failed"
-                : "Delivered"}
+                : status === "delivered"
+                  ? "Delivered"
+                  : "Accepted"}
         </div>
         {typeof event.payload?.error === "string" && event.payload.error.trim() ? (
           <div className="event-details-failure">{event.payload.error}</div>

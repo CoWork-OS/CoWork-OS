@@ -1,4 +1,5 @@
 import { CUSTOM_PROVIDER_MAP } from "../../../shared/llm-provider-catalog";
+import type { LLMProviderType } from "../../../shared/types";
 
 /**
  * Model Pricing Table
@@ -41,7 +42,7 @@ export function getCacheTokenAccounting(
     return "disjoint";
   }
 
-  if (CUSTOM_PROVIDER_MAP.get(provider)?.compatibility === "anthropic") {
+  if (CUSTOM_PROVIDER_MAP.get(provider as LLMProviderType)?.compatibility === "anthropic") {
     return "disjoint";
   }
 

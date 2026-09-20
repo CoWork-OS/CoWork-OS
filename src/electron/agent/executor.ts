@@ -305,6 +305,8 @@ type TaskExecutorFollowUpOptions = Pick<
 > & {
   /** Called after transcript and queue state are durably persisted. */
   onAccepted?: () => void | Promise<void>;
+  /** Called once the follow-up is admitted and the task has started processing it. */
+  onExecutionAccepted?: () => void | Promise<void>;
   /** Queue recovery already emitted the receipt; avoid a duplicate event. */
   suppressUserMessageEvent?: boolean;
   /** Full queue item retained until the acceptance snapshot commits. */
@@ -3520,6 +3522,7 @@ export class TaskExecutor {
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
       });
     }
+    await options?.onExecutionAccepted?.();
     await runner.ensureSession();
     const result = await runner.prompt(followUpConversationMessage);
     const assistantText = result.assistantText.trim();
@@ -36288,6 +36291,7 @@ Return ONLY a JSON object:
         agentConfigOverride: options.agentConfigOverride,
         messageContext: options,
         onAccepted: options.onAccepted,
+        onExecutionAccepted: options.onExecutionAccepted,
         suppressUserMessageEvent: options.suppressUserMessageEvent,
         queuedFollowUp: options.queuedFollowUp,
       });
@@ -36297,6 +36301,7 @@ Return ONLY a JSON object:
     await this.sendMessageUnified(message, images, quotedAssistantMessage, {
       messageContext: options,
       onAccepted: options?.onAccepted,
+      onExecutionAccepted: options?.onExecutionAccepted,
       suppressUserMessageEvent: options?.suppressUserMessageEvent,
       queuedFollowUp: options?.queuedFollowUp,
     });
@@ -36386,6 +36391,7 @@ Return ONLY a JSON object:
         "messageSource" | "messageId" | "senderTaskId" | "senderLabel"
       >;
       onAccepted?: () => void | Promise<void>;
+      onExecutionAccepted?: () => void | Promise<void>;
       suppressUserMessageEvent?: boolean;
       queuedFollowUp?: TaskFollowUpInput;
     },
@@ -36393,6 +36399,7 @@ Return ONLY a JSON object:
     let executionMessage = message;
     const recoveredFromTurnLimit = opts?.recoveredFromTurnLimit === true;
     let followUpAcceptanceAttempted = false;
+    let executionAcceptanceAttempted = false;
     const followUpMessageId =
       typeof opts?.messageContext?.messageId === "string"
         ? opts.messageContext.messageId.trim()
@@ -36409,6 +36416,11 @@ Return ONLY a JSON object:
         () => this.rollbackLastFollowUpIncorporation(),
         opts.queuedFollowUp,
       );
+    };
+    const notifyExecutionAccepted = async (): Promise<void> => {
+      if (executionAcceptanceAttempted || !opts?.onExecutionAccepted) return;
+      executionAcceptanceAttempted = true;
+      await opts.onExecutionAccepted();
     };
     if (!recoveredFromTurnLimit) {
       this.followUpRecoveryAttemptsInCurrentMessage = 0;
@@ -36451,11 +36463,12 @@ Return ONLY a JSON object:
     this.lastUserMessage = message;
     const goalFollowUp = this.handleGoalSlashFollowUp(message);
     if (goalFollowUp.handled) {
-      if (opts?.onAccepted) {
+      if (opts?.onAccepted || opts?.onExecutionAccepted) {
         this.appendConversationHistory({
           role: "user",
           content: await this.buildUserContent(message, images),
         });
+        await notifyExecutionAccepted();
         await acceptFollowUp();
       }
       return;
@@ -36543,6 +36556,7 @@ Return ONLY a JSON object:
           role: "user",
           content,
         });
+        await notifyExecutionAccepted();
         await acceptFollowUp();
       }
       const pendingOutcome = await this.handlePendingSkillParameterReply(message);
@@ -36569,6 +36583,7 @@ Return ONLY a JSON object:
           role: "user",
           content,
         });
+        await notifyExecutionAccepted();
         await acceptFollowUp();
       }
       return;
@@ -36612,6 +36627,7 @@ Return ONLY a JSON object:
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
       });
     }
+    await notifyExecutionAccepted();
 
     const knownContextInformationalFollowUp =
       !shouldResumeAfterFollowup && this.isKnownContextInformationalFollowUp(executionMessage);
@@ -38989,6 +39005,7 @@ Return ONLY a JSON object:
           return await this.sendMessageUnified(message, images, quotedAssistantMessage, {
             recoveredFromTurnLimit: true,
             onAccepted: opts?.onAccepted,
+            onExecutionAccepted: opts?.onExecutionAccepted,
             suppressUserMessageEvent: opts?.suppressUserMessageEvent,
             messageContext: opts?.messageContext,
             queuedFollowUp: opts?.queuedFollowUp,

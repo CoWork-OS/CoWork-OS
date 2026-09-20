@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import type { LLMProviderType, PromptCachingSettings } from "../../../shared/types";
 import { CUSTOM_PROVIDER_MAP } from "../../../shared/llm-provider-catalog";
 import type {
+  LLMContent,
   LLMMessage,
   LLMPromptCacheConfig,
   LLMSystemBlock,
@@ -471,12 +472,14 @@ export function buildOpenAIPromptCacheFields(
     return {};
   }
 
-  const normalizedModelId = String(modelId || "")
-    .trim()
-    .toLowerCase()
-    .split("/")
-    .pop()
-    ?.replace(/^(?:openai-codex|openai)\//, "")
+  const normalizedModelId = (
+    String(modelId || "")
+      .trim()
+      .toLowerCase()
+      .split("/")
+      .pop() ?? ""
+  )
+    .replace(/^(?:openai-codex|openai)\//, "")
     .split("@", 1)[0];
   const versionMatch = normalizedModelId.match(/^gpt-(\d+)(?:\.(\d+))?(?:-|$)/);
   const modernCacheModel =
@@ -570,7 +573,12 @@ export function prependVolatileSystemContextToMessages(
 
   const prefix = `<cowork_turn_context>\n${text}\n</cowork_turn_context>\n\n`;
   const next = messages.map((message) => ({ ...message }));
-  const userIndex = next.findIndex((message) => message.role === "user");
+  const userIndex = next.findIndex(
+    (message) =>
+      message.role === "user" &&
+      (typeof message.content === "string" ||
+        message.content.every((item) => item.type !== "tool_result")),
+  );
   if (userIndex < 0) {
     return [
       {
@@ -585,7 +593,8 @@ export function prependVolatileSystemContextToMessages(
   if (typeof message.content === "string") {
     message.content = `${prefix}${message.content}`;
   } else {
-    message.content = [{ type: "text", text: prefix }, ...message.content];
+    const content = message.content as LLMContent[];
+    message.content = [{ type: "text", text: prefix }, ...content];
   }
   return next;
 }

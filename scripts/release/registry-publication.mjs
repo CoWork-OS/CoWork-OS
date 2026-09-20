@@ -22,6 +22,7 @@ const GITHUB_DOWNLOAD_HOSTS = new Set([
   "github.com",
   "objects.githubusercontent.com",
   "pkg-containers.githubusercontent.com",
+  "pkg-npm.githubusercontent.com",
   "raw.githubusercontent.com",
 ]);
 

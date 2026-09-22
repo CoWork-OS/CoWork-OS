@@ -300,6 +300,77 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.handoffs[0].replyState).toBe("timed_out");
   });
 
+  it("surfaces a timed-out handoff even when the task row is still blocked", () => {
+    const projection = deriveBotConversationProjection({
+      task: {
+        status: "blocked",
+        error: "Waiting for Forge to reply before finishing this conversation.",
+        resultSummary: undefined,
+      },
+      botName: "Atlas",
+      events: [
+        makeEvent("message-timeout-blocked", "agent_message", {
+          messageId: "message-timeout-blocked",
+          senderLabel: "Atlas",
+          recipientLabel: "Forge",
+          message: "Inspect the repository.",
+          deliveryStatus: "delivered",
+          replyStatus: "timed_out",
+        }),
+      ],
+    });
+
+    expect(projection.attention).toMatchObject({
+      kind: "delivery",
+      title: "No reply from Forge",
+    });
+    expect(projection.activityLabel).toBe("No reply from Forge; partial result available");
+  });
+
+  it("prefers a newer handoff failure over an older pending handoff", () => {
+    const projection = deriveBotConversationProjection({
+      task: {
+        status: "blocked",
+        error: "Waiting for Forge to reply before finishing this conversation.",
+        resultSummary: undefined,
+      },
+      botName: "Atlas",
+      events: [
+        makeEvent(
+          "old-pending",
+          "agent_message",
+          {
+            messageId: "old-pending",
+            senderLabel: "Atlas",
+            recipientLabel: "Forge",
+            message: "Inspect the repository.",
+            deliveryStatus: "delivered",
+            replyStatus: "pending",
+          },
+          1_000,
+        ),
+        makeEvent(
+          "new-failure",
+          "agent_message",
+          {
+            messageId: "new-failure",
+            senderLabel: "Atlas",
+            recipientLabel: "Scribe",
+            message: "Review the result.",
+            deliveryStatus: "failed",
+            error: "Scribe was unavailable.",
+          },
+          2_000,
+        ),
+      ],
+    });
+
+    expect(projection.attention).toMatchObject({
+      kind: "delivery",
+      title: "Message to Scribe failed",
+    });
+  });
+
   it("folds a child-task reply into the parent handoff instead of adding a new request", () => {
     const projection = deriveBotConversationProjection({
       task: { ...baseTask, id: "atlas-task" },

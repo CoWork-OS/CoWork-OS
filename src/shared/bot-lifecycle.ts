@@ -358,17 +358,45 @@ function getAttention(
   const scopedHandoffs = handoffs.filter(
     (handoff) => scopeStart === undefined || handoff.timestamp >= scopeStart,
   );
-  const taskError = typeof task.error === "string" ? cleanPreview(task.error) : "";
-  const waitingHandoff = [...scopedHandoffs]
+  // Handoffs are normally projected in event order, but keeping the newest
+  // actionable receipt first prevents an older pending message from masking a
+  // later delivery failure or reply timeout.
+  const recentHandoffs = [...scopedHandoffs]
     .reverse()
-    .find(
-      (handoff) =>
-        (handoff.state === "accepted" ||
-          handoff.state === "queued" ||
-          handoff.state === "started" ||
-          handoff.state === "delivered") &&
-        (handoff.replyState === undefined || handoff.replyState === "pending"),
-    );
+    .sort((left, right) => right.timestamp - left.timestamp);
+  const taskError = typeof task.error === "string" ? cleanPreview(task.error) : "";
+  const waitingHandoff = recentHandoffs.find(
+    (handoff) =>
+      (handoff.state === "accepted" ||
+        handoff.state === "queued" ||
+        handoff.state === "started" ||
+        handoff.state === "delivered") &&
+      (handoff.replyState === undefined || handoff.replyState === "pending"),
+  );
+  const failedHandoff = recentHandoffs.find((handoff) => handoff.state === "failed");
+  const timedOutHandoff = recentHandoffs.find((handoff) => handoff.replyState === "timed_out");
+  const latestActionableHandoff = recentHandoffs.find(
+    (handoff) =>
+      handoff.state === "failed" ||
+      handoff.replyState === "timed_out" ||
+      handoff === waitingHandoff,
+  );
+  if (latestActionableHandoff?.state === "failed") {
+    return {
+      kind: "delivery",
+      title: `Message to ${latestActionableHandoff.recipientLabel} failed`,
+      detail: latestActionableHandoff.error || "Retry the handoff or choose another teammate.",
+      handoffId: latestActionableHandoff.id,
+    };
+  }
+  if (latestActionableHandoff?.replyState === "timed_out") {
+    return {
+      kind: "delivery",
+      title: `No reply from ${latestActionableHandoff.recipientLabel}`,
+      detail: "The team kept the partial result so you can review it or retry the handoff.",
+      handoffId: latestActionableHandoff.id,
+    };
+  }
   if (
     waitingHandoff &&
     (task.status === "blocked" || task.status === "paused" || task.status === "interrupted")
@@ -380,7 +408,6 @@ function getAttention(
       handoffId: waitingHandoff.id,
     };
   }
-  const failedHandoff = [...scopedHandoffs].reverse().find((handoff) => handoff.state === "failed");
   if (failedHandoff) {
     return {
       kind: "delivery",
@@ -403,9 +430,6 @@ function getAttention(
       detail: "Provide the missing decision or resume the conversation to continue.",
     };
   }
-  const timedOutHandoff = [...scopedHandoffs]
-    .reverse()
-    .find((handoff) => handoff.replyState === "timed_out");
   if (timedOutHandoff) {
     return {
       kind: "delivery",

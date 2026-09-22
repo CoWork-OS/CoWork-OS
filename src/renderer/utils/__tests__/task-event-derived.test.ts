@@ -4,7 +4,10 @@ import {
   taskSurfaceFailureStormEvents,
   taskSurfaceFailureStormTask,
 } from "../../perf-fixtures/task-surface-failure-storm.fixture";
-import { deriveSharedTaskEventUiState } from "../task-event-derived";
+import {
+  deriveSharedTaskEventUiState,
+  reconcileBotConversationSharedTaskEventUi,
+} from "../task-event-derived";
 
 function makeEvent(
   id: string,
@@ -24,6 +27,37 @@ function makeEvent(
 }
 
 describe("deriveSharedTaskEventUiState action blocks", () => {
+  it("re-applies Bot transcript filtering after task hydration", () => {
+    const sharedBeforeHydration = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("waiting-1", 1_000, "assistant_message", {
+          message: "Waiting for Scribe’s single durable correlated reply.",
+        }),
+        makeEvent("waiting-2", 1_009, "assistant_message", {
+          message: "Waiting for Scribe’s single durable correlated reply.",
+        }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: null,
+      verboseSteps: false,
+    });
+
+    const reconciled = reconcileBotConversationSharedTaskEventUi(sharedBeforeHydration, {
+      task: {
+        id: "task-1",
+        status: "completed",
+        agentConfig: { botConversation: true },
+      } as Any,
+      workspace: null,
+    });
+
+    expect(
+      reconciled?.baseTimelineItems.flatMap((item) =>
+        item.kind === "event" ? [item.event.id] : [],
+      ),
+    ).toEqual(["waiting-1"]);
+  });
+
   it("keeps one action block when an assistant turn has nothing to display", () => {
     const shared = deriveSharedTaskEventUiState({
       rawEvents: [

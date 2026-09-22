@@ -158,6 +158,7 @@ import { areIntegrationMentionOptionsEqual } from "../../utils/integration-menti
 import { extractAttachmentNames } from "../utils/attachment-content";
 import {
   deriveSharedTaskEventUiState,
+  reconcileBotConversationSharedTaskEventUi,
   type BaseTimelineItem,
   type CommandOutputSession,
   type SharedTaskEventUiState,
@@ -3633,10 +3634,19 @@ function MainContentComponent({
     setTranscriptModeOverride(null);
   }, [task?.id]);
   const isReplayMode = replayControls?.isReplayMode ?? false;
-  const effectiveSharedTaskEventUi =
+  const baseSharedTaskEventUi =
     sharedTaskEventUi?.projectionMode === "live" && transcriptModeOverride === "inspect"
       ? null
       : sharedTaskEventUi;
+  const effectiveSharedTaskEventUi = useMemo(
+    () =>
+      reconcileBotConversationSharedTaskEventUi(baseSharedTaskEventUi, {
+        task,
+        workspace,
+        isReplayMode,
+      }),
+    [baseSharedTaskEventUi, isReplayMode, task, workspace],
+  );
   const statusTaskEventUi = useMemo(
     () =>
       sharedTaskEventUi ??
@@ -4771,7 +4781,13 @@ function MainContentComponent({
   >(null);
   // Filter events based on verbose mode
   const filteredEvents = useMemo(() => {
-    if (!verboseSteps && effectiveSharedTaskEventUi) {
+    // Bot conversations must take the hydrated Bot-specific filtering path;
+    // the app-level projection may have been built from a lightweight task row.
+    if (
+      !verboseSteps &&
+      effectiveSharedTaskEventUi &&
+      task?.agentConfig?.botConversation !== true
+    ) {
       return effectiveSharedTaskEventUi.filteredEvents;
     }
     return measureRendererPerf("MainContent.filteredEvents", rendererPerfLoggingEnabled, () => {
@@ -5172,7 +5188,11 @@ function MainContentComponent({
   }, [canvasSessions, latestUserMessageTimestamp]);
 
   const baseTimelineItems = useMemo<BaseTimelineItem[]>(() => {
-    if (!verboseSteps && effectiveSharedTaskEventUi) {
+    if (
+      !verboseSteps &&
+      effectiveSharedTaskEventUi &&
+      task?.agentConfig?.botConversation !== true
+    ) {
       return effectiveSharedTaskEventUi.baseTimelineItems;
     }
     return measureRendererPerf(

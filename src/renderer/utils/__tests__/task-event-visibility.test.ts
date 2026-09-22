@@ -105,6 +105,72 @@ describe("task event visibility helpers", () => {
     ).toEqual(["What is the latest verified result?", "The teammate found a launch opportunity."]);
   });
 
+  it("collapses an assistant payload duplicated by live and durable stream replay", () => {
+    const events = [
+      makeEvent(
+        "assistant_message",
+        { message: "Waiting for Scribe’s single durable correlated reply." },
+        { id: "waiting-live", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "assistant_message",
+        {
+          message:
+            "Waiting for Scribe’s single durable correlated reply.\nWaiting for Scribe’s single durable correlated reply.",
+        },
+        { id: "waiting-replay", timestamp: 1_009 },
+      ),
+    ];
+
+    const filtered = filterBotConversationTranscriptEvents(events);
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.payload?.message).toBe(
+      "Waiting for Scribe’s single durable correlated reply.",
+    );
+  });
+
+  it("removes a completion summary that replays the Bot waiting message", () => {
+    const events = [
+      makeEvent(
+        "assistant_message",
+        { message: "Waiting for Scribe’s single durable correlated reply." },
+        { id: "waiting-message", timestamp: 2_000 },
+      ),
+      makeEvent(
+        "task_completed",
+        {
+          message: "Follow-up completed (1 tool calls)",
+          resultSummary:
+            "Waiting for Scribe’s single durable correlated reply.\nWaiting for Scribe’s single durable correlated reply.",
+        },
+        { id: "waiting-completion", timestamp: 2_010 },
+      ),
+    ];
+
+    expect(filterBotConversationTranscriptEvents(events).map((event) => event.id)).toEqual([
+      "waiting-message",
+    ]);
+  });
+
+  it("collapses a distinct completion summary without hiding it", () => {
+    const events = [
+      makeEvent(
+        "task_completed",
+        {
+          message: "Follow-up completed (1 tool calls)",
+          resultSummary: "A durable result.\nA durable result.",
+        },
+        { id: "completion", timestamp: 3_000 },
+      ),
+    ];
+
+    const filtered = filterBotConversationTranscriptEvents(events);
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.payload?.resultSummary).toBe("A durable result.");
+  });
+
   it("hides coordinator delegation protocol from the primary bot transcript", () => {
     const events = [
       makeEvent("user_message", {

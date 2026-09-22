@@ -1162,3 +1162,34 @@ export function deriveSharedTaskEventUiState(
     outcomeMetrics,
   };
 }
+
+/**
+ * Reconcile a shared projection after the selected task has been hydrated.
+ *
+ * The app-level projection can be created from a lightweight task-list row
+ * before the selected Bot conversation's full agent configuration arrives.
+ * Re-projecting the normalized stream at the Bot surface keeps the shared
+ * activity model intact while ensuring Bot-only transcript filtering (notably
+ * duplicate assistant coordination messages) is applied to the rendered feed.
+ */
+export function reconcileBotConversationSharedTaskEventUi(
+  shared: SharedTaskEventUiState | null | undefined,
+  params: {
+    task: Task | null | undefined;
+    workspace?: Workspace | null;
+    isReplayMode?: boolean;
+  },
+): SharedTaskEventUiState | null {
+  if (!shared || params.task?.agentConfig?.botConversation !== true) {
+    return shared ?? null;
+  }
+
+  return deriveSharedTaskEventUiState({
+    rawEvents: shared.normalizedEvents,
+    task: params.task,
+    workspace: params.workspace,
+    verboseSteps: false,
+    projectionMode: shared.projectionMode,
+    isReplayMode: params.isReplayMode,
+  });
+}

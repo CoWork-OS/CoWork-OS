@@ -85,6 +85,40 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.collaborationSummary).toBe("1 teammate · 1 waiting");
   });
 
+  it("prefers a newer child completion event over a stale executing task row", () => {
+    const projection = deriveBotConversationProjection({
+      task: { ...baseTask, id: "atlas-task" },
+      botName: "Atlas",
+      childTasks: [
+        {
+          id: "forge-task",
+          title: "Forge",
+          status: "executing",
+          assignedAgentRoleId: "forge",
+        },
+      ],
+      childEvents: [
+        {
+          ...makeEvent(
+            "forge-completed",
+            "agent_completed",
+            {
+              childAgentLabel: "Forge",
+              resultSummary: "The handoff is complete.",
+            },
+            2_000,
+          ),
+          taskId: "forge-task",
+        },
+      ],
+    });
+
+    expect(projection.teammates).toEqual([
+      { id: "forge-task", label: "Forge", state: "completed", detail: "Finished" },
+    ]);
+    expect(projection.collaborationSummary).toBe("1 teammate · 1 finished");
+  });
+
   it("turns a queued teammate message into a waiting activity state", () => {
     const projection = deriveBotConversationProjection({
       task: baseTask,

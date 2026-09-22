@@ -205,7 +205,13 @@ function hasWaitingForReplyError(error: unknown): boolean {
 
 function teammateStateFromTask(
   task: Pick<Task, "status" | "error" | "resultSummary">,
+  events: TaskEvent[] = [],
 ): BotTeammateState {
+  const latestEvent = [...events].sort((a, b) => readTimestamp(a) - readTimestamp(b)).at(-1);
+  const latestEventType = latestEvent ? getEventType(latestEvent) : "";
+  if (latestEventType === "agent_completed") return "completed";
+  if (latestEventType === "agent_failed") return "failed";
+
   switch (task.status) {
     case "pending":
     case "queued":
@@ -603,7 +609,7 @@ export function deriveBotConversationProjection(input: {
   const attention = getAttention(input.task, handoffs, latestAgentEvent, handoffScopeStart);
   const teammates = (input.childTasks || []).map((childTask) => {
     const childTaskEvents = childEvents.filter((event) => event.taskId === childTask.id);
-    const childState = teammateStateFromTask(childTask);
+    const childState = teammateStateFromTask(childTask, childTaskEvents);
     const detail =
       childState === "completed" &&
       childTaskEvents.some((event) => getEventType(event) === "user_message")

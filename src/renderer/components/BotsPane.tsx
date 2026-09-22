@@ -60,7 +60,7 @@ const UNAVAILABLE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed",
 const DEFAULT_BOT_ICON: TwinIconKey = "Bot";
 const MAX_BOT_PREVIEW_LENGTH = 140;
 const BOT_WAITING_FOR_REPLY_RE =
-  /^waiting for .+ to reply(?: before finishing this conversation)?\.?$/i;
+  /^waiting for (.+?) to reply(?: before finishing this conversation)?\.?$/i;
 
 export function isBotConversationTask(task: Task): boolean {
   return task.agentConfig?.botConversation === true;
@@ -128,6 +128,12 @@ function hasPendingTeammateReply(task: Pick<Task, "status" | "error"> | undefine
   );
 }
 
+function getPendingTeammateReplyPreview(task: Pick<Task, "status" | "error">): string | null {
+  if (!hasPendingTeammateReply(task) || typeof task.error !== "string") return null;
+  const match = flattenTaskText(task.error).match(BOT_WAITING_FOR_REPLY_RE);
+  return match?.[1] ? `Waiting for ${match[1]} to reply` : "Waiting for a teammate to reply";
+}
+
 /** Persistent readiness is intentionally separate from the last run result. */
 export function getBotConversationReadiness(
   task: Pick<Task, "status" | "error"> | undefined,
@@ -173,6 +179,8 @@ export function getBotPreview(task: Task | undefined): string {
       ? `${preview.slice(0, MAX_BOT_PREVIEW_LENGTH - 1).trimEnd()}…`
       : preview;
   }
+  const pendingReplyPreview = getPendingTeammateReplyPreview(task);
+  if (pendingReplyPreview) return pendingReplyPreview;
   const promptPreview = getHumanBotPreview(task.userPrompt);
   const sidebarPreview = getHumanBotPreview(task.sidebarPromptPreview);
   const resultPreview = getHumanBotPreview(task.resultSummary);
@@ -277,7 +285,8 @@ function BotRow({
   const Icon = getSafeBotIcon(bot.icon);
   const readiness = getBotConversationReadiness(latestTask, conversationProjection);
   const isActive = readiness === "working";
-  const isAwaiting = readiness === "attention" || readiness === "unavailable";
+  const isAwaiting =
+    readiness === "waiting" || readiness === "attention" || readiness === "unavailable";
   const readinessLabel = getBotConversationReadinessLabel(readiness);
   const displayName = flattenTaskText(bot.displayName) || "Unnamed bot";
   const preview = getBotPreview(latestTask);

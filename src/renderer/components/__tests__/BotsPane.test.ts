@@ -83,6 +83,17 @@ describe("BotsPane", () => {
     ).toBe("Failed: The provider timed out before the teammate reply arrived.");
   });
 
+  it("uses the pending teammate reply as the waiting-row preview", () => {
+    expect(
+      getBotPreview({
+        ...task,
+        status: "blocked",
+        resultSummary: "Verified and reported to Atlas",
+        error: "Waiting for Atlas to reply before finishing this conversation.",
+      } as Any),
+    ).toBe("Waiting for Atlas to reply");
+  });
+
   it("shows Markdown previews as plain text without formatting syntax", () => {
     expect(
       getBotPreview({

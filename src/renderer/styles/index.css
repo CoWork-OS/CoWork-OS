@@ -30612,7 +30612,8 @@ html:not(.theme-light) .selected-workspace-main-row {
 }
 
 .sidebar-bot-readiness-attention,
-.sidebar-bot-readiness-unavailable {
+.sidebar-bot-readiness-unavailable,
+.sidebar-bot-readiness-waiting {
   color: var(--color-warning, #f59e0b);
 }
 
@@ -30945,7 +30946,8 @@ html:not(.theme-light) .selected-workspace-main-row {
 }
 
 .sidebar-bot-readiness-attention,
-.sidebar-bot-readiness-unavailable {
+.sidebar-bot-readiness-unavailable,
+.sidebar-bot-readiness-waiting {
   background: var(--color-warning, #f59e0b);
 }
 

@@ -347,7 +347,17 @@ export function getOutstandingBotHandoffReply(
       const inboundMessageId = readString(payload, "messageId", "message_id");
       const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
       const status = deliveryStatus(payload);
-      if (!inboundMessageId || !senderTaskId || isTerminalDelivery(status)) continue;
+      // Queue admission and worker wake-up are not proof that the receiver
+      // incorporated the request. Only the durable delivered boundary may
+      // trigger completion/recovery reply handling.
+      if (
+        !inboundMessageId ||
+        !senderTaskId ||
+        isTerminalDelivery(status) ||
+        !isBotHandoffMessageDelivered(payload)
+      ) {
+        continue;
+      }
       inboundById.set(inboundMessageId, {
         inboundMessageId,
         senderTaskId,

@@ -12,7 +12,9 @@ For bot-to-bot replies, `replyStatus=received` is set only after the requesting
 bot consumes the reply's durable `user_message` receipt (`deliveryStatus=delivered`).
 Queue admission or a wake-up request is not treated as a received reply, so the
 sender remains in a waiting state until the receiver has actually incorporated
-the message.
+the message. Completion and recovery use the same boundary: queued or started
+inbound receipts do not trigger an automatic reply before the receiver has
+incorporated the request.
 
 Agent creation also has two lifecycle states: `agent_spawn_requested` means dispatch has started, while `agent_spawned` is emitted only after a child handle exists. A failed dispatch is represented by `agent_failed` and is never shown as a successful creation.
 

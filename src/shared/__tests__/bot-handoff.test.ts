@@ -192,6 +192,30 @@ describe("buildFreshBotHandoffPrompt", () => {
     });
   });
 
+  it("does not require a reply before an inbound receipt is delivered", () => {
+    for (const deliveryStatus of ["queued", "started"] as const) {
+      const events = [
+        event("prompt", "user_message", { message: "Handle the handoff." }, 1),
+        event(
+          `inbound-${deliveryStatus}`,
+          "user_message",
+          {
+            messageId: `inbound-${deliveryStatus}`,
+            messageSource: "agent",
+            deliveryMode: "message",
+            deliveryStatus,
+            senderTaskId: "atlas-task",
+            senderLabel: "Atlas",
+            message: "The request has not been incorporated yet.",
+          },
+          2,
+        ),
+      ];
+
+      expect(getOutstandingBotHandoffReply(events)).toBeNull();
+    }
+  });
+
   it("correlates legacy receiver receipts without an in-reply-to field", () => {
     const events = [
       event("prompt", "user_message", { message: "Delegate the research." }, 1),

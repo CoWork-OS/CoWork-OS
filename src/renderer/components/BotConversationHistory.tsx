@@ -1,7 +1,6 @@
 import { Archive, Check, Clock3, MessageCircle, Plus } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import type { Task } from "../../shared/types";
-import { getBotConversationReadiness, getBotConversationReadinessLabel } from "./BotsPane";
 import { isBotConversation } from "../utils/bot-conversations";
 import "./BotConversationHistory.css";
 
@@ -19,12 +18,32 @@ function isArchived(task: Task): boolean {
   return task.sessionArchived === true;
 }
 
-function getConversationTitle(task: Task, index: number): string {
+const SYNTHETIC_BOT_PROMPT_RE =
+  /^(?:start (?:a )?(?:conversation|chatting) with .+|resume the .+ bot conversation)\.?$/i;
+
+function isSyntheticBotPrompt(value: string): boolean {
+  return SYNTHETIC_BOT_PROMPT_RE.test(value.trim());
+}
+
+export function getBotConversationTitle(task: Task, index: number, botName: string): string {
   const title = String(task.title || "").trim();
-  if (title && !/^start chatting with /i.test(title)) return title;
-  const firstMessage = String(task.userPrompt || task.prompt || "").trim();
-  if (firstMessage && !/^start chatting with /i.test(firstMessage)) {
+  const genericTitle = !title || title.toLocaleLowerCase() === botName.trim().toLocaleLowerCase();
+  if (!genericTitle && !isSyntheticBotPrompt(title)) return title;
+  const firstMessage = [task.userPrompt, task.sidebarPromptPreview, task.rawPrompt, task.prompt]
+    .map((value) =>
+      String(value || "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .find((value) => value && !isSyntheticBotPrompt(value));
+  if (firstMessage) {
     return firstMessage.length > 58 ? `${firstMessage.slice(0, 57).trimEnd()}…` : firstMessage;
+  }
+  if (/^reopened bot conversation$/i.test(task.branchLabel || "")) {
+    return "Reopened conversation";
+  }
+  if (/^repaired bot conversation$/i.test(task.branchLabel || "")) {
+    return "Repaired conversation";
   }
   return index === 0 ? "New conversation" : `Conversation ${index + 1}`;
 }
@@ -42,7 +61,29 @@ function formatConversationDate(timestamp?: number): string {
 
 export function getBotConversationHistoryStatusLabel(task: Pick<Task, "status" | "error">): string {
   if (task.status === "completed") return "Completed";
-  return getBotConversationReadinessLabel(getBotConversationReadiness(task));
+  if (task.status === "failed" || task.status === "cancelled") {
+    return "Unavailable — reopen to retry";
+  }
+  if (task.status === "pending" || task.status === "queued") {
+    return "Ready for another message";
+  }
+  if (task.status === "planning" || task.status === "executing") {
+    return "Working on latest message";
+  }
+  if (
+    (task.status === "blocked" || task.status === "paused" || task.status === "interrupted") &&
+    /^waiting for .+? to reply(?: before finishing this conversation)?\.?$/i.test(
+      String(task.error || "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+  ) {
+    return "Waiting on a teammate";
+  }
+  if (task.status === "blocked" || task.status === "paused" || task.status === "interrupted") {
+    return "Needs attention";
+  }
+  return "Ready for another message";
 }
 
 export function BotConversationHistory({
@@ -120,7 +161,7 @@ export function BotConversationHistory({
                   )}
                 </span>
                 <span className="bot-conversation-history-row-copy">
-                  <strong>{getConversationTitle(conversation, index)}</strong>
+                  <strong>{getBotConversationTitle(conversation, index, botName)}</strong>
                   <span>
                     {archived ? "Archived" : getBotConversationHistoryStatusLabel(conversation)}
                     {formatConversationDate(conversation.updatedAt || conversation.createdAt)

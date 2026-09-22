@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   BotConversationHistory,
+  getBotConversationTitle,
   getBotConversationHistoryStatusLabel,
 } from "../BotConversationHistory";
 
@@ -24,6 +25,40 @@ function conversation(id: string, updatedAt: number, overrides: Record<string, u
 }
 
 describe("BotConversationHistory", () => {
+  it("uses real prompts for generic bot titles and preserves recovery context", () => {
+    expect(
+      getBotConversationTitle(
+        conversation("prompt", 3_000, {
+          title: "Research Desk",
+          userPrompt: "Inspect the package metadata and report the version.",
+        }),
+        0,
+        "Research Desk",
+      ),
+    ).toBe("Inspect the package metadata and report the version.");
+    expect(
+      getBotConversationTitle(
+        conversation("custom", 2_000, {
+          title: "Release verification",
+          userPrompt: "Inspect the package metadata.",
+        }),
+        1,
+        "Research Desk",
+      ),
+    ).toBe("Release verification");
+    expect(
+      getBotConversationTitle(
+        conversation("recovery", 1_000, {
+          title: "Research Desk",
+          prompt: "Resume the Research Desk bot conversation.",
+          branchLabel: "Reopened bot conversation",
+        }),
+        2,
+        "Research Desk",
+      ),
+    ).toBe("Reopened conversation");
+  });
+
   it("uses human-readable readiness labels for non-terminal conversation states", () => {
     expect(getBotConversationHistoryStatusLabel({ status: "pending", error: null })).toBe(
       "Ready for another message",

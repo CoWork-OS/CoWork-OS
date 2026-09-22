@@ -415,6 +415,48 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.activityLabel).toBe("Reply received from Forge");
   });
 
+  it.each(["queued", "started", "failed"] as const)(
+    "prioritizes a durable receiver reply over a stale %s handoff state",
+    (deliveryStatus) => {
+      const projection = deriveBotConversationProjection({
+        task: baseTask,
+        botName: "Atlas",
+        events: [
+          makeEvent("stale-handoff", "agent_message", {
+            messageId: "stale-handoff",
+            senderLabel: "Atlas",
+            recipientLabel: "Scribe",
+            targetTaskId: "scribe-task",
+            message: "Verify the package metadata.",
+            deliveryStatus,
+            ...(deliveryStatus === "failed" ? { error: "The first projection was stale." } : {}),
+          }),
+          makeEvent(
+            "receiver-reply",
+            "user_message",
+            {
+              messageId: "receiver-reply",
+              messageSource: "agent",
+              deliveryMode: "message",
+              deliveryStatus: "delivered",
+              senderTaskId: "scribe-task",
+              senderLabel: "Scribe",
+              message: "The metadata is verified.",
+            },
+            1_100,
+          ),
+        ],
+      });
+
+      expect(projection.handoffs[0]).toMatchObject({
+        state: deliveryStatus,
+        replyState: "received",
+      });
+      expect(projection.activityLabel).toBe("Reply received from Scribe");
+      expect(projection.attention).toBeNull();
+    },
+  );
+
   it("does not show a queued child reply as received", () => {
     const projection = deriveBotConversationProjection({
       task: { ...baseTask, id: "atlas-task" },

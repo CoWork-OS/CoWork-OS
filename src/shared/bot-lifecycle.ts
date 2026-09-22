@@ -340,6 +340,10 @@ function getActivityLabel(event: TaskEvent, fallbackBotName: string): string {
     fallbackBotName;
 
   if (type === "agent_message") {
+    if (payload.replyStatus === "received") return `Reply received from ${recipient}`;
+    if (payload.replyStatus === "timed_out") {
+      return `No reply from ${recipient}; partial result available`;
+    }
     const state = normalizeHandoffState(
       payload.deliveryStatus ?? payload.delivery_status ?? payload.status,
     );
@@ -347,10 +351,6 @@ function getActivityLabel(event: TaskEvent, fallbackBotName: string): string {
     if (state === "queued") return `Message queued for ${recipient}`;
     if (state === "started") return `Message started for ${recipient}`;
     if (state === "delivered") {
-      if (payload.replyStatus === "received") return `Reply received from ${recipient}`;
-      if (payload.replyStatus === "timed_out") {
-        return `No reply from ${recipient}; partial result available`;
-      }
       if (payload.replyStatus === "pending") {
         return `Message delivered to ${recipient}; waiting for a reply`;
       }
@@ -391,11 +391,18 @@ function getAttention(
         handoff.state === "delivered") &&
       (handoff.replyState === undefined || handoff.replyState === "pending"),
   );
-  const failedHandoff = recentHandoffs.find((handoff) => handoff.state === "failed");
+  const failedHandoff = recentHandoffs.find(
+    (handoff) =>
+      handoff.state === "failed" &&
+      handoff.replyState !== "received" &&
+      handoff.replyState !== "timed_out",
+  );
   const timedOutHandoff = recentHandoffs.find((handoff) => handoff.replyState === "timed_out");
   const latestActionableHandoff = recentHandoffs.find(
     (handoff) =>
-      handoff.state === "failed" ||
+      (handoff.state === "failed" &&
+        handoff.replyState !== "received" &&
+        handoff.replyState !== "timed_out") ||
       handoff.replyState === "timed_out" ||
       handoff === waitingHandoff,
   );
@@ -683,9 +690,10 @@ export function deriveBotConversationProjection(input: {
       ? "waiting"
       : baseState;
   const latestParentEvent = parentEvents[parentEvents.length - 1];
-  const latestHandoff = [...handoffs]
-    .reverse()
-    .find((handoff) => handoffScopeStart === undefined || handoff.timestamp >= handoffScopeStart);
+  // `handoffs` already excludes stale messages unless they have a correlated
+  // reply. Keep a replied handoff visible even when its receiver receipt is
+  // newer than the handoff and therefore defines the active scope boundary.
+  const latestHandoff = [...handoffs].reverse()[0];
   const latestActivityAt = Math.max(
     latestParentEvent ? readTimestamp(latestParentEvent) : 0,
     latestHandoff?.timestamp || 0,

@@ -2864,11 +2864,21 @@ export class AgentDaemon extends EventEmitter {
       const alreadyReplied = events.some((candidate) => {
         if (this.resolveLegacyEventType(candidate) !== "agent_message") return false;
         const candidatePayload = (candidate.payload || {}) as Record<string, unknown>;
-        return (
+        const matchesInbound =
           candidatePayload.inReplyToMessageId === messageId &&
           (typeof candidatePayload.senderTaskId !== "string" ||
-            candidatePayload.senderTaskId === task.id)
-        );
+            candidatePayload.senderTaskId === task.id);
+        if (!matchesInbound) return false;
+
+        // A queued/started reply is still recoverable from its durable
+        // receipt, but failed or quarantined delivery is not a reply. Do not
+        // strand the original handoff after a restart just because an
+        // attempted reply left an `inReplyToMessageId` behind.
+        const deliveryStatus =
+          candidatePayload.deliveryStatus ??
+          candidatePayload.delivery_status ??
+          candidatePayload.status;
+        return deliveryStatus !== "failed" && deliveryStatus !== "quarantined";
       });
       if (alreadyReplied) continue;
 

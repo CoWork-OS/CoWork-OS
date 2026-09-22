@@ -374,4 +374,49 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
       (AgentDaemon.prototype as Any).findRecoverableBotHandoff.call(daemonLike, task, events),
     ).toBeUndefined();
   });
+
+  it.each(["failed", "quarantined"] as const)(
+    "replays a handoff when its prior reply was %s",
+    (deliveryStatus) => {
+      const task = {
+        id: "receiver-task",
+        agentConfig: { botConversation: true },
+      } as Any;
+      const events = [
+        {
+          id: "inbound",
+          type: "user_message",
+          timestamp: 2,
+          payload: {
+            message: "PROMO_RESEARCH\nFind five opportunities.",
+            messageSource: "agent",
+            deliveryMode: "message",
+            deliveryStatus: "delivered",
+            messageId: "handoff-1",
+            senderTaskId: "sender-task",
+          },
+        },
+        {
+          id: "reply-attempt",
+          type: "agent_message",
+          timestamp: 3,
+          payload: {
+            message: "The reply could not be delivered.",
+            deliveryMode: "message",
+            deliveryStatus,
+            inReplyToMessageId: "handoff-1",
+            senderTaskId: "receiver-task",
+          },
+        },
+      ];
+      const daemonLike = { resolveLegacyEventType: (event: Any) => event.type } as Any;
+
+      expect(
+        (AgentDaemon.prototype as Any).findRecoverableBotHandoff.call(daemonLike, task, events),
+      ).toMatchObject({
+        messageId: "handoff-1",
+        senderTaskId: "sender-task",
+      });
+    },
+  );
 });

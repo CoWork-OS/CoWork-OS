@@ -260,6 +260,34 @@ describe("deriveBotConversationProjection", () => {
     expect(JSON.stringify(projection)).not.toContain('"success":true');
   });
 
+  it("keeps a delivery failure specific when the task also records a generic error", () => {
+    const projection = deriveBotConversationProjection({
+      task: {
+        status: "failed",
+        error: "The bot could not finish the request.",
+        resultSummary: undefined,
+      },
+      botName: "Atlas",
+      events: [
+        makeEvent("message-failed", "agent_message", {
+          messageId: "message-failed",
+          senderLabel: "Atlas",
+          recipientLabel: "Scribe",
+          message: "Draft the final note.",
+          deliveryStatus: "failed",
+          error: "Scribe is unavailable",
+        }),
+      ],
+    });
+
+    expect(projection.attention).toEqual({
+      kind: "delivery",
+      title: "Message to Scribe failed",
+      detail: "Scribe is unavailable",
+      handoffId: "message-failed",
+    });
+  });
+
   it("projects a completed bot result without exposing execution steps", () => {
     const projection = deriveBotConversationProjection({
       task: {

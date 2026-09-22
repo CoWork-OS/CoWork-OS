@@ -350,6 +350,15 @@ function getAttention(
       handoffId: waitingHandoff.id,
     };
   }
+  const failedHandoff = handoffs.find((handoff) => handoff.state === "failed");
+  if (failedHandoff) {
+    return {
+      kind: "delivery",
+      title: `Message to ${failedHandoff.recipientLabel} failed`,
+      detail: failedHandoff.error || "Retry the handoff or choose another teammate.",
+      handoffId: failedHandoff.id,
+    };
+  }
   if (task.status === "failed" || taskError) {
     return {
       kind: "failed",
@@ -362,15 +371,6 @@ function getAttention(
       kind: "input",
       title: "The team is waiting for you",
       detail: "Provide the missing decision or resume the conversation to continue.",
-    };
-  }
-  const failedHandoff = handoffs.find((handoff) => handoff.state === "failed");
-  if (failedHandoff) {
-    return {
-      kind: "delivery",
-      title: `Message to ${failedHandoff.recipientLabel} failed`,
-      detail: failedHandoff.error || "Retry the handoff or choose another teammate.",
-      handoffId: failedHandoff.id,
     };
   }
   const timedOutHandoff = handoffs.find((handoff) => handoff.replyState === "timed_out");

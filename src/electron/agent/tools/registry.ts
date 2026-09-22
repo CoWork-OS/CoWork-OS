@@ -11949,6 +11949,7 @@ ${skillDescriptions}`;
     const isCorrelatedReplyToCurrentTask = Boolean(
       correlatedReplyMessageId &&
       correlatedReplyTaskId === this.taskId &&
+      isBotHandoffMessageDelivered(latestInbound || {}) &&
       taskEvents.some((event) => {
         const payload = event.payload as Record<string, unknown> | undefined;
         return (

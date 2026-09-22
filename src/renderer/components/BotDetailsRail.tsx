@@ -40,6 +40,7 @@ export function getBotStatusTone(status: TaskStatus | string): "busy" | "good" |
     case "failed":
     case "blocked":
     case "needs_input":
+    case "interrupted":
       return "bad";
     default:
       return "idle";

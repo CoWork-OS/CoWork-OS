@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { getBotStatusLabel } from "../BotDetailsRail";
+import { getBotStatusLabel, getBotStatusTone } from "../BotDetailsRail";
 
 const railSource = readFileSync(
   fileURLToPath(new URL("../BotDetailsRail.tsx", import.meta.url)),
@@ -17,6 +17,7 @@ describe("bot details rail", () => {
     expect(getBotStatusLabel("completed")).toBe("Finished");
     expect(getBotStatusLabel("failed")).toBe("Failed");
     expect(getBotStatusLabel("waiting")).toBe("Waiting on a teammate");
+    expect(getBotStatusTone("interrupted")).toBe("bad");
   });
 
   it("lets the durable bot conversation projection override a stale task row", () => {

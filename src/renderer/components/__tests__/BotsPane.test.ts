@@ -44,6 +44,12 @@ describe("BotsPane", () => {
     expect(getBotConversationReadiness({ status: "completed" } as Any, { state: "waiting" })).toBe(
       "waiting",
     );
+    expect(
+      getBotConversationReadiness({
+        status: "blocked",
+        error: "Waiting for Atlas to reply before finishing this conversation.",
+      } as Any),
+    ).toBe("waiting");
     expect(getBotConversationReadiness({ status: "blocked" } as Any)).toBe("attention");
     expect(getBotConversationReadiness({ status: "failed" } as Any)).toBe("unavailable");
     expect(getBotConversationReadinessLabel("ready")).toBe("Ready for another message");

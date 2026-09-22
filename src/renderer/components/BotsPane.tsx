@@ -59,6 +59,8 @@ const UNAVAILABLE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed",
 
 const DEFAULT_BOT_ICON: TwinIconKey = "Bot";
 const MAX_BOT_PREVIEW_LENGTH = 140;
+const BOT_WAITING_FOR_REPLY_RE =
+  /^waiting for .+ to reply(?: before finishing this conversation)?\.?$/i;
 
 export function isBotConversationTask(task: Task): boolean {
   return task.agentConfig?.botConversation === true;
@@ -119,9 +121,16 @@ export type BotConversationReadiness =
   | "attention"
   | "unavailable";
 
+function hasPendingTeammateReply(task: Pick<Task, "status" | "error"> | undefined): boolean {
+  if (!task || !["blocked", "paused", "interrupted"].includes(task.status)) return false;
+  return (
+    typeof task.error === "string" && BOT_WAITING_FOR_REPLY_RE.test(flattenTaskText(task.error))
+  );
+}
+
 /** Persistent readiness is intentionally separate from the last run result. */
 export function getBotConversationReadiness(
-  task: Pick<Task, "status"> | undefined,
+  task: Pick<Task, "status" | "error"> | undefined,
   projection?: Pick<BotConversationProjection, "state"> | null,
 ): BotConversationReadiness {
   if (projection?.state === "waiting") return "waiting";
@@ -129,6 +138,7 @@ export function getBotConversationReadiness(
   if (projection?.state === "needs_input") return "attention";
   if (projection?.state === "failed") return "unavailable";
   if (!task) return "ready";
+  if (hasPendingTeammateReply(task)) return "waiting";
   if (ACTIVE_BOT_STATUSES.has(task.status)) return "working";
   if (AWAITING_BOT_STATUSES.has(task.status) || task.status === "interrupted") {
     return "attention";

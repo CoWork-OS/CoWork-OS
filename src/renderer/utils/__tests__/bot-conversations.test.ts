@@ -4,7 +4,9 @@ import {
   createBotConversationOptions,
   getConversationActionLabels,
   isBotConversation,
+  isBotRecoveryBranch,
   matchesBotConversation,
+  selectLatestBotConversation,
   shouldAdoptBotConversation,
 } from "../bot-conversations";
 
@@ -36,6 +38,44 @@ describe("bot conversations", () => {
     expect(shouldAdoptBotConversation(conversation, "__temp_workspace__:session-1")).toBe(true);
     expect(shouldAdoptBotConversation(conversation, "workspace-a")).toBe(false);
     expect(shouldAdoptBotConversation(conversation, "workspace-b")).toBe(false);
+  });
+  it("recognizes only labeled bot recovery branches", () => {
+    expect(
+      isBotRecoveryBranch({
+        branchFromTaskId: "source-task",
+        branchLabel: "Reopened bot conversation",
+      }),
+    ).toBe(true);
+    expect(
+      isBotRecoveryBranch({
+        branchFromTaskId: "source-task",
+        branchLabel: "Repaired bot conversation",
+      }),
+    ).toBe(true);
+    expect(
+      isBotRecoveryBranch({ branchFromTaskId: "source-task", branchLabel: "User branch" }),
+    ).toBe(false);
+    expect(isBotRecoveryBranch({ branchLabel: "Reopened bot conversation" })).toBe(false);
+  });
+  it("prefers a recovery branch over the preserved source transcript", () => {
+    const source = {
+      ...conversation,
+      id: "source-task",
+      createdAt: 100,
+      updatedAt: 500,
+      resultSummary: "The original bot transcript",
+    } as Task;
+    const recovery = {
+      ...conversation,
+      id: "recovery-task",
+      createdAt: 200,
+      updatedAt: 200,
+      branchFromTaskId: source.id,
+      branchLabel: "Reopened bot conversation",
+      userPrompt: "Resume the Atlas bot conversation.",
+    } as Task;
+
+    expect(selectLatestBotConversation([source, recovery], "bot-a")?.id).toBe("recovery-task");
   });
   it("creates fresh dormant hybrid options without copying task permissions, history, or transient execution state", () => {
     const options = createBotConversationOptions("bot-a");

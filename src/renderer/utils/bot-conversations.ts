@@ -10,6 +10,18 @@ export function isBotConversation(task: Pick<Task, "agentConfig"> | null | undef
 }
 
 const DORMANT_BOT_SEED_RE = /^start (?:a )?(?:conversation|chatting) with /i;
+const BOT_RECOVERY_BRANCH_RE = /\b(?:reopened|repaired) bot conversation\b/i;
+
+/** A recovery branch is the current, workspace-local continuation of an older transcript. */
+export function isBotRecoveryBranch(
+  task: Pick<Task, "branchFromTaskId" | "branchLabel"> | null | undefined,
+): boolean {
+  return Boolean(
+    task?.branchFromTaskId &&
+    typeof task.branchLabel === "string" &&
+    BOT_RECOVERY_BRANCH_RE.test(task.branchLabel),
+  );
+}
 
 function hasVisibleBotMessage(task: Task): boolean {
   const candidate = task as Task & {
@@ -36,6 +48,8 @@ export function selectLatestBotConversation(tasks: Task[], agentRoleId?: string)
         (!agentRoleId || task.assignedAgentRoleId === agentRoleId),
     )
     .sort((a, b) => {
+      const recoveryDifference = Number(isBotRecoveryBranch(b)) - Number(isBotRecoveryBranch(a));
+      if (recoveryDifference !== 0) return recoveryDifference;
       const visibleDifference = Number(hasVisibleBotMessage(b)) - Number(hasVisibleBotMessage(a));
       if (visibleDifference !== 0) return visibleDifference;
       return (

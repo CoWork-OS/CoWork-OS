@@ -22,6 +22,7 @@ import {
   BOT_CONVERSATION_HISTORY_OPEN_EVENT,
   createBotConversationOptions,
   isBotConversation,
+  isBotRecoveryBranch,
   matchesBotConversation,
   selectLatestBotConversation,
   shouldAdoptBotConversation,
@@ -6654,7 +6655,21 @@ export function App() {
             candidate.id === selectedTaskIdRef.current &&
             matchesBotConversation(candidate, workspaceId, bot.id),
         );
-        let botTask = selectedBotTask || selectLatestBotConversation(candidates, bot.id);
+        const latestBotTask = selectLatestBotConversation(candidates, bot.id);
+        const selectedTaskHasRecoveryBranch = Boolean(
+          selectedBotTask &&
+          candidates.some(
+            (candidate) =>
+              candidate.branchFromTaskId === selectedBotTask.id &&
+              isBotRecoveryBranch(candidate) &&
+              matchesBotConversation(candidate, workspaceId, bot.id),
+          ),
+        );
+        // A user can inspect the preserved source transcript through the
+        // lineage link. Returning to the roster must still select its fresh
+        // recovery branch rather than reopening the cancelled source task.
+        let botTask =
+          selectedTaskHasRecoveryBranch || !selectedBotTask ? latestBotTask : selectedBotTask;
         if (botTask && botTask.workspaceId !== workspaceId && includeAllWorkspaces) {
           const adopted = (await window.electronAPI.updateTaskWorkspace(botTask.id, workspaceId)) as
             | Task

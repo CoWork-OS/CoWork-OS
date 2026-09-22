@@ -25,6 +25,8 @@ export interface BotCollaborationHeaderProps {
   events?: TaskEvent[];
   childEvents?: TaskEvent[];
   childTasks?: Array<Pick<Task, "id" | "title" | "status" | "assignedAgentRoleId">>;
+  botConversations?: Array<Pick<Task, "id" | "title">>;
+  onOpenBotConversation?: (conversationId: string) => void | Promise<void>;
   conversationProjection?: BotConversationProjection | null;
 }
 
@@ -76,6 +78,10 @@ function formatHandoffDirection(sender: string, recipient: string): string {
   return `${sender} → ${recipient}`;
 }
 
+function normalizeCollaboratorLabel(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
 function withoutCurrentBotCollaborator(
   projection: BotConversationProjection,
   botName: string,
@@ -96,6 +102,8 @@ export function BotCollaborationHeader({
   events = [],
   childEvents = [],
   childTasks = [],
+  botConversations = [],
+  onOpenBotConversation,
   conversationProjection = null,
 }: BotCollaborationHeaderProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -114,8 +122,17 @@ export function BotCollaborationHeader({
     conversationProjection ?? derivedProjection,
     botName,
   );
+  const collaboratorConversationIds = useMemo(() => {
+    const ids = new Map<string, string>();
+    for (const conversation of botConversations) {
+      const label = normalizeCollaboratorLabel(conversation.title || "");
+      if (label && !ids.has(label)) ids.set(label, conversation.id);
+    }
+    return ids;
+  }, [botConversations]);
   const handoffCount = projection.handoffs.length;
   const hasDetails = handoffCount > 0 || projection.collaborators.length > 0 || projection.outcome;
+  const visibleCollaborators = projection.collaborators.slice(0, 3);
 
   return (
     <section
@@ -149,7 +166,30 @@ export function BotCollaborationHeader({
           <div className="bot-collaboration-team" aria-label="Collaborating bots">
             <Users size={14} aria-hidden="true" />
             <span className="bot-collaboration-team-label">Messages from</span>
-            <span>{projection.collaborators.slice(0, 3).join(" · ")}</span>
+            {visibleCollaborators.map((label, index) => {
+              const conversationId = collaboratorConversationIds.get(
+                normalizeCollaboratorLabel(label),
+              );
+              const canOpen = Boolean(conversationId && onOpenBotConversation);
+              return (
+                <span className="bot-collaboration-team-member" key={label}>
+                  {index > 0 && <span aria-hidden="true"> · </span>}
+                  {canOpen ? (
+                    <button
+                      type="button"
+                      className="bot-collaboration-team-link"
+                      aria-label={`Open ${label} conversation`}
+                      title={`Open ${label} conversation`}
+                      onClick={() => void onOpenBotConversation?.(conversationId!)}
+                    >
+                      {label}
+                    </button>
+                  ) : (
+                    <span>{label}</span>
+                  )}
+                </span>
+              );
+            })}
             {projection.collaborators.length > 3 && (
               <span className="bot-collaboration-team-more">
                 +{projection.collaborators.length - 3}

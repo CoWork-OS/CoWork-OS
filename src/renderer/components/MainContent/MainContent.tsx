@@ -10950,6 +10950,8 @@ function MainContentComponent({
               events={events}
               childEvents={childEvents}
               childTasks={childTasks}
+              botConversations={botConversations}
+              onOpenBotConversation={onSelectBotConversation}
               conversationProjection={conversationProjection}
             />
           )}

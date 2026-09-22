@@ -103,6 +103,40 @@
   text-overflow: ellipsis;
 }
 
+.bot-collaboration-team-member {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.bot-collaboration-team-link {
+  max-width: 160px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 38%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.bot-collaboration-team-link:hover,
+.bot-collaboration-team-link:focus-visible {
+  color: var(--color-text-primary, #e5e7eb);
+  text-decoration-color: currentColor;
+  outline: none;
+}
+
+.bot-collaboration-team-link:active {
+  transform: translateY(1px);
+}
+
 .bot-collaboration-team-more {
   flex: 0 0 auto;
   color: var(--color-text-secondary, #b1b8c3);

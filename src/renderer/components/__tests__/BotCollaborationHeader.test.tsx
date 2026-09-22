@@ -123,6 +123,38 @@ describe("BotCollaborationHeader", () => {
     expect(markup).not.toContain(">Atlas · Scribe</span>");
   });
 
+  it("offers a direct conversation link for a known teammate", () => {
+    const conversationProjection: BotConversationProjection = {
+      state: "waiting",
+      stateLabel: "Waiting on a teammate",
+      stateDetail: "A teammate is still working on the delegated brief.",
+      activityLabel: "Waiting for Atlas to reply",
+      lastActivityAt: 1_000,
+      collaborators: ["Atlas"],
+      teammates: [],
+      collaborationSummary: "Atlas is working",
+      handoffs: [],
+      attention: null,
+      outcome: null,
+    };
+    const markup = renderToStaticMarkup(
+      React.createElement(BotCollaborationHeader, {
+        task: {
+          status: "blocked",
+          error: null,
+          resultSummary: undefined,
+        },
+        botName: "Forge",
+        conversationProjection,
+        botConversations: [{ id: "atlas-conversation", title: "Atlas" }],
+        onOpenBotConversation: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain('aria-label="Open Atlas conversation"');
+    expect(markup).toContain('class="bot-collaboration-team-link"');
+  });
+
   it("shows a partial-result state instead of claiming the team is still waiting", () => {
     const markup = renderToStaticMarkup(
       React.createElement(BotCollaborationHeader, {

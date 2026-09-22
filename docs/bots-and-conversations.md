@@ -242,7 +242,9 @@ your input`, and `Finished`. The header can reveal recent handoffs and the
 latest outcome on demand, while the primary transcript keeps tool calls,
 intermediate steps, and protocol JSON hidden. Errors, blocked states, and
 delivery failures remain visible as explicit attention items instead of being
-silently collapsed.
+silently collapsed. When a collaborator is a known persistent bot, its name in
+the header is an accessible link to that teammate's conversation, so users can
+inspect the receiver-side transcript without returning to the roster manually.
 
 The Bots roster presents persistent conversation readiness separately from the
 last run result: a completed run can still be `Ready for another message`, an

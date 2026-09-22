@@ -261,6 +261,36 @@ describe("buildFreshBotHandoffPrompt", () => {
     ).toBeNull();
   });
 
+  it("uses event time when reconciling repeated handoff receipts", () => {
+    const accepted = event(
+      "handoff-order-accepted",
+      "agent_message",
+      {
+        messageId: "handoff-order",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "accepted",
+        botTeamId: "team-1",
+        targetTaskId: "forge-task",
+        recipientLabel: "Forge",
+        message: "Inspect the repository.",
+      },
+      1,
+    );
+    const failed = event(
+      "handoff-order-failed",
+      "agent_message",
+      {
+        ...accepted.payload,
+        deliveryStatus: "failed",
+        error: "The recipient task stopped before delivery.",
+      },
+      2,
+    );
+
+    expect(getPendingBotHandoff([failed, accepted])).toBeNull();
+  });
+
   it("returns durable receipt timestamps and excludes a timed-out reply from waiting", () => {
     const handoff = event(
       "handoff-timeout",

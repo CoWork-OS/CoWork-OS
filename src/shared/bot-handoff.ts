@@ -325,12 +325,13 @@ export function getPendingBotHandoff(
   scope?: BotHandoffScope,
 ): PendingBotHandoff | null {
   const scopeStart = scope?.sinceTimestamp ?? getCurrentBotHandoffScopeStart(events);
-  const { handoffMessageIds } = getBotHandoffReplyCorrelation(events);
+  const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
+  const { handoffMessageIds } = getBotHandoffReplyCorrelation(ordered);
   const latestByMessageId = new Map<
     string,
     { payload: Record<string, unknown>; timestamp: number }
   >();
-  for (const event of events) {
+  for (const event of ordered) {
     if (eventType(event) !== "agent_message") continue;
     const payload = asRecord(event.payload);
     if (payload.senderType !== "agent" || payload.deliveryMode !== "message") continue;

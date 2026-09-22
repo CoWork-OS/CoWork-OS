@@ -140,6 +140,7 @@ export function getBotConversationReadiness(
   if (projection?.state === "working") return "working";
   if (projection?.state === "needs_input") return "attention";
   if (projection?.state === "failed") return "unavailable";
+  if (projection?.state === "completed") return "ready";
   if (!task) return "ready";
   if (hasPendingTeammateReply(task)) return "waiting";
   if (ACTIVE_BOT_STATUSES.has(task.status)) return "working";

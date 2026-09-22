@@ -44,6 +44,9 @@ describe("BotsPane", () => {
     expect(getBotConversationReadiness({ status: "completed" } as Any, { state: "waiting" })).toBe(
       "waiting",
     );
+    expect(getBotConversationReadiness({ status: "blocked" } as Any, { state: "completed" })).toBe(
+      "ready",
+    );
     expect(
       getBotConversationReadiness({
         status: "blocked",

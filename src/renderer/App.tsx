@@ -6937,26 +6937,37 @@ export function App() {
   const handleSelectBotConversation = useCallback(
     async (conversationId: string) => {
       const workspaceId = currentWorkspaceRef.current?.id || currentWorkspace?.id;
-      const knownConversation = botConversationTasks.find(
-        (candidate) =>
-          candidate.id === conversationId &&
-          candidate.workspaceId === workspaceId &&
-          isBotConversation(candidate),
+      let selectedConversation = botConversationTasks.find(
+        (candidate) => candidate.id === conversationId && isBotConversation(candidate),
       );
-      if (!knownConversation) {
+      if (!selectedConversation || !workspaceId) {
         await openTaskById(conversationId);
         return;
       }
+      if (selectedConversation.workspaceId !== workspaceId && !isTempWorkspaceId(workspaceId)) {
+        await openTaskById(conversationId);
+        return;
+      }
+      if (workspaceId && shouldAdoptBotConversation(selectedConversation, workspaceId)) {
+        const adopted = (await window.electronAPI.updateTaskWorkspace(
+          selectedConversation.id,
+          workspaceId,
+        )) as Task | undefined;
+        selectedConversation = adopted || { ...selectedConversation, workspaceId };
+      }
 
       clearRemoteTaskView();
-      tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, knownConversation, {
+      setBotConversationTasks((previous) =>
+        upsertTaskPreservingIdentity(previous, selectedConversation!, { prependIfMissing: true }),
+      );
+      tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, selectedConversation, {
         prependIfMissing: true,
       });
       setTasks((prev) =>
-        upsertTaskPreservingIdentity(prev, knownConversation, { prependIfMissing: true }),
+        upsertTaskPreservingIdentity(prev, selectedConversation!, { prependIfMissing: true }),
       );
-      markTaskSwitchStart(knownConversation.id);
-      void selectTaskAfterDraftFlush(knownConversation.id);
+      markTaskSwitchStart(selectedConversation.id);
+      void selectTaskAfterDraftFlush(selectedConversation.id);
       setCurrentView("main");
     },
     [
@@ -6966,6 +6977,7 @@ export function App() {
       markTaskSwitchStart,
       openTaskById,
       selectTaskAfterDraftFlush,
+      setBotConversationTasks,
     ],
   );
 

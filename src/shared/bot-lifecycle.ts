@@ -330,16 +330,22 @@ function getAttention(
   task: Pick<Task, "status" | "error">,
   handoffs: BotHandoffProjection[],
   latestAgentEvent?: TaskEvent,
+  scopeStart?: number,
 ): BotAttentionProjection | null {
-  const taskError = typeof task.error === "string" ? cleanPreview(task.error) : "";
-  const waitingHandoff = handoffs.find(
-    (handoff) =>
-      (handoff.state === "accepted" ||
-        handoff.state === "queued" ||
-        handoff.state === "started" ||
-        handoff.state === "delivered") &&
-      (handoff.replyState === undefined || handoff.replyState === "pending"),
+  const scopedHandoffs = handoffs.filter(
+    (handoff) => scopeStart === undefined || handoff.timestamp >= scopeStart,
   );
+  const taskError = typeof task.error === "string" ? cleanPreview(task.error) : "";
+  const waitingHandoff = [...scopedHandoffs]
+    .reverse()
+    .find(
+      (handoff) =>
+        (handoff.state === "accepted" ||
+          handoff.state === "queued" ||
+          handoff.state === "started" ||
+          handoff.state === "delivered") &&
+        (handoff.replyState === undefined || handoff.replyState === "pending"),
+    );
   if (
     waitingHandoff &&
     (task.status === "blocked" || task.status === "paused" || task.status === "interrupted")
@@ -351,7 +357,7 @@ function getAttention(
       handoffId: waitingHandoff.id,
     };
   }
-  const failedHandoff = handoffs.find((handoff) => handoff.state === "failed");
+  const failedHandoff = [...scopedHandoffs].reverse().find((handoff) => handoff.state === "failed");
   if (failedHandoff) {
     return {
       kind: "delivery",
@@ -374,7 +380,9 @@ function getAttention(
       detail: "Provide the missing decision or resume the conversation to continue.",
     };
   }
-  const timedOutHandoff = handoffs.find((handoff) => handoff.replyState === "timed_out");
+  const timedOutHandoff = [...scopedHandoffs]
+    .reverse()
+    .find((handoff) => handoff.replyState === "timed_out");
   if (timedOutHandoff) {
     return {
       kind: "delivery",
@@ -426,10 +434,17 @@ export function deriveBotConversationProjection(input: {
   const allEvents = [...parentEvents, ...childEvents].sort(
     (a, b) => readTimestamp(a) - readTimestamp(b),
   );
+  const handoffScopeStart = getCurrentBotHandoffScopeStart(input.events || []);
 
   const handoffByKey = new Map<string, BotHandoffProjection>();
   const collaboratorSet = new Set<string>();
-  const latestAgentEvent = parentEvents[parentEvents.length - 1];
+  const latestAgentEvent = [...parentEvents]
+    .reverse()
+    .find(
+      (event) =>
+        getEventType(event) !== "user_message" &&
+        (handoffScopeStart === undefined || readTimestamp(event) >= handoffScopeStart),
+    );
   const repliesByMessageId = new Map<string, { messageId: string; replyTaskId?: string }>();
   const receiverReplies = parentEvents
     .filter((event) => getEventType(event) === "user_message")
@@ -555,9 +570,7 @@ export function deriveBotConversationProjection(input: {
     !hasActivity && (input.task.status === "pending" || input.task.status === "queued")
       ? "ready"
       : stateFromTask(input.task);
-  const latestHandoff = handoffs[handoffs.length - 1];
   const pendingBotHandoff = getPendingBotHandoff(input.events || []);
-  const handoffScopeStart = getCurrentBotHandoffScopeStart(input.events || []);
   const hasScopedPendingHandoff = handoffs.some(
     (handoff) =>
       (handoffScopeStart === undefined || handoff.timestamp >= handoffScopeStart) &&
@@ -572,11 +585,15 @@ export function deriveBotConversationProjection(input: {
     baseState !== "failed" && input.task.status !== "cancelled" && isWaitingOnHandoff
       ? "waiting"
       : baseState;
+  const latestParentEvent = parentEvents[parentEvents.length - 1];
+  const latestHandoff = [...handoffs]
+    .reverse()
+    .find((handoff) => handoffScopeStart === undefined || handoff.timestamp >= handoffScopeStart);
   const latestActivityAt = Math.max(
-    latestAgentEvent ? readTimestamp(latestAgentEvent) : 0,
+    latestParentEvent ? readTimestamp(latestParentEvent) : 0,
     latestHandoff?.timestamp || 0,
   );
-  const attention = getAttention(input.task, handoffs, latestAgentEvent);
+  const attention = getAttention(input.task, handoffs, latestAgentEvent, handoffScopeStart);
   const teammates = (input.childTasks || []).map((childTask) => {
     const childTaskEvents = childEvents.filter((event) => event.taskId === childTask.id);
     const childState = teammateStateFromTask(childTask);

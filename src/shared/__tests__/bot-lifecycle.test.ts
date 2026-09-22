@@ -472,6 +472,40 @@ describe("deriveBotConversationProjection", () => {
     });
 
     expect(projection.state).toBe("working");
+    expect(projection.activityLabel).toBe("Working on the latest request");
+    expect(projection.attention).toBeNull();
+  });
+
+  it("does not carry a previous-turn delivery failure or timeout into a fresh request", () => {
+    const projection = deriveBotConversationProjection({
+      task: baseTask,
+      botName: "Atlas",
+      events: [
+        makeEvent(
+          "old-failure",
+          "agent_message",
+          {
+            messageId: "old-failure",
+            senderType: "agent",
+            deliveryMode: "message",
+            botTeamId: "team-1",
+            targetTaskId: "scribe-task",
+            senderLabel: "Atlas",
+            recipientLabel: "Scribe",
+            message: "Review the old draft.",
+            deliveryStatus: "failed",
+            replyStatus: "timed_out",
+            error: "Scribe was unavailable",
+          },
+          1_000,
+        ),
+        makeEvent("new-human-turn", "user_message", { message: "Start a fresh request." }, 2_000),
+      ],
+    });
+
+    expect(projection.state).toBe("working");
+    expect(projection.activityLabel).toBe("Working on the latest request");
+    expect(projection.attention).toBeNull();
   });
 
   it("does not show a cancelled conversation waiting on a teammate", () => {

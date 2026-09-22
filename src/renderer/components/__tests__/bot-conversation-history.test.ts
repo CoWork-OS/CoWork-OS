@@ -5,6 +5,7 @@ import {
   BotConversationHistory,
   getBotConversationTitle,
   getBotConversationHistoryStatusLabel,
+  getBotConversationHistoryTimestamp,
 } from "../BotConversationHistory";
 
 const roleId = "research-role";
@@ -118,17 +119,26 @@ describe("BotConversationHistory", () => {
   });
 
   it("uses the selected durable projection for the current history row", () => {
+    expect(
+      getBotConversationHistoryTimestamp(conversation("current", 2_000), "current", {
+        lastActivityAt: 5_000,
+      }),
+    ).toBe(5_000);
+
     const markup = renderToStaticMarkup(
       React.createElement(BotConversationHistory, {
         botName: "Research Desk",
         botRoleId: roleId,
         selectedConversationId: "current",
-        selectedConversationProjection: { state: "waiting" },
-        conversations: [conversation("current", 2_000)],
+        selectedConversationProjection: { state: "waiting", lastActivityAt: 5_000 },
+        conversations: [conversation("current", 2_000), conversation("older", 4_000)],
       }),
     );
 
     expect(markup).toContain("Waiting on a teammate");
     expect(markup).not.toContain(">Completed<");
+    expect(markup.indexOf("Conversation current")).toBeLessThan(
+      markup.indexOf("Conversation older"),
+    );
   });
 });

@@ -11,7 +11,10 @@ export interface BotConversationHistoryProps {
   selectedConversationId?: string | null;
   conversations: Task[];
   loading?: boolean;
-  selectedConversationProjection?: Pick<BotConversationProjection, "state"> | null;
+  selectedConversationProjection?: Pick<
+    BotConversationProjection,
+    "state" | "lastActivityAt"
+  > | null;
   onSelectConversation?: (conversationId: string) => void | Promise<void>;
   onNewConversation?: (botRoleId: string) => void | Promise<void>;
 }
@@ -97,6 +100,16 @@ export function getBotConversationHistoryStatusLabel(
   return "Ready for another message";
 }
 
+export function getBotConversationHistoryTimestamp(
+  task: Pick<Task, "id" | "updatedAt" | "createdAt">,
+  selectedConversationId?: string | null,
+  selectedConversationProjection?: Pick<BotConversationProjection, "lastActivityAt"> | null,
+): number {
+  const taskTimestamp = task.updatedAt || task.createdAt;
+  if (task.id !== selectedConversationId) return taskTimestamp;
+  return Math.max(taskTimestamp, selectedConversationProjection?.lastActivityAt || 0);
+}
+
 export function BotConversationHistory({
   botName,
   botRoleId,
@@ -116,7 +129,16 @@ export function BotConversationHistory({
     )
     .sort(
       (a, b) =>
-        (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt) || b.createdAt - a.createdAt,
+        getBotConversationHistoryTimestamp(
+          b,
+          selectedConversationId,
+          selectedConversationProjection,
+        ) -
+          getBotConversationHistoryTimestamp(
+            a,
+            selectedConversationId,
+            selectedConversationProjection,
+          ) || b.createdAt - a.createdAt,
     );
 
   return (
@@ -181,8 +203,20 @@ export function BotConversationHistory({
                           conversation,
                           selected ? selectedConversationProjection : null,
                         )}
-                    {formatConversationDate(conversation.updatedAt || conversation.createdAt)
-                      ? ` · ${formatConversationDate(conversation.updatedAt || conversation.createdAt)}`
+                    {formatConversationDate(
+                      getBotConversationHistoryTimestamp(
+                        conversation,
+                        selectedConversationId,
+                        selected ? selectedConversationProjection : null,
+                      ),
+                    )
+                      ? ` · ${formatConversationDate(
+                          getBotConversationHistoryTimestamp(
+                            conversation,
+                            selectedConversationId,
+                            selected ? selectedConversationProjection : null,
+                          ),
+                        )}`
                       : ""}
                   </span>
                 </span>

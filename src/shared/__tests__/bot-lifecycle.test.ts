@@ -270,6 +270,34 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.activityLabel).toBe("Reply received from Forge");
   });
 
+  it("uses the reply transition time for durable activity recency", () => {
+    const projection = deriveBotConversationProjection({
+      task: baseTask,
+      botName: "Atlas",
+      events: [
+        makeEvent(
+          "message-replied",
+          "agent_message",
+          {
+            messageId: "message-replied",
+            senderLabel: "Atlas",
+            recipientLabel: "Forge",
+            message: "Please investigate the issue.",
+            deliveryStatus: "delivered",
+            deliveredAt: 2_000,
+            replyStatus: "received",
+            replyMessageId: "reply-1",
+            repliedAt: 5_000,
+          },
+          1_000,
+        ),
+      ],
+    });
+
+    expect(projection.handoffs[0]?.timestamp).toBe(5_000);
+    expect(projection.lastActivityAt).toBe(5_000);
+  });
+
   it("does not keep a completed coordinator waiting after a teammate reply times out", () => {
     const projection = deriveBotConversationProjection({
       task: {

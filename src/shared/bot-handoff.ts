@@ -93,15 +93,20 @@ function eventType(event: TaskEvent): string {
 
 function eventTimestamp(event: TaskEvent): number {
   const payload = asRecord(event.payload);
-  const candidate =
-    payload.timestamp ??
-    payload.deliveredAt ??
-    payload.startedAt ??
-    payload.queuedAt ??
-    payload.acceptedAt;
-  return typeof candidate === "number" && Number.isFinite(candidate)
-    ? candidate
-    : event.timestamp || event.ts || 0;
+  const candidates = [
+    payload.timestamp,
+    payload.acceptedAt,
+    payload.queuedAt,
+    payload.startedAt,
+    payload.deliveredAt,
+    payload.failedAt,
+    payload.quarantinedAt,
+    payload.repliedAt,
+    payload.replyTimedOutAt,
+  ].filter(
+    (candidate): candidate is number => typeof candidate === "number" && Number.isFinite(candidate),
+  );
+  return Math.max(event.timestamp || event.ts || 0, ...candidates);
 }
 
 /** Compare durable handoff events, including same-millisecond sequence order. */

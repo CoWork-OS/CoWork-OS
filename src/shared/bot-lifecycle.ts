@@ -102,10 +102,20 @@ function readString(payload: Record<string, unknown>, ...keys: string[]): string
 
 function readTimestamp(event: TaskEvent): number {
   const payload = asRecord(event.payload);
-  const candidate = payload.timestamp ?? payload.deliveredAt ?? payload.queuedAt;
-  return typeof candidate === "number" && Number.isFinite(candidate)
-    ? candidate
-    : event.timestamp || event.ts || 0;
+  const candidates = [
+    payload.timestamp,
+    payload.acceptedAt,
+    payload.queuedAt,
+    payload.startedAt,
+    payload.deliveredAt,
+    payload.failedAt,
+    payload.quarantinedAt,
+    payload.repliedAt,
+    payload.replyTimedOutAt,
+  ].filter((candidate): candidate is number =>
+    typeof candidate === "number" && Number.isFinite(candidate),
+  );
+  return Math.max(event.timestamp || event.ts || 0, ...candidates);
 }
 
 function compareEventOrder(left: TaskEvent, right: TaskEvent): number {

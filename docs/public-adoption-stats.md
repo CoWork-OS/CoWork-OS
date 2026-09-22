@@ -1,6 +1,6 @@
 # Public Adoption Stats
 
-Generated at: 2026-09-21T08:53:34.005Z
+Generated at: 2026-09-22T08:30:01.424Z
 
 These numbers are acquisition and download-intent signals for CoWork OS. They do **not** measure active users, first launch, successful task completion, model configuration, retention, prompts, files, emails, or any in-app content.
 
@@ -14,35 +14,35 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 | GitHub open issues | 13 |
 | Latest release | v0.5.54 |
 | Latest release date | 2026-09-20 |
-| Installer/server downloads, lifetime | 1,769 |
-| Installer/server downloads, since previous snapshot | 1 |
+| Installer/server downloads, lifetime | 1,784 |
+| Installer/server downloads, since previous snapshot | 15 |
 | npm latest version | 0.5.54 |
 | npm downloads, last day | 576 |
 | npm downloads, last week | 661 |
 | npm downloads, last month | 1,635 |
 | npm downloads, all time | 8,781 |
-| GitHub views, last 14-ish days | 1,698 total / 604 unique |
-| GitHub clones, last 14-ish days | 11,777 total / 508 unique |
+| GitHub views, last 14-ish days | 1,583 total / 599 unique |
+| GitHub clones, last 14-ish days | 11,989 total / 518 unique |
 
 ## Release Downloads By Platform
 
 | Platform | Lifetime downloads | Delta |
 |---|---:|---:|
-| macos | 881 | +1 |
+| macos | 883 | +2 |
 | server | 79 | +0 |
-| windows | 809 | +0 |
+| windows | 822 | +13 |
 
 ## Recent Release Assets
 
 | Release | Asset | Platform | Downloads | Delta |
 |---|---|---|---:|---:|
-| v0.5.54 | CoWork-OS-0.5.54-arm64-mac.zip | macos | 1 | n/a |
-| v0.5.54 | CoWork-OS-0.5.54-arm64.dmg | macos | 2 | n/a |
-| v0.5.54 | cowork-os-server-linux-x64-v0.5.54.tar.gz | server | 1 | n/a |
-| v0.5.54 | CoWork-OS-Setup-0.5.54.exe | windows | 5 | n/a |
-| v0.5.54 | registry-packages-0.5.54-2e9ee97cf27035aa37189f8ff52a46aac8307e79.tar.gz | server | 12 | n/a |
+| v0.5.54 | CoWork-OS-0.5.54-arm64-mac.zip | macos | 1 | +0 |
+| v0.5.54 | CoWork-OS-0.5.54-arm64.dmg | macos | 4 | +2 |
+| v0.5.54 | cowork-os-server-linux-x64-v0.5.54.tar.gz | server | 1 | +0 |
+| v0.5.54 | CoWork-OS-Setup-0.5.54.exe | windows | 18 | +13 |
+| v0.5.54 | registry-packages-0.5.54-2e9ee97cf27035aa37189f8ff52a46aac8307e79.tar.gz | server | 12 | +0 |
 | v0.5.52 | CoWork-OS-0.5.52-arm64-mac.zip | macos | 14 | +0 |
-| v0.5.52 | CoWork-OS-0.5.52-arm64.dmg | macos | 64 | +1 |
+| v0.5.52 | CoWork-OS-0.5.52-arm64.dmg | macos | 64 | +0 |
 | v0.5.52 | cowork-os-server-linux-x64-v0.5.52.tar.gz | server | 6 | +0 |
 | v0.5.52 | CoWork-OS-Setup-0.5.52.exe | windows | 116 | +0 |
 | v0.5.51 | CoWork-OS-0.5.51-arm64-mac.zip | macos | 8 | +0 |
@@ -61,31 +61,31 @@ These numbers are acquisition and download-intent signals for CoWork OS. They do
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | github.com | 293 | 90 |
-| 2 | Google | 263 | 164 |
-| 3 | chatgpt.com | 29 | 21 |
+| 1 | github.com | 275 | 86 |
+| 2 | Google | 250 | 155 |
+| 3 | chatgpt.com | 30 | 21 |
 | 4 | Bing | 20 | 16 |
-| 5 | teams.public.onecdn.static.microsoft | 15 | 2 |
+| 5 | perplexity.ai | 11 | 4 |
 | 6 | search.brave.com | 9 | 5 |
-| 7 | perplexity.ai | 9 | 3 |
-| 8 | coworkosapp.com | 7 | 5 |
-| 9 | t.co | 5 | 4 |
-| 10 | alternativeto.net | 3 | 3 |
+| 7 | coworkosapp.com | 6 | 4 |
+| 8 | t.co | 5 | 4 |
+| 9 | alternativeto.net | 3 | 3 |
+| 10 | teams.public.onecdn.static.microsoft | 2 | 2 |
 
 ## Top GitHub Paths
 
 | Rank | Item | Count | Uniques |
 |---:|---|---:|---:|
-| 1 | /cowork-os/cowork-os | 333 | 203 |
-| 2 | /CoWork-OS/CoWork-OS | 306 | 199 |
-| 3 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-1.webp | 65 | 42 |
-| 4 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.52 | 49 | 42 |
-| 5 | /CoWork-OS/CoWork-OS/issues | 34 | 12 |
-| 6 | /CoWork-OS/CoWork-OS/discussions | 30 | 8 |
-| 7 | /CoWork-OS/CoWork-OS/releases | 20 | 16 |
+| 1 | /cowork-os/cowork-os | 325 | 199 |
+| 2 | /CoWork-OS/CoWork-OS | 287 | 185 |
+| 3 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-1.webp | 61 | 38 |
+| 4 | /CoWork-OS/CoWork-OS/releases/tag/v0.5.52 | 44 | 39 |
+| 5 | /CoWork-OS/CoWork-OS/issues | 31 | 12 |
+| 6 | /CoWork-OS/CoWork-OS/discussions | 27 | 7 |
+| 7 | /CoWork-OS/CoWork-OS/releases | 25 | 20 |
 | 8 | /CoWork-OS/CoWork-OS/tree/main | 20 | 12 |
 | 9 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-4.webp | 17 | 13 |
-| 10 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-5.webp | 16 | 10 |
+| 10 | /CoWork-OS/CoWork-OS/blob/main/resources/branding/images/cowork-os-14.webp | 15 | 12 |
 
 ## Data Policy
 

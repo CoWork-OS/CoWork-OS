@@ -157,6 +157,18 @@ describe("BotsPane", () => {
     expect(filterBots([bot], [task as Any], "billing")).toEqual([]);
   });
 
+  it("matches bots by their current durable teammate activity", () => {
+    expect(
+      filterBots([bot], [task as Any], "waiting for forge", {
+        [bot.id]: {
+          state: "waiting",
+          activityLabel: "Waiting for Forge to reply",
+          lastActivityAt: 3_000,
+        },
+      }),
+    ).toEqual([bot]);
+  });
+
   it("renders the roster row with its name, preview, and timestamp", () => {
     const markup = renderToStaticMarkup(
       React.createElement(BotsPane, {

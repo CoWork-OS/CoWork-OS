@@ -246,7 +246,12 @@ export function getBotRelativeTime(timestamp?: number, now = Date.now()): string
   return `${Math.max(1, Math.round(days / 365))}y`;
 }
 
-export function filterBots(roles: BotRole[], tasks: Task[], query: string): BotRole[] {
+export function filterBots(
+  roles: BotRole[],
+  tasks: Task[],
+  query: string,
+  projections?: Readonly<Record<string, BotConversationRosterProjection>>,
+): BotRole[] {
   const normalizedQuery = flattenTaskText(query).toLocaleLowerCase();
   if (!normalizedQuery) return roles;
 
@@ -257,7 +262,7 @@ export function filterBots(roles: BotRole[], tasks: Task[], query: string): BotR
       bot.name,
       bot.description,
       getBotHandle(bot),
-      getBotPreview(latestTask),
+      getBotPreview(latestTask, projections?.[bot.id]),
     ]
       .map((value) => flattenTaskText(value).toLocaleLowerCase())
       .join(" ");
@@ -588,7 +593,12 @@ export function BotsPane({
   const [editingBot, setEditingBot] = useState<BotRole | null>(null);
 
   const visibleBots = useMemo(
-    () => sortBots(filterBots(roles, tasks, query), tasks, conversationProjections),
+    () =>
+      sortBots(
+        filterBots(roles, tasks, query, conversationProjections),
+        tasks,
+        conversationProjections,
+      ),
     [conversationProjections, roles, tasks, query],
   );
 

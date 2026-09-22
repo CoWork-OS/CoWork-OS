@@ -155,6 +155,49 @@ describe("BotCollaborationHeader", () => {
     expect(markup).toContain('class="bot-collaboration-team-link"');
   });
 
+  it("uses the durable target task when a teammate has a custom conversation title", () => {
+    const conversationProjection: BotConversationProjection = {
+      state: "waiting",
+      stateLabel: "Waiting on a teammate",
+      stateDetail: "A teammate is still working on the delegated brief.",
+      activityLabel: "Waiting for Atlas to reply",
+      lastActivityAt: 1_000,
+      collaborators: ["Atlas"],
+      teammates: [],
+      collaborationSummary: "Atlas is working",
+      handoffs: [
+        {
+          id: "handoff-1",
+          state: "delivered",
+          senderLabel: "Forge",
+          recipientLabel: "Atlas",
+          targetTaskId: "atlas-conversation",
+          preview: "Review the brief.",
+          timestamp: 1_000,
+          replyState: "pending",
+        },
+      ],
+      attention: null,
+      outcome: null,
+    };
+    const markup = renderToStaticMarkup(
+      React.createElement(BotCollaborationHeader, {
+        task: {
+          status: "blocked",
+          error: null,
+          resultSummary: undefined,
+        },
+        botName: "Forge",
+        conversationProjection,
+        botConversations: [{ id: "atlas-conversation", title: "Launch research — May 2026" }],
+        onOpenBotConversation: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain('aria-label="Open Atlas conversation"');
+    expect(markup).toContain('class="bot-collaboration-team-link"');
+  });
+
   it("shows a partial-result state instead of claiming the team is still waiting", () => {
     const markup = renderToStaticMarkup(
       React.createElement(BotCollaborationHeader, {

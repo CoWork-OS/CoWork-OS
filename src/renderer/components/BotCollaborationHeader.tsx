@@ -126,12 +126,44 @@ export function BotCollaborationHeader({
   );
   const collaboratorConversationIds = useMemo(() => {
     const ids = new Map<string, string>();
+    const knownConversationIds = new Set(botConversations.map((conversation) => conversation.id));
     for (const conversation of botConversations) {
       const label = normalizeCollaboratorLabel(conversation.title || "");
       if (label && !ids.has(label)) ids.set(label, conversation.id);
     }
+    for (const handoff of projection.handoffs) {
+      const targetTaskId = handoff.targetTaskId;
+      const label = normalizeCollaboratorLabel(handoff.recipientLabel);
+      if (targetTaskId && knownConversationIds.has(targetTaskId) && label && !ids.has(label)) {
+        ids.set(label, targetTaskId);
+      }
+    }
+    for (const event of events) {
+      const eventType = event.legacyType || event.type;
+      if (eventType !== "user_message") continue;
+      const payload = event.payload as Record<string, unknown>;
+      if (payload.messageSource !== "agent") continue;
+      const senderTaskId =
+        typeof payload.senderTaskId === "string"
+          ? payload.senderTaskId.trim()
+          : typeof payload.sender_task_id === "string"
+            ? payload.sender_task_id.trim()
+            : "";
+      const senderLabel =
+        typeof payload.senderLabel === "string"
+          ? normalizeCollaboratorLabel(payload.senderLabel)
+          : "";
+      if (
+        senderTaskId &&
+        knownConversationIds.has(senderTaskId) &&
+        senderLabel &&
+        !ids.has(senderLabel)
+      ) {
+        ids.set(senderLabel, senderTaskId);
+      }
+    }
     return ids;
-  }, [botConversations]);
+  }, [botConversations, events, projection.handoffs]);
   const handoffCount = projection.handoffs.length;
   const hasDetails = handoffCount > 0 || projection.collaborators.length > 0 || projection.outcome;
   const visibleCollaborators = projection.collaborators.slice(0, 3);

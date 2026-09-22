@@ -61,11 +61,15 @@ function formatHandoffState(state: string): string {
   }
 }
 
-function formatHandoffReplyState(handoff: {
+export function formatHandoffReplyState(handoff: {
   state: string;
   replyState?: "pending" | "received" | "timed_out";
 }): string {
-  if (handoff.state === "delivered" && handoff.replyState === "received") {
+  // A receiver-side durable reply is stronger evidence than the sender's
+  // possibly stale delivery projection. During the queue/delivery race the
+  // handoff can still read queued or started even though the teammate has
+  // already replied; never hide that result behind the older state.
+  if (handoff.replyState === "received") {
     return "Reply received";
   }
   if (handoff.state === "delivered" && handoff.replyState === "pending") {

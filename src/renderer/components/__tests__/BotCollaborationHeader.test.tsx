@@ -2,9 +2,16 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { BotConversationProjection } from "../../../shared/bot-lifecycle";
-import { BotCollaborationHeader } from "../BotCollaborationHeader";
+import { BotCollaborationHeader, formatHandoffReplyState } from "../BotCollaborationHeader";
 
 describe("BotCollaborationHeader", () => {
+  it.each(["queued", "started", "delivered"] as const)(
+    "shows the received reply even when the handoff projection is %s",
+    (state) => {
+      expect(formatHandoffReplyState({ state, replyState: "received" })).toBe("Reply received");
+    },
+  );
+
   it("renders a calm teammate status and keeps details progressive", () => {
     const markup = renderToStaticMarkup(
       React.createElement(BotCollaborationHeader, {

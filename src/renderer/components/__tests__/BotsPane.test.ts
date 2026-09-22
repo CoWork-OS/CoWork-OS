@@ -168,6 +168,23 @@ describe("BotsPane", () => {
     expect(markup).not.toContain("Ready for another message");
   });
 
+  it("uses a durable projection for a non-selected stale completed roster row", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BotsPane, {
+        roles: [bot],
+        tasks: [task as Any],
+        selectedTaskId: null,
+        conversationProjections: {
+          [bot.id]: { state: "waiting" },
+        },
+        onSelectTask: () => {},
+      }),
+    );
+
+    expect(markup).toContain("Waiting on a teammate");
+    expect(markup).not.toContain("Ready for another message");
+  });
+
   it("keeps a bot selected for an older bot conversation but ignores normal role tasks", () => {
     const olderConversation = { ...task, id: "older-conversation", updatedAt: 1_500 };
     const newerConversation = { ...task, id: "newer-conversation", updatedAt: 2_500 };

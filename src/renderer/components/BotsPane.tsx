@@ -43,6 +43,7 @@ interface BotsPaneProps {
   onReopenBot?: (task: Task) => void | Promise<void>;
   onOpenAgents?: () => void;
   selectedConversationProjection?: Pick<BotConversationProjection, "state"> | null;
+  conversationProjections?: Readonly<Record<string, Pick<BotConversationProjection, "state">>>;
   onBotCreated?: (bot: BotRole) => void | Promise<void>;
   onBotUpdated?: (bot: BotRole) => void | Promise<void>;
   onBotDeleted?: (botId: string) => void | Promise<void>;
@@ -531,6 +532,7 @@ export function BotsPane({
   onReopenBot,
   onOpenAgents,
   selectedConversationProjection,
+  conversationProjections,
   onBotCreated,
   onBotUpdated,
   onBotDeleted,
@@ -644,7 +646,11 @@ export function BotsPane({
                 key={bot.id}
                 bot={bot}
                 latestTask={latestTask}
-                conversationProjection={selected ? selectedConversationProjection : null}
+                conversationProjection={
+                  selected
+                    ? (selectedConversationProjection ?? conversationProjections?.[bot.id] ?? null)
+                    : (conversationProjections?.[bot.id] ?? null)
+                }
                 selected={selected}
                 onSelect={() => {
                   if (latestTask) onSelectTask(latestTask.id);

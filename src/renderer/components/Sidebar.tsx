@@ -92,12 +92,22 @@ export function formatRelativeShort(timestamp?: number): string {
   return `${Math.max(1, years)}y`;
 }
 
+function getBotProjectionSignature(
+  projections?: Readonly<Record<string, Pick<BotConversationProjection, "state">>>,
+): string {
+  return Object.entries(projections || {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([roleId, projection]) => `${roleId}:${projection.state}`)
+    .join("|");
+}
+
 interface SidebarProps {
   workspace: Workspace | null;
   tasks: Task[];
   botTasks?: Task[];
   selectedTaskId: string | null;
   selectedBotConversationProjection?: Pick<BotConversationProjection, "state"> | null;
+  botConversationProjections?: Readonly<Record<string, Pick<BotConversationProjection, "state">>>;
   isBotViewActive?: boolean;
   isAutomationsActive?: boolean;
   isIdeasActive?: boolean;
@@ -828,6 +838,8 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.selectedTaskId === next.selectedTaskId &&
     prev.selectedBotConversationProjection?.state ===
       next.selectedBotConversationProjection?.state &&
+    getBotProjectionSignature(prev.botConversationProjections) ===
+      getBotProjectionSignature(next.botConversationProjections) &&
     prev.isBotViewActive === next.isBotViewActive &&
     prev.isAutomationsActive === next.isAutomationsActive &&
     prev.isIdeasActive === next.isIdeasActive &&
@@ -864,6 +876,7 @@ function SidebarComponent({
   botTasks: botTasksOverride,
   selectedTaskId,
   selectedBotConversationProjection,
+  botConversationProjections,
   isBotViewActive = false,
   isAutomationsActive = false,
   isIdeasActive = false,
@@ -3233,6 +3246,7 @@ function SidebarComponent({
               tasks={botTasks}
               selectedTaskId={selectedTaskId}
               selectedConversationProjection={selectedBotConversationProjection}
+              conversationProjections={botConversationProjections}
               isLoading={isLoadingBots}
               error={botsError}
               onRetry={() => void loadAgentRoles()}

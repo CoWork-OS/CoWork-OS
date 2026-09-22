@@ -88,7 +88,10 @@ import { isLlmRequestCancelledEvent } from "./utils/task-event-visibility";
 import { markSessionAutoResolvingApproval } from "./utils/approval-event-state";
 import { appendRendererTaskEvents, capTaskEvents } from "./utils/task-event-append";
 import { TaskTimelineCache } from "./utils/task-timeline-cache";
-import { deriveBotConversationProjection } from "../shared/bot-lifecycle";
+import {
+  deriveBotConversationProjection,
+  type BotConversationProjection,
+} from "../shared/bot-lifecycle";
 import {
   createTaskEventScheduler,
   getTaskEventTargetKey,
@@ -1851,6 +1854,25 @@ const MAX_RENDERER_CHILD_EVENTS = 300;
 const MAX_TIMELINE_HISTORY_EVENTS = 1200;
 const MAX_TIMELINE_HISTORY_PAYLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_TIMELINE_HISTORY_PAGE_PAYLOAD_BYTES = 512 * 1024;
+const BOT_CONVERSATION_PROJECTION_EVENT_TYPES = new Set([
+  "agent_message",
+  "agent_spawn_requested",
+  "agent_spawned",
+  "agent_completed",
+  "agent_failed",
+  "assistant_message",
+  "input_request_created",
+  "input_request_dismissed",
+  "input_request_resolved",
+  "task_cancelled",
+  "task_completed",
+  "task_failed",
+  "task_interrupted",
+  "task_paused",
+  "task_resumed",
+  "task_status",
+  "user_message",
+]);
 // Safety stop for a one-click "load all" expansion so a very long task cannot
 // issue unbounded history requests.
 const TIMELINE_HISTORY_LOAD_ALL_MAX_PAGES = 40;
@@ -2058,6 +2080,9 @@ export function App() {
   // Bot transcripts use a dedicated feed so the paged Sessions list cannot
   // hide older conversations belonging to a bot.
   const [botConversationTasks, setBotConversationTasks] = useState<Task[]>([]);
+  const [botConversationProjections, setBotConversationProjections] = useState<
+    Record<string, Pick<BotConversationProjection, "state">>
+  >({});
   const [isLoadingBotConversations, setIsLoadingBotConversations] = useState(false);
   const [hasMoreTasks, setHasMoreTasks] = useState(true);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -2112,6 +2137,8 @@ export function App() {
   const [homeAutomationFocusTick, setHomeAutomationFocusTick] = useState(0);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [childEvents, setChildEvents] = useState<TaskEvent[]>([]);
+  const botConversationTasksRef = useRef<Task[]>([]);
+  botConversationTasksRef.current = botConversationTasks;
 
   // Child tasks dispatched from the selected parent task (for DispatchedAgentsPanel)
   const childTasks = useMemo(() => {
@@ -2651,6 +2678,111 @@ export function App() {
         mergeTaskPreservingIdentity(task, updates),
       ),
     );
+  }, []);
+
+  const botConversationProjectionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const botConversationProjectionRefreshTaskIdsRef = useRef<Set<string>>(new Set());
+
+  const loadBotConversationRosterProjections = useCallback(async (conversationTasks: Task[]) => {
+    const getTaskEvents = window.electronAPI?.getTaskEvents;
+    if (!getTaskEvents) return {};
+
+    const roleIds = new Set(
+      conversationTasks
+        .map((task) => task.assignedAgentRoleId)
+        .filter((roleId): roleId is string => Boolean(roleId)),
+    );
+    const latestTasks = Array.from(roleIds)
+      .map((roleId) => {
+        const task = selectLatestBotConversation(conversationTasks, roleId);
+        return task ? ([roleId, task] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, Task] => entry !== null);
+
+    const entries = await Promise.all(
+      latestTasks.map(async ([roleId, task]) => {
+        try {
+          const taskEvents = (await getTaskEvents(task.id)) as TaskEvent[];
+          const projection = deriveBotConversationProjection({
+            task,
+            events: taskEvents,
+          });
+          return [roleId, { state: projection.state }] as const;
+        } catch (error) {
+          console.warn("Failed to load bot roster projection", {
+            roleId,
+            taskId: task.id,
+            error,
+          });
+          return null;
+        }
+      }),
+    );
+
+    return Object.fromEntries(
+      entries.filter(
+        (entry): entry is readonly [string, Pick<BotConversationProjection, "state">] =>
+          entry !== null,
+      ),
+    ) as Record<string, Pick<BotConversationProjection, "state">>;
+  }, []);
+
+  const refreshBotConversationProjection = useCallback(async (taskId: string) => {
+    const getTaskEvents = window.electronAPI?.getTaskEvents;
+    if (!getTaskEvents) return;
+    const currentTasks = botConversationTasksRef.current;
+    const task = currentTasks.find((candidate) => candidate.id === taskId);
+    const roleId = task?.assignedAgentRoleId;
+    if (!task || !roleId) return;
+
+    try {
+      const taskEvents = (await getTaskEvents(task.id)) as TaskEvent[];
+      const latestTask = selectLatestBotConversation(botConversationTasksRef.current, roleId);
+      if (!latestTask || latestTask.id !== task.id) return;
+      const projection = deriveBotConversationProjection({
+        task: latestTask,
+        events: taskEvents,
+      });
+      setBotConversationProjections((previous) => {
+        if (previous[roleId]?.state === projection.state) return previous;
+        return { ...previous, [roleId]: { state: projection.state } };
+      });
+    } catch (error) {
+      console.warn("Failed to refresh bot roster projection", {
+        roleId,
+        taskId: task.id,
+        error,
+      });
+    }
+  }, []);
+
+  const scheduleBotConversationProjectionRefresh = useCallback(
+    (taskId: string) => {
+      if (!botConversationTasksRef.current.some((task) => task.id === taskId)) return;
+      botConversationProjectionRefreshTaskIdsRef.current.add(taskId);
+      if (botConversationProjectionRefreshTimerRef.current !== null) return;
+      botConversationProjectionRefreshTimerRef.current = setTimeout(() => {
+        botConversationProjectionRefreshTimerRef.current = null;
+        const taskIds = Array.from(botConversationProjectionRefreshTaskIdsRef.current);
+        botConversationProjectionRefreshTaskIdsRef.current.clear();
+        void Promise.all(
+          taskIds.map((pendingTaskId) => refreshBotConversationProjection(pendingTaskId)),
+        );
+      }, 250);
+    },
+    [refreshBotConversationProjection],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (botConversationProjectionRefreshTimerRef.current !== null) {
+        clearTimeout(botConversationProjectionRefreshTimerRef.current);
+        botConversationProjectionRefreshTimerRef.current = null;
+      }
+      botConversationProjectionRefreshTaskIdsRef.current.clear();
+    };
   }, []);
 
   const upsertBotConversationSnapshot = useCallback((task: Task) => {
@@ -4007,6 +4139,10 @@ export function App() {
         }
       }
 
+      if (BOT_CONVERSATION_PROJECTION_EVENT_TYPES.has(event.type)) {
+        scheduleBotConversationProjectionRefresh(event.taskId);
+      }
+
       if (event.type === "task_completed" || event.type === "task_cancelled") {
         // Completion payloads carry the latest preview/result fields, so
         // refresh the dedicated bot roster once per terminal run instead of
@@ -4584,6 +4720,7 @@ export function App() {
     remoteTaskView,
     selectTaskAfterDraftFlush,
     selectedTaskId,
+    scheduleBotConversationProjectionRefresh,
     taskTimelineCacheKey,
     updateBotConversationSnapshot,
   ]);
@@ -5286,6 +5423,7 @@ export function App() {
     const workspaceId = currentWorkspace?.id;
     if (!workspaceId) {
       setBotConversationTasks([]);
+      setBotConversationProjections({});
       setIsLoadingBotConversations(false);
       return;
     }
@@ -5294,6 +5432,7 @@ export function App() {
       const api = window.electronAPI;
       if (!api) {
         setBotConversationTasks([]);
+        setBotConversationProjections({});
         return;
       }
       const includeAllWorkspaces = isTempWorkspaceId(workspaceId);
@@ -5312,10 +5451,12 @@ export function App() {
           task.agentConfig?.botConversation === true &&
           task.source !== "side_chat",
       );
+      const rosterProjections = await loadBotConversationRosterProjections(filtered);
       const roleIds = Array.from(
         new Set(filtered.map((task) => task.assignedAgentRoleId).filter(Boolean) as string[]),
       );
       await Promise.all(roleIds.map((roleId) => getBotNotificationPolicy(roleId)));
+      setBotConversationProjections(rosterProjections);
       setBotConversationTasks((previous) => {
         const byId = new Map(filtered.map((task) => [task.id, task]));
         // Preserve a just-created/selected transcript if a refresh races the
@@ -5336,7 +5477,7 @@ export function App() {
     } finally {
       setIsLoadingBotConversations(false);
     }
-  }, [currentWorkspace?.id, getBotNotificationPolicy]);
+  }, [currentWorkspace?.id, getBotNotificationPolicy, loadBotConversationRosterProjections]);
 
   const refreshTaskLists = useCallback(async () => {
     await Promise.allSettled([loadTasks(), loadBotConversations()]);
@@ -7471,6 +7612,7 @@ export function App() {
                 botTasks={botConversationTasks}
                 selectedTaskId={selectedTaskId}
                 selectedBotConversationProjection={selectedBotConversationProjection}
+                botConversationProjections={botConversationProjections}
                 isBotViewActive={
                   currentView === "main" &&
                   !remoteTaskView &&

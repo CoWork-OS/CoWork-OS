@@ -55,6 +55,28 @@ describe("BotsPane", () => {
     expect(getBotPreview(task as Any)).toBe("Onboarding findings are ready");
   });
 
+  it("does not show a stale success result for an unavailable conversation", () => {
+    expect(
+      getBotPreview({
+        ...task,
+        status: "failed",
+        resultSummary: "Verified package.json successfully",
+        error: undefined,
+      } as Any),
+    ).toBe("Conversation unavailable — reopen to retry");
+  });
+
+  it("shows the failure reason for an unavailable conversation", () => {
+    expect(
+      getBotPreview({
+        ...task,
+        status: "failed",
+        resultSummary: "Verified package.json successfully",
+        error: "The provider timed out before the teammate reply arrived.",
+      } as Any),
+    ).toBe("Failed: The provider timed out before the teammate reply arrived.");
+  });
+
   it("shows Markdown previews as plain text without formatting syntax", () => {
     expect(
       getBotPreview({

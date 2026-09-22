@@ -154,6 +154,15 @@ export function getBotConversationReadinessLabel(readiness: BotConversationReadi
 
 export function getBotPreview(task: Task | undefined): string {
   if (!task) return "No messages yet";
+  if (task.status === "failed" || task.status === "cancelled") {
+    const failurePreview = getHumanBotPreview(task.error || undefined);
+    const preview = failurePreview
+      ? `Failed: ${failurePreview}`
+      : "Conversation unavailable — reopen to retry";
+    return preview.length > MAX_BOT_PREVIEW_LENGTH
+      ? `${preview.slice(0, MAX_BOT_PREVIEW_LENGTH - 1).trimEnd()}…`
+      : preview;
+  }
   const promptPreview = getHumanBotPreview(task.userPrompt);
   const sidebarPreview = getHumanBotPreview(task.sidebarPromptPreview);
   const resultPreview = getHumanBotPreview(task.resultSummary);

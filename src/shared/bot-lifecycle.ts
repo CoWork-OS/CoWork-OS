@@ -433,6 +433,7 @@ export function deriveBotConversationProjection(input: {
   events?: TaskEvent[];
   childTasks?: Array<
     Pick<Task, "id" | "title" | "status" | "assignedAgentRoleId"> &
+      Partial<Pick<Task, "createdAt">> &
       Partial<Pick<Task, "error" | "resultSummary">>
   >;
   childEvents?: TaskEvent[];
@@ -456,6 +457,15 @@ export function deriveBotConversationProjection(input: {
     .sort(compareEventOrder);
   const allEvents = [...parentEvents, ...childEvents].sort(compareEventOrder);
   const handoffScopeStart = getCurrentBotHandoffScopeStart(input.events || []);
+  const scopedChildTasks = (input.childTasks || []).filter((childTask) => {
+    if (handoffScopeStart === undefined) return true;
+    if (typeof childTask.createdAt === "number") {
+      return childTask.createdAt >= handoffScopeStart;
+    }
+    return childEvents.some(
+      (event) => event.taskId === childTask.id && readTimestamp(event) >= handoffScopeStart,
+    );
+  });
 
   const handoffByKey = new Map<string, BotHandoffProjection>();
   const collaboratorSet = new Set<string>();
@@ -506,7 +516,7 @@ export function deriveBotConversationProjection(input: {
     }
   }
 
-  for (const childTask of input.childTasks || []) {
+  for (const childTask of scopedChildTasks) {
     const label = cleanPreview(childTask.title);
     if (label) collaboratorSet.add(label);
   }
@@ -516,9 +526,13 @@ export function deriveBotConversationProjection(input: {
     const senderLabel = readString(payload, "senderLabel", "sender") || botName;
     const recipientLabel = readString(payload, "recipientLabel", "recipient", "targetLabel");
     const childLabel = readString(payload, "childAgentLabel", "childTaskTitle", "agentLabel");
-    if (senderLabel !== botName) collaboratorSet.add(senderLabel);
-    if (recipientLabel) collaboratorSet.add(recipientLabel);
-    if (childLabel) collaboratorSet.add(childLabel);
+    const isCurrentTurnEvent =
+      handoffScopeStart === undefined || readTimestamp(event) >= handoffScopeStart;
+    if (isCurrentTurnEvent) {
+      if (senderLabel !== botName) collaboratorSet.add(senderLabel);
+      if (recipientLabel) collaboratorSet.add(recipientLabel);
+      if (childLabel) collaboratorSet.add(childLabel);
+    }
 
     // A child message addressed to the current conversation is the reply to
     // an existing handoff, not a second outbound request for this header.
@@ -615,7 +629,7 @@ export function deriveBotConversationProjection(input: {
     latestHandoff?.timestamp || 0,
   );
   const attention = getAttention(input.task, handoffs, latestAgentEvent, handoffScopeStart);
-  const teammates = (input.childTasks || []).map((childTask) => {
+  const teammates = scopedChildTasks.map((childTask) => {
     const childTaskEvents = childEvents.filter((event) => event.taskId === childTask.id);
     const childState = teammateStateFromTask(childTask, childTaskEvents);
     const detail =

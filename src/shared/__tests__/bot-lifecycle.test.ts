@@ -616,6 +616,69 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.attention).toBeNull();
   });
 
+  it("scopes collaborators and child teammates to the current human turn", () => {
+    const projection = deriveBotConversationProjection({
+      task: { ...baseTask, id: "atlas-task" },
+      botName: "Atlas",
+      events: [
+        makeEvent(
+          "old-handoff",
+          "agent_message",
+          {
+            messageId: "old-handoff",
+            senderType: "agent",
+            deliveryMode: "message",
+            deliveryStatus: "delivered",
+            botTeamId: "team-1",
+            targetTaskId: "forge-task",
+            senderLabel: "Atlas",
+            recipientLabel: "Forge",
+            message: "Review the old request.",
+          },
+          1_000,
+        ),
+        makeEvent("new-human-turn", "user_message", { message: "Start a fresh request." }, 2_000),
+        makeEvent(
+          "new-handoff",
+          "agent_message",
+          {
+            messageId: "new-handoff",
+            senderType: "agent",
+            deliveryMode: "message",
+            deliveryStatus: "delivered",
+            botTeamId: "team-1",
+            targetTaskId: "scribe-task",
+            senderLabel: "Atlas",
+            recipientLabel: "Scribe",
+            message: "Review the new request.",
+          },
+          2_100,
+        ),
+      ],
+      childTasks: [
+        {
+          id: "forge-task",
+          title: "Forge",
+          status: "completed",
+          assignedAgentRoleId: "forge",
+          createdAt: 1_000,
+        },
+        {
+          id: "scribe-task",
+          title: "Scribe",
+          status: "executing",
+          assignedAgentRoleId: "scribe",
+          createdAt: 2_100,
+        },
+      ],
+    });
+
+    expect(projection.collaborators).toEqual(["Scribe"]);
+    expect(projection.teammates).toEqual([
+      { id: "scribe-task", label: "Scribe", state: "working", detail: "Working" },
+    ]);
+  });
+
   it("does not show a cancelled conversation waiting on a teammate", () => {
     const projection = deriveBotConversationProjection({
       task: {

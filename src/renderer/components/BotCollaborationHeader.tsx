@@ -24,7 +24,9 @@ export interface BotCollaborationHeaderProps {
   botName: string;
   events?: TaskEvent[];
   childEvents?: TaskEvent[];
-  childTasks?: Array<Pick<Task, "id" | "title" | "status" | "assignedAgentRoleId">>;
+  childTasks?: Array<
+    Pick<Task, "id" | "title" | "status" | "assignedAgentRoleId"> & Partial<Pick<Task, "createdAt">>
+  >;
   botConversations?: Array<Pick<Task, "id" | "title">>;
   onOpenBotConversation?: (conversationId: string) => void | Promise<void>;
   conversationProjection?: BotConversationProjection | null;

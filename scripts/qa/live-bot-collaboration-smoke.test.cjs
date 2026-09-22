@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   eventType,
+  compareEventOrder,
   matchingAck,
   matchingReceiverReceipt,
   matchingSenderDelivery,
@@ -61,4 +62,35 @@ test("requires a receiver assistant event for the live acknowledgement proof", (
 
   assert.equal(matchingAck([receiverToolMessage], ackToken, 0), undefined);
   assert.equal(matchingAck([receiverToolMessage, receiverAssistantMessage], ackToken, 0), receiverAssistantMessage);
+});
+
+test("uses durable sequence when sender receipts share a timestamp", () => {
+  const accepted = {
+    id: "accepted",
+    seq: 10,
+    type: "agent_message",
+    timestamp: 1000,
+    payload: {
+      messageId: "message-2",
+      targetTaskId: "recipient-task",
+      deliveryStatus: "accepted",
+    },
+  };
+  const failed = {
+    id: "failed",
+    seq: 11,
+    type: "agent_message",
+    timestamp: 1000,
+    payload: {
+      messageId: "message-2",
+      targetTaskId: "recipient-task",
+      deliveryStatus: "failed",
+    },
+  };
+
+  assert.equal(compareEventOrder(failed, accepted) > 0, true);
+  assert.equal(
+    matchingSenderDelivery([failed, accepted], "message-2", "recipient-task"),
+    failed,
+  );
 });

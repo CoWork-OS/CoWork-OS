@@ -248,6 +248,29 @@ function eventPayload(event) {
   return event && event.payload && typeof event.payload === "object" ? event.payload : {};
 }
 
+function eventTimestamp(event) {
+  const payload = eventPayload(event);
+  for (const candidate of [
+    payload.timestamp,
+    payload.deliveredAt,
+    payload.startedAt,
+    payload.queuedAt,
+    payload.acceptedAt,
+  ]) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  }
+  return Number(event?.timestamp || event?.ts || 0) || 0;
+}
+
+function compareEventOrder(left, right) {
+  const timestampDifference = eventTimestamp(left) - eventTimestamp(right);
+  if (timestampDifference !== 0) return timestampDifference;
+  const leftSeq = Number(left?.seq);
+  const rightSeq = Number(right?.seq);
+  if (Number.isFinite(leftSeq) && Number.isFinite(rightSeq)) return leftSeq - rightSeq;
+  return String(left?.id || "").localeCompare(String(right?.id || ""));
+}
+
 function deliveryStatus(payload) {
   return String(payload.deliveryStatus || payload.delivery_status || payload.status || "")
     .trim()
@@ -278,7 +301,7 @@ function matchingSenderDelivery(events, messageId, recipientTaskId) {
         payload.targetTaskId === recipientTaskId
       );
     })
-    .sort((left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0))
+    .sort(compareEventOrder)
     .at(-1);
 }
 
@@ -293,7 +316,7 @@ function matchingReceiverReceipt(events, messageId, senderTaskId, message) {
         payload.message === message
       );
     })
-    .sort((left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0))
+    .sort(compareEventOrder)
     .at(-1);
 }
 
@@ -302,12 +325,12 @@ function matchingAck(events, ackToken, afterTimestamp) {
     .filter((event) => {
       const type = eventType(event);
       return (
-        Number(event.timestamp || 0) >= afterTimestamp &&
+        eventTimestamp(event) >= afterTimestamp &&
         type === "assistant_message" &&
         eventText(event).includes(ackToken)
       );
     })
-    .sort((left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0))
+    .sort(compareEventOrder)
     .at(-1);
 }
 
@@ -553,6 +576,8 @@ if (require.main === module) {
 
 module.exports = {
   eventType,
+  compareEventOrder,
+  eventTimestamp,
   matchingAck,
   matchingReceiverReceipt,
   matchingSenderDelivery,

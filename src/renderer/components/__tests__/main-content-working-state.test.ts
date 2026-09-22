@@ -36,6 +36,7 @@ import {
   TaskSessionLineageFooter,
 } from "../MainContent";
 import { AgentReasoningPanel } from "../MainContent/MainContent";
+import { shouldShowCancelledTaskBanner } from "../../utils/bot-conversations";
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
 import {
   buildTaskAutomationCronJobCreate,
@@ -65,6 +66,32 @@ describe("shouldCreateFreshTaskForSend", () => {
         forceFreshTask: true,
       }),
     ).toBe(true);
+  });
+});
+
+describe("shouldShowCancelledTaskBanner", () => {
+  it("hides the generic cancellation banner when the bot header owns status", () => {
+    expect(
+      shouldShowCancelledTaskBanner({
+        taskStatus: "cancelled",
+        isBotConversation: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps cancellation visible for ordinary tasks", () => {
+    expect(
+      shouldShowCancelledTaskBanner({
+        taskStatus: "cancelled",
+        isBotConversation: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowCancelledTaskBanner({
+        taskStatus: "cancelled",
+        isBotConversation: true,
+      }),
+    ).toBe(false);
   });
 });
 

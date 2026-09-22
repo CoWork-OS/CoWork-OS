@@ -89,6 +89,13 @@ export function getConversationActionLabels(botConversation: boolean) {
   };
 }
 
+export function shouldShowCancelledTaskBanner(input: {
+  taskStatus: Task["status"] | undefined;
+  isBotConversation: boolean;
+}): boolean {
+  return input.taskStatus === "cancelled" && !input.isBotConversation;
+}
+
 export function matchesBotConversation(
   task: Task,
   workspaceId: string,

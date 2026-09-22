@@ -13,6 +13,7 @@ import { BotGlyph } from "../BotGlyph";
 import {
   BOT_CONVERSATION_HISTORY_OPEN_EVENT,
   getConversationActionLabels,
+  shouldShowCancelledTaskBanner,
 } from "../../utils/bot-conversations";
 import {
   memo,
@@ -11342,7 +11343,10 @@ function MainContentComponent({
               </div>
             </div>
           )}
-          {task.status === "cancelled" && (
+          {shouldShowCancelledTaskBanner({
+            taskStatus: task.status,
+            isBotConversation,
+          }) && (
             <div className="task-status-banner task-status-banner-cancelled">
               <div className="task-status-banner-content">
                 <strong>Cancelled</strong>

@@ -235,6 +235,63 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.activityLabel).toBe("Reply received from Forge");
   });
 
+  it("infers a receiver reply from the durable inbound conversation event", () => {
+    const projection = deriveBotConversationProjection({
+      task: { ...baseTask, id: "atlas-task" },
+      botName: "Atlas",
+      events: [
+        makeEvent(
+          "handoff-queued",
+          "agent_message",
+          {
+            messageId: "handoff-1",
+            senderLabel: "Atlas",
+            recipientLabel: "Scribe",
+            targetTaskId: "scribe-task",
+            message: "Verify the package metadata.",
+            deliveryStatus: "queued",
+          },
+          1_000,
+        ),
+        makeEvent(
+          "receiver-reply",
+          "user_message",
+          {
+            messageId: "reply-1",
+            messageSource: "agent",
+            senderTaskId: "scribe-task",
+            senderLabel: "Scribe",
+            message: "DONE — package metadata verified.",
+          },
+          1_500,
+        ),
+        makeEvent(
+          "handoff-delivered",
+          "agent_message",
+          {
+            messageId: "handoff-1",
+            senderLabel: "Atlas",
+            recipientLabel: "Scribe",
+            targetTaskId: "scribe-task",
+            message: "Verify the package metadata.",
+            deliveryStatus: "delivered",
+            replyStatus: "pending",
+          },
+          2_000,
+        ),
+      ],
+    });
+
+    expect(projection.handoffs).toHaveLength(1);
+    expect(projection.handoffs[0]).toMatchObject({
+      state: "delivered",
+      targetTaskId: "scribe-task",
+      replyState: "received",
+      replyMessageId: "reply-1",
+    });
+    expect(projection.activityLabel).toBe("Reply received from Scribe");
+  });
+
   it("keeps delivery failure actionable and never requires raw protocol text", () => {
     const projection = deriveBotConversationProjection({
       task: baseTask,

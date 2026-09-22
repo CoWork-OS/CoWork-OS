@@ -29,6 +29,7 @@ export interface BotHandoffProjection {
   state: BotHandoffState;
   senderLabel: string;
   recipientLabel: string;
+  targetTaskId?: string;
   preview: string;
   timestamp: number;
   messageId?: string;
@@ -430,6 +431,28 @@ export function deriveBotConversationProjection(input: {
   const collaboratorSet = new Set<string>();
   const latestAgentEvent = parentEvents[parentEvents.length - 1];
   const repliesByMessageId = new Map<string, { messageId: string; replyTaskId?: string }>();
+  const receiverReplies = parentEvents
+    .filter((event) => getEventType(event) === "user_message")
+    .map((event) => {
+      const payload = asRecord(event.payload);
+      if (payload.messageSource !== "agent") return null;
+      const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
+      if (!senderTaskId) return null;
+      return {
+        messageId: readString(payload, "messageId", "message_id") || event.id,
+        senderTaskId,
+        timestamp: readTimestamp(event),
+      };
+    })
+    .filter(
+      (reply): reply is { messageId: string; senderTaskId: string; timestamp: number } =>
+        reply !== null,
+    );
+  const claimedReceiverReplyIds = new Set<string>();
+  const inferredRepliesByHandoffKey = new Map<
+    string,
+    { messageId: string; replyTaskId?: string }
+  >();
 
   for (const event of childEvents) {
     if (getEventType(event) !== "agent_message") continue;
@@ -473,22 +496,41 @@ export function deriveBotConversationProjection(input: {
     }
     const messageId = readString(payload, "messageId", "message_id");
     const correlationId = readString(payload, "correlationId", "correlation_id") || messageId;
-    const correlatedReply = messageId ? repliesByMessageId.get(messageId) : undefined;
-    const replyState: BotHandoffProjection["replyState"] =
-      payload.replyStatus === "pending" || payload.replyStatus === "received"
+    const handoffKey = messageId || correlationId || event.id;
+    const directReply = messageId ? repliesByMessageId.get(messageId) : undefined;
+    const targetTaskId = readString(payload, "targetTaskId", "target_task_id");
+    const inferredReply =
+      inferredRepliesByHandoffKey.get(handoffKey) ||
+      (targetTaskId
+        ? receiverReplies.find(
+            (reply) =>
+              reply.senderTaskId === targetTaskId &&
+              !claimedReceiverReplyIds.has(reply.messageId) &&
+              reply.timestamp >= readTimestamp(event),
+          )
+        : undefined);
+    if (inferredReply && !inferredRepliesByHandoffKey.has(handoffKey)) {
+      claimedReceiverReplyIds.add(inferredReply.messageId);
+      inferredRepliesByHandoffKey.set(handoffKey, {
+        messageId: inferredReply.messageId,
+      });
+    }
+    const correlatedReply = directReply || inferredReply;
+    const replyState: BotHandoffProjection["replyState"] = correlatedReply
+      ? "received"
+      : payload.replyStatus === "pending" || payload.replyStatus === "received"
         ? payload.replyStatus
         : payload.replyStatus === "timed_out"
           ? "timed_out"
-          : correlatedReply
-            ? "received"
-            : undefined;
+          : undefined;
     const handoff: BotHandoffProjection = {
-      id: messageId || event.id,
+      id: handoffKey,
       state: normalizeHandoffState(
         payload.deliveryStatus ?? payload.delivery_status ?? payload.status,
       ),
       senderLabel,
       recipientLabel: recipientLabel || "teammate",
+      ...(targetTaskId ? { targetTaskId } : {}),
       preview: cleanPreview(readString(payload, "message")),
       timestamp: readTimestamp(event),
       ...(messageId ? { messageId } : {}),
@@ -503,7 +545,6 @@ export function deriveBotConversationProjection(input: {
         ? { error: cleanPreview(readString(payload, "error")) }
         : {}),
     };
-    const handoffKey = messageId || correlationId || event.id;
     handoffByKey.set(handoffKey, handoff);
   }
 

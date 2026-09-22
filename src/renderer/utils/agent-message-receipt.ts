@@ -44,9 +44,12 @@ function shortenMessageId(messageId: string): string {
 
 export function getAgentMessageReceipt(
   payload: Record<string, unknown> | undefined,
+  options?: { defaultStatus?: AgentMessageReceiptStatus },
 ): AgentMessageReceipt & { shortMessageId: string } {
   const rawStatus = payload?.deliveryStatus ?? payload?.delivery_status ?? payload?.status;
-  const status = normalizeStatus(rawStatus ?? (payload?.success === false ? "failed" : undefined));
+  const status = normalizeStatus(
+    rawStatus ?? (payload?.success === false ? "failed" : options?.defaultStatus),
+  );
   const messageId = firstString(payload?.messageId, payload?.message_id);
   const duplicate = payload?.duplicate === true;
   const label = duplicate

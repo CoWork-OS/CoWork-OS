@@ -48,6 +48,15 @@ describe("getAgentMessageReceipt", () => {
     });
   });
 
+  it("can treat an already-rendered inbound message as delivered", () => {
+    expect(
+      getAgentMessageReceipt({ message: "legacy inbound" }, { defaultStatus: "delivered" }),
+    ).toMatchObject({
+      status: "delivered",
+      label: "Delivered",
+    });
+  });
+
   it("normalizes the raw send_agent_message JSON result", () => {
     expect(
       parseAgentMessageProtocolResult(

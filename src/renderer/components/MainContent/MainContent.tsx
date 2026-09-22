@@ -2647,6 +2647,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       : "Agent message";
                   const inboundReceipt = getAgentMessageReceipt(
                     event.payload as Record<string, unknown>,
+                    { defaultStatus: "delivered" },
                   );
                   const inboundMessageId = inboundReceipt.messageId;
                   const inboundDeliveryStatus = inboundReceipt.status;

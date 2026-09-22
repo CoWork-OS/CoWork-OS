@@ -532,10 +532,16 @@ export function deriveBotConversationProjection(input: {
       (event) => event.taskId === childTask.id && isBotHandoffEventInScope(event, handoffScope),
     );
   });
+  const scopedChildTaskIds = new Set(scopedChildTasks.map((childTask) => childTask.id));
+  const scopedChildEvents = childEvents.filter(
+    (event) =>
+      scopedChildTaskIds.has(event.taskId) && isBotHandoffEventInScope(event, handoffScope),
+  );
 
   const handoffByKey = new Map<string, BotHandoffProjection>();
   const collaboratorSet = new Set<string>();
-  const latestAgentEvent = [...parentEvents]
+  const latestCollaborationEvent = [...parentEvents, ...scopedChildEvents]
+    .sort(compareEventOrder)
     .reverse()
     .find(
       (event) =>
@@ -712,9 +718,10 @@ export function deriveBotConversationProjection(input: {
   const latestHandoff = [...handoffs].reverse()[0];
   const latestActivityAt = Math.max(
     latestParentEvent ? readTimestamp(latestParentEvent) : 0,
+    latestCollaborationEvent ? readTimestamp(latestCollaborationEvent) : 0,
     latestHandoff?.timestamp || 0,
   );
-  const attention = getAttention(input.task, handoffs, latestAgentEvent, handoffScopeStart);
+  const attention = getAttention(input.task, handoffs, latestCollaborationEvent, handoffScopeStart);
   const teammates = scopedChildTasks.map((childTask) => {
     const childTaskEvents = childEvents.filter((event) => event.taskId === childTask.id);
     const childState = teammateStateFromTask(childTask, childTaskEvents);
@@ -750,8 +757,8 @@ export function deriveBotConversationProjection(input: {
         ? `Reply received from ${latestHandoff.recipientLabel}`
         : latestHandoff?.replyState === "timed_out"
           ? `No reply from ${latestHandoff.recipientLabel}; partial result available`
-          : latestAgentEvent
-            ? getActivityLabel(latestAgentEvent, botName)
+          : latestCollaborationEvent
+            ? getActivityLabel(latestCollaborationEvent, botName)
             : state === "waiting"
               ? "Waiting for a teammate"
               : stateDetailForState(state),

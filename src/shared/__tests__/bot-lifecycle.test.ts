@@ -117,6 +117,8 @@ describe("deriveBotConversationProjection", () => {
       { id: "forge-task", label: "Forge", state: "completed", detail: "Finished" },
     ]);
     expect(projection.collaborationSummary).toBe("1 teammate · 1 finished");
+    expect(projection.activityLabel).toBe("Forge finished");
+    expect(projection.lastActivityAt).toBe(2_000);
   });
 
   it("turns a queued teammate message into a waiting activity state", () => {

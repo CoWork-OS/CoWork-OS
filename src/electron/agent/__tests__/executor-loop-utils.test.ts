@@ -7,6 +7,7 @@ import {
   maybeInjectStopReasonNudge,
   recordPackagingFailureFingerprint,
   shouldRetryEmptyFollowUpEndTurn,
+  shouldAllowBotMessagingDuringFollowUpToolLock,
   shouldForceStopAfterSkippedToolOnlyTurns,
   shouldLockFollowUpToolCalls,
   type ToolLoopCall,
@@ -236,6 +237,30 @@ describe("executor-loop-utils guardrails", () => {
       stopReasonNudgeInjected: true,
     });
     expect(shouldLock).toBe(true);
+  });
+
+  it("only preserves authorized bot messaging during follow-up tool locking", () => {
+    expect(
+      shouldAllowBotMessagingDuringFollowUpToolLock({
+        toolName: "send_agent_message",
+        botConversation: true,
+        botMessagingAuthorized: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAllowBotMessagingDuringFollowUpToolLock({
+        toolName: "web_search",
+        botConversation: true,
+        botMessagingAuthorized: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAllowBotMessagingDuringFollowUpToolLock({
+        toolName: "send_agent_message",
+        botConversation: true,
+        botMessagingAuthorized: false,
+      }),
+    ).toBe(false);
   });
 
   it("does not lock follow-up tool calls before nudge/streak threshold", () => {

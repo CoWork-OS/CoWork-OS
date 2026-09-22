@@ -342,6 +342,7 @@ import {
   maybeInjectVariedFailureNudge as maybeInjectVariedFailureNudgeUtil,
   recordPackagingFailureFingerprint as recordPackagingFailureFingerprintUtil,
   shouldRetryEmptyFollowUpEndTurn as shouldRetryEmptyFollowUpEndTurnUtil,
+  shouldAllowBotMessagingDuringFollowUpToolLock as shouldAllowBotMessagingDuringFollowUpToolLockUtil,
   shouldForceStopAfterSkippedToolOnlyTurns as shouldForceStopAfterSkippedToolOnlyTurnsUtil,
   shouldLockFollowUpToolCalls as shouldLockFollowUpToolCallsUtil,
   type ToolLoopCall,
@@ -37109,6 +37110,7 @@ Return ONLY a JSON object:
       | "remaining_turn_budget_low"
       | "repeated_identical_packaging_failure"
       | null = null;
+    let followUpBotMessagingExceptionsUsed = 0;
     let consecutiveSkippedToolOnlyTurns = 0;
     let lastInjectedPreFinalizationReminder: string | null = null;
     // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
@@ -37602,35 +37604,52 @@ Return ONLY a JSON object:
                   }
 
                   if (forceFinalizeWithoutTools) {
-                    skippedToolCallsByPolicy += 1;
-                    const followUpToolLockError =
-                      followUpToolCallsLocked &&
-                      followUpToolLockReason === "repeated_identical_packaging_failure"
-                        ? "Tool call skipped: follow-up tool calls are locked because the same packaging/export failure repeated and more retries are unlikely to help in this cycle."
-                        : "Tool call skipped: follow-up tool calls are locked due to repeated tool-use looping.";
-                    return {
-                      status: "immediate" as const,
-                      call: scheduledCall,
-                      effectiveToolName: content.name,
-                      outcome: {
-                        toolResult: {
-                          type: "tool_result",
-                          tool_use_id: content.id,
-                          content: JSON.stringify({
-                            error: followUpToolCallsLocked
-                              ? followUpToolLockError
-                              : "Tool call skipped: turn budget reserved for final response.",
-                            blocked: true,
-                            reason: followUpToolCallsLocked
-                              ? followUpToolLockReason === "repeated_identical_packaging_failure"
-                                ? "follow_up_packaging_failure_lock"
-                                : "follow_up_tool_use_lock"
-                              : "turn_budget_soft_landing",
-                          }),
-                          is_error: true,
+                    const botMessagingExceptionAvailable =
+                      followUpBotMessagingExceptionsUsed < 1 &&
+                      shouldAllowBotMessagingDuringFollowUpToolLockUtil({
+                        toolName: content.name,
+                        botConversation: this.task.agentConfig?.botConversation === true,
+                        botMessagingAuthorized:
+                          this.getToolPolicyContext().botMessagingAuthorized === true,
+                      });
+                    if (botMessagingExceptionAvailable) {
+                      followUpBotMessagingExceptionsUsed += 1;
+                      this.emitEvent("log", {
+                        metric: "bot_message_allowed_during_follow_up_tool_lock",
+                        tool: canonicalizeToolNameUtil(content.name),
+                        reason: followUpToolLockReason || "turn_budget_soft_landing",
+                      });
+                    } else {
+                      skippedToolCallsByPolicy += 1;
+                      const followUpToolLockError =
+                        followUpToolCallsLocked &&
+                        followUpToolLockReason === "repeated_identical_packaging_failure"
+                          ? "Tool call skipped: follow-up tool calls are locked because the same packaging/export failure repeated and more retries are unlikely to help in this cycle."
+                          : "Tool call skipped: follow-up tool calls are locked due to repeated tool-use looping.";
+                      return {
+                        status: "immediate" as const,
+                        call: scheduledCall,
+                        effectiveToolName: content.name,
+                        outcome: {
+                          toolResult: {
+                            type: "tool_result",
+                            tool_use_id: content.id,
+                            content: JSON.stringify({
+                              error: followUpToolCallsLocked
+                                ? followUpToolLockError
+                                : "Tool call skipped: turn budget reserved for final response.",
+                              blocked: true,
+                              reason: followUpToolCallsLocked
+                                ? followUpToolLockReason === "repeated_identical_packaging_failure"
+                                  ? "follow_up_packaging_failure_lock"
+                                  : "follow_up_tool_use_lock"
+                                : "turn_budget_soft_landing",
+                            }),
+                            is_error: true,
+                          },
                         },
-                      },
-                    };
+                      };
+                    }
                   }
 
                   const preflight = await this.preflightToolInvocation({

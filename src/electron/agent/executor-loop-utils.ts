@@ -694,6 +694,26 @@ export function shouldLockFollowUpToolCalls(opts: {
   );
 }
 
+/**
+ * A bot teammate must be able to return a durable handoff reply even when the
+ * follow-up loop is being forced to finalize after repeated tool use. Keep the
+ * exception narrow: only the verified bot-team messaging primitive may pass;
+ * the executor limits it to one escape call per follow-up.
+ */
+export function shouldAllowBotMessagingDuringFollowUpToolLock(opts: {
+  toolName: string | undefined;
+  botConversation: boolean;
+  botMessagingAuthorized: boolean;
+}): boolean {
+  return (
+    opts.botConversation === true &&
+    opts.botMessagingAuthorized === true &&
+    String(opts.toolName || "")
+      .trim()
+      .toLowerCase() === "send_agent_message"
+  );
+}
+
 export function updateSkippedToolOnlyTurnStreak(opts: {
   skippedToolCalls: number;
   hasTextInThisResponse: boolean;

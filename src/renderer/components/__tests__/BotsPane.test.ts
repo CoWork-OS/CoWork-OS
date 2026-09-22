@@ -51,6 +51,7 @@ describe("BotsPane", () => {
       } as Any),
     ).toBe("waiting");
     expect(getBotConversationReadiness({ status: "blocked" } as Any)).toBe("attention");
+    expect(getBotConversationReadiness({ status: "interrupted" } as Any)).toBe("attention");
     expect(getBotConversationReadiness({ status: "failed" } as Any)).toBe("unavailable");
     expect(getBotConversationReadinessLabel("ready")).toBe("Ready for another message");
     expect(getBotConversationReadinessLabel("waiting")).toBe("Waiting on a teammate");

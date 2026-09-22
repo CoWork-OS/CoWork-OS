@@ -48,11 +48,7 @@ interface BotsPaneProps {
   onBotDeleted?: (botId: string) => void | Promise<void>;
 }
 
-const ACTIVE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set([
-  "executing",
-  "planning",
-  "interrupted",
-]);
+const ACTIVE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["executing", "planning"]);
 
 const AWAITING_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused", "blocked"]);
 const UNAVAILABLE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed", "cancelled"]);

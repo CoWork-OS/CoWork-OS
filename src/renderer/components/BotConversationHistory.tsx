@@ -19,7 +19,7 @@ function isArchived(task: Task): boolean {
 }
 
 const SYNTHETIC_BOT_PROMPT_RE =
-  /^(?:start (?:a )?(?:conversation|chatting) with .+|resume the .+ bot conversation)\.?$/i;
+  /^(?:start (?:a )?(?:conversation|chatting) with .+|resume the .+ bot conversation)\b/i;
 
 function isSyntheticBotPrompt(value: string): boolean {
   return SYNTHETIC_BOT_PROMPT_RE.test(value.trim());

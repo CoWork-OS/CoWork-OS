@@ -50,7 +50,7 @@ describe("BotConversationHistory", () => {
       getBotConversationTitle(
         conversation("recovery", 1_000, {
           title: "Research Desk",
-          prompt: "Resume the Research Desk bot conversation.",
+          prompt: "Resume the Research Desk bot conversation. Internal recovery context follows.",
           branchLabel: "Reopened bot conversation",
         }),
         2,

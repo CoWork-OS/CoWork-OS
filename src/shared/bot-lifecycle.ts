@@ -196,6 +196,13 @@ function stateFromTask(
   }
 }
 
+const WAITING_FOR_REPLY_RE =
+  /^waiting for .+? to reply(?: before finishing this conversation)?\.?$/i;
+
+function hasWaitingForReplyError(error: unknown): boolean {
+  return typeof error === "string" && WAITING_FOR_REPLY_RE.test(error.replace(/\s+/g, " ").trim());
+}
+
 function teammateStateFromTask(
   task: Pick<Task, "status" | "error" | "resultSummary">,
 ): BotTeammateState {
@@ -208,7 +215,7 @@ function teammateStateFromTask(
     case "paused":
     case "blocked":
     case "interrupted":
-      return "needs_input";
+      return hasWaitingForReplyError(task.error) ? "waiting" : "needs_input";
     case "failed":
       return "failed";
     case "completed":

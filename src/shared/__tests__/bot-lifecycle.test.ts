@@ -64,6 +64,27 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.collaborationSummary).toBe("2 teammates · 1 working · 1 finished");
   });
 
+  it("keeps a blocked teammate waiting when its durable error names a reply boundary", () => {
+    const projection = deriveBotConversationProjection({
+      task: { ...baseTask, id: "atlas-task" },
+      botName: "Atlas",
+      childTasks: [
+        {
+          id: "forge-task",
+          title: "Forge",
+          status: "blocked",
+          error: "Waiting for Scribe to reply before finishing this conversation.",
+          assignedAgentRoleId: "forge",
+        },
+      ],
+    });
+
+    expect(projection.teammates).toEqual([
+      { id: "forge-task", label: "Forge", state: "waiting", detail: "Waiting for a reply" },
+    ]);
+    expect(projection.collaborationSummary).toBe("1 teammate · 1 waiting");
+  });
+
   it("turns a queued teammate message into a waiting activity state", () => {
     const projection = deriveBotConversationProjection({
       task: baseTask,

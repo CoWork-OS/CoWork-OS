@@ -97,7 +97,10 @@ function getBotProjectionSignature(
 ): string {
   return Object.entries(projections || {})
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([roleId, projection]) => `${roleId}:${projection.state}:${projection.activityLabel}`)
+    .map(
+      ([roleId, projection]) =>
+        `${roleId}:${projection.state}:${projection.activityLabel}:${projection.lastActivityAt}`,
+    )
     .join("|");
 }
 
@@ -840,6 +843,8 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
       next.selectedBotConversationProjection?.state &&
     prev.selectedBotConversationProjection?.activityLabel ===
       next.selectedBotConversationProjection?.activityLabel &&
+    prev.selectedBotConversationProjection?.lastActivityAt ===
+      next.selectedBotConversationProjection?.lastActivityAt &&
     getBotProjectionSignature(prev.botConversationProjections) ===
       getBotProjectionSignature(next.botConversationProjections) &&
     prev.isBotViewActive === next.isBotViewActive &&

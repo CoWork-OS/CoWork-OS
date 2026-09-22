@@ -83,7 +83,7 @@ export interface BotConversationProjection {
 /** Minimal durable projection retained for bot roster rows. */
 export type BotConversationRosterProjection = Pick<
   BotConversationProjection,
-  "state" | "activityLabel"
+  "state" | "activityLabel" | "lastActivityAt"
 >;
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -11,6 +11,7 @@ import {
   getBotLatestTask,
   getBotPreview,
   getBotRelativeTime,
+  getBotTimestamp,
   stripMarkdownForBotPreview,
 } from "../BotsPane";
 
@@ -145,6 +146,12 @@ describe("BotsPane", () => {
     expect(getBotRelativeTime(10_000, 10_000 + 2 * 60 * 60 * 1000)).toBe("2h");
   });
 
+  it("uses durable projection activity for roster age when it is newer than the task row", () => {
+    expect(
+      getBotTimestamp(bot, { ...task, updatedAt: 2_000 } as Any, { lastActivityAt: 9_000 }),
+    ).toBe(9_000);
+  });
+
   it("matches bots by identity, description, or recent task text", () => {
     expect(filterBots([bot], [task as Any], "onboarding")).toEqual([bot]);
     expect(filterBots([bot], [task as Any], "billing")).toEqual([]);
@@ -179,6 +186,7 @@ describe("BotsPane", () => {
         selectedConversationProjection: {
           state: "waiting",
           activityLabel: "Waiting for Forge to reply",
+          lastActivityAt: 3_000,
         },
         onSelectTask: () => {},
       }),
@@ -200,6 +208,7 @@ describe("BotsPane", () => {
           [bot.id]: {
             state: "waiting",
             activityLabel: "Waiting for Forge to reply",
+            lastActivityAt: 3_000,
           },
         },
         onSelectTask: () => {},

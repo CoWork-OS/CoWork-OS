@@ -272,11 +272,22 @@ function getSafeBotIcon(icon: string | undefined) {
   return BotGlyph;
 }
 
-function getBotTimestamp(bot: BotRole, task: Task | undefined): number {
-  return task?.updatedAt || task?.createdAt || bot.updatedAt || 0;
+export function getBotTimestamp(
+  bot: BotRole,
+  task: Task | undefined,
+  projection?: Pick<BotConversationProjection, "lastActivityAt"> | null,
+): number {
+  return Math.max(
+    task?.updatedAt || task?.createdAt || bot.updatedAt || 0,
+    projection?.lastActivityAt || 0,
+  );
 }
 
-function sortBots(roles: BotRole[], tasks: Task[]): BotRole[] {
+function sortBots(
+  roles: BotRole[],
+  tasks: Task[],
+  projections?: Readonly<Record<string, BotConversationRosterProjection>>,
+): BotRole[] {
   return [...roles].sort((a, b) => {
     const aTask = getBotLatestTask(tasks, a.id);
     const bTask = getBotLatestTask(tasks, b.id);
@@ -284,7 +295,9 @@ function sortBots(roles: BotRole[], tasks: Task[]): BotRole[] {
     const bActive = bTask && ACTIVE_BOT_STATUSES.has(bTask.status) ? 1 : 0;
     if (aActive !== bActive) return bActive - aActive;
 
-    const activityDifference = getBotTimestamp(b, bTask) - getBotTimestamp(a, aTask);
+    const activityDifference =
+      getBotTimestamp(b, bTask, projections?.[b.id]) -
+      getBotTimestamp(a, aTask, projections?.[a.id]);
     if (activityDifference !== 0) return activityDifference;
     return (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName);
   });
@@ -320,7 +333,7 @@ function BotRow({
   const readinessLabel = getBotConversationReadinessLabel(readiness);
   const displayName = flattenTaskText(bot.displayName) || "Unnamed bot";
   const preview = getBotPreview(latestTask, conversationProjection);
-  const age = getBotRelativeTime(latestTask?.updatedAt || latestTask?.createdAt || bot.updatedAt);
+  const age = getBotRelativeTime(getBotTimestamp(bot, latestTask, conversationProjection));
 
   return (
     <div className="sidebar-bot-row-wrap">
@@ -575,8 +588,8 @@ export function BotsPane({
   const [editingBot, setEditingBot] = useState<BotRole | null>(null);
 
   const visibleBots = useMemo(
-    () => sortBots(filterBots(roles, tasks, query), tasks),
-    [roles, tasks, query],
+    () => sortBots(filterBots(roles, tasks, query), tasks, conversationProjections),
+    [conversationProjections, roles, tasks, query],
   );
 
   return (

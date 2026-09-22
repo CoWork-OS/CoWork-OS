@@ -2711,7 +2711,11 @@ export function App() {
           });
           return [
             roleId,
-            { state: projection.state, activityLabel: projection.activityLabel },
+            {
+              state: projection.state,
+              activityLabel: projection.activityLabel,
+              lastActivityAt: projection.lastActivityAt,
+            },
           ] as const;
         } catch (error) {
           console.warn("Failed to load bot roster projection", {
@@ -2750,13 +2754,18 @@ export function App() {
       setBotConversationProjections((previous) => {
         if (
           previous[roleId]?.state === projection.state &&
-          previous[roleId]?.activityLabel === projection.activityLabel
+          previous[roleId]?.activityLabel === projection.activityLabel &&
+          previous[roleId]?.lastActivityAt === projection.lastActivityAt
         ) {
           return previous;
         }
         return {
           ...previous,
-          [roleId]: { state: projection.state, activityLabel: projection.activityLabel },
+          [roleId]: {
+            state: projection.state,
+            activityLabel: projection.activityLabel,
+            lastActivityAt: projection.lastActivityAt,
+          },
         };
       });
     } catch (error) {

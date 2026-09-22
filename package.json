@@ -181,7 +181,7 @@
     "electron": "44.0.0",
     "electron-updater": "^6.8.9",
     "ethers": "^6.16.0",
-    "eventsource": "^4.1.0",
+    "eventsource": "^5.1.1",
     "exceljs": "npm:devextreme-exceljs-fork@4.4.13",
     "grammy": "^1.39.3",
     "highlight.js": "^11.11.1",

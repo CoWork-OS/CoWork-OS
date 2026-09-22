@@ -94,7 +94,7 @@ describe("TaskExecutor provider refresh", () => {
     expect(executor.provider.createMessage).toHaveBeenCalledOnce();
     expect(recordLlmTurn).toHaveBeenCalledOnce();
     expect(updateTracking).toHaveBeenCalledTimes(hasUsage ? 1 : 0);
-    if (hasUsage) expect(updateTracking).toHaveBeenCalledWith(3, 2, 1, 0);
+    if (hasUsage) expect(updateTracking).toHaveBeenCalledWith(3, 2, 1, 0, undefined);
   });
 
   it("refreshes provider before an LLM call and uses the refreshed model id", async () => {

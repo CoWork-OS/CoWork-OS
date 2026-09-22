@@ -76,6 +76,20 @@ function formatHandoffDirection(sender: string, recipient: string): string {
   return `${sender} → ${recipient}`;
 }
 
+function withoutCurrentBotCollaborator(
+  projection: BotConversationProjection,
+  botName: string,
+): BotConversationProjection {
+  const normalizedBotName = botName.trim().toLocaleLowerCase();
+  if (!normalizedBotName) return projection;
+  const collaborators = projection.collaborators.filter(
+    (label) => label.trim().toLocaleLowerCase() !== normalizedBotName,
+  );
+  return collaborators.length === projection.collaborators.length
+    ? projection
+    : { ...projection, collaborators };
+}
+
 export function BotCollaborationHeader({
   task,
   botName,
@@ -96,7 +110,10 @@ export function BotCollaborationHeader({
       }),
     [botName, childEvents, childTasks, events, task],
   );
-  const projection = conversationProjection ?? derivedProjection;
+  const projection = withoutCurrentBotCollaborator(
+    conversationProjection ?? derivedProjection,
+    botName,
+  );
   const handoffCount = projection.handoffs.length;
   const hasDetails = handoffCount > 0 || projection.collaborators.length > 0 || projection.outcome;
 

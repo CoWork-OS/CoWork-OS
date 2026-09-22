@@ -92,6 +92,37 @@ describe("BotCollaborationHeader", () => {
     expect(markup).not.toContain("Needs your input");
   });
 
+  it("does not list the current bot as one of its collaborators", () => {
+    const conversationProjection: BotConversationProjection = {
+      state: "working",
+      stateLabel: "Working with the team",
+      stateDetail: "Working on the latest request",
+      activityLabel: "Message delivered to Scribe",
+      lastActivityAt: 1_000,
+      collaborators: ["Atlas", "Scribe"],
+      teammates: [],
+      collaborationSummary: "No teammates involved",
+      handoffs: [],
+      attention: null,
+      outcome: null,
+    };
+    const markup = renderToStaticMarkup(
+      React.createElement(BotCollaborationHeader, {
+        task: {
+          status: "executing",
+          error: null,
+          resultSummary: undefined,
+        },
+        botName: "Atlas",
+        conversationProjection,
+      }),
+    );
+
+    expect(markup).toContain("Messages from");
+    expect(markup).toContain(">Scribe</span>");
+    expect(markup).not.toContain(">Atlas · Scribe</span>");
+  });
+
   it("shows a partial-result state instead of claiming the team is still waiting", () => {
     const markup = renderToStaticMarkup(
       React.createElement(BotCollaborationHeader, {

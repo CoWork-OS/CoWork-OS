@@ -883,17 +883,23 @@ function getTaskFeedRowsSignature(rows: TaskFeedRow[]): string {
 export function TaskSessionLineageFooter({
   task,
   onSelectTask,
+  isBotConversation = false,
 }: {
   task: Task | null | undefined;
   onSelectTask?: (taskId: string | null) => void;
+  isBotConversation?: boolean;
 }) {
   const sourceTaskId = task?.branchFromTaskId?.trim();
   if (!sourceTaskId) return null;
 
+  const lineageLabel = isBotConversation ? "Previous bot conversation" : "Forked from conversation";
+  const sourceTitle = isBotConversation
+    ? "Open previous bot conversation"
+    : "Open source conversation";
   const content = (
     <>
       <GitFork size={18} strokeWidth={1.8} aria-hidden="true" />
-      <span>Forked from conversation</span>
+      <span>{lineageLabel}</span>
     </>
   );
 
@@ -905,7 +911,7 @@ export function TaskSessionLineageFooter({
           type="button"
           className="session-lineage-link"
           onClick={() => onSelectTask(sourceTaskId)}
-          title="Open source conversation"
+          title={sourceTitle}
         >
           {content}
         </button>
@@ -11119,9 +11125,11 @@ function MainContentComponent({
           )}
 
           {conversationFlow}
-          {!isBotConversation && (
-            <TaskSessionLineageFooter task={task} onSelectTask={onSelectTask} />
-          )}
+          <TaskSessionLineageFooter
+            task={task}
+            onSelectTask={onSelectTask}
+            isBotConversation={isBotConversation}
+          />
         </div>
       </div>
 

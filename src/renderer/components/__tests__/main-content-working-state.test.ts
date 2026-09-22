@@ -549,6 +549,20 @@ describe("TaskSessionLineageFooter", () => {
 
     expect(html).toBe("");
   });
+
+  it("makes a reopened bot's preserved transcript discoverable", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(TaskSessionLineageFooter, {
+        task: makeTask({ branchFromTaskId: "previous-bot-task" }),
+        isBotConversation: true,
+        onSelectTask: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Previous bot conversation");
+    expect(html).toContain("Open previous bot conversation");
+    expect(html).not.toContain("Forked from conversation");
+  });
 });
 
 describe("message-level session forking", () => {

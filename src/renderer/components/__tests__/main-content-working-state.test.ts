@@ -20,6 +20,7 @@ import {
   getInlinePreviewKindForGeneratedFile,
   getInlinePreviewKindForTaskEvent,
   getAutoScrollTargetTop,
+  getBotTranscriptSpeaker,
   getBootstrapProgressTitle,
   getDefaultTranscriptMode,
   getVisibleEndOfTaskArtifactCards,
@@ -316,6 +317,30 @@ describe("shouldSuppressInitialPromptUserEvent", () => {
         taskCreatedAt: 10_000,
       }),
     ).toBe(false);
+  });
+});
+
+describe("getBotTranscriptSpeaker", () => {
+  it("attributes teammate messages to the sender instead of the user", () => {
+    expect(
+      getBotTranscriptSpeaker(
+        makeEvent("teammate-message", 1_000, "user_message", {
+          messageSource: "agent",
+          senderLabel: "Scribe — Author and Publisher",
+        }),
+      ),
+    ).toBe("Scribe — Author and Publisher");
+    expect(getBotTranscriptSpeaker(makeEvent("human-message", 1_001, "user_message"))).toBe("You");
+  });
+
+  it("uses a stable fallback when a legacy teammate receipt has no sender label", () => {
+    expect(
+      getBotTranscriptSpeaker(
+        makeEvent("legacy-teammate-message", 1_002, "user_message", {
+          messageSource: "agent",
+        }),
+      ),
+    ).toBe("Teammate");
   });
 });
 

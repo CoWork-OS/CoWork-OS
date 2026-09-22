@@ -15,6 +15,7 @@ export {
 export type { EndOfTaskArtifactCard, EndOfTaskArtifactStack } from "./artifact-logic";
 export {
   shouldSuppressInitialPromptUserEvent,
+  getBotTranscriptSpeaker,
   deriveTaskHeaderPresentation,
   shouldCreateFreshTaskForSend,
   isChatExecutionTask,

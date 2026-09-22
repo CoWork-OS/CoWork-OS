@@ -249,6 +249,7 @@ import {
   getCompletionSummaryText,
   getAssistantBubbleStatusLabel,
   getAssistantOrCompletionText,
+  getBotTranscriptSpeaker,
   getUserEventDisplayMessage,
   isLowSignalPauseMessage,
   buildPauseDecisionFallbackFromRecentEvents,
@@ -8733,7 +8734,8 @@ function MainContentComponent({
         const type = getEffectiveTaskEventType(event);
         if (type === "user_message") {
           const message = getUserEventDisplayMessage(event);
-          return message ? `### You\n\n${message}` : "";
+          const speaker = getBotTranscriptSpeaker(event);
+          return message ? `### ${speaker}\n\n${message}` : "";
         }
         if (type === "assistant_message" || type === "task_completed") {
           const message = getAssistantOrCompletionText(event);

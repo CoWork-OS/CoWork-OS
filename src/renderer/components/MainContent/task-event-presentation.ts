@@ -257,6 +257,15 @@ export function getUserEventDisplayMessage(event: TaskEvent): string {
     : "";
 }
 
+export function getBotTranscriptSpeaker(event: TaskEvent): string {
+  if (event.payload?.messageSource !== "agent") return "You";
+  const senderLabel =
+    typeof event.payload?.senderLabel === "string"
+      ? event.payload.senderLabel.replace(/\s+/g, " ").trim()
+      : "";
+  return senderLabel || "Teammate";
+}
+
 export function shouldSuppressInitialPromptUserEvent(params: {
   event: TaskEvent;
   initialPromptEventId: string | null;

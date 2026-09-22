@@ -9,6 +9,13 @@ const memoryFeatureMocks = vi.hoisted(() => ({
   getCurrentLocation: vi.fn(),
 }));
 
+const memoryServiceMocks = vi.hoisted(() => ({
+  searchAsync: vi.fn(() => {
+    throw new Error("DB not initialized");
+  }),
+  searchWorkspaceMarkdown: vi.fn(() => []),
+}));
+
 vi.mock("electron", () => ({
   app: {
     getAppPath: () => "/app",
@@ -29,6 +36,10 @@ vi.mock("../../../location/DesktopLocationService", () => ({
   getDesktopLocationService: () => ({
     getCurrentLocation: memoryFeatureMocks.getCurrentLocation,
   }),
+}));
+
+vi.mock("../../memory/MemoryService", () => ({
+  MemoryService: memoryServiceMocks,
 }));
 
 import { SystemTools } from "../system-tools";
@@ -297,14 +308,6 @@ describe("SystemTools.getCurrentLocation", () => {
 
 describe("SystemTools.searchMemories", () => {
   it("returns empty results on error", async () => {
-    vi.mock("../../memory/MemoryService", () => ({
-      MemoryService: {
-        search: vi.fn(() => {
-          throw new Error("DB not initialized");
-        }),
-      },
-    }));
-
     const instance = new SystemTools(
       {
         id: "ws-1",

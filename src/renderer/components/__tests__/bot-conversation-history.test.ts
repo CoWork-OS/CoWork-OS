@@ -1,7 +1,10 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { BotConversationHistory } from "../BotConversationHistory";
+import {
+  BotConversationHistory,
+  getBotConversationHistoryStatusLabel,
+} from "../BotConversationHistory";
 
 const roleId = "research-role";
 
@@ -21,6 +24,21 @@ function conversation(id: string, updatedAt: number, overrides: Record<string, u
 }
 
 describe("BotConversationHistory", () => {
+  it("uses human-readable readiness labels for non-terminal conversation states", () => {
+    expect(getBotConversationHistoryStatusLabel({ status: "pending", error: null })).toBe(
+      "Ready for another message",
+    );
+    expect(
+      getBotConversationHistoryStatusLabel({
+        status: "blocked",
+        error: "Waiting for Scribe to reply before finishing this conversation.",
+      }),
+    ).toBe("Waiting on a teammate");
+    expect(getBotConversationHistoryStatusLabel({ status: "cancelled", error: null })).toBe(
+      "Unavailable — reopen to retry",
+    );
+  });
+
   it("renders current, archived, and unrelated conversations in one bot screen", () => {
     const markup = renderToStaticMarkup(
       React.createElement(BotConversationHistory, {

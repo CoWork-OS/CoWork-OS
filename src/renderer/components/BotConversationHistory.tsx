@@ -1,6 +1,7 @@
 import { Archive, Check, Clock3, MessageCircle, Plus } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import type { Task } from "../../shared/types";
+import { getBotConversationReadiness, getBotConversationReadinessLabel } from "./BotsPane";
 import { isBotConversation } from "../utils/bot-conversations";
 import "./BotConversationHistory.css";
 
@@ -37,6 +38,11 @@ function formatConversationDate(timestamp?: number): string {
   } catch {
     return "";
   }
+}
+
+export function getBotConversationHistoryStatusLabel(task: Pick<Task, "status" | "error">): string {
+  if (task.status === "completed") return "Completed";
+  return getBotConversationReadinessLabel(getBotConversationReadiness(task));
 }
 
 export function BotConversationHistory({
@@ -116,11 +122,7 @@ export function BotConversationHistory({
                 <span className="bot-conversation-history-row-copy">
                   <strong>{getConversationTitle(conversation, index)}</strong>
                   <span>
-                    {archived
-                      ? "Archived"
-                      : conversation.status === "completed"
-                        ? "Completed"
-                        : conversation.status}
+                    {archived ? "Archived" : getBotConversationHistoryStatusLabel(conversation)}
                     {formatConversationDate(conversation.updatedAt || conversation.createdAt)
                       ? ` · ${formatConversationDate(conversation.updatedAt || conversation.createdAt)}`
                       : ""}

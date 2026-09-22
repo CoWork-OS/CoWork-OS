@@ -22,7 +22,6 @@ import {
   Search,
   Send,
   ShieldCheck,
-  Slack,
   Sparkles,
   Wrench,
 } from "lucide-react";
@@ -2657,7 +2656,7 @@ export function AgentsHubPanel({
               ))}
             </div>
             <button className="agents-secondary-btn" onClick={handleAddSlackTarget}>
-              <Slack size={16} />
+          <MessageSquare size={16} />
               Add Slack deployment
             </button>
             <div className="agents-list">
@@ -3539,7 +3538,7 @@ export function AgentsHubPanel({
               </button>
               {(studio?.deployment?.surfaces || []).includes("slack") && slackTargets[0] ? (
                 <button className="agents-agent-channel-card">
-                  <Slack size={20} />
+                  <MessageSquare size={20} />
                   <strong>{slackTargets[0].channelName}</strong>
                   <span>
                     {slackTargets[0].misconfigured ? "Needs attention" : "Responds to messages"}
@@ -3547,7 +3546,7 @@ export function AgentsHubPanel({
                 </button>
               ) : (
                 <button className="agents-agent-channel-card">
-                  <Slack size={20} />
+                  <MessageSquare size={20} />
                   <strong>Slack</strong>
                   <span>
                     {(studio?.deployment?.surfaces || []).includes("slack")

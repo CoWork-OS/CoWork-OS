@@ -1,5 +1,6 @@
 import type { Task, TaskEvent } from "./types";
 import {
+  compareBotHandoffEventOrder,
   getCurrentBotHandoffScope,
   getPendingBotHandoff,
   isBotHandoffEventInScope,
@@ -515,11 +516,11 @@ export function deriveBotConversationProjection(input: {
       return {
         messageId: readString(payload, "messageId", "message_id") || event.id,
         senderTaskId,
-        timestamp: readTimestamp(event),
+        event,
       };
     })
     .filter(
-      (reply): reply is { messageId: string; senderTaskId: string; timestamp: number } =>
+      (reply): reply is { messageId: string; senderTaskId: string; event: TaskEvent } =>
         reply !== null,
     );
   const claimedReceiverReplyIds = new Set<string>();
@@ -578,7 +579,7 @@ export function deriveBotConversationProjection(input: {
             (reply) =>
               reply.senderTaskId === targetTaskId &&
               !claimedReceiverReplyIds.has(reply.messageId) &&
-              reply.timestamp >= readTimestamp(event),
+              compareBotHandoffEventOrder(reply.event, event) >= 0,
           )
         : undefined);
     if (inferredReply && !inferredRepliesByHandoffKey.has(handoffKey)) {

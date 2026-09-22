@@ -386,6 +386,68 @@ describe("buildFreshBotHandoffPrompt", () => {
     });
   });
 
+  it("does not correlate a same-millisecond reply that preceded the handoff", () => {
+    const earlierReply = {
+      ...event(
+        "reply-before-handoff",
+        "user_message",
+        {
+          messageId: "reply-before-handoff",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          message: "An earlier result.",
+        },
+        3_000,
+      ),
+      seq: 9,
+    };
+    const handoff = {
+      ...event(
+        "handoff-same-ms-reply",
+        "agent_message",
+        {
+          messageId: "handoff-same-ms-reply",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          targetTaskId: "scribe-task",
+          recipientLabel: "Scribe",
+          message: "The current request.",
+        },
+        3_000,
+      ),
+      seq: 10,
+    };
+
+    expect(getPendingBotHandoff([earlierReply, handoff])).toMatchObject({
+      messageId: "handoff-same-ms-reply",
+    });
+
+    const laterReply = {
+      ...event(
+        "reply-after-handoff",
+        "user_message",
+        {
+          messageId: "reply-after-handoff",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          message: "The current result.",
+        },
+        3_000,
+      ),
+      seq: 11,
+    };
+
+    expect(getPendingBotHandoff([earlierReply, handoff, laterReply])).toBeNull();
+  });
+
   it("returns durable receipt timestamps and excludes a timed-out reply from waiting", () => {
     const handoff = event(
       "handoff-timeout",

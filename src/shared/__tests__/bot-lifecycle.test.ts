@@ -471,6 +471,85 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.activityLabel).toBe("Reply received from Scribe");
   });
 
+  it("uses durable order when a receiver reply shares the handoff timestamp", () => {
+    const handoff = {
+      ...makeEvent(
+        "handoff-same-ms-reply",
+        "agent_message",
+        {
+          messageId: "handoff-same-ms-reply",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          senderLabel: "Atlas",
+          recipientLabel: "Scribe",
+          targetTaskId: "scribe-task",
+          message: "The current request.",
+        },
+        3_000,
+      ),
+      seq: 10,
+    };
+    const earlierReply = {
+      ...makeEvent(
+        "reply-before-handoff",
+        "user_message",
+        {
+          messageId: "reply-before-handoff",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          message: "An earlier result.",
+        },
+        3_000,
+      ),
+      seq: 9,
+    };
+    const waitingProjection = deriveBotConversationProjection({
+      task: { ...baseTask, id: "atlas-task" },
+      botName: "Atlas",
+      events: [handoff, earlierReply],
+    });
+
+    expect(waitingProjection.handoffs[0]).toMatchObject({
+      messageId: "handoff-same-ms-reply",
+    });
+    expect(waitingProjection.handoffs[0]).not.toHaveProperty("replyState");
+    expect(waitingProjection.state).toBe("waiting");
+
+    const laterReply = {
+      ...makeEvent(
+        "reply-after-handoff",
+        "user_message",
+        {
+          messageId: "reply-after-handoff",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          message: "The current result.",
+        },
+        3_000,
+      ),
+      seq: 11,
+    };
+    const completedProjection = deriveBotConversationProjection({
+      task: { ...baseTask, id: "atlas-task" },
+      botName: "Atlas",
+      events: [handoff, earlierReply, laterReply],
+    });
+
+    expect(completedProjection.handoffs[0]).toMatchObject({
+      messageId: "handoff-same-ms-reply",
+      replyState: "received",
+      replyMessageId: "reply-after-handoff",
+    });
+  });
+
   it("keeps delivery failure actionable and never requires raw protocol text", () => {
     const projection = deriveBotConversationProjection({
       task: baseTask,

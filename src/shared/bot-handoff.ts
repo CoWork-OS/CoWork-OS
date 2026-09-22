@@ -104,7 +104,8 @@ function eventTimestamp(event: TaskEvent): number {
     : event.timestamp || event.ts || 0;
 }
 
-function compareEventOrder(left: TaskEvent, right: TaskEvent): number {
+/** Compare durable handoff events, including same-millisecond sequence order. */
+export function compareBotHandoffEventOrder(left: TaskEvent, right: TaskEvent): number {
   const timestampDifference = eventTimestamp(left) - eventTimestamp(right);
   if (timestampDifference !== 0) return timestampDifference;
   if (left.taskId !== right.taskId) return 0;
@@ -113,6 +114,8 @@ function compareEventOrder(left: TaskEvent, right: TaskEvent): number {
   }
   return 0;
 }
+
+const compareEventOrder = compareBotHandoffEventOrder;
 
 function scopeForEvent(event: TaskEvent): BotHandoffScope {
   return {
@@ -189,10 +192,10 @@ function getBotHandoffReplyCorrelation(events: TaskEvent[]): BotHandoffReplyCorr
       const messageId = readString(payload, "messageId", "message_id") || event.id;
       const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
       if (!messageId || !senderTaskId || isTerminalDelivery(deliveryStatus(payload))) return null;
-      return { messageId, senderTaskId, timestamp: eventTimestamp(event) };
+      return { messageId, senderTaskId, event };
     })
     .filter(
-      (reply): reply is { messageId: string; senderTaskId: string; timestamp: number } =>
+      (reply): reply is { messageId: string; senderTaskId: string; event: TaskEvent } =>
         reply !== null,
     );
   const claimedReplyIds = new Set<string>();
@@ -225,7 +228,7 @@ function getBotHandoffReplyCorrelation(events: TaskEvent[]): BotHandoffReplyCorr
       (candidate) =>
         candidate.senderTaskId === targetTaskId &&
         !claimedReplyIds.has(candidate.messageId) &&
-        candidate.timestamp >= eventTimestamp(event),
+        compareEventOrder(candidate.event, event) >= 0,
     );
     if (!reply) continue;
     claimedReplyIds.add(reply.messageId);

@@ -131,6 +131,23 @@ function getPendingTeammateReplyPreview(task: Pick<Task, "status" | "error">): s
   return match?.[1] ? `Waiting for ${match[1]} to reply` : "Waiting for a teammate to reply";
 }
 
+function getProjectionPreview(
+  projection?: Pick<BotConversationProjection, "state"> | null,
+): string | null {
+  switch (projection?.state) {
+    case "working":
+      return "Working on latest message";
+    case "waiting":
+      return "Waiting on a teammate";
+    case "needs_input":
+      return "Needs your input";
+    case "failed":
+      return "Unavailable — reopen to retry";
+    default:
+      return null;
+  }
+}
+
 /** Persistent readiness is intentionally separate from the last run result. */
 export function getBotConversationReadiness(
   task: Pick<Task, "status" | "error"> | undefined,
@@ -166,8 +183,11 @@ export function getBotConversationReadinessLabel(readiness: BotConversationReadi
   }
 }
 
-export function getBotPreview(task: Task | undefined): string {
-  if (!task) return "No messages yet";
+export function getBotPreview(
+  task: Task | undefined,
+  projection?: Pick<BotConversationProjection, "state"> | null,
+): string {
+  if (!task) return getProjectionPreview(projection) || "No messages yet";
   if (task.status === "failed" || task.status === "cancelled") {
     const failurePreview = getHumanBotPreview(task.error || undefined);
     const preview = failurePreview
@@ -177,6 +197,8 @@ export function getBotPreview(task: Task | undefined): string {
       ? `${preview.slice(0, MAX_BOT_PREVIEW_LENGTH - 1).trimEnd()}…`
       : preview;
   }
+  const projectionPreview = getProjectionPreview(projection);
+  if (projectionPreview) return projectionPreview;
   const pendingReplyPreview = getPendingTeammateReplyPreview(task);
   if (pendingReplyPreview) return pendingReplyPreview;
   const promptPreview = getHumanBotPreview(task.userPrompt);
@@ -287,7 +309,7 @@ function BotRow({
     readiness === "waiting" || readiness === "attention" || readiness === "unavailable";
   const readinessLabel = getBotConversationReadinessLabel(readiness);
   const displayName = flattenTaskText(bot.displayName) || "Unnamed bot";
-  const preview = getBotPreview(latestTask);
+  const preview = getBotPreview(latestTask, conversationProjection);
   const age = getBotRelativeTime(latestTask?.updatedAt || latestTask?.createdAt || bot.updatedAt);
 
   return (

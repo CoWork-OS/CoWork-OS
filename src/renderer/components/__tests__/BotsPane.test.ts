@@ -98,6 +98,15 @@ describe("BotsPane", () => {
     ).toBe("Waiting for Atlas to reply");
   });
 
+  it.each([
+    ["working", "Working on latest message"],
+    ["waiting", "Waiting on a teammate"],
+    ["needs_input", "Needs your input"],
+    ["failed", "Unavailable — reopen to retry"],
+  ] as const)("does not show a stale result while projection is %s", (state, expected) => {
+    expect(getBotPreview(task as Any, { state })).toBe(expected);
+  });
+
   it("shows Markdown previews as plain text without formatting syntax", () => {
     expect(
       getBotPreview({
@@ -169,6 +178,7 @@ describe("BotsPane", () => {
 
     expect(markup).toContain("Waiting on a teammate");
     expect(markup).not.toContain("Ready for another message");
+    expect(markup).not.toContain("Onboarding findings are ready");
   });
 
   it("uses a durable projection for a non-selected stale completed roster row", () => {

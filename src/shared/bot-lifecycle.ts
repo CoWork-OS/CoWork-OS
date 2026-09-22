@@ -1,5 +1,5 @@
 import type { Task, TaskEvent } from "./types";
-import { getPendingBotHandoff } from "./bot-handoff";
+import { getCurrentBotHandoffScopeStart, getPendingBotHandoff } from "./bot-handoff";
 
 /**
  * Read-side lifecycle projection for persistent Bot conversations.
@@ -516,18 +516,21 @@ export function deriveBotConversationProjection(input: {
       : stateFromTask(input.task);
   const latestHandoff = handoffs[handoffs.length - 1];
   const pendingBotHandoff = getPendingBotHandoff(input.events || []);
-  const isWaitingOnHandoff =
-    Boolean(pendingBotHandoff) ||
-    handoffs.some(
-      (handoff) =>
-        (handoff.state === "accepted" ||
-          handoff.state === "queued" ||
-          handoff.state === "started" ||
-          handoff.state === "delivered") &&
-        (handoff.replyState === undefined || handoff.replyState === "pending"),
-    );
+  const handoffScopeStart = getCurrentBotHandoffScopeStart(input.events || []);
+  const hasScopedPendingHandoff = handoffs.some(
+    (handoff) =>
+      (handoffScopeStart === undefined || handoff.timestamp >= handoffScopeStart) &&
+      (handoff.state === "accepted" ||
+        handoff.state === "queued" ||
+        handoff.state === "started" ||
+        handoff.state === "delivered") &&
+      (handoff.replyState === undefined || handoff.replyState === "pending"),
+  );
+  const isWaitingOnHandoff = Boolean(pendingBotHandoff) || hasScopedPendingHandoff;
   const state: BotConversationState =
-    baseState !== "failed" && isWaitingOnHandoff ? "waiting" : baseState;
+    baseState !== "failed" && input.task.status !== "cancelled" && isWaitingOnHandoff
+      ? "waiting"
+      : baseState;
   const latestActivityAt = Math.max(
     latestAgentEvent ? readTimestamp(latestAgentEvent) : 0,
     latestHandoff?.timestamp || 0,

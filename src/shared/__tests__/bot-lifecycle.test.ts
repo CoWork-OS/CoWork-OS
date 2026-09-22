@@ -389,4 +389,57 @@ describe("deriveBotConversationProjection", () => {
     });
     expect(projection.attention?.title).not.toBe("The bot could not finish");
   });
+
+  it("does not resurrect a stale handoff after a new human turn starts", () => {
+    const projection = deriveBotConversationProjection({
+      task: baseTask,
+      botName: "Atlas",
+      events: [
+        makeEvent(
+          "old-handoff",
+          "agent_message",
+          {
+            messageId: "old-handoff",
+            senderType: "agent",
+            deliveryMode: "message",
+            deliveryStatus: "delivered",
+            botTeamId: "team-1",
+            targetTaskId: "forge-task",
+            recipientLabel: "Forge",
+            message: "The earlier request is no longer active.",
+          },
+          1_000,
+        ),
+        makeEvent("new-human-turn", "user_message", { message: "Start a fresh request." }, 2_000),
+      ],
+    });
+
+    expect(projection.state).toBe("working");
+  });
+
+  it("does not show a cancelled conversation waiting on a teammate", () => {
+    const projection = deriveBotConversationProjection({
+      task: {
+        status: "cancelled",
+        error: null,
+        resultSummary: "The partial result is still available.",
+      },
+      botName: "Atlas",
+      events: [
+        makeEvent("cancelled-handoff", "agent_message", {
+          messageId: "cancelled-handoff",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          targetTaskId: "scribe-task",
+          recipientLabel: "Scribe",
+          message: "Review the partial result.",
+        }),
+      ],
+    });
+
+    expect(projection.state).toBe("completed");
+    expect(projection.stateLabel).toBe("Finished");
+  });
 });

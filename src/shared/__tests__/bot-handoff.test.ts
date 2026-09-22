@@ -149,6 +149,85 @@ describe("buildFreshBotHandoffPrompt", () => {
     expect(getOutstandingBotHandoffReply([inboundReply])).toBeNull();
   });
 
+  it("correlates legacy receiver receipts without an in-reply-to field", () => {
+    const events = [
+      event("prompt", "user_message", { message: "Delegate the research." }, 1),
+      event(
+        "handoff-legacy",
+        "agent_message",
+        {
+          messageId: "handoff-legacy",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          targetTaskId: "scribe-task",
+          recipientLabel: "Scribe",
+          replyStatus: "pending",
+          message: "Find the source-backed result.",
+        },
+        2,
+      ),
+      event(
+        "legacy-reply",
+        "user_message",
+        {
+          messageId: "legacy-reply",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          message: "The source-backed result is ready.",
+        },
+        3,
+      ),
+    ];
+
+    expect(getPendingBotHandoff(events)).toBeNull();
+    expect(getCurrentBotHandoffScopeStart(events)).toBe(1);
+    expect(getOutstandingBotHandoffReply(events)).toBeNull();
+  });
+
+  it("does not consume a reply from a different teammate", () => {
+    const events = [
+      event(
+        "handoff-forge",
+        "agent_message",
+        {
+          messageId: "handoff-forge",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          targetTaskId: "forge-task",
+          recipientLabel: "Forge",
+          message: "Inspect the repository.",
+        },
+        1,
+      ),
+      event(
+        "reply-from-scribe",
+        "user_message",
+        {
+          messageId: "reply-from-scribe",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          message: "A different teammate replied.",
+        },
+        2,
+      ),
+    ];
+
+    expect(getPendingBotHandoff(events, { sinceTimestamp: 0 })).toMatchObject({
+      messageId: "handoff-forge",
+      recipientTaskId: "forge-task",
+    });
+  });
+
   it("projects the coordinator's pending bot-team handoff without treating failure as pending", () => {
     const handoff = event(
       "handoff-1",

@@ -118,22 +118,81 @@ function isAgentInbound(payload: Record<string, unknown>): boolean {
   return payload.messageSource === "agent" && payload.deliveryMode === "message";
 }
 
+interface BotHandoffReplyCorrelation {
+  handoffMessageIds: Set<string>;
+  replyMessageIds: Set<string>;
+}
+
 /**
  * The sender's durable handoff row is updated when the recipient sends a
  * reply. The receiver may already have a user_message copy of that reply, so
- * keep the message id projection in one place and use it to avoid treating a
- * completed reply as a fresh request.
+ * keep both sides of the correlation in one place and use it to avoid treating
+ * a completed reply as a fresh request.
+ *
+ * Older queue receipts did not always persist `inReplyToMessageId` on the
+ * receiver-side user_message. When that field is absent, the recipient task
+ * and message order are still a durable, bounded correlation: the first
+ * non-terminal inbound message from the handoff target after the handoff
+ * answers that handoff. Claims are one-to-one so two outbound messages to the
+ * same teammate cannot both consume one reply.
  */
-function getCorrelatedReplyMessageIds(events: TaskEvent[]): Set<string> {
+function getBotHandoffReplyCorrelation(events: TaskEvent[]): BotHandoffReplyCorrelation {
+  const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
+  const handoffMessageIds = new Set<string>();
   const replyMessageIds = new Set<string>();
-  for (const event of events) {
+  const receiverReplies = ordered
+    .filter((event) => eventType(event) === "user_message")
+    .map((event) => {
+      const payload = asRecord(event.payload);
+      if (!isAgentInbound(payload)) return null;
+      const messageId = readString(payload, "messageId", "message_id") || event.id;
+      const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
+      if (!messageId || !senderTaskId || isTerminalDelivery(deliveryStatus(payload))) return null;
+      return { messageId, senderTaskId, timestamp: eventTimestamp(event) };
+    })
+    .filter(
+      (reply): reply is { messageId: string; senderTaskId: string; timestamp: number } =>
+        reply !== null,
+    );
+  const claimedReplyIds = new Set<string>();
+
+  for (const event of ordered) {
     if (eventType(event) !== "agent_message") continue;
     const payload = asRecord(event.payload);
-    if (payload.replyStatus !== "received") continue;
-    const replyMessageId = readString(payload, "replyMessageId", "reply_message_id");
-    if (replyMessageId) replyMessageIds.add(replyMessageId);
+    const messageId = readString(payload, "messageId", "message_id");
+    if (!messageId) continue;
+
+    if (payload.replyStatus === "received") {
+      handoffMessageIds.add(messageId);
+      const replyMessageId = readString(payload, "replyMessageId", "reply_message_id");
+      if (replyMessageId) replyMessageIds.add(replyMessageId);
+      continue;
+    }
+    if (
+      payload.senderType !== "agent" ||
+      payload.deliveryMode !== "message" ||
+      !readString(payload, "botTeamId", "bot_team_id") ||
+      isTerminalDelivery(deliveryStatus(payload)) ||
+      isTerminalReply(payload)
+    ) {
+      continue;
+    }
+
+    const targetTaskId = readString(payload, "targetTaskId", "target_task_id");
+    if (!targetTaskId) continue;
+    const reply = receiverReplies.find(
+      (candidate) =>
+        candidate.senderTaskId === targetTaskId &&
+        !claimedReplyIds.has(candidate.messageId) &&
+        candidate.timestamp >= eventTimestamp(event),
+    );
+    if (!reply) continue;
+    claimedReplyIds.add(reply.messageId);
+    handoffMessageIds.add(messageId);
+    replyMessageIds.add(reply.messageId);
   }
-  return replyMessageIds;
+
+  return { handoffMessageIds, replyMessageIds };
 }
 
 function isCorrelatedInboundReply(
@@ -162,7 +221,8 @@ function isCorrelatedInboundReply(
  */
 export function getCurrentBotHandoffScopeStart(events: TaskEvent[]): number | undefined {
   const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
-  const correlatedReplyMessageIds = getCorrelatedReplyMessageIds(ordered);
+  const { replyMessageIds: correlatedReplyMessageIds, handoffMessageIds } =
+    getBotHandoffReplyCorrelation(ordered);
   const humanMessages = ordered.filter((event) => {
     if (eventType(event) !== "user_message") return false;
     const payload = asRecord(event.payload);
@@ -190,10 +250,12 @@ export function getCurrentBotHandoffScopeStart(events: TaskEvent[]): number | un
   const hasActiveParentHandoff = ordered.some((event) => {
     if (eventType(event) !== "agent_message") return false;
     const payload = asRecord(event.payload);
+    const messageId = readString(payload, "messageId", "message_id");
     if (eventTimestamp(event) < humanBoundary) return false;
     if (readString(payload, "targetTaskId", "target_task_id") !== senderTaskId) return false;
     const status = deliveryStatus(payload);
     return (
+      !handoffMessageIds.has(messageId) &&
       payload.senderType === "agent" &&
       payload.deliveryMode === "message" &&
       !readString(payload, "inReplyToMessageId", "in_reply_to_message_id") &&
@@ -218,7 +280,7 @@ export function getOutstandingBotHandoffReply(
   const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
   const inboundById = new Map<string, BotHandoffReplyRequirement>();
   const repliedMessageIds = new Set<string>();
-  const correlatedReplyMessageIds = getCorrelatedReplyMessageIds(ordered);
+  const { replyMessageIds: correlatedReplyMessageIds } = getBotHandoffReplyCorrelation(ordered);
 
   for (const event of ordered) {
     const payload = asRecord(event.payload);
@@ -263,6 +325,7 @@ export function getPendingBotHandoff(
   scope?: BotHandoffScope,
 ): PendingBotHandoff | null {
   const scopeStart = scope?.sinceTimestamp ?? getCurrentBotHandoffScopeStart(events);
+  const { handoffMessageIds } = getBotHandoffReplyCorrelation(events);
   const latestByMessageId = new Map<
     string,
     { payload: Record<string, unknown>; timestamp: number }
@@ -282,7 +345,9 @@ export function getPendingBotHandoff(
     .filter(({ payload, timestamp }) => {
       if (scopeStart !== undefined && timestamp < scopeStart) return false;
       const status = deliveryStatus(payload);
+      const messageId = readString(payload, "messageId", "message_id");
       return (
+        !handoffMessageIds.has(messageId) &&
         !readString(payload, "inReplyToMessageId", "in_reply_to_message_id") &&
         !isTerminalDelivery(status) &&
         !isTerminalReply(payload)

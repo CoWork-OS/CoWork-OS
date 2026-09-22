@@ -547,6 +547,26 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.activityLabel).toBe("Message delivered to Scribe; waiting for a reply");
   });
 
+  it("does not list a queued bot receipt as a collaborator before delivery", () => {
+    const projection = deriveBotConversationProjection({
+      task: baseTask,
+      botName: "Atlas",
+      events: [
+        makeEvent("queued-inbound", "user_message", {
+          messageId: "queued-inbound",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "queued",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          message: "The research result is queued.",
+        }),
+      ],
+    });
+
+    expect(projection.collaborators).toEqual([]);
+  });
+
   it("uses durable order when a receiver reply shares the handoff timestamp", () => {
     const handoff = {
       ...makeEvent(

@@ -116,6 +116,18 @@ function getEventType(event: TaskEvent): string {
   return typeof event.legacyType === "string" ? event.legacyType : event.type;
 }
 
+function isDeliveredAgentInbound(
+  event: TaskEvent,
+  payload: Record<string, unknown>,
+): boolean {
+  return (
+    getEventType(event) === "user_message" &&
+    payload.messageSource === "agent" &&
+    payload.deliveryMode === "message" &&
+    isBotHandoffMessageDelivered(payload)
+  );
+}
+
 function cleanPreview(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (!normalized) return "";
@@ -511,9 +523,7 @@ export function deriveBotConversationProjection(input: {
     .filter((event) => getEventType(event) === "user_message")
     .map((event) => {
       const payload = asRecord(event.payload);
-      if (payload.messageSource !== "agent") return null;
-      if (payload.deliveryMode !== "message") return null;
-      if (!isBotHandoffMessageDelivered(payload)) return null;
+      if (!isDeliveredAgentInbound(event, payload)) return null;
       const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
       if (!senderTaskId) return null;
       return {
@@ -562,7 +572,14 @@ export function deriveBotConversationProjection(input: {
     const childLabel = readString(payload, "childAgentLabel", "childTaskTitle", "agentLabel");
     const isCurrentTurnEvent = isBotHandoffEventInScope(event, handoffScope);
     if (isCurrentTurnEvent) {
-      if (senderLabel !== botName) collaboratorSet.add(senderLabel);
+      if (
+        senderLabel !== botName &&
+        (getEventType(event) !== "user_message" ||
+          payload.messageSource !== "agent" ||
+          isDeliveredAgentInbound(event, payload))
+      ) {
+        collaboratorSet.add(senderLabel);
+      }
       if (recipientLabel) collaboratorSet.add(recipientLabel);
       if (childLabel) collaboratorSet.add(childLabel);
     }

@@ -16,6 +16,7 @@ import {
   type BotConversationProjection,
   type BotConversationState,
 } from "../../shared/bot-lifecycle";
+import { isBotHandoffMessageDelivered } from "../../shared/bot-handoff";
 import { BotGlyph } from "./BotGlyph";
 import "./BotCollaborationHeader.css";
 
@@ -142,7 +143,13 @@ export function BotCollaborationHeader({
       const eventType = event.legacyType || event.type;
       if (eventType !== "user_message") continue;
       const payload = event.payload as Record<string, unknown>;
-      if (payload.messageSource !== "agent") continue;
+      if (
+        payload.messageSource !== "agent" ||
+        payload.deliveryMode !== "message" ||
+        !isBotHandoffMessageDelivered(payload)
+      ) {
+        continue;
+      }
       const senderTaskId =
         typeof payload.senderTaskId === "string"
           ? payload.senderTaskId.trim()

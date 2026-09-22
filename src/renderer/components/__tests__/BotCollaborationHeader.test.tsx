@@ -155,6 +155,81 @@ describe("BotCollaborationHeader", () => {
     expect(markup).toContain('class="bot-collaboration-team-link"');
   });
 
+  it("does not link a teammate from an undelivered or non-message receipt", () => {
+    const conversationProjection: BotConversationProjection = {
+      state: "waiting",
+      stateLabel: "Waiting on a teammate",
+      stateDetail: "A teammate is still working on the delegated brief.",
+      activityLabel: "Waiting for Scribe to reply",
+      lastActivityAt: 1_000,
+      collaborators: ["Scribe"],
+      teammates: [],
+      collaborationSummary: "Scribe is working",
+      handoffs: [],
+      attention: null,
+      outcome: null,
+    };
+    const commonProps = {
+      task: {
+        status: "blocked" as const,
+        error: null,
+        resultSummary: undefined,
+      },
+      botName: "Atlas",
+      conversationProjection,
+      botConversations: [{ id: "scribe-conversation", title: "Launch research" }],
+      onOpenBotConversation: () => undefined,
+    };
+
+    const queuedMarkup = renderToStaticMarkup(
+      React.createElement(BotCollaborationHeader, {
+        ...commonProps,
+        events: [
+          {
+            id: "queued-receipt",
+            taskId: "atlas-task",
+            timestamp: 1_000,
+            type: "user_message",
+            schemaVersion: 2,
+            payload: {
+              messageId: "queued-receipt",
+              messageSource: "agent",
+              deliveryMode: "message",
+              deliveryStatus: "queued",
+              senderTaskId: "scribe-conversation",
+              senderLabel: "Scribe",
+            },
+          },
+        ],
+      }),
+    );
+    expect(queuedMarkup).not.toContain('aria-label="Open Scribe conversation"');
+
+    const deliveredMarkup = renderToStaticMarkup(
+      React.createElement(BotCollaborationHeader, {
+        ...commonProps,
+        events: [
+          {
+            id: "delivered-receipt",
+            taskId: "atlas-task",
+            timestamp: 1_000,
+            type: "user_message",
+            schemaVersion: 2,
+            payload: {
+              messageId: "delivered-receipt",
+              messageSource: "agent",
+              deliveryMode: "message",
+              deliveryStatus: "delivered",
+              senderTaskId: "scribe-conversation",
+              senderLabel: "Scribe",
+            },
+          },
+        ],
+      }),
+    );
+    expect(deliveredMarkup).toContain('aria-label="Open Scribe conversation"');
+  });
+
   it("uses the durable target task when a teammate has a custom conversation title", () => {
     const conversationProjection: BotConversationProjection = {
       state: "waiting",

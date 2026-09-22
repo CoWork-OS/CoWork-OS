@@ -271,7 +271,7 @@ function compareEventOrder(left, right) {
   return String(left?.id || "").localeCompare(String(right?.id || ""));
 }
 
-function deliveryStatus(payload) {
+function readDeliveryStatus(payload) {
   return String(payload.deliveryStatus || payload.delivery_status || payload.status || "")
     .trim()
     .toLowerCase();
@@ -303,6 +303,17 @@ function matchingSenderDelivery(events, messageId, recipientTaskId) {
     })
     .sort(compareEventOrder)
     .at(-1);
+}
+
+function matchingSenderReply(events, messageId, recipientTaskId) {
+  const senderDelivery = matchingSenderDelivery(events, messageId, recipientTaskId);
+  if (!senderDelivery) return undefined;
+  const payload = eventPayload(senderDelivery);
+  return payload.replyStatus === "received" &&
+    typeof payload.replyMessageId === "string" &&
+    payload.replyMessageId.trim()
+    ? senderDelivery
+    : undefined;
 }
 
 function matchingReceiverReceipt(events, messageId, senderTaskId, message) {
@@ -341,7 +352,9 @@ function summarizeEvent(event) {
     id: event.id,
     type: eventType(event),
     timestamp: event.timestamp,
-    status: deliveryStatus(payload) || undefined,
+    status: readDeliveryStatus(payload) || undefined,
+    replyStatus: typeof payload.replyStatus === "string" ? payload.replyStatus : undefined,
+    replyMessageId: typeof payload.replyMessageId === "string" ? payload.replyMessageId : undefined,
     messageId: payload.messageId,
     targetTaskId: payload.targetTaskId,
     excerpt: eventText(event).replace(/\s+/g, " ").trim().slice(0, 240) || undefined,
@@ -391,7 +404,7 @@ async function run(args) {
   const marker = args.marker || `COWORK_BOT_SMOKE_${Date.now()}_${suffix}`;
   const ackToken = `COWORK_BOT_ACK_${suffix}`;
   const messageId = `cowork-live-smoke-${Date.now()}-${suffix.toLowerCase()}`;
-  const message = `LIVE_COWORK_BOT_SMOKE marker=${marker}. When you receive this message, reply with the exact token ${ackToken}. Do not take any other action.`;
+  const message = `LIVE_COWORK_BOT_SMOKE marker=${marker}. When you receive this message, call send_agent_message back to the requesting teammate with the exact token ${ackToken}. Do not take any other action.`;
   const senderPrompt = [
     "Run the live CoWork Bots delivery smoke test now.",
     `Call send_agent_message exactly once with task_id "${args.recipientTaskId}".`,
@@ -461,6 +474,7 @@ async function run(args) {
       senderTask: taskSummary(senderTask),
       recipientTask: taskSummary(recipientTask),
       senderDelivery: null,
+      senderReply: null,
       receiverReceipt: null,
       receiverAck: null,
     };
@@ -475,6 +489,7 @@ async function run(args) {
       const senderEvents = getEvents(senderEventsPayload);
       const recipientEvents = getEvents(recipientEventsPayload);
       const senderDelivery = matchingSenderDelivery(senderEvents, messageId, args.recipientTaskId);
+      const senderReply = matchingSenderReply(senderEvents, messageId, args.recipientTaskId);
       const receiverReceipt = matchingReceiverReceipt(
         recipientEvents,
         messageId,
@@ -486,13 +501,14 @@ async function run(args) {
         senderTask: taskSummary(getTask(senderState)),
         recipientTask: taskSummary(getTask(recipientState)),
         senderDelivery: summarizeEvent(senderDelivery),
+        senderReply: summarizeEvent(senderReply),
         receiverReceipt: summarizeEvent(receiverReceipt),
         receiverAck: summarizeEvent(receiverAck),
       };
 
-      const deliveryStatus = deliveryStatus(eventPayload(senderDelivery));
-      const receiptStatus = deliveryStatus(eventPayload(receiverReceipt));
-      if (deliveryStatus === "failed" || deliveryStatus === "quarantined") {
+      const senderDeliveryStatus = readDeliveryStatus(eventPayload(senderDelivery));
+      const receiverReceiptStatus = readDeliveryStatus(eventPayload(receiverReceipt));
+      if (senderDeliveryStatus === "failed" || senderDeliveryStatus === "quarantined") {
         output({
           ok: false,
           stage: "delivery",
@@ -507,7 +523,12 @@ async function run(args) {
         });
         return 2;
       }
-      if (deliveryStatus === "delivered" && receiptStatus === "delivered" && receiverAck) {
+      if (
+        senderDeliveryStatus === "delivered" &&
+        receiverReceiptStatus === "delivered" &&
+        receiverAck &&
+        senderReply
+      ) {
         output({
           ok: true,
           stage: "complete",
@@ -522,6 +543,7 @@ async function run(args) {
             senderReceipt: "agent_message deliveryStatus=delivered",
             receiverTranscript: "user_message deliveryStatus=delivered",
             receiverCompletion: `assistant event contained ${ackToken}`,
+            senderReply: "agent_message replyStatus=received",
           },
         });
         return 0;
@@ -549,7 +571,7 @@ async function run(args) {
         sender: getEvents(senderBefore).length,
         recipient: getEvents(recipientBefore).length,
       },
-      hint: "A timeout is a live failure, not a pass. Inspect the sender receipt, receiver receipt, and receiver acknowledgement separately.",
+      hint: "A timeout is a live failure, not a pass. Inspect the sender receipt, receiver receipt, receiver acknowledgement, and sender reply correlation separately.",
     });
     return 2;
   } finally {
@@ -580,5 +602,6 @@ module.exports = {
   eventTimestamp,
   matchingAck,
   matchingReceiverReceipt,
+  matchingSenderReply,
   matchingSenderDelivery,
 };

@@ -437,8 +437,9 @@ completion until the receiver-side delivered state is durable.
 For a real running-app check, use two existing bot conversation task IDs and
 run `npm run qa:bots:live -- --sender-task <id> --recipient-task <id>`. The
 check sends a unique marker through the sender bot and only passes when the
-sender receipt, receiver transcript, and receiver acknowledgement are all
-observed. It does not replace a desktop UI review: after it passes, inspect
+sender receipt, receiver transcript, receiver acknowledgement, and durable
+correlated sender reply are all observed. It does not replace a desktop UI
+review: after it passes, inspect
 both conversations in the app for a single incoming message, compact delivery
 copy, no raw JSON or execution-step leakage, and transcript continuity after
 reopen. A queued/started result or a timeout is evidence to investigate, not a

@@ -84,13 +84,15 @@ for the bot profile, conversation lifecycle, roster, and troubleshooting guide.
 
 The repeatable live check is intentionally separate from Vitest. It drives the
 running local control plane, asks an existing sender bot to call
-`send_agent_message`, and requires three independent proofs before reporting a
+`send_agent_message`, and requires four independent proofs before reporting a
 pass:
 
 1. the sender-side `agent_message` receipt reaches `deliveryStatus=delivered`;
 2. the receiver-side `user_message` transcript contains the exact marker and
    reaches `deliveryStatus=delivered`; and
-3. a receiver assistant event contains the generated acknowledgement token.
+3. a receiver assistant event contains the generated acknowledgement token; and
+4. the original sender-side receipt reaches `replyStatus=received` with a
+   durable `replyMessageId`.
 
 Use two existing bot-conversation task IDs from the Bots surface:
 

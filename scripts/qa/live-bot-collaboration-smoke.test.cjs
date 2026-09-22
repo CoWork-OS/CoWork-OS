@@ -6,6 +6,7 @@ const {
   compareEventOrder,
   matchingAck,
   matchingReceiverReceipt,
+  matchingSenderReply,
   matchingSenderDelivery,
 } = require("./live-bot-collaboration-smoke.cjs");
 
@@ -92,5 +93,35 @@ test("uses durable sequence when sender receipts share a timestamp", () => {
   assert.equal(
     matchingSenderDelivery([failed, accepted], "message-2", "recipient-task"),
     failed,
+  );
+});
+
+test("requires a durable correlated reply on the sender receipt", () => {
+  const pending = {
+    id: "pending",
+    type: "agent_message",
+    timestamp: 1000,
+    payload: {
+      messageId: "message-3",
+      targetTaskId: "recipient-task",
+      deliveryStatus: "delivered",
+      replyStatus: "pending",
+    },
+  };
+  const received = {
+    ...pending,
+    id: "received",
+    timestamp: 1001,
+    payload: {
+      ...pending.payload,
+      replyStatus: "received",
+      replyMessageId: "reply-3",
+    },
+  };
+
+  assert.equal(matchingSenderReply([pending], "message-3", "recipient-task"), undefined);
+  assert.equal(
+    matchingSenderReply([pending, received], "message-3", "recipient-task"),
+    received,
   );
 });

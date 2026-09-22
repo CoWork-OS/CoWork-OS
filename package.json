@@ -195,7 +195,7 @@
     "openai": "^7.17.0",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
-    "pdfjs-dist": "^5.4.296",
+    "pdfjs-dist": "^6.3.289",
     "pdfkit": "^0.20.2",
     "playwright": "npm:playwright-core@^1.58.2",
     "pptxgenjs": "^4.0.1",

@@ -291,6 +291,42 @@ describe("buildFreshBotHandoffPrompt", () => {
     expect(getPendingBotHandoff([failed, accepted])).toBeNull();
   });
 
+  it("uses the durable sequence when receipts share an event timestamp", () => {
+    const accepted = {
+      ...event(
+        "handoff-same-ms-accepted",
+        "agent_message",
+        {
+          messageId: "handoff-same-ms",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "accepted",
+          botTeamId: "team-1",
+          targetTaskId: "forge-task",
+          recipientLabel: "Forge",
+          message: "Inspect the repository.",
+        },
+        1_000,
+      ),
+      seq: 10,
+    };
+    const failed = {
+      ...event(
+        "handoff-same-ms-failed",
+        "agent_message",
+        {
+          ...accepted.payload,
+          deliveryStatus: "failed",
+          error: "The recipient task stopped before delivery.",
+        },
+        1_000,
+      ),
+      seq: 11,
+    };
+
+    expect(getPendingBotHandoff([failed, accepted])).toBeNull();
+  });
+
   it("returns durable receipt timestamps and excludes a timed-out reply from waiting", () => {
     const handoff = event(
       "handoff-timeout",

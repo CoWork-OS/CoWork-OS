@@ -96,6 +96,16 @@ function readTimestamp(event: TaskEvent): number {
     : event.timestamp || event.ts || 0;
 }
 
+function compareEventOrder(left: TaskEvent, right: TaskEvent): number {
+  const timestampDifference = readTimestamp(left) - readTimestamp(right);
+  if (timestampDifference !== 0) return timestampDifference;
+  if (left.taskId !== right.taskId) return 0;
+  if (typeof left.seq === "number" && typeof right.seq === "number") {
+    return left.seq - right.seq;
+  }
+  return 0;
+}
+
 function getEventType(event: TaskEvent): string {
   return typeof event.legacyType === "string" ? event.legacyType : event.type;
 }
@@ -207,7 +217,7 @@ function teammateStateFromTask(
   task: Pick<Task, "status" | "error" | "resultSummary">,
   events: TaskEvent[] = [],
 ): BotTeammateState {
-  const latestEvent = [...events].sort((a, b) => readTimestamp(a) - readTimestamp(b)).at(-1);
+  const latestEvent = [...events].sort(compareEventOrder).at(-1);
   const latestEventType = latestEvent ? getEventType(latestEvent) : "";
   if (latestEventType === "agent_completed") return "completed";
   if (latestEventType === "agent_failed") return "failed";
@@ -440,13 +450,11 @@ export function deriveBotConversationProjection(input: {
   ];
   const parentEvents = [...(input.events || [])]
     .filter((event) => eventTypes.includes(getEventType(event)))
-    .sort((a, b) => readTimestamp(a) - readTimestamp(b));
+    .sort(compareEventOrder);
   const childEvents = [...(input.childEvents || [])]
     .filter((event) => eventTypes.includes(getEventType(event)))
-    .sort((a, b) => readTimestamp(a) - readTimestamp(b));
-  const allEvents = [...parentEvents, ...childEvents].sort(
-    (a, b) => readTimestamp(a) - readTimestamp(b),
-  );
+    .sort(compareEventOrder);
+  const allEvents = [...parentEvents, ...childEvents].sort(compareEventOrder);
   const handoffScopeStart = getCurrentBotHandoffScopeStart(input.events || []);
 
   const handoffByKey = new Map<string, BotHandoffProjection>();

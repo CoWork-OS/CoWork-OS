@@ -100,6 +100,16 @@ function eventTimestamp(event: TaskEvent): number {
     : event.timestamp || event.ts || 0;
 }
 
+function compareEventOrder(left: TaskEvent, right: TaskEvent): number {
+  const timestampDifference = eventTimestamp(left) - eventTimestamp(right);
+  if (timestampDifference !== 0) return timestampDifference;
+  if (left.taskId !== right.taskId) return 0;
+  if (typeof left.seq === "number" && typeof right.seq === "number") {
+    return left.seq - right.seq;
+  }
+  return 0;
+}
+
 function deliveryStatus(payload: Record<string, unknown>): string {
   return String(payload.deliveryStatus ?? payload.delivery_status ?? payload.status ?? "accepted")
     .trim()
@@ -137,7 +147,7 @@ interface BotHandoffReplyCorrelation {
  * same teammate cannot both consume one reply.
  */
 function getBotHandoffReplyCorrelation(events: TaskEvent[]): BotHandoffReplyCorrelation {
-  const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
+  const ordered = [...events].sort(compareEventOrder);
   const handoffMessageIds = new Set<string>();
   const replyMessageIds = new Set<string>();
   const receiverReplies = ordered
@@ -220,7 +230,7 @@ function isCorrelatedInboundReply(
  * teammate replies arrive.
  */
 export function getCurrentBotHandoffScopeStart(events: TaskEvent[]): number | undefined {
-  const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
+  const ordered = [...events].sort(compareEventOrder);
   const { replyMessageIds: correlatedReplyMessageIds, handoffMessageIds } =
     getBotHandoffReplyCorrelation(ordered);
   const humanMessages = ordered.filter((event) => {
@@ -277,7 +287,7 @@ export function getOutstandingBotHandoffReply(
   scope?: BotHandoffScope,
 ): BotHandoffReplyRequirement | null {
   const scopeStart = scope?.sinceTimestamp ?? getCurrentBotHandoffScopeStart(events);
-  const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
+  const ordered = [...events].sort(compareEventOrder);
   const inboundById = new Map<string, BotHandoffReplyRequirement>();
   const repliedMessageIds = new Set<string>();
   const { replyMessageIds: correlatedReplyMessageIds } = getBotHandoffReplyCorrelation(ordered);
@@ -325,7 +335,7 @@ export function getPendingBotHandoff(
   scope?: BotHandoffScope,
 ): PendingBotHandoff | null {
   const scopeStart = scope?.sinceTimestamp ?? getCurrentBotHandoffScopeStart(events);
-  const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
+  const ordered = [...events].sort(compareEventOrder);
   const { handoffMessageIds } = getBotHandoffReplyCorrelation(ordered);
   const latestByMessageId = new Map<
     string,

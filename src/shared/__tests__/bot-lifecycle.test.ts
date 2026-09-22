@@ -193,6 +193,59 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.activityLabel).toBe("Message delivered to Forge; waiting for a reply");
   });
 
+  it("uses the durable sequence for same-millisecond handoff receipts", () => {
+    const accepted = {
+      ...makeEvent(
+        "handoff-same-ms-accepted",
+        "agent_message",
+        {
+          messageId: "handoff-same-ms",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "accepted",
+          botTeamId: "team-1",
+          targetTaskId: "scribe-task",
+          senderLabel: "Atlas",
+          recipientLabel: "Scribe",
+          message: "Inspect the repository.",
+        },
+        1_000,
+      ),
+      seq: 10,
+    };
+    const failed = {
+      ...makeEvent(
+        "handoff-same-ms-failed",
+        "agent_message",
+        {
+          messageId: "handoff-same-ms",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "failed",
+          botTeamId: "team-1",
+          targetTaskId: "scribe-task",
+          senderLabel: "Atlas",
+          recipientLabel: "Scribe",
+          message: "Inspect the repository.",
+          error: "The recipient task stopped before delivery.",
+        },
+        1_000,
+      ),
+      seq: 11,
+    };
+    const projection = deriveBotConversationProjection({
+      task: baseTask,
+      botName: "Atlas",
+      events: [failed, accepted],
+    });
+
+    expect(projection.handoffs[0]).toMatchObject({ state: "failed" });
+    expect(projection.attention).toMatchObject({
+      kind: "delivery",
+      title: "Message to Scribe failed",
+    });
+  });
+
   it("shows a correlated teammate reply once the originating handoff is acknowledged", () => {
     const projection = deriveBotConversationProjection({
       task: baseTask,

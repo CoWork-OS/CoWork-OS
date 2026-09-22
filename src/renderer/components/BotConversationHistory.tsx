@@ -5,16 +5,16 @@ import type { BotConversationProjection } from "../../shared/bot-lifecycle";
 import { isBotConversation } from "../utils/bot-conversations";
 import "./BotConversationHistory.css";
 
+type BotConversationHistoryProjection = Pick<BotConversationProjection, "state"> &
+  Partial<Pick<BotConversationProjection, "activityLabel" | "lastActivityAt">>;
+
 export interface BotConversationHistoryProps {
   botName: string;
   botRoleId?: string;
   selectedConversationId?: string | null;
   conversations: Task[];
   loading?: boolean;
-  selectedConversationProjection?: Pick<
-    BotConversationProjection,
-    "state" | "lastActivityAt"
-  > | null;
+  selectedConversationProjection?: BotConversationHistoryProjection | null;
   onSelectConversation?: (conversationId: string) => void | Promise<void>;
   onNewConversation?: (botRoleId: string) => void | Promise<void>;
 }
@@ -66,12 +66,13 @@ function formatConversationDate(timestamp?: number): string {
 
 export function getBotConversationHistoryStatusLabel(
   task: Pick<Task, "status" | "error"> & Partial<Pick<Task, "resultSummary">>,
-  projection?: Pick<BotConversationProjection, "state"> | null,
+  projection?: BotConversationHistoryProjection | null,
 ): string {
-  if (projection?.state === "working") return "Working on latest message";
-  if (projection?.state === "waiting") return "Waiting on a teammate";
-  if (projection?.state === "needs_input") return "Needs attention";
-  if (projection?.state === "failed") return "Unavailable — reopen to retry";
+  const activityLabel = projection?.activityLabel?.trim();
+  if (projection?.state === "working") return activityLabel || "Working on latest message";
+  if (projection?.state === "waiting") return activityLabel || "Waiting on a teammate";
+  if (projection?.state === "needs_input") return activityLabel || "Needs attention";
+  if (projection?.state === "failed") return activityLabel || "Unavailable — reopen to retry";
   if (projection?.state === "completed") return "Completed";
   if (task.status === "completed") return "Completed";
   if (task.status === "cancelled" && task.resultSummary?.trim()) return "Completed";
@@ -103,7 +104,9 @@ export function getBotConversationHistoryStatusLabel(
 export function getBotConversationHistoryTimestamp(
   task: Pick<Task, "id" | "updatedAt" | "createdAt">,
   selectedConversationId?: string | null,
-  selectedConversationProjection?: Pick<BotConversationProjection, "lastActivityAt"> | null,
+  selectedConversationProjection?: Partial<
+    Pick<BotConversationProjection, "lastActivityAt">
+  > | null,
 ): number {
   const taskTimestamp = task.updatedAt || task.createdAt;
   if (task.id !== selectedConversationId) return taskTimestamp;

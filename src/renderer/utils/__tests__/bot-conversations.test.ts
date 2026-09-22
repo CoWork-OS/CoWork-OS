@@ -5,6 +5,7 @@ import {
   getConversationActionLabels,
   isBotConversation,
   matchesBotConversation,
+  shouldAdoptBotConversation,
 } from "../bot-conversations";
 
 describe("bot conversations", () => {
@@ -30,6 +31,11 @@ describe("bot conversations", () => {
     expect(
       matchesBotConversation({ ...conversation, agentConfig: {} }, "workspace-a", "bot-a"),
     ).toBe(false);
+  });
+  it("adopts cross-workspace history only for temporary workspaces", () => {
+    expect(shouldAdoptBotConversation(conversation, "__temp_workspace__:session-1")).toBe(true);
+    expect(shouldAdoptBotConversation(conversation, "workspace-a")).toBe(false);
+    expect(shouldAdoptBotConversation(conversation, "workspace-b")).toBe(false);
   });
   it("creates fresh dormant hybrid options without copying task permissions, history, or transient execution state", () => {
     const options = createBotConversationOptions("bot-a");

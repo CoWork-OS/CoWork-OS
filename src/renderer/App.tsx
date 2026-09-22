@@ -24,6 +24,7 @@ import {
   isBotConversation,
   matchesBotConversation,
   selectLatestBotConversation,
+  shouldAdoptBotConversation,
 } from "./utils/bot-conversations";
 import type { SpreadsheetTurnContext } from "./components/SpreadsheetArtifactViewer";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
@@ -6731,18 +6732,29 @@ export function App() {
         return;
       }
       try {
+        let taskToReopen = task;
+        // Temporary UI workspaces are recreated between launches. The roster
+        // intentionally surfaces prior temporary-workspace conversations, so
+        // adopt that transcript before the daemon validates the reopen request
+        // against the current workspace.
+        if (shouldAdoptBotConversation(task, workspaceId)) {
+          const adopted = (await window.electronAPI.updateTaskWorkspace(task.id, workspaceId)) as
+            | Task
+            | undefined;
+          taskToReopen = adopted || { ...task, workspaceId };
+        }
         let reopened: Task;
         try {
           reopened = await window.electronAPI.reopenBotConversation({
             workspaceId,
-            taskId: task.id,
+            taskId: taskToReopen.id,
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (!/BOT_(?:MEMBERSHIP_REVOKED|TEAM_UNAVAILABLE)/.test(message)) throw error;
           reopened = await window.electronAPI.reopenBotConversation({
             workspaceId,
-            taskId: task.id,
+            taskId: taskToReopen.id,
             repairMembership: true,
           });
         }

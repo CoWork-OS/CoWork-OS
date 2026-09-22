@@ -1,4 +1,4 @@
-import type { Task } from "../../shared/types";
+import { isTempWorkspaceId, type Task } from "../../shared/types";
 import type { CreateTaskOptions } from "../components/MainContent/main-content-types";
 
 /** Cross-component signal used by the bot details rail to reveal inline history. */
@@ -86,4 +86,12 @@ export function matchesBotConversation(
     task.workspaceId === workspaceId &&
     task.assignedAgentRoleId === agentRoleId
   );
+}
+
+/** Temporary workspaces may safely adopt a prior bot transcript before recovery. */
+export function shouldAdoptBotConversation(
+  task: Pick<Task, "workspaceId">,
+  workspaceId: string,
+): boolean {
+  return task.workspaceId !== workspaceId && isTempWorkspaceId(workspaceId);
 }

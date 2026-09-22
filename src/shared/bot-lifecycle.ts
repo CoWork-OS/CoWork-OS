@@ -1,5 +1,9 @@
 import type { Task, TaskEvent } from "./types";
-import { getCurrentBotHandoffScopeStart, getPendingBotHandoff } from "./bot-handoff";
+import {
+  getCurrentBotHandoffScope,
+  getPendingBotHandoff,
+  isBotHandoffEventInScope,
+} from "./bot-handoff";
 
 /**
  * Read-side lifecycle projection for persistent Bot conversations.
@@ -480,14 +484,15 @@ export function deriveBotConversationProjection(input: {
     .filter((event) => eventTypes.includes(getEventType(event)))
     .sort(compareEventOrder);
   const allEvents = [...parentEvents, ...childEvents].sort(compareEventOrder);
-  const handoffScopeStart = getCurrentBotHandoffScopeStart(input.events || []);
+  const handoffScope = getCurrentBotHandoffScope(input.events || []);
+  const handoffScopeStart = handoffScope?.sinceTimestamp;
   const scopedChildTasks = (input.childTasks || []).filter((childTask) => {
     if (handoffScopeStart === undefined) return true;
     if (typeof childTask.createdAt === "number") {
       return childTask.createdAt >= handoffScopeStart;
     }
     return childEvents.some(
-      (event) => event.taskId === childTask.id && readTimestamp(event) >= handoffScopeStart,
+      (event) => event.taskId === childTask.id && isBotHandoffEventInScope(event, handoffScope),
     );
   });
 
@@ -497,8 +502,7 @@ export function deriveBotConversationProjection(input: {
     .reverse()
     .find(
       (event) =>
-        getEventType(event) !== "user_message" &&
-        (handoffScopeStart === undefined || readTimestamp(event) >= handoffScopeStart),
+        getEventType(event) !== "user_message" && isBotHandoffEventInScope(event, handoffScope),
     );
   const repliesByMessageId = new Map<string, { messageId: string; replyTaskId?: string }>();
   const receiverReplies = parentEvents
@@ -550,8 +554,7 @@ export function deriveBotConversationProjection(input: {
     const senderLabel = readString(payload, "senderLabel", "sender") || botName;
     const recipientLabel = readString(payload, "recipientLabel", "recipient", "targetLabel");
     const childLabel = readString(payload, "childAgentLabel", "childTaskTitle", "agentLabel");
-    const isCurrentTurnEvent =
-      handoffScopeStart === undefined || readTimestamp(event) >= handoffScopeStart;
+    const isCurrentTurnEvent = isBotHandoffEventInScope(event, handoffScope);
     if (isCurrentTurnEvent) {
       if (senderLabel !== botName) collaboratorSet.add(senderLabel);
       if (recipientLabel) collaboratorSet.add(recipientLabel);
@@ -641,7 +644,7 @@ export function deriveBotConversationProjection(input: {
     !hasActivity && (input.task.status === "pending" || input.task.status === "queued")
       ? "ready"
       : stateFromTask(input.task);
-  const pendingBotHandoff = getPendingBotHandoff(input.events || []);
+  const pendingBotHandoff = getPendingBotHandoff(input.events || [], handoffScope);
   const hasScopedPendingHandoff = handoffs.some(
     (handoff) =>
       (handoffScopeStart === undefined || handoff.timestamp >= handoffScopeStart) &&

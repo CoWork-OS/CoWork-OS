@@ -67,6 +67,10 @@ export interface PendingBotHandoff {
 export interface BotHandoffScope {
   /** Ignore handoffs and inbound requests that belong to earlier turns. */
   sinceTimestamp?: number;
+  /** Parent task that owns the boundary event, when known. */
+  sinceTaskId?: string;
+  /** Durable parent-task sequence for same-millisecond boundaries. */
+  sinceSeq?: number;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -108,6 +112,33 @@ function compareEventOrder(left: TaskEvent, right: TaskEvent): number {
     return left.seq - right.seq;
   }
   return 0;
+}
+
+function scopeForEvent(event: TaskEvent): BotHandoffScope {
+  return {
+    sinceTimestamp: eventTimestamp(event),
+    ...(event.taskId ? { sinceTaskId: event.taskId } : {}),
+    ...(typeof event.seq === "number" && Number.isFinite(event.seq) ? { sinceSeq: event.seq } : {}),
+  };
+}
+
+/** Whether an event belongs to a turn boundary, including same-ms sequence order. */
+export function isBotHandoffEventInScope(event: TaskEvent, scope?: BotHandoffScope): boolean {
+  if (!scope || scope.sinceTimestamp === undefined) return true;
+  const timestamp = eventTimestamp(event);
+  if (timestamp > scope.sinceTimestamp) return true;
+  if (timestamp < scope.sinceTimestamp) return false;
+  if (
+    scope.sinceTaskId &&
+    event.taskId === scope.sinceTaskId &&
+    typeof scope.sinceSeq === "number" &&
+    Number.isFinite(scope.sinceSeq) &&
+    typeof event.seq === "number" &&
+    Number.isFinite(event.seq)
+  ) {
+    return event.seq >= scope.sinceSeq;
+  }
+  return true;
 }
 
 function deliveryStatus(payload: Record<string, unknown>): string {
@@ -229,7 +260,7 @@ function isCorrelatedInboundReply(
  * case the human turn remains the active coordination scope while the other
  * teammate replies arrive.
  */
-export function getCurrentBotHandoffScopeStart(events: TaskEvent[]): number | undefined {
+export function getCurrentBotHandoffScope(events: TaskEvent[]): BotHandoffScope | undefined {
   const ordered = [...events].sort(compareEventOrder);
   const { replyMessageIds: correlatedReplyMessageIds, handoffMessageIds } =
     getBotHandoffReplyCorrelation(ordered);
@@ -249,19 +280,19 @@ export function getCurrentBotHandoffScopeStart(events: TaskEvent[]): number | un
   });
   const latestHuman = humanMessages[humanMessages.length - 1];
   const latestInbound = agentInbound[agentInbound.length - 1];
-  if (!latestInbound) return latestHuman ? eventTimestamp(latestHuman) : undefined;
-  if (!latestHuman || eventTimestamp(latestHuman) > eventTimestamp(latestInbound)) {
-    return latestHuman ? eventTimestamp(latestHuman) : eventTimestamp(latestInbound);
+  if (!latestInbound) return latestHuman ? scopeForEvent(latestHuman) : undefined;
+  if (!latestHuman || compareEventOrder(latestHuman, latestInbound) > 0) {
+    return scopeForEvent(latestHuman || latestInbound);
   }
 
   const inboundPayload = asRecord(latestInbound.payload);
   const senderTaskId = readString(inboundPayload, "senderTaskId", "sender_task_id");
-  const humanBoundary = eventTimestamp(latestHuman);
+  const humanBoundary = scopeForEvent(latestHuman);
   const hasActiveParentHandoff = ordered.some((event) => {
     if (eventType(event) !== "agent_message") return false;
     const payload = asRecord(event.payload);
     const messageId = readString(payload, "messageId", "message_id");
-    if (eventTimestamp(event) < humanBoundary) return false;
+    if (!isBotHandoffEventInScope(event, humanBoundary)) return false;
     if (readString(payload, "targetTaskId", "target_task_id") !== senderTaskId) return false;
     const status = deliveryStatus(payload);
     return (
@@ -274,7 +305,12 @@ export function getCurrentBotHandoffScopeStart(events: TaskEvent[]): number | un
     );
   });
 
-  return hasActiveParentHandoff ? humanBoundary : eventTimestamp(latestInbound);
+  return hasActiveParentHandoff ? humanBoundary : scopeForEvent(latestInbound);
+}
+
+/** Backwards-compatible timestamp-only view of the active turn boundary. */
+export function getCurrentBotHandoffScopeStart(events: TaskEvent[]): number | undefined {
+  return getCurrentBotHandoffScope(events)?.sinceTimestamp;
 }
 
 /**
@@ -286,8 +322,8 @@ export function getOutstandingBotHandoffReply(
   events: TaskEvent[],
   scope?: BotHandoffScope,
 ): BotHandoffReplyRequirement | null {
-  const scopeStart = scope?.sinceTimestamp ?? getCurrentBotHandoffScopeStart(events);
   const ordered = [...events].sort(compareEventOrder);
+  const resolvedScope = scope ?? getCurrentBotHandoffScope(ordered);
   const inboundById = new Map<string, BotHandoffReplyRequirement>();
   const repliedMessageIds = new Set<string>();
   const { replyMessageIds: correlatedReplyMessageIds } = getBotHandoffReplyCorrelation(ordered);
@@ -298,9 +334,7 @@ export function getOutstandingBotHandoffReply(
     if (type === "user_message") {
       if (!isAgentInbound(payload)) continue;
       if (isCorrelatedInboundReply(payload, correlatedReplyMessageIds)) continue;
-      if (scopeStart !== undefined && eventTimestamp(event) < scopeStart) {
-        continue;
-      }
+      if (!isBotHandoffEventInScope(event, resolvedScope)) continue;
       const inboundMessageId = readString(payload, "messageId", "message_id");
       const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
       const status = deliveryStatus(payload);
@@ -334,12 +368,12 @@ export function getPendingBotHandoff(
   events: TaskEvent[],
   scope?: BotHandoffScope,
 ): PendingBotHandoff | null {
-  const scopeStart = scope?.sinceTimestamp ?? getCurrentBotHandoffScopeStart(events);
   const ordered = [...events].sort(compareEventOrder);
+  const resolvedScope = scope ?? getCurrentBotHandoffScope(ordered);
   const { handoffMessageIds } = getBotHandoffReplyCorrelation(ordered);
   const latestByMessageId = new Map<
     string,
-    { payload: Record<string, unknown>; timestamp: number }
+    { payload: Record<string, unknown>; event: TaskEvent }
   >();
   for (const event of ordered) {
     if (eventType(event) !== "agent_message") continue;
@@ -348,13 +382,13 @@ export function getPendingBotHandoff(
     if (!readString(payload, "botTeamId", "bot_team_id")) continue;
     const messageId = readString(payload, "messageId", "message_id");
     if (!messageId) continue;
-    latestByMessageId.set(messageId, { payload, timestamp: eventTimestamp(event) });
+    latestByMessageId.set(messageId, { payload, event });
   }
 
   const pending = [...latestByMessageId.entries()]
     .map(([messageId, entry]) => ({ messageId, ...entry }))
-    .filter(({ payload, timestamp }) => {
-      if (scopeStart !== undefined && timestamp < scopeStart) return false;
+    .filter(({ payload, event }) => {
+      if (!isBotHandoffEventInScope(event, resolvedScope)) return false;
       const status = deliveryStatus(payload);
       const messageId = readString(payload, "messageId", "message_id");
       return (
@@ -364,7 +398,7 @@ export function getPendingBotHandoff(
         !isTerminalReply(payload)
       );
     })
-    .sort((a, b) => a.timestamp - b.timestamp);
+    .sort((a, b) => compareEventOrder(a.event, b.event));
   const latest = pending[pending.length - 1];
   if (!latest) return null;
   const status = deliveryStatus(latest.payload);

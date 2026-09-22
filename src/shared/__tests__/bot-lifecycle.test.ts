@@ -693,6 +693,58 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.handoffs.map((handoff) => handoff.id)).toEqual(["new-handoff"]);
   });
 
+  it("uses durable sequence order when an old handoff shares the new turn timestamp", () => {
+    const projection = deriveBotConversationProjection({
+      task: baseTask,
+      botName: "Atlas",
+      events: [
+        {
+          ...makeEvent(
+            "old-handoff-same-ms",
+            "agent_message",
+            {
+              messageId: "old-handoff-same-ms",
+              senderLabel: "Atlas",
+              recipientLabel: "Forge",
+              targetTaskId: "forge-task",
+              message: "Review the old request.",
+              deliveryStatus: "delivered",
+            },
+            2_000,
+          ),
+          seq: 10,
+        },
+        {
+          ...makeEvent(
+            "new-human-turn-same-ms",
+            "user_message",
+            { message: "Start a fresh request." },
+            2_000,
+          ),
+          seq: 11,
+        },
+        {
+          ...makeEvent(
+            "new-handoff-same-ms",
+            "agent_message",
+            {
+              messageId: "new-handoff-same-ms",
+              senderLabel: "Atlas",
+              recipientLabel: "Scribe",
+              targetTaskId: "scribe-task",
+              message: "Review the new request.",
+              deliveryStatus: "queued",
+            },
+            2_000,
+          ),
+          seq: 12,
+        },
+      ],
+    });
+
+    expect(projection.handoffs.map((handoff) => handoff.id)).toEqual(["new-handoff-same-ms"]);
+  });
+
   it("does not carry a previous-turn delivery failure or timeout into a fresh request", () => {
     const projection = deriveBotConversationProjection({
       task: baseTask,

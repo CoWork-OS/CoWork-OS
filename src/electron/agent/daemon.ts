@@ -124,7 +124,7 @@ import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
 import {
-  getCurrentBotHandoffScopeStart,
+  getCurrentBotHandoffScope,
   getOutstandingBotHandoffReply,
   getPendingBotHandoff,
   type PendingBotHandoff,
@@ -14564,8 +14564,7 @@ export class AgentDaemon extends EventEmitter {
       return { deferred: false, replySent: false };
     }
 
-    const scopeStart = getCurrentBotHandoffScopeStart(historicalEvents);
-    const scope = scopeStart === undefined ? undefined : { sinceTimestamp: scopeStart };
+    const scope = getCurrentBotHandoffScope(historicalEvents);
     let pendingHandoff = getPendingBotHandoff(historicalEvents, scope);
     while (pendingHandoff) {
       const taskRepo = this.taskRepo as Any;

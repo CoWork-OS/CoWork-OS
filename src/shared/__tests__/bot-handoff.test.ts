@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildFreshBotHandoffPrompt,
+  getCurrentBotHandoffScope,
   getCurrentBotHandoffScopeStart,
   getOutstandingBotHandoffReply,
   getPendingBotHandoff,
@@ -325,6 +326,64 @@ describe("buildFreshBotHandoffPrompt", () => {
     };
 
     expect(getPendingBotHandoff([failed, accepted])).toBeNull();
+  });
+
+  it("uses the durable sequence when a new human turn shares its timestamp with an old handoff", () => {
+    const oldHandoff = {
+      ...event(
+        "old-handoff-same-ms",
+        "agent_message",
+        {
+          messageId: "old-handoff-same-ms",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          targetTaskId: "forge-task",
+          recipientLabel: "Forge",
+          message: "Old request",
+        },
+        2_000,
+      ),
+      seq: 10,
+    };
+    const newHumanTurn = {
+      ...event(
+        "new-human-turn-same-ms",
+        "user_message",
+        { message: "Start a fresh request." },
+        2_000,
+      ),
+      seq: 11,
+    };
+    const newHandoff = {
+      ...event(
+        "new-handoff-same-ms",
+        "agent_message",
+        {
+          messageId: "new-handoff-same-ms",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          targetTaskId: "scribe-task",
+          recipientLabel: "Scribe",
+          message: "New request",
+        },
+        2_000,
+      ),
+      seq: 12,
+    };
+
+    expect(getCurrentBotHandoffScope([oldHandoff, newHumanTurn, newHandoff])).toMatchObject({
+      sinceTimestamp: 2_000,
+      sinceTaskId: "task-1",
+      sinceSeq: 11,
+    });
+    expect(getPendingBotHandoff([newHandoff, newHumanTurn, oldHandoff])).toMatchObject({
+      messageId: "new-handoff-same-ms",
+      recipientLabel: "Scribe",
+    });
   });
 
   it("returns durable receipt timestamps and excludes a timed-out reply from waiting", () => {

@@ -90,7 +90,7 @@ import { appendRendererTaskEvents, capTaskEvents } from "./utils/task-event-appe
 import { TaskTimelineCache } from "./utils/task-timeline-cache";
 import {
   deriveBotConversationProjection,
-  type BotConversationProjection,
+  type BotConversationRosterProjection,
 } from "../shared/bot-lifecycle";
 import {
   createTaskEventScheduler,
@@ -2081,7 +2081,7 @@ export function App() {
   // hide older conversations belonging to a bot.
   const [botConversationTasks, setBotConversationTasks] = useState<Task[]>([]);
   const [botConversationProjections, setBotConversationProjections] = useState<
-    Record<string, Pick<BotConversationProjection, "state">>
+    Record<string, BotConversationRosterProjection>
   >({});
   const [isLoadingBotConversations, setIsLoadingBotConversations] = useState(false);
   const [hasMoreTasks, setHasMoreTasks] = useState(true);
@@ -2709,7 +2709,10 @@ export function App() {
             task,
             events: taskEvents,
           });
-          return [roleId, { state: projection.state }] as const;
+          return [
+            roleId,
+            { state: projection.state, activityLabel: projection.activityLabel },
+          ] as const;
         } catch (error) {
           console.warn("Failed to load bot roster projection", {
             roleId,
@@ -2723,10 +2726,9 @@ export function App() {
 
     return Object.fromEntries(
       entries.filter(
-        (entry): entry is readonly [string, Pick<BotConversationProjection, "state">] =>
-          entry !== null,
+        (entry): entry is readonly [string, BotConversationRosterProjection] => entry !== null,
       ),
-    ) as Record<string, Pick<BotConversationProjection, "state">>;
+    ) as Record<string, BotConversationRosterProjection>;
   }, []);
 
   const refreshBotConversationProjection = useCallback(async (taskId: string) => {
@@ -2746,8 +2748,16 @@ export function App() {
         events: taskEvents,
       });
       setBotConversationProjections((previous) => {
-        if (previous[roleId]?.state === projection.state) return previous;
-        return { ...previous, [roleId]: { state: projection.state } };
+        if (
+          previous[roleId]?.state === projection.state &&
+          previous[roleId]?.activityLabel === projection.activityLabel
+        ) {
+          return previous;
+        }
+        return {
+          ...previous,
+          [roleId]: { state: projection.state, activityLabel: projection.activityLabel },
+        };
       });
     } catch (error) {
       console.warn("Failed to refresh bot roster projection", {

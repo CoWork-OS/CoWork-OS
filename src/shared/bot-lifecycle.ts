@@ -80,6 +80,12 @@ export interface BotConversationProjection {
   outcome: BotOutcomeProjection | null;
 }
 
+/** Minimal durable projection retained for bot roster rows. */
+export type BotConversationRosterProjection = Pick<
+  BotConversationProjection,
+  "state" | "activityLabel"
+>;
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

@@ -14,7 +14,10 @@ import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
 import { BotProfileDialog } from "./BotProfileDialog";
 import { selectLatestBotConversation } from "../utils/bot-conversations";
 import { parseAgentMessageProtocolResult } from "../utils/agent-message-receipt";
-import type { BotConversationProjection } from "../../shared/bot-lifecycle";
+import type {
+  BotConversationProjection,
+  BotConversationRosterProjection,
+} from "../../shared/bot-lifecycle";
 
 export interface BotRole {
   id: string;
@@ -42,8 +45,8 @@ interface BotsPaneProps {
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
   onReopenBot?: (task: Task) => void | Promise<void>;
   onOpenAgents?: () => void;
-  selectedConversationProjection?: Pick<BotConversationProjection, "state"> | null;
-  conversationProjections?: Readonly<Record<string, Pick<BotConversationProjection, "state">>>;
+  selectedConversationProjection?: BotConversationRosterProjection | null;
+  conversationProjections?: Readonly<Record<string, BotConversationRosterProjection>>;
   onBotCreated?: (bot: BotRole) => void | Promise<void>;
   onBotUpdated?: (bot: BotRole) => void | Promise<void>;
   onBotDeleted?: (botId: string) => void | Promise<void>;
@@ -132,17 +135,21 @@ function getPendingTeammateReplyPreview(task: Pick<Task, "status" | "error">): s
 }
 
 function getProjectionPreview(
-  projection?: Pick<BotConversationProjection, "state"> | null,
+  projection?:
+    | (Pick<BotConversationProjection, "state"> &
+        Partial<Pick<BotConversationProjection, "activityLabel">>)
+    | null,
 ): string | null {
+  const activityLabel = projection?.activityLabel?.trim();
   switch (projection?.state) {
     case "working":
-      return "Working on latest message";
+      return activityLabel || "Working on latest message";
     case "waiting":
-      return "Waiting on a teammate";
+      return activityLabel || "Waiting on a teammate";
     case "needs_input":
-      return "Needs your input";
+      return activityLabel || "Needs your input";
     case "failed":
-      return "Unavailable — reopen to retry";
+      return activityLabel || "Unavailable — reopen to retry";
     default:
       return null;
   }
@@ -185,7 +192,10 @@ export function getBotConversationReadinessLabel(readiness: BotConversationReadi
 
 export function getBotPreview(
   task: Task | undefined,
-  projection?: Pick<BotConversationProjection, "state"> | null,
+  projection?:
+    | (Pick<BotConversationProjection, "state"> &
+        Partial<Pick<BotConversationProjection, "activityLabel">>)
+    | null,
 ): string {
   if (!task) return getProjectionPreview(projection) || "No messages yet";
   if (task.status === "failed" || task.status === "cancelled") {
@@ -293,7 +303,7 @@ function BotRow({
 }: {
   bot: BotRole;
   latestTask?: Task;
-  conversationProjection?: Pick<BotConversationProjection, "state"> | null;
+  conversationProjection?: BotConversationRosterProjection | null;
   selected: boolean;
   onSelect: () => void;
   onOpenBot?: () => void | Promise<void>;

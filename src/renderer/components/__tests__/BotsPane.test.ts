@@ -100,11 +100,16 @@ describe("BotsPane", () => {
 
   it.each([
     ["working", "Working on latest message"],
-    ["waiting", "Waiting on a teammate"],
+    ["waiting", "Waiting for Forge to reply"],
     ["needs_input", "Needs your input"],
-    ["failed", "Unavailable — reopen to retry"],
+    ["failed", "No reply from Forge; partial result available"],
   ] as const)("does not show a stale result while projection is %s", (state, expected) => {
-    expect(getBotPreview(task as Any, { state })).toBe(expected);
+    expect(
+      getBotPreview(task as Any, {
+        state,
+        activityLabel: expected,
+      }),
+    ).toBe(expected);
   });
 
   it("shows Markdown previews as plain text without formatting syntax", () => {
@@ -171,12 +176,16 @@ describe("BotsPane", () => {
         roles: [bot],
         tasks: [task as Any],
         selectedTaskId: task.id,
-        selectedConversationProjection: { state: "waiting" },
+        selectedConversationProjection: {
+          state: "waiting",
+          activityLabel: "Waiting for Forge to reply",
+        },
         onSelectTask: () => {},
       }),
     );
 
     expect(markup).toContain("Waiting on a teammate");
+    expect(markup).toContain("Waiting for Forge to reply");
     expect(markup).not.toContain("Ready for another message");
     expect(markup).not.toContain("Onboarding findings are ready");
   });
@@ -188,7 +197,10 @@ describe("BotsPane", () => {
         tasks: [task as Any],
         selectedTaskId: null,
         conversationProjections: {
-          [bot.id]: { state: "waiting" },
+          [bot.id]: {
+            state: "waiting",
+            activityLabel: "Waiting for Forge to reply",
+          },
         },
         onSelectTask: () => {},
       }),

@@ -58,7 +58,7 @@ import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 import { BotsPane, type BotRole } from "./BotsPane";
 import { BOT_PROFILE_DELETED_EVENT, BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
-import type { BotConversationProjection } from "../../shared/bot-lifecycle";
+import type { BotConversationRosterProjection } from "../../shared/bot-lifecycle";
 
 const SIDEBAR_ITEM_HEIGHT = 22;
 const SIDEBAR_DATE_HEADER_HEIGHT = 20;
@@ -93,11 +93,11 @@ export function formatRelativeShort(timestamp?: number): string {
 }
 
 function getBotProjectionSignature(
-  projections?: Readonly<Record<string, Pick<BotConversationProjection, "state">>>,
+  projections?: Readonly<Record<string, BotConversationRosterProjection>>,
 ): string {
   return Object.entries(projections || {})
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([roleId, projection]) => `${roleId}:${projection.state}`)
+    .map(([roleId, projection]) => `${roleId}:${projection.state}:${projection.activityLabel}`)
     .join("|");
 }
 
@@ -106,8 +106,8 @@ interface SidebarProps {
   tasks: Task[];
   botTasks?: Task[];
   selectedTaskId: string | null;
-  selectedBotConversationProjection?: Pick<BotConversationProjection, "state"> | null;
-  botConversationProjections?: Readonly<Record<string, Pick<BotConversationProjection, "state">>>;
+  selectedBotConversationProjection?: BotConversationRosterProjection | null;
+  botConversationProjections?: Readonly<Record<string, BotConversationRosterProjection>>;
   isBotViewActive?: boolean;
   isAutomationsActive?: boolean;
   isIdeasActive?: boolean;
@@ -838,6 +838,8 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.selectedTaskId === next.selectedTaskId &&
     prev.selectedBotConversationProjection?.state ===
       next.selectedBotConversationProjection?.state &&
+    prev.selectedBotConversationProjection?.activityLabel ===
+      next.selectedBotConversationProjection?.activityLabel &&
     getBotProjectionSignature(prev.botConversationProjections) ===
       getBotProjectionSignature(next.botConversationProjections) &&
     prev.isBotViewActive === next.isBotViewActive &&

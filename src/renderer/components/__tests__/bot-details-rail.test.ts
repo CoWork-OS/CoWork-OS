@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { getBotStatusLabel, getBotStatusTone } from "../BotDetailsRail";
+import {
+  getBotConversationStatusLabel,
+  getBotStatusLabel,
+  getBotStatusTone,
+} from "../BotDetailsRail";
 
 const railSource = readFileSync(
   fileURLToPath(new URL("../BotDetailsRail.tsx", import.meta.url)),
@@ -20,10 +24,28 @@ describe("bot details rail", () => {
     expect(getBotStatusTone("interrupted")).toBe("bad");
   });
 
+  it("shows specific durable teammate activity for active conversations", () => {
+    expect(
+      getBotConversationStatusLabel("blocked", {
+        state: "waiting",
+        stateLabel: "Waiting on a teammate",
+        activityLabel: "Waiting for Forge to reply",
+      }),
+    ).toBe("Waiting for Forge to reply");
+    expect(
+      getBotConversationStatusLabel("completed", {
+        state: "completed",
+        stateLabel: "Finished",
+        activityLabel: "Reply received from Forge",
+      }),
+    ).toBe("Finished");
+  });
+
   it("lets the durable bot conversation projection override a stale task row", () => {
     expect(railSource).toContain("conversationProjection?: Pick<");
-    expect(railSource).toContain("conversationProjection?.stateLabel");
+    expect(railSource).toContain("projection?.stateLabel");
     expect(railSource).toContain("conversationProjection?.stateDetail");
+    expect(railSource).toContain("projection?.activityLabel");
     expect(appSource).toContain("conversationProjection={botConversationProjection}");
   });
 

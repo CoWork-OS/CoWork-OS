@@ -17,7 +17,7 @@ export interface BotDetailsRailProps {
    */
   conversationProjection?: Pick<
     BotConversationProjection,
-    "state" | "stateLabel" | "stateDetail"
+    "state" | "stateLabel" | "stateDetail" | "activityLabel"
   > | null;
   onEdit?: () => void;
   onOpenHistory?: () => void;
@@ -76,6 +76,26 @@ export function getBotStatusLabel(status: TaskStatus | string): string {
   }
 }
 
+export function getBotConversationStatusLabel(
+  taskStatus: TaskStatus | string,
+  projection?:
+    | (Pick<BotConversationProjection, "state" | "stateLabel"> &
+        Partial<Pick<BotConversationProjection, "activityLabel">>)
+    | null,
+): string {
+  const activityLabel = projection?.activityLabel?.trim();
+  if (
+    activityLabel &&
+    (projection?.state === "working" ||
+      projection?.state === "waiting" ||
+      projection?.state === "needs_input" ||
+      projection?.state === "failed")
+  ) {
+    return activityLabel;
+  }
+  return projection?.stateLabel || getBotStatusLabel(taskStatus);
+}
+
 export function BotDetailsRail({
   task,
   conversationProjection,
@@ -94,8 +114,10 @@ export function BotDetailsRail({
   const roleId = task.assignedAgentRoleId || "";
   const botName = role?.displayName || task.assignedAgentRoleId || "Bot";
   const description = role?.description?.trim() || "";
-  const conversationStatusLabel =
-    conversationProjection?.stateLabel || getBotStatusLabel(task.status);
+  const conversationStatusLabel = getBotConversationStatusLabel(
+    task.status,
+    conversationProjection,
+  );
   const conversationStatusTone = conversationProjection
     ? getBotStatusTone(conversationProjection.state)
     : getBotStatusTone(task.status);

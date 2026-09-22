@@ -50,6 +50,7 @@ import { JsonlPreview, parseJsonlPreview } from "../JsonlPreview";
 import { getStepCompletionPreviewPath } from "../../utils/step-document-preview";
 import { findLatexPdfPair } from "../../utils/latex-artifacts";
 import { formatFileSize } from "./attachments";
+import { getAgentMessageReceipt } from "../../utils/agent-message-receipt";
 import {
   DeferredMarkdown,
   HighlightedCodePreview,
@@ -1263,25 +1264,8 @@ export function renderEventDetails(
     effectiveType === "agent_follow_up_started"
   ) {
     const message = typeof event.payload?.message === "string" ? event.payload.message.trim() : "";
-    const rawStatus =
-      typeof event.payload?.status === "string"
-        ? event.payload.status
-        : typeof event.payload?.deliveryStatus === "string"
-          ? event.payload.deliveryStatus
-          : "";
-    const status =
-      rawStatus === "accepted" ||
-      rawStatus === "queued" ||
-      rawStatus === "failed" ||
-      rawStatus === "delivered"
-        ? rawStatus
-        : "accepted";
-    const messageId =
-      typeof event.payload?.messageId === "string" ? event.payload.messageId.trim() : "";
-    const senderTaskId =
-      typeof event.payload?.senderTaskId === "string" ? event.payload.senderTaskId.trim() : "";
-    const targetTaskId =
-      typeof event.payload?.targetTaskId === "string" ? event.payload.targetTaskId.trim() : "";
+    const receipt = getAgentMessageReceipt(event.payload as Record<string, unknown>);
+    const { status, messageId, senderTaskId, targetTaskId } = receipt;
     const sender =
       event.payload?.senderType === "agent"
         ? typeof event.payload?.senderLabel === "string"
@@ -1301,21 +1285,14 @@ export function renderEventDetails(
         </div>
         {message ? <div className="agent-message-preview">{message}</div> : null}
         <div className={`agent-message-delivery agent-message-delivery-${status}`}>
-          {event.payload?.duplicate === true
-            ? status === "queued"
-              ? "Already queued; duplicate ignored"
-              : "Already delivered; duplicate ignored"
-            : status === "queued"
-              ? "Queued for the next turn"
-              : status === "failed"
-                ? "Delivery failed"
-                : status === "delivered"
-                  ? "Delivered"
-                  : "Accepted"}
+          {receipt.label}
+          {receipt.messageId ? (
+            <span className="agent-message-receipt-id" title={`Message ID ${receipt.messageId}`}>
+              {` · ${receipt.shortMessageId}`}
+            </span>
+          ) : null}
         </div>
-        {typeof event.payload?.error === "string" && event.payload.error.trim() ? (
-          <div className="event-details-failure">{event.payload.error}</div>
-        ) : null}
+        {receipt.error ? <div className="event-details-failure">{receipt.error}</div> : null}
         {renderOpenLinkedAgent()}
       </div>
     );

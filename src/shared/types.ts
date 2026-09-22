@@ -3287,9 +3287,19 @@ export interface TaskFollowUpInput {
   /** Parent/agent task that authored an agent message. */
   senderTaskId?: string;
   senderLabel?: string;
+  /** Message ID on the sender side when this is a teammate reply. */
+  inReplyToMessageId?: string;
+  /** Sender task that owns the message being replied to. */
+  inReplyToTaskId?: string;
 }
 
-export type AgentMessageDeliveryStatus = "accepted" | "queued" | "delivered" | "failed";
+export type AgentMessageDeliveryStatus =
+  | "accepted"
+  | "queued"
+  | "started"
+  | "delivered"
+  | "failed"
+  | "quarantined";
 
 export interface AgentMessageSendResult {
   queued: boolean;
@@ -3299,7 +3309,12 @@ export interface AgentMessageSendResult {
   deliveryStatus?: AgentMessageDeliveryStatus;
   acceptedAt?: number;
   queuedAt?: number;
+  startedAt?: number;
   deliveredAt?: number;
+  failedAt?: number;
+  quarantinedAt?: number;
+  attempt?: number;
+  failureCode?: string;
 }
 
 export interface AgentMessagePayload {
@@ -3314,10 +3329,20 @@ export interface AgentMessagePayload {
   duplicate?: boolean;
   deliveryMode?: "message" | "follow_up";
   correlationId?: string;
+  inReplyToMessageId?: string;
+  inReplyToTaskId?: string;
+  replyStatus?: "pending" | "received" | "timed_out";
+  replyMessageId?: string;
+  replyTaskId?: string;
+  repliedAt?: number;
   acceptedAt?: number;
   queuedAt?: number;
+  startedAt?: number;
   deliveredAt?: number;
   failedAt?: number;
+  quarantinedAt?: number;
+  attempt?: number;
+  failureCode?: string;
   error?: string;
 }
 
@@ -4532,6 +4557,13 @@ export interface BotConversationListQuery {
   includeArchivedSessions?: boolean;
   limit?: number;
   offset?: number;
+}
+
+export interface BotConversationReopenRequest {
+  workspaceId: string;
+  taskId?: string;
+  agentRoleId?: string;
+  repairMembership?: boolean;
 }
 
 export interface BotNotificationPolicy {
@@ -8554,6 +8586,7 @@ export const IPC_CHANNELS = {
   TASK_LIST: "task:list",
   TASK_LIST_SIDEBAR: "task:listSidebar",
   BOT_CONVERSATIONS_LIST: "bot:conversationsList",
+  BOT_CONVERSATION_REOPEN: "bot:conversationReopen",
   COMPOSER_DRAFT_GET: "composerDraft:get",
   COMPOSER_DRAFT_UPSERT: "composerDraft:upsert",
   COMPOSER_DRAFT_CLEAR: "composerDraft:clear",

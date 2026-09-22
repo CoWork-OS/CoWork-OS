@@ -86,6 +86,7 @@ import { isLlmRequestCancelledEvent } from "./utils/task-event-visibility";
 import { markSessionAutoResolvingApproval } from "./utils/approval-event-state";
 import { appendRendererTaskEvents, capTaskEvents } from "./utils/task-event-append";
 import { TaskTimelineCache } from "./utils/task-timeline-cache";
+import { deriveBotConversationProjection } from "../shared/bot-lifecycle";
 import {
   createTaskEventScheduler,
   getTaskEventTargetKey,
@@ -770,6 +771,8 @@ type SelectedTaskWorkspaceViewProps = {
     quotedAssistantMessage?: QuotedAssistantMessage,
     options?: {
       interactionMode?: import("../shared/interaction-mode").InteractionModeSelection;
+      deliveryMode?: "message" | "follow_up";
+      messageId?: string;
       permissionMode?: PermissionMode;
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
@@ -1494,6 +1497,18 @@ const SelectedTaskWorkspaceView = memo(
       workspace?.path &&
       !remoteTaskView,
     );
+    const botConversationProjection = useMemo(
+      () =>
+        task?.agentConfig?.botConversation
+          ? deriveBotConversationProjection({
+              task,
+              events: replayControls.replayEvents,
+              childEvents,
+              childTasks,
+            })
+          : null,
+      [childEvents, childTasks, replayControls.replayEvents, task],
+    );
 
     return (
       <div
@@ -1513,6 +1528,7 @@ const SelectedTaskWorkspaceView = memo(
               replayControls={replayControls}
               botConversations={botConversations}
               isLoadingBotConversations={isLoadingBotConversations}
+              conversationProjection={botConversationProjection}
               draftValue={draftValue}
               draftRevision={draftRevision}
               onDraftValueChange={onDraftValueChange}
@@ -1727,7 +1743,7 @@ const SelectedTaskWorkspaceView = memo(
           ) : task?.agentConfig?.botConversation && !remoteTaskView && !effectiveRightCollapsed ? (
             <BotDetailsRail
               task={task}
-              workspace={workspace}
+              conversationProjection={botConversationProjection}
               onEdit={() => {
                 // The bot identity header owns the profile dialog; focus it
                 // through the same history action rather than duplicating the
@@ -1740,7 +1756,6 @@ const SelectedTaskWorkspaceView = memo(
               onOpenHistory={() => {
                 window.dispatchEvent(new Event(BOT_CONVERSATION_HISTORY_OPEN_EVENT));
               }}
-              onOpenComputerSettings={() => onOpenSettings("tools")}
               onClose={onCloseRightPanel}
             />
           ) : !effectiveRightCollapsed && !remoteTaskView ? (
@@ -2110,6 +2125,18 @@ export function App() {
         : undefined),
     [botConversationTasks, remoteTaskView, tasks, selectedTaskId],
   );
+  const selectedBotConversationProjection = useMemo(
+    () =>
+      selectedTask?.agentConfig?.botConversation && !remoteTaskView
+        ? deriveBotConversationProjection({
+            task: selectedTask,
+            events,
+            childEvents,
+            childTasks,
+          })
+        : null,
+    [childEvents, childTasks, events, remoteTaskView, selectedTask],
+  );
   const completedTaskIdsSignature = useMemo(
     () =>
       tasks
@@ -2227,6 +2254,10 @@ export function App() {
   const fetchedFullTaskForMentionMetadataRef = useRef<Set<string>>(new Set());
   const currentViewRef = useRef<AppView>("main");
   const rightSidebarCollapsedRef = useRef(false);
+  const botConversationPanelMemoryRef = useRef<{
+    active: boolean;
+    previousCollapsed: boolean | null;
+  }>({ active: false, previousCollapsed: null });
   const currentWorkspaceRef = useRef<Workspace | null>(null);
   const noiseEventThrottleRef = useRef<Map<string, number>>(new Map());
   const taskLastEventTimestampRef = useRef<Map<string, number>>(new Map());
@@ -6494,6 +6525,42 @@ export function App() {
         : !selectedTaskId
           ? true
           : rightSidebarCollapsed;
+  const isBotConversationSurface =
+    currentView === "main" &&
+    !remoteTaskView &&
+    selectedTask?.agentConfig?.botConversation === true;
+
+  useLayoutEffect(() => {
+    const panelMemory = botConversationPanelMemoryRef.current;
+
+    if (isBotConversationSurface) {
+      if (panelMemory.active) return;
+
+      const previousCollapsed = rightSidebarCollapsedRef.current;
+      botConversationPanelMemoryRef.current = {
+        active: true,
+        previousCollapsed,
+      };
+      if (!previousCollapsed) {
+        setRightSidebarCollapsed(true);
+      }
+      return;
+    }
+
+    if (!panelMemory.active) return;
+
+    botConversationPanelMemoryRef.current = {
+      active: false,
+      previousCollapsed: null,
+    };
+    if (
+      panelMemory.previousCollapsed !== null &&
+      rightSidebarCollapsedRef.current !== panelMemory.previousCollapsed
+    ) {
+      setRightSidebarCollapsed(panelMemory.previousCollapsed);
+    }
+  }, [isBotConversationSurface]);
+
   const unseenOutputCount = unseenOutputTaskIds.length;
   const showTitleBarTerminalToggle =
     currentView === "main" &&
@@ -6581,7 +6648,12 @@ export function App() {
           limit: 500,
           offset: 0,
         })) as Task[];
-        let botTask = selectLatestBotConversation(candidates, bot.id);
+        const selectedBotTask = candidates.find(
+          (candidate) =>
+            candidate.id === selectedTaskIdRef.current &&
+            matchesBotConversation(candidate, workspaceId, bot.id),
+        );
+        let botTask = selectedBotTask || selectLatestBotConversation(candidates, bot.id);
         if (botTask && botTask.workspaceId !== workspaceId && includeAllWorkspaces) {
           const adopted = (await window.electronAPI.updateTaskWorkspace(botTask.id, workspaceId)) as
             | Task
@@ -6634,6 +6706,82 @@ export function App() {
       clearRemoteTaskView,
       currentWorkspace?.id,
       handleCreateTask,
+      loadBotConversations,
+      markTaskSwitchStart,
+      selectTaskAfterDraftFlush,
+    ],
+  );
+  const handleReopenBot = useCallback(
+    async (task: Task) => {
+      const workspaceId = currentWorkspace?.id;
+      if (!workspaceId) {
+        addToast({
+          type: "error",
+          title: "Select a workspace first",
+          message: "Bot recovery needs an active workspace so the replacement stays local.",
+        });
+        return;
+      }
+      if (!window.electronAPI?.reopenBotConversation) {
+        addToast({
+          type: "error",
+          title: "Restart CoWork OS to recover this bot",
+          message: "The recovery control is not available in this running app instance yet.",
+        });
+        return;
+      }
+      try {
+        let reopened: Task;
+        try {
+          reopened = await window.electronAPI.reopenBotConversation({
+            workspaceId,
+            taskId: task.id,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!/BOT_(?:MEMBERSHIP_REVOKED|TEAM_UNAVAILABLE)/.test(message)) throw error;
+          reopened = await window.electronAPI.reopenBotConversation({
+            workspaceId,
+            taskId: task.id,
+            repairMembership: true,
+          });
+        }
+        setBotConversationTasks((previous) => [
+          reopened,
+          ...previous.filter((candidate) => candidate.id !== reopened.id),
+        ]);
+        tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, reopened, {
+          prependIfMissing: true,
+        });
+        setTasks((previous) =>
+          upsertTaskPreservingIdentity(previous, reopened, { prependIfMissing: true }),
+        );
+        clearRemoteTaskView();
+        markTaskSwitchStart(reopened.id);
+        void selectTaskAfterDraftFlush(reopened.id);
+        setCurrentView("main");
+        await loadBotConversations();
+        addToast({
+          type: "success",
+          title: "Bot conversation reopened",
+          message:
+            "The old transcript was preserved and a fresh workspace-local conversation is ready.",
+        });
+      } catch (error) {
+        addToast({
+          type: "error",
+          title: "Could not recover bot conversation",
+          message:
+            error instanceof Error
+              ? error.message.replace(/^BOT_[A-Z_]+:\s*/, "")
+              : "The old transcript was preserved. Try again or repair the bot team.",
+        });
+      }
+    },
+    [
+      addToast,
+      clearRemoteTaskView,
+      currentWorkspace?.id,
       loadBotConversations,
       markTaskSwitchStart,
       selectTaskAfterDraftFlush,
@@ -7283,6 +7431,7 @@ export function App() {
                 tasks={tasks}
                 botTasks={botConversationTasks}
                 selectedTaskId={selectedTaskId}
+                selectedBotConversationProjection={selectedBotConversationProjection}
                 isBotViewActive={
                   currentView === "main" &&
                   !remoteTaskView &&
@@ -7305,6 +7454,7 @@ export function App() {
                 onOpenInboxAgent={() => setCurrentView("inboxAgent")}
                 onOpenAgents={() => setCurrentView("agents")}
                 onOpenBot={handleOpenBot}
+                onReopenBot={handleReopenBot}
                 onBotDeleted={(botId) => {
                   if (selectedTask?.assignedAgentRoleId === botId) {
                     handleClearTaskView();

@@ -1,0 +1,419 @@
+.bot-collaboration-header {
+  width: 100%;
+  max-width: 760px;
+  box-sizing: border-box;
+  margin: 0 auto 12px;
+  border: 1px solid var(--color-border, rgba(148, 163, 184, 0.18));
+  border-radius: 12px;
+  background: var(--color-bg-secondary, rgba(148, 163, 184, 0.05));
+  color: var(--color-text-primary, #e5e7eb);
+  overflow: hidden;
+}
+
+.bot-collaboration-header-row {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+}
+
+.bot-collaboration-avatar {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--color-bg-hover, rgba(148, 163, 184, 0.12));
+  color: var(--color-text-secondary, #a8b0bd);
+}
+
+.bot-collaboration-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.bot-collaboration-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bot-collaboration-bot-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.bot-collaboration-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--color-text-muted, #98a1ad);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.bot-collaboration-working .bot-collaboration-status {
+  color: var(--color-accent, #67c8a0);
+}
+
+.bot-collaboration-completed .bot-collaboration-status {
+  color: var(--color-success, #6fcf97);
+}
+
+.bot-collaboration-needs_input .bot-collaboration-status,
+.bot-collaboration-waiting .bot-collaboration-status {
+  color: var(--color-warning, #e8b86d);
+}
+
+.bot-collaboration-failed .bot-collaboration-status {
+  color: var(--color-danger, #ef8d8d);
+}
+
+.bot-collaboration-activity {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--color-text-secondary, #b1b8c3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-collaboration-team {
+  max-width: min(34%, 280px);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--color-text-muted, #98a1ad);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.bot-collaboration-team span:not(.bot-collaboration-team-more) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bot-collaboration-team-more {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary, #b1b8c3);
+}
+
+.bot-collaboration-summary {
+  flex: 0 1 auto;
+  max-width: min(30%, 220px);
+  overflow: hidden;
+  color: var(--color-text-muted, #98a1ad);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-collaboration-details-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted, #98a1ad);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.bot-collaboration-details-toggle:hover,
+.bot-collaboration-details-toggle:focus-visible {
+  border-color: var(--color-border-light, rgba(148, 163, 184, 0.3));
+  background: var(--color-bg-hover, rgba(148, 163, 184, 0.08));
+  color: var(--color-text-primary, #e5e7eb);
+  outline: none;
+}
+
+.bot-collaboration-details-toggle svg:last-child {
+  transition: transform 0.15s ease;
+}
+
+.bot-collaboration-chevron-open {
+  transform: rotate(180deg);
+}
+
+.bot-collaboration-attention {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--color-border, rgba(148, 163, 184, 0.15));
+  color: var(--color-text-secondary, #b1b8c3);
+  font-size: 12px;
+}
+
+.bot-collaboration-attention > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bot-collaboration-attention strong {
+  color: var(--color-text-primary, #e5e7eb);
+  font-weight: 650;
+}
+
+.bot-collaboration-attention-input,
+.bot-collaboration-attention-blocked,
+.bot-collaboration-attention-delivery {
+  color: var(--color-warning, #e8b86d);
+}
+
+.bot-collaboration-attention-failed {
+  color: var(--color-danger, #ef8d8d);
+}
+
+.bot-collaboration-details {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px 50px;
+  border-top: 1px solid var(--color-border, rgba(148, 163, 184, 0.15));
+  color: var(--color-text-secondary, #b1b8c3);
+  font-size: 12px;
+}
+
+.bot-collaboration-outcome,
+.bot-collaboration-detail-team,
+.bot-collaboration-handoffs {
+  display: grid;
+  gap: 5px;
+  padding-top: 10px;
+}
+
+.bot-collaboration-detail-label {
+  color: var(--color-text-muted, #98a1ad);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bot-collaboration-handoff {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-border, rgba(148, 163, 184, 0.1));
+}
+
+.bot-collaboration-handoff:last-child {
+  border-bottom: 0;
+}
+
+.bot-collaboration-handoff-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bot-collaboration-handoff-main > span,
+.bot-collaboration-handoff-main > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-collaboration-handoff-main small {
+  color: var(--color-text-muted, #98a1ad);
+}
+
+.bot-collaboration-handoff-state {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.bot-collaboration-handoff-state.state-delivered {
+  color: var(--color-success, #6fcf97);
+}
+
+.bot-collaboration-handoff-state.state-queued,
+.bot-collaboration-handoff-state.state-accepted,
+.bot-collaboration-handoff-state.state-started {
+  color: var(--color-warning, #e8b86d);
+}
+
+.bot-collaboration-handoff-state.state-failed,
+.bot-collaboration-handoff-state.state-quarantined {
+  color: var(--color-danger, #ef8d8d);
+}
+
+.bot-collaboration-teammates {
+  display: grid;
+  gap: 5px;
+}
+
+.bot-collaboration-teammate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.bot-collaboration-teammate > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teammate-state {
+  flex: 0 0 auto;
+  color: var(--color-text-muted, #98a1ad);
+}
+
+.teammate-state-completed {
+  color: var(--color-success, #6fcf97);
+}
+
+.teammate-state-failed,
+.teammate-state-needs_input {
+  color: var(--color-danger, #ef8d8d);
+}
+
+.bot-collaboration-disclosure-note {
+  padding-top: 2px;
+  color: var(--color-text-muted, #98a1ad);
+  font-size: 11px;
+}
+
+.bot-collaboration-spin {
+  animation: bot-collaboration-spin 1.2s linear infinite;
+}
+
+@keyframes bot-collaboration-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-collaboration-spin {
+    animation: none;
+  }
+}
+
+@container (max-width: 680px) {
+  .bot-collaboration-header-row {
+    flex-wrap: wrap;
+  }
+
+  .bot-collaboration-copy {
+    min-width: calc(100% - 48px);
+  }
+
+  .bot-collaboration-team {
+    max-width: 55%;
+    margin-left: 38px;
+  }
+
+  .bot-collaboration-details-toggle {
+    margin-left: auto;
+  }
+}
+
+/* Conversation mode treats collaboration context as a quiet transcript event,
+   not as a second dashboard header. The expanded details remain available, but
+   the default state now uses the same measure and rhythm as the messages below. */
+.bot-collaboration-header {
+  max-width: 100%;
+  margin: 0 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-subtle, rgba(148, 163, 184, 0.16));
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.bot-collaboration-header-row {
+  min-height: 38px;
+  gap: 9px;
+  padding: 2px 0 10px;
+}
+
+.bot-collaboration-avatar {
+  width: 25px;
+  height: 25px;
+  flex-basis: 25px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+  color: var(--color-accent);
+}
+
+.bot-collaboration-bot-name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bot-collaboration-activity {
+  color: var(--color-text-muted, #98a1ad);
+  font-size: 11px;
+}
+
+.bot-collaboration-team {
+  max-width: min(40%, 300px);
+  color: var(--color-text-muted, #98a1ad);
+}
+
+.bot-collaboration-team-label {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary, #b1b8c3);
+}
+
+.bot-collaboration-details-toggle {
+  min-height: 26px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: var(--color-text-secondary, #b1b8c3);
+}
+
+.bot-collaboration-details-toggle:hover,
+.bot-collaboration-details-toggle:focus-visible {
+  border-color: transparent;
+  background: var(--color-bg-hover, rgba(148, 163, 184, 0.08));
+}
+
+.bot-collaboration-attention {
+  margin: 8px 0 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--color-warning, #e8b86d) 28%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-warning, #e8b86d) 8%, transparent);
+}
+
+.bot-collaboration-details {
+  gap: 9px;
+  padding: 10px 0 2px;
+  border-top: 0;
+}
+
+.bot-collaboration-handoff {
+  padding: 7px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-collaboration-details-toggle svg:last-child {
+    transition: none;
+  }
+}

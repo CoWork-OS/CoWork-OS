@@ -1,0 +1,321 @@
+import type { TaskEvent } from "./types";
+
+/**
+ * Prompt-only boundary for a teammate handoff.
+ *
+ * Bot conversations keep their durable transcript for the user, but the model
+ * should not inherit unfinished work from an older handoff. This helper keeps
+ * that distinction explicit: the boundary is sent to the model only and is
+ * never persisted as a user-facing transcript message.
+ */
+export function buildFreshBotHandoffPrompt(
+  message: string,
+  senderLabel?: string,
+  senderTaskId?: string,
+  correlation?: {
+    inReplyToMessageId?: string;
+    inReplyToTaskId?: string;
+  },
+): string {
+  const sender =
+    typeof senderLabel === "string" && senderLabel.trim() ? senderLabel.trim() : "a teammate";
+  const senderTask =
+    typeof senderTaskId === "string" && senderTaskId.trim() ? senderTaskId.trim() : "";
+  const isCorrelatedReply = Boolean(
+    typeof correlation?.inReplyToMessageId === "string" &&
+    correlation.inReplyToMessageId.trim() &&
+    typeof correlation?.inReplyToTaskId === "string" &&
+    correlation.inReplyToTaskId.trim(),
+  );
+  return [
+    isCorrelatedReply ? "[CORRELATED TEAM REPLY]" : "[NEW TEAMMATE HANDOFF]",
+    isCorrelatedReply
+      ? `This message is a durable reply from ${sender} to your earlier handoff. Treat it as a delivery receipt, not a new request. Do not call send_agent_message or send another message in response unless the request below explicitly asks for a new action.`
+      : `This is a new, independent request from ${sender}. Treat earlier conversation turns as archived reference only; do not continue, merge, or mention unfinished work from them unless this request explicitly asks you to.`,
+    isCorrelatedReply
+      ? "Record the received result and finish this turn concisely."
+      : "Complete only the request below. Use the available tools as needed, and return one concise, evidence-backed result to the requesting teammate.",
+    isCorrelatedReply
+      ? "No teammate reply is required for this correlated receipt."
+      : senderTask
+        ? `Reply to that requesting teammate with send_agent_message using task_id="${senderTask}" so the durable reply is correlated to this handoff. Do not default to Atlas unless Atlas is the requester.`
+        : "Reply to the requesting teammate with send_agent_message using that teammate's bot handle; do not default to Atlas unless Atlas is the requester.",
+    "REQUEST:",
+    message,
+  ].join("\n");
+}
+
+export interface BotHandoffReplyRequirement {
+  inboundMessageId: string;
+  senderTaskId: string;
+  senderLabel: string;
+  message: string;
+}
+
+export interface PendingBotHandoff {
+  messageId: string;
+  recipientTaskId: string;
+  recipientLabel: string;
+  message: string;
+  deliveryStatus: "accepted" | "queued" | "started" | "delivered";
+  acceptedAt?: number;
+  queuedAt?: number;
+  startedAt?: number;
+  deliveredAt?: number;
+}
+
+export interface BotHandoffScope {
+  /** Ignore handoffs and inbound requests that belong to earlier turns. */
+  sinceTimestamp?: number;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readString(payload: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function eventType(event: TaskEvent): string {
+  return typeof event.legacyType === "string" ? event.legacyType : event.type;
+}
+
+function eventTimestamp(event: TaskEvent): number {
+  const payload = asRecord(event.payload);
+  const candidate =
+    payload.timestamp ??
+    payload.deliveredAt ??
+    payload.startedAt ??
+    payload.queuedAt ??
+    payload.acceptedAt;
+  return typeof candidate === "number" && Number.isFinite(candidate)
+    ? candidate
+    : event.timestamp || event.ts || 0;
+}
+
+function deliveryStatus(payload: Record<string, unknown>): string {
+  return String(payload.deliveryStatus ?? payload.delivery_status ?? payload.status ?? "accepted")
+    .trim()
+    .toLowerCase();
+}
+
+function isTerminalDelivery(status: string): boolean {
+  return status === "failed" || status === "quarantined";
+}
+
+function isTerminalReply(payload: Record<string, unknown>): boolean {
+  return payload.replyStatus === "received" || payload.replyStatus === "timed_out";
+}
+
+function isAgentInbound(payload: Record<string, unknown>): boolean {
+  return payload.messageSource === "agent" && payload.deliveryMode === "message";
+}
+
+/**
+ * The sender's durable handoff row is updated when the recipient sends a
+ * reply. The receiver may already have a user_message copy of that reply, so
+ * keep the message id projection in one place and use it to avoid treating a
+ * completed reply as a fresh request.
+ */
+function getCorrelatedReplyMessageIds(events: TaskEvent[]): Set<string> {
+  const replyMessageIds = new Set<string>();
+  for (const event of events) {
+    if (eventType(event) !== "agent_message") continue;
+    const payload = asRecord(event.payload);
+    if (payload.replyStatus !== "received") continue;
+    const replyMessageId = readString(payload, "replyMessageId", "reply_message_id");
+    if (replyMessageId) replyMessageIds.add(replyMessageId);
+  }
+  return replyMessageIds;
+}
+
+function isCorrelatedInboundReply(
+  payload: Record<string, unknown>,
+  correlatedReplyMessageIds: Set<string>,
+): boolean {
+  // Newer queue receipts carry the correlation directly. Older receipts only
+  // have the replyMessageId projection on the originating agent_message row.
+  return Boolean(
+    readString(payload, "inReplyToMessageId", "in_reply_to_message_id") ||
+    (readString(payload, "messageId", "message_id") &&
+      correlatedReplyMessageIds.has(readString(payload, "messageId", "message_id"))),
+  );
+}
+
+/**
+ * Find the durable boundary for the active bot turn.
+ *
+ * Persistent bot conversations intentionally retain their transcript, so a
+ * raw scan of every historical handoff makes an old unresolved message block
+ * a new request. Human turns use their latest user message as the boundary.
+ * A teammate turn uses its latest inbound message, unless that inbound is a
+ * reply to a handoff that is still active from the latest human turn; in that
+ * case the human turn remains the active coordination scope while the other
+ * teammate replies arrive.
+ */
+export function getCurrentBotHandoffScopeStart(events: TaskEvent[]): number | undefined {
+  const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
+  const correlatedReplyMessageIds = getCorrelatedReplyMessageIds(ordered);
+  const humanMessages = ordered.filter((event) => {
+    if (eventType(event) !== "user_message") return false;
+    const payload = asRecord(event.payload);
+    return !isAgentInbound(payload);
+  });
+  const agentInbound = ordered.filter((event) => {
+    if (eventType(event) !== "user_message") return false;
+    const payload = asRecord(event.payload);
+    return (
+      isAgentInbound(payload) &&
+      !isTerminalDelivery(deliveryStatus(payload)) &&
+      !isCorrelatedInboundReply(payload, correlatedReplyMessageIds)
+    );
+  });
+  const latestHuman = humanMessages[humanMessages.length - 1];
+  const latestInbound = agentInbound[agentInbound.length - 1];
+  if (!latestInbound) return latestHuman ? eventTimestamp(latestHuman) : undefined;
+  if (!latestHuman || eventTimestamp(latestHuman) > eventTimestamp(latestInbound)) {
+    return latestHuman ? eventTimestamp(latestHuman) : eventTimestamp(latestInbound);
+  }
+
+  const inboundPayload = asRecord(latestInbound.payload);
+  const senderTaskId = readString(inboundPayload, "senderTaskId", "sender_task_id");
+  const humanBoundary = eventTimestamp(latestHuman);
+  const hasActiveParentHandoff = ordered.some((event) => {
+    if (eventType(event) !== "agent_message") return false;
+    const payload = asRecord(event.payload);
+    if (eventTimestamp(event) < humanBoundary) return false;
+    if (readString(payload, "targetTaskId", "target_task_id") !== senderTaskId) return false;
+    const status = deliveryStatus(payload);
+    return (
+      payload.senderType === "agent" &&
+      payload.deliveryMode === "message" &&
+      !readString(payload, "inReplyToMessageId", "in_reply_to_message_id") &&
+      !isTerminalDelivery(status) &&
+      !isTerminalReply(payload)
+    );
+  });
+
+  return hasActiveParentHandoff ? humanBoundary : eventTimestamp(latestInbound);
+}
+
+/**
+ * Return the newest inbound teammate message that has no durable correlated
+ * reply yet. This is intentionally event-based so completion and recovery can
+ * enforce the same contract without depending on renderer state.
+ */
+export function getOutstandingBotHandoffReply(
+  events: TaskEvent[],
+  scope?: BotHandoffScope,
+): BotHandoffReplyRequirement | null {
+  const scopeStart = scope?.sinceTimestamp ?? getCurrentBotHandoffScopeStart(events);
+  const ordered = [...events].sort((a, b) => eventTimestamp(a) - eventTimestamp(b));
+  const inboundById = new Map<string, BotHandoffReplyRequirement>();
+  const repliedMessageIds = new Set<string>();
+  const correlatedReplyMessageIds = getCorrelatedReplyMessageIds(ordered);
+
+  for (const event of ordered) {
+    const payload = asRecord(event.payload);
+    const type = eventType(event);
+    if (type === "user_message") {
+      if (!isAgentInbound(payload)) continue;
+      if (isCorrelatedInboundReply(payload, correlatedReplyMessageIds)) continue;
+      if (scopeStart !== undefined && eventTimestamp(event) < scopeStart) {
+        continue;
+      }
+      const inboundMessageId = readString(payload, "messageId", "message_id");
+      const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
+      const status = deliveryStatus(payload);
+      if (!inboundMessageId || !senderTaskId || isTerminalDelivery(status)) continue;
+      inboundById.set(inboundMessageId, {
+        inboundMessageId,
+        senderTaskId,
+        senderLabel: readString(payload, "senderLabel", "sender") || "teammate",
+        message: readString(payload, "message"),
+      });
+      continue;
+    }
+    if (type !== "agent_message") continue;
+    const replyTo = readString(payload, "inReplyToMessageId", "in_reply_to_message_id");
+    if (!replyTo) continue;
+    const status = deliveryStatus(payload);
+    if (!isTerminalDelivery(status)) repliedMessageIds.add(replyTo);
+  }
+
+  for (const requirement of [...inboundById.values()].reverse()) {
+    if (!repliedMessageIds.has(requirement.inboundMessageId)) return requirement;
+  }
+  return null;
+}
+
+/**
+ * Return the newest bot-team handoff whose recipient has not acknowledged a
+ * reply. Generic child-task steering is excluded by requiring botTeamId.
+ */
+export function getPendingBotHandoff(
+  events: TaskEvent[],
+  scope?: BotHandoffScope,
+): PendingBotHandoff | null {
+  const scopeStart = scope?.sinceTimestamp ?? getCurrentBotHandoffScopeStart(events);
+  const latestByMessageId = new Map<
+    string,
+    { payload: Record<string, unknown>; timestamp: number }
+  >();
+  for (const event of events) {
+    if (eventType(event) !== "agent_message") continue;
+    const payload = asRecord(event.payload);
+    if (payload.senderType !== "agent" || payload.deliveryMode !== "message") continue;
+    if (!readString(payload, "botTeamId", "bot_team_id")) continue;
+    const messageId = readString(payload, "messageId", "message_id");
+    if (!messageId) continue;
+    latestByMessageId.set(messageId, { payload, timestamp: eventTimestamp(event) });
+  }
+
+  const pending = [...latestByMessageId.entries()]
+    .map(([messageId, entry]) => ({ messageId, ...entry }))
+    .filter(({ payload, timestamp }) => {
+      if (scopeStart !== undefined && timestamp < scopeStart) return false;
+      const status = deliveryStatus(payload);
+      return (
+        !readString(payload, "inReplyToMessageId", "in_reply_to_message_id") &&
+        !isTerminalDelivery(status) &&
+        !isTerminalReply(payload)
+      );
+    })
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const latest = pending[pending.length - 1];
+  if (!latest) return null;
+  const status = deliveryStatus(latest.payload);
+  if (
+    status !== "accepted" &&
+    status !== "queued" &&
+    status !== "started" &&
+    status !== "delivered"
+  ) {
+    return null;
+  }
+  return {
+    messageId: latest.messageId,
+    recipientTaskId: readString(latest.payload, "targetTaskId", "target_task_id"),
+    recipientLabel:
+      readString(latest.payload, "recipientLabel", "recipient", "targetLabel") || "teammate",
+    message: readString(latest.payload, "message"),
+    deliveryStatus: status,
+    ...(typeof latest.payload.acceptedAt === "number"
+      ? { acceptedAt: latest.payload.acceptedAt }
+      : {}),
+    ...(typeof latest.payload.queuedAt === "number" ? { queuedAt: latest.payload.queuedAt } : {}),
+    ...(typeof latest.payload.startedAt === "number"
+      ? { startedAt: latest.payload.startedAt }
+      : {}),
+    ...(typeof latest.payload.deliveredAt === "number"
+      ? { deliveredAt: latest.payload.deliveredAt }
+      : {}),
+  };
+}

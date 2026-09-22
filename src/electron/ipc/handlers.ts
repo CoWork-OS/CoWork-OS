@@ -245,6 +245,7 @@ import {
   TaskEventDetailResult,
   TaskTimelinePageRequest,
   BotConversationListQuery,
+  BotConversationReopenRequest,
   BotNotificationPolicy,
   UpdateBotNotificationPolicyRequest,
 } from "../../shared/types";
@@ -257,6 +258,7 @@ import {
   normalizeComposerDraft,
 } from "../../shared/composer-drafts";
 import { isTerminalTaskStatus } from "../../shared/task-status";
+import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
 import type { MailboxCommitmentState } from "../../shared/mailbox";
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
@@ -4668,8 +4670,9 @@ export async function setupIpcHandlers(
       images: validatedImages,
       generateTitle,
     } = validated;
+    const botNormalizedAgentConfig = normalizeBotConversationAgentConfig(agentConfig);
     const accessProfileAgentConfig = applyDefaultAccessProfile(
-      agentConfig,
+      botNormalizedAgentConfig,
       PermissionSettingsManager.loadSettings(),
     );
     const normalizedAgentConfig: AgentConfig | undefined = accessProfileAgentConfig
@@ -5306,6 +5309,26 @@ export async function setupIpcHandlers(
     },
   );
 
+  ipcMain.handle(
+    IPC_CHANNELS.BOT_CONVERSATION_REOPEN,
+    async (_, rawRequest?: Partial<BotConversationReopenRequest>) => {
+      const request = validateInput(
+        z.object({
+          workspaceId: WorkspaceIdSchema,
+          taskId: z.string().trim().min(1).max(128).optional(),
+          agentRoleId: z.string().trim().min(1).max(128).optional(),
+          repairMembership: z.boolean().optional(),
+        }),
+        rawRequest,
+        "bot conversation reopen request",
+      );
+      if (!request.taskId && !request.agentRoleId) {
+        throw new Error("A bot conversation or bot role is required to reopen.");
+      }
+      return agentDaemon.reopenBotConversation(request);
+    },
+  );
+
   // Export task summaries as a structured JSON blob (prompt-free by design)
   ipcMain.handle(IPC_CHANNELS.TASK_EXPORT_JSON, async (_, rawQuery?: TaskExportQuery) => {
     checkRateLimit(IPC_CHANNELS.TASK_EXPORT_JSON);
@@ -5929,6 +5952,7 @@ export async function setupIpcHandlers(
           ...(validated.expectedTurnId ? { expectedTurnId: validated.expectedTurnId } : {}),
           ...(validated.interactionMode ? { interactionMode: validated.interactionMode } : {}),
           ...(validated.deliveryMode ? { deliveryMode: validated.deliveryMode } : {}),
+          messageSource: "user" as const,
           ...(validated.returnOnAccepted ? { returnOnAccepted: true } : {}),
           ...(validated.messageId ? { messageId: validated.messageId } : {}),
           ...(validated.permissionMode ? { permissionMode: validated.permissionMode } : {}),

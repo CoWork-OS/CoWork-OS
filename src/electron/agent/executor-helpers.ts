@@ -195,6 +195,11 @@ export const PROACTIVE_COMPACTION_TARGET = 0.55;
 export const COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS = 6144;
 export const COMPACTION_SUMMARY_MIN_OUTPUT_TOKENS = 500;
 export const COMPACTION_SUMMARY_MAX_INPUT_CHARS = 90000;
+// Bot conversations commonly accumulate many read-only web results in a single
+// turn. Sending that entire transcript through a second LLM call can spend
+// several minutes retrying a compaction request, even though the deterministic
+// transcript fallback already preserves the evidence needed to continue.
+export const COMPACTION_BOT_LLM_MAX_INPUT_CHARS = 24000;
 export const COMPACTION_USER_MSG_CLAMP = 4000;
 export const COMPACTION_ASSISTANT_TEXT_CLAMP = 2500;
 export const COMPACTION_TOOL_USE_CLAMP = 1200;

@@ -212,7 +212,9 @@ import type {
   TaskEventDetailResult,
   TaskTimelinePageRequest,
   TaskTimelinePageResult,
+  Task,
   BotConversationListQuery,
+  BotConversationReopenRequest,
   BotNotificationPolicy,
   UpdateBotNotificationPolicyRequest,
 } from "../shared/types";
@@ -2747,6 +2749,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_LIST_SIDEBAR, opts),
   listBotConversations: (query: BotConversationListQuery) =>
     invokeTaskIpcWithRendererTiming(IPC_CHANNELS.BOT_CONVERSATIONS_LIST, query),
+  reopenBotConversation: (request: BotConversationReopenRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_CONVERSATION_REOPEN, request) as Promise<Task>,
   getComposerDraft: (request: ComposerDraftGetRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_DRAFT_GET, request) as Promise<ComposerDraft | null>,
   upsertComposerDraft: (draft: ComposerDraft) =>
@@ -5965,6 +5969,7 @@ export interface ElectronAPI {
     };
   }) => Promise<Any[]>;
   listBotConversations: (query: BotConversationListQuery) => Promise<Any[]>;
+  reopenBotConversation: (request: BotConversationReopenRequest) => Promise<Task>;
   getComposerDraft?: (request: ComposerDraftGetRequest) => Promise<ComposerDraft | null>;
   upsertComposerDraft?: (draft: ComposerDraft) => Promise<{
     accepted: boolean;

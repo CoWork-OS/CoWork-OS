@@ -25,6 +25,7 @@ import { hasAssistantMediaDirective } from "./assistant-media-directives";
 import { hasDisplayableAssistantText } from "../components/MainContent/markdown-normalization";
 import {
   filterAdjacentDuplicateTimelineFailures,
+  filterBotConversationTranscriptEvents,
   filterResolvedApprovalNarration,
   filterVerboseTimelineNoise,
   isLlmRequestCancelledEvent,
@@ -513,6 +514,67 @@ function getCompletionComparableTexts(event: TaskEvent): Set<string> {
   );
 }
 
+function getCompletionDeduplicationKey(event: TaskEvent): string {
+  if (getEffectiveTaskEventType(event) !== "task_completed") return "";
+
+  const summary = normalizeCompletionTextForComparison(getCompletionSummaryText(event));
+  if (!summary) return "";
+
+  const payload = asObject(event.payload);
+  const terminalStatus =
+    typeof payload.terminalStatus === "string" && payload.terminalStatus.trim().length > 0
+      ? payload.terminalStatus.trim()
+      : "ok";
+  const pendingChecklist = Array.isArray(payload.pendingChecklist)
+    ? payload.pendingChecklist
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join("|")
+    : "";
+
+  return [event.taskId, terminalStatus, pendingChecklist, summary].join("\u0000");
+}
+
+function getCompletionRetentionScore(event: TaskEvent, eventIndex: number): number {
+  const payload = asObject(event.payload);
+  const bestKnownOutcome = asObject(payload.bestKnownOutcome);
+  const hasOutputSummary =
+    Object.keys(asObject(payload.outputSummary)).length > 0 ||
+    Object.keys(asObject(bestKnownOutcome.outputSummary)).length > 0;
+  const hasTerminalStatus = typeof payload.terminalStatus === "string";
+
+  // Prefer the record that preserves output/terminal metadata. When the records
+  // are otherwise equivalent, the later durable event is the authoritative one.
+  return (hasOutputSummary ? 1_000_000 : 0) + (hasTerminalStatus ? 1_000 : 0) + eventIndex;
+}
+
+function getDuplicateCompletionEventIndexes(filteredEvents: TaskEvent[]): Set<number> {
+  const retainedByKey = new Map<string, { index: number; score: number }>();
+  const suppressedIndexes = new Set<number>();
+
+  filteredEvents.forEach((event, index) => {
+    const key = getCompletionDeduplicationKey(event);
+    if (!key) return;
+
+    const score = getCompletionRetentionScore(event, index);
+    const retained = retainedByKey.get(key);
+    if (!retained) {
+      retainedByKey.set(key, { index, score });
+      return;
+    }
+
+    if (score >= retained.score) {
+      suppressedIndexes.add(retained.index);
+      retainedByKey.set(key, { index, score });
+    } else {
+      suppressedIndexes.add(index);
+    }
+  });
+
+  return suppressedIndexes;
+}
+
 function deriveChecklistState(events: TaskEvent[]): SessionChecklistState | null {
   const normalizeChecklistState = (payload: unknown): SessionChecklistState | null => {
     const payloadObject = asObject(payload);
@@ -848,6 +910,7 @@ function deriveToolCallPairing(
 
 function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[] {
   const eventItems: BaseTimelineItem[] = [];
+  const duplicateCompletionEventIndexes = getDuplicateCompletionEventIndexes(filteredEvents);
   let currentBlock: TaskEvent[] = [];
   let currentBlockIndices: number[] = [];
   const completionSummariesByTask = new Map<
@@ -924,6 +987,7 @@ function deriveBaseTimelineItems(filteredEvents: TaskEvent[]): BaseTimelineItem[
   };
 
   for (let index = 0; index < filteredEvents.length; index += 1) {
+    if (duplicateCompletionEventIndexes.has(index)) continue;
     const event = filteredEvents[index];
     if (isBoundaryEvent(event)) {
       if (getEffectiveTaskEventType(event) === "assistant_message") {
@@ -988,10 +1052,14 @@ export function deriveSharedTaskEventUiState(
     projectionMode === "live" && rawEvents !== params.rawEvents
       ? normalizeEventsForTimelineUi(selectTaskStatusProjectionRawEvents(params.rawEvents))
       : normalizedEvents;
+  const botConversationEvents =
+    params.task?.agentConfig?.botConversation === true
+      ? filterBotConversationTranscriptEvents(normalizedEvents)
+      : normalizedEvents;
   const candidateEvents = params.verboseSteps
-    ? filterVerboseTimelineNoise(normalizedEvents)
+    ? filterVerboseTimelineNoise(botConversationEvents)
     : filterAdjacentDuplicateTimelineFailures(
-        filterResolvedApprovalNarration(normalizedEvents, params.rawEvents),
+        filterResolvedApprovalNarration(botConversationEvents, params.rawEvents),
       );
 
   const liveEvents: TaskEvent[] = [];
@@ -1030,7 +1098,7 @@ export function deriveSharedTaskEventUiState(
   }
 
   const dedupedLiveEvents = filterAdjacentDuplicateTimelineFailures(liveEvents);
-  const parallelGroupProjection = buildParallelGroupProjection(normalizedEvents);
+  const parallelGroupProjection = buildParallelGroupProjection(botConversationEvents);
   const suppressedParallelEventIds = parallelGroupProjection.suppressedEventIds;
   const toolCallPairing = deriveToolCallPairing(dedupedLiveEvents, suppressedParallelEventIds);
   const baseTimelineItems = deriveBaseTimelineItems(dedupedLiveEvents);
@@ -1067,6 +1135,9 @@ export function deriveSharedTaskEventUiState(
   return {
     projectionMode,
     rawEventCount: params.rawEvents.length,
+    // Keep the normalized event stream complete for collaboration chrome and
+    // diagnostics. Bot-only transcript filtering belongs to filteredEvents;
+    // otherwise the header would lose its handoff receipts altogether.
     normalizedEvents,
     filteredEvents: dedupedLiveEvents,
     liveEvents: dedupedLiveEvents,

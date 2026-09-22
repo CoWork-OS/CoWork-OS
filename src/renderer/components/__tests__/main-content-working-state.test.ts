@@ -45,6 +45,9 @@ import {
 } from "../task-automation-utils";
 
 const mainContentPath = fileURLToPath(new URL("../MainContent/MainContent.tsx", import.meta.url));
+const mainContentStylesPath = fileURLToPath(
+  new URL("../MainContent/main-content.css", import.meta.url),
+);
 const messageUiPath = fileURLToPath(new URL("../MainContent/message-ui.tsx", import.meta.url));
 const appPath = fileURLToPath(new URL("../../App.tsx", import.meta.url));
 
@@ -598,6 +601,68 @@ describe("bot transcript surface", () => {
     expect(mainContentSource).not.toContain("Bot chats keep one continuous transcript");
     expect(appSource).toContain("botConversationTasks");
     expect(appSource).toContain("bot.displayName,");
+  });
+
+  it("hides execution-step rows from bot transcripts without hiding messages", () => {
+    const mainContentSource = readFileSync(mainContentPath, "utf8");
+
+    expect(mainContentSource).toContain(
+      "const isConversationOnlySurface = isChatTask || isBotConversation;",
+    );
+    expect(mainContentSource).toMatch(
+      /if \(item\.kind === "action_block"\) \{\s+return !isConversationOnlySurface;/,
+    );
+    expect(mainContentSource).toMatch(
+      /isConversationOnlySurface &&\s+!isUserMessage &&\s+!isAssistantMessage &&\s+!isCompletionSummaryMessage/,
+    );
+    expect(mainContentSource).toContain("isChatTask={isConversationOnlySurface}");
+    expect(mainContentSource).toMatch(/\{!isBotConversation &&\s+\(hasNonConversationEvents/);
+  });
+
+  it("turns raw send-agent protocol JSON into a compact bot receipt", () => {
+    const mainContentSource = readFileSync(mainContentPath, "utf8");
+
+    expect(mainContentSource).toContain("parseAgentMessageProtocolResult(messageText)");
+    expect(mainContentSource).toContain("agent-outbound-message-receipt");
+    expect(mainContentSource).toContain("Agent message ${agentMessageProtocolReceipt.label");
+  });
+
+  it("keeps collaboration context inside the transcript and attributes bot replies", () => {
+    const mainContentSource = readFileSync(mainContentPath, "utf8");
+    const mainContentStyles = readFileSync(mainContentStylesPath, "utf8");
+    const taskContentIndex = mainContentSource.indexOf('<div className="task-content">');
+    const collaborationHeaderIndex = mainContentSource.indexOf("<BotCollaborationHeader");
+
+    expect(taskContentIndex).toBeGreaterThan(-1);
+    expect(collaborationHeaderIndex).toBeGreaterThan(taskContentIndex);
+    expect(mainContentSource).toContain("bot-message-attribution-avatar");
+    expect(mainContentStyles).toContain(".bot-conversation .chat-bubble.user-bubble");
+    expect(mainContentStyles).toContain(
+      ".bot-conversation .chat-message.assistant-message .chat-bubble.assistant-bubble",
+    );
+    expect(mainContentStyles).toContain(".bot-conversation .input-container");
+    expect(mainContentStyles).toMatch(
+      /\.bot-conversation \.input-container \.lets-go-btn\.lets-go-btn-sm \{\s+background: var\(--bot-send-bg\);\s+color: var\(--bot-send-fg\);/,
+    );
+    expect(mainContentStyles).toMatch(
+      /\.bot-conversation \.input-container \.lets-go-btn\.lets-go-btn-sm svg \{\s+color: var\(--bot-send-fg\) !important;\s+stroke: currentColor !important;/,
+    );
+  });
+
+  it("uses the shared collaboration projection for waiting copy", () => {
+    const mainContentSource = readFileSync(mainContentPath, "utf8");
+    const appSource = readFileSync(appPath, "utf8");
+
+    expect(mainContentSource).toContain(
+      "conversationProjection?: BotConversationProjection | null",
+    );
+    expect(mainContentSource).toContain("const isBotHandoffWaiting =");
+    expect(mainContentSource).toContain("Waiting on a teammate");
+    expect(mainContentSource).toContain(
+      "The conversation will continue when the teammate replies.",
+    );
+    expect(mainContentSource).toContain("conversationProjection={conversationProjection}");
+    expect(appSource).toContain("conversationProjection={botConversationProjection}");
   });
 });
 

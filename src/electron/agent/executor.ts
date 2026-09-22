@@ -197,6 +197,7 @@ import {
 } from "../memory/WorkspaceKitContext";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { InputSanitizer, OutputFilter } from "./security";
+import { buildFreshBotHandoffPrompt } from "../../shared/bot-handoff";
 import { buildRolePersonaPrompt } from "../agents/role-persona";
 import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { getAwarenessService } from "../awareness/AwarenessService";
@@ -246,6 +247,7 @@ import {
   COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
   COMPACTION_SUMMARY_MIN_OUTPUT_TOKENS,
   COMPACTION_SUMMARY_MAX_INPUT_CHARS,
+  COMPACTION_BOT_LLM_MAX_INPUT_CHARS,
   COMPACTION_USER_MSG_CLAMP,
   COMPACTION_ASSISTANT_TEXT_CLAMP,
   COMPACTION_TOOL_USE_CLAMP,
@@ -302,6 +304,8 @@ type TaskExecutorFollowUpOptions = Pick<
   | "messageId"
   | "senderTaskId"
   | "senderLabel"
+  | "inReplyToMessageId"
+  | "inReplyToTaskId"
 > & {
   /** Called after transcript and queue state are durably persisted. */
   onAccepted?: () => void | Promise<void>;
@@ -1572,6 +1576,31 @@ export class TaskExecutor {
     const clearTerminalFailure = opts?.clearTerminalFailure !== false;
     const summary = this.buildFollowUpResultSummary();
     const trimmedSummary = typeof summary === "string" ? summary.trim() : "";
+
+    // Follow-up completion used to write `completed` directly, bypassing the
+    // daemon's bot-handoff contract. A bot conversation may have been
+    // reopened from a previously completed row while a teammate reply is
+    // still pending, so reconcile the durable event stream before publishing
+    // another terminal completion.
+    const handoffReconciliation = (
+      this.daemon as Any
+    ).reconcileBotHandoffBeforeFollowUpCompletion?.(this.task.id, trimmedSummary || undefined);
+    if (handoffReconciliation?.deferred) {
+      const refreshedTask = (this.daemon as Any).getTask?.(this.task.id);
+      if (refreshedTask) {
+        this.task = { ...this.task, ...refreshedTask };
+      } else {
+        this.task.status = "blocked";
+        this.task.completedAt = undefined;
+      }
+      this.emitEvent("task_status", {
+        status: "blocked",
+        message:
+          this.task.error || "Waiting for a teammate reply before finishing this conversation.",
+        botHandoffWaiting: true,
+      });
+      return;
+    }
 
     this.task.status = "completed";
     this.task.completedAt = completedAt;
@@ -4782,6 +4811,26 @@ export class TaskExecutor {
     }
   }
 
+  /**
+   * Start a teammate handoff from a clean model context while retaining the
+   * durable user-facing transcript. Each incoming handoff is a separate work
+   * item; carrying an older bot's unfinished task into the next turn caused
+   * stale-file work and false completions in live collaboration runs.
+   */
+  private resetConversationForBotHandoff(): void {
+    this.updateConversationHistory([]);
+    this.lastUserMessage = "";
+    this.lastAssistantOutput = null;
+    this.lastNonVerificationOutput = null;
+    this.lastAssistantText = null;
+    this.explicitChatSummaryBlock = null;
+    this.explicitChatSummaryCreatedAt = 0;
+    this.explicitChatSummarySourceMessageCount = 0;
+    this.explicitChatSummaryInputSignature = "";
+    this.stepOutcomeSummaries = [];
+    this.getSessionRuntime().saveSnapshot();
+  }
+
   private appendConversationHistory(message: LLMMessage): void {
     this.updateConversationHistory([...this.conversationHistory, message]);
   }
@@ -5624,6 +5673,17 @@ ${transcript}
         TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
       ].join("\n");
     };
+
+    // Bot research is durable at the task-event layer and often contains many
+    // large web-result blocks. A second LLM request to summarize an oversized
+    // bot transcript is both redundant and prone to timeout/retry storms. Keep
+    // the bounded transcript fallback so the agent can continue immediately.
+    if (
+      this.task?.agentConfig?.botConversation === true &&
+      transcript.length > COMPACTION_BOT_LLM_MAX_INPUT_CHARS
+    ) {
+      return buildDeterministicFallback();
+    }
 
     try {
       const response = await this.callLLMWithRetry(
@@ -7883,11 +7943,13 @@ ${transcript}
         lines.push(
           "As the lead, delegate focused read-only or execution work to the relevant teammates, wait for their durable replies, and summarize only received results.",
         );
-      } else {
-        lines.push(
-          "When the lead or another teammate sends you a request, complete the focused work and send the concise result back with bot=atlas.",
-        );
       }
+      lines.push(
+        "For any inbound teammate handoff, complete the focused work and send the concise result back to the requesting teammate. Prefer send_agent_message with task_id from the [NEW TEAMMATE HANDOFF] boundary so the durable reply is correlated; otherwise use that teammate's bot handle. Do not default to Atlas unless Atlas is the requester.",
+      );
+      lines.push(
+        "A [CORRELATED TEAM REPLY] is a delivery receipt for your own earlier handoff, not a new request. Do not send another message for it or start a reply loop; finish the turn after recording the received result. Only message again when the receipt explicitly contains a new action request.",
+      );
     }
 
     const workerRole = resolveWorkerRoleKind(this.task.workerRole);
@@ -14821,6 +14883,15 @@ ${transcript}
   }
 
   private getToolPolicyContext() {
+    const daemon = this.daemon as Any | undefined;
+    const botMessagingContext =
+      typeof daemon?.getBotConversationMessagingContext === "function"
+        ? daemon.getBotConversationMessagingContext(this.task.id)
+        : undefined;
+    const botMessagingAuthorized =
+      botMessagingContext?.authorized === true ||
+      (typeof daemon?.isBotConversationMessagingAuthorized === "function" &&
+        daemon.isBotConversationMessagingAuthorized(this.task.id) === true);
     return {
       executionMode: this.getEffectiveExecutionMode(),
       taskDomain: this.getEffectiveTaskDomain(),
@@ -14828,6 +14899,9 @@ ${transcript}
       taskIntent: this.task.agentConfig?.taskIntent,
       shellEnabled: this.workspace.permissions.shell,
       humanInputPolicy: this.humanInputPolicy,
+      botConversation: this.task.agentConfig?.botConversation === true,
+      botTeamId: botMessagingContext?.botTeamId || this.task.agentConfig?.botTeamId,
+      botMessagingAuthorized,
     };
   }
 
@@ -14847,6 +14921,11 @@ ${transcript}
       .filter(([, count]) => count > 0)
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 16);
+    const daemon = this.daemon as Any | undefined;
+    const botMessagingContext =
+      typeof daemon?.getBotConversationMessagingContext === "function"
+        ? daemon.getBotConversationMessagingContext(this.task.id)
+        : undefined;
 
     return JSON.stringify({
       toolCatalogVersion:
@@ -14859,6 +14938,12 @@ ${transcript}
       taskDomain: this.getEffectiveTaskDomain(),
       humanInputPolicy: this.humanInputPolicy,
       taskIntent: this.task.agentConfig?.taskIntent || "",
+      botConversation: this.task.agentConfig?.botConversation === true,
+      botTeamId: botMessagingContext?.botTeamId || this.task.agentConfig?.botTeamId || "",
+      botMessagingAuthorized:
+        botMessagingContext?.authorized === true ||
+        (typeof daemon?.isBotConversationMessagingAuthorized === "function" &&
+          daemon.isBotConversationMessagingAuthorized(this.task.id) === true),
       webSearchMode: this.webSearchMode,
       visualCanvasTask: this.isVisualCanvasTask(),
       hasAllowlist: params.hasAllowlist,
@@ -16501,19 +16586,38 @@ ${transcript}
   }
 
   private applyStepScopedToolPolicy(tools: Any[]): Any[] {
+    const retainVerifiedBotMessagingTool = (candidateTools: Any[]): Any[] => {
+      if (this.task.agentConfig?.botConversation !== true) return candidateTools;
+      const policyContext =
+        typeof (this as Any).getToolPolicyContext === "function"
+          ? (this as Any).getToolPolicyContext()
+          : undefined;
+      if (policyContext?.botMessagingAuthorized !== true) return candidateTools;
+      const sendTool = tools.find(
+        (tool) => canonicalizeToolNameUtil(String(tool.name || "")) === "send_agent_message",
+      );
+      const alreadyIncluded = candidateTools.some(
+        (tool) => canonicalizeToolNameUtil(String(tool.name || "")) === "send_agent_message",
+      );
+      if (!sendTool || alreadyIncluded) return candidateTools;
+      return [...candidateTools, sendTool];
+    };
+
     if (this.isSimpleImageGenerationTask()) {
-      return tools.filter((tool) =>
-        this.isSimpleImageGenerationAllowedTool(String(tool.name || "")),
+      return retainVerifiedBotMessagingTool(
+        tools.filter((tool) => this.isSimpleImageGenerationAllowedTool(String(tool.name || ""))),
       );
     }
 
     if (this.isTerminalImageGenerationTask()) {
-      return tools.filter((tool) => {
-        const name = canonicalizeToolNameUtil(String(tool.name || ""));
-        return (
-          name !== "analyze_image" && name !== "read_pdf_visual" && !name.startsWith("task_list_")
-        );
-      });
+      return retainVerifiedBotMessagingTool(
+        tools.filter((tool) => {
+          const name = canonicalizeToolNameUtil(String(tool.name || ""));
+          return (
+            name !== "analyze_image" && name !== "read_pdf_visual" && !name.startsWith("task_list_")
+          );
+        }),
+      );
     }
 
     // Bot handoff requests are intentionally narrow even when a follow-up
@@ -16554,7 +16658,9 @@ ${transcript}
       const scopedDiscoveryTools = tools.filter((tool) =>
         discoveryTools.has(canonicalizeToolNameUtil(String(tool.name || ""))),
       );
-      return scopedDiscoveryTools.length > 0 ? scopedDiscoveryTools : tools;
+      return retainVerifiedBotMessagingTool(
+        scopedDiscoveryTools.length > 0 ? scopedDiscoveryTools : tools,
+      );
     }
 
     if (
@@ -16579,8 +16685,10 @@ ${transcript}
         "revise_plan",
         "request_user_input",
       ]);
-      return tools.filter((tool) =>
-        documentAnalysisTools.has(canonicalizeToolNameUtil(String(tool.name || ""))),
+      return retainVerifiedBotMessagingTool(
+        tools.filter((tool) =>
+          documentAnalysisTools.has(canonicalizeToolNameUtil(String(tool.name || ""))),
+        ),
       );
     }
 
@@ -16622,7 +16730,7 @@ ${transcript}
         : 0;
     const stepCap = stepKind === "mutation_required" ? 56 : stepKind === "verification" ? 32 : 40;
     return this.capToolCount(
-      codeFirstUiScoped,
+      retainVerifiedBotMessagingTool(codeFirstUiScoped),
       stepCap + deepWorkBlockedBoost,
       stepCap + deepWorkBlockedBoost,
     );
@@ -19171,6 +19279,46 @@ You are continuing a previous conversation. The context from the previous conver
     return "I need your input before I can continue. Reply below with the decision or missing detail, or stop the task.";
   }
 
+  private getBotWorkspacePreflightBlock(taskPrompt: string): {
+    reason: "workspace_required" | "workspace_read_failed";
+    message: string;
+  } | null {
+    if (this.task.agentConfig?.botConversation !== true) return null;
+    if (this.workspacePreflightAcknowledged || this.capabilityUpgradeRequested) return null;
+    if (this.isInternalAppOrToolChangeIntent(taskPrompt)) return null;
+    if (this.classifyWorkspaceNeed(taskPrompt) !== "needs_existing") return null;
+
+    const signals = this.getWorkspaceSignals();
+    const looksLikeProject =
+      signals.hasProjectMarkers || signals.hasCodeFiles || signals.hasAppDirs;
+    const isTemp =
+      Boolean(this.workspace?.isTemp) || isTempWorkspaceId(String(this.workspace?.id || ""));
+    const workspaceLabel =
+      typeof this.workspace?.path === "string" && this.workspace.path.trim()
+        ? this.workspace.path
+        : String(this.workspace?.id || "the selected workspace");
+
+    if (isTemp && !looksLikeProject) {
+      return {
+        reason: "workspace_required",
+        message:
+          `BLOCKED: this teammate was assigned an existing-project request, but its mounted workspace (${workspaceLabel}) is temporary and does not contain a detectable project. ` +
+          "Select the repository workspace and retry so the teammate can inspect the real files.",
+      };
+    }
+
+    if (!isTemp && signals.readFailed) {
+      return {
+        reason: "workspace_read_failed",
+        message:
+          `BLOCKED: this teammate was assigned an existing-project request, but it could not read the mounted workspace (${workspaceLabel}). ` +
+          "Check the repository path and permissions, then retry.",
+      };
+    }
+
+    return null;
+  }
+
   private preflightWorkspaceCheck(): boolean {
     if (!this.workspacePreflightSummaryEmitted) {
       this.workspacePreflightSummaryEmitted = true;
@@ -19248,6 +19396,26 @@ You are continuing a previous conversation. The context from the previous conver
       typeof this.getContractPrompt === "function"
         ? this.getContractPrompt()
         : String(this.task?.rawPrompt || this.task?.userPrompt || this.task?.prompt || "");
+
+    const botWorkspaceBlock =
+      typeof (this as Any).getBotWorkspacePreflightBlock === "function"
+        ? (this as Any).getBotWorkspacePreflightBlock(taskPrompt)
+        : null;
+    if (botWorkspaceBlock) {
+      this.lastAssistantOutput = botWorkspaceBlock.message;
+      this.lastAssistantText = botWorkspaceBlock.message;
+      this.lastNonVerificationOutput = botWorkspaceBlock.message;
+      this.emitEvent("assistant_message", { message: botWorkspaceBlock.message });
+      this.emitEvent("log", {
+        metric: "bot_workspace_preflight_failed",
+        reason: botWorkspaceBlock.reason,
+        taskId: this.task.id,
+        workspaceId: this.workspace.id,
+        workspacePath: this.workspace.path,
+        partialResultAvailable: false,
+      });
+      return true;
+    }
 
     return preflightWorkspaceCheckUtil({
       shouldPauseForQuestions: this.shouldPauseForQuestions,
@@ -29250,6 +29418,7 @@ Return ONLY a JSON object:
         },
         drainPendingMessages: async (_state: TurnKernelIterationState) => {
           let pendingMsg = this.drainPendingFollowUp();
+          let resetForPendingBotHandoff = false;
           while (pendingMsg) {
             logger.info(`${this.logTag} Injecting queued follow-up into step execution`);
             this.daemon.logEvent(this.task.id, "agent_follow_up_started", {
@@ -29259,6 +29428,12 @@ Return ONLY a JSON object:
               ...(pendingMsg.messageSource ? { messageSource: pendingMsg.messageSource } : {}),
               ...(pendingMsg.senderTaskId ? { senderTaskId: pendingMsg.senderTaskId } : {}),
               ...(pendingMsg.senderLabel ? { senderLabel: pendingMsg.senderLabel } : {}),
+              ...(pendingMsg.inReplyToMessageId
+                ? { inReplyToMessageId: pendingMsg.inReplyToMessageId }
+                : {}),
+              ...(pendingMsg.inReplyToTaskId
+                ? { inReplyToTaskId: pendingMsg.inReplyToTaskId }
+                : {}),
             });
             const pendingMessageId =
               typeof pendingMsg.messageId === "string" ? pendingMsg.messageId.trim() : "";
@@ -29284,7 +29459,23 @@ Return ONLY a JSON object:
             }
             try {
               this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
-              const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
+              const isPendingBotHandoff = pendingMsg.messageSource === "agent";
+              if (isPendingBotHandoff && !resetForPendingBotHandoff) {
+                this.resetConversationForBotHandoff();
+                messages = this.conversationHistory;
+                resetForPendingBotHandoff = true;
+              }
+              const userUpdate = isPendingBotHandoff
+                ? buildFreshBotHandoffPrompt(
+                    pendingMsg.message,
+                    pendingMsg.senderLabel,
+                    pendingMsg.senderTaskId,
+                    {
+                      inReplyToMessageId: pendingMsg.inReplyToMessageId,
+                      inReplyToTaskId: pendingMsg.inReplyToTaskId,
+                    },
+                  )
+                : `USER UPDATE: ${pendingMsg.message}`;
               const content = await this.buildUserContent(
                 this.buildQuotedAssistantContextMessage(
                   userUpdate,
@@ -34630,16 +34821,64 @@ Return ONLY a JSON object:
    * Called by the daemon when an interrupted task is being resumed.
    * Acquires the lifecycle mutex, restores context, and continues the plan.
    */
-  async resumeAfterInterruption(): Promise<void> {
+  async resumeAfterInterruption(
+    recoveredBotHandoff?: Pick<
+      TaskFollowUpInput,
+      | "message"
+      | "messageSource"
+      | "messageId"
+      | "senderTaskId"
+      | "senderLabel"
+      | "inReplyToMessageId"
+      | "inReplyToTaskId"
+    >,
+  ): Promise<void> {
     await this.getLifecycleMutex().runExclusive(async () => {
       if (this.shutdownRequested) return;
-      await this.resumeAfterInterruptionUnlocked();
+      await this.resumeAfterInterruptionUnlocked(recoveredBotHandoff);
     });
   }
 
-  private async resumeAfterInterruptionUnlocked(): Promise<void> {
+  private async resumeAfterInterruptionUnlocked(
+    recoveredBotHandoff?: Pick<
+      TaskFollowUpInput,
+      | "message"
+      | "messageSource"
+      | "messageId"
+      | "senderTaskId"
+      | "senderLabel"
+      | "inReplyToMessageId"
+      | "inReplyToTaskId"
+    >,
+  ): Promise<void> {
     try {
       if (!this.plan) {
+        if (recoveredBotHandoff?.message && recoveredBotHandoff.messageSource === "agent") {
+          // A bot handoff may already be durably delivered when the process
+          // exits. In that case the queue receipt is terminal, but the
+          // receiver still needs one fresh execution turn after restart. Do
+          // not rebuild the persona's initial conversation; replay the exact
+          // handoff through the normal agent-message path instead.
+          logger.info(
+            `${this.logTag} Replaying the latest delivered teammate handoff after restart`,
+          );
+          this.emitEvent("log", {
+            message: "Replaying the latest delivered teammate handoff after restart.",
+            messageId: recoveredBotHandoff.messageId,
+            senderTaskId: recoveredBotHandoff.senderTaskId,
+            recovery: "bot_handoff",
+          });
+          await this.sendMessageUnlocked(recoveredBotHandoff.message, undefined, undefined, {
+            messageSource: "agent",
+            messageId: recoveredBotHandoff.messageId,
+            senderTaskId: recoveredBotHandoff.senderTaskId,
+            senderLabel: recoveredBotHandoff.senderLabel,
+            inReplyToMessageId: recoveredBotHandoff.inReplyToMessageId,
+            inReplyToTaskId: recoveredBotHandoff.inReplyToTaskId,
+            suppressUserMessageEvent: true,
+          });
+          return;
+        }
         // No plan was restored — fall back to full execution from scratch
         logger.info(
           `${this.logTag} No plan available for resumption, falling back to full execution`,
@@ -35753,6 +35992,8 @@ Return ONLY a JSON object:
     senderTaskId?: TaskFollowUpInput["senderTaskId"],
     senderLabel?: TaskFollowUpInput["senderLabel"],
     deliveryMode?: TaskFollowUpInput["deliveryMode"],
+    inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
+    inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
   ): void {
     if (this.shutdownRequested) {
       throw new Error("Task executor is shutting down; follow-up was not queued.");
@@ -35769,6 +36010,8 @@ Return ONLY a JSON object:
       senderTaskId,
       senderLabel,
       deliveryMode,
+      inReplyToMessageId,
+      inReplyToTaskId,
     );
     logger.info(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
@@ -35859,7 +36102,12 @@ Return ONLY a JSON object:
   private buildMessageProvenanceEventPayload(
     context?: Pick<
       TaskFollowUpInput,
-      "messageSource" | "messageId" | "senderTaskId" | "senderLabel"
+      | "messageSource"
+      | "messageId"
+      | "senderTaskId"
+      | "senderLabel"
+      | "inReplyToMessageId"
+      | "inReplyToTaskId"
     >,
   ): Record<string, string> {
     return {
@@ -35867,6 +36115,8 @@ Return ONLY a JSON object:
       ...(context?.messageId ? { messageId: context.messageId } : {}),
       ...(context?.senderTaskId ? { senderTaskId: context.senderTaskId } : {}),
       ...(context?.senderLabel ? { senderLabel: context.senderLabel } : {}),
+      ...(context?.inReplyToMessageId ? { inReplyToMessageId: context.inReplyToMessageId } : {}),
+      ...(context?.inReplyToTaskId ? { inReplyToTaskId: context.inReplyToTaskId } : {}),
     };
   }
 
@@ -36388,7 +36638,12 @@ Return ONLY a JSON object:
       agentConfigOverride?: AgentConfig;
       messageContext?: Pick<
         TaskFollowUpInput,
-        "messageSource" | "messageId" | "senderTaskId" | "senderLabel"
+        | "messageSource"
+        | "messageId"
+        | "senderTaskId"
+        | "senderLabel"
+        | "inReplyToMessageId"
+        | "inReplyToTaskId"
       >;
       onAccepted?: () => void | Promise<void>;
       onExecutionAccepted?: () => void | Promise<void>;
@@ -36475,6 +36730,20 @@ Return ONLY a JSON object:
     }
     if (goalFollowUp.executionMessage) {
       executionMessage = goalFollowUp.executionMessage;
+    }
+    const isFreshBotHandoff = opts?.messageContext?.messageSource === "agent";
+    if (isFreshBotHandoff && !recoveredFromTurnLimit) {
+      this.resetConversationForBotHandoff();
+      executionMessage = buildFreshBotHandoffPrompt(
+        executionMessage,
+        opts?.messageContext?.senderLabel,
+        opts?.messageContext?.senderTaskId,
+        {
+          inReplyToMessageId: opts?.messageContext?.inReplyToMessageId,
+          inReplyToTaskId: opts?.messageContext?.inReplyToTaskId,
+        },
+      );
+      this.lastUserMessage = message;
     }
     const followUpConversationMessage = this.buildQuotedAssistantContextMessage(
       executionMessage,
@@ -36895,6 +37164,7 @@ Return ONLY a JSON object:
         },
         drainPendingMessages: async (_state: TurnKernelIterationState) => {
           let pendingMsg = this.drainPendingFollowUp();
+          let resetForPendingBotHandoff = false;
           while (pendingMsg) {
             logger.info(`${this.logTag} Injecting queued follow-up into sendMessage loop`);
             this.daemon.logEvent(this.task.id, "agent_follow_up_started", {
@@ -36904,6 +37174,12 @@ Return ONLY a JSON object:
               ...(pendingMsg.messageSource ? { messageSource: pendingMsg.messageSource } : {}),
               ...(pendingMsg.senderTaskId ? { senderTaskId: pendingMsg.senderTaskId } : {}),
               ...(pendingMsg.senderLabel ? { senderLabel: pendingMsg.senderLabel } : {}),
+              ...(pendingMsg.inReplyToMessageId
+                ? { inReplyToMessageId: pendingMsg.inReplyToMessageId }
+                : {}),
+              ...(pendingMsg.inReplyToTaskId
+                ? { inReplyToTaskId: pendingMsg.inReplyToTaskId }
+                : {}),
             });
             const pendingMessageId =
               typeof pendingMsg.messageId === "string" ? pendingMsg.messageId.trim() : "";
@@ -36928,7 +37204,23 @@ Return ONLY a JSON object:
             }
             try {
               this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
-              const userUpdate = `USER UPDATE: ${pendingMsg.message}`;
+              const isPendingBotHandoff = pendingMsg.messageSource === "agent";
+              if (isPendingBotHandoff && !resetForPendingBotHandoff) {
+                this.resetConversationForBotHandoff();
+                messages = this.conversationHistory;
+                resetForPendingBotHandoff = true;
+              }
+              const userUpdate = isPendingBotHandoff
+                ? buildFreshBotHandoffPrompt(
+                    pendingMsg.message,
+                    pendingMsg.senderLabel,
+                    pendingMsg.senderTaskId,
+                    {
+                      inReplyToMessageId: pendingMsg.inReplyToMessageId,
+                      inReplyToTaskId: pendingMsg.inReplyToTaskId,
+                    },
+                  )
+                : `USER UPDATE: ${pendingMsg.message}`;
               const content = await this.buildUserContent(
                 this.buildQuotedAssistantContextMessage(
                   userUpdate,

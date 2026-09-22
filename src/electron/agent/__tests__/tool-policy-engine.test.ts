@@ -92,6 +92,54 @@ describe("tool-policy-engine request_user_input gating", () => {
     expect(decision.decision).toBe("deny");
     expect(decision.reason).toContain('blocked for the "general" domain');
   });
+
+  it("allows only internal bot messaging across a read-only mode gate", () => {
+    const context = {
+      executionMode: "plan" as const,
+      taskDomain: "general" as const,
+      botConversation: true,
+      botTeamId: "team-1",
+      botMessagingAuthorized: true,
+    };
+
+    expect(evaluateToolPolicy("send_agent_message", context).decision).toBe("allow");
+    expect(evaluateToolPolicy("write_file", context).decision).toBe("deny");
+  });
+
+  it("does not expose the bot messaging exception to ordinary tasks", () => {
+    const decision = evaluateToolPolicy("send_agent_message", {
+      executionMode: "plan",
+      taskDomain: "general",
+    });
+
+    expect(decision.decision).toBe("deny");
+    expect(decision.reason).toContain("plan mode");
+  });
+
+  it("fails closed when persisted bot markers lack daemon authorization", () => {
+    const decision = evaluateToolPolicy("send_agent_message", {
+      executionMode: "plan",
+      taskDomain: "general",
+      botConversation: true,
+      botTeamId: "team-1",
+      botMessagingAuthorized: false,
+    });
+
+    expect(decision.decision).toBe("deny");
+    expect(decision.reason).toContain("plan mode");
+  });
+
+  it("requires a verified persistent team before allowing bot messaging", () => {
+    const decision = evaluateToolPolicy("send_agent_message", {
+      executionMode: "plan",
+      taskDomain: "general",
+      botConversation: true,
+      botTeamId: "",
+      botMessagingAuthorized: true,
+    });
+
+    expect(decision.decision).toBe("deny");
+  });
 });
 
 describe("evaluateToolAvailability computer_use", () => {

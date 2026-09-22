@@ -4,8 +4,9 @@ import * as path from "path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { AgentDaemon } from "../daemon";
+import { AgentDaemon, BOT_HANDOFF_REPLY_TIMEOUT_MS } from "../daemon";
 import type { TaskEvent } from "../../../shared/types";
+import { getOutstandingBotHandoffReply, getPendingBotHandoff } from "../../../shared/bot-handoff";
 import { QueuedAttachmentStore } from "../runtime/queued-attachment-store";
 
 type Any = Record<string, any>;
@@ -22,6 +23,33 @@ function makeEvent(id: string, taskId: string, type: TaskEvent["type"], payload:
 }
 
 describe("AgentDaemon agent-message receipts", () => {
+  it("returns the repaired bot-team identity with messaging authorization", () => {
+    const task = {
+      id: "bot-task",
+      agentConfig: { botConversation: true },
+    };
+    const normalizedTask = {
+      ...task,
+      agentConfig: { botConversation: true, botTeamId: "team-1" },
+    };
+    const daemonLike = {
+      taskRepo: { findById: vi.fn().mockReturnValue(task) },
+      ensureBotTaskTeam: vi.fn().mockReturnValue(normalizedTask),
+      getBotTeamContext: vi.fn().mockReturnValue({ team: { id: "team-1" } }),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    expect(
+      (AgentDaemon.prototype as Any).getBotConversationMessagingContext.call(
+        daemonLike,
+        "bot-task",
+      ),
+    ).toEqual({
+      authorized: true,
+      botTeamId: "team-1",
+    });
+  });
+
   it("wakes a dormant bot through the accepted-message drain instead of its seed prompt", () => {
     const executor = { isRunning: false };
     const processOrphanedFollowUps = vi.fn();
@@ -48,6 +76,311 @@ describe("AgentDaemon agent-message receipts", () => {
 
     expect(processOrphanedFollowUps).toHaveBeenCalledWith(task.id, executor);
     expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it("holds a coordinator at the handoff boundary until its teammate replies", () => {
+    const update = vi.fn();
+    const logEvent = vi.fn();
+    const daemonLike = {
+      taskRepo: { update },
+      logEvent,
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const handoffEvents = [
+      makeEvent("handoff-1", "atlas-task", "agent_message", {
+        messageId: "handoff-1",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "forge-task",
+        recipientLabel: "Forge",
+        message: "Research the developer opportunities.",
+      }),
+    ];
+    expect(getPendingBotHandoff(handoffEvents)).not.toBeNull();
+
+    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+      daemonLike,
+      {
+        id: "atlas-task",
+        status: "executing",
+        agentConfig: { botConversation: true },
+      },
+      handoffEvents,
+      "Partial research",
+    );
+
+    expect(result).toEqual({ deferred: true, replySent: false });
+    expect(update).toHaveBeenCalledWith(
+      "atlas-task",
+      expect.objectContaining({
+        status: "blocked",
+        error: "Waiting for Forge to reply before finishing this conversation.",
+        resultSummary: "Partial research",
+      }),
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      "atlas-task",
+      "task_status",
+      expect.objectContaining({ botHandoffWaiting: true }),
+    );
+  });
+
+  it("marks a handoff timed out when the recipient is already terminal", () => {
+    const update = vi.fn();
+    const logEvent = vi.fn();
+    const updatePayloadById = vi.fn();
+    const emitTaskEvent = vi.fn();
+    const handoffEvents = [
+      makeEvent("handoff-terminal", "atlas-task", "agent_message", {
+        messageId: "handoff-terminal",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "forge-task",
+        recipientLabel: "Forge",
+        message: "Inspect the repository.",
+        acceptedAt: Date.now(),
+      }),
+    ];
+    const daemonLike = {
+      taskRepo: {
+        update,
+        findById: vi.fn().mockReturnValue({
+          id: "forge-task",
+          status: "completed",
+          completedAt: Date.now(),
+        }),
+      },
+      eventRepo: { updatePayloadById },
+      emitTaskEvent,
+      logEvent,
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+      daemonLike,
+      {
+        id: "atlas-task",
+        status: "executing",
+        agentConfig: { botConversation: true, botTeamId: "team-1" },
+      },
+      handoffEvents,
+      "Partial repository inspection",
+    );
+
+    expect(result).toEqual({ deferred: false, replySent: false });
+    expect(update).not.toHaveBeenCalled();
+    expect(updatePayloadById).toHaveBeenCalledWith(
+      "handoff-terminal",
+      expect.objectContaining({
+        replyStatus: "timed_out",
+        failureCode: "BOT_HANDOFF_REPLY_TIMEOUT",
+      }),
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      "atlas-task",
+      "log",
+      expect.objectContaining({
+        metric: "bot_handoff_reply_timeout",
+        recipientTaskId: "forge-task",
+        partialResultAvailable: true,
+      }),
+    );
+    expect(getPendingBotHandoff(handoffEvents)).toBeNull();
+  });
+
+  it("preserves a partial result after a live recipient exceeds the reply timeout", () => {
+    const updatePayloadById = vi.fn();
+    const emitTaskEvent = vi.fn();
+    const logEvent = vi.fn();
+    const handoffEvents = [
+      makeEvent("handoff-aged", "atlas-task", "agent_message", {
+        messageId: "handoff-aged",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "scribe-task",
+        recipientLabel: "Scribe",
+        message: "Prepare a source-backed summary.",
+        acceptedAt: Date.now() - BOT_HANDOFF_REPLY_TIMEOUT_MS - 1,
+      }),
+    ];
+    const daemonLike = {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({
+          id: "scribe-task",
+          status: "executing",
+          completedAt: undefined,
+        }),
+      },
+      eventRepo: { updatePayloadById },
+      emitTaskEvent,
+      logEvent,
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+      daemonLike,
+      {
+        id: "atlas-task",
+        status: "executing",
+        agentConfig: { botConversation: true, botTeamId: "team-1" },
+      },
+      handoffEvents,
+      "Partial source summary",
+    );
+
+    expect(result).toEqual({ deferred: false, replySent: false });
+    expect(updatePayloadById).toHaveBeenCalledWith(
+      "handoff-aged",
+      expect.objectContaining({ replyStatus: "timed_out" }),
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      "atlas-task",
+      "log",
+      expect.objectContaining({ metric: "bot_handoff_reply_timeout" }),
+    );
+  });
+
+  it("sends a durable blocked reply when a teammate would otherwise finish silently", () => {
+    const queueMessageOnly = vi.fn().mockReturnValue({
+      queued: true,
+      messageId: "fallback-1",
+      deliveryMode: "message",
+      deliveryStatus: "queued",
+      acceptedAt: 20,
+      queuedAt: 20,
+    });
+    const markBotHandoffReplied = vi.fn();
+    const logEvent = vi.fn();
+    const sender = {
+      id: "atlas-task",
+      title: "Atlas",
+      agentConfig: { botConversation: true, botTeamId: "team-1" },
+    };
+    const daemonLike = {
+      taskRepo: { findById: vi.fn().mockReturnValue(sender) },
+      canDeliverBotMessageBetween: vi.fn().mockReturnValue(true),
+      queueMessageOnly,
+      markBotHandoffReplied,
+      logEvent,
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const inboundEvents = [
+      makeEvent("inbound-1", "scribe-task", "user_message", {
+        messageId: "inbound-1",
+        messageSource: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        senderTaskId: "atlas-task",
+        senderLabel: "Atlas",
+        message: "Find current opportunities.",
+      }),
+    ];
+    expect(getOutstandingBotHandoffReply(inboundEvents)).not.toBeNull();
+
+    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+      daemonLike,
+      {
+        id: "scribe-task",
+        title: "Scribe",
+        status: "executing",
+        agentConfig: { botConversation: true, botTeamId: "team-1" },
+      },
+      inboundEvents,
+      "No verified sources were produced.",
+    );
+
+    expect(result).toEqual({ deferred: false, replySent: true });
+    expect(queueMessageOnly).toHaveBeenCalledWith(
+      sender,
+      expect.stringContaining("BLOCKED:"),
+      undefined,
+      undefined,
+      expect.objectContaining({
+        deliveryMode: "message",
+        messageSource: "agent",
+        senderTaskId: "scribe-task",
+        inReplyToMessageId: "inbound-1",
+        inReplyToTaskId: "atlas-task",
+        startAfterAccepted: true,
+      }),
+    );
+    expect(markBotHandoffReplied).toHaveBeenCalledWith(
+      "atlas-task",
+      "inbound-1",
+      "scribe-task",
+      "scribe-task",
+      expect.any(String),
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      "scribe-task",
+      "agent_message",
+      expect.objectContaining({
+        replyKind: "automatic_blocked_fallback",
+        deliveryStatus: "queued",
+      }),
+    );
+  });
+
+  it("does not send a blocked fallback for a durable teammate result", () => {
+    const queueMessageOnly = vi.fn();
+    const logEvent = vi.fn();
+    const daemonLike = {
+      taskRepo: { findById: vi.fn() },
+      queueMessageOnly,
+      logEvent,
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const events = [
+      makeEvent("prompt", "atlas-task", "user_message", {
+        message: "Delegate the research.",
+      }),
+      makeEvent("handoff-1", "atlas-task", "agent_message", {
+        messageId: "handoff-1",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "scribe-task",
+        replyStatus: "received",
+        replyMessageId: "reply-1",
+      }),
+      // Receiver-side durable copy from an older delivery path. It has no
+      // inReplyTo field, but the originating handoff projection does.
+      makeEvent("reply-1", "scribe-task", "user_message", {
+        messageId: "reply-1",
+        messageSource: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        senderTaskId: "scribe-task",
+        senderLabel: "Scribe",
+        message: "Verified findings are ready.",
+      }),
+    ];
+
+    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+      daemonLike,
+      {
+        id: "atlas-task",
+        title: "Atlas",
+        status: "executing",
+        agentConfig: { botConversation: true, botTeamId: "team-1" },
+      },
+      events,
+      "Verified findings are ready.",
+    );
+
+    expect(result).toEqual({ deferred: false, replySent: false });
+    expect(queueMessageOnly).not.toHaveBeenCalled();
+    expect(logEvent).not.toHaveBeenCalled();
   });
 
   it("deduplicates a previously accepted queue-only message", () => {
@@ -108,6 +441,183 @@ describe("AgentDaemon agent-message receipts", () => {
     });
   });
 
+  it("rejects reusing a message id for different content", () => {
+    const prior = makeEvent("receipt-content", "child-task", "user_message", {
+      message: "Original durable content",
+      messageId: "message-content",
+      deliveryMode: "message",
+      deliveryStatus: "queued",
+      senderTaskId: "parent-task",
+    });
+    const daemonLike = {
+      getTaskEvents: vi.fn().mockReturnValue([prior]),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    expect(() =>
+      AgentDaemon.prototype.queueMessageOnly.call(
+        daemonLike,
+        { id: "child-task" },
+        "Different durable content",
+        undefined,
+        undefined,
+        {
+          deliveryMode: "message",
+          messageId: "message-content",
+          senderTaskId: "parent-task",
+        },
+      ),
+    ).toThrow("already used for different content");
+  });
+
+  it("quarantines a queued handoff and projects the failure to its sender", () => {
+    const targetReceipt = makeEvent("receipt-revoked", "child-task", "user_message", {
+      message: "Do not deliver",
+      messageId: "message-revoked",
+      deliveryMode: "message",
+      deliveryStatus: "queued",
+      senderTaskId: "parent-task",
+    });
+    const parentActivity = makeEvent("activity-revoked", "parent-task", "agent_message", {
+      messageId: "message-revoked",
+      targetTaskId: "child-task",
+      status: "queued",
+      deliveryStatus: "queued",
+    });
+    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+      if (eventId === targetReceipt.id) targetReceipt.payload = payload;
+      if (eventId === parentActivity.id) parentActivity.payload = payload;
+    });
+    const daemonLike = {
+      getTaskEvents: vi.fn((taskId: string) =>
+        taskId === "child-task" ? [targetReceipt] : [parentActivity],
+      ),
+      eventRepo: { updatePayloadById },
+      emitTaskEvent: vi.fn(),
+      releaseQueuedAttachmentRefs: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    expect(
+      AgentDaemon.prototype.markQueuedAgentMessageFailed.call(
+        daemonLike,
+        "child-task",
+        "message-revoked",
+        "team membership revoked",
+      ),
+    ).toBe(true);
+    expect(targetReceipt.payload).toMatchObject({
+      status: "failed",
+      deliveryStatus: "failed",
+      error: "team membership revoked",
+    });
+    expect(parentActivity.payload).toMatchObject({
+      status: "failed",
+      deliveryStatus: "failed",
+      error: "team membership revoked",
+    });
+  });
+
+  it("uses a terminal quarantined state for authorization loss and does not deliver it later", () => {
+    const targetReceipt = makeEvent("receipt-quarantined", "child-task", "user_message", {
+      message: "Do not deliver after membership loss",
+      messageId: "message-quarantined",
+      deliveryMode: "message",
+      deliveryStatus: "queued",
+      senderTaskId: "parent-task",
+    });
+    const parentActivity = makeEvent("activity-quarantined", "parent-task", "agent_message", {
+      messageId: "message-quarantined",
+      targetTaskId: "child-task",
+      status: "queued",
+      deliveryStatus: "queued",
+    });
+    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+      if (eventId === targetReceipt.id) targetReceipt.payload = payload;
+      if (eventId === parentActivity.id) parentActivity.payload = payload;
+    });
+    const daemonLike = {
+      getTaskEvents: vi.fn((taskId: string) =>
+        taskId === "child-task" ? [targetReceipt] : [parentActivity],
+      ),
+      eventRepo: { updatePayloadById },
+      emitTaskEvent: vi.fn(),
+      releaseQueuedAttachmentRefs: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    expect(
+      AgentDaemon.prototype.markQueuedAgentMessageFailed.call(
+        daemonLike,
+        "child-task",
+        "message-quarantined",
+        "team membership revoked",
+        { quarantined: true, failureCode: "BOT_MESSAGE_TEAM_AUTHORIZATION_REVOKED" },
+      ),
+    ).toBe(true);
+    expect(targetReceipt.payload).toMatchObject({
+      status: "quarantined",
+      deliveryStatus: "quarantined",
+      failureCode: "BOT_MESSAGE_TEAM_AUTHORIZATION_REVOKED",
+    });
+    expect(parentActivity.payload).toMatchObject({
+      status: "quarantined",
+      deliveryStatus: "quarantined",
+    });
+    expect(
+      AgentDaemon.prototype.markQueuedAgentMessageDelivered.call(
+        daemonLike,
+        "child-task",
+        "message-quarantined",
+      ),
+    ).toBe(false);
+  });
+
+  it("marks a handoff started before provider execution and projects that state to the sender", () => {
+    const targetReceipt = makeEvent("receipt-started", "child-task", "user_message", {
+      messageId: "message-started",
+      deliveryMode: "message",
+      deliveryStatus: "queued",
+      senderTaskId: "parent-task",
+    });
+    const parentActivity = makeEvent("activity-started", "parent-task", "agent_message", {
+      messageId: "message-started",
+      targetTaskId: "child-task",
+      status: "queued",
+      deliveryStatus: "queued",
+    });
+    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+      if (eventId === targetReceipt.id) targetReceipt.payload = payload;
+      if (eventId === parentActivity.id) parentActivity.payload = payload;
+    });
+    const daemonLike = {
+      getTaskEvents: vi.fn((taskId: string) =>
+        taskId === "child-task" ? [targetReceipt] : [parentActivity],
+      ),
+      eventRepo: { updatePayloadById },
+      emitTaskEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    expect(
+      AgentDaemon.prototype.markQueuedAgentMessageStarted.call(
+        daemonLike,
+        "child-task",
+        "message-started",
+      ),
+    ).toBe(true);
+    expect(targetReceipt.payload).toMatchObject({
+      status: "started",
+      deliveryStatus: "started",
+      attempt: 1,
+      startedAt: expect.any(Number),
+    });
+    expect(parentActivity.payload).toMatchObject({
+      status: "started",
+      deliveryStatus: "started",
+    });
+  });
+
   it("persists opaque attachment refs before the queue-only receipt", () => {
     const root = mkdtempSync(path.join(tmpdir(), "cowork-daemon-attachments-"));
     try {
@@ -162,6 +672,7 @@ describe("AgentDaemon agent-message receipts", () => {
         deliveryStatus: "queued",
       });
       const receipt = logEvent.mock.calls.find((call: Any[]) => call[1] === "user_message")[2];
+      expect(receipt.correlationId).toBe("image-message");
       expect(receipt.queuedAttachmentRefs).toEqual([
         expect.objectContaining({
           key: expect.stringMatching(/^[0-9a-f-]{36}$/),
@@ -350,7 +861,14 @@ describe("AgentDaemon agent-message receipts", () => {
 
     await vi.waitFor(() => expect(requeueFollowUpAtTurnBoundary).toHaveBeenCalledTimes(1));
     expect(requeueFollowUpAtTurnBoundary).toHaveBeenCalledWith(followUp);
-    expect(updatePayloadById).not.toHaveBeenCalled();
+    expect(updatePayloadById).toHaveBeenCalledWith(
+      "receipt-preflight",
+      expect.objectContaining({
+        status: "started",
+        deliveryStatus: "started",
+        attempt: 1,
+      }),
+    );
     expect(daemonLike.logEvent).toHaveBeenCalledWith(
       "child-task",
       "error",

@@ -286,6 +286,45 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
     ).toEqual(["task-complete-initial", "task-complete-follow-up"]);
   });
 
+  it("coalesces duplicate follow-up and terminal completion records", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("assistant-final", 100, "timeline_step_updated", {
+          legacyType: "assistant_message",
+          internal: false,
+          message: "LIVE_UI_COMPOSER_ACK_20260921C",
+        }),
+        makeEvent("follow-up-complete", 200, "timeline_step_finished", {
+          legacyType: "task_completed",
+          message: "Follow-up completed (chat reply)",
+          resultSummary: "LIVE_UI_COMPOSER_ACK_20260921C",
+        }),
+        makeEvent("terminal-complete", 300, "timeline_step_finished", {
+          legacyType: "task_completed",
+          message: "Task completed successfully",
+          resultSummary: "LIVE_UI_COMPOSER_ACK_20260921C",
+          terminalStatus: "ok",
+          bestKnownOutcome: {
+            outputSummary: {
+              created: [".forge-context.md"],
+              primaryOutputPath: ".forge-context.md",
+              outputCount: 1,
+            },
+          },
+        }),
+      ],
+      task: { id: "task-1", status: "completed" } as Any,
+      workspace: null,
+      verboseSteps: false,
+    });
+
+    expect(
+      shared.baseTimelineItems
+        .filter((item) => item.kind === "event")
+        .map((item) => (item.kind === "event" ? item.event.id : "")),
+    ).toEqual(["terminal-complete"]);
+  });
+
   it("preserves a distinct assistant response before the completion", () => {
     const shared = deriveSharedTaskEventUiState({
       rawEvents: [

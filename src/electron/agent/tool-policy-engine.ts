@@ -52,6 +52,12 @@ export interface ToolPolicyContext {
   taskIntent?: string;
   shellEnabled?: boolean;
   humanInputPolicy?: HumanInputPolicy;
+  /** True only for a persistent bot conversation, never a generic task. */
+  botConversation?: boolean;
+  /** Verified workspace-scoped persistent team identifier. */
+  botTeamId?: string;
+  /** Set only after the daemon verifies the sender's active team membership. */
+  botMessagingAuthorized?: boolean;
 }
 
 export interface ToolPolicyResult {
@@ -642,7 +648,26 @@ export function normalizeTaskDomain(taskDomain: TaskDomain | undefined): TaskDom
   return taskDomain ?? "auto";
 }
 
-function applyModeGate(toolName: string, mode: ExecutionMode): string | null {
+function hasVerifiedBotMessagingContext(ctx: ToolPolicyContext): boolean {
+  return (
+    ctx.botConversation === true &&
+    typeof ctx.botTeamId === "string" &&
+    ctx.botTeamId.trim().length > 0 &&
+    ctx.botMessagingAuthorized === true
+  );
+}
+
+function applyModeGate(
+  toolName: string,
+  mode: ExecutionMode,
+  ctx: ToolPolicyContext,
+): string | null {
+  // Internal bot routing is the only mutation allowed to cross a plan/analyze
+  // gate. The daemon verifies the workspace/team boundary before execution;
+  // the context check prevents this exception from widening normal writes.
+  if (toolName === "send_agent_message" && hasVerifiedBotMessagingContext(ctx)) {
+    return null;
+  }
   if (mode === "chat") {
     return `Tool "${toolName}" is blocked in chat mode because chat mode is direct-answer only and does not allow tool calls.`;
   }
@@ -708,7 +733,7 @@ export function evaluateToolPolicy(toolName: string, ctx: ToolPolicyContext): To
   const mode = normalizeExecutionMode(ctx.executionMode, ctx.conversationMode);
   const domain = normalizeTaskDomain(ctx.taskDomain);
 
-  const modeReason = applyModeGate(toolName, mode);
+  const modeReason = applyModeGate(toolName, mode, ctx);
   if (modeReason) {
     return { decision: "deny", reason: modeReason, mode, domain };
   }

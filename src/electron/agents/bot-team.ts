@@ -90,18 +90,21 @@ export const DEFAULT_BOT_TEAM_DEFINITIONS: readonly BotTeamDefinition[] = [
 ];
 
 const COLLABORATION_MARKER = "[CoWork bot team collaboration]";
+const REQUESTER_REPLY_GUIDANCE =
+  "When the lead bot or another teammate sends you a request, treat it as a fresh handoff, do only the focused work, state evidence and blockers, and send exactly one concise result back to the requesting teammate. Prefer send_agent_message with task_id from the handoff boundary so the durable reply is correlated; otherwise use that teammate's bot handle. Do not default to Atlas unless Atlas is the requester. Include DONE only when finished; otherwise include BLOCKED and the reason.";
 
 function collaborationPrompt(role: BotTeamDefinition): string {
   const leadGuidance =
     role.name === "atlas-your-chief-of-staff" || role.autonomyLevel === "lead"
-      ? "You may delegate focused work to teammates with send_agent_message using the bot selector, then incorporate their replies into your answer."
-      : "When the lead bot or another teammate sends you a request, do the focused work, state evidence and blockers, and send a concise result back with send_agent_message using bot=atlas.";
+      ? `You may delegate focused work to teammates with send_agent_message using the bot selector, then incorporate their replies into your answer. ${REQUESTER_REPLY_GUIDANCE}`
+      : REQUESTER_REPLY_GUIDANCE;
   return [
     COLLABORATION_MARKER,
     `You are ${role.displayName}, a persistent member of the CoWork Bot Team.`,
     "Your bot conversation is a durable shared workspace channel, not a one-off task.",
     leadGuidance,
     "Never claim that a teammate completed work unless you have received a durable message or visible result from that teammate.",
+    "Every incoming teammate handoff requires a reply before you finish the turn, even when the result is blocked or empty.",
   ].join("\n");
 }
 
@@ -153,11 +156,12 @@ export function ensureDefaultBotRoles(db: Database.Database): AgentRole[] {
       role = roleRepo.update({ id: role.id, sortOrder: definition.sortOrder }) || role;
     } else if (!role.isSystem) {
       const hasCollaborationPrompt = role.systemPrompt?.includes(COLLABORATION_MARKER) === true;
+      const hasRequesterReplyGuidance =
+        role.systemPrompt?.includes("requesting teammate") === true &&
+        role.systemPrompt?.includes("task_id") === true;
       const needsCollaborationPrompt =
         !hasCollaborationPrompt ||
-        (definition.name !== "atlas-your-chief-of-staff" &&
-          role.autonomyLevel !== "lead" &&
-          !role.systemPrompt?.includes("bot=atlas"));
+        (definition.name !== "atlas-your-chief-of-staff" && !hasRequesterReplyGuidance);
       const hasAtlasSelfRouting =
         definition.name === "atlas-your-chief-of-staff" &&
         role.systemPrompt?.includes("Use send_agent_message with bot=atlas");
@@ -170,13 +174,15 @@ export function ensureDefaultBotRoles(db: Database.Database): AgentRole[] {
       const cleanedPrompt = (role.systemPrompt || "")
         .split("\n")
         .filter(
-          (line) => line.trim() !== "Use send_agent_message with bot=atlas to return your result.",
+          (line) =>
+            definition.name === "atlas-your-chief-of-staff" ||
+            !/send_agent_message.*bot=atlas/i.test(line.trim()),
         )
         .join("\n")
         .trim();
       const nextPrompt = hasCollaborationPrompt
         ? needsCollaborationPrompt
-          ? `${cleanedPrompt}\nUse send_agent_message with bot=atlas to return your result.`
+          ? `${cleanedPrompt}\n${REQUESTER_REPLY_GUIDANCE}`
           : cleanedPrompt
         : [cleanedPrompt, collaborationPrompt(definition)].filter(Boolean).join("\n\n");
       role = roleRepo.update({ id: role.id, systemPrompt: nextPrompt }) || role;

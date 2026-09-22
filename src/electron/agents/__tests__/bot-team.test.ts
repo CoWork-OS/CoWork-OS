@@ -67,5 +67,12 @@ describeWithSqlite("default CoWork bot team", () => {
       .get(first!.team.id) as { count: number };
     expect(members.count).toBe(6);
     expect(first?.roles[0].systemPrompt).toContain("send_agent_message");
+    expect(first?.roles.find((role) => role.name === "scribe")?.systemPrompt).toContain(
+      "requesting teammate",
+    );
+    expect(first?.roles.find((role) => role.name === "scribe")?.systemPrompt).toContain("task_id");
+    expect(first?.roles.find((role) => role.name === "scribe")?.systemPrompt).not.toContain(
+      "bot=atlas to return your result",
+    );
   });
 });

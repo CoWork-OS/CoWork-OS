@@ -1494,6 +1494,8 @@ export class SessionRuntime {
     senderTaskId?: TaskFollowUpInput["senderTaskId"],
     senderLabel?: TaskFollowUpInput["senderLabel"],
     deliveryMode?: TaskFollowUpInput["deliveryMode"],
+    inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
+    inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
   ): void {
     this.state.queues.pendingFollowUps.push({
       message,
@@ -1507,6 +1509,8 @@ export class SessionRuntime {
       ...(messageId !== undefined ? { messageId } : {}),
       ...(senderTaskId !== undefined ? { senderTaskId } : {}),
       ...(senderLabel !== undefined ? { senderLabel } : {}),
+      ...(inReplyToMessageId !== undefined ? { inReplyToMessageId } : {}),
+      ...(inReplyToTaskId !== undefined ? { inReplyToTaskId } : {}),
     });
     this.saveSnapshot();
   }
@@ -1768,6 +1772,7 @@ export class SessionRuntime {
     const blockedByAllowlist = (name: string) =>
       hasAllowlist && !allowedTools.has("*") && !allowedTools.has(name);
     const disabledTools = this.state.tooling.toolFailureTracker.getDisabledTools();
+    const botPolicyContext = this.deps.getToolPolicyContext();
     const cacheKey = JSON.stringify({
       toolCatalogVersion: this.deps.getToolRegistry().getToolCatalogVersion?.() || null,
       disabledTools,
@@ -1776,6 +1781,9 @@ export class SessionRuntime {
       hasAllowlist,
       webSearchMode: this.deps.getWebSearchMode(),
       shellEnabled: this.deps.getWorkspace().permissions.shell,
+      botConversation: botPolicyContext?.botConversation === true,
+      botTeamId: botPolicyContext?.botTeamId || "",
+      botMessagingAuthorized: botPolicyContext?.botMessagingAuthorized === true,
     });
     const task = this.deps.getTask();
     const renderContext = this.buildToolPromptRenderContext();
@@ -4218,6 +4226,12 @@ export class SessionRuntime {
         messageId,
         ...(typeof payload.senderTaskId === "string" ? { senderTaskId: payload.senderTaskId } : {}),
         ...(typeof payload.senderLabel === "string" ? { senderLabel: payload.senderLabel } : {}),
+        ...(typeof payload.inReplyToMessageId === "string"
+          ? { inReplyToMessageId: payload.inReplyToMessageId }
+          : {}),
+        ...(typeof payload.inReplyToTaskId === "string"
+          ? { inReplyToTaskId: payload.inReplyToTaskId }
+          : {}),
         ...(interactionMode && typeof interactionMode === "object"
           ? { interactionMode: interactionMode as TaskFollowUpInput["interactionMode"] }
           : {}),

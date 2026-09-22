@@ -239,4 +239,65 @@ describeWithSqlite("WorkSessionProtocolService", () => {
     service.getReliabilityService().rollout.setLegacyReadRollback(true);
     expect(service.readTaskEvents(task.id, undefined, legacyRead)).toEqual(legacyRead());
   });
+
+  it("recovers a task into the current workspace without copying the foreign transcript", () => {
+    db.prepare(
+      `INSERT INTO workspaces (id, name, path, created_at, permissions)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run("workspace-2", "Foreign Workspace", path.join(tempDir, "workspace-2"), Date.now(), "{}");
+
+    const task = createTask();
+    const foreign = service.getRepository().createAggregate({
+      id: "foreign-session",
+      taskId: task.id,
+      workspaceId: "workspace-2",
+      source: "old-runtime",
+    });
+    service.getRepository().appendUserMessage({
+      sessionId: foreign.session.id,
+      taskId: task.id,
+      message: "This belongs to the old workspace and must stay there.",
+      idempotencyKey: "foreign-message",
+    });
+
+    const recovered = service.ensureForTask(task);
+    expect(recovered.session.id).not.toBe(foreign.session.id);
+    expect(recovered.session.workspaceId).toBe(task.workspaceId);
+    expect(task.sessionId).toBe(recovered.session.id);
+    expect(taskRepo.findById(task.id)?.sessionId).toBe(recovered.session.id);
+    expect(
+      service
+        .getRepository()
+        .findById(foreign.session.id)
+        ?.items.some((item) => JSON.stringify(item.payload).includes("old workspace")),
+    ).toBe(true);
+    expect(
+      recovered.items.some((item) => JSON.stringify(item.payload).includes("old workspace")),
+    ).toBe(false);
+
+    const recovery = db
+      .prepare(
+        `SELECT previous_session_id, replacement_session_id, previous_workspace_id,
+                workspace_id, code, details_json
+         FROM work_session_recovery_records WHERE task_id = ?`,
+      )
+      .get(task.id) as Record<string, unknown>;
+    expect(recovery).toMatchObject({
+      previous_session_id: "foreign-session",
+      replacement_session_id: recovered.session.id,
+      previous_workspace_id: "workspace-2",
+      workspace_id: "workspace-1",
+      code: "SESSION_WORKSPACE_CONFLICT",
+    });
+    expect(String(recovery.details_json)).not.toContain("old workspace");
+    expect(
+      eventRepo
+        .findByTaskId(task.id)
+        .some(
+          (event) =>
+            event.type === "workspace_boundary_recovery" ||
+            event.legacyType === "workspace_boundary_recovery",
+        ),
+    ).toBe(true);
+  });
 });

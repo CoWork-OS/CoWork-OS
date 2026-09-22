@@ -58,6 +58,7 @@ import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 import { BotsPane, type BotRole } from "./BotsPane";
 import { BOT_PROFILE_DELETED_EVENT, BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
+import type { BotConversationProjection } from "../../shared/bot-lifecycle";
 
 const SIDEBAR_ITEM_HEIGHT = 22;
 const SIDEBAR_DATE_HEADER_HEIGHT = 20;
@@ -96,6 +97,7 @@ interface SidebarProps {
   tasks: Task[];
   botTasks?: Task[];
   selectedTaskId: string | null;
+  selectedBotConversationProjection?: Pick<BotConversationProjection, "state"> | null;
   isBotViewActive?: boolean;
   isAutomationsActive?: boolean;
   isIdeasActive?: boolean;
@@ -113,6 +115,7 @@ interface SidebarProps {
   onOpenInboxAgent?: () => void;
   onOpenAgents?: () => void;
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
+  onReopenBot?: (task: Task) => void | Promise<void>;
   onBotUpdated?: (bot: BotRole) => void | Promise<void>;
   onBotDeleted?: (botId: string) => void | Promise<void>;
   onOpenEverydayAgent?: () => void;
@@ -823,6 +826,8 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
   return (
     prev.workspace?.id === next.workspace?.id &&
     prev.selectedTaskId === next.selectedTaskId &&
+    prev.selectedBotConversationProjection?.state ===
+      next.selectedBotConversationProjection?.state &&
     prev.isBotViewActive === next.isBotViewActive &&
     prev.isAutomationsActive === next.isAutomationsActive &&
     prev.isIdeasActive === next.isIdeasActive &&
@@ -844,6 +849,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.updateInfo?.latestVersion === next.updateInfo?.latestVersion &&
     prev.onSelectTask === next.onSelectTask &&
     prev.onOpenBot === next.onOpenBot &&
+    prev.onReopenBot === next.onReopenBot &&
     prev.onBotUpdated === next.onBotUpdated &&
     prev.onBotDeleted === next.onBotDeleted &&
     prev.onTasksChanged === next.onTasksChanged &&
@@ -857,6 +863,7 @@ function SidebarComponent({
   tasks,
   botTasks: botTasksOverride,
   selectedTaskId,
+  selectedBotConversationProjection,
   isBotViewActive = false,
   isAutomationsActive = false,
   isIdeasActive = false,
@@ -873,6 +880,7 @@ function SidebarComponent({
   onOpenInboxAgent,
   onOpenAgents,
   onOpenBot,
+  onReopenBot,
   onOpenEverydayAgent,
   onOpenHealth,
   onNewSession,
@@ -3224,11 +3232,13 @@ function SidebarComponent({
               roles={botRoles}
               tasks={botTasks}
               selectedTaskId={selectedTaskId}
+              selectedConversationProjection={selectedBotConversationProjection}
               isLoading={isLoadingBots}
               error={botsError}
               onRetry={() => void loadAgentRoles()}
               onSelectTask={onSelectTask}
               onOpenBot={onOpenBot}
+              onReopenBot={onReopenBot}
               onOpenAgents={onOpenAgents}
               onBotCreated={handleBotCreated}
               onBotUpdated={async (bot) => {

@@ -101,11 +101,51 @@ const BOT_CONVERSATION_PREVIEW_SELECT = `
   SUBSTR(
     COALESCE(
       (
-        SELECT COALESCE(
-          CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.message') END,
-          CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.content') END,
-          CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.text') END
-        )
+        SELECT CASE
+          WHEN json_valid(te.payload) = 1
+            AND json_valid(json_extract(te.payload, '$.message')) = 1
+            AND TRIM(CAST(COALESCE(
+              json_extract(json_extract(te.payload, '$.message'), '$.message_id'),
+              json_extract(json_extract(te.payload, '$.message'), '$.messageId'),
+              ''
+            ) AS TEXT)) <> ''
+            AND (
+              json_extract(json_extract(te.payload, '$.message'), '$.success') IS NOT NULL
+              OR json_extract(json_extract(te.payload, '$.message'), '$.deliveryStatus') IS NOT NULL
+              OR json_extract(json_extract(te.payload, '$.message'), '$.delivery_status') IS NOT NULL
+              OR json_extract(json_extract(te.payload, '$.message'), '$.status') IS NOT NULL
+            )
+          THEN CASE
+            WHEN json_extract(json_extract(te.payload, '$.message'), '$.success') = 0
+              OR LOWER(CAST(COALESCE(
+                json_extract(json_extract(te.payload, '$.message'), '$.deliveryStatus'),
+                json_extract(json_extract(te.payload, '$.message'), '$.delivery_status'),
+                json_extract(json_extract(te.payload, '$.message'), '$.status'),
+                ''
+              ) AS TEXT)) = 'failed'
+            THEN 'Delivery failed'
+            WHEN LOWER(CAST(COALESCE(
+              json_extract(json_extract(te.payload, '$.message'), '$.deliveryStatus'),
+              json_extract(json_extract(te.payload, '$.message'), '$.delivery_status'),
+              json_extract(json_extract(te.payload, '$.message'), '$.status'),
+              ''
+            ) AS TEXT)) = 'queued'
+            THEN 'Queued for the next turn'
+            WHEN LOWER(CAST(COALESCE(
+              json_extract(json_extract(te.payload, '$.message'), '$.deliveryStatus'),
+              json_extract(json_extract(te.payload, '$.message'), '$.delivery_status'),
+              json_extract(json_extract(te.payload, '$.message'), '$.status'),
+              ''
+            ) AS TEXT)) = 'delivered'
+            THEN 'Delivered'
+            ELSE 'Accepted'
+          END
+          ELSE COALESCE(
+            CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.message') END,
+            CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.content') END,
+            CASE WHEN json_valid(te.payload) = 1 THEN json_extract(te.payload, '$.text') END
+          )
+        END
         FROM task_events te
         WHERE te.task_id = tasks.id
           AND COALESCE(NULLIF(te.legacy_type, ''), te.type) IN ('user_message', 'assistant_message')

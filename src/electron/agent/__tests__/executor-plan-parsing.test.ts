@@ -467,6 +467,45 @@ describe("TaskExecutor plan parsing", () => {
     ]);
   });
 
+  it("keeps verified bot messaging available during discovery-scoped teammate work", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.agentConfig = { botConversation: true, botTeamId: "team-1" };
+    executor.getToolPolicyContext = vi.fn(() => ({
+      botConversation: true,
+      botTeamId: "team-1",
+      botMessagingAuthorized: true,
+    }));
+    executor.task.title = "Forge repository inspection";
+    executor.task.prompt = "Inspect the local repository and report the package name.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.currentStepId = "1";
+    executor.plan = {
+      description: "Inspect the repository",
+      steps: [
+        {
+          id: "1",
+          description: "Locate the repository files in the workspace.",
+          status: "pending",
+        },
+      ],
+    };
+
+    const scoped = executor.applyStepScopedToolPolicy([
+      { name: "list_directory" },
+      { name: "search_files" },
+      { name: "read_file" },
+      { name: "request_user_input" },
+      { name: "send_agent_message" },
+    ]);
+
+    expect(scoped.map((tool: Any) => tool.name)).toEqual([
+      "list_directory",
+      "search_files",
+      "request_user_input",
+      "send_agent_message",
+    ]);
+  });
+
   it("does not strip mutation tools from a step that finds and deletes files", () => {
     const executor = createPlanExecutor({ content: [] });
     executor.currentStepId = "1";

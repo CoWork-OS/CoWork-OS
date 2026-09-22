@@ -1,54 +1,27 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import {
-  Bell,
-  Check,
-  Copy,
-  Monitor,
-  MessagesSquare,
-  PanelRightClose,
-  RefreshCw,
-  Settings2,
-} from "lucide-react";
+import { Bell, Check, Copy, MessagesSquare, PanelRightClose, Settings2 } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
-import type { BotNotificationPolicy, Task, TaskStatus, Workspace } from "../../shared/types";
+import type { BotNotificationPolicy, Task, TaskStatus } from "../../shared/types";
+import type { BotConversationProjection } from "../../shared/bot-lifecycle";
 import type { AgentRoleData } from "../../electron/preload";
 import "./BotDetailsRail.css";
 
 export interface BotDetailsRailProps {
   task: Task;
-  workspace: Workspace | null;
+  /**
+   * Bot conversations have a durable collaboration projection that can be
+   * ahead of the compatibility task row (for example, a completed-looking
+   * row while a teammate reply is still pending). Keep the inspector on that
+   * same projection as the conversation header when it is available.
+   */
+  conversationProjection?: Pick<
+    BotConversationProjection,
+    "state" | "stateLabel" | "stateDetail"
+  > | null;
   onEdit?: () => void;
   onOpenHistory?: () => void;
-  onOpenComputerSettings?: () => void;
   onClose?: () => void;
-}
-
-export interface HostComputerStatusSnapshot {
-  platform?: string;
-  installed?: boolean;
-  accessibilityTrusted?: boolean;
-  screenCaptureStatus?: string;
-  error?: string | null;
-}
-
-export function isHostComputerReady(
-  status: HostComputerStatusSnapshot | null | undefined,
-): boolean {
-  if (!status?.installed || status.error) return false;
-  if (status.platform !== "darwin" && status.platform !== "win32") return false;
-  return status.accessibilityTrusted === true && status.screenCaptureStatus === "granted";
-}
-
-export function getHostComputerStatusLabel(
-  activeTaskId: string | null | undefined,
-  currentTaskId: string,
-  ready = true,
-): string {
-  if (activeTaskId === currentTaskId) return "In use by this conversation";
-  if (activeTaskId) return "In use by another task";
-  if (!ready) return "Needs setup on this computer";
-  return "Available when this bot needs it";
 }
 
 /**
@@ -57,6 +30,8 @@ export function getHostComputerStatusLabel(
  */
 export function getBotStatusTone(status: TaskStatus | string): "busy" | "good" | "bad" | "idle" {
   switch (status) {
+    case "working":
+    case "waiting":
     case "planning":
     case "executing":
       return "busy";
@@ -64,28 +39,53 @@ export function getBotStatusTone(status: TaskStatus | string): "busy" | "good" |
       return "good";
     case "failed":
     case "blocked":
+    case "needs_input":
       return "bad";
     default:
       return "idle";
   }
 }
 
+export function getBotStatusLabel(status: TaskStatus | string): string {
+  switch (status) {
+    case "working":
+      return "Working with the team";
+    case "waiting":
+      return "Waiting on a teammate";
+    case "needs_input":
+      return "Needs your input";
+    case "pending":
+    case "queued":
+      return "Ready to start";
+    case "planning":
+    case "executing":
+      return "Working";
+    case "paused":
+    case "blocked":
+    case "interrupted":
+      return "Needs input";
+    case "completed":
+      return "Finished";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return "Ready";
+  }
+}
+
 export function BotDetailsRail({
   task,
-  workspace,
+  conversationProjection,
   onEdit,
   onOpenHistory,
-  onOpenComputerSettings,
   onClose,
 }: BotDetailsRailProps) {
   const [role, setRole] = useState<AgentRoleData | null>(null);
   const [policy, setPolicy] = useState<BotNotificationPolicy | null>(null);
-  const [computerStatus, setComputerStatus] = useState<Awaited<
-    ReturnType<typeof window.electronAPI.getComputerUseStatus>
-  > | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingPolicy, setSavingPolicy] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +93,11 @@ export function BotDetailsRail({
   const roleId = task.assignedAgentRoleId || "";
   const botName = role?.displayName || task.assignedAgentRoleId || "Bot";
   const description = role?.description?.trim() || "";
+  const conversationStatusLabel =
+    conversationProjection?.stateLabel || getBotStatusLabel(task.status);
+  const conversationStatusTone = conversationProjection
+    ? getBotStatusTone(conversationProjection.state)
+    : getBotStatusTone(task.status);
   // Only offer the expand affordance for descriptions long enough to be clamped.
   const descriptionIsLong = useMemo(() => description.length > 180, [description]);
 
@@ -106,9 +111,8 @@ export function BotDetailsRail({
     void Promise.all([
       window.electronAPI.getAgentRole(roleId),
       window.electronAPI.getBotNotificationPolicy(roleId).catch(() => null),
-      window.electronAPI.getComputerUseStatus().catch(() => null),
     ])
-      .then(([loadedRole, loadedPolicy, loadedComputerStatus]) => {
+      .then(([loadedRole, loadedPolicy]) => {
         if (cancelled) return;
         setRole(loadedRole || null);
         setPolicy(
@@ -119,7 +123,6 @@ export function BotDetailsRail({
             updatedAt: 0,
           },
         );
-        setComputerStatus(loadedComputerStatus || null);
         setError(null);
       })
       .catch((cause) => {
@@ -162,17 +165,6 @@ export function BotDetailsRail({
       setError(cause instanceof Error ? cause.message : "Could not save notification settings.");
     } finally {
       setSavingPolicy(false);
-    }
-  };
-
-  const refreshComputerStatus = async () => {
-    setRefreshing(true);
-    try {
-      setComputerStatus(await window.electronAPI.getComputerUseStatus());
-    } catch {
-      // The rail still renders the last known status when the helper is unavailable.
-    } finally {
-      setRefreshing(false);
     }
   };
 
@@ -272,8 +264,11 @@ export function BotDetailsRail({
         </h3>
         <div className="bot-details-conversation">
           <strong title={task.title || "Conversation"}>{task.title || "Conversation"}</strong>
-          <span className={`bot-details-status ${getBotStatusTone(task.status)}`}>
-            {task.status}
+          <span
+            className={`bot-details-status ${conversationStatusTone}`}
+            title={conversationProjection?.stateDetail}
+          >
+            {conversationStatusLabel}
           </span>
         </div>
         {onOpenHistory && (
@@ -316,55 +311,6 @@ export function BotDetailsRail({
             onChange={(event) => void updatePolicy({ onInputRequired: event.target.checked })}
           />
         </label>
-      </section>
-
-      <section className="bot-details-section">
-        <h3 className="bot-details-section-heading">
-          <Monitor size={13} />
-          <span>This computer</span>
-        </h3>
-        <div className="bot-details-computer-status">
-          <span
-            className={`bot-details-status-dot ${computerStatus?.activeTaskId ? "active" : ""}`}
-            aria-hidden="true"
-          />
-          <span>
-            {getHostComputerStatusLabel(
-              computerStatus?.activeTaskId,
-              task.id,
-              isHostComputerReady(computerStatus),
-            )}
-          </span>
-        </div>
-        <small className="bot-details-computer-note">
-          Uses the computer running CoWork OS{workspace?.name ? ` in ${workspace.name}` : ""}.
-          Desktop access follows your local permissions.
-        </small>
-        {computerStatus?.error ? (
-          <small className="bot-details-computer-note bot-details-computer-note-warning">
-            {computerStatus.error}
-          </small>
-        ) : null}
-        <div className="bot-details-computer-actions">
-          {onOpenComputerSettings && (
-            <button
-              type="button"
-              className="bot-details-secondary-button"
-              onClick={onOpenComputerSettings}
-            >
-              <Settings2 size={13} /> Computer use settings
-            </button>
-          )}
-          <button
-            type="button"
-            className="bot-details-icon-button"
-            onClick={() => void refreshComputerStatus()}
-            aria-label="Refresh computer status"
-            title="Refresh status"
-          >
-            <RefreshCw size={14} className={refreshing ? "bot-details-spin" : undefined} />
-          </button>
-        </div>
       </section>
 
       {error ? (

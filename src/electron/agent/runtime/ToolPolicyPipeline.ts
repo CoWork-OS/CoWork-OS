@@ -61,6 +61,13 @@ export interface ToolPolicyPipelineOptions {
    * The default remains the interactive approval path.
    */
   headlessSemanticReviewPolicy?: "allow_if_authorized";
+  /**
+   * Bot conversations can run unattended. Permit only credential-free,
+   * idempotent public reads when the configured profile asks for network
+   * consent but the runtime has no approval prompt surface. Hard network
+   * denials, domain rules, and mutating requests still win before this lane.
+   */
+  allowReadOnlyNetworkWhenApprovalDisabled?: boolean;
 }
 
 export interface ToolPolicyPipelineResult {
@@ -82,6 +89,60 @@ function toStageDecision(
     default:
       return decision;
   }
+}
+
+function isCredentialFreeReadOnlyNetworkRequest(toolName: string, toolInput: unknown): boolean {
+  const normalizedToolName = toolName.trim().toLowerCase();
+  if (normalizedToolName === "web_fetch") {
+    const input =
+      toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)
+        ? (toolInput as Record<string, unknown>)
+        : undefined;
+    if (!input || typeof input.url !== "string" || input.url.trim().length === 0) {
+      return false;
+    }
+    return (
+      input.credentialId === undefined ||
+      input.credentialId === null ||
+      (typeof input.credentialId === "string" && input.credentialId.trim().length === 0)
+    );
+  }
+  if (normalizedToolName !== "http_request") return false;
+  const input =
+    toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)
+      ? (toolInput as Record<string, unknown>)
+      : undefined;
+  if (!input || typeof input.url !== "string" || input.url.trim().length === 0) {
+    return false;
+  }
+  const method = typeof input.method === "string" ? input.method.trim().toUpperCase() : "GET";
+  if (method !== "GET" && method !== "HEAD") return false;
+  if (
+    input.credentialId !== undefined &&
+    input.credentialId !== null &&
+    !(typeof input.credentialId === "string" && input.credentialId.trim().length === 0)
+  ) {
+    return false;
+  }
+  // A GET body or caller-supplied headers can still be an outbound write or
+  // credential channel. Keep the unattended lane deliberately narrow.
+  if (
+    input.body !== undefined &&
+    input.body !== null &&
+    !(typeof input.body === "string" && input.body.trim().length === 0)
+  ) {
+    return false;
+  }
+  if (input.headers !== undefined && input.headers !== null) {
+    if (
+      typeof input.headers !== "object" ||
+      Array.isArray(input.headers) ||
+      Object.keys(input.headers as Record<string, unknown>).length > 0
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export async function evaluateToolPolicyPipeline(
@@ -252,6 +313,25 @@ export async function evaluateToolPolicyPipeline(
     }
     if (permission.decision === "ask") {
       if (!canRequestApproval) {
+        if (
+          opts.allowReadOnlyNetworkWhenApprovalDisabled === true &&
+          workspaceApprovalReason === undefined &&
+          permission.reason.type === "workspace_capability" &&
+          permission.reason.capability === "network" &&
+          isCredentialFreeReadOnlyNetworkRequest(opts.toolName, opts.toolInput)
+        ) {
+          const reason =
+            "Credential-free read-only network access allowed for an unattended bot research turn.";
+          trace.add("approval", "allow", reason, {
+            source: "bot_research_read_lane",
+            originalReason: permission.reason.summary,
+          });
+          return {
+            decision: "allow",
+            trace: trace.build("allow"),
+            agentSecurity,
+          };
+        }
         const reason =
           "This operation needs additional authority, but approval requests are disabled.";
         trace.add("approval", "deny", reason);

@@ -109,6 +109,75 @@ describe("TaskExecutor workspace preflight acknowledgement", () => {
     expect(pauseForUserInput.mock.calls[0][1]).toBe("workspace_required");
   });
 
+  it("durably blocks a bot teammate when an existing-project request lands in an empty temp workspace", () => {
+    const pauseForUserInput = vi.fn();
+    const emitEvent = vi.fn();
+    const fakeThis: Any = {
+      ...buildBase(),
+      task: {
+        id: "bot-task",
+        prompt: "Inspect the local repository and report the package name.",
+        agentConfig: { botConversation: true, botTeamId: "team-1" },
+      },
+      workspace: { isTemp: true, id: TEMP_WORKSPACE_ID, path: "/tmp/bot-session" },
+      pauseForUserInput,
+      emitEvent,
+      getBotWorkspacePreflightBlock: (prompt: string) =>
+        (TaskExecutor as Any).prototype.getBotWorkspacePreflightBlock.call(fakeThis, prompt),
+    };
+
+    const blocked = (TaskExecutor as Any).prototype.preflightWorkspaceCheck.call(fakeThis);
+
+    expect(blocked).toBe(true);
+    expect(pauseForUserInput).not.toHaveBeenCalled();
+    expect(fakeThis.lastAssistantOutput).toContain("BLOCKED:");
+    expect(emitEvent).toHaveBeenCalledWith(
+      "log",
+      expect.objectContaining({
+        metric: "bot_workspace_preflight_failed",
+        reason: "workspace_required",
+      }),
+    );
+  });
+
+  it("durably blocks a bot teammate when the selected repository cannot be read", () => {
+    const pauseForUserInput = vi.fn();
+    const emitEvent = vi.fn();
+    const fakeThis: Any = {
+      ...buildBase(),
+      task: {
+        id: "bot-task",
+        prompt: "Inspect the local repository and report the package name.",
+        agentConfig: { botConversation: true, botTeamId: "team-1" },
+      },
+      workspace: { isTemp: false, id: "repo-workspace", path: "/restricted/repository" },
+      getWorkspaceSignals: vi.fn(() => ({
+        hasEntries: false,
+        hasProjectMarkers: false,
+        hasCodeFiles: false,
+        hasAppDirs: false,
+        readFailed: true,
+      })),
+      pauseForUserInput,
+      emitEvent,
+      getBotWorkspacePreflightBlock: (prompt: string) =>
+        (TaskExecutor as Any).prototype.getBotWorkspacePreflightBlock.call(fakeThis, prompt),
+    };
+
+    const blocked = (TaskExecutor as Any).prototype.preflightWorkspaceCheck.call(fakeThis);
+
+    expect(blocked).toBe(true);
+    expect(pauseForUserInput).not.toHaveBeenCalled();
+    expect(fakeThis.lastAssistantOutput).toContain("could not read");
+    expect(emitEvent).toHaveBeenCalledWith(
+      "log",
+      expect.objectContaining({
+        metric: "bot_workspace_preflight_failed",
+        reason: "workspace_read_failed",
+      }),
+    );
+  });
+
   it("does not pause for ambiguous coding requests in temporary workspace (stays in temp, no auto-switch)", () => {
     const pauseForUserInput = vi.fn();
     const tryAutoSwitch = vi.fn(() => false);

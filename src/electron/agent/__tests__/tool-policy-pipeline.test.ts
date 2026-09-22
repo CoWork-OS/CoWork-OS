@@ -714,4 +714,133 @@ describe("ToolPolicyPipeline", () => {
       expect(result.decision).toBe("deny");
     },
   );
+
+  it("allows a credential-free bot research read when prompts are disabled", async () => {
+    const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+    process.env.COWORK_APPROVAL_PROMPTS = "off";
+    try {
+      const result = await evaluateToolPolicyPipeline({
+        workspace: {
+          ...workspace,
+          permissions: {
+            ...workspace.permissions,
+            accessApprovalPolicy: "on-request",
+            accessNetworkMode: "on-request",
+          },
+        },
+        toolName: "http_request",
+        toolInput: { url: "https://docs.example.com/guide", method: "GET" },
+        permissionEvaluation: async () => ({
+          decision: "ask",
+          reason: {
+            type: "workspace_capability",
+            capability: "network",
+            summary: "The active access profile requires approval before internet access.",
+          },
+          suggestions: [],
+          scopePreview: "domain docs.example.com",
+        }),
+        allowReadOnlyNetworkWhenApprovalDisabled: true,
+      });
+
+      expect(result.decision).toBe("allow");
+      expect(result.trace.entries).toContainEqual(
+        expect.objectContaining({
+          stage: "approval",
+          decision: "allow",
+          metadata: expect.objectContaining({ source: "bot_research_read_lane" }),
+        }),
+      );
+    } finally {
+      if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+      else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+    }
+  });
+
+  it("does not auto-authorize bot writes or credential-backed reads", async () => {
+    const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+    process.env.COWORK_APPROVAL_PROMPTS = "off";
+    try {
+      for (const [toolName, toolInput] of [
+        ["http_request", { url: "https://api.example.com", method: "POST", body: "x" }],
+        ["http_request", { url: "https://api.example.com", method: "GET", credentialId: "secret" }],
+        ["web_fetch", { url: "https://api.example.com", credentialId: "secret" }],
+      ] as const) {
+        const result = await evaluateToolPolicyPipeline({
+          workspace: {
+            ...workspace,
+            permissions: {
+              ...workspace.permissions,
+              accessApprovalPolicy: "on-request",
+              accessNetworkMode: "on-request",
+            },
+          },
+          toolName,
+          toolInput,
+          permissionEvaluation: async () => ({
+            decision: "ask",
+            reason: {
+              type: "workspace_capability",
+              capability: "network",
+              summary: "The active access profile requires approval before internet access.",
+            },
+            suggestions: [],
+            scopePreview: "network boundary",
+          }),
+          allowReadOnlyNetworkWhenApprovalDisabled: true,
+        });
+
+        expect(result.decision, toolName).toBe("deny");
+        expect(result.reason).toContain("approval requests are disabled");
+      }
+    } finally {
+      if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+      else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+    }
+  });
+
+  it("fails closed for malformed credential, body, and header inputs", async () => {
+    const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+    process.env.COWORK_APPROVAL_PROMPTS = "off";
+    try {
+      for (const [toolName, toolInput] of [
+        ["http_request", { url: "https://api.example.com", method: "GET", credentialId: 1 }],
+        ["http_request", { url: "https://api.example.com", method: "GET", body: {} }],
+        ["http_request", { url: "https://api.example.com", method: "GET", headers: [] }],
+        ["web_fetch", { url: "https://api.example.com", credentialId: { id: "secret" } }],
+        ["web_fetch", {}],
+        ["web_fetch", []],
+        ["http_request", { method: "GET" }],
+      ] as const) {
+        const result = await evaluateToolPolicyPipeline({
+          workspace: {
+            ...workspace,
+            permissions: {
+              ...workspace.permissions,
+              accessApprovalPolicy: "on-request",
+              accessNetworkMode: "on-request",
+            },
+          },
+          toolName,
+          toolInput,
+          permissionEvaluation: async () => ({
+            decision: "ask",
+            reason: {
+              type: "workspace_capability",
+              capability: "network",
+              summary: "The active access profile requires approval before internet access.",
+            },
+            suggestions: [],
+            scopePreview: "network boundary",
+          }),
+          allowReadOnlyNetworkWhenApprovalDisabled: true,
+        });
+
+        expect(result.decision, toolName).toBe("deny");
+      }
+    } finally {
+      if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+      else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+    }
+  });
 });

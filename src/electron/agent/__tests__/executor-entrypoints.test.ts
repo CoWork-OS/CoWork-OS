@@ -439,6 +439,49 @@ describe("TaskExecutor entrypoint guards", () => {
     );
   });
 
+  it("does not bypass the bot handoff gate when a completed conversation is reopened", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-follow-up-bot-handoff",
+      status: "executing",
+      agentConfig: { botConversation: true },
+    };
+    executor.lastAssistantText = "Partial teammate work";
+    executor.getContentFallback = vi.fn(() => "");
+    executor.daemon = {
+      reconcileBotHandoffBeforeFollowUpCompletion: vi.fn(() => ({
+        deferred: true,
+        replySent: false,
+      })),
+      getTask: vi.fn(() => ({
+        id: "task-follow-up-bot-handoff",
+        status: "blocked",
+        error: "Waiting for Scribe to reply before finishing this conversation.",
+      })),
+      updateTask: vi.fn(),
+    };
+    executor.emitEvent = vi.fn();
+
+    (TaskExecutor as Any).prototype.finalizeFollowUpCompletion.call(
+      executor,
+      "Follow-up completed (chat reply)",
+    );
+
+    expect(executor.daemon.reconcileBotHandoffBeforeFollowUpCompletion).toHaveBeenCalledWith(
+      "task-follow-up-bot-handoff",
+      "Partial teammate work",
+    );
+    expect(executor.task.status).toBe("blocked");
+    expect(executor.daemon.updateTask).not.toHaveBeenCalled();
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "task_status",
+      expect.objectContaining({
+        status: "blocked",
+        botHandoffWaiting: true,
+      }),
+    );
+  });
+
   it("does not overwrite an approval blocker when a follow-up fails", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { id: "task-follow-up-blocked" };

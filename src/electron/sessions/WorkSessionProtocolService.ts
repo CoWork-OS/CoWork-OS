@@ -14,6 +14,7 @@ import type {
 } from "../../shared/types";
 import { TaskEventRepository, TaskRepository } from "../database/repositories";
 import {
+  WorkSessionProtocolError,
   WorkSessionProtocolRepository,
   type WorkSessionTaskBinding,
 } from "../database/WorkSessionProtocolRepository";
@@ -315,7 +316,48 @@ export class WorkSessionProtocolService {
       sessionId,
       status: protocolStatusForTask(task.status),
     };
-    const aggregate = this.repository.ensureForTask(binding);
+    let aggregate: WorkSessionAggregate;
+    let recovered: ReturnType<WorkSessionProtocolRepository["recoverForTask"]> | undefined;
+    try {
+      aggregate = this.repository.ensureForTask(binding);
+    } catch (error) {
+      if (
+        !(error instanceof WorkSessionProtocolError) ||
+        error.code !== "SESSION_WORKSPACE_CONFLICT"
+      ) {
+        throw error;
+      }
+      recovered = this.repository.recoverForTask(binding, {
+        code: error.code,
+        details: {
+          message: error.message,
+          taskId: task.id,
+          workspaceId: task.workspaceId,
+        },
+      });
+      aggregate = recovered.aggregate;
+      this.db
+        .prepare("UPDATE tasks SET session_id = ? WHERE id = ?")
+        .run(recovered.replacementSessionId, task.id);
+      task.sessionId = recovered.replacementSessionId;
+      const recoveryEvent = this.eventRepo.create({
+        taskId: task.id,
+        timestamp: Date.now(),
+        schemaVersion: 2,
+        type: "workspace_boundary_recovery",
+        actor: "system",
+        payload: {
+          recovered: true,
+          code: error.code,
+          message: "Conversation restored for the current workspace.",
+          previousSessionId: recovered.previousSessionId,
+          previousWorkspaceId: recovered.previousWorkspaceId,
+          replacementSessionId: recovered.replacementSessionId,
+          workspaceId: task.workspaceId,
+        },
+      });
+      this.recordTaskEventForAggregate(task, { session: aggregate.session }, recoveryEvent);
+    }
     // Existing task rows created before the protocol rollout may not have a
     // session_id. Backfill the stable id without changing task semantics.
     if (!task.sessionId && sessionId) {
@@ -585,12 +627,24 @@ export class WorkSessionProtocolService {
     if (!taskId || !event || EPHEMERAL_EVENT_TYPES.has(event.type)) return undefined;
     const task = this.taskRepo.findById(taskId);
     if (!task) return undefined;
-    const session = this.repository.ensureSessionForTask({
-      taskId: task.id,
-      workspaceId: task.workspaceId,
-      sessionId: task.sessionId || task.id,
-      status: protocolStatusForTask(task.status),
-    });
+    let session: WorkSession;
+    try {
+      session = this.repository.ensureSessionForTask({
+        taskId: task.id,
+        workspaceId: task.workspaceId,
+        sessionId: task.sessionId || task.id,
+        status: protocolStatusForTask(task.status),
+      });
+    } catch (error) {
+      if (
+        !(error instanceof WorkSessionProtocolError) ||
+        error.code !== "SESSION_WORKSPACE_CONFLICT"
+      ) {
+        throw error;
+      }
+      const recovered = this.ensureForTask(task);
+      session = recovered.session;
+    }
     const sessionRef: Pick<WorkSessionAggregate, "session"> = { session };
     if (this.repository.countItems(session.id) <= 1) {
       this.backfillTaskEvents(task, sessionRef);

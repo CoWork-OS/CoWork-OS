@@ -548,6 +548,108 @@ export function filterAdjacentDuplicateTimelineFailures(events: TaskEvent[]): Ta
   return filterDuplicateTimelineArtifacts(out);
 }
 
+const BOT_CONVERSATION_INTERNAL_EVENT_TYPES = new Set([
+  "agent_message",
+  "agent_spawn_requested",
+  "agent_spawned",
+  "agent_completed",
+  "agent_failed",
+  "agent_follow_up_scheduled",
+  "agent_follow_up_started",
+]);
+const BOT_CONVERSATION_MESSAGE_DEDUPE_WINDOW_MS = 30_000;
+
+/**
+ * Recovery attempts used to be persisted as ordinary user-message events.
+ * They are useful in the durable activity log, but showing the same long
+ * orchestration brief in the primary bot conversation makes a retry look like
+ * a new user instruction and buries the actual teammate exchange.
+ */
+const BOT_CONVERSATION_INTERNAL_PROMPT_PATTERNS = [
+  /^\s*\[RETRY CONTEXT\]:/i,
+  /^\s*Recovery run(?:\s+for\b|\b)/i,
+  /\bread-only\s+opportunity-discovery\b[\s\S]*\b(?:send_agent_message|do not merely describe or simulate)\b/i,
+];
+
+function isBotConversationInternalPrompt(event: TaskEvent): boolean {
+  if (getEffectiveTaskEventType(event) !== "user_message") return false;
+
+  const payload = asObject(event.payload);
+  // Inbound teammate work is a real conversation message, even when its text
+  // happens to mention recovery.
+  if (payload.messageSource === "agent") return false;
+
+  const message = getEventMessage(event);
+  return BOT_CONVERSATION_INTERNAL_PROMPT_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function normalizeConversationMessage(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * Keep bot conversations message-first. Handoff delivery and retry lifecycle
+ * events are represented by BotCollaborationHeader, while the transcript gets
+ * one visible card per logical message even when a renderer retry persisted a
+ * second event with a different event id.
+ */
+export function filterBotConversationTranscriptEvents(events: TaskEvent[]): TaskEvent[] {
+  const out: TaskEvent[] = [];
+  const byStableMessageId = new Map<string, number>();
+  const byMessageText = new Map<string, { index: number; timestamp: number }>();
+
+  for (const event of events) {
+    const effectiveType = getEffectiveTaskEventType(event);
+    if (BOT_CONVERSATION_INTERNAL_EVENT_TYPES.has(effectiveType)) continue;
+    if (isBotConversationInternalPrompt(event)) continue;
+
+    if (effectiveType !== "user_message" && effectiveType !== "assistant_message") {
+      out.push(event);
+      continue;
+    }
+
+    const payload = asObject(event.payload);
+    const messageId =
+      typeof payload.messageId === "string" && payload.messageId.trim()
+        ? payload.messageId.trim()
+        : typeof payload.message_id === "string" && payload.message_id.trim()
+          ? payload.message_id.trim()
+          : "";
+    const message = normalizeConversationMessage(getEventMessage(event));
+    const stableKey = messageId
+      ? `${event.taskId}|${effectiveType}|${messageId}`
+      : message
+        ? `${event.taskId}|${effectiveType}|text:${message}`
+        : "";
+    const timestamp = Number.isFinite(event.timestamp) ? event.timestamp : event.ts || 0;
+
+    if (stableKey && byStableMessageId.has(stableKey)) {
+      // Delivery status can be updated by a later receipt event. Keep the
+      // latest copy for agent messages so the compact card is not left queued.
+      if (payload.messageSource === "agent") {
+        out[byStableMessageId.get(stableKey)!] = event;
+      }
+      continue;
+    }
+    if (message) {
+      const textKey = `${event.taskId}|${effectiveType}|${message}`;
+      const previous = byMessageText.get(textKey);
+      if (
+        previous &&
+        Math.abs(timestamp - previous.timestamp) <= BOT_CONVERSATION_MESSAGE_DEDUPE_WINDOW_MS
+      ) {
+        if (payload.messageSource === "agent") out[previous.index] = event;
+        continue;
+      }
+      byMessageText.set(textKey, { index: out.length, timestamp });
+    }
+    if (stableKey) byStableMessageId.set(stableKey, out.length);
+    out.push(event);
+  }
+
+  return out;
+}
+
 function getToolCorrelationId(payload: Record<string, unknown>): string {
   const toolUseId =
     typeof payload.toolUseId === "string" && payload.toolUseId.trim().length > 0

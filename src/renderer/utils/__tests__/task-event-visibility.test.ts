@@ -4,6 +4,7 @@ import type { TaskEvent } from "../../../shared/types";
 import {
   ALWAYS_VISIBLE_TECHNICAL_EVENT_TYPES,
   filterAdjacentDuplicateTimelineFailures,
+  filterBotConversationTranscriptEvents,
   filterResolvedApprovalNarration,
   filterVerboseTimelineNoise,
   IMPORTANT_EVENT_TYPES,
@@ -30,6 +31,96 @@ function makeEvent(
 }
 
 describe("task event visibility helpers", () => {
+  it("keeps bot transcripts message-first and removes duplicate lifecycle receipts", () => {
+    const events = [
+      makeEvent(
+        "user_message",
+        {
+          messageId: "handoff-1",
+          messageSource: "agent",
+          deliveryMode: "message",
+          message: "Investigate the launch opportunity.",
+        },
+        { id: "agent-receipt", timestamp: 1_000 },
+      ),
+      makeEvent(
+        "agent_message",
+        {
+          messageId: "handoff-1",
+          deliveryStatus: "queued",
+        },
+        { id: "handoff-queued", timestamp: 1_001 },
+      ),
+      makeEvent(
+        "agent_follow_up_started",
+        {
+          messageId: "handoff-1",
+          deliveryStatus: "delivered",
+        },
+        { id: "handoff-delivered", timestamp: 1_002 },
+      ),
+      makeEvent(
+        "user_message",
+        {
+          messageSource: "agent",
+          message: "Investigate the launch opportunity.",
+        },
+        { id: "agent-duplicate", timestamp: 1_010 },
+      ),
+      makeEvent(
+        "assistant_message",
+        { message: "I found three opportunities." },
+        {
+          id: "assistant-result",
+          timestamp: 1_020,
+        },
+      ),
+    ];
+
+    expect(filterBotConversationTranscriptEvents(events).map((event) => event.id)).toEqual([
+      "agent-duplicate",
+      "assistant-result",
+    ]);
+  });
+
+  it("hides persisted recovery prompts while keeping normal and teammate messages", () => {
+    const events = [
+      makeEvent("user_message", {
+        message: "Recovery run for the promotion-opportunity task. Retry the two routes.",
+      }),
+      makeEvent("user_message", {
+        message: "What is the latest verified result?",
+      }),
+      makeEvent("user_message", {
+        messageSource: "agent",
+        message: "The teammate found a launch opportunity.",
+      }),
+      makeEvent("user_message", {
+        message: "[RETRY CONTEXT]: use the narrower brief",
+      }),
+    ];
+
+    expect(
+      filterBotConversationTranscriptEvents(events).map((event) => event.payload?.message),
+    ).toEqual(["What is the latest verified result?", "The teammate found a launch opportunity."]);
+  });
+
+  it("hides coordinator delegation protocol from the primary bot transcript", () => {
+    const events = [
+      makeEvent("user_message", {
+        message:
+          "Run a real, read-only opportunity-discovery task for promoting CoWork OS. You are the coordinator and must use the actual send_agent_message tool to delegate work; do not merely describe or simulate the delegation.",
+      }),
+      makeEvent("user_message", {
+        message: "Find current opportunities to promote CoWork OS and summarize the best ones.",
+      }),
+    ];
+
+    expect(
+      filterBotConversationTranscriptEvents(events).map((event) => event.payload?.message),
+    ).toEqual(["Find current opportunities to promote CoWork OS and summarize the best ones."]);
+  });
+
   it("includes artifact_created as an important summary event", () => {
     expect(IMPORTANT_EVENT_TYPES).toContain("artifact_created");
     expect(

@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   BotsPane,
   filterBots,
+  getBotConversationReadiness,
+  getBotConversationReadinessLabel,
   getBotHandle,
   getBotLatestTask,
   getBotPreview,
@@ -36,6 +38,18 @@ const task = {
 };
 
 describe("BotsPane", () => {
+  it("separates persistent conversation readiness from the last run status", () => {
+    expect(getBotConversationReadiness({ status: "completed" } as Any)).toBe("ready");
+    expect(getBotConversationReadiness({ status: "executing" } as Any)).toBe("working");
+    expect(getBotConversationReadiness({ status: "completed" } as Any, { state: "waiting" })).toBe(
+      "waiting",
+    );
+    expect(getBotConversationReadiness({ status: "blocked" } as Any)).toBe("attention");
+    expect(getBotConversationReadiness({ status: "failed" } as Any)).toBe("unavailable");
+    expect(getBotConversationReadinessLabel("ready")).toBe("Ready for another message");
+    expect(getBotConversationReadinessLabel("waiting")).toBe("Waiting on a teammate");
+  });
+
   it("derives a stable handle and prefers the latest result preview", () => {
     expect(getBotHandle(bot)).toBe("research-desk");
     expect(getBotPreview(task as Any)).toBe("Onboarding findings are ready");
@@ -59,6 +73,15 @@ describe("BotsPane", () => {
     expect(stripMarkdownForBotPreview("> **One** result\n- Ship it\n1. Verify it")).toBe(
       "One result Ship it Verify it",
     );
+  });
+
+  it("turns a raw agent-message receipt into a human-facing preview", () => {
+    expect(
+      getBotPreview({
+        ...task,
+        resultSummary: '{"success":true,"deliveryStatus":"queued","message_id":"message-3"}',
+      } as Any),
+    ).toBe("Queued for the next turn");
   });
 
   it("formats bot activity with compact relative units", () => {
@@ -88,6 +111,21 @@ describe("BotsPane", () => {
     expect(markup).toContain('aria-label="Edit Research Desk"');
     expect(markup).toContain("Onboarding findings are ready");
     expect(markup).toMatch(/class="sidebar-bot-row selected\b/);
+  });
+
+  it("uses the selected conversation projection for a stale completed roster row", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BotsPane, {
+        roles: [bot],
+        tasks: [task as Any],
+        selectedTaskId: task.id,
+        selectedConversationProjection: { state: "waiting" },
+        onSelectTask: () => {},
+      }),
+    );
+
+    expect(markup).toContain("Waiting on a teammate");
+    expect(markup).not.toContain("Ready for another message");
   });
 
   it("keeps a bot selected for an older bot conversation but ignores normal role tasks", () => {

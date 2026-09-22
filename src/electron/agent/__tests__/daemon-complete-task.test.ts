@@ -28,6 +28,7 @@ function createDaemonLike() {
     },
     eventRepo: {
       findByTaskId: vi.fn().mockReturnValue([]),
+      updatePayloadById: vi.fn(),
     },
     approvalRepo: {
       update: vi.fn(),
@@ -296,6 +297,68 @@ describe("AgentDaemon.completeTask", () => {
     );
 
     clearTimeout(timeoutHandle);
+  });
+
+  it("reconciles a persisted completed bot row before accepting terminal state", async () => {
+    const daemonLike = createDaemonLike();
+    const completedTask = {
+      id: "task-1",
+      title: "Atlas",
+      status: "completed",
+      workspaceId: "workspace-1",
+      agentType: "main",
+      agentConfig: { botConversation: true, botTeamId: "team-1" },
+    };
+    daemonLike.taskRepo.findById.mockImplementation((taskId: string) =>
+      taskId === "teammate-1"
+        ? {
+            id: "teammate-1",
+            title: "Scribe",
+            status: "executing",
+            workspaceId: "workspace-1",
+            agentType: "main",
+            agentConfig: { botConversation: true, botTeamId: "team-1" },
+          }
+        : completedTask,
+    );
+    daemonLike.eventRepo.findByTaskId.mockReturnValue([
+      {
+        id: "handoff-1",
+        taskId: "task-1",
+        timestamp: 1,
+        type: "agent_message",
+        payload: {
+          messageId: "handoff-1",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          targetTaskId: "teammate-1",
+          recipientLabel: "Scribe",
+          message: "Find current opportunities.",
+        },
+      },
+    ]);
+
+    await AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Partial result");
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "blocked",
+        error: "Waiting for Scribe to reply before finishing this conversation.",
+      }),
+    );
+    expect(daemonLike.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "task_status",
+      expect.objectContaining({ botHandoffWaiting: true }),
+    );
+    expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "task_completed",
+      expect.anything(),
+    );
   });
 
   it("ignores late failures after the task is already completed", () => {

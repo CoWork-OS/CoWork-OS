@@ -999,6 +999,34 @@ describe("TaskExecutor chat mode", () => {
     expect(summary).toContain("Remember this user decision.");
   });
 
+  it("uses the bounded deterministic handoff for oversized bot research transcripts", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { botConversation: true } };
+    executor.contextManager = { getAvailableTokens: () => 20_000 };
+    executor.callLLMWithRetry = vi.fn();
+    executor.updateTracking = vi.fn();
+
+    const summary = await (TaskExecutor as Any).prototype.buildCompactionSummaryBlock.call(
+      executor,
+      {
+        removedMessages: [
+          ...Array.from({ length: 10 }, (_, index) => ({
+            role: "user",
+            content:
+              index === 0 ? "Research brief" : `Research result ${index} ` + "x".repeat(4000),
+          })),
+        ],
+        maxOutputTokens: 512,
+        contextLabel: "bot research",
+      },
+    );
+
+    expect(executor.callLLMWithRetry).not.toHaveBeenCalled();
+    expect(summary).toContain("<cowork_compaction_summary>");
+    expect(summary).toContain("Dropped context (raw, truncated):");
+    expect(summary).toContain("Research brief");
+  });
+
   it("compacts a single oversized prior chat message instead of bypassing the token trigger", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     const summary =

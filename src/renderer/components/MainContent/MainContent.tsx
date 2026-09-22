@@ -122,12 +122,19 @@ import {
 } from "../../utils/task-outputs";
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
 import {
+  getAgentMessageReceipt,
+  formatAgentMessageProtocolForDisplay,
+  parseAgentMessageProtocolResult,
+} from "../../utils/agent-message-receipt";
+import {
+  isSameAcceptedComposerDraftFence,
   isSameComposerDraftSubmission,
   isTaskCreationAccepted,
 } from "../../utils/composer-draft-fencing";
 import { shouldShowPersistentNeedsUserActionBanner } from "../../utils/task-completion-ux";
 import {
   filterAdjacentDuplicateTimelineFailures,
+  filterBotConversationTranscriptEvents,
   filterResolvedApprovalNarration,
   filterVerboseTimelineNoise,
   isDuplicateContextSummaryEvent,
@@ -295,6 +302,8 @@ import {
   taskCanBecomeRoutineFromFollowUp,
 } from "./TaskAutomationModal";
 import { BotConversationHistory } from "../BotConversationHistory";
+import { BotCollaborationHeader } from "../BotCollaborationHeader";
+import type { BotConversationProjection } from "../../../shared/bot-lifecycle";
 
 const VISUAL_ATTACHMENT_MIME_SET = new Set([
   "image/jpeg",
@@ -511,6 +520,7 @@ interface MainContentProps {
   onSelectTask?: (taskId: string | null) => void;
   botConversations?: Task[];
   isLoadingBotConversations?: boolean;
+  conversationProjection?: BotConversationProjection | null;
   onSelectBotConversation?: (conversationId: string) => void | Promise<void>;
   onNewBotConversation?: (botRoleId: string) => void | Promise<void>;
   draftValue?: string;
@@ -1498,6 +1508,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const suppressedParallelEventIds = props.suppressedParallelEventIds as Set<string>;
   const task = props.task as Task;
   const isBotConversation = task?.agentConfig?.botConversation === true;
+  // Bot transcripts follow the teammate-conversation model: keep messages and
+  // user-relevant outcomes in the flow, but keep internal execution activity
+  // out of the primary conversation surface.
+  const isConversationOnlySurface = isChatTask || isBotConversation;
   const botName = props.botName as string | undefined;
   const timelineItems = props.timelineItems as Array<any>;
   const timelineRef = props.timelineRef as React.RefObject<HTMLDivElement | null>;
@@ -1517,7 +1531,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const stepFeedTimelineIndexPosition = new Map<number, number>();
   let stepFeedEventCount = 0;
   timelineItems.forEach((timelineItem, timelineIndex) => {
-    if (isChatTask && timelineItem.kind === "action_block") {
+    if (isConversationOnlySurface && timelineItem.kind === "action_block") {
       return;
     }
     if (timelineItem.kind === "action_block") {
@@ -1780,7 +1794,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     () =>
       feedRows.filter((row) => {
         if (row.kind === "history-control") return true;
-        if (row.kind === "leading-command-outputs") return row.sessions.length > 0;
+        if (row.kind === "leading-command-outputs") {
+          return !isConversationOnlySurface && row.sessions.length > 0;
+        }
         if (row.kind === "artifact-stack") return Boolean(workspace?.path);
         if (row.kind !== "timeline") return true;
 
@@ -1790,10 +1806,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
           item.kind === "cli-agent-frame" ||
           item.kind === "dispatched-agents"
         ) {
-          return true;
+          return !isConversationOnlySurface;
         }
         if (item.kind === "action_block") {
-          return !isChatTask;
+          return !isConversationOnlySurface;
         }
         if (item.kind !== "event") return true;
 
@@ -1805,8 +1821,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         const commandOutputsAfterEvent = commandOutputSessionsByInsertIndex.get(item.eventIndex);
         const hasCommandOutputs = Boolean(commandOutputsAfterEvent?.length);
 
-        if (isChatTask && !isUserMessage && !isAssistantMessage && !isCompletionSummaryMessage) {
-          return (effectiveType === "llm_streaming" && isTaskWorking) || hasCommandOutputs;
+        if (
+          isConversationOnlySurface &&
+          !isUserMessage &&
+          !isAssistantMessage &&
+          !isCompletionSummaryMessage
+        ) {
+          return effectiveType === "llm_streaming" && isTaskWorking;
         }
 
         if (isUserMessage) {
@@ -1834,7 +1855,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       commandOutputSessionsByInsertIndex,
       feedRows,
       initialPromptEventId,
-      isChatTask,
+      isConversationOnlySurface,
       isTaskWorking,
       parallelGroupsByAnchorEventId,
       shouldRenderTimelineEventInStepFeed,
@@ -1859,7 +1880,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   );
   const showReasoningPanel =
     transcriptMode === "live" &&
-    !isChatTask &&
+    !isConversationOnlySurface &&
     isTaskWorking &&
     hasAgentReasoningPanelContent(reasoningPanelState);
   const reasoningPanelSignature = showReasoningPanel
@@ -2035,6 +2056,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
 
               const { item, timelineIndex } = row;
               if (item.kind === "canvas") {
+                if (isConversationOnlySurface) return null;
                 return (
                   <CanvasPreview
                     session={item.session}
@@ -2046,6 +2068,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               }
 
               if (item.kind === "cli-agent-frame") {
+                if (isConversationOnlySurface) return null;
                 const agentType =
                   resolveCliAgentType(item.childTask, item.childTaskEvents) || "codex-cli";
                 return (
@@ -2060,6 +2083,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               }
 
               if (item.kind === "dispatched-agents") {
+                if (isConversationOnlySurface) return null;
                 // Collaborative runs own every child agent in the shared team-run surface.
                 const nonCliChildTasks = childTasks.filter((t) => !isCliAgentChildTask(t));
                 const panelTasks = collaborativeRun
@@ -2099,7 +2123,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               }
 
               if (item.kind === "action_block") {
-                if (isChatTask) return null;
+                if (isConversationOnlySurface) return null;
                 const isBlockOnlyMinimalCompletions =
                   !verboseSteps &&
                   item.events.length > 0 &&
@@ -2548,7 +2572,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               );
 
               if (
-                isChatTask &&
+                isConversationOnlySurface &&
                 !isUserMessage &&
                 !isAssistantMessage &&
                 !isCompletionSummaryMessage
@@ -2613,20 +2637,12 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     typeof event.payload?.message === "string"
                       ? normalizeInitialPromptText(event.payload.message)
                       : "Agent message";
-                  const inboundMessageId =
-                    typeof event.payload?.messageId === "string"
-                      ? event.payload.messageId.trim()
-                      : "";
-                  const inboundDeliveryStatus =
-                    typeof event.payload?.deliveryStatus === "string"
-                      ? event.payload.deliveryStatus.trim()
-                      : typeof event.payload?.status === "string"
-                        ? event.payload.status.trim()
-                        : "";
-                  const inboundSenderTaskId =
-                    typeof event.payload?.senderTaskId === "string"
-                      ? event.payload.senderTaskId.trim()
-                      : "";
+                  const inboundReceipt = getAgentMessageReceipt(
+                    event.payload as Record<string, unknown>,
+                  );
+                  const inboundMessageId = inboundReceipt.messageId;
+                  const inboundDeliveryStatus = inboundReceipt.status;
+                  const inboundSenderTaskId = inboundReceipt.senderTaskId;
                   const senderLabel =
                     typeof event.payload?.senderLabel === "string" &&
                     event.payload.senderLabel.trim().length > 0
@@ -2643,6 +2659,20 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       >
                         <div className="agent-inbound-message-label">
                           Message from {senderLabel}
+                        </div>
+                        <div
+                          className={`agent-inbound-message-receipt agent-inbound-message-receipt-${inboundReceipt.status}`}
+                          aria-label={`Message ${inboundReceipt.label.toLowerCase()}`}
+                        >
+                          <span>{inboundReceipt.label}</span>
+                          {inboundReceipt.messageId ? (
+                            <span
+                              className="agent-message-receipt-id"
+                              title={`Message ID ${inboundReceipt.messageId}`}
+                            >
+                              {` · ${inboundReceipt.shortMessageId}`}
+                            </span>
+                          ) : null}
                         </div>
                         <div className="agent-inbound-message-body markdown-content">
                           <UserMessageText
@@ -2763,6 +2793,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 const messageText = isCompletionSummaryMessage
                   ? completionSummaryText
                   : event.payload?.message || "";
+                const agentMessageProtocolReceipt = isBotConversation
+                  ? parseAgentMessageProtocolResult(messageText)
+                  : null;
                 const cleanedMessageText = cleanAssistantMessageForDisplay(messageText);
                 const inlineFrames = getTaskEventInlineFrames(event);
                 const sourceUserMessage = getPreviousUserMessageText(events, item.eventIndex);
@@ -2773,7 +2806,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 );
                 const isLastAssistant = isLastAssistantMessageEvent(event, lastAssistantMessage);
                 const assistantStatusLabel =
-                  isLastAssistant && !isChatTask
+                  isLastAssistant && !isConversationOnlySurface
                     ? getAssistantBubbleStatusLabel(
                         task,
                         agentContext.getMessage("taskBlocked") || "Needs approval",
@@ -2795,207 +2828,252 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div className="chat-message assistant-message">
-                      <div className="chat-bubble assistant-bubble">
-                        {isBotConversation && (
-                          <div className="bot-message-attribution">{botMessageSender}</div>
-                        )}
-                        {assistantStatusLabel && (
-                          <div className="chat-bubble-header">
-                            <span className="chat-status">{assistantStatusLabel}</span>
+                      {agentMessageProtocolReceipt ? (
+                        <div
+                          className="agent-outbound-message-receipt"
+                          data-message-id={agentMessageProtocolReceipt.messageId || undefined}
+                          data-delivery-state={agentMessageProtocolReceipt.status}
+                          aria-label={`Agent message ${agentMessageProtocolReceipt.label.toLowerCase()}`}
+                        >
+                          <div className="bot-message-attribution">
+                            <span className="bot-message-attribution-avatar" aria-hidden="true">
+                              <BotGlyph size={12} />
+                            </span>
+                            <span>{botMessageSender}</span>
                           </div>
-                        )}
-                        <div className="chat-bubble-content markdown-content">
-                          <AssistantMessageContent
-                            message={cleanedMessageText}
-                            markdownComponents={markdownComponents}
-                            workspacePath={workspace?.path}
-                            onOpenViewer={setViewerFilePath}
-                          />
-                        </div>
-                      </div>
-                      {(inlineFrames.length > 0 || (isAssistantMessage && event.id)) && (
-                        <div className="chat-inline-frames">
-                          {inlineFrames.map((frame) => (
-                            <MailComposeFrame
-                              key={`${frame.kind}:${frame.draftId}`}
-                              frame={frame}
-                            />
-                          ))}
-                          {inlineFrames.length === 0 && isLastAssistant && !isTaskWorking && (
-                            <AutoMailComposeFrame
-                              eventId={event.id}
-                              taskId={event.taskId}
-                              assistantMessage={cleanedMessageText}
-                              sourceUserMessage={sourceUserMessage}
-                              allowCreate={true}
-                            />
-                          )}
-                        </div>
-                      )}
-                      <div className="message-actions">
-                        <MessageCopyButton text={messageText} />
-                        <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
-                        {quotedAssistantMessage && onQuoteAssistantMessage && (
-                          <MessageQuoteButton
-                            onQuote={() => onQuoteAssistantMessage(quotedAssistantMessage)}
-                          />
-                        )}
-                        {event.id &&
-                          onForkTaskSessionFromEvent &&
-                          !isBotConversation &&
-                          isLastAssistant && (
-                            <MessageForkButton onFork={() => onForkTaskSessionFromEvent(event)} />
-                          )}
-                        {isLastAssistant && event.id && !isTaskWorking && (
-                          <>
-                            <button
-                              className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
-                              title="Helpful"
-                              onClick={() =>
-                                void handleMessageFeedback({
-                                  messageId: event.id!,
-                                  decision: "accepted",
-                                })
-                              }
-                            >
-                              👍
-                            </button>
-                            <div
-                              ref={rejectMenuOpenFor === event.id ? rejectMenuRef : undefined}
-                              className="message-feedback-thumbdown-wrap"
-                            >
-                              <button
-                                className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
-                                title="Not helpful"
-                                onClick={() =>
-                                  setRejectMenuOpenFor((v) =>
-                                    v === event.id ? null : (event.id ?? null),
-                                  )
-                                }
-                              >
-                                👎
-                              </button>
-                              {rejectMenuOpenFor === event.id && (
-                                <div className="message-feedback-menu">
-                                  {(
-                                    [
-                                      ["incorrect", "Incorrect"],
-                                      ["too_verbose", "Too verbose"],
-                                      ["ignored_instructions", "Ignored instructions"],
-                                      ["wrong_tone", "Wrong tone"],
-                                      ["unsafe", "Unsafe / unwanted"],
-                                    ] as const
-                                  ).map(([reason, label]) => (
-                                    <button
-                                      key={reason}
-                                      className="message-feedback-reason"
-                                      onClick={() =>
-                                        void handleMessageFeedback({
-                                          messageId: event.id!,
-                                          decision: "rejected",
-                                          reason,
-                                        })
-                                      }
-                                    >
-                                      {label}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-                        {isLastAssistant && isTaskWorking && !isBotConversation && (
-                          <button
-                            className="bubble-feedback-toggle"
-                            onClick={() => setStepFeedbackOpen((o) => !o)}
-                            title="Give feedback"
+                          <div
+                            className={`agent-inbound-message-receipt agent-inbound-message-receipt-${agentMessageProtocolReceipt.status}`}
                           >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <circle cx="12" cy="12" r="1" />
-                              <circle cx="19" cy="12" r="1" />
-                              <circle cx="5" cy="12" r="1" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
-                      {isLastAssistant && stepFeedbackOpen && !isBotConversation && (
-                        <div className="bubble-feedback-panel">
-                          {currentStep && (
-                            <div className="bubble-feedback-step-label">
-                              {currentStep.description === "Thinking..." ? (
-                                <span className="thinking-title">
-                                  Thinking
-                                  <span className="thinking-ellipsis">
-                                    <span>.</span>
-                                    <span>.</span>
-                                    <span>.</span>
-                                  </span>
+                            <span>{agentMessageProtocolReceipt.label}</span>
+                            {agentMessageProtocolReceipt.messageId ? (
+                              <span
+                                className="agent-message-receipt-id"
+                                title={`Message ID ${agentMessageProtocolReceipt.messageId}`}
+                              >
+                                {` · ${agentMessageProtocolReceipt.shortMessageId}`}
+                              </span>
+                            ) : null}
+                          </div>
+                          {agentMessageProtocolReceipt.error ? (
+                            <div className="agent-outbound-message-error">
+                              {agentMessageProtocolReceipt.error}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="chat-bubble assistant-bubble">
+                            {isBotConversation && (
+                              <div className="bot-message-attribution">
+                                <span className="bot-message-attribution-avatar" aria-hidden="true">
+                                  <BotGlyph size={12} />
                                 </span>
-                              ) : (
-                                currentStep.description
+                                <span>{botMessageSender}</span>
+                              </div>
+                            )}
+                            {assistantStatusLabel && (
+                              <div className="chat-bubble-header">
+                                <span className="chat-status">{assistantStatusLabel}</span>
+                              </div>
+                            )}
+                            <div className="chat-bubble-content markdown-content">
+                              <AssistantMessageContent
+                                message={cleanedMessageText}
+                                markdownComponents={markdownComponents}
+                                workspacePath={workspace?.path}
+                                onOpenViewer={setViewerFilePath}
+                              />
+                            </div>
+                          </div>
+                          {(inlineFrames.length > 0 || (isAssistantMessage && event.id)) && (
+                            <div className="chat-inline-frames">
+                              {inlineFrames.map((frame) => (
+                                <MailComposeFrame
+                                  key={`${frame.kind}:${frame.draftId}`}
+                                  frame={frame}
+                                />
+                              ))}
+                              {inlineFrames.length === 0 && isLastAssistant && !isTaskWorking && (
+                                <AutoMailComposeFrame
+                                  eventId={event.id}
+                                  taskId={event.taskId}
+                                  assistantMessage={cleanedMessageText}
+                                  sourceUserMessage={sourceUserMessage}
+                                  allowCreate={true}
+                                />
                               )}
                             </div>
                           )}
-                          <div className="bubble-feedback-actions">
-                            {currentStep && (
+                          <div className="message-actions">
+                            <MessageCopyButton text={messageText} />
+                            <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
+                            {quotedAssistantMessage && onQuoteAssistantMessage && (
+                              <MessageQuoteButton
+                                onQuote={() => onQuoteAssistantMessage(quotedAssistantMessage)}
+                              />
+                            )}
+                            {event.id &&
+                              onForkTaskSessionFromEvent &&
+                              !isBotConversation &&
+                              isLastAssistant && (
+                                <MessageForkButton
+                                  onFork={() => onForkTaskSessionFromEvent(event)}
+                                />
+                              )}
+                            {isLastAssistant && event.id && !isTaskWorking && (
                               <>
                                 <button
-                                  className="bubble-feedback-btn skip"
-                                  disabled={stepFeedbackSending}
-                                  onClick={() => handleStepFeedback("skip")}
+                                  className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
+                                  title="Helpful"
+                                  onClick={() =>
+                                    void handleMessageFeedback({
+                                      messageId: event.id!,
+                                      decision: "accepted",
+                                    })
+                                  }
                                 >
-                                  Skip
+                                  👍
                                 </button>
-                                <button
-                                  className="bubble-feedback-btn retry"
-                                  disabled={stepFeedbackSending}
-                                  onClick={() => handleStepFeedback("retry")}
+                                <div
+                                  ref={rejectMenuOpenFor === event.id ? rejectMenuRef : undefined}
+                                  className="message-feedback-thumbdown-wrap"
                                 >
-                                  Retry
-                                </button>
+                                  <button
+                                    className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
+                                    title="Not helpful"
+                                    onClick={() =>
+                                      setRejectMenuOpenFor((v) =>
+                                        v === event.id ? null : (event.id ?? null),
+                                      )
+                                    }
+                                  >
+                                    👎
+                                  </button>
+                                  {rejectMenuOpenFor === event.id && (
+                                    <div className="message-feedback-menu">
+                                      {(
+                                        [
+                                          ["incorrect", "Incorrect"],
+                                          ["too_verbose", "Too verbose"],
+                                          ["ignored_instructions", "Ignored instructions"],
+                                          ["wrong_tone", "Wrong tone"],
+                                          ["unsafe", "Unsafe / unwanted"],
+                                        ] as const
+                                      ).map(([reason, label]) => (
+                                        <button
+                                          key={reason}
+                                          className="message-feedback-reason"
+                                          onClick={() =>
+                                            void handleMessageFeedback({
+                                              messageId: event.id!,
+                                              decision: "rejected",
+                                              reason,
+                                            })
+                                          }
+                                        >
+                                          {label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                               </>
                             )}
-                            <button
-                              className="bubble-feedback-btn stop"
-                              disabled={stepFeedbackSending || !currentStep}
-                              onClick={() => handleStepFeedback("stop")}
-                            >
-                              Stop
-                            </button>
+                            {isLastAssistant && isTaskWorking && !isBotConversation && (
+                              <button
+                                className="bubble-feedback-toggle"
+                                onClick={() => setStepFeedbackOpen((o) => !o)}
+                                title="Give feedback"
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <circle cx="12" cy="12" r="1" />
+                                  <circle cx="19" cy="12" r="1" />
+                                  <circle cx="5" cy="12" r="1" />
+                                </svg>
+                              </button>
+                            )}
                           </div>
-                          <div className="bubble-feedback-input-row">
-                            <input
-                              className="bubble-feedback-input"
-                              type="text"
-                              placeholder="Adjust direction…"
-                              value={stepFeedbackText}
-                              onChange={(e) => setStepFeedbackText(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && stepFeedbackText.trim()) {
-                                  handleStepFeedback("drift", stepFeedbackText.trim());
-                                }
-                              }}
-                              disabled={stepFeedbackSending}
-                            />
-                            <button
-                              className="bubble-feedback-btn drift"
-                              disabled={stepFeedbackSending || !stepFeedbackText.trim()}
-                              onClick={() => handleStepFeedback("drift", stepFeedbackText.trim())}
-                            >
-                              Send
-                            </button>
-                          </div>
-                        </div>
+                          {isLastAssistant && stepFeedbackOpen && !isBotConversation && (
+                            <div className="bubble-feedback-panel">
+                              {currentStep && (
+                                <div className="bubble-feedback-step-label">
+                                  {currentStep.description === "Thinking..." ? (
+                                    <span className="thinking-title">
+                                      Thinking
+                                      <span className="thinking-ellipsis">
+                                        <span>.</span>
+                                        <span>.</span>
+                                        <span>.</span>
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    currentStep.description
+                                  )}
+                                </div>
+                              )}
+                              <div className="bubble-feedback-actions">
+                                {currentStep && (
+                                  <>
+                                    <button
+                                      className="bubble-feedback-btn skip"
+                                      disabled={stepFeedbackSending}
+                                      onClick={() => handleStepFeedback("skip")}
+                                    >
+                                      Skip
+                                    </button>
+                                    <button
+                                      className="bubble-feedback-btn retry"
+                                      disabled={stepFeedbackSending}
+                                      onClick={() => handleStepFeedback("retry")}
+                                    >
+                                      Retry
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  className="bubble-feedback-btn stop"
+                                  disabled={stepFeedbackSending || !currentStep}
+                                  onClick={() => handleStepFeedback("stop")}
+                                >
+                                  Stop
+                                </button>
+                              </div>
+                              <div className="bubble-feedback-input-row">
+                                <input
+                                  className="bubble-feedback-input"
+                                  type="text"
+                                  placeholder="Adjust direction…"
+                                  value={stepFeedbackText}
+                                  onChange={(e) => setStepFeedbackText(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && stepFeedbackText.trim()) {
+                                      handleStepFeedback("drift", stepFeedbackText.trim());
+                                    }
+                                  }}
+                                  disabled={stepFeedbackSending}
+                                />
+                                <button
+                                  className="bubble-feedback-btn drift"
+                                  disabled={stepFeedbackSending || !stepFeedbackText.trim()}
+                                  onClick={() =>
+                                    handleStepFeedback("drift", stepFeedbackText.trim())
+                                  }
+                                >
+                                  Send
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                     {renderCommandOutputs(commandOutputsAfterEvent)}
@@ -3162,7 +3240,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
                 rendererPerfLoggingEnabled={Boolean(rendererPerfLoggingEnabled)}
                 visibleFeedRows={visibleFeedRows}
-                isChatTask={isChatTask}
+                isChatTask={isConversationOnlySurface}
                 isTaskWorking={isTaskWorking}
                 task={task}
                 formatTime={formatTime}
@@ -3209,7 +3287,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       timelineHistoryError,
       isBotConversation,
       botName,
-      isChatTask,
+      isConversationOnlySurface,
       isTaskWorking,
       isReplayMode,
       markdownComponents,
@@ -3465,6 +3543,7 @@ function MainContentComponent({
   onSelectTask,
   botConversations = [],
   isLoadingBotConversations = false,
+  conversationProjection = null,
   onSelectBotConversation,
   onNewBotConversation,
   draftValue,
@@ -3587,10 +3666,10 @@ function MainContentComponent({
     if (effectiveSharedTaskEventUi) {
       return effectiveSharedTaskEventUi.normalizedEvents;
     }
-    return measureRendererPerf("MainContent.normalizeEvents", rendererPerfLoggingEnabled, () =>
-      normalizeEventsForTimelineUi(rawEvents),
-    );
-  }, [rawEvents, rendererPerfLoggingEnabled, effectiveSharedTaskEventUi]);
+    return measureRendererPerf("MainContent.normalizeEvents", rendererPerfLoggingEnabled, () => {
+      return normalizeEventsForTimelineUi(rawEvents);
+    });
+  }, [rawEvents, rendererPerfLoggingEnabled, effectiveSharedTaskEventUi, task]);
   const taskStatusStripModel = useMemo(
     () => ({
       ...statusTaskEventUi.taskStatusStrip,
@@ -3621,6 +3700,11 @@ function MainContentComponent({
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [isPreparingMessage, setIsPreparingMessage] = useState(false);
+  const pendingFollowUpSubmissionRef = useRef<{
+    taskId: string;
+    fingerprint: string;
+    messageId: string;
+  } | null>(null);
   const [agentRoles, setAgentRoles] = useState<AgentRoleData[]>([]);
   const [integrationMentionOptions, setIntegrationMentionOptions] = useState<
     IntegrationMentionOption[]
@@ -3659,6 +3743,12 @@ function MainContentComponent({
   const draftRevisionRef = useRef(draftRevision);
   const draftKeyRef = useRef<string | undefined>(draftSnapshot?.draftKey);
   const draftSnapshotRef = useRef<ComposerDraft | null>(draftSnapshot);
+  const acceptedDraftClearRef = useRef<{
+    draftKey?: string;
+    taskId?: string;
+    revision: number;
+    text: string;
+  } | null>(null);
   const renderedDraftKey = draftSnapshot?.draftKey;
   if (draftKeyRef.current !== renderedDraftKey) {
     // A key change is an owner transition, so reset the revision fence for
@@ -3696,6 +3786,34 @@ function MainContentComponent({
   // prompt remains visible in the fresh composer.
   useEffect(() => {
     const draftKey = draftSnapshot?.draftKey;
+    const acceptedDraftClear = acceptedDraftClearRef.current;
+    const acceptedDraftStillVisible =
+      acceptedDraftClear &&
+      isSameAcceptedComposerDraftFence({
+        fenceDraftKey: acceptedDraftClear.draftKey,
+        currentDraftKey: draftKey,
+        fenceTaskId: acceptedDraftClear.taskId,
+        currentTaskId: task?.id,
+        fenceRevision: acceptedDraftClear.revision,
+        currentRevision: draftSnapshot?.revision ?? draftRevision,
+      }) &&
+      draftValue === acceptedDraftClear.text &&
+      inputValueRef.current === "";
+    if (acceptedDraftStillVisible) {
+      // The durable clear is still in flight. Do not hydrate the accepted
+      // prompt back into the editor after the optimistic local clear.
+      previousTaskIdRef.current = task?.id;
+      previousDraftKeyRef.current = draftKey;
+      return;
+    }
+    if (
+      acceptedDraftClear &&
+      (!draftSnapshot ||
+        draftKey !== acceptedDraftClear.draftKey ||
+        (draftSnapshot.revision ?? draftRevision) > acceptedDraftClear.revision)
+    ) {
+      acceptedDraftClearRef.current = null;
+    }
     const taskChanged = previousTaskIdRef.current !== task?.id;
     const draftChanged = previousDraftKeyRef.current !== draftKey;
     const restoredAttachments = (draftSnapshot?.attachments ?? []).map((attachment) => ({
@@ -4114,6 +4232,7 @@ function MainContentComponent({
     (isChatExecutionTask(task?.agentConfig?.executionMode) &&
       task?.agentConfig?.executionModeSource === "user");
   const isBotConversation = task?.agentConfig?.botConversation === true;
+  const isBotHandoffWaiting = isBotConversation && conversationProjection?.state === "waiting";
   const botName = botRole && botRole.id === task?.assignedAgentRoleId ? botRole.displayName : "Bot";
   const actionLabels = getConversationActionLabels(isBotConversation);
   const menuLabel = isBotConversation ? "Bot options" : actionLabels.menu;
@@ -4656,10 +4775,14 @@ function MainContentComponent({
       return effectiveSharedTaskEventUi.filteredEvents;
     }
     return measureRendererPerf("MainContent.filteredEvents", rendererPerfLoggingEnabled, () => {
+      const transcriptEvents =
+        task?.agentConfig?.botConversation === true
+          ? filterBotConversationTranscriptEvents(events)
+          : events;
       const baseEvents = verboseSteps
-        ? filterVerboseTimelineNoise(events)
+        ? filterVerboseTimelineNoise(transcriptEvents)
         : filterAdjacentDuplicateTimelineFailures(
-            filterResolvedApprovalNarration(events).filter((event) =>
+            filterResolvedApprovalNarration(transcriptEvents).filter((event) =>
               shouldShowTaskEventInSummaryMode(event, task?.status),
             ),
           );
@@ -6897,6 +7020,15 @@ function MainContentComponent({
 
     const trimmedInput = inputValue.trim();
     const hasAttachments = pendingAttachments.length > 0;
+    const pendingFollowUpSubmission = pendingFollowUpSubmissionRef.current;
+    if (
+      pendingFollowUpSubmission &&
+      task?.id === pendingFollowUpSubmission.taskId &&
+      pendingFollowUpSubmission.fingerprint === trimmedInput.replace(/\s+/g, " ").toLowerCase() &&
+      !hasAttachments
+    ) {
+      return;
+    }
     const unavailableAttachments = pendingAttachments.filter(
       (attachment) =>
         attachment.status === "unavailable" ||
@@ -7061,6 +7193,11 @@ function MainContentComponent({
     const submittedDraftKey = draftKeyRef.current;
     const submittedDraftRevision = draftRevisionRef.current;
     const submittedDraft = draftSnapshotRef.current;
+    const submittedTaskId = task?.id;
+    const submittedPendingAttachments = pendingAttachments;
+    const submittedIntegrationMentionSpans = integrationMentionSpans;
+    const submittedQuotedAssistantMessage = quotedAssistantMessage;
+    const submittedWelcomeSuggestionDraft = activeWelcomeSuggestionDraft;
     const isSubmittedDraftCurrent = () =>
       isSameComposerDraftSubmission({
         submittedDraftKey,
@@ -7086,24 +7223,81 @@ function MainContentComponent({
       setSlashTarget(null);
       setModeSuggestions([]);
     };
+    const restoreAcceptedComposer = (): boolean => {
+      const acceptedDraftClear = acceptedDraftClearRef.current;
+      const stillOwnsSubmission = isSameAcceptedComposerDraftFence({
+        fenceDraftKey: submittedDraftKey,
+        currentDraftKey: draftKeyRef.current,
+        fenceTaskId: submittedTaskId,
+        currentTaskId: task?.id,
+        fenceRevision: submittedDraftRevision,
+        currentRevision: draftRevisionRef.current,
+      });
+      if (
+        acceptedDraftClear &&
+        isSameAcceptedComposerDraftFence({
+          fenceDraftKey: acceptedDraftClear.draftKey,
+          currentDraftKey: submittedDraftKey,
+          fenceTaskId: acceptedDraftClear.taskId,
+          currentTaskId: submittedTaskId,
+          fenceRevision: acceptedDraftClear.revision,
+          currentRevision: submittedDraftRevision,
+        }) &&
+        stillOwnsSubmission
+      ) {
+        pendingProgrammaticResizeRef.current = true;
+        setInputValue(submittedInputValue);
+        setActiveWelcomeSuggestionDraft(submittedWelcomeSuggestionDraft);
+        setQuotedAssistantMessage(submittedQuotedAssistantMessage);
+        setPendingAttachments(submittedPendingAttachments);
+        setIntegrationMentionSpans(submittedIntegrationMentionSpans);
+        acceptedDraftClearRef.current = null;
+        return true;
+      }
+      if (
+        acceptedDraftClear &&
+        isSameAcceptedComposerDraftFence({
+          fenceDraftKey: acceptedDraftClear.draftKey,
+          currentDraftKey: submittedDraftKey,
+          fenceTaskId: acceptedDraftClear.taskId,
+          currentTaskId: submittedTaskId,
+          fenceRevision: acceptedDraftClear.revision,
+          currentRevision: submittedDraftRevision,
+        })
+      ) {
+        acceptedDraftClearRef.current = null;
+      }
+      return false;
+    };
     const clearAcceptedComposer = async (): Promise<boolean> => {
       if (!isSubmittedDraftCurrent()) return false;
-      const accepted = await onDraftAccepted?.(submittedDraftRevision, submittedDraft);
-      if (accepted === false) return false;
-      // The successful store clear removes the draft snapshot, so the normal
-      // revision fence is no longer expected to match. Only clear the local
-      // editor if the submitted text/owner is still the one on screen.
-      if (
-        inputValueRef.current !== submittedInputValue ||
-        (draftKeyRef.current && draftKeyRef.current !== submittedDraftKey)
-      ) {
+      acceptedDraftClearRef.current = {
+        draftKey: submittedDraftKey,
+        taskId: submittedTaskId,
+        revision: submittedDraftRevision,
+        text: submittedInputValue,
+      };
+      // Clear the visible editor at the durable execution-acceptance boundary
+      // instead of making the user wait for the SQLite draft deletion round
+      // trip. The hydration fence above prevents the old persisted snapshot
+      // from immediately putting the accepted prompt back.
+      clearComposer(false);
+      try {
+        const accepted = await onDraftAccepted?.(submittedDraftRevision, submittedDraft);
+        if (accepted === false) {
+          restoreAcceptedComposer();
+          return false;
+        }
+      } catch {
+        restoreAcceptedComposer();
         return false;
       }
-      clearComposer(false);
+      acceptedDraftClearRef.current = null;
       return true;
     };
     let shouldDeferComposerClear = false;
     let submissionResult: void | boolean | Promise<void | boolean> = undefined;
+    let submittedFollowUpMessageId: string | null = null;
     if (hasAttachments) {
       setIsUploadingAttachments(true);
     }
@@ -7359,6 +7553,15 @@ function MainContentComponent({
       } else {
         // Task is selected (even if not in current list) - send follow-up message
         const submissionRevision = ++modeSubmissionRevisionRef.current;
+        const messageId =
+          globalThis.crypto?.randomUUID?.() ||
+          `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        submittedFollowUpMessageId = messageId;
+        pendingFollowUpSubmissionRef.current = {
+          taskId: submittedTaskId || task?.id || "",
+          fingerprint: message.trim().replace(/\s+/g, " ").toLowerCase(),
+          messageId,
+        };
         const submission = onSendMessage(
           message,
           imagePayload,
@@ -7367,6 +7570,7 @@ function MainContentComponent({
             interactionMode: selectedInteractionMode,
             integrationMentions: selectedIntegrationMentions,
             returnOnAccepted: true,
+            messageId,
             ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
           },
         );
@@ -7375,7 +7579,7 @@ function MainContentComponent({
         // IPC can remain pending for the full turn. Keep the composer available
         // for steering, but restore a failed draft if the user has not moved on.
         void Promise.resolve(submission)
-          .then((sent) => {
+          .then(async (sent) => {
             if (
               sent === false &&
               activeModeDraftKeyRef.current === modeDraftKey &&
@@ -7383,6 +7587,9 @@ function MainContentComponent({
             ) {
               setInputValue((current) => current || trimmedInput);
               setPendingAttachments((current) => (current.length ? current : pendingAttachments));
+            }
+            if (pendingFollowUpSubmissionRef.current?.messageId === messageId) {
+              if (sent === false) pendingFollowUpSubmissionRef.current = null;
             }
           })
           .catch((error) => {
@@ -7394,6 +7601,9 @@ function MainContentComponent({
               reportAttachmentError(
                 error instanceof Error ? error.message : "Failed to send message.",
               );
+            }
+            if (pendingFollowUpSubmissionRef.current?.messageId === messageId) {
+              pendingFollowUpSubmissionRef.current = null;
             }
           });
       }
@@ -7429,6 +7639,12 @@ function MainContentComponent({
         void Promise.resolve(submissionResult)
           .then(async (sent) => {
             if (!isTaskCreationAccepted(sent) || !isSubmittedDraftCurrent()) {
+              if (
+                submittedFollowUpMessageId &&
+                pendingFollowUpSubmissionRef.current?.messageId === submittedFollowUpMessageId
+              ) {
+                pendingFollowUpSubmissionRef.current = null;
+              }
               return;
             }
             // Clear the durable draft before clearing the local input. Task
@@ -7436,6 +7652,12 @@ function MainContentComponent({
             // clear is in flight; clearing local state first lets the still
             // persisted draft hydrate the just-sent text back into the box.
             await clearAcceptedComposer();
+            if (
+              submittedFollowUpMessageId &&
+              pendingFollowUpSubmissionRef.current?.messageId === submittedFollowUpMessageId
+            ) {
+              pendingFollowUpSubmissionRef.current = null;
+            }
           })
           .catch(() => {
             // The primary submission handler restores the draft and reports the error.
@@ -8478,7 +8700,7 @@ function MainContentComponent({
   }, [botDeeplink, cleanedDisplayPrompt, task, taskWorkingDirectory]);
   const botTranscriptMarkdown = useMemo(() => {
     if (!task || !isBotConversation) return taskMarkdown;
-    const transcriptRows = events
+    const transcriptRows = filterBotConversationTranscriptEvents(events)
       .map((event) => {
         const type = getEffectiveTaskEventType(event);
         if (type === "user_message") {
@@ -8487,7 +8709,8 @@ function MainContentComponent({
         }
         if (type === "assistant_message" || type === "task_completed") {
           const message = getAssistantOrCompletionText(event);
-          return message ? `### ${botName || "Bot"}\n\n${message}` : "";
+          const displayMessage = formatAgentMessageProtocolForDisplay(message);
+          return displayMessage ? `### ${botName || "Bot"}\n\n${displayMessage}` : "";
         }
         return "";
       })
@@ -10693,6 +10916,16 @@ function MainContentComponent({
         <div className="task-content">
           {/* Always anchor the initial user prompt above the timeline. */}
           {initialPromptBubble}
+          {isBotConversation && task && (
+            <BotCollaborationHeader
+              task={task}
+              botName={botName || "Bot"}
+              events={events}
+              childEvents={childEvents}
+              childTasks={childTasks}
+              conversationProjection={conversationProjection}
+            />
+          )}
           {showLegalWorkflowCard &&
             (legalWorkflowInvocation.kind === "demand-intake" ? (
               <LegalDemandIntakePromptCard
@@ -10739,127 +10972,126 @@ function MainContentComponent({
           )}
 
           {/* Timeline controls - show right after original prompt */}
-          {(!isBotConversation || !isChatTask) &&
-            (hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
-              <div className="timeline-controls">
-                <div className="timeline-controls-status">
-                  {canToggleCompletedTranscript ? (
-                    <button
-                      type="button"
-                      className="timeline-controls-label timeline-controls-label-button with-duration"
-                      onClick={toggleCompletedTranscriptMode}
-                      aria-expanded={transcriptMode !== "delivery"}
-                      title={
-                        transcriptMode === "delivery"
-                          ? "Show full timeline"
-                          : "Show only final output"
-                      }
-                    >
-                      <span>{workDurationLabel}</span>
-                      <span className="timeline-controls-label-chevron" aria-hidden="true">
-                        {transcriptMode === "delivery" ? ">" : "v"}
-                      </span>
-                    </button>
-                  ) : liveActivityHeaderVisible ? null : (
-                    <span
-                      className={`timeline-controls-label ${
-                        isTaskWorking || isTaskFinished ? "with-duration" : ""
-                      }`}
-                    >
-                      {workDurationLabel}
-                    </span>
-                  )}
-                  {isTaskWorking && continuationStatusChip && (
-                    <span className="header-continuation-chip" title="Adaptive continuation status">
-                      <span>{continuationStatusChip.window}</span>
-                      {continuationStatusChip.progress && (
-                        <span className="header-continuation-chip-sep">·</span>
-                      )}
-                      {continuationStatusChip.progress && (
-                        <span>{continuationStatusChip.progress}</span>
-                      )}
-                      {continuationStatusChip.loopRisk && (
-                        <span className="header-continuation-chip-sep">·</span>
-                      )}
-                      {continuationStatusChip.loopRisk && (
-                        <span>{continuationStatusChip.loopRisk}</span>
-                      )}
-                    </span>
-                  )}
-                </div>
-                <div className="timeline-controls-actions">
+          {!isBotConversation && (hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
+            <div className="timeline-controls">
+              <div className="timeline-controls-status">
+                {canToggleCompletedTranscript ? (
                   <button
                     type="button"
-                    className="verbose-switch"
-                    role="switch"
-                    aria-checked={verboseSteps}
-                    aria-label={`Verbose mode ${verboseSteps ? "on" : "off"}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      toggleVerboseSteps();
-                    }}
-                    title={`Verbose mode ${verboseSteps ? "on" : "off"} (click to toggle)`}
-                  >
-                    <span className="goal-mode-toggle-switch-content">
-                      <span className="goal-mode-toggle-text">
-                        <span className="verbose-switch-label">Verbose</span>
-                      </span>
-                      <span
-                        className={`goal-mode-switch-track ${verboseSteps ? "on" : ""}`}
-                        aria-hidden="true"
-                      >
-                        <span className="goal-mode-switch-thumb" />
-                      </span>
-                    </span>
-                  </button>
-                  <button
-                    className={`verbose-toggle-btn ${codePreviewsExpanded ? "active" : ""}`}
-                    onClick={toggleCodePreviews}
+                    className="timeline-controls-label timeline-controls-label-button with-duration"
+                    onClick={toggleCompletedTranscriptMode}
+                    aria-expanded={transcriptMode !== "delivery"}
                     title={
-                      codePreviewsExpanded
-                        ? "Collapse code previews by default"
-                        : "Expand code previews by default"
+                      transcriptMode === "delivery"
+                        ? "Show full timeline"
+                        : "Show only final output"
                     }
                   >
-                    {codePreviewsExpanded ? "Code: Open" : "Code: Collapsed"}
+                    <span>{workDurationLabel}</span>
+                    <span className="timeline-controls-label-chevron" aria-hidden="true">
+                      {transcriptMode === "delivery" ? ">" : "v"}
+                    </span>
                   </button>
-                  {replayControls &&
-                    !replayControls.isReplayMode &&
-                    (task?.status === "completed" ||
-                      task?.status === "failed" ||
-                      task?.status === "cancelled") && (
-                      <button
-                        className="replay-entry-btn"
-                        onClick={replayControls.startReplay}
-                        title="Replay this session step by step"
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polygon points="5 3 19 12 5 21 5 3" />
-                        </svg>
-                        Replay
-                      </button>
+                ) : liveActivityHeaderVisible ? null : (
+                  <span
+                    className={`timeline-controls-label ${
+                      isTaskWorking || isTaskFinished ? "with-duration" : ""
+                    }`}
+                  >
+                    {workDurationLabel}
+                  </span>
+                )}
+                {isTaskWorking && continuationStatusChip && (
+                  <span className="header-continuation-chip" title="Adaptive continuation status">
+                    <span>{continuationStatusChip.window}</span>
+                    {continuationStatusChip.progress && (
+                      <span className="header-continuation-chip-sep">·</span>
                     )}
-                  {replayControls?.isReplayMode && !replayControls.areControlsVisible && (
+                    {continuationStatusChip.progress && (
+                      <span>{continuationStatusChip.progress}</span>
+                    )}
+                    {continuationStatusChip.loopRisk && (
+                      <span className="header-continuation-chip-sep">·</span>
+                    )}
+                    {continuationStatusChip.loopRisk && (
+                      <span>{continuationStatusChip.loopRisk}</span>
+                    )}
+                  </span>
+                )}
+              </div>
+              <div className="timeline-controls-actions">
+                <button
+                  type="button"
+                  className="verbose-switch"
+                  role="switch"
+                  aria-checked={verboseSteps}
+                  aria-label={`Verbose mode ${verboseSteps ? "on" : "off"}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    toggleVerboseSteps();
+                  }}
+                  title={`Verbose mode ${verboseSteps ? "on" : "off"} (click to toggle)`}
+                >
+                  <span className="goal-mode-toggle-switch-content">
+                    <span className="goal-mode-toggle-text">
+                      <span className="verbose-switch-label">Verbose</span>
+                    </span>
+                    <span
+                      className={`goal-mode-switch-track ${verboseSteps ? "on" : ""}`}
+                      aria-hidden="true"
+                    >
+                      <span className="goal-mode-switch-thumb" />
+                    </span>
+                  </span>
+                </button>
+                <button
+                  className={`verbose-toggle-btn ${codePreviewsExpanded ? "active" : ""}`}
+                  onClick={toggleCodePreviews}
+                  title={
+                    codePreviewsExpanded
+                      ? "Collapse code previews by default"
+                      : "Expand code previews by default"
+                  }
+                >
+                  {codePreviewsExpanded ? "Code: Open" : "Code: Collapsed"}
+                </button>
+                {replayControls &&
+                  !replayControls.isReplayMode &&
+                  (task?.status === "completed" ||
+                    task?.status === "failed" ||
+                    task?.status === "cancelled") && (
                     <button
                       className="replay-entry-btn"
-                      onClick={replayControls.showControls}
-                      title="Show replay controls"
+                      onClick={replayControls.startReplay}
+                      title="Replay this session step by step"
                     >
-                      <SlidersHorizontal aria-hidden="true" />
-                      Replay controls
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                      Replay
                     </button>
                   )}
-                </div>
+                {replayControls?.isReplayMode && !replayControls.areControlsVisible && (
+                  <button
+                    className="replay-entry-btn"
+                    onClick={replayControls.showControls}
+                    title="Show replay controls"
+                  >
+                    <SlidersHorizontal aria-hidden="true" />
+                    Replay controls
+                  </button>
+                )}
               </div>
-            )}
+            </div>
+          )}
 
           {/* Replay controls bar — shown when replay mode is active */}
           {replayControls?.isReplayMode && replayControls.areControlsVisible && (
@@ -10932,7 +11164,8 @@ function MainContentComponent({
           onDrop={handleDrop}
         >
           {/* Collaborative agent lines — extension of input box, inside same container */}
-          {(collaborativeRun || childTasks.length > 0) &&
+          {!isBotConversation &&
+            (collaborativeRun || childTasks.length > 0) &&
             (onOpenChildAgentSidebar || onSelectChildTask) && (
               <CollaborativeAgentLines
                 collaborativeRun={collaborativeRun}
@@ -11058,18 +11291,26 @@ function MainContentComponent({
             <div className="task-status-banner task-status-banner-blocked">
               <div className="task-status-banner-content">
                 <strong>
-                  {task.terminalStatus === "awaiting_approval"
-                    ? "Blocked - needs approval"
-                    : task.terminalStatus === "awaiting_verification"
-                      ? "Verifying before completion"
-                      : "Blocked - waiting on you"}
+                  {isBotHandoffWaiting
+                    ? "Waiting on a teammate"
+                    : task.terminalStatus === "awaiting_approval"
+                      ? "Blocked - needs approval"
+                      : task.terminalStatus === "awaiting_verification"
+                        ? "Verifying before completion"
+                        : "Blocked - waiting on you"}
                 </strong>
-                {latestApprovalEvent?.payload?.approval?.description &&
+                {isBotHandoffWaiting ? (
+                  <span className="task-status-banner-detail">
+                    The conversation will continue when the teammate replies.
+                  </span>
+                ) : (
+                  latestApprovalEvent?.payload?.approval?.description &&
                   task.terminalStatus === "awaiting_approval" && (
                     <span className="task-status-banner-detail">
                       {latestApprovalEvent.payload.approval.description}
                     </span>
-                  )}
+                  )
+                )}
               </div>
             </div>
           )}
@@ -11108,7 +11349,7 @@ function MainContentComponent({
                 </div>
               </div>
             )}
-          {taskStatusStripEnabled && (
+          {taskStatusStripEnabled && !isBotConversation && (
             <TaskStatusStrip
               model={taskStatusStripModel}
               activityGroups={statusTaskEventUi.activityGroups}
@@ -11663,6 +11904,7 @@ function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps
     prev.sharedTaskEventUi === next.sharedTaskEventUi &&
     prev.botConversations === next.botConversations &&
     prev.isLoadingBotConversations === next.isLoadingBotConversations &&
+    prev.conversationProjection === next.conversationProjection &&
     prev.onSelectBotConversation === next.onSelectBotConversation &&
     prev.onNewBotConversation === next.onNewBotConversation &&
     prev.childTasks === next.childTasks &&

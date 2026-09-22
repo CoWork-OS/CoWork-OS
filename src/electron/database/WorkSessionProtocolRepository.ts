@@ -214,6 +214,13 @@ export interface WorkSessionTaskBinding {
   status?: WorkSessionStatus;
 }
 
+export interface WorkSessionRecoveryResult {
+  aggregate: WorkSessionAggregate;
+  previousSessionId?: string;
+  previousWorkspaceId?: string;
+  replacementSessionId: string;
+}
+
 export interface WorkSessionUserMessageInput {
   sessionId: string;
   message: string;
@@ -331,6 +338,133 @@ export class WorkSessionProtocolRepository {
       status: binding.status,
     });
     return this.getAggregate(session.id)!;
+  }
+
+  /**
+   * Create a fresh, workspace-local canonical session when an old binding
+   * points across a workspace boundary.  The old aggregate is never read or
+   * copied: only its identifiers are retained in the recovery audit row.
+   */
+  recoverForTask(
+    binding: WorkSessionTaskBinding,
+    recovery: { code: string; details?: Record<string, unknown> },
+  ): WorkSessionRecoveryResult {
+    const taskId = requiredId(binding.taskId, "taskId");
+    const workspaceId = requiredId(binding.workspaceId, "workspaceId");
+    const requestedSessionId = optionalId(binding.sessionId);
+    const boundSessionId = this.findBoundSessionId(taskId);
+    const existingRow =
+      (boundSessionId ? this.findSessionRow(boundSessionId) : undefined) ||
+      (requestedSessionId ? this.findSessionRow(requestedSessionId) : undefined) ||
+      this.findSessionRowByTaskId(taskId);
+    const previousSessionId = existingRow?.id ? String(existingRow.id) : undefined;
+    const previousWorkspaceId = existingRow?.workspace_id
+      ? String(existingRow.workspace_id)
+      : undefined;
+    const replacementSessionId = randomUUID();
+    const now = Date.now();
+    const details = redactPayload({
+      ...(recovery.details || {}),
+      previousSessionId,
+      previousWorkspaceId,
+      replacementSessionId,
+      workspaceId,
+    });
+
+    this.db.transaction(() => {
+      // Keep the old session and transcript available for audit, but detach it
+      // from the task before the new session claims the task FK.
+      if (previousSessionId && String(existingRow?.task_id || "") === taskId) {
+        this.db
+          .prepare("UPDATE work_sessions SET task_id = NULL, updated_at = ? WHERE id = ?")
+          .run(now, previousSessionId);
+      }
+
+      this.db
+        .prepare(
+          `INSERT INTO work_sessions (
+             id, task_id, workspace_id, protocol_version, status,
+             current_turn_id, last_sequence, created_at, updated_at
+           ) VALUES (?, ?, ?, 1, ?, NULL, 0, ?, ?)`,
+        )
+        .run(
+          replacementSessionId,
+          taskId,
+          workspaceId,
+          normalizeSessionStatus(binding.status),
+          now,
+          now,
+        );
+
+      const turn = this.createTurnInTransaction({
+        sessionId: replacementSessionId,
+        taskId,
+        actor: "system",
+        idempotencyKey: `session:${replacementSessionId}:root-turn`,
+        status: binding.status === "executing" ? "executing" : "pending",
+      });
+      this.appendItemInTransaction({
+        sessionId: replacementSessionId,
+        turnId: turn.id,
+        kind: "session",
+        actor: "system",
+        payload: {
+          event: "session.recovered",
+          recoveryCode: boundedText(recovery.code, "WORKSPACE_BOUNDARY_RECOVERY"),
+        },
+        idempotencyKey: `session:${replacementSessionId}:created`,
+        redactionClass: "standard",
+        status: turn.status,
+      });
+
+      const owner = "system";
+      this.db
+        .prepare(
+          `INSERT INTO work_session_task_bindings (
+             task_id, session_id, parent_session_id, isolation_key,
+             inherited_policy_snapshot_json, owner, created_at, updated_at
+           ) VALUES (?, ?, NULL, ?, NULL, ?, ?, ?)
+           ON CONFLICT(task_id) DO UPDATE SET
+             session_id = excluded.session_id,
+             isolation_key = excluded.isolation_key,
+             owner = excluded.owner,
+             updated_at = excluded.updated_at`,
+        )
+        .run(taskId, replacementSessionId, `session:${replacementSessionId}`, owner, now, now);
+
+      this.db
+        .prepare(
+          `INSERT INTO work_session_recovery_records (
+             id, task_id, previous_session_id, replacement_session_id,
+             previous_workspace_id, workspace_id, code, details_json, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          randomUUID(),
+          taskId,
+          previousSessionId || null,
+          replacementSessionId,
+          previousWorkspaceId || null,
+          workspaceId,
+          boundedText(recovery.code, "WORKSPACE_BOUNDARY_RECOVERY"),
+          JSON.stringify(details),
+          now,
+        );
+    })();
+
+    const aggregate = this.getAggregate(replacementSessionId);
+    if (!aggregate) {
+      throw new WorkSessionProtocolError(
+        `Failed to recover work session ${replacementSessionId}`,
+        "SESSION_RECOVERY_FAILED",
+      );
+    }
+    return {
+      aggregate,
+      ...(previousSessionId ? { previousSessionId } : {}),
+      ...(previousWorkspaceId ? { previousWorkspaceId } : {}),
+      replacementSessionId,
+    };
   }
 
   /** Ensure only the session row exists, avoiding a full aggregate scan on hot event paths. */

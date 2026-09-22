@@ -70,6 +70,19 @@ describe("bot conversation query isolation", () => {
         JSON.stringify({ message: "The latest findings are ready" }),
         21,
       );
+      insertEvent.run(
+        "older-agent-receipt",
+        "older-chat",
+        22,
+        "timeline_step_updated",
+        JSON.stringify({
+          message: '{"success":true,"deliveryStatus":"queued","message_id":"message-4"}',
+        }),
+        22,
+      );
+      db.prepare("UPDATE task_events SET legacy_type = 'assistant_message' WHERE id = ?").run(
+        "older-agent-receipt",
+      );
       for (let i = 0; i < 600; i++) add(`unrelated-${i}`, "workspace-b", "bot-b", "{}", 10 + i);
       const repo = new TaskRepository(db as never);
       const filter = {
@@ -129,6 +142,11 @@ describe("bot conversation query isolation", () => {
           .findBotConversations("workspace-a", { agentRoleId: "bot-a" })
           .find((task) => task.id === "newer-chat")?.sidebarPromptPreview,
       ).toBe("The latest findings are ready");
+      expect(
+        repo
+          .findBotConversations("workspace-a", { agentRoleId: "bot-a" })
+          .find((task) => task.id === "older-chat")?.sidebarPromptPreview,
+      ).toBe("Queued for the next turn");
       expect(
         repo.findBotConversations("workspace-a", { agentRoleId: "bot-b" }).map((task) => task.id),
       ).toEqual(["different-bot"]);

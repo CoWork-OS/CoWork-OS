@@ -30588,7 +30588,10 @@ html:not(.theme-light) .selected-workspace-main-row {
 }
 
 .sidebar-bot-secondary-line {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  gap: 5px;
   margin-top: 2px;
   overflow: hidden;
   color: var(--color-text-muted);
@@ -30596,8 +30599,26 @@ html:not(.theme-light) .selected-workspace-main-row {
   line-height: 15px;
 }
 
+.sidebar-bot-readiness {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-bot-readiness-working {
+  color: var(--color-accent);
+}
+
+.sidebar-bot-readiness-attention,
+.sidebar-bot-readiness-unavailable {
+  color: var(--color-warning, #f59e0b);
+}
+
 .sidebar-bot-preview {
-  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -30838,4 +30859,96 @@ html:not(.theme-light) .selected-workspace-main-row {
   .sidebar-bots-actions .sidebar-session-action {
     transition: none;
   }
+}
+
+/* Bot roster: avatar-forward, message-list rhythm. The readiness text remains
+   available as a title/aria description while the visible row prioritizes the
+   latest conversational preview, like a messaging inbox. */
+.sidebar-bots-pane {
+  padding: 12px 8px 10px;
+}
+
+.sidebar-bots-header {
+  padding: 0 4px;
+}
+
+.sidebar-bots-search {
+  height: 36px;
+  flex-basis: 36px;
+  margin: 10px 2px 12px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 92%, var(--color-bg-sidebar));
+}
+
+.sidebar-bots-search:focus-within {
+  border-color: transparent;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.sidebar-bots-list {
+  gap: 3px;
+  margin: 0 -2px;
+  padding: 0 2px 8px;
+}
+
+.sidebar-bot-row {
+  gap: 10px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 12px;
+}
+
+.sidebar-bot-row:hover {
+  background: color-mix(in srgb, var(--color-bg-hover) 82%, transparent);
+}
+
+.sidebar-bot-row.selected {
+  border: 0;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-sidebar));
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.sidebar-bot-avatar {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+  border-radius: 50%;
+}
+
+.sidebar-bot-name {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.sidebar-bot-secondary-line {
+  gap: 7px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.sidebar-bot-readiness {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+}
+
+.sidebar-bot-readiness-working {
+  background: var(--color-accent);
+}
+
+.sidebar-bot-readiness-attention,
+.sidebar-bot-readiness-unavailable {
+  background: var(--color-warning, #f59e0b);
+}
+
+.sidebar-bot-preview {
+  color: var(--color-text-muted);
 }

@@ -635,6 +635,31 @@ describe("SessionRuntime", () => {
     });
   });
 
+  it("persists reply correlation in the follow-up queue", () => {
+    const harness = createHarness();
+    harness.runtime.queueFollowUp(
+      "The launch communities are ready.",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "agent",
+      "reply-1",
+      "forge-task",
+      "Forge",
+      "message",
+      "handoff-1",
+      "atlas-task",
+    );
+
+    expect(harness.runtime.drainPendingFollowUp()).toMatchObject({
+      message: "The launch communities are ready.",
+      inReplyToMessageId: "handoff-1",
+      inReplyToTaskId: "atlas-task",
+    });
+  });
+
   it("reports snapshot persistence failure to an acceptance caller", () => {
     const harness = createHarness();
     harness.runtime.appendConversationHistory({ role: "user", content: "Queued input" });
@@ -2089,6 +2114,32 @@ describe("SessionRuntime", () => {
     const updatedTools = harness.runtime.getAvailableTools();
     expect(updatedRegistry.getTools).toHaveBeenCalledTimes(1);
     expect(updatedTools.map((tool: Any) => tool.name)).toEqual(["browser_navigate"]);
+  });
+
+  it("keeps the verified bot handoff tool visible in plan mode without exposing writes", () => {
+    const harness = createHarness();
+    harness.setToolRegistry({
+      getTools: vi.fn(() => [
+        { name: "send_agent_message" },
+        { name: "write_file" },
+        { name: "read_file" },
+      ]),
+      getDeferredTools: vi.fn(() => []),
+      getToolCatalogVersion: vi.fn(() => "catalog:bot-policy"),
+      cleanup: vi.fn(async () => undefined),
+    });
+    harness.deps.getToolPolicyContext = () => ({
+      executionMode: "plan",
+      taskDomain: "general",
+      botConversation: true,
+      botTeamId: "team-1",
+      botMessagingAuthorized: true,
+    });
+
+    expect(harness.runtime.getAvailableTools().map((tool: Any) => tool.name)).toEqual([
+      "send_agent_message",
+      "read_file",
+    ]);
   });
 
   it("writes conversation snapshots with the V2 runtime schema", () => {

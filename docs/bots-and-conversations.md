@@ -207,9 +207,50 @@ For a bot teammate, CoWork verifies all of the following before delivery:
 Bot-team messages are durably admitted with sender/recipient provenance and a
 stable message ID. A teammate's conversation is reused when a healthy one
 exists; otherwise CoWork creates a dormant conversation for that role. The
-recipient is then woken through the normal daemon/runtime path. A reply can be
-returned to the sender's current turn and is also retained in the recipient and
-sender timelines as durable message context.
+recipient is then woken asynchronously after queue acceptance through the normal
+daemon/runtime path. `send_agent_message` returns the daemon's admission status
+(`queued` for normal acceptance, or `delivered` for a duplicate that was
+already consumed); it does not wait for the recipient model turn or relay a
+synchronous reply. Reusing a message ID with different content is rejected,
+and a queued receipt is only restart-recoverable when it was created by an
+agent handoff. User-authored child-task follow-ups keep their normal queue
+behavior without becoming bot-to-bot messages during recovery.
+
+The daemon rechecks team membership at both admission and restart recovery. It
+never repairs an explicit target team by assigning the sender's team: a stale,
+foreign, inactive, or non-persistent team reference is unavailable until an
+explicit product action fixes it. If membership is revoked after a receipt is
+queued, the receipt is terminally quarantined with
+`BOT_MESSAGE_TEAM_AUTHORIZATION_REVOKED` rather than delivered to a
+conversation outside the team's current boundary. The UI distinguishes
+`BOT_TEAM_UNAVAILABLE`, `BOT_MEMBERSHIP_REVOKED`,
+`BOT_CONVERSATION_UNAVAILABLE`, and `BOT_RUNTIME_UNAVAILABLE` so recovery does
+not look like a generic missing bot.
+
+When a bot conversation is failed or unavailable, **Reopen conversation** is
+available from the Bots roster. Reopen creates a fresh conversation in the
+current workspace and links it to the old task for history without copying the
+old transcript. Team or membership repair is explicit; a foreign team is never
+silently reassigned. A workspace-boundary recovery follows the same rule for
+canonical WorkSessions and emits a durable `workspace_boundary_recovery`
+event.
+
+The conversation header uses a read-side lifecycle projection to present bot
+collaboration as teammate activity rather than an implementation trace. It
+shows states such as `Working with the team`, `Waiting on a teammate`, `Needs
+your input`, and `Finished`. The header can reveal recent handoffs and the
+latest outcome on demand, while the primary transcript keeps tool calls,
+intermediate steps, and protocol JSON hidden. Errors, blocked states, and
+delivery failures remain visible as explicit attention items instead of being
+silently collapsed.
+
+The Bots roster presents persistent conversation readiness separately from the
+last run result: a completed run can still be `Ready for another message`, an
+active run is `Working on latest message`, and paused/failed runs surface an
+explicit attention or retry state. Sender and receiver timeline rows share the
+same compact delivery receipt and stable message ID for diagnosis. The compact
+receipt hides raw protocol JSON and exposes human labels for Accepted, Queued,
+Started, Delivered, Failed, and Quarantined.
 
 This is different from ephemeral child-agent delegation. Child-agent messages
 remain queue-oriented and are addressed by task ID; bot-team conversations are
@@ -298,7 +339,7 @@ The main persistence and transport boundaries are:
 | Team storage | `agent_teams` stores the workspace-scoped team; `agent_team_members` stores role membership. |
 | Automation storage | `automation_profiles` may mirror a role's heartbeat policy and is disabled when a role is deleted. |
 | Renderer preload | Role APIs are exposed through `getAgentRoles`, `getAgentRole`, `createAgentRole`, `updateAgentRole`, and `deleteAgentRole`; bot history uses `listBotConversations`. |
-| IPC channel names | Role CRUD uses `agentRole:list`, `agentRole:get`, `agentRole:create`, `agentRole:update`, and `agentRole:delete`; history uses `bot:conversationsList`. |
+| IPC channel names | Role CRUD uses `agentRole:list`, `agentRole:get`, `agentRole:create`, `agentRole:update`, and `agentRole:delete`; history uses `bot:conversationsList`; recovery uses `bot:conversationReopen`. |
 
 The canonical bot-conversation marker is:
 
@@ -374,7 +415,32 @@ instructions are loaded.
 Confirm the sender is a bot conversation attached to the persistent CoWork Bot
 Team, use the internal handle rather than a display-name typo, and check that
 the recipient is a member of the same workspace team. `send_agent_message`
-cannot cross teams or workspaces.
+cannot cross teams or workspaces. If the Bots roster shows **Unavailable —
+reopen to retry**, use the refresh action on that row. If the role membership
+was revoked, the recovery action repairs it explicitly and creates a fresh
+conversation; the old task and transcript remain intact.
+
+### A conversation was restored after a workspace conflict
+
+The current workspace is authoritative. CoWork creates a replacement
+WorkSession, keeps the previous session detached for audit, and emits
+`workspace_boundary_recovery`. The recovery record contains identifiers and a
+diagnostic code, not the old transcript content. If a message still appears
+queued, compare the sender receipt, the receiver's `user_message` receipt, and
+the receiver's assistant turn; a queued or started receipt is not proof of
+completion until the receiver-side delivered state is durable.
+
+### How to validate a live bot handoff
+
+For a real running-app check, use two existing bot conversation task IDs and
+run `npm run qa:bots:live -- --sender-task <id> --recipient-task <id>`. The
+check sends a unique marker through the sender bot and only passes when the
+sender receipt, receiver transcript, and receiver acknowledgement are all
+observed. It does not replace a desktop UI review: after it passes, inspect
+both conversations in the app for a single incoming message, compact delivery
+copy, no raw JSON or execution-step leakage, and transcript continuity after
+reopen. A queued/started result or a timeout is evidence to investigate, not a
+pass.
 
 ### Computer-use actions are unavailable
 

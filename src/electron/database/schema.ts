@@ -3540,6 +3540,29 @@ export class DatabaseManager {
           ON work_session_child_links(parent_session_id, created_at ASC);
         CREATE INDEX IF NOT EXISTS idx_work_session_child_links_status
           ON work_session_child_links(parent_session_id, status, updated_at DESC);
+
+        -- A recovery record is deliberately append-only and does not expose
+        -- or copy the previous session's transcript.  Previous identifiers
+        -- are retained only for audit/diagnostics; the replacement session is
+        -- the only session that remains bound to the task.
+        CREATE TABLE IF NOT EXISTS work_session_recovery_records (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          previous_session_id TEXT,
+          replacement_session_id TEXT NOT NULL,
+          previous_workspace_id TEXT,
+          workspace_id TEXT NOT NULL,
+          code TEXT NOT NULL,
+          details_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (replacement_session_id) REFERENCES work_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_work_session_recovery_task_created
+          ON work_session_recovery_records(task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_work_session_recovery_replacement
+          ON work_session_recovery_records(replacement_session_id);
       `);
     } catch (error) {
       schemaLogger.error("[DatabaseManager] Failed WorkSession protocol migration:", error);

@@ -19,3 +19,18 @@ export function isSameComposerDraftSubmission(input: {
     input.submittedText === input.currentText
   );
 }
+
+export function isSameAcceptedComposerDraftFence(input: {
+  fenceDraftKey?: string;
+  currentDraftKey?: string;
+  fenceTaskId?: string;
+  currentTaskId?: string;
+  fenceRevision: number;
+  currentRevision: number;
+}): boolean {
+  return (
+    input.fenceDraftKey === input.currentDraftKey &&
+    input.fenceTaskId === input.currentTaskId &&
+    input.fenceRevision === input.currentRevision
+  );
+}

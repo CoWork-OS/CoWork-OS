@@ -4168,6 +4168,13 @@
   color: var(--color-warning, #f59e0b);
 }
 
+.agent-message-receipt-id {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+  letter-spacing: 0.01em;
+}
+
 .agent-lifecycle-event-details {
   display: flex;
   flex-wrap: wrap;
@@ -14052,6 +14059,31 @@
   box-sizing: border-box;
 }
 
+/* Outbound tool acknowledgements are transport receipts, not assistant prose. */
+.agent-outbound-message-receipt {
+  width: min(var(--cw-transcript-measure, 760px), 100%);
+  margin: 0 0 22px;
+  padding: 11px 14px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border));
+  border-left: 3px solid color-mix(in srgb, var(--color-accent) 72%, var(--color-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-accent) 4%, transparent);
+  color: var(--color-text);
+  box-sizing: border-box;
+}
+
+.agent-outbound-message-error {
+  margin-top: 7px;
+  color: var(--color-danger, #ef4444);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.theme-light .agent-outbound-message-receipt {
+  background: color-mix(in srgb, var(--color-accent) 5%, #ffffff);
+}
+
 .agent-inbound-message-label {
   margin-bottom: 5px;
   color: var(--color-text-muted);
@@ -14060,6 +14092,21 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+
+.agent-inbound-message-receipt {
+  margin: -1px 0 7px;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+
+.agent-inbound-message-receipt-queued {
+  color: var(--color-warning, #f59e0b);
+}
+
+.agent-inbound-message-receipt-failed {
+  color: var(--color-danger, #ef4444);
 }
 
 .agent-inbound-message-body {
@@ -15073,4 +15120,292 @@
   color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   Bot conversation surface
+
+   Bot chats borrow the visual language of a messaging app: the user's intent
+   is a compact dark capsule, bot replies are soft neutral bubbles, and
+   collaboration receipts sit in the same stream instead of reading like
+   execution telemetry. The underlying events and delivery state remain
+   unchanged and continue to be available through the details affordances.
+   -------------------------------------------------------------------------- */
+.bot-conversation {
+  --bot-user-bubble-bg: color-mix(in srgb, var(--color-text) 94%, var(--color-bg-primary));
+  --bot-user-bubble-fg: var(--color-bg-primary);
+  --bot-send-bg: color-mix(in srgb, var(--color-accent) 82%, var(--color-text));
+  --bot-send-fg: #ffffff;
+  --bot-assistant-bubble-bg: color-mix(
+    in srgb,
+    var(--color-bg-secondary) 92%,
+    var(--color-bg-primary)
+  );
+}
+
+.theme-dark .bot-conversation {
+  --bot-user-bubble-bg: color-mix(in srgb, var(--color-bg-secondary) 88%, #000000);
+  --bot-user-bubble-fg: var(--color-text);
+  --bot-send-bg: color-mix(in srgb, var(--color-accent) 76%, var(--color-bg-secondary));
+  --bot-send-fg: #ffffff;
+  --bot-assistant-bubble-bg: color-mix(in srgb, var(--color-bg-secondary) 88%, #000000);
+}
+
+.theme-light .bot-conversation {
+  --bot-user-bubble-bg: #1f1f1f;
+  --bot-user-bubble-fg: #ffffff;
+  --bot-send-bg: var(--color-accent, #6f55d9);
+  --bot-send-fg: #ffffff;
+}
+
+.bot-conversation .chat-message.user-message {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 22px;
+}
+
+.bot-conversation .chat-bubble.user-bubble {
+  max-width: min(680px, 84%);
+  padding: 13px 17px;
+  border-radius: 20px 20px 6px 20px;
+  background: var(--bot-user-bubble-bg);
+  color: var(--bot-user-bubble-fg);
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.bot-conversation .chat-bubble.user-bubble .markdown-content,
+.bot-conversation .chat-bubble.user-bubble .markdown-content p {
+  color: var(--bot-user-bubble-fg) !important;
+}
+
+.bot-conversation .chat-bubble.user-bubble .markdown-content * {
+  color: var(--bot-user-bubble-fg) !important;
+}
+
+.bot-conversation .chat-bubble.user-bubble p,
+.bot-conversation .chat-bubble.user-bubble strong,
+.bot-conversation .chat-bubble.user-bubble h1,
+.bot-conversation .chat-bubble.user-bubble h2,
+.bot-conversation .chat-bubble.user-bubble h3,
+.bot-conversation .chat-bubble.user-bubble li {
+  color: var(--bot-user-bubble-fg) !important;
+}
+
+.bot-conversation .chat-bubble.user-bubble:not(.expanded) .user-bubble-fade {
+  background: linear-gradient(transparent, var(--bot-user-bubble-bg));
+}
+
+.bot-conversation .chat-bubble.user-bubble a {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.bot-conversation .chat-message.assistant-message {
+  margin-bottom: 20px;
+}
+
+.bot-conversation .chat-message.assistant-message .chat-bubble.assistant-bubble {
+  width: fit-content;
+  max-width: min(720px, 100%);
+  padding: 13px 17px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 68%, transparent);
+  border-radius: 18px 18px 18px 6px;
+  background: var(--bot-assistant-bubble-bg);
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
+.bot-conversation .chat-message.assistant-message .chat-bubble-content {
+  color: var(--color-text);
+}
+
+.bot-conversation .bot-message-attribution {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.bot-message-attribution-avatar {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bot-mark-color, var(--color-accent)) 16%, transparent);
+  color: var(--bot-mark-color, var(--color-accent));
+}
+
+.bot-conversation .agent-inbound-message {
+  margin: 0 0 20px;
+  padding: 13px 16px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--color-border));
+  border-left: 3px solid var(--color-accent);
+  border-radius: 17px 17px 17px 6px;
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-primary));
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.bot-conversation .agent-inbound-message-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.bot-conversation .agent-inbound-message-label::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  content: "";
+}
+
+.bot-conversation .agent-inbound-message-body {
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.bot-conversation .agent-outbound-message-receipt {
+  margin: 0 0 18px;
+  padding: 8px 2px;
+  border: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.bot-conversation .agent-outbound-message-receipt .bot-message-attribution {
+  margin-bottom: 4px;
+}
+
+.bot-conversation .agent-message-event-details {
+  width: min(680px, 100%);
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--color-bg-secondary) 70%, transparent);
+}
+
+.bot-conversation .agent-message-event-details .agent-message-preview {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.bot-conversation .event-details-scrollable,
+.bot-conversation .event-details-command-error {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-bg-secondary) 86%, transparent);
+}
+
+.bot-conversation .main-footer {
+  padding: 10px 20px 18px;
+}
+
+.bot-conversation .input-container {
+  max-width: 760px;
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--color-bg-secondary) 76%, var(--color-bg-primary));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.bot-conversation .input-container:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 58%, var(--color-border));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent),
+    0 5px 18px color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.bot-conversation .input-row {
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+}
+
+.bot-conversation .input-container .input-textarea {
+  min-height: 24px;
+  padding: 9px 3px;
+  font-size: 14px;
+}
+
+.bot-conversation .input-container .attachment-btn-left,
+.bot-conversation .input-container .voice-input-btn,
+.bot-conversation .input-container .lets-go-btn.lets-go-btn-sm {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  border-radius: 50%;
+}
+
+.bot-conversation .input-container .attachment-btn-left {
+  margin-right: 0;
+  background: color-mix(in srgb, var(--color-bg-primary) 70%, transparent);
+  color: var(--color-text-secondary);
+}
+
+.bot-conversation .input-container .attachment-btn-left:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.bot-conversation .input-container .voice-input-btn {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.bot-conversation .input-container .voice-input-btn:hover:not(:disabled) {
+  border-color: var(--color-border);
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.bot-conversation .input-container .lets-go-btn.lets-go-btn-sm {
+  background: var(--bot-send-bg);
+  color: var(--bot-send-fg);
+  border: 1px solid color-mix(in srgb, var(--bot-send-fg) 18%, var(--bot-send-bg));
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--bot-send-bg) 28%, transparent);
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.bot-conversation .input-container .lets-go-btn.lets-go-btn-sm svg {
+  color: var(--bot-send-fg) !important;
+  stroke: currentColor !important;
+  opacity: 1;
+}
+
+.bot-conversation .input-container .lets-go-btn.lets-go-btn-sm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bot-send-bg) 86%, var(--color-text));
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--bot-send-bg) 34%, transparent);
+  transform: translateY(-1px);
+}
+
+.bot-conversation .input-container .lets-go-btn.lets-go-btn-sm:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--bot-send-bg) 24%, transparent);
+}
+
+.bot-conversation .input-container .lets-go-btn.lets-go-btn-sm:disabled {
+  background: color-mix(in srgb, var(--bot-send-bg) 42%, var(--color-bg-secondary));
+  color: color-mix(in srgb, var(--bot-send-fg) 66%, var(--color-text-muted));
+  box-shadow: none;
 }

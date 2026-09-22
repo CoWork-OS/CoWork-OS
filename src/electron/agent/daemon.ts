@@ -35,7 +35,11 @@ import { ActivityRepository } from "../activity/ActivityRepository";
 import { AgentRoleRepository } from "../agents/AgentRoleRepository";
 import { AgentTeamRepository } from "../agents/AgentTeamRepository";
 import { AgentTeamMemberRepository } from "../agents/AgentTeamMemberRepository";
-import { ensureDefaultBotRoles, ensureDefaultBotTeam } from "../agents/bot-team";
+import {
+  DEFAULT_BOT_TEAM_NAME,
+  ensureDefaultBotRoles,
+  ensureDefaultBotTeam,
+} from "../agents/bot-team";
 import { MentionRepository } from "../agents/MentionRepository";
 import { buildAgentDispatchPrompt } from "../agents/agent-dispatch";
 import { extractMentionedRoles } from "../agents/mentions";
@@ -90,6 +94,7 @@ import {
   Annotation,
   QuotedAssistantMessage,
   TaskFollowUpInput,
+  AgentMessageDeliveryStatus,
   AgentMessageSendResult,
   MULTI_LLM_PROVIDER_DISPLAY,
   AgentTeamRun,
@@ -117,6 +122,13 @@ import {
 } from "../../shared/types";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
+import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
+import {
+  getCurrentBotHandoffScopeStart,
+  getOutstandingBotHandoffReply,
+  getPendingBotHandoff,
+  type PendingBotHandoff,
+} from "../../shared/bot-handoff";
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
   hasAccessProfileScope,
@@ -254,6 +266,14 @@ export interface AgentDaemonOptions {
 
 const log = createLogger("AgentDaemon");
 
+/** Maximum time a bot coordinator waits for a teammate reply before preserving
+ * a partial result and making the missing reply explicit. */
+export const BOT_HANDOFF_REPLY_TIMEOUT_MS = 120_000;
+
+function hashBotMessage(message: string): string {
+  return crypto.createHash("sha256").update(message, "utf8").digest("hex");
+}
+
 const FORK_REPLAY_EVENT_TYPES = new Set([
   "user_message",
   "assistant_message",
@@ -298,6 +318,15 @@ const RESUME_PLAN_STATE_EVENT_TYPES = [
   "step_skipped",
   "step_feedback",
 ] as const;
+
+export function shouldRestartInterruptedTask(input: {
+  hasSnapshot: boolean;
+  hasPlan: boolean;
+  hasRecoveredBotHandoff: boolean;
+}): boolean {
+  return !input.hasSnapshot && !input.hasPlan && !input.hasRecoveredBotHandoff;
+}
+
 const RESUME_STATE_EVENT_TYPES = [
   "conversation_snapshot",
   "user_message",
@@ -476,6 +505,8 @@ type DaemonFollowUpOptions = Pick<
   | "messageId"
   | "senderTaskId"
   | "senderLabel"
+  | "inReplyToMessageId"
+  | "inReplyToTaskId"
 > & {
   /** Return to the renderer once the follow-up is durably admitted, not after provider completion. */
   returnOnAccepted?: boolean;
@@ -1881,6 +1912,13 @@ export class AgentDaemon extends EventEmitter {
     // Initialize queue with queued tasks
     await this.queueManager.initialize(queuedTasks, []);
 
+    // Agent handoffs are accepted into a durable target receipt before the
+    // recipient worker is woken. If the process exits between those two
+    // boundaries, rebuild the exact queue item from the receipt on startup.
+    // This is deliberately limited to persistent bot conversations; ordinary
+    // user follow-ups retain their existing resume semantics.
+    this.recoverQueuedBotMessagesOnStartup();
+
     // Resume all resumable tasks after a short delay to let the rest of the app
     // (IPC handlers, tray, cron, UI) finish initializing first.
     if (tasksToResume.length > 0) {
@@ -2609,6 +2647,10 @@ export class AgentDaemon extends EventEmitter {
       "allow";
     const checkpoint = TranscriptStore.loadCheckpointSync(workspace.path, task.id, readGuard);
     const events = this.getTaskEventsForResume(task.id, workspace.path, readGuard);
+    const recoveredBotHandoff =
+      task.agentConfig?.botConversation === true
+        ? this.findRecoverableBotHandoff(task, this.getTaskEventsForReplay(task.id))
+        : undefined;
 
     // Check if we have meaningful state to restore from
     const hasSnapshot =
@@ -2625,7 +2667,17 @@ export class AgentDaemon extends EventEmitter {
       .pop();
     const hasPlan = planEvent && planEvent.payload?.plan;
 
-    if (!hasSnapshot && !hasPlan) {
+    // A delivered teammate handoff is meaningful durable state even when the
+    // receiver has not persisted a conversation snapshot or execution plan
+    // yet. Let resumeAfterInterruption replay that exact handoff instead of
+    // falling back to the bot persona's synthetic starter prompt.
+    if (
+      shouldRestartInterruptedTask({
+        hasSnapshot,
+        hasPlan: Boolean(hasPlan),
+        hasRecoveredBotHandoff: Boolean(recoveredBotHandoff),
+      })
+    ) {
       if (this.shutdownRequested) return;
       // Task was interrupted very early (during planning, before any meaningful state).
       // Re-queue it to start from scratch.
@@ -2756,7 +2808,7 @@ export class AgentDaemon extends EventEmitter {
 
     // Start execution (non-blocking, same pattern as startTaskImmediate)
     executor
-      .resumeAfterInterruption()
+      .resumeAfterInterruption(recoveredBotHandoff)
       .then(() => {
         MemoryService.clearExecutionSideChannelPolicy();
         if (this.shutdownRequested) return;
@@ -2771,6 +2823,72 @@ export class AgentDaemon extends EventEmitter {
         this.activeTasks.delete(effectiveTask.id);
         this.processOrphanedFollowUps(effectiveTask.id, executor);
       });
+  }
+
+  private findRecoverableBotHandoff(
+    task: Task,
+    events: TaskEvent[],
+  ):
+    | Pick<
+        TaskFollowUpInput,
+        | "message"
+        | "messageSource"
+        | "messageId"
+        | "senderTaskId"
+        | "senderLabel"
+        | "inReplyToMessageId"
+        | "inReplyToTaskId"
+      >
+    | undefined {
+    if (task.agentConfig?.botConversation !== true) return undefined;
+
+    const inbound = events.filter((event) => {
+      if (this.resolveLegacyEventType(event) !== "user_message") return false;
+      const payload = (event.payload || {}) as Record<string, unknown>;
+      return (
+        payload.messageSource === "agent" &&
+        payload.deliveryMode === "message" &&
+        (payload.deliveryStatus === "delivered" || payload.status === "delivered") &&
+        typeof payload.messageId === "string" &&
+        payload.messageId.trim().length > 0 &&
+        typeof payload.senderTaskId === "string" &&
+        payload.senderTaskId.trim().length > 0 &&
+        typeof payload.message === "string" &&
+        payload.message.trim().length > 0
+      );
+    });
+
+    for (const event of inbound.slice().reverse()) {
+      const payload = (event.payload || {}) as Record<string, unknown>;
+      const messageId = String(payload.messageId).trim();
+      const alreadyReplied = events.some((candidate) => {
+        if (this.resolveLegacyEventType(candidate) !== "agent_message") return false;
+        const candidatePayload = (candidate.payload || {}) as Record<string, unknown>;
+        return (
+          candidatePayload.inReplyToMessageId === messageId &&
+          (typeof candidatePayload.senderTaskId !== "string" ||
+            candidatePayload.senderTaskId === task.id)
+        );
+      });
+      if (alreadyReplied) continue;
+
+      return {
+        message: String(payload.message),
+        messageSource: "agent",
+        messageId,
+        senderTaskId: String(payload.senderTaskId).trim(),
+        ...(typeof payload.senderLabel === "string" && payload.senderLabel.trim()
+          ? { senderLabel: payload.senderLabel }
+          : {}),
+        ...(typeof payload.inReplyToMessageId === "string"
+          ? { inReplyToMessageId: payload.inReplyToMessageId }
+          : {}),
+        ...(typeof payload.inReplyToTaskId === "string"
+          ? { inReplyToTaskId: payload.inReplyToTaskId }
+          : {}),
+      };
+    }
+    return undefined;
   }
 
   /**
@@ -3568,40 +3686,35 @@ export class AgentDaemon extends EventEmitter {
     assignedAgentRoleId: string | undefined,
     agentConfig: AgentConfig | undefined,
   ): AgentConfig | undefined {
+    const normalizedAgentConfig = normalizeBotConversationAgentConfig(agentConfig);
     if (
-      !agentConfig?.botConversation ||
-      agentConfig.botTeamId ||
+      !normalizedAgentConfig?.botConversation ||
+      normalizedAgentConfig.botTeamId ||
       !assignedAgentRoleId ||
       !workspaceId
     ) {
-      return agentConfig;
+      return normalizedAgentConfig;
     }
     try {
       const seeded = ensureDefaultBotTeam(this.dbManager.getDatabase(), workspaceId);
       if (!seeded || !seeded.roles.some((role) => role.id === assignedAgentRoleId)) {
-        return agentConfig;
+        return normalizedAgentConfig;
       }
-      return this.prepareBotTeamAgentConfig(agentConfig, seeded.team.id);
+      return this.prepareBotTeamAgentConfig(normalizedAgentConfig, seeded.team.id);
     } catch (error) {
       log.warn("Unable to attach the default bot team to a conversation:", error);
-      return agentConfig;
+      return normalizedAgentConfig;
     }
   }
 
   /** Keep team channels conversational while allowing task turns to use tools. */
   private prepareBotTeamAgentConfig(agentConfig: AgentConfig, teamId: string): AgentConfig {
-    const next = { ...agentConfig, botTeamId: teamId };
-    if (next.interactionMode?.mode === "chat") {
-      next.interactionMode = { mode: "smart" };
-    }
-    if (!next.conversationMode || next.conversationMode === "chat") {
-      next.conversationMode = "hybrid";
-    }
-    if (!next.executionMode || next.executionMode === "chat") {
-      next.executionMode = "execute";
-      next.executionModeSource = "strategy";
-    }
-    return next;
+    return (
+      normalizeBotConversationAgentConfig({ ...agentConfig, botTeamId: teamId }) || {
+        ...agentConfig,
+        botTeamId: teamId,
+      }
+    );
   }
 
   private logTaskIntentRouted(
@@ -3662,15 +3775,56 @@ export class AgentDaemon extends EventEmitter {
       return task;
     }
     try {
+      const normalizedConfig = normalizeBotConversationAgentConfig(task.agentConfig);
+      if (
+        normalizedConfig &&
+        JSON.stringify(normalizedConfig) !== JSON.stringify(task.agentConfig)
+      ) {
+        this.taskRepo.update(task.id, { agentConfig: normalizedConfig });
+        task.agentConfig = normalizedConfig;
+      }
       const db = this.dbManager.getDatabase();
       const existingTeamId = task.agentConfig.botTeamId;
       const existingTeam = existingTeamId
         ? new AgentTeamRepository(db).findById(existingTeamId)
         : undefined;
+      // A non-empty team id is an authorization claim, not a hint that may be
+      // silently repaired. Legacy conversations without a team id may attach
+      // to the workspace's default team; an explicit stale, inactive, or
+      // non-member team fails closed and remains unavailable until repaired by
+      // an explicit product action. The one migration exception is the
+      // reserved default team crossing between temporary UI workspaces: the
+      // Bots pane can adopt a durable conversation into the current temporary
+      // workspace, so its built-in team must follow that adoption as well.
+      if (existingTeamId && !existingTeam) return task;
+      const canReconcileTemporaryDefaultTeam = Boolean(
+        existingTeam &&
+        existingTeam.name === DEFAULT_BOT_TEAM_NAME &&
+        existingTeam.isActive &&
+        existingTeam.persistent &&
+        existingTeam.workspaceId !== task.workspaceId &&
+        isTempWorkspaceId(existingTeam.workspaceId) &&
+        isTempWorkspaceId(task.workspaceId),
+      );
+      if (
+        existingTeam &&
+        (existingTeam.workspaceId !== task.workspaceId ||
+          !existingTeam.isActive ||
+          !existingTeam.persistent) &&
+        !canReconcileTemporaryDefaultTeam
+      ) {
+        return task;
+      }
+      // The built-in team is repairable: older conversations may point at a
+      // valid default team whose newer roster members were never attached.
+      // Re-seed that one reserved team on every access so named teammates such
+      // as the Chief Community Officer cannot disappear from routing.
       const seeded =
-        existingTeam && existingTeam.workspaceId === task.workspaceId
-          ? { team: existingTeam, roles: ensureDefaultBotRoles(db) }
-          : ensureDefaultBotTeam(db, task.workspaceId);
+        existingTeam?.name === DEFAULT_BOT_TEAM_NAME
+          ? ensureDefaultBotTeam(db, task.workspaceId)
+          : existingTeam
+            ? { team: existingTeam, roles: ensureDefaultBotRoles(db) }
+            : ensureDefaultBotTeam(db, task.workspaceId);
       if (
         !seeded ||
         !seeded.team.isActive ||
@@ -3684,11 +3838,228 @@ export class AgentDaemon extends EventEmitter {
       if (JSON.stringify(agentConfig) !== JSON.stringify(task.agentConfig)) {
         this.taskRepo.update(task.id, { agentConfig });
         task.agentConfig = agentConfig;
+        if (canReconcileTemporaryDefaultTeam) {
+          this.logEvent(task.id, "log", {
+            message: "Reconciled the built-in bot team with the current temporary workspace.",
+            previousBotTeamId: existingTeam?.id,
+            previousWorkspaceId: existingTeam?.workspaceId,
+            botTeamId: seeded.team.id,
+            workspaceId: task.workspaceId,
+          });
+        }
       }
       return task;
     } catch (error) {
       log.warn("Unable to attach the default bot team to an existing conversation:", error);
       return task;
+    }
+  }
+
+  /**
+   * Return true only when the task is an active member of a persistent team.
+   * Tool policy uses this daemon-derived value instead of trusting task JSON
+   * markers supplied by a renderer or an old database snapshot.
+   */
+  isBotConversationMessagingAuthorized(taskId: string): boolean {
+    return this.getBotConversationMessagingContext(taskId).authorized;
+  }
+
+  /**
+   * Return the verified bot-team identity and authorization together. The
+   * executor may hold an older task object while the daemon repairs a legacy
+   * conversation, so callers must use the same normalized snapshot for both
+   * the team id and the authorization decision.
+   */
+  getBotConversationMessagingContext(taskId: string): {
+    authorized: boolean;
+    botTeamId?: string;
+  } {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || task.agentConfig?.botConversation !== true) {
+      return { authorized: false };
+    }
+    const normalized = this.ensureBotTaskTeam(task);
+    const context = this.getBotTeamContext(normalized);
+    return context?.team?.id
+      ? { authorized: true, botTeamId: context.team.id }
+      : { authorized: false };
+  }
+
+  private getVerifiedBotTeamContext(task: Task): ReturnType<AgentDaemon["getBotTeamContext"]> {
+    if (task.agentConfig?.botConversation !== true) return undefined;
+    const normalized = this.ensureBotTaskTeam(task);
+    return this.getBotTeamContext(normalized);
+  }
+
+  private getBotTeamDiagnostic(task: Task): {
+    availability:
+      | "available"
+      | "conversation_unavailable"
+      | "team_unavailable"
+      | "membership_revoked";
+    message: string;
+    team?: ReturnType<AgentTeamRepository["findById"]>;
+    roleIds: Set<string>;
+  } {
+    if (task.agentConfig?.botConversation !== true || !task.assignedAgentRoleId) {
+      return {
+        availability: "conversation_unavailable",
+        message: "This conversation is not attached to an active bot role.",
+        roleIds: new Set(),
+      };
+    }
+    const teamId = task.agentConfig?.botTeamId;
+    if (typeof teamId !== "string" || !teamId.trim()) {
+      return {
+        availability: "team_unavailable",
+        message: "This bot conversation is not attached to a persistent bot team.",
+        roleIds: new Set(),
+      };
+    }
+    const teamRepo = new AgentTeamRepository(this.dbManager.getDatabase());
+    const team = teamRepo.findById(teamId);
+    if (!team || team.workspaceId !== task.workspaceId || !team.isActive || !team.persistent) {
+      return {
+        availability: "team_unavailable",
+        message: "The bot team is unavailable in the current workspace.",
+        roleIds: new Set(),
+      };
+    }
+    const members = new AgentTeamMemberRepository(this.dbManager.getDatabase()).listByTeam(team.id);
+    const roleIds = new Set([team.leadAgentRoleId, ...members.map((member) => member.agentRoleId)]);
+    if (!roleIds.has(task.assignedAgentRoleId)) {
+      return {
+        availability: "membership_revoked",
+        message: "This bot role is no longer a member of the persistent bot team.",
+        team,
+        roleIds,
+      };
+    }
+    return { availability: "available", message: "Bot teammate is available.", team, roleIds };
+  }
+
+  private canDeliverBotMessageBetween(sender: Task, target: Task): boolean {
+    const senderContext = this.getVerifiedBotTeamContext(sender);
+    const targetContext = this.getVerifiedBotTeamContext(target);
+    if (!senderContext?.team || !targetContext?.team) return false;
+    return (
+      senderContext.team.id === targetContext.team.id && sender.workspaceId === target.workspaceId
+    );
+  }
+
+  private recoverQueuedBotMessagesOnStartup(): void {
+    let conversations: Task[] = [];
+    try {
+      conversations = this.taskRepo.findBotConversations("", {
+        includeAllWorkspaces: true,
+        includeArchivedSessions: false,
+        limit: 500,
+        offset: 0,
+      });
+    } catch (error) {
+      log.warn("Unable to scan bot conversations for queued handoff recovery:", error);
+      return;
+    }
+
+    for (const task of conversations) {
+      const latestByMessageId = new Map<string, TaskEvent>();
+      for (const event of readDurableTaskEvents(this, task.id, "user_message")) {
+        const payload = (event.payload || {}) as Record<string, unknown>;
+        // Only agent-authored bot receipts are restart-recoverable. A renderer
+        // can use the generic queue mode for child-task steering, but that is
+        // a user follow-up and must never be replayed as a teammate handoff.
+        if (payload.deliveryMode !== "message" || payload.messageSource !== "agent") continue;
+        const messageId = typeof payload.messageId === "string" ? payload.messageId.trim() : "";
+        if (!messageId) continue;
+        latestByMessageId.set(messageId, event);
+      }
+
+      for (const event of latestByMessageId.values()) {
+        const payload = (event.payload || {}) as Record<string, unknown>;
+        const deliveryStatus =
+          payload.deliveryStatus === "delivered" || payload.status === "delivered"
+            ? "delivered"
+            : payload.deliveryStatus === "quarantined" || payload.status === "quarantined"
+              ? "quarantined"
+              : payload.deliveryStatus === "failed" || payload.status === "failed"
+                ? "failed"
+                : payload.deliveryStatus === "started" || payload.status === "started"
+                  ? "started"
+                  : "queued";
+        // A started receipt may be left behind if the process exits between
+        // runtime consumption and the final acknowledgement. Reconstruct that
+        // exact message; delivered and quarantined are terminal.
+        if (deliveryStatus !== "queued" && deliveryStatus !== "started") continue;
+
+        const messageId = String(payload.messageId || "").trim();
+        const message = typeof payload.message === "string" ? payload.message.trim() : "";
+        const senderTaskId =
+          typeof payload.senderTaskId === "string" ? payload.senderTaskId.trim() : "";
+        if (!messageId || !message || !senderTaskId) continue;
+
+        const sender = this.taskRepo.findById(senderTaskId);
+        if (!sender || !this.canDeliverBotMessageBetween(sender, task)) {
+          const error =
+            "Bot teammate message was quarantined because the sender and recipient are no longer active members of the same persistent team.";
+          this.markQueuedAgentMessageFailed(task.id, messageId, error, {
+            quarantined: true,
+            failureCode: "BOT_MESSAGE_TEAM_AUTHORIZATION_REVOKED",
+          });
+          this.logEvent(task.id, "error", {
+            message: error,
+            code: "BOT_MESSAGE_TEAM_AUTHORIZATION_REVOKED",
+            messageId,
+            senderTaskId,
+            deliveryStatus: "quarantined",
+            recovery: true,
+          });
+          continue;
+        }
+
+        try {
+          const result = this.queueMessageOnly(
+            task,
+            message,
+            undefined,
+            payload.quotedAssistantMessage as QuotedAssistantMessage | undefined,
+            {
+              deliveryMode: "message",
+              messageId,
+              messageSource: "agent",
+              senderTaskId,
+              senderLabel:
+                typeof payload.senderLabel === "string" ? payload.senderLabel : undefined,
+              inReplyToMessageId:
+                typeof payload.inReplyToMessageId === "string"
+                  ? payload.inReplyToMessageId
+                  : undefined,
+              inReplyToTaskId:
+                typeof payload.inReplyToTaskId === "string" ? payload.inReplyToTaskId : undefined,
+              interactionMode: payload.interactionMode as TaskFollowUpInput["interactionMode"],
+              integrationMentions: Array.isArray(payload.integrationMentions)
+                ? (payload.integrationMentions as TaskFollowUpInput["integrationMentions"])
+                : undefined,
+              startAfterAccepted: true,
+            },
+          );
+          this.logEvent(task.id, "log", {
+            metric: "bot_message_recovered_after_restart",
+            messageId,
+            deliveryStatus: result.deliveryStatus || "queued",
+            senderTaskId: payload.senderTaskId,
+          });
+        } catch (error) {
+          // Keep the durable queued receipt intact. A later explicit retry or
+          // another startup can still reconstruct it without losing content.
+          this.logEvent(task.id, "error", {
+            message: "Queued bot handoff recovery failed",
+            error: String(error),
+            messageId,
+            deliveryStatus: "queued",
+            recovery: true,
+          });
+        }
+      }
     }
   }
 
@@ -3699,12 +4070,13 @@ export class AgentDaemon extends EventEmitter {
    * transcript and leaving the lead waiting forever.
    */
   private findReusableBotConversation(workspaceId: string, agentRoleId: string): Task | undefined {
-    const [candidate] = this.taskRepo.findBotConversations(workspaceId, {
+    const candidates = this.taskRepo.findBotConversations(workspaceId, {
       agentRoleId,
       includeArchivedSessions: false,
-      limit: 1,
+      // A failed newest transcript must not hide an older healthy persistent
+      // conversation. Keep the scan bounded while covering normal history.
+      limit: 50,
     });
-    if (!candidate) return undefined;
     const reusableStatuses = new Set<TaskStatus>([
       "pending",
       "queued",
@@ -3712,7 +4084,7 @@ export class AgentDaemon extends EventEmitter {
       "executing",
       "completed",
     ]);
-    return reusableStatuses.has(candidate.status) ? candidate : undefined;
+    return candidates.find((candidate) => reusableStatuses.has(candidate.status));
   }
 
   /** List the persistent bot peers visible to a bot conversation. */
@@ -3725,29 +4097,162 @@ export class AgentDaemon extends EventEmitter {
       description?: string;
       status?: TaskStatus;
       available: boolean;
+      availability:
+        | "available"
+        | "conversation_unavailable"
+        | "team_unavailable"
+        | "membership_revoked";
+      reason?: string;
+      recoveryAction?: "reopen" | "repair_membership";
     }>
   > {
     const existingSender = this.taskRepo.findById(taskId);
     if (!existingSender) return [];
     const sender = this.ensureBotTaskTeam(existingSender);
-    const context = this.getBotTeamContext(sender);
-    if (!context) return [];
+    const diagnostic = this.getBotTeamDiagnostic(sender);
     const roleRepo = new AgentRoleRepository(this.dbManager.getDatabase());
-    return Array.from(context.roleIds)
-      .map((roleId) => roleRepo.findById(roleId))
-      .filter((role): role is AgentRole => Boolean(role))
-      .map((role) => {
-        const conversation = this.findReusableBotConversation(sender.workspaceId, role.id);
-        return {
-          taskId: conversation?.id,
-          roleId: role.id,
-          name: role.name,
-          displayName: role.displayName,
-          description: role.description,
-          status: conversation?.status,
-          available: Boolean(conversation),
-        };
+    const roles = diagnostic.roleIds.size
+      ? Array.from(diagnostic.roleIds)
+          .map((roleId) => roleRepo.findById(roleId))
+          .filter((role): role is AgentRole => Boolean(role))
+      : ensureDefaultBotRoles(this.dbManager.getDatabase());
+    return roles.map((role) => {
+      const conversation = this.findReusableBotConversation(sender.workspaceId, role.id);
+      const isSelf = role.id === sender.assignedAgentRoleId;
+      const roleAvailable = diagnostic.availability === "available" && !isSelf;
+      const availability = roleAvailable
+        ? conversation
+          ? "available"
+          : "conversation_unavailable"
+        : isSelf
+          ? "conversation_unavailable"
+          : diagnostic.availability;
+      return {
+        taskId: conversation?.id,
+        roleId: role.id,
+        name: role.name,
+        displayName: role.displayName,
+        description: role.description,
+        status: conversation?.status,
+        available: availability === "available",
+        availability,
+        ...(availability !== "available"
+          ? {
+              reason: isSelf
+                ? "A bot cannot message itself."
+                : diagnostic.availability === "available"
+                  ? "No reusable conversation is available yet."
+                  : diagnostic.message,
+            }
+          : {}),
+        ...(availability === "conversation_unavailable" || availability === "team_unavailable"
+          ? { recoveryAction: "reopen" as const }
+          : availability === "membership_revoked"
+            ? { recoveryAction: "repair_membership" as const }
+            : {}),
+      };
+    });
+  }
+
+  /**
+   * Reopen a bot conversation without mutating or borrowing its old
+   * transcript. An explicit repair may restore a revoked role membership;
+   * ordinary reopen keeps authorization fail-closed.
+   */
+  async reopenBotConversation(params: {
+    workspaceId: string;
+    taskId?: string;
+    agentRoleId?: string;
+    repairMembership?: boolean;
+  }): Promise<Task> {
+    const workspaceId = String(params.workspaceId || "").trim();
+    if (!workspaceId) throw new Error("BOT_WORKSPACE_REQUIRED: workspaceId is required");
+    const oldTask = params.taskId ? this.taskRepo.findById(params.taskId) : undefined;
+    if (params.taskId && !oldTask) {
+      throw new Error("BOT_CONVERSATION_UNAVAILABLE: The bot conversation no longer exists.");
+    }
+    if (oldTask && oldTask.workspaceId !== workspaceId) {
+      throw new Error(
+        "BOT_WORKSPACE_CONFLICT: The old bot conversation belongs to another workspace.",
+      );
+    }
+    const roleId = params.agentRoleId?.trim() || oldTask?.assignedAgentRoleId?.trim() || "";
+    const role = roleId
+      ? new AgentRoleRepository(this.dbManager.getDatabase()).findById(roleId)
+      : undefined;
+    if (!role) {
+      throw new Error("BOT_NOT_FOUND: The bot role is no longer available.");
+    }
+
+    const db = this.dbManager.getDatabase();
+    const teamRepo = new AgentTeamRepository(db);
+    const memberRepo = new AgentTeamMemberRepository(db);
+    const oldTeamId = oldTask?.agentConfig?.botTeamId;
+    const oldTeam = typeof oldTeamId === "string" ? teamRepo.findById(oldTeamId) : undefined;
+    let team =
+      oldTeam && oldTeam.workspaceId === workspaceId && oldTeam.isActive && oldTeam.persistent
+        ? oldTeam
+        : undefined;
+    if (!team) {
+      if (oldTeamId && !params.repairMembership) {
+        throw new Error(
+          "BOT_TEAM_UNAVAILABLE: The old bot team is unavailable; repair the team before reopening.",
+        );
+      }
+      const seeded = ensureDefaultBotTeam(db, workspaceId);
+      team = seeded?.team;
+    }
+    if (!team) throw new Error("BOT_TEAM_UNAVAILABLE: No persistent bot team is available.");
+
+    const roleIds = new Set([
+      team.leadAgentRoleId,
+      ...memberRepo.listByTeam(team.id).map((member) => member.agentRoleId),
+    ]);
+    if (!roleIds.has(role.id)) {
+      if (!params.repairMembership) {
+        throw new Error(
+          "BOT_MEMBERSHIP_REVOKED: This role is no longer a member of the bot team; repair membership to continue.",
+        );
+      }
+      memberRepo.add({
+        teamId: team.id,
+        agentRoleId: role.id,
+        memberOrder: 900,
+        isRequired: false,
       });
+    }
+
+    const reopened = await this.createTask({
+      title: role.displayName,
+      prompt: `Resume the ${role.displayName} bot conversation.`,
+      workspaceId,
+      agentConfig: {
+        botConversation: true,
+        botTeamId: team.id,
+        conversationMode: "hybrid",
+        executionMode: "execute",
+        executionModeSource: "strategy",
+      },
+      taskOverrides: {
+        assignedAgentRoleId: role.id,
+        ...(oldTask
+          ? {
+              branchFromTaskId: oldTask.id,
+              branchLabel: params.repairMembership
+                ? "Repaired bot conversation"
+                : "Reopened bot conversation",
+            }
+          : {}),
+      },
+      autoStart: false,
+    });
+    this.logEvent(reopened.id, "task_created", {
+      recoveryAction: params.repairMembership ? "repair_membership" : "reopen",
+      reopenedFromTaskId: oldTask?.id,
+      botRoleId: role.id,
+      botTeamId: team.id,
+    });
+    return reopened;
   }
 
   /**
@@ -3759,7 +4264,17 @@ export class AgentDaemon extends EventEmitter {
     recipient: { taskId?: string; botName?: string },
   ): Promise<
     | { ok: true; task: Task; role: AgentRole }
-    | { ok: false; error: "BOT_TEAM_UNAVAILABLE" | "BOT_NOT_FOUND" | "FORBIDDEN"; message: string }
+    | {
+        ok: false;
+        error:
+          | "BOT_TEAM_UNAVAILABLE"
+          | "BOT_NOT_FOUND"
+          | "BOT_MEMBERSHIP_REVOKED"
+          | "BOT_CONVERSATION_UNAVAILABLE"
+          | "BOT_RUNTIME_UNAVAILABLE"
+          | "FORBIDDEN";
+        message: string;
+      }
   > {
     const existingSender = this.taskRepo.findById(senderTaskId);
     if (!existingSender) {
@@ -3768,10 +4283,16 @@ export class AgentDaemon extends EventEmitter {
     const sender = this.ensureBotTaskTeam(existingSender);
     const context = this.getBotTeamContext(sender);
     if (!context) {
+      const diagnostic = this.getBotTeamDiagnostic(sender);
       return {
         ok: false,
-        error: "BOT_TEAM_UNAVAILABLE",
-        message: "The current bot is not attached to a persistent bot team",
+        error:
+          diagnostic.availability === "conversation_unavailable"
+            ? "BOT_CONVERSATION_UNAVAILABLE"
+            : diagnostic.availability === "membership_revoked"
+              ? "BOT_MEMBERSHIP_REVOKED"
+              : "BOT_TEAM_UNAVAILABLE",
+        message: diagnostic.message,
       };
     }
 
@@ -3780,9 +4301,23 @@ export class AgentDaemon extends EventEmitter {
     let target: Task | undefined;
     if (recipient.taskId) {
       target = this.taskRepo.findById(recipient.taskId);
+      if (!target) {
+        return {
+          ok: false,
+          error: "BOT_CONVERSATION_UNAVAILABLE",
+          message: "The target bot conversation no longer exists.",
+        };
+      }
       role = target?.assignedAgentRoleId
         ? roleRepo.findById(target.assignedAgentRoleId)
         : undefined;
+      if (target && (!role || target.agentConfig?.botConversation !== true)) {
+        return {
+          ok: false,
+          error: "BOT_CONVERSATION_UNAVAILABLE",
+          message: "The target is not an active bot conversation.",
+        };
+      }
     } else {
       const normalized = String(recipient.botName || "")
         .trim()
@@ -3791,29 +4326,29 @@ export class AgentDaemon extends EventEmitter {
       if (!normalized) {
         return { ok: false, error: "BOT_NOT_FOUND", message: "bot is required" };
       }
-      role = Array.from(context.roleIds)
-        .map((roleId) => roleRepo.findById(roleId))
-        .filter((candidate): candidate is AgentRole => Boolean(candidate))
-        .find((candidate) => {
-          const handle = candidate.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-          const shortHandle = candidate.name.toLowerCase().split(/[^a-z0-9]+/)[0] || "";
-          const displayShortHandle =
-            candidate.displayName.toLowerCase().trim().split(/\s+/)[0] || "";
-          return (
-            handle === normalized ||
-            shortHandle === normalized ||
-            candidate.name.toLowerCase() === normalized ||
-            candidate.displayName.toLowerCase() === normalized ||
-            candidate.displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-") === normalized ||
-            displayShortHandle === normalized
-          );
-        });
+      const matchesHandle = (candidate: AgentRole): boolean => {
+        const handle = candidate.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const shortHandle = candidate.name.toLowerCase().split(/[^a-z0-9]+/)[0] || "";
+        const displayShortHandle = candidate.displayName.toLowerCase().trim().split(/\s+/)[0] || "";
+        return (
+          handle === normalized ||
+          shortHandle === normalized ||
+          candidate.name.toLowerCase() === normalized ||
+          candidate.displayName.toLowerCase() === normalized ||
+          candidate.displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-") === normalized ||
+          displayShortHandle === normalized
+        );
+      };
+      // Resolve against the stable role registry first so a known role that
+      // was removed from the team can produce a truthful membership error
+      // instead of looking like a misspelled bot.
+      role = roleRepo.findAll(true).find(matchesHandle);
       if (role) {
         target = this.findReusableBotConversation(sender.workspaceId, role.id);
       }
     }
 
-    if (!role || !context.roleIds.has(role.id) || role.id === sender.assignedAgentRoleId) {
+    if (!role || role.id === sender.assignedAgentRoleId) {
       return {
         ok: false,
         error: recipient.taskId ? "FORBIDDEN" : "BOT_NOT_FOUND",
@@ -3823,22 +4358,32 @@ export class AgentDaemon extends EventEmitter {
       };
     }
 
+    if (!context.roleIds.has(role.id)) {
+      return {
+        ok: false,
+        error: "BOT_MEMBERSHIP_REVOKED",
+        message: "That bot role is not an active member of the current persistent team.",
+      };
+    }
+
     if (target) {
-      if (
-        target.workspaceId !== sender.workspaceId ||
-        target.agentConfig?.botConversation !== true
-      ) {
+      if (!this.canDeliverBotMessageBetween(sender, target)) {
+        const targetDiagnostic = this.getBotTeamDiagnostic(target);
         return {
           ok: false,
-          error: "FORBIDDEN",
-          message: "The target is not a bot conversation in the current workspace",
+          error:
+            targetDiagnostic.availability === "membership_revoked"
+              ? "BOT_MEMBERSHIP_REVOKED"
+              : targetDiagnostic.availability === "conversation_unavailable"
+                ? "BOT_CONVERSATION_UNAVAILABLE"
+                : "BOT_TEAM_UNAVAILABLE",
+          message: targetDiagnostic.message,
         };
       }
-      const targetConfig = this.prepareBotTeamAgentConfig(target.agentConfig!, context.team!.id);
-      if (JSON.stringify(targetConfig) !== JSON.stringify(target.agentConfig)) {
-        this.taskRepo.update(target.id, { agentConfig: targetConfig });
-        target.agentConfig = targetConfig;
-      }
+      // canDeliverBotMessageBetween() intentionally validates the existing
+      // target team. Never overwrite a target's team id as an authorization
+      // repair; that could move a stale or foreign conversation into the
+      // sender's team merely because it shares a workspace.
       return { ok: true, task: target, role };
     }
 
@@ -11687,6 +12232,26 @@ export class AgentDaemon extends EventEmitter {
       console.warn(`[AgentDaemon] completeTask called for unknown task ${taskId}`);
       return;
     }
+    // Bot conversations have a second completion contract: a terminal-looking
+    // task row is not authoritative until every durable teammate handoff has
+    // either received a correlated reply or reached a terminal delivery state.
+    // Reconcile before the generic terminal short-circuit because an older
+    // runtime could persist `completed` before the handoff gate ran.
+    const historicalEvents = this.getTaskEventsForReplay(taskId);
+    let botHandoffCompletion: { deferred: boolean; replySent: boolean } = {
+      deferred: false,
+      replySent: false,
+    };
+    if (existingTask.agentConfig?.botConversation === true) {
+      botHandoffCompletion = this.reconcileBotHandoffBeforeCompletion(
+        existingTask,
+        historicalEvents,
+        typeof resultSummary === "string" && resultSummary.trim().length > 0
+          ? resultSummary.trim()
+          : undefined,
+      );
+      if (botHandoffCompletion.deferred) return;
+    }
     const currentStatus = deriveCanonicalTaskStatus(existingTask);
     if (isTerminalTaskStatus(currentStatus)) {
       return;
@@ -11758,7 +12323,6 @@ export class AgentDaemon extends EventEmitter {
       }
       return desc.includes("verify:") || desc.includes("verification") || desc.includes("verify ");
     };
-    const historicalEvents = this.getTaskEventsForReplay(taskId);
     const trimmedSummary =
       typeof resultSummary === "string" && resultSummary.trim().length > 0
         ? resultSummary.trim()
@@ -12254,6 +12818,10 @@ export class AgentDaemon extends EventEmitter {
 
     let terminalStatus: NonNullable<Task["terminalStatus"]> = metadata?.terminalStatus || "ok";
     let failureClass: Task["failureClass"] | undefined = metadata?.failureClass || undefined;
+    if (botHandoffCompletion.replySent) {
+      terminalStatus = "partial_success";
+      failureClass = "contract_error";
+    }
     if (metadata?.terminalKind === "failed" && terminalStatus !== "failed") {
       terminalStatus = "failed";
     }
@@ -12814,6 +13382,54 @@ export class AgentDaemon extends EventEmitter {
    * for injection into the active execution loop and a user_message event is
    * emitted immediately so the UI shows the message right away.
    */
+  private getExistingUserFollowUpResult(
+    taskId: string,
+    messageId: string,
+    message: string,
+  ): AgentMessageSendResult | null {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode !== "message";
+      });
+    if (!event) return null;
+    const payload = (event.payload as Record<string, unknown> | undefined) || {};
+    const priorMessage = typeof payload.message === "string" ? payload.message : "";
+    if (priorMessage && priorMessage !== message) {
+      throw new Error(
+        `Message ID ${messageId} was already used for different content; retry with a new message_id.`,
+      );
+    }
+    const rawStatus = payload.deliveryStatus ?? payload.status;
+    const status: AgentMessageDeliveryStatus =
+      rawStatus === "queued" ||
+      rawStatus === "started" ||
+      rawStatus === "delivered" ||
+      rawStatus === "failed" ||
+      rawStatus === "quarantined" ||
+      rawStatus === "accepted"
+        ? rawStatus
+        : "accepted";
+    return {
+      queued: status === "queued" || status === "started",
+      duplicate: true,
+      messageId,
+      deliveryMode: "follow_up",
+      deliveryStatus: status,
+      ...(typeof payload.acceptedAt === "number" ? { acceptedAt: payload.acceptedAt } : {}),
+      ...(typeof payload.queuedAt === "number" ? { queuedAt: payload.queuedAt } : {}),
+      ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
+      ...(typeof payload.deliveredAt === "number" ? { deliveredAt: payload.deliveredAt } : {}),
+      ...(typeof payload.failedAt === "number" ? { failedAt: payload.failedAt } : {}),
+      ...(typeof payload.quarantinedAt === "number"
+        ? { quarantinedAt: payload.quarantinedAt }
+        : {}),
+      ...(typeof payload.failureCode === "string" ? { failureCode: payload.failureCode } : {}),
+    };
+  }
+
   async sendMessage(
     taskId: string,
     message: string,
@@ -12847,6 +13463,14 @@ export class AgentDaemon extends EventEmitter {
     // continue through the existing execution path below.
     if (options?.deliveryMode === "message") {
       return this.queueMessageOnly(task, message, images, quotedAssistantMessage, options);
+    }
+    // Renderer retries may arrive after the IPC call returned but before the
+    // composer receives the acceptance callback. A stable message_id is the
+    // idempotency boundary for ordinary follow-ups too; never create a second
+    // transcript event or provider turn for the same identity.
+    if (options?.messageId && options.messageSource !== "agent") {
+      const existing = this.getExistingUserFollowUpResult(taskId, options.messageId, message);
+      if (existing) return existing;
     }
     let cached = this.activeTasks.get(taskId);
     if (this.isSideChatTask(task) && !cached?.executor.isRunning) {
@@ -12976,6 +13600,9 @@ export class AgentDaemon extends EventEmitter {
         effectiveOptions?.senderTaskId,
         effectiveOptions?.senderLabel,
         effectiveOptions?.deliveryMode,
+        ...(effectiveOptions?.inReplyToMessageId || effectiveOptions?.inReplyToTaskId
+          ? [effectiveOptions.inReplyToMessageId, effectiveOptions.inReplyToTaskId]
+          : []),
       );
       this.logEvent(taskId, "agent_follow_up_scheduled", {
         message,
@@ -12989,6 +13616,12 @@ export class AgentDaemon extends EventEmitter {
           : {}),
         ...(effectiveOptions?.senderTaskId ? { senderTaskId: effectiveOptions.senderTaskId } : {}),
         ...(effectiveOptions?.senderLabel ? { senderLabel: effectiveOptions.senderLabel } : {}),
+        ...(effectiveOptions?.inReplyToMessageId
+          ? { inReplyToMessageId: effectiveOptions.inReplyToMessageId }
+          : {}),
+        ...(effectiveOptions?.inReplyToTaskId
+          ? { inReplyToTaskId: effectiveOptions.inReplyToTaskId }
+          : {}),
       });
       // Emit user_message event immediately so the UI shows the message right away.
       // The executor's sendMessageLegacy won't re-emit because the message is
@@ -13005,6 +13638,12 @@ export class AgentDaemon extends EventEmitter {
         queuedAt: acceptedAt,
         ...(effectiveOptions?.senderTaskId ? { senderTaskId: effectiveOptions.senderTaskId } : {}),
         ...(effectiveOptions?.senderLabel ? { senderLabel: effectiveOptions.senderLabel } : {}),
+        ...(effectiveOptions?.inReplyToMessageId
+          ? { inReplyToMessageId: effectiveOptions.inReplyToMessageId }
+          : {}),
+        ...(effectiveOptions?.inReplyToTaskId
+          ? { inReplyToTaskId: effectiveOptions.inReplyToTaskId }
+          : {}),
         ...(effectiveMessage !== message ? { annotationContextInjected: true } : {}),
         ...(userMessageAttachmentMetadata.length > 0
           ? { images: userMessageAttachmentMetadata }
@@ -13051,7 +13690,9 @@ export class AgentDaemon extends EventEmitter {
     // caller may use agent provenance on an ordinary follow-up, which has no
     // target queue receipt to acknowledge here.
     const queuedAgentMessageId =
-      candidateReceiptStatus === "queued" || candidateReceiptStatus === "delivered"
+      candidateReceiptStatus === "queued" ||
+      candidateReceiptStatus === "started" ||
+      candidateReceiptStatus === "delivered"
         ? candidateAgentMessageId
         : undefined;
     let agentMessageAcceptanceCompleted = false;
@@ -13066,7 +13707,7 @@ export class AgentDaemon extends EventEmitter {
             return;
           }
           if (
-            receiptStatus !== "queued" ||
+            (receiptStatus !== "queued" && receiptStatus !== "started") ||
             !this.markQueuedAgentMessageDelivered(taskId, queuedAgentMessageId)
           ) {
             throw new Error(
@@ -13121,6 +13762,8 @@ export class AgentDaemon extends EventEmitter {
           messageId: effectiveOptions?.messageId,
           senderTaskId: effectiveOptions?.senderTaskId,
           senderLabel: effectiveOptions?.senderLabel,
+          inReplyToMessageId: effectiveOptions?.inReplyToMessageId,
+          inReplyToTaskId: effectiveOptions?.inReplyToTaskId,
           onAccepted: onAgentMessageAccepted,
           onExecutionAccepted,
           suppressUserMessageEvent:
@@ -13199,6 +13842,8 @@ export class AgentDaemon extends EventEmitter {
       | "messageId"
       | "senderTaskId"
       | "senderLabel"
+      | "inReplyToMessageId"
+      | "inReplyToTaskId"
       | "integrationMentions"
     > &
       Pick<DaemonFollowUpOptions, "startAfterAccepted">,
@@ -13210,6 +13855,7 @@ export class AgentDaemon extends EventEmitter {
       typeof options.messageId === "string" && options.messageId.trim().length > 0
         ? options.messageId.trim()
         : crypto.randomUUID();
+    const messageHash = hashBotMessage(message);
 
     // The target's persisted user_message event is the receipt. Checking it
     // before touching the runtime makes retries idempotent across restarts.
@@ -13226,10 +13872,30 @@ export class AgentDaemon extends EventEmitter {
       });
     if (priorEvent) {
       const payload = priorEvent.payload as Record<string, unknown> | undefined;
+      const priorMessage = typeof payload?.message === "string" ? payload.message : undefined;
+      const priorMessageHash =
+        typeof payload?.messageHash === "string" ? payload.messageHash : undefined;
+      if (
+        (priorMessage !== undefined && priorMessage !== message) ||
+        (priorMessageHash !== undefined && priorMessageHash !== messageHash)
+      ) {
+        throw new Error(
+          `Message ID ${messageId} was already used for different content; retry with a new message_id.`,
+        );
+      }
       const status =
         payload?.deliveryStatus === "delivered" || payload?.status === "delivered"
           ? "delivered"
-          : "queued";
+          : payload?.deliveryStatus === "quarantined" || payload?.status === "quarantined"
+            ? "quarantined"
+            : payload?.deliveryStatus === "failed" || payload?.status === "failed"
+              ? "failed"
+              : "queued";
+      if (status === "quarantined") {
+        throw new Error(
+          `BOT_MESSAGE_QUARANTINED: ${typeof payload?.error === "string" ? payload.error : "Repair the bot team before retrying."}`,
+        );
+      }
       if (status === "delivered") {
         if (typeof (this as Any).releaseQueuedAttachmentRefs === "function") {
           this.releaseQueuedAttachmentRefs(task.id, messageId, payload);
@@ -13244,6 +13910,29 @@ export class AgentDaemon extends EventEmitter {
           ...(typeof payload?.queuedAt === "number" ? { queuedAt: payload.queuedAt } : {}),
           ...(typeof payload?.deliveredAt === "number" ? { deliveredAt: payload.deliveredAt } : {}),
         };
+      }
+      if (status === "failed") {
+        const retryAt = Date.now();
+        const retryPayload: Record<string, unknown> = {
+          ...(payload || {}),
+          status: "queued",
+          deliveryStatus: "queued",
+          queuedAt: retryAt,
+          attempt:
+            typeof payload?.attempt === "number" && Number.isFinite(payload.attempt)
+              ? Math.max(1, Math.floor(payload.attempt) + 1)
+              : 1,
+        };
+        delete retryPayload.failedAt;
+        delete retryPayload.quarantinedAt;
+        delete retryPayload.failureCode;
+        delete retryPayload.error;
+        this.eventRepo.updatePayloadById(priorEvent.id, retryPayload);
+        try {
+          this.emitTaskEvent({ ...priorEvent, payload: retryPayload });
+        } catch {
+          // The retry receipt is durable even when the renderer is offline.
+        }
       }
     }
 
@@ -13385,6 +14074,9 @@ export class AgentDaemon extends EventEmitter {
           options.senderTaskId,
           options.senderLabel,
           "message",
+          ...(options.inReplyToMessageId || options.inReplyToTaskId
+            ? [options.inReplyToMessageId, options.inReplyToTaskId]
+            : []),
         );
       }
       if (options.startAfterAccepted) {
@@ -13417,14 +14109,19 @@ export class AgentDaemon extends EventEmitter {
     // this queued receipt back into the runtime queue by messageId.
     this.logEvent(task.id, "user_message", {
       message,
+      messageHash,
       messageId,
+      correlationId: messageId,
       deliveryMode: "message",
       deliveryStatus: "queued",
       acceptedAt,
       queuedAt: acceptedAt,
+      attempt: 1,
       ...(options.messageSource ? { messageSource: options.messageSource } : {}),
       ...(options.senderTaskId ? { senderTaskId: options.senderTaskId } : {}),
       ...(options.senderLabel ? { senderLabel: options.senderLabel } : {}),
+      ...(options.inReplyToMessageId ? { inReplyToMessageId: options.inReplyToMessageId } : {}),
+      ...(options.inReplyToTaskId ? { inReplyToTaskId: options.inReplyToTaskId } : {}),
       ...(options.interactionMode ? { interactionMode: options.interactionMode } : {}),
       ...(persistedAttachments.refs.length > 0
         ? { queuedAttachmentRefs: persistedAttachments.refs }
@@ -13436,7 +14133,9 @@ export class AgentDaemon extends EventEmitter {
     });
     this.logEvent(task.id, "agent_follow_up_scheduled", {
       message,
+      messageHash,
       messageId,
+      correlationId: messageId,
       deliveryMode: "message",
       deliveryStatus: "queued",
       acceptedAt,
@@ -13444,6 +14143,8 @@ export class AgentDaemon extends EventEmitter {
       ...(options.messageSource ? { messageSource: options.messageSource } : {}),
       ...(options.senderTaskId ? { senderTaskId: options.senderTaskId } : {}),
       ...(options.senderLabel ? { senderLabel: options.senderLabel } : {}),
+      ...(options.inReplyToMessageId ? { inReplyToMessageId: options.inReplyToMessageId } : {}),
+      ...(options.inReplyToTaskId ? { inReplyToTaskId: options.inReplyToTaskId } : {}),
     });
     executor.queueFollowUp(
       message,
@@ -13457,6 +14158,9 @@ export class AgentDaemon extends EventEmitter {
       options.senderTaskId,
       options.senderLabel,
       "message",
+      ...(options.inReplyToMessageId || options.inReplyToTaskId
+        ? [options.inReplyToMessageId, options.inReplyToTaskId]
+        : []),
     );
 
     if (options.startAfterAccepted) {
@@ -13493,9 +14197,51 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
+    // Defensive recovery for callers that reach the wake boundary without a
+    // cached executor (for example a race with runtime eviction). Reconstruct
+    // from the durable receipt instead of reporting a false delivery failure.
+    const receipt = readDurableTaskEvents(this, task.id, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "message";
+      });
+    const payload = receipt?.payload as Record<string, unknown> | undefined;
+    const queuedMessage = typeof payload?.message === "string" ? payload.message.trim() : "";
+    if (queuedMessage) {
+      try {
+        this.queueMessageOnly(task, queuedMessage, undefined, undefined, {
+          deliveryMode: "message",
+          messageId,
+          messageSource: payload?.messageSource === "agent" ? "agent" : undefined,
+          senderTaskId:
+            typeof payload?.senderTaskId === "string" ? payload.senderTaskId : senderTaskId,
+          senderLabel: typeof payload?.senderLabel === "string" ? payload.senderLabel : undefined,
+          inReplyToMessageId:
+            typeof payload?.inReplyToMessageId === "string"
+              ? payload.inReplyToMessageId
+              : undefined,
+          inReplyToTaskId:
+            typeof payload?.inReplyToTaskId === "string" ? payload.inReplyToTaskId : undefined,
+          startAfterAccepted: true,
+        });
+        return;
+      } catch (error) {
+        this.logEvent(task.id, "error", {
+          message: "Bot teammate message recovery could not start the recipient runtime.",
+          error: String(error),
+          code: "BOT_RUNTIME_RECOVERY_FAILED",
+          messageId,
+          senderTaskId,
+        });
+        return;
+      }
+    }
+
     this.logEvent(task.id, "error", {
-      message: "Bot teammate message was accepted but its recipient runtime was unavailable.",
-      error: "BOT_RUNTIME_UNAVAILABLE",
+      message: "Bot teammate message was accepted but its durable receipt is missing content.",
+      error: "BOT_MESSAGE_RECEIPT_INCOMPLETE",
       messageId,
       senderTaskId,
     });
@@ -13518,7 +14264,7 @@ export class AgentDaemon extends EventEmitter {
   private getQueuedAgentMessageDeliveryStatus(
     taskId: string,
     messageId: string,
-  ): "queued" | "delivered" | undefined {
+  ): "queued" | "started" | "delivered" | "failed" | "quarantined" | undefined {
     const event = readDurableTaskEvents(this, taskId, "user_message")
       .slice()
       .reverse()
@@ -13528,9 +14274,57 @@ export class AgentDaemon extends EventEmitter {
       });
     if (!event) return undefined;
     const payload = event.payload as Record<string, unknown> | undefined;
-    return payload?.deliveryStatus === "delivered" || payload?.status === "delivered"
-      ? "delivered"
-      : "queued";
+    if (payload?.deliveryStatus === "delivered" || payload?.status === "delivered") {
+      return "delivered";
+    }
+    if (payload?.deliveryStatus === "quarantined" || payload?.status === "quarantined") {
+      return "quarantined";
+    }
+    if (payload?.deliveryStatus === "failed" || payload?.status === "failed") return "failed";
+    if (payload?.deliveryStatus === "started" || payload?.status === "started") return "started";
+    return "queued";
+  }
+
+  /** Mark the exact queue receipt when the recipient begins consuming it. */
+  markQueuedAgentMessageStarted(taskId: string, messageId: string): boolean {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "message";
+      });
+    if (!event) return false;
+    const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
+    const existingStatus = this.getQueuedAgentMessageDeliveryStatus(taskId, messageId);
+    if (
+      existingStatus === "delivered" ||
+      existingStatus === "failed" ||
+      existingStatus === "quarantined"
+    ) {
+      return false;
+    }
+    if (existingStatus === "started") return true;
+    const startedAt =
+      typeof existingPayload.startedAt === "number" ? existingPayload.startedAt : Date.now();
+    const payload: Record<string, unknown> = {
+      ...existingPayload,
+      status: "started",
+      deliveryStatus: "started",
+      startedAt,
+      attempt:
+        typeof existingPayload.attempt === "number" && Number.isFinite(existingPayload.attempt)
+          ? Math.max(1, Math.floor(existingPayload.attempt))
+          : 1,
+    };
+    this.eventRepo.updatePayloadById(event.id, payload);
+    try {
+      this.emitTaskEvent({ ...event, payload });
+    } catch {
+      // Durable state is authoritative if the renderer is unavailable.
+    }
+    this.updateAgentMessageSenderProjection(taskId, messageId, payload, "started", startedAt);
+    return true;
   }
 
   /** Mark the persisted queue receipt once the worker has incorporated it. */
@@ -13544,24 +14338,33 @@ export class AgentDaemon extends EventEmitter {
       });
     if (!event) return false;
     const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
-    if (existingPayload.deliveryStatus === "delivered" || existingPayload.status === "delivered") {
-      if (typeof (this as Any).releaseQueuedAttachmentRefs === "function") {
-        this.releaseQueuedAttachmentRefs(taskId, messageId, existingPayload);
-      }
-      return true;
+    const alreadyDelivered =
+      existingPayload.deliveryStatus === "delivered" || existingPayload.status === "delivered";
+    if (
+      existingPayload.deliveryStatus === "failed" ||
+      existingPayload.status === "failed" ||
+      existingPayload.deliveryStatus === "quarantined" ||
+      existingPayload.status === "quarantined"
+    ) {
+      return false;
     }
-    const deliveredAt = Date.now();
-    const payload: Record<string, unknown> = {
-      ...existingPayload,
-      deliveryStatus: "delivered",
-      deliveredAt,
-    };
-    this.eventRepo.updatePayloadById(event.id, payload);
-    try {
-      this.emitTaskEvent({ ...event, payload });
-    } catch {
-      // The durable receipt is already written; a renderer listener must not
-      // turn an accepted handoff into a retryable failure.
+    const deliveredAt =
+      typeof existingPayload.deliveredAt === "number" ? existingPayload.deliveredAt : Date.now();
+    const payload: Record<string, unknown> = alreadyDelivered
+      ? existingPayload
+      : {
+          ...existingPayload,
+          deliveryStatus: "delivered",
+          deliveredAt,
+        };
+    if (!alreadyDelivered) {
+      this.eventRepo.updatePayloadById(event.id, payload);
+      try {
+        this.emitTaskEvent({ ...event, payload });
+      } catch {
+        // The durable receipt is already written; a renderer listener must not
+        // turn an accepted handoff into a retryable failure.
+      }
     }
 
     // Keep the originating parent activity row in sync with the target
@@ -13570,43 +14373,424 @@ export class AgentDaemon extends EventEmitter {
     // Parent activity is a best-effort projection. The target receipt above is
     // the acceptance record; lookup, update, or broadcast failures here must
     // never turn an accepted message into a retryable dispatch.
-    try {
-      const senderTaskId =
-        typeof payload.senderTaskId === "string" ? payload.senderTaskId.trim() : "";
-      if (senderTaskId) {
-        const senderEvent = readDurableTaskEvents(this, senderTaskId, "agent_message")
-          .slice()
-          .reverse()
-          .find((candidate) => {
-            const candidatePayload = candidate.payload as Record<string, unknown> | undefined;
-            return (
-              candidatePayload?.messageId === messageId && candidatePayload?.targetTaskId === taskId
-            );
-          });
+    if (typeof (this as Any).updateAgentMessageSenderProjection === "function") {
+      this.updateAgentMessageSenderProjection(taskId, messageId, payload, "delivered", deliveredAt);
+    } else {
+      // Keep lightweight daemon doubles and older embedders compatible with
+      // the projection path while the full prototype is not installed.
+      try {
+        const senderTaskId =
+          typeof payload.senderTaskId === "string" ? payload.senderTaskId.trim() : "";
+        const senderEvent = senderTaskId
+          ? readDurableTaskEvents(this, senderTaskId, "agent_message")
+              .slice()
+              .reverse()
+              .find((candidate) => {
+                const candidatePayload = candidate.payload as Record<string, unknown> | undefined;
+                return (
+                  candidatePayload?.messageId === messageId &&
+                  candidatePayload?.targetTaskId === taskId
+                );
+              })
+          : undefined;
         if (senderEvent) {
-          const senderPayload: Record<string, unknown> = {
+          const senderPayload = {
             ...((senderEvent.payload as Record<string, unknown> | undefined) || {}),
             status: "delivered",
             deliveryStatus: "delivered",
             deliveredAt,
           };
-          try {
-            this.eventRepo.updatePayloadById(senderEvent.id, senderPayload);
-          } catch {
-            // Keep the target acceptance durable if the parent projection fails.
-          }
-          try {
-            this.emitTaskEvent({ ...senderEvent, payload: senderPayload });
-          } catch {
-            // Keep the target acceptance durable if the parent broadcast fails.
-          }
+          this.eventRepo.updatePayloadById(senderEvent.id, senderPayload);
+          this.emitTaskEvent({ ...senderEvent, payload: senderPayload });
         }
+      } catch {
+        // Parent projection is best effort after target delivery is durable.
       }
-    } catch {
-      // Parent lookup is also best effort after the target receipt is safe.
     }
     if (typeof (this as Any).releaseQueuedAttachmentRefs === "function") {
       this.releaseQueuedAttachmentRefs(taskId, messageId, payload);
+    }
+    return true;
+  }
+
+  /** Mark a queued handoff as failed, or quarantine it when authorization is gone. */
+  markQueuedAgentMessageFailed(
+    taskId: string,
+    messageId: string,
+    error: string,
+    options?: { quarantined?: boolean; failureCode?: string },
+  ): boolean {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "message";
+      });
+    if (!event) return false;
+    const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
+    if (
+      existingPayload.deliveryStatus === "delivered" ||
+      existingPayload.status === "delivered" ||
+      existingPayload.deliveryStatus === "failed" ||
+      existingPayload.status === "failed" ||
+      existingPayload.deliveryStatus === "quarantined" ||
+      existingPayload.status === "quarantined"
+    ) {
+      return false;
+    }
+    const failedAt =
+      typeof existingPayload.failedAt === "number" ? existingPayload.failedAt : Date.now();
+    const deliveryStatus = options?.quarantined ? "quarantined" : "failed";
+    const payload: Record<string, unknown> = {
+      ...existingPayload,
+      status: deliveryStatus,
+      deliveryStatus,
+      ...(options?.quarantined ? { quarantinedAt: failedAt } : { failedAt }),
+      ...(options?.failureCode ? { failureCode: options.failureCode } : {}),
+      error,
+    };
+    this.eventRepo.updatePayloadById(event.id, payload);
+    try {
+      this.emitTaskEvent({ ...event, payload });
+    } catch {
+      // The durable failure is sufficient for a later UI refresh.
+    }
+
+    this.updateAgentMessageSenderProjection(taskId, messageId, payload, deliveryStatus, failedAt);
+    if (typeof (this as Any).releaseQueuedAttachmentRefs === "function") {
+      this.releaseQueuedAttachmentRefs(taskId, messageId, payload);
+    }
+    return true;
+  }
+
+  private updateAgentMessageSenderProjection(
+    targetTaskId: string,
+    messageId: string,
+    targetPayload: Record<string, unknown>,
+    status: "started" | "delivered" | "failed" | "quarantined",
+    timestamp: number,
+  ): void {
+    try {
+      const senderTaskId =
+        typeof targetPayload.senderTaskId === "string" ? targetPayload.senderTaskId.trim() : "";
+      if (!senderTaskId) return;
+      const senderEvent = readDurableTaskEvents(this, senderTaskId, "agent_message")
+        .slice()
+        .reverse()
+        .find((candidate) => {
+          const candidatePayload = candidate.payload as Record<string, unknown> | undefined;
+          return (
+            candidatePayload?.messageId === messageId &&
+            candidatePayload?.targetTaskId === targetTaskId
+          );
+        });
+      if (!senderEvent) return;
+      const senderPayload: Record<string, unknown> = {
+        ...((senderEvent.payload as Record<string, unknown> | undefined) || {}),
+        status,
+        deliveryStatus: status,
+        ...(status === "started" ? { startedAt: timestamp } : {}),
+        ...(status === "delivered" ? { deliveredAt: timestamp } : {}),
+        ...(status === "failed" ? { failedAt: timestamp } : {}),
+        ...(status === "quarantined" ? { quarantinedAt: timestamp } : {}),
+        ...(typeof targetPayload.failureCode === "string"
+          ? { failureCode: targetPayload.failureCode }
+          : {}),
+        ...(typeof targetPayload.error === "string" ? { error: targetPayload.error } : {}),
+      };
+      try {
+        this.eventRepo.updatePayloadById(senderEvent.id, senderPayload);
+      } catch {
+        // Target state is authoritative if the parent projection fails.
+      }
+      try {
+        this.emitTaskEvent({ ...senderEvent, payload: senderPayload });
+      } catch {
+        // Parent broadcast is best effort after the target state is durable.
+      }
+    } catch {
+      // Parent lookup is best effort after the target state is durable.
+    }
+  }
+
+  private markBotHandoffTimedOut(
+    historicalEvents: TaskEvent[],
+    pendingHandoff: PendingBotHandoff,
+    reason: string,
+  ): boolean {
+    const event = historicalEvents
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        if (candidate.type !== "agent_message" && candidate.legacyType !== "agent_message") {
+          return false;
+        }
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return (
+          payload?.messageId === pendingHandoff.messageId &&
+          payload?.targetTaskId === pendingHandoff.recipientTaskId
+        );
+      });
+    if (!event) return false;
+    const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
+    if (existingPayload.replyStatus === "received") return false;
+    const replyTimedOutAt = Date.now();
+    const payload = {
+      ...existingPayload,
+      replyStatus: "timed_out",
+      replyTimedOutAt,
+      failureCode: "BOT_HANDOFF_REPLY_TIMEOUT",
+      replyTimeoutReason: reason,
+    } satisfies Record<string, unknown>;
+    this.eventRepo.updatePayloadById(event.id, payload);
+    // Keep this replay buffer consistent so multiple terminal teammates can be
+    // expired in one completion pass without waiting for a second turn.
+    event.payload = payload;
+    try {
+      this.emitTaskEvent({ ...event, payload });
+    } catch {
+      // Durable timeout state is authoritative when the renderer is offline.
+    }
+    return true;
+  }
+
+  private reconcileBotHandoffBeforeCompletion(
+    task: Task,
+    historicalEvents: TaskEvent[],
+    resultSummary?: string,
+  ): { deferred: boolean; replySent: boolean } {
+    if (task.agentConfig?.botConversation !== true) {
+      return { deferred: false, replySent: false };
+    }
+
+    const scopeStart = getCurrentBotHandoffScopeStart(historicalEvents);
+    const scope = scopeStart === undefined ? undefined : { sinceTimestamp: scopeStart };
+    let pendingHandoff = getPendingBotHandoff(historicalEvents, scope);
+    while (pendingHandoff) {
+      const taskRepo = this.taskRepo as Any;
+      const canInspectRecipient = typeof taskRepo.findById === "function";
+      const recipientTask = canInspectRecipient
+        ? (taskRepo.findById(pendingHandoff.recipientTaskId) as Task | undefined)
+        : undefined;
+      const recipientIsTerminal =
+        canInspectRecipient &&
+        (!recipientTask || isTerminalTaskStatus(deriveCanonicalTaskStatus(recipientTask)));
+      const acceptedAt =
+        pendingHandoff.deliveredAt ??
+        pendingHandoff.startedAt ??
+        pendingHandoff.queuedAt ??
+        pendingHandoff.acceptedAt;
+      const timedOutByAge =
+        typeof acceptedAt === "number" && Date.now() - acceptedAt >= BOT_HANDOFF_REPLY_TIMEOUT_MS;
+      if (!recipientIsTerminal && !timedOutByAge) break;
+
+      const reason = recipientIsTerminal
+        ? `Recipient ${pendingHandoff.recipientLabel} is no longer active.`
+        : `No correlated reply arrived within ${Math.round(BOT_HANDOFF_REPLY_TIMEOUT_MS / 1000)} seconds.`;
+      if (!this.markBotHandoffTimedOut(historicalEvents, pendingHandoff, reason)) break;
+      this.logEvent(task.id, "log", {
+        metric: "bot_handoff_reply_timeout",
+        code: "BOT_HANDOFF_REPLY_TIMEOUT",
+        handoffMessageId: pendingHandoff.messageId,
+        recipientTaskId: pendingHandoff.recipientTaskId,
+        recipientLabel: pendingHandoff.recipientLabel,
+        reason,
+        partialResultAvailable: true,
+      });
+      pendingHandoff = getPendingBotHandoff(historicalEvents, scope);
+    }
+    if (pendingHandoff) {
+      const detail = `Waiting for ${pendingHandoff.recipientLabel} to reply before finishing this conversation.`;
+      this.taskRepo.update(task.id, {
+        status: "blocked",
+        completedAt: undefined,
+        terminalStatus: undefined,
+        failureClass: undefined,
+        error: detail,
+        ...(resultSummary ? { resultSummary } : {}),
+      });
+      this.logEvent(task.id, "task_status", {
+        status: "blocked",
+        message: detail,
+        botHandoffWaiting: true,
+        handoffMessageId: pendingHandoff.messageId,
+        recipientTaskId: pendingHandoff.recipientTaskId,
+        recipientLabel: pendingHandoff.recipientLabel,
+        deliveryStatus: pendingHandoff.deliveryStatus,
+      });
+      return { deferred: true, replySent: false };
+    }
+
+    const requirement = getOutstandingBotHandoffReply(historicalEvents, scope);
+    if (!requirement) return { deferred: false, replySent: false };
+
+    const sender = this.taskRepo.findById(requirement.senderTaskId);
+    const cannotReply =
+      !sender ||
+      !this.canDeliverBotMessageBetween(task, sender) ||
+      !sender.agentConfig?.botConversation;
+    if (cannotReply) {
+      const detail =
+        "The teammate reply could not be delivered because the sender is no longer available in the same bot team.";
+      this.taskRepo.update(task.id, {
+        status: "blocked",
+        completedAt: undefined,
+        terminalStatus: "needs_user_action",
+        failureClass: "contract_error",
+        error: detail,
+        ...(resultSummary ? { resultSummary } : {}),
+      });
+      this.logEvent(task.id, "error", {
+        code: "BOT_HANDOFF_REPLY_REQUIRED",
+        message: detail,
+        inboundMessageId: requirement.inboundMessageId,
+        senderTaskId: requirement.senderTaskId,
+      });
+      return { deferred: true, replySent: false };
+    }
+
+    const fallbackMessage = [
+      "BLOCKED: I could not finish this handoff with a verified result.",
+      resultSummary
+        ? `Partial result: ${resultSummary.slice(0, 600)}`
+        : "No verified result was produced.",
+      "Please review the partial work and retry with a narrower brief if needed.",
+    ].join("\n");
+    const replyMessageId = crypto
+      .createHash("sha256")
+      .update(`bot-handoff-recovery:${task.id}:${requirement.inboundMessageId}`, "utf8")
+      .digest("hex");
+    try {
+      const result = this.queueMessageOnly(sender, fallbackMessage, undefined, undefined, {
+        deliveryMode: "message",
+        messageSource: "agent",
+        messageId: replyMessageId,
+        senderTaskId: task.id,
+        senderLabel: task.title,
+        inReplyToMessageId: requirement.inboundMessageId,
+        inReplyToTaskId: requirement.senderTaskId,
+        startAfterAccepted: true,
+      });
+      const status = result.deliveryStatus || (result.queued ? "queued" : "delivered");
+      const timestamp = Date.now();
+      this.logEvent(task.id, "agent_message", {
+        messageId: replyMessageId,
+        correlationId: replyMessageId,
+        targetTaskId: sender.id,
+        message: fallbackMessage,
+        status,
+        deliveryStatus: status,
+        deliveryMode: "message",
+        acceptedAt: result.acceptedAt ?? timestamp,
+        ...(status === "queued" ? { queuedAt: result.queuedAt ?? timestamp } : {}),
+        ...(status === "started" ? { startedAt: result.startedAt ?? timestamp } : {}),
+        ...(status === "delivered" ? { deliveredAt: result.deliveredAt ?? timestamp } : {}),
+        senderType: "agent",
+        senderTaskId: task.id,
+        senderLabel: task.title,
+        recipientLabel: sender.title,
+        ...(task.agentConfig?.botTeamId ? { botTeamId: task.agentConfig.botTeamId } : {}),
+        inReplyToMessageId: requirement.inboundMessageId,
+        inReplyToTaskId: requirement.senderTaskId,
+        replyKind: "automatic_blocked_fallback",
+      });
+      this.markBotHandoffReplied(
+        requirement.senderTaskId,
+        requirement.inboundMessageId,
+        task.id,
+        task.id,
+        replyMessageId,
+      );
+      this.logEvent(task.id, "task_status", {
+        status: "partial_success",
+        message: "A blocked reply was sent to the requesting teammate.",
+        botHandoffReplySent: true,
+        inboundMessageId: requirement.inboundMessageId,
+        replyMessageId,
+        deliveryStatus: status,
+      });
+      return { deferred: false, replySent: true };
+    } catch (error) {
+      const detail = `The teammate reply could not be delivered: ${String(error)}`;
+      this.taskRepo.update(task.id, {
+        status: "blocked",
+        completedAt: undefined,
+        terminalStatus: "needs_user_action",
+        failureClass: "contract_error",
+        error: detail,
+        ...(resultSummary ? { resultSummary } : {}),
+      });
+      this.logEvent(task.id, "error", {
+        code: "BOT_HANDOFF_REPLY_DELIVERY_FAILED",
+        message: detail,
+        inboundMessageId: requirement.inboundMessageId,
+        senderTaskId: requirement.senderTaskId,
+      });
+      return { deferred: true, replySent: false };
+    }
+  }
+
+  /**
+   * Follow-up execution has its own terminalization path in TaskExecutor.
+   * Keep that path behind the same durable bot-handoff gate as normal task
+   * completion so a persisted completed row cannot swallow a pending reply.
+   */
+  reconcileBotHandoffBeforeFollowUpCompletion(
+    taskId: string,
+    resultSummary?: string,
+  ): { deferred: boolean; replySent: boolean } {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || task.agentConfig?.botConversation !== true) {
+      return { deferred: false, replySent: false };
+    }
+    return this.reconcileBotHandoffBeforeCompletion(
+      task,
+      this.getTaskEventsForReplay(taskId),
+      resultSummary,
+    );
+  }
+
+  /** Mark the originating handoff when a teammate sends a correlated reply. */
+  markBotHandoffReplied(
+    originalSenderTaskId: string,
+    originalMessageId: string,
+    originalTargetTaskId: string,
+    replyTaskId: string,
+    replyMessageId: string,
+  ): boolean {
+    const senderTaskId =
+      typeof originalSenderTaskId === "string" ? originalSenderTaskId.trim() : "";
+    const messageId = typeof originalMessageId === "string" ? originalMessageId.trim() : "";
+    const targetTaskId =
+      typeof originalTargetTaskId === "string" ? originalTargetTaskId.trim() : "";
+    const replyId = typeof replyMessageId === "string" ? replyMessageId.trim() : "";
+    if (!senderTaskId || !messageId || !targetTaskId || !replyId) return false;
+    const event = readDurableTaskEvents(this, senderTaskId, "agent_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload?.targetTaskId === targetTaskId;
+      });
+    if (!event) return false;
+    const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
+    if (existingPayload.replyStatus === "received" && existingPayload.replyMessageId === replyId) {
+      return true;
+    }
+    const repliedAt = Date.now();
+    const payload = {
+      ...existingPayload,
+      replyStatus: "received",
+      replyMessageId: replyId,
+      replyTaskId,
+      repliedAt,
+    } satisfies Record<string, unknown>;
+    this.eventRepo.updatePayloadById(event.id, payload);
+    try {
+      this.emitTaskEvent({ ...event, payload });
+    } catch {
+      // Durable correlation is authoritative when the renderer is offline.
     }
     return true;
   }
@@ -13737,6 +14921,7 @@ export class AgentDaemon extends EventEmitter {
     const drain = async () => {
       let followUp = executor.takeNextFollowUpAtTurnBoundary();
       while (followUp && !this.shutdownRequested) {
+        const currentFollowUp = followUp;
         if (this.shutdownRequested) {
           (executor.runtime as Any)?.requeueFollowUpAtTurnBoundary?.(followUp);
           break;
@@ -13796,6 +14981,21 @@ export class AgentDaemon extends EventEmitter {
           continue;
         }
         try {
+          if (followUpMessageId) {
+            const started = this.markQueuedAgentMessageStarted(taskId, followUpMessageId);
+            const durableStatus = this.getQueuedAgentMessageDeliveryStatus(
+              taskId,
+              followUpMessageId,
+            );
+            if (!started && (durableStatus === "quarantined" || durableStatus === "failed")) {
+              if (runtime && typeof runtime.removeFollowUpAtTurnBoundary === "function") {
+                runtime.removeFollowUpAtTurnBoundary(followUpMessageId);
+                if (typeof runtime.saveSnapshot === "function") runtime.saveSnapshot();
+              }
+              followUp = executor.takeNextFollowUpAtTurnBoundary();
+              continue;
+            }
+          }
           this.logEvent(taskId, "agent_follow_up_started", {
             ...(followUp.messageId ? { messageId: followUp.messageId } : {}),
             deliveryMode: followUp.deliveryMode || "follow_up",
@@ -13803,6 +15003,10 @@ export class AgentDaemon extends EventEmitter {
             ...(followUp.messageSource ? { messageSource: followUp.messageSource } : {}),
             ...(followUp.senderTaskId ? { senderTaskId: followUp.senderTaskId } : {}),
             ...(followUp.senderLabel ? { senderLabel: followUp.senderLabel } : {}),
+            ...(followUp.inReplyToMessageId
+              ? { inReplyToMessageId: followUp.inReplyToMessageId }
+              : {}),
+            ...(followUp.inReplyToTaskId ? { inReplyToTaskId: followUp.inReplyToTaskId } : {}),
           });
           if (!(followUp.deliveryMode === "message" && followUp.messageId)) {
             executor.suppressNextUserMessageEvent();
@@ -13825,6 +15029,8 @@ export class AgentDaemon extends EventEmitter {
               messageId: followUp.messageId,
               senderTaskId: followUp.senderTaskId,
               senderLabel: followUp.senderLabel,
+              inReplyToMessageId: followUp.inReplyToMessageId,
+              inReplyToTaskId: followUp.inReplyToTaskId,
               suppressUserMessageEvent:
                 followUp.deliveryMode === "message" && followUp.messageId !== undefined,
               queuedFollowUp: followUp,
@@ -13835,12 +15041,12 @@ export class AgentDaemon extends EventEmitter {
           if (delivery?.queued) break;
         } catch (error) {
           const deliveryStatus =
-            followUp.deliveryMode === "message" && followUp.messageId
-              ? this.getQueuedAgentMessageDeliveryStatus(taskId, followUp.messageId)
+            currentFollowUp.deliveryMode === "message" && currentFollowUp.messageId
+              ? this.getQueuedAgentMessageDeliveryStatus(taskId, currentFollowUp.messageId)
               : undefined;
           if (
-            followUp.deliveryMode === "message" &&
-            followUp.messageId &&
+            currentFollowUp.deliveryMode === "message" &&
+            currentFollowUp.messageId &&
             deliveryStatus !== "delivered" &&
             runtime &&
             typeof runtime.requeueFollowUpAtTurnBoundary === "function"
@@ -13850,13 +15056,13 @@ export class AgentDaemon extends EventEmitter {
             // retry it without reordering or silently dropping the message.
             // A consumed marker makes this an acknowledgement-only retry; the
             // branch above suppresses provider replay in that case.
-            runtime.requeueFollowUpAtTurnBoundary(followUp);
+            runtime.requeueFollowUpAtTurnBoundary(currentFollowUp);
           }
           this.logEvent(taskId, "error", {
             message: "Queued follow-up failed",
             error: String(error),
           });
-          if (followUp.deliveryMode === "message" && followUp.messageId) break;
+          if (currentFollowUp.deliveryMode === "message" && currentFollowUp.messageId) break;
         }
         followUp = executor.takeNextFollowUpAtTurnBoundary();
       }

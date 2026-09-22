@@ -33,6 +33,30 @@
   background: var(--color-bg-hover);
   color: var(--color-text);
 }
+.sidebar-bot-reopen-button {
+  position: absolute;
+  top: 7px;
+  right: 34px;
+  width: 25px;
+  height: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.sidebar-bot-reopen-button:hover,
+.sidebar-bot-reopen-button:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+}
+.sidebar-bot-reopen-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
 .bot-profile-dialog {
   width: min(480px, 100%);
   max-height: min(720px, calc(100dvh - 40px));

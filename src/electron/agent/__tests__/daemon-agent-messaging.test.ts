@@ -673,6 +673,45 @@ describe("AgentDaemon agent-message receipts", () => {
     });
   });
 
+  it("repairs a sender projection when the target was delivered before the sender row existed", () => {
+    const targetReceipt = makeEvent("receipt-fast", "child-task", "user_message", {
+      messageId: "message-fast",
+      deliveryMode: "message",
+      deliveryStatus: "delivered",
+      deliveredAt: 42,
+      senderTaskId: "parent-task",
+    });
+    const parentActivity = makeEvent("activity-fast", "parent-task", "agent_message", {
+      messageId: "message-fast",
+      targetTaskId: "child-task",
+      status: "queued",
+      deliveryStatus: "queued",
+    });
+    const updatePayloadById = vi.fn((_eventId: string, payload: Any) => {
+      parentActivity.payload = payload;
+    });
+    const daemonLike = {
+      getTaskEvents: vi.fn((taskId: string) =>
+        taskId === "child-task" ? [targetReceipt] : [parentActivity],
+      ),
+      eventRepo: { updatePayloadById },
+      emitTaskEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    AgentDaemon.prototype.reconcileAgentMessageSenderProjection.call(
+      daemonLike,
+      "child-task",
+      "message-fast",
+    );
+
+    expect(parentActivity.payload).toMatchObject({
+      status: "delivered",
+      deliveryStatus: "delivered",
+      deliveredAt: 42,
+    });
+  });
+
   it("persists opaque attachment refs before the queue-only receipt", () => {
     const root = mkdtempSync(path.join(tmpdir(), "cowork-daemon-attachments-"));
     try {

@@ -14285,6 +14285,43 @@ export class AgentDaemon extends EventEmitter {
     return "queued";
   }
 
+  /**
+   * Repair the sender projection after its activity row is persisted. The
+   * recipient may consume a queue receipt before send_agent_message records
+   * that row, so the normal target-side projection can otherwise miss it.
+   */
+  reconcileAgentMessageSenderProjection(targetTaskId: string, messageId: string): void {
+    const event = readDurableTaskEvents(this, targetTaskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "message";
+      });
+    if (!event) return;
+    const payload = (event.payload as Record<string, unknown> | undefined) || {};
+    const status = this.getQueuedAgentMessageDeliveryStatus(targetTaskId, messageId);
+    if (
+      status !== "started" &&
+      status !== "delivered" &&
+      status !== "failed" &&
+      status !== "quarantined"
+    ) {
+      return;
+    }
+    const timestampKey =
+      status === "started"
+        ? "startedAt"
+        : status === "delivered"
+          ? "deliveredAt"
+          : status === "failed"
+            ? "failedAt"
+            : "quarantinedAt";
+    const timestamp =
+      typeof payload[timestampKey] === "number" ? (payload[timestampKey] as number) : Date.now();
+    this.updateAgentMessageSenderProjection(targetTaskId, messageId, payload, status, timestamp);
+  }
+
   /** Mark the exact queue receipt when the recipient begins consuming it. */
   markQueuedAgentMessageStarted(taskId: string, messageId: string): boolean {
     const event = readDurableTaskEvents(this, taskId, "user_message")

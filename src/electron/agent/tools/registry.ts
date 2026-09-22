@@ -12032,6 +12032,10 @@ ${skillDescriptions}`;
         ...(botPeerConversation ? { replyStatus: "pending" } : {}),
         duplicate: result.duplicate === true,
       });
+      // The recipient can consume a queue receipt before this sender-side
+      // activity row is written. Reconcile once more after logging so a fast
+      // recipient cannot leave the sender projection stuck at "queued".
+      (this.daemon as Any).reconcileAgentMessageSenderProjection?.(resolved.taskId, messageId);
       // Queue-only bot messages are not replies until the recipient consumes
       // their durable user_message receipt. The daemon marks that correlation
       // from the receiver-side delivery transition. Keep the direct path only

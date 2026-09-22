@@ -257,6 +257,7 @@ describe("ToolRegistry child task control tools", () => {
         queuedAt: 100,
       }),
       getTaskEvents: vi.fn(),
+      reconcileAgentMessageSenderProjection: vi.fn(),
       logEvent: vi.fn(),
     } as Any;
 
@@ -311,6 +312,10 @@ describe("ToolRegistry child task control tools", () => {
       }),
     );
     expect(daemon.logEvent).toHaveBeenCalledTimes(1);
+    expect(daemon.reconcileAgentMessageSenderProjection).toHaveBeenCalledWith(
+      "forge-task",
+      "bot-message-1",
+    );
   });
 
   it("correlates a bot reply with the latest durable inbound receipt", async () => {

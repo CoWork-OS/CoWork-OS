@@ -512,6 +512,7 @@ export function deriveBotConversationProjection(input: {
     .map((event) => {
       const payload = asRecord(event.payload);
       if (payload.messageSource !== "agent") return null;
+      if (payload.deliveryMode !== "message") return null;
       if (!isBotHandoffMessageDelivered(payload)) return null;
       const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
       if (!senderTaskId) return null;
@@ -534,6 +535,7 @@ export function deriveBotConversationProjection(input: {
   for (const event of childEvents) {
     if (getEventType(event) !== "agent_message") continue;
     const payload = asRecord(event.payload);
+    if (payload.deliveryMode !== "message") continue;
     if (!isBotHandoffMessageDelivered(payload)) continue;
     const originalMessageId = readString(payload, "inReplyToMessageId");
     if (!originalMessageId) continue;

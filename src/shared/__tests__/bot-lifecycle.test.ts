@@ -392,6 +392,7 @@ describe("deriveBotConversationProjection", () => {
             {
               messageId: "reply-1",
               targetTaskId: "atlas-task",
+              deliveryMode: "message",
               senderLabel: "Forge",
               recipientLabel: "Atlas",
               inReplyToMessageId: "handoff-1",
@@ -478,6 +479,7 @@ describe("deriveBotConversationProjection", () => {
           {
             messageId: "reply-1",
             messageSource: "agent",
+            deliveryMode: "message",
             senderTaskId: "scribe-task",
             senderLabel: "Scribe",
             message: "DONE — package metadata verified.",

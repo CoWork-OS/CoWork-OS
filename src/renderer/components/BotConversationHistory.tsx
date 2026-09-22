@@ -62,7 +62,7 @@ function formatConversationDate(timestamp?: number): string {
 }
 
 export function getBotConversationHistoryStatusLabel(
-  task: Pick<Task, "status" | "error">,
+  task: Pick<Task, "status" | "error"> & Partial<Pick<Task, "resultSummary">>,
   projection?: Pick<BotConversationProjection, "state"> | null,
 ): string {
   if (projection?.state === "working") return "Working on latest message";
@@ -71,6 +71,7 @@ export function getBotConversationHistoryStatusLabel(
   if (projection?.state === "failed") return "Unavailable — reopen to retry";
   if (projection?.state === "completed") return "Completed";
   if (task.status === "completed") return "Completed";
+  if (task.status === "cancelled" && task.resultSummary?.trim()) return "Completed";
   if (task.status === "failed" || task.status === "cancelled") {
     return "Unavailable — reopen to retry";
   }

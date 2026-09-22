@@ -73,6 +73,13 @@ describe("BotConversationHistory", () => {
       "Unavailable — reopen to retry",
     );
     expect(
+      getBotConversationHistoryStatusLabel({
+        status: "cancelled",
+        error: null,
+        resultSummary: "The partial result is available.",
+      }),
+    ).toBe("Completed");
+    expect(
       getBotConversationHistoryStatusLabel(
         { status: "completed", error: null },
         {

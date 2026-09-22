@@ -105,6 +105,36 @@ describe("task event visibility helpers", () => {
     ).toEqual(["What is the latest verified result?", "The teammate found a launch opportunity."]);
   });
 
+  it("keeps identical legacy teammate messages from different senders", () => {
+    const events = [
+      makeEvent(
+        "user_message",
+        {
+          messageSource: "agent",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          message: "The launch opportunity is viable.",
+        },
+        { id: "scribe-message", timestamp: 2_000 },
+      ),
+      makeEvent(
+        "user_message",
+        {
+          messageSource: "agent",
+          senderTaskId: "forge-task",
+          senderLabel: "Forge",
+          message: "The launch opportunity is viable.",
+        },
+        { id: "forge-message", timestamp: 2_010 },
+      ),
+    ];
+
+    expect(filterBotConversationTranscriptEvents(events).map((event) => event.id)).toEqual([
+      "scribe-message",
+      "forge-message",
+    ]);
+  });
+
   it("collapses an assistant payload duplicated by live and durable stream replay", () => {
     const events = [
       makeEvent(

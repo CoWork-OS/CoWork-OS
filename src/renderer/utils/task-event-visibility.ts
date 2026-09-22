@@ -587,6 +587,23 @@ function normalizeConversationMessage(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function getBotTranscriptMessageScope(payload: Record<string, unknown>): string {
+  if (payload.messageSource !== "agent") return "";
+  return [
+    payload.senderTaskId,
+    payload.sender_task_id,
+    payload.senderLabel,
+    payload.sender,
+    payload.targetTaskId,
+    payload.target_task_id,
+    payload.recipientLabel,
+    payload.recipient,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim().toLocaleLowerCase())
+    .join("|");
+}
+
 /**
  * A streamed assistant turn can be appended twice when the live event and
  * its durable replay arrive in the same render batch. Collapse only an exact
@@ -682,10 +699,11 @@ export function filterBotConversationTranscriptEvents(events: TaskEvent[]): Task
           ? payload.message_id.trim()
           : "";
     const message = normalizeConversationMessage(collapsedMessage);
+    const messageScope = getBotTranscriptMessageScope(payload);
     const stableKey = messageId
       ? `${event.taskId}|${effectiveType}|${messageId}`
       : message
-        ? `${event.taskId}|${effectiveType}|text:${message}`
+        ? `${event.taskId}|${effectiveType}|${messageScope ? `scope:${messageScope}|` : ""}text:${message}`
         : "";
     if (stableKey && byStableMessageId.has(stableKey)) {
       // Delivery status can be updated by a later receipt event. Keep the
@@ -696,7 +714,9 @@ export function filterBotConversationTranscriptEvents(events: TaskEvent[]): Task
       continue;
     }
     if (message) {
-      const textKey = `${event.taskId}|${effectiveType}|${message}`;
+      const textKey = messageScope
+        ? `${event.taskId}|${effectiveType}|${messageScope}|${message}`
+        : `${event.taskId}|${effectiveType}|${message}`;
       const previous = byMessageText.get(textKey);
       if (
         previous &&

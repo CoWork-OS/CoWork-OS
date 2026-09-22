@@ -630,6 +630,89 @@ describe("ToolRegistry child task control tools", () => {
     },
   );
 
+  it("starts a fresh handoff after a new human request follows a correlated reply", async () => {
+    const recipient: Task = {
+      id: "scribe-task",
+      title: "Scribe — Author and Publisher",
+      prompt: "Start chatting with Scribe.",
+      status: "executing",
+      workspaceId: workspace.id,
+      assignedAgentRoleId: "scribe-role",
+      agentConfig: { botConversation: true, botTeamId: "bot-team-1" },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue(recipient),
+      resolveBotTeamPeer: vi.fn().mockResolvedValue({
+        ok: true,
+        task: recipient,
+        role: { id: "scribe-role", name: "scribe", displayName: recipient.title },
+      }),
+      getTaskEvents: vi.fn().mockReturnValue([
+        {
+          id: "handoff-event",
+          taskId: "atlas-task",
+          type: "agent_message",
+          timestamp: 100,
+          payload: {
+            messageId: "handoff-1",
+            messageSource: "agent",
+            deliveryMode: "message",
+            deliveryStatus: "delivered",
+            senderTaskId: "atlas-task",
+            targetTaskId: "scribe-task",
+          },
+        },
+        {
+          id: "reply-event",
+          taskId: "atlas-task",
+          type: "user_message",
+          timestamp: 101,
+          payload: {
+            messageId: "reply-1",
+            messageSource: "agent",
+            deliveryMode: "message",
+            deliveryStatus: "delivered",
+            senderTaskId: "scribe-task",
+            inReplyToMessageId: "handoff-1",
+            inReplyToTaskId: "atlas-task",
+          },
+        },
+        {
+          id: "human-follow-up",
+          taskId: "atlas-task",
+          type: "user_message",
+          timestamp: 102,
+          payload: {
+            message: "Now ask Scribe to verify the second source.",
+          },
+        },
+      ]),
+      sendMessage: vi.fn().mockResolvedValue({
+        queued: true,
+        deliveryMode: "message",
+        deliveryStatus: "queued",
+        acceptedAt: 103,
+        queuedAt: 103,
+      }),
+      reconcileAgentMessageSenderProjection: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const registry = new ToolRegistry(workspace, daemon, "atlas-task");
+    const result = await registry.executeTool("send_agent_message", {
+      bot: "scribe",
+      message: "Verify the second source.",
+      message_id: "handoff-2",
+    });
+
+    expect(result.success).toBe(true);
+    expect(daemon.sendMessage).toHaveBeenCalledTimes(1);
+    expect(daemon.sendMessage.mock.calls[0]?.[4]).not.toHaveProperty("inReplyToMessageId");
+    expect(daemon.sendMessage.mock.calls[0]?.[4]).not.toHaveProperty("inReplyToTaskId");
+  });
+
   it("capture_agent_events returns summarized events", async () => {
     const tasks = new Map<string, Task>([
       [

@@ -26,7 +26,10 @@ import {
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
 } from "../../../shared/human-input-policy";
-import { isBotHandoffMessageDelivered } from "../../../shared/bot-handoff";
+import {
+  compareBotHandoffEventOrder,
+  isBotHandoffMessageDelivered,
+} from "../../../shared/bot-handoff";
 import { AgentDaemon } from "../daemon";
 import { FileTools } from "./file-tools";
 import { SkillTools } from "./skill-tools";
@@ -11915,12 +11918,13 @@ ${skillDescriptions}`;
           // readers participate in reply correlation.
           this.daemon.getTaskEvents(this.taskId, { limit: 200 }) || []
         : [];
-    const latestInbound = botPeerConversation
-      ? taskEvents
+    const orderedTaskEvents = taskEvents.slice().sort(compareBotHandoffEventOrder);
+    const latestInboundEvent = botPeerConversation
+      ? orderedTaskEvents
           .slice()
           .reverse()
-          .map((event) => event.payload as Record<string, unknown> | undefined)
-          .find((payload) => {
+          .find((event) => {
+            const payload = event.payload as Record<string, unknown> | undefined;
             const senderTaskId =
               typeof payload?.senderTaskId === "string" ? payload.senderTaskId.trim() : "";
             const inboundMessageId =
@@ -11934,10 +11938,25 @@ ${skillDescriptions}`;
             );
           })
       : undefined;
+    const latestInbound = latestInboundEvent?.payload as Record<string, unknown> | undefined;
+    const hasNewHumanMessageAfterLatestInbound = Boolean(
+      latestInboundEvent &&
+      orderedTaskEvents.some((event) => {
+        const eventType = event.legacyType || event.type;
+        if (eventType !== "user_message") return false;
+        const payload = event.payload as Record<string, unknown> | undefined;
+        if (payload?.messageSource === "agent") return false;
+        return compareBotHandoffEventOrder(event, latestInboundEvent) > 0;
+      }),
+    );
     const inReplyToMessageId =
-      typeof latestInbound?.messageId === "string" ? latestInbound.messageId.trim() : "";
+      !hasNewHumanMessageAfterLatestInbound && typeof latestInbound?.messageId === "string"
+        ? latestInbound.messageId.trim()
+        : "";
     const inReplyToTaskId =
-      typeof latestInbound?.senderTaskId === "string" ? latestInbound.senderTaskId.trim() : "";
+      !hasNewHumanMessageAfterLatestInbound && typeof latestInbound?.senderTaskId === "string"
+        ? latestInbound.senderTaskId.trim()
+        : "";
     const correlatedReplyMessageId =
       typeof latestInbound?.inReplyToMessageId === "string"
         ? latestInbound.inReplyToMessageId.trim()
@@ -11947,6 +11966,7 @@ ${skillDescriptions}`;
         ? latestInbound.inReplyToTaskId.trim()
         : "";
     const isCorrelatedReplyToCurrentTask = Boolean(
+      !hasNewHumanMessageAfterLatestInbound &&
       correlatedReplyMessageId &&
       correlatedReplyTaskId === this.taskId &&
       isBotHandoffMessageDelivered(latestInbound || {}) &&

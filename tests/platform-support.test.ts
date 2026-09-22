@@ -21,7 +21,7 @@ describe("platform support policy", () => {
     expect(PLATFORM_SUPPORT.macos.minimumProductVersion).toBe("13.0");
     expect(PLATFORM_SUPPORT.macos.minimumDarwinVersion).toBe("22.0.0");
     expect(PLATFORM_SUPPORT.macos.lastMontereyCompatibleVersion).toBe("0.5.51");
-    expect(packageJson.dependencies.electron).toBe("44.0.0");
+    expect(packageJson.dependencies.electron).toBe("44.4.3");
     expect(packageJson.dependencies["@electron/rebuild"]).toBe("4.2.0");
     expect(packageJson.build.mac.minimumSystemVersion).toBe("13.0");
     expect(packageJson.build.dmg.title).toContain("macOS 13+");

@@ -210,7 +210,7 @@ export function BotCollaborationHeader({
         {projection.collaborators.length > 0 && (
           <div className="bot-collaboration-team" aria-label="Collaborating bots">
             <Users size={14} aria-hidden="true" />
-            <span className="bot-collaboration-team-label">Messages from</span>
+            <span className="bot-collaboration-team-label">Collaborating with</span>
             {visibleCollaborators.map((label, index) => {
               const conversationId = collaboratorConversationIds.get(
                 normalizeCollaboratorLabel(label),

@@ -43,7 +43,8 @@ describe("BotCollaborationHeader", () => {
     expect(markup).toContain('data-testid="bot-collaboration-header"');
     expect(markup).toContain('data-bot-state="waiting"');
     expect(markup).toContain("Waiting on a teammate");
-    expect(markup).toContain("Messages from");
+    expect(markup).toContain("Collaborating with");
+    expect(markup).not.toContain("Messages from");
     expect(markup).toContain("Message delivered to Forge");
     expect(markup).toContain("1 handoff");
     expect(markup).not.toContain("Investigate the handoff.");
@@ -125,7 +126,7 @@ describe("BotCollaborationHeader", () => {
       }),
     );
 
-    expect(markup).toContain("Messages from");
+    expect(markup).toContain("Collaborating with");
     expect(markup).toContain(">Scribe</span>");
     expect(markup).not.toContain(">Atlas · Scribe</span>");
   });

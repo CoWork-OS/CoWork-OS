@@ -72,6 +72,14 @@ describe("BotConversationHistory", () => {
     expect(getBotConversationHistoryStatusLabel({ status: "cancelled", error: null })).toBe(
       "Unavailable — reopen to retry",
     );
+    expect(
+      getBotConversationHistoryStatusLabel(
+        { status: "completed", error: null },
+        {
+          state: "waiting",
+        },
+      ),
+    ).toBe("Waiting on a teammate");
   });
 
   it("renders current, archived, and unrelated conversations in one bot screen", () => {
@@ -100,5 +108,20 @@ describe("BotConversationHistory", () => {
     // Only the two conversations for this bot are counted.
     expect(markup).toContain('class="bot-conversation-history-count">2<');
     expect(markup).not.toContain("other-bot");
+  });
+
+  it("uses the selected durable projection for the current history row", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BotConversationHistory, {
+        botName: "Research Desk",
+        botRoleId: roleId,
+        selectedConversationId: "current",
+        selectedConversationProjection: { state: "waiting" },
+        conversations: [conversation("current", 2_000)],
+      }),
+    );
+
+    expect(markup).toContain("Waiting on a teammate");
+    expect(markup).not.toContain(">Completed<");
   });
 });

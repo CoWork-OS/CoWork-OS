@@ -10934,6 +10934,7 @@ function MainContentComponent({
           selectedConversationId={task?.id}
           conversations={botConversations}
           loading={isLoadingBotConversations}
+          selectedConversationProjection={conversationProjection}
           onSelectConversation={onSelectBotConversation || onSelectTask || undefined}
           onNewConversation={onNewBotConversation}
         />

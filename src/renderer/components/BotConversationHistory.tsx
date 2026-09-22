@@ -1,6 +1,7 @@
 import { Archive, Check, Clock3, MessageCircle, Plus } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import type { Task } from "../../shared/types";
+import type { BotConversationProjection } from "../../shared/bot-lifecycle";
 import { isBotConversation } from "../utils/bot-conversations";
 import "./BotConversationHistory.css";
 
@@ -10,6 +11,7 @@ export interface BotConversationHistoryProps {
   selectedConversationId?: string | null;
   conversations: Task[];
   loading?: boolean;
+  selectedConversationProjection?: Pick<BotConversationProjection, "state"> | null;
   onSelectConversation?: (conversationId: string) => void | Promise<void>;
   onNewConversation?: (botRoleId: string) => void | Promise<void>;
 }
@@ -59,7 +61,15 @@ function formatConversationDate(timestamp?: number): string {
   }
 }
 
-export function getBotConversationHistoryStatusLabel(task: Pick<Task, "status" | "error">): string {
+export function getBotConversationHistoryStatusLabel(
+  task: Pick<Task, "status" | "error">,
+  projection?: Pick<BotConversationProjection, "state"> | null,
+): string {
+  if (projection?.state === "working") return "Working on latest message";
+  if (projection?.state === "waiting") return "Waiting on a teammate";
+  if (projection?.state === "needs_input") return "Needs attention";
+  if (projection?.state === "failed") return "Unavailable — reopen to retry";
+  if (projection?.state === "completed") return "Completed";
   if (task.status === "completed") return "Completed";
   if (task.status === "failed" || task.status === "cancelled") {
     return "Unavailable — reopen to retry";
@@ -92,6 +102,7 @@ export function BotConversationHistory({
   selectedConversationId,
   conversations,
   loading = false,
+  selectedConversationProjection,
   onSelectConversation,
   onNewConversation,
 }: BotConversationHistoryProps) {
@@ -163,7 +174,12 @@ export function BotConversationHistory({
                 <span className="bot-conversation-history-row-copy">
                   <strong>{getBotConversationTitle(conversation, index, botName)}</strong>
                   <span>
-                    {archived ? "Archived" : getBotConversationHistoryStatusLabel(conversation)}
+                    {archived
+                      ? "Archived"
+                      : getBotConversationHistoryStatusLabel(
+                          conversation,
+                          selected ? selectedConversationProjection : null,
+                        )}
                     {formatConversationDate(conversation.updatedAt || conversation.createdAt)
                       ? ` · ${formatConversationDate(conversation.updatedAt || conversation.createdAt)}`
                       : ""}

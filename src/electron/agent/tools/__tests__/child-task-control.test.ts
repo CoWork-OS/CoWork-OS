@@ -394,6 +394,70 @@ describe("ToolRegistry child task control tools", () => {
     expect(markBotHandoffReplied).not.toHaveBeenCalled();
   });
 
+  it.each(["queued", "started"] as const)(
+    "does not correlate a %s inbound receipt before the receiver consumes it",
+    async (deliveryStatus) => {
+      const recipient: Task = {
+        id: "scribe-task",
+        title: "Scribe — Author and Publisher",
+        prompt: "Start chatting with Scribe.",
+        status: "executing",
+        workspaceId: workspace.id,
+        assignedAgentRoleId: "scribe-role",
+        agentConfig: { botConversation: true, botTeamId: "bot-team-1" },
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(recipient),
+        resolveBotTeamPeer: vi.fn().mockResolvedValue({
+          ok: true,
+          task: recipient,
+          role: { id: "scribe-role", name: "scribe", displayName: recipient.title },
+        }),
+        getTaskEvents: vi.fn().mockReturnValue([
+          {
+            id: "inbound-event",
+            taskId: "atlas-task",
+            type: "user_message",
+            timestamp: 100,
+            payload: {
+              messageId: "inbound-1",
+              messageSource: "agent",
+              deliveryMode: "message",
+              deliveryStatus,
+              senderTaskId: "scribe-task",
+              senderLabel: "Scribe — Author and Publisher",
+              message: "Please verify the source mechanics.",
+            },
+            schemaVersion: 2,
+          },
+        ]),
+        sendMessage: vi.fn().mockResolvedValue({
+          queued: true,
+          deliveryMode: "message",
+          deliveryStatus: "queued",
+          acceptedAt: 101,
+          queuedAt: 101,
+        }),
+        reconcileAgentMessageSenderProjection: vi.fn(),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "atlas-task");
+      const result = await registry.executeTool("send_agent_message", {
+        bot: "scribe",
+        message: "Start a new, independent check.",
+        message_id: `independent-${deliveryStatus}`,
+      });
+
+      expect(result.success).toBe(true);
+      const sendOptions = daemon.sendMessage.mock.calls[0]?.[4];
+      expect(sendOptions).not.toHaveProperty("inReplyToMessageId");
+      expect(sendOptions).not.toHaveProperty("inReplyToTaskId");
+    },
+  );
+
   it("suppresses a follow-up when the latest teammate message is a correlated reply receipt", async () => {
     const recipient: Task = {
       id: "scribe-task",

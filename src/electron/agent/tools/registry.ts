@@ -26,6 +26,7 @@ import {
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
 } from "../../../shared/human-input-policy";
+import { isBotHandoffMessageDelivered } from "../../../shared/bot-handoff";
 import { AgentDaemon } from "../daemon";
 import { FileTools } from "./file-tools";
 import { SkillTools } from "./skill-tools";
@@ -11929,8 +11930,7 @@ ${skillDescriptions}`;
               payload?.deliveryMode === "message" &&
               senderTaskId === resolved.taskId &&
               inboundMessageId.length > 0 &&
-              payload?.deliveryStatus !== "failed" &&
-              payload?.deliveryStatus !== "quarantined"
+              isBotHandoffMessageDelivered(payload)
             );
           })
       : undefined;

@@ -560,12 +560,7 @@ export function deriveBotConversationProjection(input: {
 
     // A child message addressed to the current conversation is the reply to
     // an existing handoff, not a second outbound request for this header.
-    if (
-      getEventType(event) !== "agent_message" ||
-      (childEvents.includes(event) &&
-        input.task.id &&
-        readString(payload, "targetTaskId") === input.task.id)
-    ) {
+    if (getEventType(event) !== "agent_message") {
       continue;
     }
     const messageId = readString(payload, "messageId", "message_id");
@@ -590,6 +585,23 @@ export function deriveBotConversationProjection(input: {
       });
     }
     const correlatedReply = directReply || inferredReply;
+
+    // The collaboration header represents the active turn. Older handoffs
+    // remain in the durable transcript, but may stay visible when their
+    // correlated reply is part of the active turn so the exchange remains
+    // understandable. Stale unresolved handoffs must not reappear or inflate
+    // the current turn's handoff count.
+    if (!isCurrentTurnEvent && !correlatedReply) continue;
+
+    // A child message addressed to the current conversation is the reply to
+    // an existing handoff, not a second outbound request for this header.
+    if (
+      childEvents.includes(event) &&
+      input.task.id &&
+      readString(payload, "targetTaskId") === input.task.id
+    ) {
+      continue;
+    }
     const replyState: BotHandoffProjection["replyState"] = correlatedReply
       ? "received"
       : payload.replyStatus === "pending" || payload.replyStatus === "received"

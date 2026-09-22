@@ -655,6 +655,44 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.attention).toBeNull();
   });
 
+  it("does not expose prior-turn handoffs in current collaboration details", () => {
+    const projection = deriveBotConversationProjection({
+      task: baseTask,
+      botName: "Atlas",
+      events: [
+        makeEvent(
+          "old-handoff",
+          "agent_message",
+          {
+            messageId: "old-handoff",
+            senderLabel: "Atlas",
+            recipientLabel: "Forge",
+            targetTaskId: "forge-task",
+            message: "Review the old request.",
+            deliveryStatus: "delivered",
+          },
+          1_000,
+        ),
+        makeEvent("new-human-turn", "user_message", { message: "Start a fresh request." }, 2_000),
+        makeEvent(
+          "new-handoff",
+          "agent_message",
+          {
+            messageId: "new-handoff",
+            senderLabel: "Atlas",
+            recipientLabel: "Scribe",
+            targetTaskId: "scribe-task",
+            message: "Review the new request.",
+            deliveryStatus: "queued",
+          },
+          2_100,
+        ),
+      ],
+    });
+
+    expect(projection.handoffs.map((handoff) => handoff.id)).toEqual(["new-handoff"]);
+  });
+
   it("does not carry a previous-turn delivery failure or timeout into a fresh request", () => {
     const projection = deriveBotConversationProjection({
       task: baseTask,

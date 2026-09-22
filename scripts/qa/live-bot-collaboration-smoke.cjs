@@ -240,7 +240,8 @@ function getEvents(payload) {
 }
 
 function eventType(event) {
-  return String(event?.type || event?.legacyType || "");
+  const legacyType = typeof event?.legacyType === "string" ? event.legacyType.trim() : "";
+  return legacyType || String(event?.type || "");
 }
 
 function eventPayload(event) {
@@ -248,7 +249,9 @@ function eventPayload(event) {
 }
 
 function deliveryStatus(payload) {
-  return String(payload.deliveryStatus || payload.status || "").trim().toLowerCase();
+  return String(payload.deliveryStatus || payload.delivery_status || payload.status || "")
+    .trim()
+    .toLowerCase();
 }
 
 function eventText(event) {
@@ -300,7 +303,7 @@ function matchingAck(events, ackToken, afterTimestamp) {
       const type = eventType(event);
       return (
         Number(event.timestamp || 0) >= afterTimestamp &&
-        type !== "user_message" &&
+        type === "assistant_message" &&
         eventText(event).includes(ackToken)
       );
     })
@@ -531,17 +534,26 @@ async function run(args) {
   }
 }
 
-run(parseArgs(process.argv.slice(2)))
-  .then((exitCode) => {
-    process.exitCode = exitCode;
-  })
-  .catch((error) => {
-    output({
-      ok: false,
-      stage: "preflight",
-      error: error?.message || String(error),
-      ...(error?.code ? { code: error.code } : {}),
-      ...(error?.details ? { details: error.details } : {}),
+if (require.main === module) {
+  run(parseArgs(process.argv.slice(2)))
+    .then((exitCode) => {
+      process.exitCode = exitCode;
+    })
+    .catch((error) => {
+      output({
+        ok: false,
+        stage: "preflight",
+        error: error?.message || String(error),
+        ...(error?.code ? { code: error.code } : {}),
+        ...(error?.details ? { details: error.details } : {}),
+      });
+      process.exitCode = 2;
     });
-    process.exitCode = 2;
-  });
+}
+
+module.exports = {
+  eventType,
+  matchingAck,
+  matchingReceiverReceipt,
+  matchingSenderDelivery,
+};

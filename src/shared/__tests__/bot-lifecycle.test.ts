@@ -333,4 +333,32 @@ describe("deriveBotConversationProjection", () => {
       }).attention,
     ).toMatchObject({ kind: "failed", detail: "Computer connection lost" });
   });
+
+  it("keeps a pending teammate handoff actionable when the task carries a waiting error", () => {
+    const projection = deriveBotConversationProjection({
+      task: {
+        status: "blocked",
+        error: "Waiting for Atlas to reply before finishing this conversation.",
+        resultSummary: undefined,
+      },
+      botName: "Product Engineer",
+      events: [
+        makeEvent("handoff-1", "agent_message", {
+          messageId: "handoff-1",
+          senderLabel: "Product Engineer",
+          recipientLabel: "Atlas",
+          message: "Please review the workspace.",
+          deliveryStatus: "delivered",
+          replyStatus: "pending",
+        }),
+      ],
+    });
+
+    expect(projection.state).toBe("waiting");
+    expect(projection.attention).toMatchObject({
+      kind: "blocked",
+      title: "Waiting on Atlas",
+    });
+    expect(projection.attention?.title).not.toBe("The bot could not finish");
+  });
 });

@@ -331,13 +331,6 @@ function getAttention(
   latestAgentEvent?: TaskEvent,
 ): BotAttentionProjection | null {
   const taskError = typeof task.error === "string" ? cleanPreview(task.error) : "";
-  if (task.status === "failed" || taskError) {
-    return {
-      kind: "failed",
-      title: "The bot could not finish",
-      detail: taskError || "Review the activity details and retry the request.",
-    };
-  }
   const waitingHandoff = handoffs.find(
     (handoff) =>
       (handoff.state === "accepted" ||
@@ -346,12 +339,22 @@ function getAttention(
         handoff.state === "delivered") &&
       (handoff.replyState === undefined || handoff.replyState === "pending"),
   );
-  if (waitingHandoff && (task.status === "blocked" || task.status === "paused")) {
+  if (
+    waitingHandoff &&
+    (task.status === "blocked" || task.status === "paused" || task.status === "interrupted")
+  ) {
     return {
       kind: "blocked",
       title: `Waiting on ${waitingHandoff.recipientLabel}`,
       detail: "The teammate has the task. The conversation will continue when its reply arrives.",
       handoffId: waitingHandoff.id,
+    };
+  }
+  if (task.status === "failed" || taskError) {
+    return {
+      kind: "failed",
+      title: "The bot could not finish",
+      detail: taskError || "Review the activity details and retry the request.",
     };
   }
   if (task.status === "blocked" || task.status === "paused" || task.status === "interrupted") {

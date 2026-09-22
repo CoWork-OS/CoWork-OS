@@ -122,16 +122,28 @@ describe("renderer perf replay fixture", () => {
   });
 
   it("projects a failure storm into a bounded live transcript within budget", () => {
-    const startedAt = performance.now();
-    const shared = deriveSharedTaskEventUiState({
-      rawEvents: taskSurfaceFailureStormEvents,
-      task: taskSurfaceFailureStormTask,
-      workspace: null,
-      verboseSteps: false,
-      projectionMode: "live",
-      liveWindowSize: 160,
-    });
-    const projectionMs = performance.now() - startedAt;
+    const projectFailureStorm = () =>
+      deriveSharedTaskEventUiState({
+        rawEvents: taskSurfaceFailureStormEvents,
+        task: taskSurfaceFailureStormTask,
+        workspace: null,
+        verboseSteps: false,
+        projectionMode: "live",
+        liveWindowSize: 160,
+      });
+
+    // Warm up the projection before measuring it. A single wall-clock sample is
+    // too sensitive to V8 tier-up and shared-runner scheduling noise when this
+    // suite runs alongside the other 800+ test files.
+    projectFailureStorm();
+    const projectionSamples: number[] = [];
+    let shared = projectFailureStorm();
+    for (let sample = 0; sample < 5; sample += 1) {
+      const startedAt = performance.now();
+      shared = projectFailureStorm();
+      projectionSamples.push(performance.now() - startedAt);
+    }
+    const projectionMs = percentile([...projectionSamples].sort((a, b) => a - b), 0.5);
 
     const feedRows = shared.baseTimelineItems.map((item, index) => ({
       kind: "timeline" as const,
@@ -163,7 +175,7 @@ describe("renderer perf replay fixture", () => {
     ).toBeLessThanOrEqual(2);
 
     console.info(
-      `[renderer-perf-fixture] failure_storm_projection=${projectionMs.toFixed(1)}ms raw=${shared.rawEventCount} projected=${shared.normalizedEvents.length} visible=${visible.visibleFeedRows.length}`,
+      `[renderer-perf-fixture] failure_storm_projection_p50=${projectionMs.toFixed(1)}ms raw=${shared.rawEventCount} projected=${shared.normalizedEvents.length} visible=${visible.visibleFeedRows.length}`,
     );
   });
 

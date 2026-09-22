@@ -414,6 +414,46 @@ describe("deriveBotConversationProjection", () => {
     expect(projection.activityLabel).toBe("Reply received from Forge");
   });
 
+  it("does not show a queued child reply as received", () => {
+    const projection = deriveBotConversationProjection({
+      task: { ...baseTask, id: "atlas-task" },
+      botName: "Atlas",
+      events: [
+        makeEvent("handoff-queued-child", "agent_message", {
+          messageId: "handoff-queued-child",
+          senderLabel: "Atlas",
+          recipientLabel: "Forge",
+          targetTaskId: "forge-task",
+          message: "Investigate the issue.",
+          deliveryStatus: "delivered",
+          replyStatus: "pending",
+        }),
+      ],
+      childEvents: [
+        {
+          ...makeEvent(
+            "reply-queued-child",
+            "agent_message",
+            {
+              messageId: "reply-queued-child",
+              targetTaskId: "atlas-task",
+              senderLabel: "Forge",
+              recipientLabel: "Atlas",
+              inReplyToMessageId: "handoff-queued-child",
+              message: "The result is queued for Atlas.",
+              deliveryStatus: "queued",
+            },
+            2_000,
+          ),
+          taskId: "forge-task",
+        },
+      ],
+    });
+
+    expect(projection.handoffs[0]).toMatchObject({ replyState: "pending" });
+    expect(projection.activityLabel).toBe("Message delivered to Forge; waiting for a reply");
+  });
+
   it("infers a receiver reply from the durable inbound conversation event", () => {
     const projection = deriveBotConversationProjection({
       task: { ...baseTask, id: "atlas-task" },
@@ -441,6 +481,7 @@ describe("deriveBotConversationProjection", () => {
             senderTaskId: "scribe-task",
             senderLabel: "Scribe",
             message: "DONE — package metadata verified.",
+            deliveryStatus: "delivered",
           },
           1_500,
         ),
@@ -469,6 +510,39 @@ describe("deriveBotConversationProjection", () => {
       replyMessageId: "reply-1",
     });
     expect(projection.activityLabel).toBe("Reply received from Scribe");
+  });
+
+  it("keeps the collaboration header waiting while a receiver receipt is queued", () => {
+    const projection = deriveBotConversationProjection({
+      task: { ...baseTask, id: "atlas-task" },
+      botName: "Atlas",
+      events: [
+        makeEvent("handoff-delivered", "agent_message", {
+          messageId: "handoff-queued-reply",
+          senderLabel: "Atlas",
+          recipientLabel: "Scribe",
+          targetTaskId: "scribe-task",
+          message: "Verify the package metadata.",
+          deliveryStatus: "delivered",
+          replyStatus: "pending",
+        }),
+        makeEvent("receiver-reply-queued", "user_message", {
+          messageId: "reply-queued",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "queued",
+          senderTaskId: "scribe-task",
+          senderLabel: "Scribe",
+          inReplyToMessageId: "handoff-queued-reply",
+          inReplyToTaskId: "atlas-task",
+          message: "DONE — package metadata is queued.",
+        }),
+      ],
+    });
+
+    expect(projection.handoffs[0]).toMatchObject({ replyState: "pending" });
+    expect(projection.handoffs[0]).not.toHaveProperty("replyMessageId");
+    expect(projection.activityLabel).toBe("Message delivered to Scribe; waiting for a reply");
   });
 
   it("uses durable order when a receiver reply shares the handoff timestamp", () => {

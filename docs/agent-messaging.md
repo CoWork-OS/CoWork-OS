@@ -8,6 +8,12 @@ Users can select a spawned worker from the live agent strip or spawned-agent sid
 
 The distinction between a queued message and a new follow-up turn is intentional. A queued message is consumed at the worker's next input boundary and does not start an idle or completed worker. A normal follow-up explicitly starts or continues work through the existing composer. Completion of the worker's task is a separate lifecycle event.
 
+For bot-to-bot replies, `replyStatus=received` is set only after the requesting
+bot consumes the reply's durable `user_message` receipt (`deliveryStatus=delivered`).
+Queue admission or a wake-up request is not treated as a received reply, so the
+sender remains in a waiting state until the receiver has actually incorporated
+the message.
+
 Agent creation also has two lifecycle states: `agent_spawn_requested` means dispatch has started, while `agent_spawned` is emitted only after a child handle exists. A failed dispatch is represented by `agent_failed` and is never shown as a successful creation.
 
 Queued follow-ups emit `agent_follow_up_scheduled` when accepted and `agent_follow_up_started` when the worker incorporates the message at a turn boundary. User cancellation emits `agent_interrupt_requested` followed by `agent_interrupt_confirmed` after the runtime has stopped the task. These events are persisted, projected into the semantic timeline, and kept separate from task completion so replay can distinguish acceptance, execution and interruption.

@@ -386,13 +386,7 @@ describe("ToolRegistry child task control tools", () => {
         inReplyToTaskId: "scribe-task",
       }),
     );
-    expect(markBotHandoffReplied).toHaveBeenCalledWith(
-      "scribe-task",
-      "inbound-1",
-      "atlas-task",
-      "atlas-task",
-      "reply-1",
-    );
+    expect(markBotHandoffReplied).not.toHaveBeenCalled();
   });
 
   it("suppresses a follow-up when the latest teammate message is a correlated reply receipt", async () => {

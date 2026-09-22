@@ -14475,6 +14475,31 @@ export class AgentDaemon extends EventEmitter {
       const senderTaskId =
         typeof targetPayload.senderTaskId === "string" ? targetPayload.senderTaskId.trim() : "";
       if (!senderTaskId) return;
+      // A correlated bot reply becomes a reply only after its target-side
+      // receipt reaches the durable incorporated state. Queue admission and
+      // wake-up are intentionally not enough: the sender UI must continue to
+      // say that it is waiting until the receiver has actually consumed the
+      // message. Run this before looking up the sender projection so a fast
+      // receiver cannot win a race against the sender's activity row.
+      if (status === "delivered") {
+        const originalMessageId =
+          typeof targetPayload.inReplyToMessageId === "string"
+            ? targetPayload.inReplyToMessageId.trim()
+            : "";
+        const originalSenderTaskId =
+          typeof targetPayload.inReplyToTaskId === "string"
+            ? targetPayload.inReplyToTaskId.trim()
+            : "";
+        if (originalMessageId && originalSenderTaskId) {
+          this.markBotHandoffReplied(
+            originalSenderTaskId,
+            originalMessageId,
+            targetTaskId,
+            senderTaskId,
+            messageId,
+          );
+        }
+      }
       const senderEvent = readDurableTaskEvents(this, senderTaskId, "agent_message")
         .slice()
         .reverse()
@@ -14696,13 +14721,19 @@ export class AgentDaemon extends EventEmitter {
         inReplyToTaskId: requirement.senderTaskId,
         replyKind: "automatic_blocked_fallback",
       });
-      this.markBotHandoffReplied(
-        requirement.senderTaskId,
-        requirement.inboundMessageId,
-        task.id,
-        task.id,
-        replyMessageId,
-      );
+      // Queue-only delivery is not a received reply yet. The originating
+      // handoff is marked when the sender consumes this durable receipt; keep
+      // the immediate path only for a transport that explicitly reports the
+      // receiver-side delivery boundary.
+      if (status === "delivered") {
+        this.markBotHandoffReplied(
+          requirement.senderTaskId,
+          requirement.inboundMessageId,
+          task.id,
+          task.id,
+          replyMessageId,
+        );
+      }
       this.logEvent(task.id, "task_status", {
         status: "partial_success",
         message: "A blocked reply was sent to the requesting teammate.",

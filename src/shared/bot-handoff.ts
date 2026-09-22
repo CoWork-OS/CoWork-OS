@@ -150,6 +150,11 @@ function deliveryStatus(payload: Record<string, unknown>): string {
     .toLowerCase();
 }
 
+/** A receiver receipt is a reply only after the worker incorporates it. */
+export function isBotHandoffMessageDelivered(payload: Record<string, unknown>): boolean {
+  return deliveryStatus(payload) === "delivered";
+}
+
 function isTerminalDelivery(status: string): boolean {
   return status === "failed" || status === "quarantined";
 }
@@ -176,9 +181,10 @@ interface BotHandoffReplyCorrelation {
  * Older queue receipts did not always persist `inReplyToMessageId` on the
  * receiver-side user_message. When that field is absent, the recipient task
  * and message order are still a durable, bounded correlation: the first
- * non-terminal inbound message from the handoff target after the handoff
- * answers that handoff. Claims are one-to-one so two outbound messages to the
- * same teammate cannot both consume one reply.
+ * delivered inbound message from the handoff target after the handoff answers
+ * that handoff. Queue admission is deliberately excluded so the sender does
+ * not show a reply before the receiver has consumed it. Claims are one-to-one
+ * so two outbound messages to the same teammate cannot both consume one reply.
  */
 function getBotHandoffReplyCorrelation(events: TaskEvent[]): BotHandoffReplyCorrelation {
   const ordered = [...events].sort(compareEventOrder);
@@ -191,7 +197,7 @@ function getBotHandoffReplyCorrelation(events: TaskEvent[]): BotHandoffReplyCorr
       if (!isAgentInbound(payload)) return null;
       const messageId = readString(payload, "messageId", "message_id") || event.id;
       const senderTaskId = readString(payload, "senderTaskId", "sender_task_id");
-      if (!messageId || !senderTaskId || isTerminalDelivery(deliveryStatus(payload))) return null;
+      if (!messageId || !senderTaskId || !isBotHandoffMessageDelivered(payload)) return null;
       return { messageId, senderTaskId, event };
     })
     .filter(

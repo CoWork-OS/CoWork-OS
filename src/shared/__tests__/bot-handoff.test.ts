@@ -150,6 +150,48 @@ describe("buildFreshBotHandoffPrompt", () => {
     expect(getOutstandingBotHandoffReply([inboundReply])).toBeNull();
   });
 
+  it("does not treat a queued receiver receipt as a received reply", () => {
+    const events = [
+      event("prompt", "user_message", { message: "Delegate the research." }, 1),
+      event(
+        "handoff-queued-reply",
+        "agent_message",
+        {
+          messageId: "handoff-queued-reply",
+          senderType: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "delivered",
+          botTeamId: "team-1",
+          targetTaskId: "scribe-task",
+          recipientLabel: "Scribe",
+          replyStatus: "pending",
+          message: "Return the source-backed result.",
+        },
+        2,
+      ),
+      event(
+        "reply-queued",
+        "user_message",
+        {
+          messageId: "reply-queued",
+          messageSource: "agent",
+          deliveryMode: "message",
+          deliveryStatus: "queued",
+          senderTaskId: "scribe-task",
+          inReplyToMessageId: "handoff-queued-reply",
+          inReplyToTaskId: "atlas-task",
+          message: "The result is queued for Atlas.",
+        },
+        3,
+      ),
+    ];
+
+    expect(getPendingBotHandoff(events)).toMatchObject({
+      messageId: "handoff-queued-reply",
+      recipientTaskId: "scribe-task",
+    });
+  });
+
   it("correlates legacy receiver receipts without an in-reply-to field", () => {
     const events = [
       event("prompt", "user_message", { message: "Delegate the research." }, 1),

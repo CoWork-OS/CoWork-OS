@@ -373,13 +373,7 @@ describe("AgentDaemon agent-message receipts", () => {
         startAfterAccepted: true,
       }),
     );
-    expect(markBotHandoffReplied).toHaveBeenCalledWith(
-      "atlas-task",
-      "inbound-1",
-      "scribe-task",
-      "scribe-task",
-      expect.any(String),
-    );
+    expect(markBotHandoffReplied).not.toHaveBeenCalled();
     expect(logEvent).toHaveBeenCalledWith(
       "scribe-task",
       "agent_message",
@@ -802,6 +796,106 @@ describe("AgentDaemon agent-message receipts", () => {
       expect.objectContaining({ status: "delivered", deliveryStatus: "delivered" }),
     );
     expect(emitTaskEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks a correlated reply only after the receiver consumes its durable receipt", () => {
+    const targetReceipt = makeEvent("reply-receipt", "atlas-task", "user_message", {
+      messageId: "reply-1",
+      deliveryMode: "message",
+      deliveryStatus: "queued",
+      senderTaskId: "scribe-task",
+      inReplyToMessageId: "handoff-1",
+      inReplyToTaskId: "scribe-task",
+    });
+    const originalHandoff = makeEvent("handoff-event", "scribe-task", "agent_message", {
+      messageId: "handoff-1",
+      targetTaskId: "atlas-task",
+      status: "delivered",
+      deliveryStatus: "delivered",
+      replyStatus: "pending",
+    });
+    const replyActivity = makeEvent("reply-activity", "scribe-task", "agent_message", {
+      messageId: "reply-1",
+      targetTaskId: "atlas-task",
+      status: "queued",
+      deliveryStatus: "queued",
+      inReplyToMessageId: "handoff-1",
+      inReplyToTaskId: "scribe-task",
+    });
+    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+      if (eventId === targetReceipt.id) targetReceipt.payload = payload;
+      if (eventId === originalHandoff.id) originalHandoff.payload = payload;
+      if (eventId === replyActivity.id) replyActivity.payload = payload;
+    });
+    const daemonLike = {
+      getTaskEvents: vi.fn((taskId: string) =>
+        taskId === "atlas-task" ? [targetReceipt] : [originalHandoff, replyActivity],
+      ),
+      eventRepo: { updatePayloadById },
+      emitTaskEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    expect(originalHandoff.payload).toMatchObject({ replyStatus: "pending" });
+    expect(
+      AgentDaemon.prototype.markQueuedAgentMessageDelivered.call(
+        daemonLike,
+        "atlas-task",
+        "reply-1",
+      ),
+    ).toBe(true);
+
+    expect(targetReceipt.payload).toMatchObject({ deliveryStatus: "delivered" });
+    expect(replyActivity.payload).toMatchObject({
+      status: "delivered",
+      deliveryStatus: "delivered",
+    });
+    expect(originalHandoff.payload).toMatchObject({
+      replyStatus: "received",
+      replyMessageId: "reply-1",
+      replyTaskId: "scribe-task",
+    });
+  });
+
+  it("keeps reply correlation durable when the sender projection races delivery", () => {
+    const targetReceipt = makeEvent("reply-receipt-race", "atlas-task", "user_message", {
+      messageId: "reply-race",
+      deliveryMode: "message",
+      deliveryStatus: "queued",
+      senderTaskId: "scribe-task",
+      inReplyToMessageId: "handoff-race",
+      inReplyToTaskId: "scribe-task",
+    });
+    const originalHandoff = makeEvent("handoff-event-race", "scribe-task", "agent_message", {
+      messageId: "handoff-race",
+      targetTaskId: "atlas-task",
+      status: "delivered",
+      deliveryStatus: "delivered",
+      replyStatus: "pending",
+    });
+    const daemonLike = {
+      getTaskEvents: vi.fn((taskId: string) =>
+        taskId === "atlas-task" ? [targetReceipt] : [originalHandoff],
+      ),
+      eventRepo: { updatePayloadById: vi.fn() },
+      emitTaskEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    expect(
+      AgentDaemon.prototype.markQueuedAgentMessageDelivered.call(
+        daemonLike,
+        "atlas-task",
+        "reply-race",
+      ),
+    ).toBe(true);
+    expect(daemonLike.eventRepo.updatePayloadById).toHaveBeenCalledWith(
+      "handoff-event-race",
+      expect.objectContaining({
+        replyStatus: "received",
+        replyMessageId: "reply-race",
+      }),
+    );
   });
 
   it("releases durable attachment bytes only after the target receipt is delivered", () => {

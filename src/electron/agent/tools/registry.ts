@@ -12032,7 +12032,12 @@ ${skillDescriptions}`;
         ...(botPeerConversation ? { replyStatus: "pending" } : {}),
         duplicate: result.duplicate === true,
       });
-      if (inReplyToMessageId && inReplyToTaskId) {
+      // Queue-only bot messages are not replies until the recipient consumes
+      // their durable user_message receipt. The daemon marks that correlation
+      // from the receiver-side delivery transition. Keep the direct path only
+      // for transports that explicitly report delivered, which is the one
+      // state that already proves the receiver-side boundary was crossed.
+      if (status === "delivered" && inReplyToMessageId && inReplyToTaskId) {
         (this.daemon as Any).markBotHandoffReplied?.(
           inReplyToTaskId,
           inReplyToMessageId,

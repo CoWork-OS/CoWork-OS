@@ -247,6 +247,67 @@ describe("AgentDaemon agent-message receipts", () => {
     );
   });
 
+  it("keeps a queued handoff pending until the recipient starts consuming it", () => {
+    const update = vi.fn();
+    const updatePayloadById = vi.fn();
+    const emitTaskEvent = vi.fn();
+    const logEvent = vi.fn();
+    const handoffEvents = [
+      makeEvent("handoff-queued", "atlas-task", "agent_message", {
+        messageId: "handoff-queued",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "queued",
+        botTeamId: "team-1",
+        targetTaskId: "scribe-task",
+        recipientLabel: "Scribe",
+        message: "Prepare a source-backed summary.",
+        acceptedAt: Date.now() - BOT_HANDOFF_REPLY_TIMEOUT_MS - 1,
+        queuedAt: Date.now() - BOT_HANDOFF_REPLY_TIMEOUT_MS - 1,
+      }),
+    ];
+    const daemonLike = {
+      taskRepo: {
+        update,
+        findById: vi.fn().mockReturnValue({
+          id: "scribe-task",
+          status: "executing",
+          completedAt: undefined,
+        }),
+      },
+      eventRepo: { updatePayloadById },
+      emitTaskEvent,
+      logEvent,
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+      daemonLike,
+      {
+        id: "atlas-task",
+        status: "executing",
+        agentConfig: { botConversation: true, botTeamId: "team-1" },
+      },
+      handoffEvents,
+      "Partial source summary",
+    );
+
+    expect(result).toEqual({ deferred: true, replySent: false });
+    expect(updatePayloadById).not.toHaveBeenCalled();
+    expect(logEvent).not.toHaveBeenCalledWith(
+      "atlas-task",
+      "log",
+      expect.objectContaining({ metric: "bot_handoff_reply_timeout" }),
+    );
+    expect(update).toHaveBeenCalledWith(
+      "atlas-task",
+      expect.objectContaining({
+        status: "blocked",
+        error: "Waiting for Scribe to reply before finishing this conversation.",
+      }),
+    );
+  });
+
   it("sends a durable blocked reply when a teammate would otherwise finish silently", () => {
     const queueMessageOnly = vi.fn().mockReturnValue({
       queued: true,

@@ -14576,13 +14576,15 @@ export class AgentDaemon extends EventEmitter {
       const recipientIsTerminal =
         canInspectRecipient &&
         (!recipientTask || isTerminalTaskStatus(deriveCanonicalTaskStatus(recipientTask)));
-      const acceptedAt =
-        pendingHandoff.deliveredAt ??
+      const timeoutAnchor =
         pendingHandoff.startedAt ??
-        pendingHandoff.queuedAt ??
-        pendingHandoff.acceptedAt;
+        pendingHandoff.deliveredAt ??
+        (pendingHandoff.deliveryStatus === "queued"
+          ? undefined
+          : (pendingHandoff.acceptedAt ?? pendingHandoff.queuedAt));
       const timedOutByAge =
-        typeof acceptedAt === "number" && Date.now() - acceptedAt >= BOT_HANDOFF_REPLY_TIMEOUT_MS;
+        typeof timeoutAnchor === "number" &&
+        Date.now() - timeoutAnchor >= BOT_HANDOFF_REPLY_TIMEOUT_MS;
       if (!recipientIsTerminal && !timedOutByAge) break;
 
       const reason = recipientIsTerminal

@@ -309,6 +309,7 @@ describe("ToolRegistry child task control tools", () => {
         status: "queued",
         deliveryStatus: "queued",
         deliveryMode: "message",
+        replyStatus: "pending",
       }),
     );
     expect(daemon.logEvent).toHaveBeenCalledTimes(1);
@@ -391,7 +392,85 @@ describe("ToolRegistry child task control tools", () => {
         inReplyToTaskId: "scribe-task",
       }),
     );
+    const replyActivity = daemon.logEvent.mock.calls.find(
+      (call: Any[]) => call[1] === "agent_message",
+    )?.[2];
+    expect(replyActivity).toMatchObject({
+      inReplyToMessageId: "inbound-1",
+      inReplyToTaskId: "scribe-task",
+    });
+    expect(replyActivity).not.toHaveProperty("replyStatus");
     expect(markBotHandoffReplied).not.toHaveBeenCalled();
+  });
+
+  it("uses the durable delivered receipt when the canonical event is still queued", async () => {
+    const recipient: Task = {
+      id: "atlas-task",
+      title: "Atlas",
+      prompt: "Start chatting with Atlas.",
+      status: "completed",
+      workspaceId: workspace.id,
+      assignedAgentRoleId: "atlas-role",
+      agentConfig: { botConversation: true, botTeamId: "bot-team-1" },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const delivered = {
+      id: "inbound-event",
+      taskId: "scribe-task",
+      type: "user_message",
+      timestamp: 100,
+      payload: {
+        messageId: "inbound-1",
+        messageSource: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        senderTaskId: "atlas-task",
+        message: "Check this calculation.",
+      },
+    };
+    const daemon = {
+      getTaskById: vi.fn().mockResolvedValue(recipient),
+      resolveBotTeamPeer: vi.fn().mockResolvedValue({
+        ok: true,
+        task: recipient,
+        role: { id: "atlas-role", name: "atlas", displayName: recipient.title },
+      }),
+      getTaskEvents: vi
+        .fn()
+        .mockReturnValue([
+          { ...delivered, payload: { ...delivered.payload, deliveryStatus: "queued" } },
+        ]),
+      getDurableTaskEvents: vi.fn((_taskId: string, type: string) =>
+        type === "user_message" ? [delivered] : [],
+      ),
+      sendMessage: vi.fn().mockResolvedValue({
+        queued: true,
+        deliveryMode: "message",
+        deliveryStatus: "queued",
+      }),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const registry = new ToolRegistry(workspace, daemon, "scribe-task");
+    const result = await registry.executeTool("send_agent_message", {
+      task_id: "atlas-task",
+      message: "The answer is 59.5.",
+      message_id: "reply-1",
+    });
+
+    expect(result.success).toBe(true);
+    expect(daemon.getTaskEvents).not.toHaveBeenCalled();
+    expect(daemon.sendMessage).toHaveBeenCalledWith(
+      "atlas-task",
+      "The answer is 59.5.",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        inReplyToMessageId: "inbound-1",
+        inReplyToTaskId: "atlas-task",
+      }),
+    );
   });
 
   it.each(["queued", "started"] as const)(
@@ -500,7 +579,7 @@ describe("ToolRegistry child task control tools", () => {
           timestamp: 100,
           payload: {
             messageId: "handoff-1",
-            messageSource: "agent",
+            senderType: "agent",
             deliveryMode: "message",
             deliveryStatus: "delivered",
             senderTaskId: "atlas-task",

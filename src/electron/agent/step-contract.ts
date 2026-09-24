@@ -221,13 +221,60 @@ export function descriptionHasProtectiveConstraintIntent(text: string): boolean 
   const desc = String(text || "").toLowerCase();
   return (
     /\bexclude\b[^!?\n]{0,200}\bfrom\s+(?:consideration|scope|the\s+task)\b/.test(desc) ||
-    /\b(?:do\s+not|don't|must\s+not|never)\s+(?:touch|modify|move|edit|change|write|delete|remove|rename)\b/.test(
+    /\b(?:do\s+not|don't|must\s+not|should\s+not|never)\s+(?:touch|modify|move|edit|change|write|delete|remove|rename)\b/.test(
+      desc,
+    ) ||
+    // "create"/"access" are only protective when they target workspace content;
+    // "do not access the internet" is not a file guardrail.
+    /\b(?:do\s+not|don't|must\s+not|should\s+not|never)\s+(?:create|access)\b[^.;!?\n]{0,80}\b(?:files?|directories|folders?|paths?|workspace)\b/.test(
       desc,
     ) ||
     // Keep dots that are part of a filename (for example `notes.txt`) while
     // still stopping at an actual sentence boundary before the constraint.
     /\bleave\b(?:[^!?\n.]|\.(?=[A-Za-z0-9_/-])){0,160}\b(?:untouched|unchanged)\b/.test(desc) ||
     /\b(?:was|were|is|are)\s+not\s+(?:modified|moved|edited|changed|touched)\b/.test(desc)
+  );
+}
+
+/**
+ * Detect a plan step that only repeats a prohibition from the task prompt.
+ * Such a step is a guardrail, not executable work. In particular, action
+ * verbs inside "do not create, edit, or delete..." must not become tool
+ * requirements or be sent to the model as an instruction to perform them.
+ */
+export function isReadOnlyConstraintOnlyStep(text: string): boolean {
+  const desc = String(text || "").trim();
+  if (!desc || !descriptionHasProtectiveConstraintIntent(desc)) return false;
+
+  const operation =
+    "(?:create|write|edit|modify|move|delete|remove|rename|access|touch|read|open)";
+  const actionList =
+    operation +
+    "(?:(?:\\s*,\\s*(?:(?:and|or)\\s+)?|\\s+(?:and|or)\\s+)" +
+    operation +
+    ")*";
+  const match = desc.match(
+    new RegExp(
+      "^\\s*(?:do\\s+not|don't|must\\s+not|should\\s+not|never)\\s+" +
+        actionList +
+        "\\s+([\\s\\S]+?)\\s*[.!?]?\\s*$",
+      "i",
+    ),
+  );
+  if (!match) return false;
+
+  const target = String(match[1] || "").replace(
+    /\b[A-Za-z0-9_.\/-]+\.(?:csv|tsv|xlsx?|docx?|pdf|md|txt|json|jsonl|ya?ml|toml|xml|pptx?|html?|css|js|tsx?|py|go|rs|swift|sql)\b/gi,
+    " ",
+  );
+  if (!/\b(?:files?|directories|folders?|paths?|workspace)\b/i.test(target)) return false;
+
+  // Keep a step executable when it continues with a positive task after the
+  // prohibition (for example, "Do not edit sources; create a separate report"
+  // or "Don't touch other files, just fix the failing test").
+  if (/[;:]|\b(?:just|only)\b/i.test(target)) return false;
+  return !/\b(?:but|then|instead|also|provide|return|calculate|compute|verify|compare|check|summari[sz]e|report|produce|create|write|edit|modify|move|delete|remove|rename|access|read|open|update|fix|add|append|insert|change|set|replace|refactor|implement|run|save|generate|export|build)\b/i.test(
+    target,
   );
 }
 

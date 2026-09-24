@@ -23,6 +23,7 @@ const VERIFICATION_TOOL_EVIDENCE = new Set([
   "run_command",
   "http_request",
   "read_file",
+  "get_file_info",
   "list_directory",
   // The bounded document pipeline performs a policy-checked, checksum-backed
   // source extraction internally rather than through a model tool call. Treat
@@ -446,12 +447,45 @@ export function buildCompletionGuidancePrompt(opts: {
 export function detectReadOnlyConstraint(prompt: string): boolean {
   const lower = String(prompt || "").toLowerCase();
 
+  // A boundary such as "do not access any other files" protects inputs and
+  // unrelated workspace content; it does not prohibit an output that the
+  // same request explicitly asks us to create. Keep those scoped constraints
+  // from disabling the mutation tool needed for the requested deliverable.
+  const hasScopedOtherFileRestriction =
+    /\b(?:do\s+not|don'?t|must\s+not|should\s+not|never)\b[^.!?\n]{0,180}\b(?:any\s+other|other)\s+(?:files?|directories|folders?|paths?)\b/.test(
+      lower,
+    );
+  const withoutNegatedClauses = lower.replace(
+    /\b(?:do\s+not|don'?t|must\s+not|should\s+not|never)\b[^.!?\n]*/g,
+    " ",
+  );
+  const explicitlyRequestsFileOutput =
+    /\b(?:create|write|edit|modify|generate|produce|save|export|build|make)\b[^.!?\n]{0,140}\b(?:files?|reports?|documents?|spreadsheets?|workbooks?|artifacts?|\.xlsx|\.docx|\.pdf|\.md|\.csv)\b/.test(
+      withoutNegatedClauses,
+    );
+  if (hasScopedOtherFileRestriction && explicitlyRequestsFileOutput) return false;
+
   // Explicit "do not" / "don't" constraints — unambiguous
   const hasExplicitConstraint =
     /\b(?:do\s+not\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?|do\s+not\s+make\s+(?:any\s+)?changes|no\s+file\s+changes|without\s+(?:editing|modifying|creating)|don'?t\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?|situational\s+awareness\s+(?:only|mode))\b/.test(
       lower,
     );
   if (hasExplicitConstraint) return true;
+
+  // A coordinated prohibition such as "do not create, write, edit, move, or
+  // delete any file or directory" is still a global read-only constraint.
+  // The simpler pattern above only handles one verb directly before "files".
+  // Scoped ("any other files") or partial ("do not delete any files")
+  // prohibitions attached to a requested change are not read-only.
+  const hasNegatedFileOperationList =
+    /\b(?:do\s+not|don'?t|must\s+not|should\s+not|never)\s+(?:create|write|edit|modify|move|delete|remove|rename|access|touch)(?:(?:\s*,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)(?:create|write|edit|modify|move|delete|remove|rename|access|touch))*\s+(?:any\s+)?(?:files?|directories|folders?|paths?)\b/.test(
+      lower,
+    );
+  const requestsChangeOutsideProhibition =
+    /\b(?:fix|update|edit|modify|create|write|add|append|change|refactor|rename|move|delete|remove|save|replace|set|implement|generate|produce|export)\b/.test(
+      withoutNegatedClauses,
+    );
+  if (hasNegatedFileOperationList && !requestsChangeOutsideProhibition) return true;
 
   // "read-only" requires constraint context — must NOT be preceded by fix/debug verbs
   // "fix the read-only issue" → false, "this task is read-only" → true
@@ -553,8 +587,15 @@ export function responseHasDecisionSignal(text: string): boolean {
   const normalized = String(text || "").toLowerCase();
   if (!normalized.trim()) return false;
   return (
+    /\b(?:read[- ]?back|report|output|values?|figures?|counts?|totals?)\b[\s\S]{0,80}\b(?:match(?:ed|es)?|mismatch(?:ed)?|do not match|does not match|did not match|didn't match|failed to match)\b/.test(
+      normalized,
+    ) ||
     /\byes\b/.test(normalized) ||
     /\bno\b/.test(normalized) ||
+    /\b(?:includes?|contains?|has)\b[^.!?\n]{0,60}\bheaders?(?:\s+row)?\b/.test(normalized) ||
+    /\b(?:there is|there are|is|are|was|were)\s+(?:(?:a|the|one)\s+)?headers?(?:\s+row)?\b/.test(
+      normalized,
+    ) ||
     /\bi recommend\b/.test(normalized) ||
     /\byou should\b/.test(normalized) ||
     /\bshould (?:you|i|we)\b/.test(normalized) ||
@@ -584,6 +625,22 @@ export function responseHasVerificationSignal(text: string): boolean {
     /\bfindings\b/.test(normalized) ||
     /\bkey takeaways\b/.test(normalized) ||
     /\brecommendation\b/.test(normalized)
+  );
+}
+
+function responseHasConcreteResultSignal(text: string): boolean {
+  const normalized = String(text || "").toLowerCase();
+  if (!normalized.trim()) return false;
+  return (
+    /\b(?:values?|figures?|counts?|totals?)\s+(?:match(?:ed|es)?|verified|confirmed)\b/.test(
+      normalized,
+    ) ||
+    /\b\d[\d,]*(?:\.\d+)?\s+(?:unique\s+)?(?:attendees?|tickets?|items?|records?|rows?|entries|files?|pages?|cities?|errors?|warnings?|tests?|words?|characters?|bytes?)\b/.test(
+      normalized,
+    ) ||
+    /\b(?:attendees?|tickets?|items?|records?|rows?|entries|files?|pages?|cities?|errors?|warnings?|tests?|words?|characters?|bytes?)\s*:\s*\d[\d,]*(?:\.\d+)?\b/.test(
+      normalized,
+    )
   );
 }
 
@@ -697,6 +754,7 @@ export function responseLooksOperationalOnly(text: string): boolean {
     /\b(because|therefore|so that|tradeoff|pros|cons|reason|recommend|should|why|answer|conclusion)\b/.test(
       normalized,
     );
+  const hasConcreteResultSignal = responseHasConcreteResultSignal(normalized);
 
   const sentenceCount = normalized
     .split(/[.!?]\s+/)
@@ -711,6 +769,7 @@ export function responseLooksOperationalOnly(text: string): boolean {
     hasArtifactReference &&
     hasStatusVerb &&
     !hasReasoningCue &&
+    !hasConcreteResultSignal &&
     sentenceCount <= 2 &&
     normalized.length < 320
   );
@@ -729,14 +788,25 @@ export function getBestFinalResponseCandidate(opts: {
     opts.buildResultSummary(),
   ];
 
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string") continue;
-    const trimmed = candidate.trim();
-    if (!trimmed) continue;
-    return trimmed;
+  const nonEmptyCandidates = candidates
+    .filter((candidate): candidate is string => typeof candidate === "string")
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+  const preferred = nonEmptyCandidates[0] || "";
+  if (preferred && responseLooksOperationalOnly(preferred)) {
+    const evidencedAnswer = nonEmptyCandidates
+      .slice(1)
+      .find(
+        (candidate) =>
+          !responseLooksOperationalOnly(candidate) &&
+          (responseHasVerificationSignal(candidate) ||
+            responseHasReasonedConclusionSignal(candidate) ||
+            responseHasConcreteResultSignal(candidate)),
+      );
+    if (evidencedAnswer) return evidencedAnswer;
   }
 
-  return "";
+  return preferred;
 }
 
 export function shouldPreserveExistingDeliverableForRecovery(opts: {
@@ -841,12 +911,15 @@ export function hasArtifactEvidence(opts: {
   createdFiles: string[];
   /** When createdFiles is empty, modified files can satisfy artifact evidence (e.g. task edited existing file). */
   modifiedFiles?: string[];
+  /** Successful, verified mutations may not be registered by the file tracker (for example, shell writes). */
+  mutationFiles?: string[];
 }): boolean {
   if (!opts.contract.requiresArtifactEvidence) return true;
-  const evidenceFiles =
+  const trackedFiles =
     opts.createdFiles.length > 0
       ? opts.createdFiles
       : (opts.modifiedFiles || []).map((file) => String(file));
+  const evidenceFiles = [...trackedFiles, ...(opts.mutationFiles || [])];
   if (evidenceFiles.length === 0) return false;
   if (!opts.contract.requiredArtifactExtensions.length) return true;
 
@@ -860,6 +933,7 @@ export function hasVerificationEvidence(opts: {
   bestCandidate: string;
   planSteps?: Array<{ status?: string; description?: string }>;
   toolResultMemory?: Array<{ tool: string }>;
+  successfulTools?: string[];
 }): boolean {
   const hasCompletedReviewStep = !!opts.planSteps?.some(
     (step) =>
@@ -867,7 +941,10 @@ export function hasVerificationEvidence(opts: {
       (isVerificationStepDescription(step.description || "") ||
         COMPLETED_REVIEW_STEP_REGEX.test(step.description || "")),
   );
-  const hasToolEvidence = hasVerificationToolEvidence(opts.toolResultMemory);
+  const hasToolEvidence = hasVerificationToolEvidence([
+    ...(opts.toolResultMemory || []),
+    ...(opts.successfulTools || []).map((tool) => ({ tool })),
+  ]);
 
   if (responseHasExecutionReportEvidenceSignal(opts.bestCandidate)) {
     return true;

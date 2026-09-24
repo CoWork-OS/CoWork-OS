@@ -184,6 +184,46 @@ describe("TaskExecutor getWaivableFailedStepIdsAtCompletion", () => {
 
     expect(result).toEqual([]);
   });
+
+  it("does not downgrade completion for failed steps reconciled by later artifact evidence", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.plan = {
+      description: "Plan",
+      steps: [
+        {
+          id: "prepare-report",
+          description: "Prepare report.md",
+          status: "failed",
+        },
+        {
+          id: "write-report",
+          description: "Write report.md with the verified figures",
+          status: "completed",
+        },
+      ],
+    };
+    executor.getResolvedRecoveredFailureStepIds = vi.fn(() => ["prepare-report"]);
+    executor.getVerificationState = vi.fn(() => ({ blockingVerificationFailedStepIds: new Set() }));
+    executor.ensureVerificationOutcomeSets = vi.fn();
+    executor.getBudgetConstrainedFailureStepIdSet = vi.fn(() => new Set());
+    executor.buildResultSummary = vi.fn(
+      () => "The requested report was written and read back with all verified figures.",
+    );
+    executor.getContentFallback = vi.fn(() => "");
+    executor.isBoundedDocumentAnalysisTask = vi.fn(() => false);
+    executor.responseLooksOperationalOnly = vi.fn(() => false);
+    executor.shouldPreferBestEffortCompletion = vi.fn(() => true);
+    executor.hasExecutionEvidence = vi.fn(() => true);
+    executor.buildTaskOutputSummary = vi.fn(() => ({ outputCount: 1 }));
+    executor.bestKnownOutcome = { outputSummary: { outputCount: 1 } };
+    executor.isMutationRequiredStepForCompletion = vi.fn(() => false);
+
+    const result = (TaskExecutor as Any).prototype.getWaivableFailedStepIdsAtCompletion.call(
+      executor,
+    );
+
+    expect(result).toEqual([]);
+  });
 });
 
 describe("TaskExecutor verification terminal status mapping", () => {

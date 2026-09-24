@@ -161,6 +161,7 @@ import type {
   GuardrailSettings,
   PersistedPermissionRule,
   PermissionSettingsData,
+  PermissionRuntimeInfo,
   CouncilConfig,
   CouncilMemo,
   CouncilRun,
@@ -3618,6 +3619,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Permission Settings APIs
   getPermissionSettings: () => ipcRenderer.invoke(IPC_CHANNELS.PERMISSIONS_GET_SETTINGS),
+  getPermissionRuntimeInfo: () => ipcRenderer.invoke(IPC_CHANNELS.PERMISSIONS_GET_RUNTIME_INFO),
   savePermissionSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERMISSIONS_SAVE_SETTINGS, settings),
   getWorkspacePermissionRules: (workspaceId: string) =>
@@ -6983,6 +6985,7 @@ export interface ElectronAPI {
   getGuardrailDefaults: () => Promise<GuardrailSettings>;
   // Permission Settings
   getPermissionSettings: () => Promise<PermissionSettingsData>;
+  getPermissionRuntimeInfo: () => Promise<PermissionRuntimeInfo>;
   savePermissionSettings: (settings: PermissionSettingsData) => Promise<{ success: boolean }>;
   getWorkspacePermissionRules: (workspaceId: string) => Promise<PersistedPermissionRule[]>;
   deleteWorkspacePermissionRule: (payload: { workspaceId: string; ruleId: string }) => Promise<{

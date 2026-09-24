@@ -212,6 +212,8 @@ export interface SessionRuntimeSnapshotV2 {
     webEvidenceMemory: WebEvidenceEntry[];
     toolUsageCounts: Array<[string, number]>;
     successfulToolUsageCounts: Array<[string, number]>;
+    /** Tool successes since the most recent user-request turn. Optional for older V2 snapshots. */
+    turnSuccessfulToolUsageCounts?: Array<[string, number]>;
     toolUsageEventsSinceDecay: number;
     toolSelectionEpoch: number;
     discoveredDeferredToolNames: string[];
@@ -332,6 +334,7 @@ export interface SessionRuntimeState {
     webEvidenceMemory: WebEvidenceEntry[];
     toolUsageCounts: Map<string, number>;
     successfulToolUsageCounts: Map<string, number>;
+    turnSuccessfulToolUsageCounts: Map<string, number>;
     toolUsageEventsSinceDecay: number;
     toolSelectionEpoch: number;
     discoveredDeferredToolNames: Set<string>;
@@ -1051,10 +1054,12 @@ export class SessionRuntime {
     this.clearTaskListVerificationNudge();
   }
 
-  private consumeTaskListVerificationReminder(): string | null {
+  private consumeTaskListVerificationReminder(updatedAfter?: number): string | null {
     if (
       !this.state.checklist.verificationNudgeNeeded ||
-      !this.taskListVerificationReminderPending
+      !this.taskListVerificationReminderPending ||
+      (updatedAfter !== undefined &&
+        !this.state.checklist.items.some((item) => item.updatedAt >= updatedAfter))
     ) {
       return null;
     }
@@ -1784,6 +1789,11 @@ export class SessionRuntime {
       botConversation: botPolicyContext?.botConversation === true,
       botTeamId: botPolicyContext?.botTeamId || "",
       botMessagingAuthorized: botPolicyContext?.botMessagingAuthorized === true,
+      turnSuccessfulToolUsageCounts: Array.from(
+        this.state.tooling.turnSuccessfulToolUsageCounts.entries(),
+      )
+        .filter(([, count]) => count > 0)
+        .sort(([left], [right]) => left.localeCompare(right)),
     });
     const task = this.deps.getTask();
     const renderContext = this.buildToolPromptRenderContext();
@@ -1997,6 +2007,7 @@ export class SessionRuntime {
   async prepareMessagesForTurnIteration(opts: {
     messages: LLMMessage[];
     phase: "step" | "follow_up";
+    checklistUpdatedAfter?: number;
     systemPromptTokens: number;
     allowSharedContextInjection: boolean;
     allowMemoryInjection: boolean;
@@ -2090,7 +2101,7 @@ export class SessionRuntime {
       }
     }
 
-    const taskListReminder = this.consumeTaskListVerificationReminder();
+    const taskListReminder = this.consumeTaskListVerificationReminder(opts.checklistUpdatedAfter);
     if (taskListReminder) {
       this.deps.upsertPinnedUserBlock(messages, {
         tag: "PINNED_TASK_LIST_REMINDER",
@@ -3407,6 +3418,9 @@ export class SessionRuntime {
           successfulToolUsageCounts: Array.from(
             this.state.tooling.successfulToolUsageCounts.entries(),
           ),
+          turnSuccessfulToolUsageCounts: Array.from(
+            this.state.tooling.turnSuccessfulToolUsageCounts.entries(),
+          ),
           toolUsageEventsSinceDecay: this.state.tooling.toolUsageEventsSinceDecay,
           toolSelectionEpoch: this.state.tooling.toolSelectionEpoch,
           discoveredDeferredToolNames: Array.from(
@@ -4503,6 +4517,11 @@ export class SessionRuntime {
     this.state.tooling.toolUsageCounts = new Map(payload.tooling.toolUsageCounts || []);
     this.state.tooling.successfulToolUsageCounts = new Map(
       payload.tooling.successfulToolUsageCounts || [],
+    );
+    this.state.tooling.turnSuccessfulToolUsageCounts = new Map(
+      payload.tooling.turnSuccessfulToolUsageCounts ??
+        payload.tooling.successfulToolUsageCounts ??
+        [],
     );
     this.state.tooling.toolUsageEventsSinceDecay = payload.tooling.toolUsageEventsSinceDecay || 0;
     this.state.tooling.toolSelectionEpoch = payload.tooling.toolSelectionEpoch || 0;

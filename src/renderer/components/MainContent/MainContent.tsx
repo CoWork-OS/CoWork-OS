@@ -4,6 +4,7 @@ import {
   type InteractionModeSelection,
 } from "../../../shared/interaction-mode";
 import { InteractionModePicker } from "./InteractionModePicker";
+import { getAccessProfilePresentation } from "./access-profile-presentation";
 import {
   BotProfileDialog,
   BOT_PROFILE_DELETED_EVENT,
@@ -472,7 +473,8 @@ import {
 import { CanvasPreview } from "../CanvasPreview";
 import { StepFeed } from "../timeline/StepFeed";
 import { ParallelGroupFeed } from "../timeline/ParallelGroupFeed";
-import { ActionBlock, buildActionBlockSummary } from "../timeline/ActionBlock";
+import { ActionBlock } from "../timeline/ActionBlock";
+import { buildActionBlockSummary } from "../timeline/ActionBlockSummary";
 import { TaskStatusStrip } from "../TaskStatusStrip";
 import { buildParallelGroupProjection } from "../timeline/parallel-group-projection";
 import {
@@ -4160,6 +4162,7 @@ function MainContentComponent({
       allowShellNetwork?: boolean;
     };
   } | null>(null);
+  const [approvalPromptsEnabled, setApprovalPromptsEnabled] = useState<boolean | null>(null);
   const newTaskAccessProfileId = newTaskUsesLegacyPermissionMode ? undefined : permissionAccessMode;
   const taskAccessProfileId = task?.id
     ? (selectedTaskAccessProfileOverride ?? undefined)
@@ -4191,6 +4194,10 @@ function MainContentComponent({
     }
     return BUILTIN_ACCESS_PROFILES[0];
   }, [accessProfiles, selectedProfileId]);
+  const selectedAccessProfilePresentation = getAccessProfilePresentation(
+    selectedAccessProfile,
+    approvalPromptsEnabled,
+  );
   const selectedAccessProfileLabel =
     task?.id && selectedTaskAccessProfileOverride === null
       ? `Legacy mode${task.agentConfig?.permissionMode ? ` · ${task.agentConfig.permissionMode}` : ""}`
@@ -4199,6 +4206,10 @@ function MainContentComponent({
     const notices: string[] = [];
     if (selectedProfileId && selectedAccessProfile.label === "Unavailable access profile") {
       return "This access profile is unavailable; execution will remain paused until you choose a valid profile.";
+    }
+
+    if (selectedAccessProfilePresentation.notice) {
+      notices.push(selectedAccessProfilePresentation.notice);
     }
 
     if (
@@ -4239,7 +4250,12 @@ function MainContentComponent({
       );
     }
     return notices.length > 0 ? notices.join(" ") : null;
-  }, [adminRuntimePolicy, selectedAccessProfile, selectedProfileId]);
+  }, [
+    adminRuntimePolicy,
+    selectedAccessProfile,
+    selectedAccessProfilePresentation.notice,
+    selectedProfileId,
+  ]);
   const [modeSuggestions, setModeSuggestions] = useState<ModeSuggestion[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const modeSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -5927,6 +5943,15 @@ function MainContentComponent({
       }
     };
 
+    const loadPermissionRuntimeInfo = async () => {
+      try {
+        const runtime = await window.electronAPI.getPermissionRuntimeInfo();
+        if (!cancelled) setApprovalPromptsEnabled(runtime.approvalPromptsEnabled);
+      } catch (error) {
+        console.debug("Failed to load permission runtime info:", error);
+      }
+    };
+
     const handlePermissionSettingsUpdated = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (detail && typeof detail === "object") {
@@ -5936,6 +5961,7 @@ function MainContentComponent({
 
     void loadPermissionDefaults();
     void loadAdminRuntimePolicy();
+    void loadPermissionRuntimeInfo();
     window.addEventListener("cowork:permission-settings-updated", handlePermissionSettingsUpdated);
 
     return () => {
@@ -9546,74 +9572,75 @@ function MainContentComponent({
                       <span>{selectedAccessProfileLabel}</span>
                       <ChevronDown size={16} aria-hidden="true" />
                     </button>
-                    {profileConstraintNotice && (
-                      <span className="permission-access-constraint" role="status">
-                        {profileConstraintNotice}
-                      </span>
-                    )}
                     {showPermissionDropdown && (
                       <div
                         className="permission-access-dropdown"
                         role="menu"
                         aria-label="Permission access profiles"
                       >
-                        {BUILTIN_ACCESS_PROFILES.map((profile) => (
-                          <button
-                            key={profile.id}
-                            type="button"
-                            className={`permission-access-option ${
-                              profile.id === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "danger" : ""
-                            } ${selectedProfileId === profile.id ? "active" : ""}`}
-                            onClick={() => {
-                              handlePermissionProfileSelect(profile.id);
-                            }}
-                            role="menuitemradio"
-                            aria-checked={selectedProfileId === profile.id}
-                            title={profile.description}
-                          >
-                            {profile.id === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? (
-                              <ShieldAlert size={16} aria-hidden="true" />
-                            ) : (
-                              <ShieldCheck size={16} aria-hidden="true" />
-                            )}
-                            <span className="permission-access-option-copy">
-                              <span className="permission-access-option-title">
-                                {profile.label}
+                        {BUILTIN_ACCESS_PROFILES.map((profile) => {
+                          const presentation = getAccessProfilePresentation(
+                            profile,
+                            approvalPromptsEnabled,
+                          );
+                          return (
+                            <button
+                              key={profile.id}
+                              type="button"
+                              className={`permission-access-option ${
+                                profile.id === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "danger" : ""
+                              } ${selectedProfileId === profile.id ? "active" : ""}`}
+                              onClick={() => {
+                                handlePermissionProfileSelect(profile.id);
+                              }}
+                              role="menuitemradio"
+                              aria-checked={selectedProfileId === profile.id}
+                              title={presentation.description}
+                            >
+                              {profile.id === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? (
+                                <ShieldAlert size={16} aria-hidden="true" />
+                              ) : (
+                                <ShieldCheck size={16} aria-hidden="true" />
+                              )}
+                              <span className="permission-access-option-copy">
+                                <span className="permission-access-option-title">
+                                  {profile.label}
+                                </span>
                               </span>
-                              <span className="permission-access-option-description">
-                                {profile.description}
-                              </span>
-                            </span>
-                          </button>
-                        ))}
+                            </button>
+                          );
+                        })}
                         {accessProfiles.length > 0 && (
                           <div className="permission-access-custom-label">Custom profiles</div>
                         )}
-                        {accessProfiles.map((profile) => (
-                          <button
-                            key={profile.id}
-                            type="button"
-                            className={`permission-access-option ${
-                              selectedProfileId === profile.id ? "active" : ""
-                            }`}
-                            onClick={() => {
-                              handlePermissionProfileSelect(profile.id);
-                            }}
-                            role="menuitemradio"
-                            aria-checked={selectedProfileId === profile.id}
-                            title={profile.description}
-                          >
-                            <SlidersHorizontal size={16} aria-hidden="true" />
-                            <span className="permission-access-option-copy">
-                              <span className="permission-access-option-title">
-                                {profile.label || getAccessProfileLabel(profile.id)}
+                        {accessProfiles.map((profile) => {
+                          const presentation = getAccessProfilePresentation(
+                            profile,
+                            approvalPromptsEnabled,
+                          );
+                          return (
+                            <button
+                              key={profile.id}
+                              type="button"
+                              className={`permission-access-option ${
+                                selectedProfileId === profile.id ? "active" : ""
+                              }`}
+                              onClick={() => {
+                                handlePermissionProfileSelect(profile.id);
+                              }}
+                              role="menuitemradio"
+                              aria-checked={selectedProfileId === profile.id}
+                              title={presentation.description}
+                            >
+                              <SlidersHorizontal size={16} aria-hidden="true" />
+                              <span className="permission-access-option-copy">
+                                <span className="permission-access-option-title">
+                                  {profile.label || getAccessProfileLabel(profile.id)}
+                                </span>
                               </span>
-                              <span className="permission-access-option-description">
-                                {profile.description}
-                              </span>
-                            </span>
-                          </button>
-                        ))}
+                            </button>
+                          );
+                        })}
                         <button
                           type="button"
                           className="permission-access-option"
@@ -9627,9 +9654,6 @@ function MainContentComponent({
                           <span className="permission-access-option-copy">
                             <span className="permission-access-option-title">
                               Configure custom profiles
-                            </span>
-                            <span className="permission-access-option-description">
-                              Define sandbox, filesystem, network, and approval rules in Settings.
                             </span>
                           </span>
                         </button>

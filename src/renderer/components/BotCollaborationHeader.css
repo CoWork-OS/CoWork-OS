@@ -69,6 +69,7 @@
   color: var(--color-success, #6fcf97);
 }
 
+.bot-collaboration-partial .bot-collaboration-status,
 .bot-collaboration-needs_input .bot-collaboration-status,
 .bot-collaboration-waiting .bot-collaboration-status {
   color: var(--color-warning, #e8b86d);

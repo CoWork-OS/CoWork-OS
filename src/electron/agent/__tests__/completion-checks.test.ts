@@ -203,6 +203,32 @@ describe("evaluateDomainCompletion", () => {
   });
 
   // ── Research quality gate without tool success ────────────────────────
+  it("accepts a requested direct comparison without requiring research keywords", () => {
+    expect(
+      evaluateDomainCompletion({
+        domain: "research",
+        isLastStep: true,
+        hadAnyToolSuccess: false,
+        taskIntent:
+          "Compare the supplied event budgets. Answer directly; no files or external tools.",
+        assistantText:
+          "Plan A: €200. Plan B: €160. Savings: €40. Choose Plan B because it is €40 cheaper overall.",
+      }).failed,
+    ).toBe(false);
+  });
+
+  it("still rejects a status-only response when a direct comparison was requested", () => {
+    expect(
+      evaluateDomainCompletion({
+        domain: "research",
+        isLastStep: true,
+        hadAnyToolSuccess: false,
+        taskIntent: "Compare the budgets and answer directly.",
+        assistantText: "Done.",
+      }).failed,
+    ).toBe(true);
+  });
+
   it("fails for research domain without sufficient signal even with longer text", () => {
     const result = evaluateDomainCompletion({
       domain: "research",
@@ -224,4 +250,28 @@ describe("evaluateDomainCompletion", () => {
     });
     expect(result.failed).toBe(false);
   });
+  it.each(["writing", "research"] as const)(
+    "accepts the exact requested reply in a %s session",
+    (domain) => {
+      const input = {
+        domain,
+        isLastStep: true,
+        hadAnyToolSuccess: false,
+        stepDescription: 'Reply exactly "Recovery acknowledged." No tools are needed.',
+      };
+      expect(
+        evaluateDomainCompletion({ ...input, assistantText: "Recovery acknowledged." }).failed,
+      ).toBe(false);
+      expect(evaluateDomainCompletion({ ...input, assistantText: "Acknowledged." }).failed).toBe(
+        true,
+      );
+      expect(
+        evaluateDomainCompletion({
+          ...input,
+          stepDescription: "Write a project brief",
+          assistantText: "Recovery acknowledged.",
+        }).failed,
+      ).toBe(true);
+    },
+  );
 });

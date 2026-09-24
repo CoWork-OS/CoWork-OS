@@ -40,6 +40,27 @@ describe("Astra pricing", () => {
   });
 });
 
+describe("GPT-6 Sol and Luna pricing", () => {
+  it.each([
+    ["gpt-6-sol", 2, 10, 0.2, 2.5],
+    ["gpt-6-luna", 0.1, 0.5, 0.01, 0.125],
+  ] as const)(
+    "prices %s at published rates and applies the long-context multiplier",
+    (model, input, output, cached, write) => {
+      expect(getModelPricing(model)).toEqual({
+        inputPer1M: input,
+        outputPer1M: output,
+        cachedInputPer1M: cached,
+        cacheWritePer1M: write,
+      });
+      expect(calculateCost(model, 300_000, 100_000)).toBeCloseTo(
+        0.3 * input * 2 + 0.1 * output * 1.5,
+        8,
+      );
+    },
+  );
+});
+
 describe("current OpenAI prompt-cache pricing", () => {
   it("recognizes GPT-5.6 model rates instead of treating them as free", () => {
     expect(getModelPricing("gpt-5.6-sol")).toMatchObject({

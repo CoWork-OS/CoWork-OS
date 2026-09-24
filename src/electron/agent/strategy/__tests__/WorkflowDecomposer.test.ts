@@ -59,6 +59,13 @@ describe("WorkflowDecomposer", () => {
     expect(phases!.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("does not split a 'then' that separates literal lines from a later verification action", () => {
+    const prompt =
+      "Use write_file to create qa-roundtrip.txt with exactly two lines: CoWork task round-trip, then profile-safe QA. Use read_file on the same path to verify it.";
+
+    expect(WorkflowDecomposer.decompose(prompt, defaultRoute)).toBeNull();
+  });
+
   // ── Phase type detection ──────────────────────────────────────
 
   it("correctly detects phase types", () => {

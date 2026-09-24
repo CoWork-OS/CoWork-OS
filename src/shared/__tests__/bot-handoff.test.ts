@@ -88,6 +88,58 @@ describe("buildFreshBotHandoffPrompt", () => {
     expect(getOutstandingBotHandoffReply([inbound, reply])).toBeNull();
   });
 
+  it("does not consume a second request as the reply to an earlier correlated reply", () => {
+    const firstRequest = event(
+      "request-1",
+      "user_message",
+      {
+        messageId: "request-1",
+        messageSource: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        senderTaskId: "cco-task",
+        message: "Check the package name.",
+      },
+      1,
+    );
+    const firstReply = event(
+      "reply-1",
+      "agent_message",
+      {
+        messageId: "reply-1",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "cco-task",
+        inReplyToMessageId: "request-1",
+        message: "Package check complete.",
+      },
+      2,
+    );
+    const secondRequest = event(
+      "request-2",
+      "user_message",
+      {
+        messageId: "request-2",
+        messageSource: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        senderTaskId: "cco-task",
+        message: "Calculate 7 times 3.5.",
+      },
+      3,
+    );
+
+    expect(getCurrentBotHandoffScope([firstRequest, firstReply, secondRequest])).toMatchObject({
+      sinceTimestamp: 3,
+    });
+    expect(getOutstandingBotHandoffReply([firstRequest, firstReply, secondRequest])).toMatchObject({
+      inboundMessageId: "request-2",
+      senderTaskId: "cco-task",
+    });
+  });
+
   it("does not turn a direct reply receipt into a new teammate request", () => {
     const events = [
       event("prompt", "user_message", { message: "Delegate the research." }, 1),

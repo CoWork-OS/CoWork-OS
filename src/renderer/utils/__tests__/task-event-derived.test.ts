@@ -5,6 +5,7 @@ import {
   taskSurfaceFailureStormTask,
 } from "../../perf-fixtures/task-surface-failure-storm.fixture";
 import {
+  deriveToolUsage,
   deriveSharedTaskEventUiState,
   reconcileBotConversationSharedTaskEventUi,
 } from "../task-event-derived";
@@ -25,6 +26,80 @@ function makeEvent(
     ...overrides,
   };
 }
+
+describe("deriveToolUsage", () => {
+  it("counts each command execution once despite its shell detail and duplicate receipt", () => {
+    const events = [
+      makeEvent("call-1", 1, "tool_call", {
+        tool: "run_command",
+        toolUseId: "one",
+        input: { command: "sleep 45", cwd: "/scratch" },
+      }),
+      makeEvent("detail-1", 2, "tool_call", {
+        tool: "run_command",
+        command: "sleep 45",
+        cwd: "/scratch",
+      }),
+      makeEvent("duplicate-1", 3, "tool_call", {
+        tool: "run_command",
+        toolUseId: "one",
+        input: { command: "sleep 45", cwd: "/scratch" },
+      }),
+      makeEvent("call-2", 4, "tool_call", {
+        tool: "run_command",
+        toolUseId: "two",
+        input: { command: "sleep 45", cwd: "/scratch" },
+      }),
+      makeEvent("detail-2", 5, "tool_call", {
+        tool: "run_command",
+        command: "sleep 45",
+        cwd: "/scratch",
+      }),
+    ];
+    expect(deriveToolUsage(events)).toEqual([{ name: "run_command", count: 2, lastUsed: 4 }]);
+  });
+
+  it.each(["tool_result", "task_completed", "task_cancelled"])(
+    "preserves a later standalone command after %s",
+    (type) => {
+      expect(
+        deriveToolUsage([
+          makeEvent("call", 1, "tool_call", {
+            tool: "run_command",
+            toolUseId: "one",
+            input: { command: "pwd" },
+          }),
+          makeEvent("done", 2, type, { tool: "run_command", toolUseId: "one" }),
+          makeEvent("legacy", 3, "tool_call", { tool: "run_command", command: "pwd" }),
+        ]),
+      ).toEqual([{ name: "run_command", count: 2, lastUsed: 3 }]);
+    },
+  );
+
+  it("does not merge commands from different tasks or working directories", () => {
+    expect(
+      deriveToolUsage([
+        makeEvent("call", 1, "tool_call", {
+          tool: "run_command",
+          toolUseId: "one",
+          input: { command: "pwd", cwd: "/first" },
+        }),
+        makeEvent("other-directory", 2, "tool_call", {
+          tool: "run_command",
+          command: "pwd",
+          cwd: "/second",
+        }),
+        makeEvent(
+          "other-task",
+          3,
+          "tool_call",
+          { tool: "run_command", command: "pwd", cwd: "/first" },
+          { taskId: "task-2" },
+        ),
+      ]),
+    ).toEqual([{ name: "run_command", count: 3, lastUsed: 3 }]);
+  });
+});
 
 describe("deriveSharedTaskEventUiState action blocks", () => {
   it("re-applies Bot transcript filtering after task hydration", () => {

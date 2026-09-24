@@ -23,6 +23,12 @@ interface IntentScores {
   redirect: number;
 }
 
+// Keep a contrast pivot inside one sentence. Otherwise a phrase such as
+// "rather than guessing. Do not change the source" looks like a redirect to
+// the distant "do" even though it is only rationale plus a constraint.
+const REDIRECT_CONTRAST_PATTERN =
+  /\b(?:instead\s+of|rather\s+than)\b[^.!?\n]{0,150}\b(?:focus|work|do(?!\s+not\b)|build|create|look|tackle|explore|concentrate)\b/i;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -100,11 +106,7 @@ export class IntentRouter {
       signals.push("redirect-explicit-pivot");
     }
 
-    if (
-      /\b(?:instead\s+of|rather\s+than)\b[\s\S]{0,150}\b(?:focus|work|do|build|create|look|tackle|explore|concentrate)\b/i.test(
-        lower,
-      )
-    ) {
+    if (REDIRECT_CONTRAST_PATTERN.test(lower)) {
       signals.push("redirect-contrast");
     }
 

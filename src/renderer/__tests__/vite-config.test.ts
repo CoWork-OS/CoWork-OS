@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfigFromFile } from "vite";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const viteConfigPath = path.join(repositoryRoot, "vite.config.ts");
+const viteConfigPath = path.join(repositoryRoot, "vite.config.mts");
 
 describe("renderer Vite configuration", () => {
   it("preserves the Electron renderer output contract under Vite 8", async () => {

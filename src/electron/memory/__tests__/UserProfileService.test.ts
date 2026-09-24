@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserProfile } from "../../../shared/types";
+import type { LoadResult } from "../../database/SecureSettingsRepository";
 
 const mocks = vi.hoisted(() => {
   let storedProfile: UserProfile = { facts: [], updatedAt: 0 };
@@ -11,7 +12,9 @@ const mocks = vi.hoisted(() => {
     set storedProfile(value: UserProfile) {
       storedProfile = value;
     },
-    repositoryLoad: vi.fn(() => storedProfile),
+    repositoryLoadWithStatus: vi.fn(
+      (): LoadResult<UserProfile> => ({ status: "success", data: storedProfile }),
+    ),
     repositorySave: vi.fn((_key: string, profile: UserProfile) => {
       storedProfile = profile;
     }),
@@ -23,7 +26,7 @@ vi.mock("../../database/SecureSettingsRepository", () => ({
   SecureSettingsRepository: {
     isInitialized: vi.fn(() => true),
     getInstance: vi.fn(() => ({
-      load: mocks.repositoryLoad,
+      loadWithStatus: mocks.repositoryLoadWithStatus,
       save: mocks.repositorySave,
     })),
   },
@@ -49,6 +52,27 @@ describe("UserProfileService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.storedProfile = { facts: [], updatedAt: 0 };
+    mocks.repositoryLoadWithStatus.mockImplementation(() => ({
+      status: "success",
+      data: mocks.storedProfile,
+    }));
+  });
+
+  it("does not overwrite an encrypted profile when it cannot be decrypted", () => {
+    mocks.repositoryLoadWithStatus.mockReturnValue({
+      status: "decryption_failed",
+      error: "Keychain service is unavailable",
+    });
+
+    expect(UserProfileService.getProfile()).toEqual({ facts: [], updatedAt: 0 });
+    expect(() =>
+      UserProfileService.addFact({
+        category: "other",
+        value: "A new fact",
+        source: "manual",
+      }),
+    ).toThrow("kept it intact and did not save over it");
+    expect(mocks.repositorySave).not.toHaveBeenCalled();
   });
 
   it("canonicalizes manually added preferred names and syncs personality identity", () => {

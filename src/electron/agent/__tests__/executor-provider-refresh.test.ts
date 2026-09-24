@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { ContextManager } from "../context-manager";
 import { TaskExecutor } from "../executor";
@@ -94,7 +97,7 @@ describe("TaskExecutor provider refresh", () => {
     expect(executor.provider.createMessage).toHaveBeenCalledOnce();
     expect(recordLlmTurn).toHaveBeenCalledOnce();
     expect(updateTracking).toHaveBeenCalledTimes(hasUsage ? 1 : 0);
-    if (hasUsage) expect(updateTracking).toHaveBeenCalledWith(3, 2, 1, 0);
+    if (hasUsage) expect(updateTracking).toHaveBeenCalledWith(3, 2, 1, 0, undefined);
   });
 
   it("refreshes provider before an LLM call and uses the refreshed model id", async () => {
@@ -585,5 +588,78 @@ describe("TaskExecutor provider refresh", () => {
         totalOutputTokens: 12,
       }),
     );
+  });
+
+  it("includes final result facts and labels recovered steps in the auto-report prompt", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-auto-report-"));
+    const finalAnswer =
+      "Verified 3 unique attendees and 10 total tickets. City totals: Lisbon 3, Porto 3, Porto, Norte 4.";
+    const report =
+      "## Summary\n- Created and verified the attendee summary.\n\n## What Was Done\n- Read the CSV.\n\n## Issues Encountered\n- The calculation step recovered.\n\n## Results\n- 3 attendees, 10 tickets.";
+    let reportPrompt = "";
+    const response = { content: [{ type: "text", text: report }] };
+    const executor = Object.assign(Object.create(TaskExecutor.prototype), {
+      task: {
+        id: "auto-re",
+        title: "Attendee Summary Report",
+        prompt: "Read the CSV and summarize attendee totals.",
+        resultSummary: "Created attendees-summary.md and verified the read-back.",
+        agentConfig: { autoReportEnabled: true },
+        createdAt: Date.now() - 60_000,
+      },
+      workspace: {
+        id: "auto-report-workspace",
+        path: workspacePath,
+        isTemp: true,
+        permissions: { read: true, write: true, delete: true, network: false, shell: false },
+      },
+      plan: {
+        steps: [
+          {
+            id: "calculate",
+            description: "Calculate attendee and ticket totals.",
+            status: "failed",
+            error: "The step stopped at a limitation statement.",
+          },
+          {
+            id: "recover-calculate",
+            description: "Recalculate from the CSV rows.",
+            status: "completed",
+          },
+        ],
+      },
+      bestKnownOutcome: { resultSummary: finalAnswer },
+      lastNonVerificationOutput: finalAnswer,
+      lastAssistantOutput: finalAnswer,
+      lastAssistantText: finalAnswer,
+      conversationHistory: [{ role: "assistant", content: [{ type: "text", text: finalAnswer }] }],
+      modelId: "test-model",
+      logTag: "[Executor:auto-report-test]",
+      callLLMWithRetry: (fn: () => Promise<unknown>) => fn(),
+      createMessageWithTimeout: vi.fn(async (request: Any) => {
+        reportPrompt = String(request.messages?.[0]?.content?.[0]?.text || "");
+        return response;
+      }),
+      getContractPrompt: () => "Read the CSV and summarize attendee totals.",
+      getResolvedRecoveredFailureStepIds: () => ["calculate"],
+      extractTextFromLLMContent: (content: Any[]) =>
+        content.map((item) => item.text || "").join(""),
+      emitEvent: vi.fn(),
+      updateTracking: vi.fn(),
+    });
+
+    try {
+      await executor.autoGenerateReport();
+
+      expect(reportPrompt).toContain(finalAnswer);
+      expect(reportPrompt).toContain("Recovered steps:");
+      expect(reportPrompt).toContain("Calculate attendee and ticket totals.");
+      expect(reportPrompt).not.toContain("Failed steps:\n- Calculate attendee and ticket totals.");
+      expect(
+        fs.readFileSync(path.join(workspacePath, ".cowork", "cowork-report-auto-re.md"), "utf8"),
+      ).toBe(report);
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
   });
 });

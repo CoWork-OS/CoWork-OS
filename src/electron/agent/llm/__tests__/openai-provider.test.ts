@@ -422,6 +422,33 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
+  it.each(["gpt-6-sol", "gpt-6-luna"])(
+    "routes %s API-key tool calls through Responses",
+    async (model) => {
+      responsesCreateMock.mockResolvedValue({
+        output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+      });
+      const provider = new OpenAIProvider({
+        type: "openai",
+        model,
+        openaiApiKey: "sk-test",
+        openaiReasoningEffort: "max",
+      });
+
+      await provider.createMessage({
+        model: `openai/${model}@fast`,
+        maxTokens: 128,
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      expect(chatCompletionsCreateMock).not.toHaveBeenCalled();
+      expect(responsesCreateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ model, reasoning: { effort: "max" } }),
+        undefined,
+      );
+    },
+  );
+
   it("retries a Responses request without cache controls when the endpoint rejects them", async () => {
     responsesCreateMock
       .mockRejectedValueOnce(
@@ -734,30 +761,34 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
-  it.each(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])(
-    "routes ChatGPT subscription model %s through the Codex compatibility shim",
-    async (model) => {
-      completeMock.mockResolvedValue({
-        stopReason: "stop",
-        content: [{ type: "text", text: "ok" }],
-        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
-      });
-      getModelsMock.mockReturnValue([{ id: "gpt-5.5" }]);
-      const provider = new OpenAIProvider({ ...makeConfig(), model });
+  it.each([
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+  ])("routes ChatGPT subscription model %s through the Codex compatibility shim", async (model) => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    });
+    getModelsMock.mockReturnValue([{ id: "gpt-5.5" }]);
+    const provider = new OpenAIProvider({ ...makeConfig(), model });
 
-      await provider.createMessage({ ...makeRequest(), model });
+    await provider.createMessage({ ...makeRequest(), model });
 
-      expect(completeMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: model,
-          api: "openai-codex-responses",
-          provider: "openai-codex",
-        }),
-        expect.any(Object),
-        expect.any(Object),
-      );
-    },
-  );
+    expect(completeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: model,
+        api: "openai-codex-responses",
+        provider: "openai-codex",
+      }),
+      expect.any(Object),
+      expect.any(Object),
+    );
+  });
 
   it("forwards GPT-5.6 Ultra reasoning and response verbosity to the ChatGPT backend", async () => {
     completeMock.mockResolvedValue({
@@ -788,6 +819,102 @@ describe("OpenAIProvider structured errors", () => {
         textVerbosity: "high",
       }),
     );
+  });
+
+  it.each(["absent", "disabled", "rejected"] as const)(
+    "preserves every system block when OAuth cache controls are %s",
+    async (cacheState) => {
+      completeMock.mockResolvedValue({
+        stopReason: "stop",
+        content: [{ type: "text", text: "ok" }],
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      });
+      if (cacheState === "rejected") {
+        completeMock.mockResolvedValueOnce({
+          stopReason: "error",
+          errorMessage: "Unsupported parameter: prompt_cache_key",
+        });
+      }
+      const provider = new OpenAIProvider(makeConfig());
+      const request: LLMRequest = {
+        ...makeRequest(),
+        system: "Stable instructions\n\nCurrent turn: only modify the scratch CSV.",
+        systemBlocks: [
+          { text: "Stable instructions", scope: "session", cacheable: true },
+          { text: "Current turn: only modify the scratch CSV.", scope: "turn", cacheable: false },
+        ],
+        promptCache:
+          cacheState === "absent"
+            ? undefined
+            : {
+                mode: cacheState === "disabled" ? "disabled" : "openai_key",
+                ttl: "1h",
+                explicitRecentMessages: 3,
+                cacheKey: "test-context",
+              },
+      };
+      await provider.createMessage(request);
+      const context = completeMock.mock.calls.at(-1)?.[1];
+      expect(context.systemPrompt).toBe(request.system);
+      expect(JSON.stringify(context.messages)).not.toContain("Current turn:");
+      expect(completeMock).toHaveBeenCalledTimes(cacheState === "rejected" ? 2 : 1);
+      expect(request.messages).toEqual(makeRequest().messages);
+    },
+  );
+
+  it("remembers an OAuth prompt-cache rejection for later turns", async () => {
+    completeMock
+      .mockResolvedValueOnce({
+        stopReason: "error",
+        errorMessage: "Unsupported parameter: prompt_cache_key",
+      })
+      .mockResolvedValue({
+        stopReason: "stop",
+        content: [{ type: "text", text: "ok" }],
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      });
+    const provider = new OpenAIProvider(makeConfig());
+    const cachedRequest: LLMRequest = {
+      ...makeRequest(),
+      promptCache: {
+        mode: "openai_key",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+        cacheKey: "unsupported-session",
+      },
+    };
+
+    await provider.createMessage(cachedRequest);
+    await provider.createMessage(cachedRequest);
+
+    expect(completeMock).toHaveBeenCalledTimes(3);
+    const secondTurnOptions = completeMock.mock.calls[2]?.[2] as Any;
+    expect(secondTurnOptions.cacheRetention).toBe("none");
+    expect(secondTurnOptions.sessionId).toBeUndefined();
+    expect(secondTurnOptions.onPayload).toBeUndefined();
+  });
+
+  it("includes turn-only context once when cache prefix splitting is enabled", async () => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    });
+    const provider = new OpenAIProvider(makeConfig());
+    await provider.createMessage({
+      ...makeRequest(),
+      system: "Current turn context",
+      systemBlocks: [{ text: "Current turn context", scope: "turn", cacheable: false }],
+      promptCache: {
+        mode: "openai_key",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+        cacheKey: "turn-only",
+      },
+    });
+    const context = completeMock.mock.calls.at(-1)?.[1];
+    expect(context.systemPrompt).toBeUndefined();
+    expect(JSON.stringify(context.messages).match(/Current turn context/g)).toHaveLength(1);
   });
 
   it("injects modern cache-write options into the subscription transport payload", async () => {
@@ -850,14 +977,16 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
-  it("includes GPT-6 Astra and all GPT-5.6 variants in the ChatGPT subscription model catalog", async () => {
+  it("includes GPT-6 and GPT-5.6 variants in the ChatGPT subscription model catalog", async () => {
     getModelsMock.mockReturnValue([{ id: "gpt-5.5", name: "GPT-5.5" }]);
     const provider = new OpenAIProvider(makeConfig());
 
     const models = await provider.getAvailableModels();
 
-    expect(models.slice(0, 4).map((model) => model.id)).toEqual([
+    expect(models.slice(0, 6).map((model) => model.id)).toEqual([
       "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",

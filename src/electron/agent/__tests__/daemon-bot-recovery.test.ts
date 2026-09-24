@@ -122,6 +122,99 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     );
   });
 
+  it("branches a built-in bot transcript into a temporary workspace without moving its source or team", async () => {
+    const [repositories, botTeam] = await Promise.all([
+      import("../../database/repositories"),
+      import("../../agents/bot-team"),
+    ]);
+    const sourceWorkspace = new repositories.WorkspaceRepository(manager.getDatabase()).create(
+      "Source workspace",
+      `${tempDir}/source`,
+      { read: true, write: true, delete: true, network: true, shell: false },
+    );
+    const targetWorkspaceId = "__temp_workspace__:bot-recovery-target";
+    const now = Date.now();
+    manager
+      .getDatabase()
+      .prepare(
+        "INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        targetWorkspaceId,
+        "Temporary workspace",
+        `${tempDir}/target`,
+        now,
+        now,
+        JSON.stringify({ read: true, write: true, delete: true, network: true, shell: false }),
+      );
+    const sourceTeam = botTeam.ensureDefaultBotTeam(manager.getDatabase(), sourceWorkspace.id)!;
+    const targetTeam = botTeam.ensureDefaultBotTeam(manager.getDatabase(), targetWorkspaceId)!;
+    const role = sourceTeam.roles.find((candidate) => candidate.name === "scribe")!;
+    const taskRepo = new repositories.TaskRepository(manager.getDatabase());
+    const source = taskRepo.create({
+      title: role.displayName,
+      prompt: "Source transcript",
+      status: "completed",
+      workspaceId: sourceWorkspace.id,
+      assignedAgentRoleId: role.id,
+      agentConfig: { botConversation: true, botTeamId: sourceTeam.team.id },
+    });
+    const daemonLike = {
+      dbManager: manager,
+      taskRepo,
+      createTask: async (params: Any) =>
+        taskRepo.create({
+          title: params.title,
+          prompt: params.prompt,
+          status: "pending",
+          workspaceId: params.workspaceId,
+          assignedAgentRoleId: params.taskOverrides?.assignedAgentRoleId,
+          branchFromTaskId: params.taskOverrides?.branchFromTaskId,
+          branchLabel: params.taskOverrides?.branchLabel,
+          agentConfig: params.agentConfig,
+        }),
+      logEvent: vi.fn(),
+    } as Any;
+
+    const branch = await AgentDaemon.prototype.reopenBotConversation.call(daemonLike, {
+      workspaceId: targetWorkspaceId,
+      taskId: source.id,
+    });
+
+    expect(branch.id).not.toBe(source.id);
+    expect(branch.workspaceId).toBe(targetWorkspaceId);
+    expect(branch.branchFromTaskId).toBe(source.id);
+    expect(branch.agentConfig?.botTeamId).toBe(targetTeam.team.id);
+    expect(taskRepo.findById(source.id)?.workspaceId).toBe(sourceWorkspace.id);
+    expect(taskRepo.findById(source.id)?.agentConfig?.botTeamId).toBe(sourceTeam.team.id);
+
+    const customTeam = new (await import("../../agents/AgentTeamRepository")).AgentTeamRepository(
+      manager.getDatabase(),
+    ).create({
+      workspaceId: sourceWorkspace.id,
+      name: "Restricted team",
+      leadAgentRoleId: role.id,
+      maxParallelAgents: 1,
+      isActive: true,
+      persistent: true,
+    });
+    const restrictedSource = taskRepo.create({
+      title: role.displayName,
+      prompt: "Restricted transcript",
+      status: "completed",
+      workspaceId: sourceWorkspace.id,
+      assignedAgentRoleId: role.id,
+      agentConfig: { botConversation: true, botTeamId: customTeam.id },
+    });
+    await expect(
+      AgentDaemon.prototype.reopenBotConversation.call(daemonLike, {
+        workspaceId: targetWorkspaceId,
+        taskId: restrictedSource.id,
+        repairMembership: true,
+      }),
+    ).rejects.toThrow("BOT_WORKSPACE_CONFLICT");
+  });
+
   it("reports a missing reusable conversation without making the peer look available", async () => {
     const [repositories, botTeam] = await Promise.all([
       import("../../database/repositories"),

@@ -187,6 +187,20 @@ function writeLocalControlPlaneConnectionFile(settings: {
   }
 }
 
+/**
+ * The server may fall back to an OS-assigned loopback port, so every start path
+ * must record the bound port for CLI discovery (otherwise the CLI connects to
+ * whatever process holds the configured port).
+ */
+function writeLocalControlPlaneConnectionFileForServer(server: ControlPlaneServer): void {
+  const settings = ControlPlaneSettingsManager.loadSettings();
+  writeLocalControlPlaneConnectionFile({
+    host: settings.host,
+    port: server.getAddress()?.port ?? settings.port,
+    token: settings.token,
+  });
+}
+
 function toNodePlatform(platform?: string): "ios" | "android" | "macos" | "linux" | "windows" {
   switch (platform) {
     case "darwin":
@@ -2445,7 +2459,7 @@ export async function startControlPlaneFromSettings(
       const tailscale = getExposureStatus();
       writeLocalControlPlaneConnectionFile({
         host: settings.host,
-        port: settings.port,
+        port: addr?.port ?? settings.port,
         token: settings.token,
       });
       return {
@@ -2561,7 +2575,7 @@ export async function startControlPlaneFromSettings(
     if (address && settings.enabled) {
       writeLocalControlPlaneConnectionFile({
         host: settings.host,
-        port: settings.port,
+        port: address.port,
         token: settings.token,
       });
     }
@@ -4072,6 +4086,7 @@ export function setupControlPlaneHandlers(
 
           // Start with Tailscale if configured
           const tailscaleResult = await server.startWithTailscale();
+          writeLocalControlPlaneConnectionFileForServer(server);
 
           const address = server.getAddress();
 
@@ -4249,6 +4264,7 @@ export function setupControlPlaneHandlers(
           registerCanvasMethods(controlPlaneServer);
 
           await controlPlaneServer.startWithTailscale();
+          writeLocalControlPlaneConnectionFileForServer(controlPlaneServer);
         }
 
         const settings = ControlPlaneSettingsManager.loadSettings();
@@ -4328,6 +4344,7 @@ export function setupControlPlaneHandlers(
           registerCanvasMethods(controlPlaneServer);
 
           await controlPlaneServer.startWithTailscale();
+          writeLocalControlPlaneConnectionFileForServer(controlPlaneServer);
         }
 
         return { ok: true };

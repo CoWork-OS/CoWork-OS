@@ -121,6 +121,8 @@ function isOpenAIReasoningModel(modelId: string): boolean {
     .split("@", 1)[0];
   return (
     normalized === "gpt-6-astra" ||
+    normalized === "gpt-6-sol" ||
+    normalized === "gpt-6-luna" ||
     normalized.startsWith("gpt-5") ||
     normalized.startsWith("o1") ||
     normalized.startsWith("o3") ||
@@ -130,6 +132,7 @@ function isOpenAIReasoningModel(modelId: string): boolean {
 
 const OPENAI_OUTPUT_LIMITS: Array<{ pattern: RegExp; limit: number }> = [
   { pattern: /(?:^|[/:])gpt-6-astra(?:@|$)/i, limit: 128_000 },
+  { pattern: /(?:^|[/:])gpt-6-(?:sol|luna)(?:@|$)/i, limit: 128_000 },
 ];
 
 function inferOpenRouterRoutedFamily(

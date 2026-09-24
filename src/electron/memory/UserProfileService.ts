@@ -24,6 +24,7 @@ const EMPTY_PROFILE: UserProfile = {
 
 export class UserProfileService {
   private static inMemoryProfile: UserProfile = { ...EMPTY_PROFILE };
+  private static profileLoadFailed = false;
 
   static getProfile(): UserProfile {
     return this.load();
@@ -598,9 +599,25 @@ export class UserProfileService {
     if (SecureSettingsRepository.isInitialized()) {
       try {
         const repo = SecureSettingsRepository.getInstance();
-        profile = repo.load<UserProfile>("user-profile");
+        const result = repo.loadWithStatus<UserProfile>("user-profile", { logErrors: false });
+        if (result.status === "success") {
+          this.profileLoadFailed = false;
+          profile = result.data;
+        } else if (result.status === "not_found") {
+          this.profileLoadFailed = false;
+        } else {
+          this.profileLoadFailed = true;
+          console.warn(
+            `[UserProfileService] Could not read the saved profile (${result.status}); keeping the encrypted profile intact.`,
+          );
+          return this.inMemoryProfile;
+        }
       } catch {
-        // fallback to in-memory
+        this.profileLoadFailed = true;
+        console.warn(
+          "[UserProfileService] Could not read the saved profile; keeping the encrypted profile intact.",
+        );
+        return this.inMemoryProfile;
       }
     }
 
@@ -658,6 +675,12 @@ export class UserProfileService {
   }
 
   private static save(profile: UserProfile): void {
+    if (this.profileLoadFailed) {
+      throw new Error(
+        "The saved profile could not be decrypted, so CoWork OS kept it intact and did not save over it.",
+      );
+    }
+
     const normalized: UserProfile = {
       summary: profile.summary?.trim() || undefined,
       facts: this.sortFacts(profile.facts).slice(0, MAX_FACTS),

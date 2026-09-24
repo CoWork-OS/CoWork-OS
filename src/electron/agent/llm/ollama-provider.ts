@@ -141,7 +141,7 @@ export class OllamaProvider implements LLMProvider {
       });
       if (error.name === "AbortError") {
         if (abortedByExternalSignal) {
-          console.log(`[Ollama] Request aborted by user`);
+          console.log(`[Ollama] Request aborted by caller signal`);
           throw new Error("Request cancelled");
         }
         throw new Error(

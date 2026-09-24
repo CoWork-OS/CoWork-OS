@@ -781,7 +781,7 @@ export const OpenAISettingsSchema = z
   .object({
     apiKey: z.string().max(500).optional(),
     model: z.string().max(200).optional(),
-    reasoningEffort: z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
+    reasoningEffort: z.enum(["none", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
     textVerbosity: z.enum(["low", "medium", "high"]).optional(),
     // OAuth tokens (alternative to API key)
     accessToken: z.string().max(MAX_OAUTH_TOKEN_LENGTH).optional(),
@@ -801,7 +801,9 @@ export const AzureSettingsSchema = z
     deployment: z.string().max(200).optional(),
     deployments: z.array(z.string().max(200)).max(50).optional(),
     apiVersion: z.string().max(200).optional(),
-    reasoningEffort: z.enum(["low", "medium", "high", "extra_high"]).optional(),
+    reasoningEffort: z
+      .enum(["none", "low", "medium", "high", "xhigh", "max", "extra_high"])
+      .optional(),
     ...ProviderRoutingSettingsSchema,
   })
   .optional();

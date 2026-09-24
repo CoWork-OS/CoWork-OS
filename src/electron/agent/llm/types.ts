@@ -606,6 +606,16 @@ export const OPENAI_MODELS = {
     displayName: "GPT-6 Astra",
     description: "Flagship model for complex reasoning and coding",
   },
+  "gpt-6-sol": {
+    id: "gpt-6-sol",
+    displayName: "GPT-6 Sol",
+    description: "Complex coding and agentic workflows",
+  },
+  "gpt-6-luna": {
+    id: "gpt-6-luna",
+    displayName: "GPT-6 Luna",
+    description: "Efficient focused tasks",
+  },
   "gpt-4o": {
     id: "gpt-4o",
     displayName: "GPT-4o",

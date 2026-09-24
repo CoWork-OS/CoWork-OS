@@ -1207,6 +1207,10 @@ export class ToolRegistry {
     return this.shellTools.killProcess(force);
   }
 
+  async cancelShellSession(): Promise<void> {
+    await this.shellTools.cancelPersistentShellSession();
+  }
+
   private deriveChronicleDestinationHints(input: {
     appName?: string;
     windowTitle?: string;
@@ -6959,14 +6963,29 @@ ${skillDescriptions}`;
             filename: { type: "string", description: "Name of the Excel file (without extension)" },
             sheets: {
               type: "array",
-              description: "Array of sheets to create",
+              description: "Sheets use 2D data, or paired headers and rows arrays",
               items: {
                 type: "object",
                 properties: {
                   name: { type: "string", description: "Sheet name" },
                   data: {
                     type: "array",
-                    description: "2D array of cell values (rows of columns)",
+                    description:
+                      "Optional 2D array of cell values (rows of columns); include the header row as row 1",
+                    items: {
+                      type: "array",
+                      description: "Row of cell values",
+                      items: { type: "string", description: "Cell value" },
+                    },
+                  },
+                  headers: {
+                    type: "array",
+                    description: "Optional column headers when using the headers/rows shape",
+                    items: { type: "string", description: "Column header" },
+                  },
+                  rows: {
+                    type: "array",
+                    description: "Optional data rows paired with headers",
                     items: {
                       type: "array",
                       description: "Row of cell values",
@@ -11909,15 +11928,16 @@ ${skillDescriptions}`;
       botPeerRoleId = recipient?.assignedAgentRoleId;
       botPeerTeamId = recipient?.agentConfig?.botTeamId;
     }
-    const taskEvents =
-      botPeerConversation && typeof this.daemon.getTaskEvents === "function"
-        ? // The canonical work-session projection can expose an inbound
-          // message as a `timeline_step_updated` event with
-          // `legacyType: "user_message"`. Ask for the recent compatibility
-          // stream without a type predicate so both legacy and canonical
-          // readers participate in reply correlation.
-          this.daemon.getTaskEvents(this.taskId, { limit: 200 }) || []
-        : [];
+    const taskEvents = botPeerConversation
+      ? typeof this.daemon.getDurableTaskEvents === "function"
+        ? [
+            ...this.daemon.getDurableTaskEvents(this.taskId, "user_message"),
+            ...this.daemon.getDurableTaskEvents(this.taskId, "agent_message"),
+          ]
+        : typeof this.daemon.getTaskEvents === "function"
+          ? this.daemon.getTaskEvents(this.taskId, { limit: 200 }) || []
+          : []
+      : [];
     const orderedTaskEvents = taskEvents.slice().sort(compareBotHandoffEventOrder);
     const latestInboundEvent = botPeerConversation
       ? orderedTaskEvents
@@ -11957,6 +11977,7 @@ ${skillDescriptions}`;
       !hasNewHumanMessageAfterLatestInbound && typeof latestInbound?.senderTaskId === "string"
         ? latestInbound.senderTaskId.trim()
         : "";
+    const isCorrelatedReply = Boolean(inReplyToMessageId && inReplyToTaskId);
     const correlatedReplyMessageId =
       typeof latestInbound?.inReplyToMessageId === "string"
         ? latestInbound.inReplyToMessageId.trim()
@@ -11973,7 +11994,7 @@ ${skillDescriptions}`;
       taskEvents.some((event) => {
         const payload = event.payload as Record<string, unknown> | undefined;
         return (
-          payload?.messageSource === "agent" &&
+          (payload?.senderType === "agent" || payload?.messageSource === "agent") &&
           payload?.deliveryMode === "message" &&
           payload?.senderTaskId === this.taskId &&
           payload?.targetTaskId === resolved.taskId &&
@@ -12050,7 +12071,7 @@ ${skillDescriptions}`;
         ...(botPeerTeamId ? { botTeamId: botPeerTeamId } : {}),
         ...(inReplyToMessageId ? { inReplyToMessageId } : {}),
         ...(inReplyToTaskId ? { inReplyToTaskId } : {}),
-        ...(botPeerConversation ? { replyStatus: "pending" } : {}),
+        ...(botPeerConversation && !isCorrelatedReply ? { replyStatus: "pending" } : {}),
         duplicate: result.duplicate === true,
       });
       // The recipient can consume a queue receipt before this sender-side

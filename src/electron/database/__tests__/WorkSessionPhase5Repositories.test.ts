@@ -73,16 +73,19 @@ describeWithSqlite("WorkSession Phase 5 repositories", () => {
 
   it("reduces only the suffix after the cursor and compares to a full rebuild", () => {
     const { session, turn } = createSession();
-    for (let index = 0; index < 10_000; index += 1) {
-      protocol.appendItem({
-        sessionId: session.id,
-        turnId: turn.id,
-        kind: "status",
-        actor: "agent",
-        payload: { index },
-        idempotencyKey: `phase5-item-${index}`,
-      });
-    }
+    // Keep the realistic append path, but avoid committing the fixture once per item.
+    db.transaction(() => {
+      for (let index = 0; index < 10_000; index += 1) {
+        protocol.appendItem({
+          sessionId: session.id,
+          turnId: turn.id,
+          kind: "status",
+          actor: "agent",
+          payload: { index },
+          idempotencyKey: `phase5-item-${index}`,
+        });
+      }
+    })();
 
     expect(protocol.listItems(session.id)).toHaveLength(10_000);
     const allItems = protocol.listAllItems(session.id);

@@ -11292,7 +11292,24 @@
 
 .model-dropdown.align-right .model-dropdown-submenu {
   left: auto;
-  right: calc(100% + 8px);
+  right: 8px;
+}
+
+.model-dropdown-submenu-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.model-dropdown-submenu-back:hover {
+  color: var(--color-text);
 }
 
 .model-dropdown-submenu-header {
@@ -13205,15 +13222,6 @@
   flex-shrink: 0;
 }
 
-.permission-access-constraint {
-  max-width: 340px;
-  margin: -1px 6px 3px;
-  color: var(--color-text-muted);
-  font-size: 10px;
-  line-height: 1.25;
-  text-align: left;
-}
-
 .cli-input-container .attachment-btn,
 .cli-input-container .permission-access-btn,
 .cli-input-container .model-selector,
@@ -13339,7 +13347,6 @@
   flex: 1 1 auto;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
 }
 
 .permission-access-option .permission-access-option-title {
@@ -13347,14 +13354,6 @@
   color: inherit;
   font-size: 13px;
   line-height: 1.2;
-}
-
-.permission-access-option .permission-access-option-description {
-  flex: 0 0 auto;
-  color: var(--color-text-muted);
-  font-size: 11px;
-  line-height: 1.3;
-  white-space: normal;
 }
 
 .permission-access-option:hover,

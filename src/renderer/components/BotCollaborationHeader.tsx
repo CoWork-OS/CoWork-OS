@@ -11,17 +11,22 @@ import {
   XCircle,
 } from "lucide-react";
 import type { Task, TaskEvent } from "../../shared/types";
+// Keep non-component exports in the helper module so this view can Fast Refresh.
 import {
   deriveBotConversationProjection,
   type BotConversationProjection,
   type BotConversationState,
 } from "../../shared/bot-lifecycle";
-import { isBotHandoffMessageDelivered } from "../../shared/bot-handoff";
 import { BotGlyph } from "./BotGlyph";
+import {
+  formatHandoffReplyState,
+  normalizeCollaboratorLabel,
+  resolveCollaboratorConversationIds,
+} from "./BotCollaborationHeader.helpers";
 import "./BotCollaborationHeader.css";
 
 export interface BotCollaborationHeaderProps {
-  task: Pick<Task, "status" | "error" | "resultSummary">;
+  task: Pick<Task, "status" | "error" | "resultSummary" | "terminalStatus">;
   botName: string;
   events?: TaskEvent[];
   childEvents?: TaskEvent[];
@@ -36,57 +41,14 @@ export interface BotCollaborationHeaderProps {
 function StateIcon({ state }: { state: BotConversationState }) {
   if (state === "working") return <LoaderCircle size={15} className="bot-collaboration-spin" />;
   if (state === "waiting") return <Clock3 size={15} />;
-  if (state === "needs_input") return <AlertTriangle size={15} />;
+  if (state === "needs_input" || state === "partial") return <AlertTriangle size={15} />;
   if (state === "completed") return <CheckCircle2 size={15} />;
   if (state === "failed") return <XCircle size={15} />;
   return <CircleDashed size={15} />;
 }
 
-function formatHandoffState(state: string): string {
-  switch (state) {
-    case "queued":
-      return "Queued";
-    case "delivered":
-      return "Delivered";
-    case "started":
-      return "Started";
-    case "failed":
-      return "Failed";
-    case "quarantined":
-      return "Quarantined";
-    case "accepted":
-      return "Accepted";
-    default:
-      return state;
-  }
-}
-
-export function formatHandoffReplyState(handoff: {
-  state: string;
-  replyState?: "pending" | "received" | "timed_out";
-}): string {
-  // A receiver-side durable reply is stronger evidence than the sender's
-  // possibly stale delivery projection. During the queue/delivery race the
-  // handoff can still read queued or started even though the teammate has
-  // already replied; never hide that result behind the older state.
-  if (handoff.replyState === "received") {
-    return "Reply received";
-  }
-  if (handoff.state === "delivered" && handoff.replyState === "pending") {
-    return "Waiting for reply";
-  }
-  if (handoff.replyState === "timed_out") {
-    return "No reply — partial result";
-  }
-  return formatHandoffState(handoff.state);
-}
-
 function formatHandoffDirection(sender: string, recipient: string): string {
   return `${sender} → ${recipient}`;
-}
-
-function normalizeCollaboratorLabel(value: string): string {
-  return value.trim().toLocaleLowerCase();
 }
 
 function withoutCurrentBotCollaborator(
@@ -130,50 +92,11 @@ export function BotCollaborationHeader({
     botName,
   );
   const collaboratorConversationIds = useMemo(() => {
-    const ids = new Map<string, string>();
-    const knownConversationIds = new Set(botConversations.map((conversation) => conversation.id));
-    for (const conversation of botConversations) {
-      const label = normalizeCollaboratorLabel(conversation.title || "");
-      if (label && !ids.has(label)) ids.set(label, conversation.id);
-    }
-    for (const handoff of projection.handoffs) {
-      const targetTaskId = handoff.targetTaskId;
-      const label = normalizeCollaboratorLabel(handoff.recipientLabel);
-      if (targetTaskId && knownConversationIds.has(targetTaskId) && label && !ids.has(label)) {
-        ids.set(label, targetTaskId);
-      }
-    }
-    for (const event of events) {
-      const eventType = event.legacyType || event.type;
-      if (eventType !== "user_message") continue;
-      const payload = event.payload as Record<string, unknown>;
-      if (
-        payload.messageSource !== "agent" ||
-        payload.deliveryMode !== "message" ||
-        !isBotHandoffMessageDelivered(payload)
-      ) {
-        continue;
-      }
-      const senderTaskId =
-        typeof payload.senderTaskId === "string"
-          ? payload.senderTaskId.trim()
-          : typeof payload.sender_task_id === "string"
-            ? payload.sender_task_id.trim()
-            : "";
-      const senderLabel =
-        typeof payload.senderLabel === "string"
-          ? normalizeCollaboratorLabel(payload.senderLabel)
-          : "";
-      if (
-        senderTaskId &&
-        knownConversationIds.has(senderTaskId) &&
-        senderLabel &&
-        !ids.has(senderLabel)
-      ) {
-        ids.set(senderLabel, senderTaskId);
-      }
-    }
-    return ids;
+    return resolveCollaboratorConversationIds({
+      conversations: botConversations,
+      events,
+      handoffs: projection.handoffs,
+    });
   }, [botConversations, events, projection.handoffs]);
   const handoffCount = projection.handoffs.length;
   const hasDetails = handoffCount > 0 || projection.collaborators.length > 0 || projection.outcome;

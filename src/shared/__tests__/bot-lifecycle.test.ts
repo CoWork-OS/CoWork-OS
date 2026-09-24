@@ -25,6 +25,109 @@ const baseTask: Pick<Task, "status" | "error" | "resultSummary"> = {
 };
 
 describe("deriveBotConversationProjection", () => {
+  it("finishes a delivered correlated reply instead of waiting for another teammate response", () => {
+    const projection = deriveBotConversationProjection({
+      task: {
+        id: "scribe-task",
+        status: "completed",
+        resultSummary: "Package metadata sent to the coordinator.",
+      },
+      botName: "Scribe",
+      events: [
+        {
+          ...makeEvent(
+            "incoming-request",
+            "user_message",
+            {
+              messageId: "request-1",
+              messageSource: "agent",
+              deliveryMode: "message",
+              deliveryStatus: "delivered",
+              senderTaskId: "coordinator-task",
+              senderLabel: "Coordinator",
+              message: "Read package.json and reply.",
+            },
+            1_000,
+          ),
+          taskId: "scribe-task",
+        },
+        {
+          ...makeEvent(
+            "outgoing-reply",
+            "agent_message",
+            {
+              messageId: "reply-1",
+              senderType: "agent",
+              senderTaskId: "scribe-task",
+              senderLabel: "Scribe",
+              recipientLabel: "Coordinator",
+              targetTaskId: "coordinator-task",
+              deliveryMode: "message",
+              deliveryStatus: "delivered",
+              replyStatus: "pending",
+              inReplyToMessageId: "request-1",
+              inReplyToTaskId: "coordinator-task",
+              message: "cowork-os@0.5.54",
+            },
+            2_000,
+          ),
+          taskId: "scribe-task",
+        },
+      ],
+    });
+
+    expect(projection.state).toBe("completed");
+    expect(projection.stateLabel).toBe("Finished");
+    expect(projection.activityLabel).toBe("Reply delivered to Coordinator");
+    expect(projection.handoffs[0]).toMatchObject({ isReply: true, replyState: "pending" });
+    expect(projection.attention).toBeNull();
+    expect(projection.outcome).toEqual({
+      state: "completed",
+      summary: "Package metadata sent to the coordinator.",
+    });
+  });
+
+  it("preserves a partial terminal outcome even with an unanswered handoff", () => {
+    const projection = deriveBotConversationProjection({
+      task: {
+        status: "completed",
+        terminalStatus: "partial_success",
+        resultSummary: "Unverified output saved.",
+      },
+      events: [
+        {
+          id: "handoff",
+          schemaVersion: 2,
+          taskId: "bot",
+          timestamp: 1,
+          type: "agent_message",
+          payload: {
+            messageId: "pending",
+            deliveryStatus: "delivered",
+            replyStatus: "pending",
+            recipientLabel: "Forge",
+          },
+        },
+      ],
+    });
+    expect(projection.state).toBe("partial");
+    expect(projection.stateLabel).toBe("Partial result");
+    expect(projection.outcome).toEqual({ state: "partial", summary: "Unverified output saved." });
+    expect(projection.activityLabel).not.toContain("ready");
+  });
+
+  it("does not carry the previous partial outcome into an active follow-up", () => {
+    expect(
+      deriveBotConversationProjection({
+        task: {
+          status: "executing",
+          terminalStatus: "partial_success",
+          resultSummary: "Old result",
+        },
+      }).state,
+    ).toBe("working");
+  });
+
   it("keeps a dormant pending bot ready instead of showing a phantom run", () => {
     const projection = deriveBotConversationProjection({
       task: { status: "pending", error: null, resultSummary: undefined },

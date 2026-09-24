@@ -546,14 +546,19 @@ function getAllElectronWindows(): Any[] {
   return [];
 }
 
-function readDurableTaskEvents(host: Any, taskId: string, type: string): TaskEvent[] {
+function readDurableTaskEvents(
+  host: Any,
+  taskId: string,
+  type: string,
+  limit?: number,
+): TaskEvent[] {
   const repository = host?.eventRepo;
   if (typeof repository?.findByTaskIdAndTypes === "function") {
-    return repository.findByTaskIdAndTypes(taskId, [type]);
+    return repository.findByTaskIdAndTypes(taskId, [type], limit);
   }
   const getTaskEvents = host?.getTaskEvents;
   if (typeof getTaskEvents === "function") {
-    const events = getTaskEvents.call(host, taskId, { types: [type] });
+    const events = getTaskEvents.call(host, taskId, { types: [type], limit });
     return Array.isArray(events) ? events : [];
   }
   return [];
@@ -639,6 +644,7 @@ export class AgentDaemon extends EventEmitter {
   > = new Map();
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private maintenanceIntervalHandle?: ReturnType<typeof setInterval>;
+  private botHandoffTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private queueManager: TaskQueueManager;
   // Activity throttle: Map<taskId:eventType, lastTimestamp>
   private activityThrottle: Map<string, number> = new Map();
@@ -1918,6 +1924,7 @@ export class AgentDaemon extends EventEmitter {
     // This is deliberately limited to persistent bot conversations; ordinary
     // user follow-ups retain their existing resume semantics.
     this.recoverQueuedBotMessagesOnStartup();
+    this.rehydrateBotHandoffTimeoutsOnStartup();
 
     // Resume all resumable tasks after a short delay to let the rest of the app
     // (IPC handlers, tray, cron, UI) finish initializing first.
@@ -4181,11 +4188,6 @@ export class AgentDaemon extends EventEmitter {
     if (params.taskId && !oldTask) {
       throw new Error("BOT_CONVERSATION_UNAVAILABLE: The bot conversation no longer exists.");
     }
-    if (oldTask && oldTask.workspaceId !== workspaceId) {
-      throw new Error(
-        "BOT_WORKSPACE_CONFLICT: The old bot conversation belongs to another workspace.",
-      );
-    }
     const roleId = params.agentRoleId?.trim() || oldTask?.assignedAgentRoleId?.trim() || "";
     const role = roleId
       ? new AgentRoleRepository(this.dbManager.getDatabase()).findById(roleId)
@@ -4199,12 +4201,32 @@ export class AgentDaemon extends EventEmitter {
     const memberRepo = new AgentTeamMemberRepository(db);
     const oldTeamId = oldTask?.agentConfig?.botTeamId;
     const oldTeam = typeof oldTeamId === "string" ? teamRepo.findById(oldTeamId) : undefined;
+    // A temporary UI workspace may continue a transcript from the reserved
+    // built-in team as a new branch. Never reassign the source task or borrow
+    // its team authorization from another workspace.
+    const canBranchBuiltInTeamToTemporaryWorkspace = Boolean(
+      oldTeam &&
+      oldTeam.name === DEFAULT_BOT_TEAM_NAME &&
+      oldTeam.isActive &&
+      oldTeam.persistent &&
+      oldTeam.workspaceId !== workspaceId &&
+      isTempWorkspaceId(workspaceId),
+    );
+    if (
+      oldTask &&
+      oldTask.workspaceId !== workspaceId &&
+      !canBranchBuiltInTeamToTemporaryWorkspace
+    ) {
+      throw new Error(
+        "BOT_WORKSPACE_CONFLICT: The old bot conversation belongs to another workspace.",
+      );
+    }
     let team =
       oldTeam && oldTeam.workspaceId === workspaceId && oldTeam.isActive && oldTeam.persistent
         ? oldTeam
         : undefined;
     if (!team) {
-      if (oldTeamId && !params.repairMembership) {
+      if (oldTeamId && !params.repairMembership && !canBranchBuiltInTeamToTemporaryWorkspace) {
         throw new Error(
           "BOT_TEAM_UNAVAILABLE: The old bot team is unavailable; repair the team before reopening.",
         );
@@ -5874,6 +5896,20 @@ export class AgentDaemon extends EventEmitter {
       }
       await cached.executor.resume();
       return true;
+    }
+    // A paused task survives a desktop restart, but its executor does not.
+    // Reconstruct it from the same durable checkpoint used for interrupted
+    // tasks so the recovery card's Resume action remains functional.
+    const task = this.taskRepo.findById(taskId);
+    if (task?.status === "paused" && !isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) {
+      this.taskRepo.update(taskId, { status: "interrupted" });
+      try {
+        await this.resumeInterruptedTask({ ...task, status: "interrupted" });
+        return true;
+      } catch (error) {
+        this.taskRepo.update(taskId, { status: "paused" });
+        throw error;
+      }
     }
     return false;
   }
@@ -7866,16 +7902,24 @@ export class AgentDaemon extends EventEmitter {
       stageSourceType && typeof (this as Any).taskRepo?.findById === "function"
         ? (this as Any).taskRepo.findById(taskId)
         : undefined;
-    const isTerminalLifecycleEvent =
-      type === "task_completed" ||
-      type === "task_cancelled" ||
-      (type === "task_status" &&
-        ["completed", "failed", "cancelled"].includes(String(payloadObj.status || "")));
+    const terminalLifecycleStatus =
+      type === "task_completed"
+        ? "completed"
+        : type === "task_cancelled"
+          ? "cancelled"
+          : type === "task_status" &&
+              (payloadObj.status === "completed" ||
+                payloadObj.status === "failed" ||
+                payloadObj.status === "cancelled")
+            ? payloadObj.status
+            : undefined;
     const suppressTerminalStageInference =
-      !isTerminalLifecycleEvent &&
-      isTerminalTaskStatus(
-        persistedTaskForStage ? deriveCanonicalTaskStatus(persistedTaskForStage) : undefined,
-      );
+      terminalLifecycleStatus === "failed" ||
+      terminalLifecycleStatus === "cancelled" ||
+      (!terminalLifecycleStatus &&
+        isTerminalTaskStatus(
+          persistedTaskForStage ? deriveCanonicalTaskStatus(persistedTaskForStage) : undefined,
+        ));
     if (stageSourceType && !suppressTerminalStageInference) {
       const inferredStage = inferTimelineStageForLegacyType(stageSourceType);
       if (inferredStage) {
@@ -7938,6 +7982,21 @@ export class AgentDaemon extends EventEmitter {
       legacyType,
       legacyPayload,
     });
+    // Terminal events also cover executor follow-ups, which bypass completeTask.
+    // Close the active stage before callers discard their in-memory timeline state.
+    const terminalStage = this.activeTimelineStageByTask.get(taskId);
+    if (terminalLifecycleStatus && terminalStage) {
+      this.activeTimelineStageByTask.delete(taskId);
+      const timeline = createTimelineEmitter(taskId, (eventType, payload) => {
+        this.logEvent(taskId, eventType, payload);
+      });
+      timeline.finishGroup(terminalStage, {
+        label: terminalStage,
+        actor: "system",
+        status: terminalLifecycleStatus,
+        message: `${terminalLifecycleStatus === "completed" ? "Completed" : terminalLifecycleStatus === "failed" ? "Failed" : "Cancelled"} ${terminalStage}`,
+      });
+    }
     // Keep the event bridge resilient when `logEvent` is exercised on a
     // lightweight daemon double (as in focused renderer/timeline tests). The
     // concrete daemon always has these methods, but the canonical event should
@@ -10133,6 +10192,11 @@ export class AgentDaemon extends EventEmitter {
     }
     this.taskRepo.update(taskId, { status });
     if (status === "completed" || status === "failed" || status === "cancelled") {
+      const cached = this.activeTasks.get(taskId);
+      if (cached) {
+        cached.status = "completed";
+        cached.lastAccessed = Date.now();
+      }
       this.clearTimelineTaskState(taskId);
       this.clearRetryState(taskId);
       if (this.teamOrchestrator && existing?.status !== status) {
@@ -11410,6 +11474,11 @@ export class AgentDaemon extends EventEmitter {
       updates.status === "cancelled"
     ) {
       this.clearRetryState(taskId);
+      const cached = this.activeTasks.get(taskId);
+      if (cached) {
+        cached.status = "completed";
+        cached.lastAccessed = Date.now();
+      }
       if (this.teamOrchestrator && existing?.status !== updates.status) {
         void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
       }
@@ -11605,7 +11674,6 @@ export class AgentDaemon extends EventEmitter {
       failureClass: undefined,
     });
     this.clearRetryState(taskId);
-    this.clearTimelineTaskState(taskId);
 
     const cached = this.activeTasks.get(taskId);
     if (cached) {
@@ -11624,6 +11692,8 @@ export class AgentDaemon extends EventEmitter {
     this.logEvent(taskId, "task_cancelled", {
       message,
     });
+
+    this.clearTimelineTaskState(taskId);
 
     if (this.teamOrchestrator && existing?.status !== "cancelled") {
       void this.teamOrchestrator.onTaskTerminal(taskId).catch(() => {});
@@ -11934,8 +12004,9 @@ export class AgentDaemon extends EventEmitter {
       );
     };
     const pieces = trimmed
-      .split(/(?<=[.!?])\s+/)
-      .map((piece) => piece.trim())
+      .split(/(?=^\s*(?:[-*+]|\d+[.)])\s+)/m)
+      .flatMap((piece) => piece.split(/(?<=[.!?])\s+/))
+      .map((piece) => normalizePiece(piece))
       .filter(Boolean);
     const comparativeSignalRe =
       /\b(less|greater|higher|lower|faster|slower|increase|decrease|median|percentile|best|worst|before|after)\b/i;
@@ -11955,6 +12026,7 @@ export class AgentDaemon extends EventEmitter {
     taskId: string,
     summary?: string,
     verificationEvidenceBundle?: TaskVerificationEvidenceBundle,
+    taskEvents?: TaskEvent[],
   ): {
     passed: boolean;
     keyClaims: string[];
@@ -11970,6 +12042,15 @@ export class AgentDaemon extends EventEmitter {
       verificationEvidenceBundle?.entries?.some((entry) => Boolean(entry?.ok)) ?? false;
     if (hasSuccessfulVerificationEvidence) return { passed: true, keyClaims };
 
+    const evidenceEvents =
+      taskEvents ??
+      (typeof this.getTaskEventsForReplay === "function"
+        ? this.getTaskEventsForReplay(taskId)
+        : []);
+    if (this.hasMatchingFileReadEvidenceForKeyClaims(keyClaims, evidenceEvents)) {
+      return { passed: true, keyClaims };
+    }
+
     const tokenEvidenceRe = /\[(?:evidence|source|cite):[^\]]+\]|\[[0-9]+\]|https?:\/\//i;
     const markdownLinkEvidenceRe = /\[[^\]]+\]\((?:https?:\/\/|\/)[^)]+\)/i;
     const labeledEvidenceLineRe =
@@ -11981,6 +12062,104 @@ export class AgentDaemon extends EventEmitter {
         labeledEvidenceLineRe.test(text),
       keyClaims,
     };
+  }
+
+  private hasMatchingFileReadEvidenceForKeyClaims(
+    keyClaims: string[],
+    events: TaskEvent[],
+  ): boolean {
+    if (keyClaims.length === 0 || events.length === 0) return false;
+
+    const asRecord = (value: unknown): Record<string, unknown> =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    const successfulReads: Array<{
+      path: string;
+      content: string;
+      size?: number;
+    }> = [];
+
+    for (const event of events) {
+      if (this.resolveLegacyEventType(event) !== "tool_result" || event.status === "failed") {
+        continue;
+      }
+
+      const payload = asRecord(event.payload);
+      const envelope = asRecord(payload.envelope);
+      const toolName =
+        (typeof envelope.toolName === "string" && envelope.toolName) ||
+        (typeof payload.tool === "string" && payload.tool) ||
+        "";
+      if (toolName !== "read_file") continue;
+      if (typeof envelope.status === "string" && envelope.status !== "success") continue;
+
+      const structuredData = asRecord(envelope.structuredData);
+      const result =
+        Object.keys(structuredData).length > 0 ? structuredData : asRecord(payload.result);
+      if (result.__coworkPayloadTruncated === true || typeof result.content !== "string") continue;
+
+      const window = asRecord(result.window);
+      const startsAtBeginning = typeof window.start !== "number" || window.start === 0;
+      const reachesEnd =
+        typeof window.end !== "number" ||
+        typeof window.total !== "number" ||
+        window.end >= window.total;
+      if (result.truncated === true || !startsAtBeginning || !reachesEnd) continue;
+
+      successfulReads.push({
+        path: typeof result.path === "string" ? result.path : "",
+        content: result.content,
+        size:
+          typeof result.size === "number" && Number.isFinite(result.size)
+            ? result.size
+            : typeof window.total === "number" && Number.isFinite(window.total)
+              ? window.total
+              : undefined,
+      });
+    }
+
+    if (successfulReads.length === 0) return false;
+
+    return keyClaims.every((claim) => {
+      const hasFileReference =
+        /\b(?:file|document|report|text|contents?|read[ -]?back)\b/i.test(claim) ||
+        /\bit\s+(?:contains?|includes?|is|was)\b/i.test(claim);
+      if (!hasFileReference) {
+        return false;
+      }
+
+      const byteMatch = claim.match(/\b([\d,]+)\s*bytes?\b/i);
+      const claimedByteCount = byteMatch ? Number(byteMatch[1].replace(/,/g, "")) : undefined;
+      const quotedValues = Array.from(
+        claim.matchAll(/`([^`]+)`|"([^"]+)"|'([^']+)'/g),
+        (match) => match[1] || match[2] || match[3] || "",
+      ).filter(Boolean);
+      if (claimedByteCount === undefined && quotedValues.length === 0) return false;
+
+      const exactContentClaim = /\bexactly\b/i.test(claim);
+      const contentHasOneTrailingNewline =
+        /\b(?:followed by|with|ending in|ends? in)\s+(?:exactly\s+)?(?:one|a single|a)\s+(?:trailing\s+)?newline\b/i.test(
+          claim,
+        );
+      return successfulReads.some((read) => {
+        const readPaths = [read.path, path.basename(read.path)].filter(Boolean);
+        const contentLiterals = quotedValues.filter(
+          (value) => !readPaths.some((readPath) => value.toLowerCase() === readPath.toLowerCase()),
+        );
+        if (
+          contentLiterals.some((literal) =>
+            exactContentClaim
+              ? read.content !== (contentHasOneTrailingNewline ? `${literal}\n` : literal)
+              : !read.content.includes(literal),
+          )
+        ) {
+          return false;
+        }
+        if (claimedByteCount !== undefined && read.size !== claimedByteCount) return false;
+        return contentLiterals.length > 0 || claimedByteCount !== undefined;
+      });
+    });
   }
 
   private async runPostCompletionVerification(
@@ -12881,6 +13060,7 @@ export class AgentDaemon extends EventEmitter {
       taskId,
       trimmedSummary,
       metadata?.verificationEvidenceBundle,
+      historicalEvents,
     );
     if (!evidenceCheck.passed) {
       this.timelineMetrics.evidenceGateFails += 1;
@@ -13191,18 +13371,6 @@ export class AgentDaemon extends EventEmitter {
       reviewGate: reviewDecision,
       telemetry: completionTelemetry,
     });
-
-    if (isCompletedOutcome && this.activeTimelineStageByTask.get(taskId) === "DELIVER") {
-      const timeline = createTimelineEmitter(taskId, (eventType, payload) => {
-        this.logEvent(taskId, eventType, payload);
-      });
-      timeline.finishGroup("DELIVER", {
-        label: "DELIVER",
-        actor: "system",
-        legacyType: "step_completed",
-      });
-      this.activeTimelineStageByTask.delete(taskId);
-    }
 
     if (quality) {
       this.logEvent(taskId, quality.passed ? "review_quality_passed" : "review_quality_failed", {
@@ -14267,8 +14435,8 @@ export class AgentDaemon extends EventEmitter {
    * messageId/deliveryStatus/sender fields that are intentionally not part of
    * the compact work-session message payload.
    */
-  private getDurableTaskEvents(taskId: string, type: string): TaskEvent[] {
-    return readDurableTaskEvents(this, taskId, type);
+  getDurableTaskEvents(taskId: string, type: string): TaskEvent[] {
+    return readDurableTaskEvents(this, taskId, type, 200);
   }
 
   private getQueuedAgentMessageDeliveryStatus(
@@ -14541,7 +14709,7 @@ export class AgentDaemon extends EventEmitter {
           this.markBotHandoffReplied(
             originalSenderTaskId,
             originalMessageId,
-            targetTaskId,
+            senderTaskId,
             senderTaskId,
             messageId,
           );
@@ -14616,6 +14784,7 @@ export class AgentDaemon extends EventEmitter {
       replyTimeoutReason: reason,
     } satisfies Record<string, unknown>;
     this.eventRepo.updatePayloadById(event.id, payload);
+    this.clearBotHandoffTimeout(event.taskId);
     // Keep this replay buffer consistent so multiple terminal teammates can be
     // expired in one completion pass without waiting for a second turn.
     event.payload = payload;
@@ -14625,6 +14794,119 @@ export class AgentDaemon extends EventEmitter {
       // Durable timeout state is authoritative when the renderer is offline.
     }
     return true;
+  }
+
+  private clearBotHandoffTimeout(taskId: string): void {
+    const handle = this.botHandoffTimeouts?.get(taskId);
+    if (!handle) return;
+    clearTimeout(handle);
+    this.botHandoffTimeouts.delete(taskId);
+  }
+
+  /**
+   * Age anchor for a pending handoff's reply deadline. A handoff still queued
+   * behind a busy teammate has not been delivered, so it has no anchor yet.
+   */
+  private getBotHandoffTimeoutAnchor(handoff: PendingBotHandoff): number | undefined {
+    return (
+      handoff.startedAt ??
+      handoff.deliveredAt ??
+      (handoff.deliveryStatus === "queued" ? undefined : (handoff.acceptedAt ?? handoff.queuedAt))
+    );
+  }
+
+  private scheduleBotHandoffTimeout(taskId: string, handoff: PendingBotHandoff): void {
+    this.botHandoffTimeouts ||= new Map();
+    this.clearBotHandoffTimeout(taskId);
+    // Unanchored (still queued) handoffs are re-checked later instead of expired.
+    const anchor = this.getBotHandoffTimeoutAnchor(handoff) ?? Date.now();
+    const delay = Math.max(
+      1,
+      Math.min(2_147_483_647, anchor + BOT_HANDOFF_REPLY_TIMEOUT_MS - Date.now()),
+    );
+    const handle = setTimeout(() => {
+      this.botHandoffTimeouts.delete(taskId);
+      this.expireBotHandoffWait(taskId, handoff.messageId);
+    }, delay);
+    if (typeof handle === "object" && "unref" in handle) handle.unref();
+    this.botHandoffTimeouts.set(taskId, handle);
+  }
+
+  private rehydrateBotHandoffTimeoutsOnStartup(): void {
+    const blockedTasks = this.taskRepo.findByStatus("blocked");
+    for (const task of blockedTasks) {
+      if (
+        task.agentConfig?.botConversation !== true ||
+        !/^Waiting for .+ to reply before finishing this conversation\.$/i.test(task.error || "")
+      ) {
+        continue;
+      }
+      const events = this.eventRepo.findByTaskId(task.id);
+      const handoff = getPendingBotHandoff(events, getCurrentBotHandoffScope(events));
+      if (handoff) {
+        this.scheduleBotHandoffTimeout(task.id, handoff);
+        continue;
+      }
+      // Older runtimes could persist a waiting task_status after the reply was
+      // incorporated or after its handoff fell outside the active turn. There
+      // is no durable pending handoff to wake, so stop advertising a wait.
+      const reason =
+        "No outstanding teammate reply is pending for this conversation. Review the prior result or retry.";
+      this.taskRepo.update(task.id, {
+        status: "blocked",
+        terminalStatus: "needs_user_action",
+        failureClass: "contract_error",
+        error: reason,
+      });
+      this.logEvent(task.id, "task_status", {
+        status: "blocked",
+        message: reason,
+        recovery: "stale_bot_handoff_wait",
+      });
+    }
+  }
+
+  private expireBotHandoffWait(taskId: string, expectedMessageId: string): void {
+    if (this.shutdownRequested) return;
+    const task = this.taskRepo.findById(taskId);
+    if (task?.status !== "blocked" || task.agentConfig?.botConversation !== true) return;
+    const events = this.eventRepo.findByTaskId(taskId);
+    const handoff = getPendingBotHandoff(events, getCurrentBotHandoffScope(events));
+    if (!handoff) return;
+    if (handoff.messageId !== expectedMessageId) {
+      // The awaited handoff changed (for example the latest one failed); keep a
+      // deadline on the one that is still pending.
+      this.scheduleBotHandoffTimeout(taskId, handoff);
+      return;
+    }
+    const anchor = this.getBotHandoffTimeoutAnchor(handoff);
+    if (typeof anchor !== "number" || Date.now() - anchor < BOT_HANDOFF_REPLY_TIMEOUT_MS) {
+      this.scheduleBotHandoffTimeout(taskId, handoff);
+      return;
+    }
+    const reason = `No correlated reply arrived from ${handoff.recipientLabel} within ${Math.round(BOT_HANDOFF_REPLY_TIMEOUT_MS / 1000)} seconds. Review the partial result or retry.`;
+    if (!this.markBotHandoffTimedOut(events, handoff, reason)) return;
+    this.taskRepo.update(taskId, {
+      status: "blocked",
+      terminalStatus: "needs_user_action",
+      failureClass: "contract_error",
+      error: reason,
+    });
+    this.logEvent(taskId, "log", {
+      metric: "bot_handoff_reply_timeout",
+      code: "BOT_HANDOFF_REPLY_TIMEOUT",
+      handoffMessageId: handoff.messageId,
+      recipientTaskId: handoff.recipientTaskId,
+      recipientLabel: handoff.recipientLabel,
+      reason,
+      partialResultAvailable: Boolean(task.resultSummary),
+    });
+    this.logEvent(taskId, "task_status", {
+      status: "blocked",
+      message: reason,
+      handoffMessageId: handoff.messageId,
+      recipientTaskId: handoff.recipientTaskId,
+    });
   }
 
   private reconcileBotHandoffBeforeCompletion(
@@ -14647,16 +14929,26 @@ export class AgentDaemon extends EventEmitter {
       const recipientIsTerminal =
         canInspectRecipient &&
         (!recipientTask || isTerminalTaskStatus(deriveCanonicalTaskStatus(recipientTask)));
-      const timeoutAnchor =
-        pendingHandoff.startedAt ??
-        pendingHandoff.deliveredAt ??
-        (pendingHandoff.deliveryStatus === "queued"
-          ? undefined
-          : (pendingHandoff.acceptedAt ?? pendingHandoff.queuedAt));
+      const timeoutAnchor = this.getBotHandoffTimeoutAnchor(pendingHandoff);
       const timedOutByAge =
         typeof timeoutAnchor === "number" &&
         Date.now() - timeoutAnchor >= BOT_HANDOFF_REPLY_TIMEOUT_MS;
       if (!recipientIsTerminal && !timedOutByAge) break;
+      // The recipient can finish before its queued correlated reply is
+      // consumed by this task. A terminal recipient is not proof of a missing
+      // reply while that durable delivery receipt is still in flight.
+      const pendingMessageId = pendingHandoff.messageId;
+      const correlatedReplyInFlight = historicalEvents.some((event) => {
+        if (event.type !== "user_message" && event.legacyType !== "user_message") return false;
+        const payload = event.payload as Record<string, unknown> | undefined;
+        return (
+          payload?.inReplyToMessageId === pendingMessageId &&
+          (payload.deliveryStatus === "accepted" ||
+            payload.deliveryStatus === "queued" ||
+            payload.deliveryStatus === "started")
+        );
+      });
+      if (recipientIsTerminal && correlatedReplyInFlight && !timedOutByAge) break;
 
       const reason = recipientIsTerminal
         ? `Recipient ${pendingHandoff.recipientLabel} is no longer active.`
@@ -14692,6 +14984,7 @@ export class AgentDaemon extends EventEmitter {
         recipientLabel: pendingHandoff.recipientLabel,
         deliveryStatus: pendingHandoff.deliveryStatus,
       });
+      this.scheduleBotHandoffTimeout(task.id, pendingHandoff);
       return { deferred: true, replySent: false };
     }
 
@@ -14866,6 +15159,7 @@ export class AgentDaemon extends EventEmitter {
       repliedAt,
     } satisfies Record<string, unknown>;
     this.eventRepo.updatePayloadById(event.id, payload);
+    this.clearBotHandoffTimeout(senderTaskId);
     try {
       this.emitTaskEvent({ ...event, payload });
     } catch {
@@ -15323,6 +15617,8 @@ export class AgentDaemon extends EventEmitter {
     // for a late dequeue; startTaskImmediate has its own admission guard.
     this.pendingRetries.forEach((handle) => clearTimeout(handle));
     this.pendingRetries.clear();
+    this.botHandoffTimeouts?.forEach((handle) => clearTimeout(handle));
+    this.botHandoffTimeouts?.clear();
 
     // A queue-manager callback may already be inside startTaskImmediate and
     // waiting on worktree/database setup. Let it either finish activation
@@ -15357,6 +15653,10 @@ export class AgentDaemon extends EventEmitter {
     // calling executor.cancel() which aborts in-flight requests.
     this.activeTasks.forEach((cached, taskId) => {
       if (cached.status !== "active") return;
+      const currentTask = this.taskRepo.findById(taskId);
+      // A retained executor may have completed a follow-up via a direct task
+      // update. Never turn a durable terminal result into a restart request.
+      if (currentTask && isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask))) return;
 
       // Best-effort snapshot save
       try {
@@ -15367,7 +15667,6 @@ export class AgentDaemon extends EventEmitter {
 
       // Mark as "interrupted" instead of "cancelled" so we can resume on restart
       try {
-        const currentTask = this.taskRepo.findById(taskId);
         const interruptedOutcome = decideTaskOutcome({
           requestedStatus: "interrupted",
           terminalStatus: "resume_available",

@@ -193,6 +193,254 @@ describe("AgentDaemon agent-message receipts", () => {
     expect(getPendingBotHandoff(handoffEvents)).toBeNull();
   });
 
+  it("rehydrates a blocked bot wait and makes an expired reply deadline actionable", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    try {
+      const task = {
+        id: "waiting-bot",
+        status: "blocked",
+        error: "Waiting for Atlas to reply before finishing this conversation.",
+        resultSummary: "Partial research",
+        agentConfig: { botConversation: true },
+      };
+      const handoff = makeEvent("stale-handoff", task.id, "agent_message", {
+        messageId: "stale-handoff",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "atlas-task",
+        recipientLabel: "Atlas",
+        acceptedAt: now - BOT_HANDOFF_REPLY_TIMEOUT_MS - 1,
+        deliveredAt: now - BOT_HANDOFF_REPLY_TIMEOUT_MS - 1,
+        replyStatus: "pending",
+      });
+      const update = vi.fn();
+      const updatePayloadById = vi.fn();
+      const daemonLike = {
+        taskRepo: {
+          findByStatus: vi.fn().mockReturnValue([task]),
+          findById: vi.fn().mockReturnValue(task),
+          update,
+        },
+        eventRepo: {
+          findByTaskId: vi.fn().mockReturnValue([handoff]),
+          updatePayloadById,
+        },
+        botHandoffTimeouts: new Map(),
+        logEvent: vi.fn(),
+        emitTaskEvent: vi.fn(),
+      } as Any;
+      Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+      (AgentDaemon.prototype as Any).rehydrateBotHandoffTimeoutsOnStartup.call(daemonLike);
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(updatePayloadById).toHaveBeenCalledWith(
+        handoff.id,
+        expect.objectContaining({ replyStatus: "timed_out" }),
+      );
+      expect(update).toHaveBeenCalledWith(
+        task.id,
+        expect.objectContaining({
+          status: "blocked",
+          terminalStatus: "needs_user_action",
+          error: expect.stringContaining("No correlated reply arrived from Atlas"),
+        }),
+      );
+      expect(daemonLike.logEvent).toHaveBeenCalledWith(
+        task.id,
+        "log",
+        expect.objectContaining({ metric: "bot_handoff_reply_timeout" }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("expires a new blocked handoff after its in-process reply deadline", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    try {
+      const task = {
+        id: "sender-bot",
+        status: "executing",
+        agentConfig: { botConversation: true },
+      } as Any;
+      const handoff = makeEvent("fresh-handoff", task.id, "agent_message", {
+        messageId: "fresh-handoff",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "receiver-bot",
+        recipientLabel: "Scribe",
+        acceptedAt: now,
+        deliveredAt: now,
+        replyStatus: "pending",
+      });
+      const updatePayloadById = vi.fn();
+      const daemonLike = {
+        taskRepo: {
+          findById: vi.fn((id: string) =>
+            id === task.id ? task : { id: "receiver-bot", status: "executing" },
+          ),
+          update: vi.fn((_id: string, patch: Any) => Object.assign(task, patch)),
+        },
+        eventRepo: { findByTaskId: vi.fn().mockReturnValue([handoff]), updatePayloadById },
+        botHandoffTimeouts: new Map(),
+        logEvent: vi.fn(),
+        emitTaskEvent: vi.fn(),
+      } as Any;
+      Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+      expect(
+        (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+          daemonLike,
+          task,
+          [handoff],
+          "Partial result",
+        ),
+      ).toEqual({ deferred: true, replySent: false });
+      await vi.advanceTimersByTimeAsync(BOT_HANDOFF_REPLY_TIMEOUT_MS - 1);
+      expect(updatePayloadById).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2);
+      expect(updatePayloadById).toHaveBeenCalledWith(
+        handoff.id,
+        expect.objectContaining({ replyStatus: "timed_out" }),
+      );
+      expect(task.terminalStatus).toBe("needs_user_action");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not expire a blocked wait after the correlated reply was delivered", () => {
+    const now = Date.now();
+    const task = {
+      id: "replied-bot",
+      status: "blocked",
+      error: "Waiting for Atlas to reply before finishing this conversation.",
+      agentConfig: { botConversation: true },
+    };
+    const events = [
+      makeEvent("answered-handoff", task.id, "agent_message", {
+        messageId: "answered-handoff",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "atlas-task",
+        recipientLabel: "Atlas",
+        acceptedAt: now - BOT_HANDOFF_REPLY_TIMEOUT_MS - 1,
+        replyStatus: "pending",
+      }),
+      makeEvent("reply", task.id, "user_message", {
+        messageId: "reply",
+        messageSource: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        deliveredAt: now,
+        senderTaskId: "atlas-task",
+        inReplyToMessageId: "answered-handoff",
+      }),
+    ];
+    const update = vi.fn();
+    const daemonLike = {
+      taskRepo: { findById: vi.fn().mockReturnValue(task), update },
+      eventRepo: { findByTaskId: vi.fn().mockReturnValue(events), updatePayloadById: vi.fn() },
+      logEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    (AgentDaemon.prototype as Any).expireBotHandoffWait.call(
+      daemonLike,
+      task.id,
+      "answered-handoff",
+    );
+
+    expect(update).not.toHaveBeenCalled();
+    expect(daemonLike.eventRepo.updatePayloadById).not.toHaveBeenCalled();
+  });
+
+  it("repairs a persisted waiting label when no handoff remains pending", () => {
+    const task = {
+      id: "stale-wait",
+      status: "blocked",
+      error: "Waiting for Atlas to reply before finishing this conversation.",
+      agentConfig: { botConversation: true },
+    };
+    const update = vi.fn();
+    const daemonLike = {
+      taskRepo: { findByStatus: vi.fn().mockReturnValue([task]), update },
+      eventRepo: { findByTaskId: vi.fn().mockReturnValue([]) },
+      logEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    (AgentDaemon.prototype as Any).rehydrateBotHandoffTimeoutsOnStartup.call(daemonLike);
+
+    expect(update).toHaveBeenCalledWith(
+      task.id,
+      expect.objectContaining({
+        status: "blocked",
+        terminalStatus: "needs_user_action",
+        error: expect.stringContaining("No outstanding teammate reply is pending"),
+      }),
+    );
+  });
+
+  it("waits for a queued correlated reply after the recipient becomes terminal", () => {
+    const update = vi.fn();
+    const updatePayloadById = vi.fn();
+    const handoffEvents = [
+      makeEvent("handoff-queued-reply", "atlas-task", "agent_message", {
+        messageId: "handoff-queued-reply",
+        senderType: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "delivered",
+        botTeamId: "team-1",
+        targetTaskId: "scribe-task",
+        recipientLabel: "Scribe",
+        acceptedAt: Date.now(),
+      }),
+      makeEvent("queued-reply", "atlas-task", "user_message", {
+        messageId: "queued-reply",
+        messageSource: "agent",
+        deliveryMode: "message",
+        deliveryStatus: "queued",
+        senderTaskId: "scribe-task",
+        inReplyToMessageId: "handoff-queued-reply",
+      }),
+    ];
+    const daemonLike = {
+      taskRepo: {
+        update,
+        findById: vi.fn().mockReturnValue({ id: "scribe-task", status: "completed" }),
+      },
+      eventRepo: { updatePayloadById },
+      logEvent: vi.fn(),
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+      daemonLike,
+      { id: "atlas-task", status: "executing", agentConfig: { botConversation: true } },
+      handoffEvents,
+      "Waiting for the delivered result",
+    );
+
+    expect(result).toEqual({ deferred: true, replySent: false });
+    expect(updatePayloadById).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(
+      "atlas-task",
+      expect.objectContaining({ status: "blocked", error: expect.stringContaining("Scribe") }),
+    );
+  });
+
   it("preserves a partial result after a live recipient exceeds the reply timeout", () => {
     const updatePayloadById = vi.fn();
     const emitTaskEvent = vi.fn();
@@ -844,11 +1092,11 @@ describe("AgentDaemon agent-message receipts", () => {
       deliveryStatus: "queued",
       senderTaskId: "scribe-task",
       inReplyToMessageId: "handoff-1",
-      inReplyToTaskId: "scribe-task",
+      inReplyToTaskId: "atlas-task",
     });
-    const originalHandoff = makeEvent("handoff-event", "scribe-task", "agent_message", {
+    const originalHandoff = makeEvent("handoff-event", "atlas-task", "agent_message", {
       messageId: "handoff-1",
-      targetTaskId: "atlas-task",
+      targetTaskId: "scribe-task",
       status: "delivered",
       deliveryStatus: "delivered",
       replyStatus: "pending",
@@ -859,7 +1107,7 @@ describe("AgentDaemon agent-message receipts", () => {
       status: "queued",
       deliveryStatus: "queued",
       inReplyToMessageId: "handoff-1",
-      inReplyToTaskId: "scribe-task",
+      inReplyToTaskId: "atlas-task",
     });
     const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
       if (eventId === targetReceipt.id) targetReceipt.payload = payload;
@@ -868,7 +1116,7 @@ describe("AgentDaemon agent-message receipts", () => {
     });
     const daemonLike = {
       getTaskEvents: vi.fn((taskId: string) =>
-        taskId === "atlas-task" ? [targetReceipt] : [originalHandoff, replyActivity],
+        taskId === "atlas-task" ? [targetReceipt, originalHandoff] : [replyActivity],
       ),
       eventRepo: { updatePayloadById },
       emitTaskEvent: vi.fn(),
@@ -903,18 +1151,18 @@ describe("AgentDaemon agent-message receipts", () => {
       deliveryStatus: "queued",
       senderTaskId: "scribe-task",
       inReplyToMessageId: "handoff-race",
-      inReplyToTaskId: "scribe-task",
+      inReplyToTaskId: "atlas-task",
     });
-    const originalHandoff = makeEvent("handoff-event-race", "scribe-task", "agent_message", {
+    const originalHandoff = makeEvent("handoff-event-race", "atlas-task", "agent_message", {
       messageId: "handoff-race",
-      targetTaskId: "atlas-task",
+      targetTaskId: "scribe-task",
       status: "delivered",
       deliveryStatus: "delivered",
       replyStatus: "pending",
     });
     const daemonLike = {
       getTaskEvents: vi.fn((taskId: string) =>
-        taskId === "atlas-task" ? [targetReceipt] : [originalHandoff],
+        taskId === "atlas-task" ? [targetReceipt, originalHandoff] : [],
       ),
       eventRepo: { updatePayloadById: vi.fn() },
       emitTaskEvent: vi.fn(),

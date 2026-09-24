@@ -259,6 +259,7 @@ export class HeartbeatService extends EventEmitter {
   private readonly pulseEngine = new HeartbeatPulseEngine();
   private readonly dispatchEngine: HeartbeatDispatchEngine;
   private started = false;
+  private stopping = false;
 
   constructor(private deps: HeartbeatServiceDeps) {
     super();
@@ -282,6 +283,7 @@ export class HeartbeatService extends EventEmitter {
 
   async start(): Promise<void> {
     if (this.started) return;
+    this.stopping = false;
     this.started = true;
     this.runRepo.reconcileInterruptedAgentRuns();
     this.reconcileLegacyMigratedRuns();
@@ -292,14 +294,19 @@ export class HeartbeatService extends EventEmitter {
 
   async stop(): Promise<void> {
     this.started = false;
+    this.stopping = true;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.pendingManualOverrides.clear();
+    // Pulses can still be awaiting dispatch or learning work. Keep storage alive
+    // until their completion bookkeeping has finished.
+    await Promise.allSettled(this.runningPromises.values());
     this.running.clear();
     this.runningPromises.clear();
-    this.pendingManualOverrides.clear();
   }
 
   async triggerHeartbeat(agentRoleId: string): Promise<HeartbeatResult> {
+    if (this.stopping) return this.stoppedResult(agentRoleId);
     const agent = this.deps.agentRoleRepo.findById(agentRoleId);
     if (!agent) {
       return {
@@ -327,6 +334,7 @@ export class HeartbeatService extends EventEmitter {
         await current;
       }
       await Promise.resolve();
+      if (this.stopping) return this.stoppedResult(agentRoleId);
       const replay = this.runningPromises.get(agentRoleId);
       if (replay) return replay;
       const refreshedAgent = this.deps.agentRoleRepo.findById(agentRoleId);
@@ -470,18 +478,36 @@ export class HeartbeatService extends EventEmitter {
     const nextHeartbeatAt = this.getNextHeartbeatTime(agent) || Date.now() + 30_000;
     const delay = Math.max(1_000, nextHeartbeatAt - Date.now());
     const timer = setTimeout(async () => {
-      const liveAgent = this.deps.agentRoleRepo.findById(agent.id);
-      if (liveAgent?.heartbeatPolicy?.enabled || liveAgent?.heartbeatEnabled) {
-        await this.executePulse(liveAgent, false);
-        const refreshed = this.deps.agentRoleRepo.findById(agent.id);
-        if (refreshed?.heartbeatPolicy?.enabled || refreshed?.heartbeatEnabled)
-          this.scheduleHeartbeat(refreshed);
+      if (!this.started) return;
+      try {
+        const liveAgent = this.deps.agentRoleRepo.findById(agent.id);
+        if (liveAgent?.heartbeatPolicy?.enabled || liveAgent?.heartbeatEnabled) {
+          await this.executePulse(liveAgent, false);
+          if (!this.started) return;
+          const refreshed = this.deps.agentRoleRepo.findById(agent.id);
+          if (refreshed?.heartbeatPolicy?.enabled || refreshed?.heartbeatEnabled)
+            this.scheduleHeartbeat(refreshed);
+        }
+      } catch (error) {
+        console.error("[HeartbeatService] Scheduled heartbeat failed:", error);
       }
     }, delay);
     this.timers.set(agent.id, timer);
   }
 
+  private stoppedResult(agentRoleId: string): HeartbeatResult {
+    return {
+      agentRoleId,
+      status: "error",
+      pendingMentions: 0,
+      assignedTasks: 0,
+      relevantActivities: 0,
+      error: "Heartbeat service is stopped",
+    };
+  }
+
   private async executePulse(agent: AgentRole, manualOverride: boolean): Promise<HeartbeatResult> {
+    if (this.stopping) return this.stoppedResult(agent.id);
     if (this.running.has(agent.id)) {
       return (
         this.runningPromises.get(agent.id) || {
@@ -1010,13 +1036,14 @@ export class HeartbeatService extends EventEmitter {
       } finally {
         this.running.delete(agent.id);
         this.runningPromises.delete(agent.id);
-        const refreshed = this.deps.agentRoleRepo.findById(agent.id);
+        const refreshed = this.stopping ? undefined : this.deps.agentRoleRepo.findById(agent.id);
         if (
           this.pendingManualOverrides.has(agent.id) &&
           (refreshed?.heartbeatPolicy?.enabled || refreshed?.heartbeatEnabled)
         ) {
           this.pendingManualOverrides.delete(agent.id);
           queueMicrotask(() => {
+            if (this.stopping) return;
             const replayAgent = this.deps.agentRoleRepo.findById(agent.id);
             if (replayAgent?.heartbeatPolicy?.enabled || replayAgent?.heartbeatEnabled) {
               void this.executePulse(replayAgent, true);

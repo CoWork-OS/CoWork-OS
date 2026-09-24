@@ -410,7 +410,7 @@ cowork-os/
 ├── package.json
 ├── tsconfig.json
 ├── tsconfig.electron.json
-├── vite.config.ts
+├── vite.config.mts
 ├── .gitignore
 ├── README.md
 ├── GETTING_STARTED.md

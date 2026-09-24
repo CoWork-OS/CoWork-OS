@@ -1,11 +1,244 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { CsvArithmeticVerifier } from "../csv-arithmetic-verifier";
 import { AcpxRuntimeUnavailableError } from "../AcpxRuntimeRunner";
 import { PlaybookService } from "../../memory/PlaybookService";
 import { SessionRecallService } from "../../memory/SessionRecallService";
 import type { Task, TaskBestKnownOutcome } from "../../../shared/types";
 
 describe("TaskExecutor entrypoint guards", () => {
+  it("catches saved CSV arithmetic through real mutation/read hooks and prevents clean completion", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.workspace = { path: "/workspace" };
+    executor.lastUserMessage = "Update the quantity and grand total, then verify the saved CSV.";
+    executor.fileOperationTracker = {
+      invalidateFileRead: vi.fn(),
+      invalidateDirectoryListing: vi.fn(),
+    };
+    executor.toolCallDeduplicator = { clearReadOnlyHistory: vi.fn() };
+    executor.recordWebEvidence = vi.fn();
+    executor.trackFileRead = vi.fn();
+    executor.summarizeToolResult = vi.fn();
+    executor.getSessionRuntime = () => ({ getTaskListState: () => ({ items: [] }) });
+    executor.recordFileOperation("edit_file", { path: "budget.csv" }, { success: true });
+    const csv =
+      "item,quantity,unit_cost,total\nBooks,12,8,96\nPosters,6,3.5,21\nRefreshments,8,2.25,18\nTOTAL,,,135.50\n";
+    executor.recordToolResult("read_file", { path: "budget.csv", content: csv, truncated: false });
+    expect(executor.getFinalOutcomeGuardError()).toContain("expected 135.00");
+    expect(executor.buildPreFinalizationReminder(undefined, Date.now())).toContain(
+      "expected 135.00",
+    );
+
+    executor.task = { id: "csv-followup", status: "executing" };
+    executor.applyRuntimeTaskProjectionToTask = () => ({});
+    executor.daemon = { updateTask: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.buildFollowUpResultSummary = () => "Updated and verified the budget.";
+    executor.finalizeFollowUpCompletion("Completed");
+    expect(executor.task.terminalStatus).toBe("partial_success");
+    expect(executor.task.resultSummary).toContain("expected 135.00");
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "csv-followup",
+      expect.objectContaining({
+        terminalStatus: "partial_success",
+        failureClass: "contract_error",
+      }),
+    );
+
+    executor.recordFileOperation("edit_file", { path: "budget.csv" }, { success: true });
+    executor.recordToolResult("read_file", {
+      path: "budget.csv",
+      content: csv.replace("135.50", "135.00"),
+      truncated: false,
+    });
+    expect(executor.csvArithmeticVerifier.getWarning()).toBeNull();
+    expect(executor.buildPreFinalizationReminder(undefined, Date.now())).toBe("");
+    executor.finalizeFollowUpCompletion("Corrected");
+    expect(executor.task.terminalStatus).toBeUndefined();
+    executor.csvArithmeticVerifier = undefined;
+    executor.lastUserMessage = "Copy the supplied CSV verbatim.";
+    executor.recordFileOperation("edit_file", { path: "budget.csv" }, { success: true });
+    expect(executor.csvArithmeticVerifier).toBeUndefined();
+  });
+
+  it("failed mutations and failed reads cannot establish or clear CSV verification", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.workspace = { path: "/workspace" };
+    executor.recordFileOperation("edit_file", { path: "budget.csv" }, { success: false });
+    expect(executor.csvArithmeticVerifier).toBeUndefined();
+    executor.csvArithmeticVerifier = new CsvArithmeticVerifier("/workspace");
+    executor.csvArithmeticVerifier.recordMutation("budget.csv");
+    executor.csvArithmeticVerifier.recordRead(
+      "budget.csv",
+      "item,quantity,unit_cost,total\na,1,1,2\n",
+      false,
+    );
+    executor.recordWebEvidence = vi.fn();
+    executor.trackFileRead = vi.fn();
+    executor.summarizeToolResult = vi.fn();
+    executor.recordToolResult("read_file", {
+      success: false,
+      path: "budget.csv",
+      content: "item,quantity,unit_cost,total\na,1,1,1\n",
+    });
+    expect(executor.csvArithmeticVerifier.getWarning()).toContain("expected 1.00");
+  });
+
+  it.each(["cancelled", "failed", "completed"])(
+    "completes a successful text-only follow-up after %s",
+    (previousStatus) => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.task = { id: "recovery" };
+      executor.daemon = { updateTaskStatus: vi.fn() };
+      executor.emitEvent = vi.fn();
+      executor.finalizeFollowUpCompletion = vi.fn();
+      executor.finalizeSuccessfulFollowUp(previousStatus);
+      expect(executor.finalizeFollowUpCompletion).toHaveBeenCalledWith("Completed via follow-up", {
+        clearTerminalFailure: true,
+      });
+      expect(executor.daemon.updateTaskStatus).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves a paused task after an informational follow-up", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "paused-task" };
+    executor.daemon = { updateTaskStatus: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.finalizeFollowUpCompletion = vi.fn();
+    executor.finalizeSuccessfulFollowUp("paused");
+    expect(executor.daemon.updateTaskStatus).toHaveBeenCalledWith("paused-task", "paused");
+    expect(executor.finalizeFollowUpCompletion).not.toHaveBeenCalled();
+  });
+
+  it("completes a blocked bot handoff after consuming its correlated reply", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "atlas-task",
+      agentConfig: { botConversation: true },
+      error: "Waiting for Scribe to reply before finishing this conversation.",
+    };
+    executor.daemon = { updateTaskStatus: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.finalizeFollowUpCompletion = vi.fn();
+
+    executor.finalizeSuccessfulFollowUp("blocked", 0, false, true);
+
+    expect(executor.finalizeFollowUpCompletion).toHaveBeenCalledWith("Completed via follow-up", {
+      clearTerminalFailure: true,
+    });
+    expect(executor.daemon.updateTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unrelated blocked status after a text-only follow-up", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "blocked-task",
+      agentConfig: { botConversation: true },
+      error: "Waiting for user approval.",
+    };
+    executor.daemon = { updateTaskStatus: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.finalizeFollowUpCompletion = vi.fn();
+
+    executor.finalizeSuccessfulFollowUp("blocked", 0, false, true);
+
+    expect(executor.daemon.updateTaskStatus).toHaveBeenCalledWith("blocked-task", "blocked");
+    expect(executor.finalizeFollowUpCompletion).not.toHaveBeenCalled();
+  });
+
+  it("keeps the verified bot reply tool through a narrow task-intent filter", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "scribe-task", agentConfig: { taskIntent: "advice" } };
+    executor.getEffectiveTaskDomain = () => "auto";
+    executor.getToolPolicyContext = () => ({ botMessagingAuthorized: true });
+    executor.hasMessagingChannelIntent = () => false;
+    executor.capToolCount = (tools: Any[]) => tools;
+    const tools = [{ name: "read_file" }, { name: "send_agent_message" }];
+
+    expect(executor.applyIntentFilter(tools).map((tool: Any) => tool.name)).toEqual([
+      "read_file",
+      "send_agent_message",
+    ]);
+
+    executor.getToolPolicyContext = () => ({ botMessagingAuthorized: false });
+    expect(executor.applyIntentFilter(tools).map((tool: Any) => tool.name)).toEqual(["read_file"]);
+  });
+
+  it("keeps verified bot messaging available for an inbound handoff without delegation keywords", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "scribe-task",
+      title: "Scribe",
+      prompt: "Write and edit content.",
+      agentConfig: { botConversation: true, taskIntent: "chat" },
+    };
+    executor.lastUserMessage = "Calculate 15 times 3.5 and give the short calculation.";
+    executor.hasTaskToolAllowlistConfigured = () => false;
+    executor.getToolPolicyContext = () => ({
+      botConversation: true,
+      botTeamId: "team-1",
+      botMessagingAuthorized: true,
+      executionMode: "execute",
+      taskDomain: "general",
+      taskIntent: "chat",
+    });
+    executor.emitEvent = vi.fn();
+    const tools = [{ name: "read_file" }, { name: "send_agent_message" }];
+
+    expect(
+      executor.applyAdaptiveToolAvailabilityFilter(tools).map((tool: Any) => tool.name),
+    ).toEqual(["read_file", "send_agent_message"]);
+
+    executor.getToolPolicyContext = () => ({
+      botConversation: true,
+      botTeamId: "team-1",
+      botMessagingAuthorized: false,
+      executionMode: "execute",
+      taskDomain: "general",
+      taskIntent: "chat",
+    });
+    expect(
+      executor.applyAdaptiveToolAvailabilityFilter(tools).map((tool: Any) => tool.name),
+    ).toEqual(["read_file"]);
+  });
+
+  it("does not complete a follow-up cancelled during execution", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.cancelled = true;
+    executor.finalizeFollowUpCompletion = vi.fn();
+    executor.finalizeSuccessfulFollowUp("completed", 2);
+    expect(executor.finalizeFollowUpCompletion).not.toHaveBeenCalled();
+  });
+
+  it("scopes inherited verification requirements to the current follow-up", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const oldItem = {
+      title: "Verify cancelled command",
+      kind: "verification",
+      status: "pending",
+      updatedAt: 100,
+    };
+    const state = {
+      items: [oldItem],
+      verificationNudgeNeeded: true,
+      nudgeReason: "Old checklist needs verification",
+    };
+    executor.getSessionRuntime = () => ({ getTaskListState: () => state });
+    executor.requiresTestRun = true;
+    executor.requiresExecutionToolRun = true;
+    executor.shouldEnforceVisualQARequirement = () => true;
+    expect(executor.buildPreFinalizationReminder(undefined, 200)).toBe("");
+    expect(state.items).toEqual([oldItem]);
+    expect(executor.buildPreFinalizationReminder()).toContain("Verify cancelled command");
+    expect(executor.buildPreFinalizationReminder()).toContain("real test run");
+    state.items.push({ ...oldItem, title: "Verify new output", updatedAt: 201 });
+    const reminder = executor.buildPreFinalizationReminder(undefined, 200);
+    expect(reminder).toContain("Verify new output");
+    expect(reminder).not.toContain("Verify cancelled command");
+    expect(reminder).not.toContain("real test run");
+  });
+
   it("serializes execute/sendMessage via lifecycle mutex wrappers", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     const runExclusive = vi.fn(async (fn: () => Promise<void>) => fn());
@@ -157,12 +390,14 @@ describe("TaskExecutor entrypoint guards", () => {
     executor.endDebugRuntimeSessionIfNeeded = vi.fn();
     executor.stopProgressJournal = vi.fn();
     executor.killShellProcess = vi.fn();
+    executor.toolRegistry = { cancelShellSession: vi.fn(async () => undefined) };
     executor.closeAcpxRuntimeSession = vi.fn(async () => undefined);
     executor.discardProvisionalBootstrapArtifacts = vi.fn();
     executor.sandboxRunner = { cleanup: vi.fn() };
 
     await (TaskExecutor.prototype as Any).cancel.call(executor, "user");
 
+    expect(executor.toolRegistry.cancelShellSession).toHaveBeenCalledTimes(1);
     expect(cancelRunner).toHaveBeenCalledTimes(1);
     expect(executor.getAcpxRuntimeRunner).not.toHaveBeenCalled();
     expect(executor.killShellProcess).toHaveBeenCalledWith(true);
@@ -345,6 +580,56 @@ describe("TaskExecutor entrypoint guards", () => {
     );
     expect(executor.disableExternalRuntimeForFallback).not.toHaveBeenCalled();
     expect(executor.sendMessageUnified).not.toHaveBeenCalled();
+  });
+
+  it("uses the refreshed workspace registry for execution and cancellation", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const oldExecute = vi.fn(async () => ({ result: { success: true } }));
+    const refreshedRegistry = {
+      executeToolWithRuntime: vi.fn(async () => ({ result: { success: true } })),
+      killShellProcess: vi.fn(() => true),
+    };
+    executor.toolExecutionCoordinator = { executeTool: oldExecute };
+    executor.buildToolRegistry = vi.fn(() => refreshedRegistry);
+    executor.reloadAgentPolicy = vi.fn();
+    executor.getSessionRuntime = vi.fn(() => ({
+      applyWorkspaceUpdate: vi.fn(),
+      setPermissionMode: vi.fn(),
+    }));
+    executor.getDefaultPermissionMode = vi.fn(() => "default");
+    executor.task = { id: "workspace-refresh" };
+    executor.abortController = new AbortController();
+    executor.getSchedulerSpecForTool = vi.fn(() => ({
+      concurrencyClass: "exclusive",
+      idempotent: false,
+    }));
+    executor.getToolPolicyContext = vi.fn(() => ({}));
+    executor.beginToolExecutionHeartbeat = vi.fn();
+    executor.emitEvent = vi.fn();
+    executor.updateWorkspace({ id: "workspace", permissions: { shell: true } });
+    await executor.executeToolWithHeartbeat("run_command", { command: "echo test" }, 1000);
+    executor.killShellProcess(true);
+    expect(oldExecute).not.toHaveBeenCalled();
+    expect(refreshedRegistry.executeToolWithRuntime).toHaveBeenCalledWith(
+      "run_command",
+      { command: "echo test" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(refreshedRegistry.killShellProcess).toHaveBeenCalledWith(true);
+  });
+
+  it("does not finalize cancelled follow-up work as completed", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.cancelled = true;
+    executor.task = { id: "cancelled-follow-up", status: "cancelled" };
+    executor.applyRuntimeTaskProjectionToTask = vi.fn();
+    executor.buildFollowUpResultSummary = vi.fn(() => "I will run the command");
+    executor.daemon = { updateTask: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.finalizeFollowUpCompletion("Follow-up completed (2 tool calls)");
+    expect(executor.task.status).toBe("cancelled");
+    expect(executor.daemon.updateTask).not.toHaveBeenCalled();
+    expect(executor.emitEvent).not.toHaveBeenCalled();
   });
 
   it("finalizeFollowUpCompletion syncs task row and in-memory task state", () => {

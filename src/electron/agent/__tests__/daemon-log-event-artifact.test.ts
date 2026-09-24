@@ -60,7 +60,7 @@ function createDaemonLike(taskOverrides: Record<string, unknown> = {}) {
 }
 
 describe("AgentDaemon.logEvent artifact normalization", () => {
-  it("persists a completion after re-entrant DELIVER stage events", () => {
+  it("persists completion in sequence and closes the DELIVER stage for follow-ups", () => {
     const daemonLike = createDaemonLike();
     daemonLike.activeTimelineStageByTask.set("task-1", "BUILD");
     daemonLike.transitionTimelineStage = (AgentDaemon.prototype as Any).transitionTimelineStage;
@@ -78,9 +78,58 @@ describe("AgentDaemon.logEvent artifact normalization", () => {
       "step_completed",
       "step_started",
       "task_completed",
+      "step_completed",
     ]);
-    expect(persistedEvents.map((event: Any) => event.seq)).toEqual([2, 3, 4]);
+    expect(persistedEvents.map((event: Any) => event.seq)).toEqual([2, 3, 4, 5]);
+    expect(persistedEvents.at(-1).payload).toMatchObject({
+      groupId: "stage:deliver",
+      status: "completed",
+    });
+    expect(daemonLike.activeTimelineStageByTask.has("task-1")).toBe(false);
   });
+
+  it("closes delivery when the follow-up has already persisted its completed status", () => {
+    const daemonLike = createDaemonLike({ status: "completed" });
+    daemonLike.activeTimelineStageByTask.set("task-1", "DELIVER");
+    AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "task_completed", {
+      message: "Follow-up completed (chat reply)",
+    });
+    expect(
+      daemonLike.persistTimelineEvent.mock.calls.map(([event]: [Any]) => event.payload.legacyType),
+    ).toEqual(["task_completed", "step_completed"]);
+    expect(daemonLike.activeTimelineStageByTask.has("task-1")).toBe(false);
+  });
+
+  it.each(["failed", "cancelled"])(
+    "closes the active stage on %s and ignores late tool events",
+    (status) => {
+      const daemonLike = createDaemonLike({ status });
+      daemonLike.activeTimelineStageByTask.set("task-1", "FIX");
+      AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "task_status", { status });
+      const events = daemonLike.persistTimelineEvent.mock.calls.map(([event]: [Any]) => event);
+      expect(events.at(-1)).toMatchObject({
+        type: "timeline_group_finished",
+        payload: {
+          groupId: "stage:fix",
+          status,
+          message: `${status === "failed" ? "Failed" : "Cancelled"} FIX`,
+        },
+      });
+      expect(daemonLike.activeTimelineStageByTask.has("task-1")).toBe(false);
+      AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "tool_error", {
+        tool: "run_command",
+      });
+      if (status === "cancelled") {
+        AgentDaemon.prototype.logEvent.call(daemonLike, "task-1", "task_cancelled", {});
+      }
+      expect(daemonLike.transitionTimelineStage).not.toHaveBeenCalled();
+      expect(
+        daemonLike.persistTimelineEvent.mock.calls.filter(
+          ([event]: [Any]) => event.type === "timeline_group_finished",
+        ),
+      ).toHaveLength(1);
+    },
+  );
 
   it("does not reopen a timeline stage for events that arrive after cancellation", () => {
     const daemonLike = createDaemonLike({

@@ -83,11 +83,40 @@ export class SkillTools {
    */
   async createSpreadsheet(input: {
     filename: string;
-    sheets: Array<{ name: string; data: Any[][] }>;
+    sheets: Array<{
+      name: string;
+      data?: Any[][];
+      headers?: Any[];
+      rows?: Any[][];
+    }>;
   }): Promise<{ success: boolean; path: string }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");
     }
+
+    if (!Array.isArray(input.sheets) || input.sheets.length === 0) {
+      throw new Error("At least one spreadsheet sheet is required.");
+    }
+
+    const sheets = input.sheets.map((sheet, index) => {
+      const name = typeof sheet?.name === "string" ? sheet.name.trim() : "";
+      if (!name) {
+        throw new Error(`Spreadsheet sheet ${index + 1} must have a name.`);
+      }
+
+      const data = Array.isArray(sheet.data)
+        ? sheet.data
+        : Array.isArray(sheet.headers) && Array.isArray(sheet.rows)
+          ? [sheet.headers, ...sheet.rows]
+          : undefined;
+      if (!data || data.some((row) => !Array.isArray(row))) {
+        throw new Error(
+          `Spreadsheet sheet "${name}" must provide a 2D "data" array or both "headers" and "rows" arrays.`,
+        );
+      }
+
+      return { name, data };
+    });
 
     const filename = input.filename.endsWith(".xlsx") ? input.filename : `${input.filename}.xlsx`;
 
@@ -97,12 +126,12 @@ export class SkillTools {
       "spreadsheet output",
     );
 
-    await this.spreadsheetBuilder.create(outputPath, input.sheets);
+    await this.spreadsheetBuilder.create(outputPath, sheets);
 
     this.daemon.logEvent(this.taskId, "file_created", {
       path: filename,
       type: "spreadsheet",
-      sheets: input.sheets.length,
+      sheets: sheets.length,
     });
 
     return {

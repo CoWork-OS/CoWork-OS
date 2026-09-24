@@ -55,6 +55,8 @@ beforeEach(() => {
   });
   memoryServiceMocks.searchAsync.mockReset().mockResolvedValue([]);
   memoryServiceMocks.searchWorkspaceMarkdown.mockReset().mockReturnValue([]);
+  memoryServiceMocks.searchAsync.mockReset().mockResolvedValue([]);
+  memoryServiceMocks.searchWorkspaceMarkdown.mockReset().mockReturnValue([]);
 });
 
 describe("SystemTools.normalizeAppleScript", () => {

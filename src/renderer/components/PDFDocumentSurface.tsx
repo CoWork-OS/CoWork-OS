@@ -87,9 +87,6 @@ export function PDFDocumentSurface({
         }
         cleanup = async () => {
           await loadingTask.destroy();
-          if (typeof document.destroy === "function") {
-            await document.destroy();
-          }
         };
 
         const nextPages: PdfPageRender[] = [];

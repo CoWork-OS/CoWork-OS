@@ -210,9 +210,6 @@ async function extractSelectionText(
     return groupTextLines(items);
   } finally {
     await loadingTask.destroy();
-    if (typeof document.destroy === "function") {
-      await document.destroy();
-    }
   }
 }
 

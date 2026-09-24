@@ -7,6 +7,7 @@ import {
   descriptionHasStrongWriteIntent,
   descriptionHasWriteIntent,
   extractArtifactPathCandidates,
+  isReadOnlyConstraintOnlyStep,
   isArtifactPathLikeToken,
   isLikelyCommandSnippet,
 } from "../step-contract";
@@ -123,5 +124,35 @@ describe("step-contract read-only intent", () => {
     expect(descriptionHasProtectiveConstraintIntent(description)).toBe(true);
     expect(descriptionHasReadOnlyIntent(description)).toBe(true);
     expect(descriptionHasWriteIntent(description)).toBe(true);
+  });
+
+  it("recognizes a standalone coordinated file-operation prohibition as a guardrail", () => {
+    const description =
+      "Do not create, modify, move, delete, or access any other file or directory.";
+
+    expect(descriptionHasProtectiveConstraintIntent(description)).toBe(true);
+    expect(isReadOnlyConstraintOnlyStep(description)).toBe(true);
+  });
+
+  it("keeps steps that pair a prohibition with real work", () => {
+    for (const description of [
+      "Do not modify any other files; update the version field in package.json.",
+      "Don't touch other files, just fix the failing test",
+      "Never delete files; append today's entry to notes.md",
+    ]) {
+      expect(isReadOnlyConstraintOnlyStep(description)).toBe(false);
+    }
+    expect(
+      descriptionHasProtectiveConstraintIntent(
+        "Summarize revenue by region from sales.csv; do not access the internet.",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps a positive deliverable step that also protects source files", () => {
+    const description =
+      "Do not modify the source CSV; create a separate summary report in the workspace.";
+
+    expect(isReadOnlyConstraintOnlyStep(description)).toBe(false);
   });
 });

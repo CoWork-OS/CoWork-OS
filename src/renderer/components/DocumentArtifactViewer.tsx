@@ -311,6 +311,7 @@ export function DocumentArtifactViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fileData, setFileData] = useState<ViewerData | null>(null);
+  const [showMarkdownSource, setShowMarkdownSource] = useState(false);
   const [copyMessage, setCopyMessage] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -345,6 +346,7 @@ export function DocumentArtifactViewer({
     setLoading(true);
     setError(null);
     setFileData(null);
+    setShowMarkdownSource(false);
     setCopyMessage("");
     setDirty(false);
     setEditorInitializedKey("");
@@ -580,6 +582,9 @@ export function DocumentArtifactViewer({
       );
     }
     if (isMarkdownDocument) {
+      if (showMarkdownSource) {
+        return <pre className="document-viewer-text">{preview.text || ""}</pre>;
+      }
       return (
         <div className="document-viewer-markdown markdown-content">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview.text || ""}</ReactMarkdown>
@@ -744,6 +749,18 @@ export function DocumentArtifactViewer({
         ) : (
           <>
             <div className="document-viewer-format">{formatLabel}</div>
+            {isMarkdownDocument && (
+              <button
+                type="button"
+                className="document-viewer-tool-btn"
+                onClick={() => setShowMarkdownSource((current) => !current)}
+                aria-label={showMarkdownSource ? "Show rendered Markdown" : "Show Markdown source"}
+                aria-pressed={showMarkdownSource}
+                title={showMarkdownSource ? "Show rendered Markdown" : "Show Markdown source"}
+              >
+                {showMarkdownSource ? "Preview" : "Source"}
+              </button>
+            )}
             <button
               type="button"
               className="document-viewer-tool-btn"

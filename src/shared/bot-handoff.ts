@@ -227,6 +227,9 @@ function getBotHandoffReplyCorrelation(events: TaskEvent[]): BotHandoffReplyCorr
       payload.senderType !== "agent" ||
       payload.deliveryMode !== "message" ||
       !readString(payload, "botTeamId", "bot_team_id") ||
+      // A correlated reply is not a new request. Otherwise a later request
+      // from the same teammate can be claimed as the reply to this reply.
+      readString(payload, "inReplyToMessageId", "in_reply_to_message_id") ||
       isTerminalDelivery(deliveryStatus(payload)) ||
       isTerminalReply(payload)
     ) {

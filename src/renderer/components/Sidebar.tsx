@@ -925,7 +925,14 @@ function SidebarComponent({
   const [renameValue, setRenameValue] = useState("");
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
   const [agentRoles, setAgentRoles] = useState<Map<string, AgentRoleInfo>>(new Map());
-  const [sidebarTab, setSidebarTab] = useState<"sessions" | "bots">("sessions");
+  const [sidebarTab, setSidebarTab] = useState<"sessions" | "bots">(
+    isBotViewActive ? "bots" : "sessions",
+  );
+  // Follow navigation into a bot, but let the user browse Sessions while that
+  // conversation stays open. A render-time override made Sessions unclickable.
+  useEffect(() => {
+    if (isBotViewActive) setSidebarTab("bots");
+  }, [isBotViewActive, selectedTaskId]);
   const [isLoadingBots, setIsLoadingBots] = useState(false);
   const [botsError, setBotsError] = useState<string | null>(null);
   // Keep the full session history visible by default. Users can still hide
@@ -1301,7 +1308,7 @@ function SidebarComponent({
       ),
     [botTasksOverride, tasks, workspace?.id],
   );
-  const visibleSidebarTab = isBotViewActive ? "bots" : sidebarTab;
+  const visibleSidebarTab = sidebarTab;
 
   const handleBotCreated = useCallback((bot: BotRole) => {
     if (bot.isSystem) return;

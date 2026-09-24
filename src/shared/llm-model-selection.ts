@@ -4,6 +4,7 @@ export const LLM_REASONING_EFFORT_OPTIONS: Array<{
   value: LLMReasoningEffort;
   label: string;
 }> = [
+  { value: "none", label: "None" },
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
@@ -25,7 +26,7 @@ export function getLlmReasoningEffortOptions(
           option.value === "low" ? { ...option, label: "Light" } : option,
         );
 
-  if (!supportedEfforts) return options;
+  if (!supportedEfforts) return options.filter((option) => option.value !== "none");
 
   const supported = new Set(supportedEfforts);
   return options.filter((option) => supported.has(option.value));
@@ -34,6 +35,13 @@ export function getLlmReasoningEffortOptions(
 const AZURE_REASONING_EFFORTS: LLMReasoningEffort[] = ["low", "medium", "high", "extra_high"];
 const GPT_5_6_REASONING_EFFORTS: LLMReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const GPT_6_ASTRA_API_REASONING_EFFORTS: LLMReasoningEffort[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+const GPT_6_SOL_LUNA_REASONING_EFFORTS: LLMReasoningEffort[] = [
   "low",
   "medium",
   "high",
@@ -51,6 +59,9 @@ export function getLlmModelReasoningEfforts(
   if (!providerType || !modelKey?.trim()) return [];
 
   if (providerType === "azure") {
+    if (modelKey === "gpt-6-sol" || modelKey === "gpt-6-luna") {
+      return ["none", ...GPT_6_SOL_LUNA_REASONING_EFFORTS];
+    }
     return AZURE_REASONING_EFFORTS;
   }
 
@@ -64,6 +75,13 @@ export function getLlmModelReasoningEfforts(
       return openaiAuthMethod === "oauth"
         ? [...GPT_5_6_REASONING_EFFORTS, "ultra"]
         : GPT_6_ASTRA_API_REASONING_EFFORTS;
+    }
+    if (normalizedModelKey === "gpt-6-sol" || normalizedModelKey === "gpt-6-luna") {
+      return openaiAuthMethod === "oauth" && normalizedModelKey === "gpt-6-sol"
+        ? [...GPT_6_SOL_LUNA_REASONING_EFFORTS, "ultra"]
+        : openaiAuthMethod === "oauth"
+          ? GPT_6_SOL_LUNA_REASONING_EFFORTS
+          : ["none", ...GPT_6_SOL_LUNA_REASONING_EFFORTS];
     }
     if (normalizedModelKey === "gpt-5.6-sol" || normalizedModelKey === "gpt-5.6-terra") {
       return openaiAuthMethod === "oauth"

@@ -19,6 +19,7 @@ describe("AgentDaemon terminal lifecycle helpers", () => {
         isQueued: vi.fn().mockReturnValue(false),
         cancelQueuedTask: vi.fn(),
       },
+      activeTasks: new Map(),
       finishQueueSlot: vi.fn(),
       clearRetryState: vi.fn(),
       teamOrchestrator: null,
@@ -52,6 +53,7 @@ describe("AgentDaemon terminal lifecycle helpers", () => {
         isQueued: vi.fn().mockReturnValue(true),
         cancelQueuedTask: vi.fn(),
       },
+      activeTasks: new Map(),
       finishQueueSlot: vi.fn(),
       clearRetryState: vi.fn(),
       teamOrchestrator: null,
@@ -376,6 +378,9 @@ describe("AgentDaemon terminal lifecycle helpers", () => {
     );
     expect(daemonLike.clearRetryState).toHaveBeenCalledWith("task-cancelled");
     expect(daemonLike.clearTimelineTaskState).toHaveBeenCalledWith("task-cancelled");
+    expect(daemonLike.clearTimelineTaskState.mock.invocationCallOrder[0]).toBeGreaterThan(
+      daemonLike.logEvent.mock.invocationCallOrder.at(-1),
+    );
     expect(daemonLike.activeTasks.get("task-cancelled")).toEqual(
       expect.objectContaining({
         status: "completed",

@@ -140,6 +140,82 @@ describe("SpreadsheetWorkbookSessionService", () => {
     expect(viewport.viewport?.cells[0][2].displayValue).toBe("Owner");
   });
 
+  it("persists deleted CSV rows and columns without restoring source data", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-csv-delete-"));
+    const outPath = path.join(tmpDir, "people.csv");
+    await fs.writeFile(
+      outPath,
+      "Name,Status,Note\nAlice,Active,A note\nBruno,Pending,B note\nCara,Done,C note\n",
+      "utf-8",
+    );
+
+    const service = new SpreadsheetWorkbookSessionService();
+    const opened = await service.openWorkbook({ filePath: outPath, workspacePath: tmpDir });
+    const sessionId = opened.session!.sessionId;
+    const sheetId = opened.session!.sheets[0].id;
+    expect(
+      service.applyPatches(sessionId, [
+        { type: "deleteRows", sheetId, row: 2, count: 1 },
+        { type: "deleteColumns", sheetId, column: 2, count: 1 },
+      ]).success,
+    ).toBe(true);
+
+    expect((await service.saveWorkbook(sessionId)).success).toBe(true);
+    expect(await fs.readFile(outPath, "utf-8")).toBe("Name,Note\nBruno,B note\nCara,C note\n");
+  });
+
+  it("keeps truncated CSV structure read-only while saving visible cell edits", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-csv-truncated-"));
+    const outPath = path.join(tmpDir, "large.csv");
+    const original = Array.from(
+      { length: 2002 },
+      (_, index) => `row-${index + 1},value-${index + 1}`,
+    ).join("\n");
+    await fs.writeFile(outPath, original, "utf-8");
+
+    const service = new SpreadsheetWorkbookSessionService();
+    const opened = await service.openWorkbook({ filePath: outPath, workspacePath: tmpDir });
+    const sessionId = opened.session!.sessionId;
+    const sheetId = opened.session!.sheets[0].id;
+    expect(opened.session?.capabilities.canEditStructure).toBe(false);
+    expect(opened.session?.warnings.map((warning) => warning.code)).toContain(
+      "compat-delimited-structure-read-only",
+    );
+    expect(
+      service.applyPatches(sessionId, [{ type: "deleteRows", sheetId, row: 2, count: 1 }]),
+    ).toMatchObject({
+      success: false,
+      error: "Structural edits are unavailable for this spreadsheet",
+    });
+    expect(
+      service.applyPatches(sessionId, [
+        { type: "setCell", sheetId, row: 2, column: 2, input: { value: "should-not-apply" } },
+        { type: "deleteRows", sheetId, row: 2, count: 1 },
+      ]).success,
+    ).toBe(false);
+    expect(
+      service.getViewport({
+        sessionId,
+        sheetId,
+        startRow: 2,
+        endRow: 2,
+        startColumn: 2,
+        endColumn: 2,
+      }).viewport?.cells[0][0].value,
+    ).toBe("value-2");
+    expect(
+      service.applyPatches(sessionId, [
+        { type: "setCell", sheetId, row: 2, column: 2, input: { value: "edited" } },
+      ]).success,
+    ).toBe(true);
+
+    expect((await service.saveWorkbook(sessionId)).success).toBe(true);
+    const saved = await fs.readFile(outPath, "utf-8");
+    expect(saved.split("\n")).toHaveLength(2002);
+    expect(saved).toContain("row-2,edited\n");
+    expect(saved).toContain("row-2002,value-2002");
+  });
+
   it("rejects workbook files outside the workspace root", async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-workbook-workspace-"));
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-workbook-outside-"));

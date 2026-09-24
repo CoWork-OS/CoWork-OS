@@ -203,6 +203,15 @@ function createWarnings(
     });
   }
 
+  if ((format === "csv" || format === "tsv") && preview.sheets.some((sheet) => sheet.truncated)) {
+    warnings.push({
+      code: "compat-delimited-structure-read-only",
+      severity: "warning",
+      message:
+        "This file exceeds the editable preview window. Cell edits can be saved, but adding or deleting rows and columns is unavailable to protect hidden data.",
+    });
+  }
+
   return warnings;
 }
 
@@ -299,7 +308,7 @@ export class SpreadsheetWorkbookSessionService {
       capabilities: {
         ...BASE_CAPABILITIES,
         canEditCells: format !== "xlsm",
-        canEditStructure: format !== "xlsm",
+        canEditStructure: format !== "xlsm" && !preview.sheets.some((sheet) => sheet.truncated),
         preservesUnsupportedWorkbookParts: format === "csv" || format === "tsv",
       },
       warnings: createWarnings(preview, format),
@@ -352,6 +361,18 @@ export class SpreadsheetWorkbookSessionService {
       }
       for (const patch of patches) {
         assertPatchWithinLimits(patch);
+        this.getSheetIndex(record, patch.sheetId);
+        if (
+          !record.session.capabilities.canEditStructure &&
+          (patch.type === "insertRows" ||
+            patch.type === "deleteRows" ||
+            patch.type === "insertColumns" ||
+            patch.type === "deleteColumns")
+        ) {
+          throw new Error("Structural edits are unavailable for this spreadsheet");
+        }
+      }
+      for (const patch of patches) {
         this.applyPatch(record, patch);
       }
       this.refreshSessionFromPreview(record);
@@ -597,10 +618,7 @@ export class SpreadsheetWorkbookSessionService {
   }
 
   private readdressSheet(sheet: SpreadsheetPreviewSheet): void {
-    const columnCount = Math.max(
-      sheet.columnCount,
-      sheet.rows.reduce((max, row) => Math.max(max, row.length), 0),
-    );
+    const columnCount = sheet.rows.reduce((max, row) => Math.max(max, row.length), 0);
     for (let rowIndex = 0; rowIndex < sheet.rows.length; rowIndex += 1) {
       const row = sheet.rows[rowIndex];
       for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {

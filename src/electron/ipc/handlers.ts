@@ -262,6 +262,7 @@ import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversati
 import type { MailboxCommitmentState } from "../../shared/mailbox";
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
+import { approvalPromptsDisabled } from "../agent/approval-policy";
 import { generateTaskTitle } from "../agent/task-title-generator";
 import { RuntimeVisibilityService } from "../agent/RuntimeVisibilityService";
 import {
@@ -9051,6 +9052,10 @@ export async function setupIpcHandlers(
     return PermissionSettingsManager.loadSettings();
   });
 
+  ipcMain.handle(IPC_CHANNELS.PERMISSIONS_GET_RUNTIME_INFO, async () => ({
+    approvalPromptsEnabled: !approvalPromptsDisabled(),
+  }));
+
   ipcMain.handle(IPC_CHANNELS.PERMISSIONS_SAVE_SETTINGS, async (_, settings) => {
     checkRateLimit(IPC_CHANNELS.PERMISSIONS_SAVE_SETTINGS);
     const validated = validateInput(PermissionSettingsSchema, settings, "permission settings");
@@ -9544,7 +9549,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.TEAM_LIST,
     async (_, workspaceId: string, includeInactive?: boolean) => {
-      const validated = validateInput(UUIDSchema, workspaceId, "workspace ID");
+      const validated = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
       return teamRepo.listByWorkspace(validated, includeInactive ?? false);
     },
   );

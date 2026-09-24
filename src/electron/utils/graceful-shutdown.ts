@@ -17,6 +17,7 @@ interface QuitEvent {
 
 interface QuitApp {
   on(event: "before-quit", listener: (event: QuitEvent) => void): unknown;
+  on(event: "window-all-closed", listener: () => void): unknown;
   quit(): void;
 }
 
@@ -76,6 +77,16 @@ export function installGracefulShutdown(
 ): void {
   let started = false;
   let completed = false;
+  let finalQuitScheduled = false;
+
+  // A native quit can fall back to window-all-closed after an asynchronous
+  // before-quit deferral. Once cleanup has finished, preserve the explicit quit
+  // request instead of leaving the macOS app alive with closed storage.
+  app.on("window-all-closed", () => {
+    if (!completed || finalQuitScheduled) return;
+    finalQuitScheduled = true;
+    setImmediate(() => app.quit());
+  });
 
   app.on("before-quit", (event) => {
     if (completed) return;

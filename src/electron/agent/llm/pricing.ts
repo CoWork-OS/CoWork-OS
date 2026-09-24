@@ -154,6 +154,18 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     cachedInputPer1M: 1.0,
     cacheWritePer1M: 12.5,
   },
+  "gpt-6-sol": {
+    inputPer1M: 2.0,
+    outputPer1M: 10.0,
+    cachedInputPer1M: 0.2,
+    cacheWritePer1M: 2.5,
+  },
+  "gpt-6-luna": {
+    inputPer1M: 0.1,
+    outputPer1M: 0.5,
+    cachedInputPer1M: 0.01,
+    cacheWritePer1M: 0.125,
+  },
   "gpt-5.6-sol": {
     inputPer1M: 4.0,
     outputPer1M: 20.0,
@@ -277,12 +289,16 @@ export function calculateCost(
     .toLowerCase()
     .replace(/^(?:openai-codex|openai)\//, "")
     .split("@", 1)[0];
-  // Astra applies the long-context multiplier to the whole request once the
+  // GPT-6 applies the long-context multiplier to the whole request once the
   // input crosses 272K tokens: input/cache rates are doubled and output is
   // charged at 1.5x.
-  const isAstraLongContext = normalizedModelId === "gpt-6-astra" && inputTokens > 272_000;
-  const inputRateMultiplier = isAstraLongContext ? 2 : 1;
-  const outputRateMultiplier = isAstraLongContext ? 1.5 : 1;
+  const isGpt6LongContext =
+    (normalizedModelId === "gpt-6-astra" ||
+      normalizedModelId === "gpt-6-sol" ||
+      normalizedModelId === "gpt-6-luna") &&
+    inputTokens > 272_000;
+  const inputRateMultiplier = isGpt6LongContext ? 2 : 1;
+  const outputRateMultiplier = isGpt6LongContext ? 1.5 : 1;
 
   // Cached tokens are already counted in inputTokens but billed at a discount.
   // Discount rate varies by provider: Anthropic = 10% of input price, OpenAI/Azure = 50%.

@@ -20,6 +20,7 @@ export type BotConversationState =
   | "waiting"
   | "needs_input"
   | "completed"
+  | "partial"
   | "failed";
 
 export type BotHandoffState =
@@ -42,6 +43,7 @@ export interface BotHandoffProjection {
   correlationId?: string;
   replyState?: "pending" | "received" | "timed_out";
   replyMessageId?: string;
+  isReply?: boolean;
   error?: string;
 }
 
@@ -112,8 +114,8 @@ function readTimestamp(event: TaskEvent): number {
     payload.quarantinedAt,
     payload.repliedAt,
     payload.replyTimedOutAt,
-  ].filter((candidate): candidate is number =>
-    typeof candidate === "number" && Number.isFinite(candidate),
+  ].filter(
+    (candidate): candidate is number => typeof candidate === "number" && Number.isFinite(candidate),
   );
   return Math.max(event.timestamp || event.ts || 0, ...candidates);
 }
@@ -132,16 +134,20 @@ function getEventType(event: TaskEvent): string {
   return typeof event.legacyType === "string" ? event.legacyType : event.type;
 }
 
-function isDeliveredAgentInbound(
-  event: TaskEvent,
-  payload: Record<string, unknown>,
-): boolean {
+function isDeliveredAgentInbound(event: TaskEvent, payload: Record<string, unknown>): boolean {
   return (
     getEventType(event) === "user_message" &&
     payload.messageSource === "agent" &&
     payload.deliveryMode === "message" &&
     isBotHandoffMessageDelivered(payload)
   );
+}
+
+function isCorrelatedReplyMessage(payload: Record<string, unknown>): boolean {
+  const inReplyToMessageId = readString(payload, "inReplyToMessageId", "in_reply_to_message_id");
+  const inReplyToTaskId = readString(payload, "inReplyToTaskId", "in_reply_to_task_id");
+  const targetTaskId = readString(payload, "targetTaskId", "target_task_id");
+  return Boolean(inReplyToMessageId && inReplyToTaskId && inReplyToTaskId === targetTaskId);
 }
 
 function cleanPreview(value: string): string {
@@ -217,7 +223,7 @@ function normalizeHandoffState(value: unknown): BotHandoffState {
 }
 
 function stateFromTask(
-  task: Pick<Task, "status" | "error" | "resultSummary">,
+  task: Pick<Task, "status" | "error" | "resultSummary" | "terminalStatus">,
 ): BotConversationState {
   switch (task.status) {
     case "pending":
@@ -232,6 +238,8 @@ function stateFromTask(
     case "failed":
       return "failed";
     case "completed":
+      if (task.terminalStatus === "partial_success") return "partial";
+      if (task.terminalStatus === "failed") return "failed";
       return "completed";
     case "cancelled":
       return task.resultSummary ? "completed" : "failed";
@@ -322,6 +330,8 @@ function getStateLabel(state: BotConversationState): string {
       return "Needs your input";
     case "completed":
       return "Finished";
+    case "partial":
+      return "Partial result";
     case "failed":
       return "Couldn’t finish";
     default:
@@ -339,6 +349,8 @@ function getStateToneDetail(state: BotConversationState): string {
       return "Review the blocker before the team continues.";
     case "completed":
       return "The latest request has a result ready to review.";
+    case "partial":
+      return "Progress was preserved, but the request did not reach verified success.";
     case "failed":
       return "Open the activity details to see what needs recovery.";
     default:
@@ -357,12 +369,19 @@ function getActivityLabel(event: TaskEvent, fallbackBotName: string): string {
 
   if (type === "agent_message") {
     if (payload.replyStatus === "received") return `Reply received from ${recipient}`;
-    if (payload.replyStatus === "timed_out") {
-      return `No reply from ${recipient}; partial result available`;
-    }
     const state = normalizeHandoffState(
       payload.deliveryStatus ?? payload.delivery_status ?? payload.status,
     );
+    if (isCorrelatedReplyMessage(payload)) {
+      if (state === "failed" || state === "quarantined") return `Couldn’t reply to ${recipient}`;
+      if (state === "queued") return `Reply queued for ${recipient}`;
+      if (state === "started") return `Reply started for ${recipient}`;
+      if (state === "delivered") return `Reply delivered to ${recipient}`;
+      return `Reply accepted for ${recipient}`;
+    }
+    if (payload.replyStatus === "timed_out") {
+      return `No reply from ${recipient}; partial result available`;
+    }
     if (state === "failed" || state === "quarantined") return `Couldn’t message ${recipient}`;
     if (state === "queued") return `Message queued for ${recipient}`;
     if (state === "started") return `Message started for ${recipient}`;
@@ -401,6 +420,7 @@ function getAttention(
   const taskError = typeof task.error === "string" ? cleanPreview(task.error) : "";
   const waitingHandoff = recentHandoffs.find(
     (handoff) =>
+      !handoff.isReply &&
       (handoff.state === "accepted" ||
         handoff.state === "queued" ||
         handoff.state === "started" ||
@@ -413,13 +433,15 @@ function getAttention(
       handoff.replyState !== "received" &&
       handoff.replyState !== "timed_out",
   );
-  const timedOutHandoff = recentHandoffs.find((handoff) => handoff.replyState === "timed_out");
+  const timedOutHandoff = recentHandoffs.find(
+    (handoff) => !handoff.isReply && handoff.replyState === "timed_out",
+  );
   const latestActionableHandoff = recentHandoffs.find(
     (handoff) =>
       (handoff.state === "failed" &&
         handoff.replyState !== "received" &&
         handoff.replyState !== "timed_out") ||
-      handoff.replyState === "timed_out" ||
+      (!handoff.isReply && handoff.replyState === "timed_out") ||
       handoff === waitingHandoff,
   );
   if (latestActionableHandoff?.state === "failed") {
@@ -493,7 +515,7 @@ function getAttention(
 
 /** Derive a compact, human-facing collaboration state from durable events. */
 export function deriveBotConversationProjection(input: {
-  task: Pick<Task, "status" | "error" | "resultSummary"> & { id?: string };
+  task: Pick<Task, "status" | "error" | "resultSummary" | "terminalStatus"> & { id?: string };
   botName?: string;
   events?: TaskEvent[];
   childTasks?: Array<
@@ -623,6 +645,7 @@ export function deriveBotConversationProjection(input: {
     const handoffKey = messageId || correlationId || event.id;
     const directReply = messageId ? repliesByMessageId.get(messageId) : undefined;
     const targetTaskId = readString(payload, "targetTaskId", "target_task_id");
+    const isReply = isCorrelatedReplyMessage(payload);
     const inferredReply =
       inferredRepliesByHandoffKey.get(handoffKey) ||
       (targetTaskId
@@ -677,6 +700,7 @@ export function deriveBotConversationProjection(input: {
       ...(messageId ? { messageId } : {}),
       ...(correlationId ? { correlationId } : {}),
       ...(replyState ? { replyState } : {}),
+      ...(isReply ? { isReply: true } : {}),
       ...(readString(payload, "replyMessageId") || correlatedReply?.messageId
         ? {
             replyMessageId: readString(payload, "replyMessageId") || correlatedReply?.messageId,
@@ -699,6 +723,7 @@ export function deriveBotConversationProjection(input: {
   const pendingBotHandoff = getPendingBotHandoff(input.events || [], handoffScope);
   const hasScopedPendingHandoff = handoffs.some(
     (handoff) =>
+      !handoff.isReply &&
       (handoffScopeStart === undefined || handoff.timestamp >= handoffScopeStart) &&
       (handoff.state === "accepted" ||
         handoff.state === "queued" ||
@@ -708,7 +733,10 @@ export function deriveBotConversationProjection(input: {
   );
   const isWaitingOnHandoff = Boolean(pendingBotHandoff) || hasScopedPendingHandoff;
   const state: BotConversationState =
-    baseState !== "failed" && input.task.status !== "cancelled" && isWaitingOnHandoff
+    baseState !== "failed" &&
+    baseState !== "partial" &&
+    input.task.status !== "cancelled" &&
+    isWaitingOnHandoff
       ? "waiting"
       : baseState;
   const latestParentEvent = parentEvents[parentEvents.length - 1];
@@ -739,29 +767,36 @@ export function deriveBotConversationProjection(input: {
   });
   const resultSummary = cleanOutcomeSummary(input.task.resultSummary || "");
   const outcome =
-    state === "completed" && resultSummary
-      ? { state: "completed" as const, summary: resultSummary }
-      : state === "failed"
-        ? {
-            state: "failed" as const,
-            summary: resultSummary || attention?.detail || "The bot run failed.",
-          }
-        : null;
+    state === "partial"
+      ? {
+          state: "partial" as const,
+          summary: resultSummary || "Partial progress was preserved; review it before continuing.",
+        }
+      : state === "completed" && resultSummary
+        ? { state: "completed" as const, summary: resultSummary }
+        : state === "failed"
+          ? {
+              state: "failed" as const,
+              summary: resultSummary || attention?.detail || "The bot run failed.",
+            }
+          : null;
 
   return {
     state,
     stateLabel: getStateLabel(state),
     stateDetail: getStateToneDetail(state),
     activityLabel:
-      latestHandoff?.replyState === "received"
-        ? `Reply received from ${latestHandoff.recipientLabel}`
-        : latestHandoff?.replyState === "timed_out"
-          ? `No reply from ${latestHandoff.recipientLabel}; partial result available`
-          : latestCollaborationEvent
-            ? getActivityLabel(latestCollaborationEvent, botName)
-            : state === "waiting"
-              ? "Waiting for a teammate"
-              : stateDetailForState(state),
+      state === "partial"
+        ? "Partial progress saved — review the result"
+        : latestHandoff?.replyState === "received"
+          ? `Reply received from ${latestHandoff.recipientLabel}`
+          : latestHandoff?.replyState === "timed_out"
+            ? `No reply from ${latestHandoff.recipientLabel}; partial result available`
+            : latestCollaborationEvent
+              ? getActivityLabel(latestCollaborationEvent, botName)
+              : state === "waiting"
+                ? "Waiting for a teammate"
+                : stateDetailForState(state),
     lastActivityAt: latestActivityAt,
     collaborators: [...collaboratorSet].filter((label) => label !== botName).slice(0, 6),
     teammates,

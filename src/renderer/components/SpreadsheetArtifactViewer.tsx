@@ -436,6 +436,8 @@ export function SpreadsheetArtifactViewer({
   const activeSheetId =
     workbookSession?.sheets[activeSheetIndex]?.id || workbookSession?.activeSheetId;
   const isSpreadsheetReadOnly = workbookSession?.capabilities.canEditCells === false;
+  const isSpreadsheetStructureReadOnly =
+    isSpreadsheetReadOnly || workbookSession?.capabilities.canEditStructure === false;
 
   const queuePatch = (patch: SpreadsheetPatch) => {
     setPendingPatches((current) => {
@@ -608,8 +610,8 @@ export function SpreadsheetArtifactViewer({
   };
 
   const addRows = (count = 1) => {
-    if (isSpreadsheetReadOnly) {
-      setSaveMessage("Read-only");
+    if (isSpreadsheetStructureReadOnly) {
+      setSaveMessage("Structural edits unavailable");
       return;
     }
     if (activeSheetId && activeSheet) {
@@ -632,8 +634,8 @@ export function SpreadsheetArtifactViewer({
   };
 
   const addColumns = (count = 1) => {
-    if (isSpreadsheetReadOnly) {
-      setSaveMessage("Read-only");
+    if (isSpreadsheetStructureReadOnly) {
+      setSaveMessage("Structural edits unavailable");
       return;
     }
     if ((activeSheet?.columnCount || 0) >= MAX_EDITABLE_COLUMNS) return;
@@ -969,8 +971,8 @@ export function SpreadsheetArtifactViewer({
           type="button"
           className="spreadsheet-viewer-tool-btn"
           onClick={() => addRows(1)}
-          disabled={isSpreadsheetReadOnly}
-          title={isSpreadsheetReadOnly ? "This workbook is read-only" : "Add row"}
+          disabled={isSpreadsheetStructureReadOnly}
+          title={isSpreadsheetStructureReadOnly ? "Structural edits unavailable" : "Add row"}
         >
           + Row
         </button>
@@ -979,9 +981,10 @@ export function SpreadsheetArtifactViewer({
           className="spreadsheet-viewer-tool-btn"
           onClick={() => addColumns(1)}
           disabled={
-            isSpreadsheetReadOnly || (activeSheet?.columnCount || 0) >= MAX_EDITABLE_COLUMNS
+            isSpreadsheetStructureReadOnly ||
+            (activeSheet?.columnCount || 0) >= MAX_EDITABLE_COLUMNS
           }
-          title={isSpreadsheetReadOnly ? "This workbook is read-only" : "Add column"}
+          title={isSpreadsheetStructureReadOnly ? "Structural edits unavailable" : "Add column"}
         >
           + Col
         </button>

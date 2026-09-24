@@ -101,6 +101,60 @@ describe("TaskExecutor plan parsing", () => {
     vi.clearAllMocks();
   });
 
+  it("does not append a duplicate workbook step for an explicit create_spreadsheet plan step", () => {
+    const prompt =
+      "Read only attendees.csv and create attendee-audit.xlsx with create_spreadsheet exactly once. Do not access other files.";
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Attendee audit workbook";
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+    executor.getContractPrompt = vi.fn().mockReturnValue(prompt);
+    executor.promptRequiresDirectAnswer = vi.fn().mockReturnValue(false);
+    executor.promptRequestsDecision = vi.fn().mockReturnValue(false);
+    executor.promptIsWatchSkipRecommendationTask = vi.fn().mockReturnValue(false);
+
+    const explicitCreateStep = {
+      id: "4",
+      description: "Call `create_spreadsheet` exactly once to create:",
+      kind: "primary",
+      status: "pending",
+    };
+    const result = (executor as Any).ensureRequiredPlanSteps({
+      description: "Create and verify the attendee audit workbook",
+      steps: [explicitCreateStep],
+    });
+
+    expect(result.steps).toHaveLength(1);
+    expect(result.steps[0]).toEqual(explicitCreateStep);
+  });
+
+  it("still appends a workbook step when the plan omits the required spreadsheet creation", () => {
+    const prompt = "Create attendee-audit.xlsx from attendees.csv.";
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Attendee audit workbook";
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+    executor.getContractPrompt = vi.fn().mockReturnValue(prompt);
+    executor.promptRequiresDirectAnswer = vi.fn().mockReturnValue(false);
+    executor.promptRequestsDecision = vi.fn().mockReturnValue(false);
+    executor.promptIsWatchSkipRecommendationTask = vi.fn().mockReturnValue(false);
+
+    const result = (executor as Any).ensureRequiredPlanSteps({
+      description: "Inspect the attendee rows",
+      steps: [
+        {
+          id: "1",
+          description: "Read and summarize attendees.csv.",
+          kind: "primary",
+          status: "pending",
+        },
+      ],
+    });
+
+    expect(result.steps).toHaveLength(2);
+    expect(result.steps[1].description).toContain("final Excel workbook");
+  });
+
   it("uses a deterministic dependency-ordered plan for Turkish manuscript analysis", async () => {
     const executor = createPlanExecutor({ content: [] });
     executor.task.title = "Yapay_Zeka_Yan_Koltukta_Baski_Hazir_v7_word_pass4";
@@ -386,6 +440,31 @@ describe("TaskExecutor plan parsing", () => {
     expect(executor.plan.steps[0].description).toBe("Do the thing");
   });
 
+  it("allows longer plan generation for local Ollama models", async () => {
+    const response = {
+      usage: { inputTokens: 1, outputTokens: 2 },
+      content: [
+        {
+          type: "text",
+          text: '{"description":"Summarize CSV","steps":[{"id":"1","description":"Read and summarize budget.csv"}]}',
+        },
+      ],
+    };
+    const executor = createPlanExecutor(response);
+    executor.provider = { type: "ollama" };
+    executor.modelId = "qwen3.5:latest";
+    executor.createMessageWithTimeout = vi.fn().mockResolvedValue(response);
+    executor.callLLMWithRetry = vi.fn(async (requestFn: Any) => requestFn(0));
+
+    await executor.createPlan();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledWith(
+      expect.any(Object),
+      4 * 60_000,
+      "Plan creation",
+    );
+  });
+
   it("adds a final XLSX workbook step when a spreadsheet plan only contains research steps", async () => {
     const response = {
       usage: { inputTokens: 1, outputTokens: 2 },
@@ -465,6 +544,226 @@ describe("TaskExecutor plan parsing", () => {
       "search_files",
       "request_user_input",
     ]);
+  });
+
+  it("keeps file mutations on the explicitly requested single-use tool", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Create invoice summary";
+    executor.task.prompt =
+      "Read qa-invoice.csv. Calculate totals. Create invoice-summary.md with each SKU, quantity, unit price, line total, and subtotal. Use write_file once; read_file verifies it. Do not edit the source CSV; use exact cents.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.currentStepId = "1";
+    executor.plan = {
+      description: "Create invoice summary",
+      steps: [
+        { id: "1", description: "Locate and read qa-invoice.csv.", status: "pending" },
+        {
+          id: "2",
+          description:
+            "Use write_file once to create invoice-summary.md with the calculated totals.",
+          status: "pending",
+        },
+      ],
+    };
+    const toolCatalog = [
+      { name: "glob" },
+      { name: "read_file" },
+      { name: "write_file" },
+      { name: "edit_file" },
+      { name: "delete_file" },
+      { name: "run_command" },
+      { name: "run_applescript" },
+    ];
+
+    const discoveryTools = executor.applyStepScopedToolPolicy(toolCatalog);
+
+    expect(discoveryTools.map((tool: Any) => tool.name)).toContain("read_file");
+    expect(discoveryTools.map((tool: Any) => tool.name)).not.toContain("run_command");
+    expect(discoveryTools.map((tool: Any) => tool.name)).not.toContain("write_file");
+
+    executor.currentStepId = "2";
+    const mutationTools = executor.applyStepScopedToolPolicy(toolCatalog);
+
+    expect(mutationTools.map((tool: Any) => tool.name)).toContain("write_file");
+    expect(mutationTools.map((tool: Any) => tool.name)).not.toContain("run_command");
+    expect(mutationTools.map((tool: Any) => tool.name)).not.toContain("edit_file");
+    expect(mutationTools.map((tool: Any) => tool.name)).not.toContain("delete_file");
+
+    executor.successfulToolUsageCounts = new Map([["write_file", 1]]);
+    executor.turnSuccessfulToolUsageCounts = new Map([["write_file", 1]]);
+    const toolsAfterSingleWrite = executor.applyStepScopedToolPolicy(toolCatalog);
+    expect(toolsAfterSingleWrite.map((tool: Any) => tool.name)).not.toContain("write_file");
+  });
+
+  it("recognizes single-use tools phrased as using the tool exactly once", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Merge attendee CSVs";
+    executor.task.prompt =
+      "Merge the source files and create attendees-merged.csv using write_file exactly once, then verify it with read_file.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.task.userPrompt = executor.task.prompt;
+    executor.currentStepId = "1";
+    executor.plan = {
+      description: "Merge attendee CSVs",
+      steps: [
+        { id: "1", description: "Read and inspect the two input CSVs.", status: "pending" },
+        { id: "2", description: "Merge duplicate attendee records by email.", status: "pending" },
+        {
+          id: "3",
+          description: "Create attendees-merged.csv using write_file exactly once.",
+          status: "pending",
+        },
+      ],
+    };
+    const toolCatalog = [
+      { name: "parse_document" },
+      { name: "read_file" },
+      { name: "write_file" },
+      { name: "edit_file" },
+      { name: "run_command" },
+    ];
+
+    const inspectionTools = executor.applyStepScopedToolPolicy(toolCatalog);
+    expect(inspectionTools.map((tool: Any) => tool.name)).toContain("read_file");
+    expect(inspectionTools.map((tool: Any) => tool.name)).not.toContain("write_file");
+    expect(inspectionTools.map((tool: Any) => tool.name)).not.toContain("run_command");
+
+    executor.currentStepId = "3";
+    const outputTools = executor.applyStepScopedToolPolicy(toolCatalog);
+    expect(outputTools.map((tool: Any) => tool.name)).toContain("write_file");
+    expect(outputTools.map((tool: Any) => tool.name)).not.toContain("run_command");
+    expect(outputTools.map((tool: Any) => tool.name)).not.toContain("edit_file");
+  });
+
+  it("defers a single-use file-info check to a later artifact verification step", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Create attendee workbook";
+    executor.task.prompt =
+      "Create attendees.xlsx using create_spreadsheet exactly once, then call get_file_info exactly once on the workbook.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.lastUserMessage = executor.task.prompt;
+    executor.plan = {
+      description: "Create and verify attendee workbook",
+      steps: [
+        {
+          id: "1",
+          description: "Create attendees.xlsx using create_spreadsheet.",
+          status: "pending",
+        },
+        { id: "2", description: "Verify file creation", kind: "verification", status: "pending" },
+      ],
+    };
+    const toolCatalog = [
+      { name: "read_file" },
+      { name: "create_spreadsheet" },
+      { name: "get_file_info" },
+    ];
+
+    executor.currentStepId = "1";
+    const creationTools = executor.applyStepScopedToolPolicy(toolCatalog);
+    expect(creationTools.map((tool: Any) => tool.name)).toContain("create_spreadsheet");
+    expect(creationTools.map((tool: Any) => tool.name)).not.toContain("get_file_info");
+
+    executor.currentStepId = "2";
+    const verificationTools = executor.applyStepScopedToolPolicy(toolCatalog);
+    expect(verificationTools.map((tool: Any) => tool.name)).toContain("get_file_info");
+
+    executor.turnSuccessfulToolUsageCounts = new Map([["get_file_info", 1]]);
+    const toolsAfterSingleCheck = executor.applyStepScopedToolPolicy(toolCatalog);
+    expect(toolsAfterSingleCheck.map((tool: Any) => tool.name)).not.toContain("get_file_info");
+  });
+
+  it("restricts an exact-once spreadsheet request to the named creation tool", () => {
+    const executor = createPlanExecutor({ content: [] });
+    const prompt =
+      "Create attendees.xlsx. Call create_spreadsheet exactly once, then verify the returned path.";
+    executor.task.title = "Create attendee workbook";
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+    executor.task.userPrompt = prompt;
+    executor.lastUserMessage = prompt;
+    executor.currentStepId = "1";
+    executor.plan = {
+      description: "Create attendee workbook",
+      steps: [
+        {
+          id: "1",
+          description: "Create attendees.xlsx using create_spreadsheet exactly once.",
+          status: "pending",
+        },
+      ],
+    };
+
+    const scoped = executor.applyStepScopedToolPolicy([
+      { name: "read_file" },
+      { name: "create_spreadsheet" },
+      { name: "generate_spreadsheet" },
+      { name: "write_file" },
+      { name: "edit_file" },
+      { name: "get_file_info" },
+    ]);
+
+    expect(executor.getExplicitSingleUseWorkspaceMutationTool()).toBe("create_spreadsheet");
+    expect(
+      scoped
+        .map((tool: Any) => tool.name)
+        .filter((name: string) =>
+          ["create_spreadsheet", "generate_spreadsheet", "write_file", "edit_file"].includes(name),
+        ),
+    ).toEqual(["create_spreadsheet"]);
+  });
+
+  it("starts a fresh single-use mutation allowance for an explicit follow-up request", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Create invoice summary";
+    executor.task.prompt = "Use write_file once to create invoice-summary.md.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.lastUserMessage =
+      "Create qa-check.md from invoice-summary.md. Use write_file exactly once and verify with read_file.";
+    executor.successfulToolUsageCounts = new Map([["write_file", 1]]);
+    executor.turnSuccessfulToolUsageCounts = new Map();
+    executor.currentStepId = "1";
+    executor.plan = {
+      description: "Create invoice summary",
+      steps: [{ id: "1", description: "Create qa-check.md with write_file.", status: "pending" }],
+    };
+
+    const toolCatalog = [
+      { name: "read_file" },
+      { name: "write_file" },
+      { name: "edit_file" },
+      { name: "run_command" },
+    ];
+
+    const followUpTools = executor.applyStepScopedToolPolicy(toolCatalog);
+    expect(followUpTools.map((tool: Any) => tool.name)).toContain("write_file");
+    expect(followUpTools.map((tool: Any) => tool.name)).not.toContain("edit_file");
+    expect(followUpTools.map((tool: Any) => tool.name)).not.toContain("run_command");
+
+    executor.turnSuccessfulToolUsageCounts.set("write_file", 1);
+    const toolsAfterFollowUpWrite = executor.applyStepScopedToolPolicy(toolCatalog);
+    expect(toolsAfterFollowUpWrite.map((tool: Any) => tool.name)).not.toContain("write_file");
+  });
+
+  it("keeps explicitly requested shell commands available alongside a single-use file tool", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Create and test report";
+    executor.task.prompt =
+      "Use write_file once to create report.md, then run npm test using run_command.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.currentStepId = "1";
+    executor.plan = {
+      description: "Create and test report",
+      steps: [{ id: "1", description: "Create report.md using write_file.", status: "pending" }],
+    };
+
+    const scoped = executor.applyStepScopedToolPolicy([
+      { name: "write_file" },
+      { name: "run_command" },
+    ]);
+
+    expect(scoped.map((tool: Any) => tool.name)).toContain("write_file");
+    expect(scoped.map((tool: Any) => tool.name)).toContain("run_command");
   });
 
   it("keeps verified bot messaging available during discovery-scoped teammate work", () => {
@@ -1551,6 +1850,33 @@ relationship_memory:
     expect(executor.plan?.steps?.[1]?.description).toContain("output is exactly `hello world`");
     expect(executor.plan?.steps?.[1]?.description).toContain("exit status is `0`");
     expect(executor.plan?.steps?.[1]?.kind).toBe("verification");
+  });
+
+  it("does not execute answer bullets appended to a numbered plan", () => {
+    const executor = createPlanExecutor({ content: [] });
+    const steps = executor.extractPlanStepsFromText(
+      [
+        "1. Add the three costs for each plan.",
+        "2. Compare the resulting totals.",
+        "3. Calculate the difference as the savings.",
+        "Answer:",
+        "- **Plan A:** €120 + €35 + €45 = **€200**",
+        "- **Plan B:** €80 + €20 + €60 = **€160**",
+        "- **Savings:** **€40** with Plan B",
+      ].join("\n"),
+    );
+    expect(steps.map((step: Any) => step.description)).toEqual([
+      "Add the three costs for each plan.",
+      "Compare the resulting totals.",
+      "Calculate the difference as the savings.",
+    ]);
+  });
+
+  it("still recovers bullet-only plans", () => {
+    const executor = createPlanExecutor({ content: [] });
+    expect(
+      executor.extractPlanStepsFromText("- Read the input file.\n- Write the summary."),
+    ).toHaveLength(2);
   });
 
   it("merges noun-phrase calculation fragments into their colon-led JSON plan step", () => {

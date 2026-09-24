@@ -196,6 +196,25 @@ function escapeDelimitedCell(value: string, delimiter: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
+function detectDelimitedRecordLineEnding(content: string, delimiter: string): string {
+  let inQuotes = false;
+  let atCellStart = true;
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    if (inQuotes) {
+      if (char === '"' && content[index + 1] === '"') index += 1;
+      else if (char === '"') inQuotes = false;
+      continue;
+    }
+    if (char === '"' && atCellStart) inQuotes = true;
+    else if (char === delimiter) atCellStart = true;
+    else if (char === "\r") return content[index + 1] === "\n" ? "\r\n" : "\r";
+    else if (char === "\n") return "\n";
+    else atCellStart = false;
+  }
+  return "\n";
+}
+
 export function buildDelimitedSpreadsheetPreview(
   content: string,
   options: {
@@ -267,9 +286,11 @@ export async function writeDelimitedSpreadsheetPreviewToFile(
     });
   }
 
+  let originalContent = "";
   let originalRows: string[][] = [];
   try {
-    originalRows = parseDelimitedRows(await fs.readFile(filePath, "utf-8"), delimiter);
+    originalContent = await fs.readFile(filePath, "utf-8");
+    originalRows = parseDelimitedRows(originalContent, delimiter);
   } catch {
     originalRows = [];
   }
@@ -281,7 +302,7 @@ export async function writeDelimitedSpreadsheetPreviewToFile(
   const appendedPreviewRows = sheet.truncated ? sheet.rows.slice(editableSourceRowCount) : [];
   const targetRowCount = sheet.truncated
     ? Math.max(sheet.sourceRowCount || 0, originalRows.length, editableSourceRowCount)
-    : Math.max(sheet.rowCount || 0, previewRowCount, originalRows.length);
+    : previewRowCount;
   const previewColumnCount = Math.min(
     sheet.columnCount || Math.max(...sheet.rows.map((row) => row.length), 0),
     MAX_PREVIEW_COLUMNS,
@@ -296,7 +317,7 @@ export async function writeDelimitedSpreadsheetPreviewToFile(
           (_, columnIndex) => previewRow[columnIndex]?.value || "",
         )
       : originalRow.slice();
-    if (previewRow && originalRow.length > previewColumnCount) {
+    if (sheet.truncated && previewRow && originalRow.length > previewColumnCount) {
       rowValues.push(...originalRow.slice(previewColumnCount));
     }
     return rowValues.map((cell) => escapeDelimitedCell(cell, delimiter)).join(delimiter);
@@ -309,7 +330,10 @@ export async function writeDelimitedSpreadsheetPreviewToFile(
     lines.push(rowValues.map((cell) => escapeDelimitedCell(cell, delimiter)).join(delimiter));
   }
 
-  await fs.writeFile(filePath, lines.join("\n"), "utf-8");
+  const lineEnding = detectDelimitedRecordLineEnding(originalContent, delimiter);
+  const finalLineEnding =
+    /(?:\r\n|\n|\r)$/.test(originalContent) && lines.length > 0 ? lineEnding : "";
+  await fs.writeFile(filePath, lines.join(lineEnding) + finalLineEnding, "utf-8");
   const content = await fs.readFile(filePath, "utf-8");
   return buildDelimitedSpreadsheetPreview(content, {
     delimiter,
@@ -367,6 +391,17 @@ export async function writeSpreadsheetPreviewToFile(
         cell.value = cellPreview ? getPreviewCellInput(cellPreview) : null;
       }
       row.commit();
+    }
+
+    if (!sheetPreview.truncated) {
+      // Deleted rows/columns shrink the preview; clear what they left behind in
+      // the original worksheet. Truncated previews cannot change structure.
+      worksheet.eachRow({ includeEmpty: false }, (row, rowIndex) => {
+        row.eachCell({ includeEmpty: false }, (cell, columnIndex) => {
+          if (rowIndex > rowCount || columnIndex > columnCount) cell.value = null;
+        });
+        row.commit();
+      });
     }
   }
 

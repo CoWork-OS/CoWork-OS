@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { IntentRouter } from "../IntentRouter";
 import { TaskStrategyService } from "../TaskStrategyService";
 import { makeRoute } from "./task-strategy-test-fixtures";
+
+describe("TaskStrategyService execution-mode routing", () => {
+  it("keeps report creation in execute mode when 'rather than guessing' is only a rationale", () => {
+    const title = "Read orders.csv and create daily-orders-summary.md";
+    const prompt =
+      "Calculate totals from the source rows rather than guessing. Use write_file exactly once, then read_file the report. Do not change the source file or take external actions.";
+    const route = IntentRouter.route(title, prompt);
+    const strategy = TaskStrategyService.derive(route, undefined, { title, prompt });
+
+    expect(strategy.executionMode).toBe("execute");
+  });
+});
 
 describe("TaskStrategyService deriveLlmProfile", () => {
   it("returns strong for planning intent", () => {

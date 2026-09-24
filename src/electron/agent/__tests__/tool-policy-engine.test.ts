@@ -3,6 +3,7 @@ import {
   evaluateToolPolicy,
   evaluateToolAvailability,
   hasPdfVisualIntent,
+  hasNativeDesktopGuiIntent,
 } from "../tool-policy-engine";
 
 describe("tool-policy-engine request_user_input gating", () => {
@@ -404,5 +405,21 @@ describe("evaluateToolAvailability create_document", () => {
     expect(r.decision).toBe("allow");
     expect(r.metadata.lane).toBe("artifact");
     expect(r.metadata.overlapGroup).toBe("artifact_generation");
+  });
+});
+
+describe("Messages app intent", () => {
+  it("does not infer native GUI use from a prohibition on messages", () => {
+    expect(
+      hasNativeDesktopGuiIntent("Create a CSV using local files; no network or messages."),
+    ).toBe(false);
+    expect(hasNativeDesktopGuiIntent("Create the report without sending messages.")).toBe(false);
+  });
+  it.each([
+    "Open Messages and compose a draft",
+    "Create a draft in Messages",
+    "Use the Messages app",
+  ])("recognizes an explicit Messages app request: %s", (text) => {
+    expect(hasNativeDesktopGuiIntent(text)).toBe(true);
   });
 });

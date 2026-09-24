@@ -22,6 +22,41 @@ class TestApp extends EventEmitter {
 }
 
 describe("graceful Electron shutdown", () => {
+  it("finishes explicit quit when native window closure falls back to window-all-closed", async () => {
+    class NativeCloseApp extends EventEmitter {
+      closed = false;
+      exits = 0;
+      quit() {
+        let prevented = false;
+        this.emit("before-quit", {
+          preventDefault: () => {
+            prevented = true;
+          },
+        });
+        if (prevented) return;
+        if (!this.closed) {
+          this.closed = true;
+          this.emit("window-all-closed");
+        } else {
+          this.exits += 1;
+        }
+      }
+    }
+    const app = new NativeCloseApp();
+    const cleanup = vi.fn();
+    installGracefulShutdown(app, [{ name: "cleanup", run: cleanup }], vi.fn());
+    app.emit("window-all-closed");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(app.exits).toBe(0);
+    app.quit();
+    await vi.waitFor(() => expect(app.exits).toBe(1));
+    expect(cleanup).toHaveBeenCalledOnce();
+    app.emit("window-all-closed");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(app.exits).toBe(1);
+  });
+
   it("holds repeated quit requests until pending task writes finish, then closes storage", async () => {
     const app = new TestApp();
     const events: string[] = [];
@@ -56,6 +91,8 @@ describe("graceful Electron shutdown", () => {
     expect(app.exits).toBe(0);
     await vi.waitFor(() => expect(stopAgent).toHaveBeenCalledTimes(1));
     expect(events).toEqual(["snapshot"]);
+    app.emit("window-all-closed");
+    expect(app.exits).toBe(0);
     finishTask();
     await vi.waitFor(() => expect(app.exits).toBe(1));
     expect(events).toEqual(["snapshot", "interrupted", "close"]);

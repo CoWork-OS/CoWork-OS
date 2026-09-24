@@ -158,6 +158,28 @@ describe("spreadsheet preview extraction", () => {
     expect(saved[2004]).toBe("row-2005,value-2005");
   });
 
+  it("preserves the existing record line ending and final newline when saving a CSV cell", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-csv-newline-"));
+    const outPath = path.join(tmpDir, "quoted.csv");
+
+    for (const original of [
+      'item,quantity\n"Pen ""blue""",3\n',
+      'item,quantity\r\n"Pen ""blue""",3\r\n',
+      'item,quantity\r\n"Line 1\nLine 2",2\r\n"Pen ""blue""",3\r\n',
+      'item,quantity\r"Pen ""blue""",3\r',
+      'item,quantity\n"Pen ""blue""",3',
+    ]) {
+      await fs.writeFile(outPath, original, "utf-8");
+      const preview = buildDelimitedSpreadsheetPreview(original, { delimiter: "," });
+      preview.sheets[0].rows.at(-1)![0].value = 'Pen, "blue"';
+
+      await writeDelimitedSpreadsheetPreviewToFile(outPath, preview, ",");
+
+      const expected = original.replace('"Pen ""blue"""', '"Pen, ""blue"""');
+      expect(await fs.readFile(outPath, "utf-8")).toBe(expected);
+    }
+  });
+
   it("appends added CSV rows after hidden source rows", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-csv-append-large-"));
     const outPath = path.join(tmpDir, "large.csv");

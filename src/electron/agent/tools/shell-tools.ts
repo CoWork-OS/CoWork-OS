@@ -1131,6 +1131,12 @@ export class ShellTools {
     }
   }
 
+  async cancelPersistentShellSession(): Promise<void> {
+    const shellSessions = ShellSessionManager.getInstance();
+    const session = shellSessions.getSessionInfo(this.taskId, this.workspace.id);
+    if (session) await shellSessions.stopSessionById(session.id);
+  }
+
   /**
    * Execute a shell command (requires command tools from the active access profile and user
    * approval unless auto-approve is enabled).
@@ -1377,6 +1383,7 @@ export class ShellTools {
           workspacePath: this.workspace.path,
           command,
           cwd,
+          signal: options?.signal,
           timeoutMs: Math.min(options?.timeout || DEFAULT_TIMEOUT, MAX_TIMEOUT),
           fallbackRunner: async () => ({
             success: false,

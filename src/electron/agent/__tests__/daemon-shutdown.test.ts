@@ -4,6 +4,53 @@ import { AgentDaemon } from "../daemon";
 vi.mock("electron", () => ({ app: { getPath: vi.fn().mockReturnValue("/tmp") } }));
 
 describe("daemon shutdown persistence", () => {
+  it.each(["completed", "failed", "cancelled"])(
+    "does not interrupt a durable %s task left active in the executor cache",
+    async (status) => {
+      const executor = { saveConversationSnapshot: vi.fn(), cancel: vi.fn(async () => undefined) };
+      const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+        orchestrationGraphEngine: { stop: vi.fn() },
+        workSessionProtocolService: { getReliabilityService: () => ({ stop: vi.fn() }) },
+        pendingApprovals: new Map(),
+        pendingDurableApprovalGrants: new Map(),
+        pendingInputRequests: new Map(),
+        pendingRetries: new Map(),
+        pendingTaskImages: new Map(),
+        activeTasks: new Map([["task", { status: "active", executor }]]),
+        taskRepo: { findById: () => ({ id: "task", status }), update: vi.fn() },
+        logEvent: vi.fn(),
+        removeAllListeners: vi.fn(),
+      });
+      await daemon.shutdown();
+      expect(daemon.taskRepo.update).not.toHaveBeenCalled();
+      expect(daemon.logEvent).not.toHaveBeenCalledWith(
+        "task",
+        "task_interrupted",
+        expect.anything(),
+      );
+      expect(executor.saveConversationSnapshot).not.toHaveBeenCalled();
+      expect(executor.cancel).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["updateTask", "updateTaskStatus"])(
+    "%s retires a completed follow-up in the cache",
+    (method) => {
+      const cached = { status: "active", lastAccessed: 0 };
+      const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+        activeTasks: new Map([["task", cached]]),
+        taskRepo: { findById: () => ({ id: "task", status: "executing" }), update: vi.fn() },
+        clearRetryState: vi.fn(),
+        clearTimelineTaskState: vi.fn(),
+        finishQueueSlotIfTracked: vi.fn(),
+      });
+      if (method === "updateTask") daemon.updateTask("task", { status: "completed" });
+      else daemon.updateTaskStatus("task", "completed");
+      expect(cached.status).toBe("completed");
+      expect(cached.lastAccessed).toBeGreaterThan(0);
+    },
+  );
+
   it.each(["orchestration", "reliability"])(
     "persists interruption even if %s stop throws",
     async (failure) => {

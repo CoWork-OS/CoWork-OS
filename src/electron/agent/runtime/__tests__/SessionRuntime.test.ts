@@ -36,6 +36,7 @@ function createBaseState(): SessionRuntimeState {
       webEvidenceMemory: [],
       toolUsageCounts: new Map(),
       successfulToolUsageCounts: new Map(),
+      turnSuccessfulToolUsageCounts: new Map(),
       toolUsageEventsSinceDecay: 0,
       toolSelectionEpoch: 0,
       discoveredDeferredToolNames: new Set(),
@@ -159,6 +160,7 @@ function createV2Snapshot(
       webEvidenceMemory: [],
       toolUsageCounts: [],
       successfulToolUsageCounts: [],
+      turnSuccessfulToolUsageCounts: [],
       toolUsageEventsSinceDecay: 0,
       toolSelectionEpoch: 0,
       discoveredDeferredToolNames: [],
@@ -679,6 +681,26 @@ describe("SessionRuntime", () => {
     expect(harness.emittedEvents.some((event) => event.type === "conversation_snapshot")).toBe(
       true,
     );
+  });
+
+  it("persists single-use tool counts for the active user turn", () => {
+    const source = createHarness();
+    source.runtime.state.tooling.successfulToolUsageCounts.set("write_file", 2);
+    source.runtime.state.tooling.turnSuccessfulToolUsageCounts.set("write_file", 1);
+    source.runtime.appendConversationHistory({ role: "user", content: "Create a file once." });
+
+    expect(source.runtime.saveSnapshot()).toBe(true);
+    const snapshot = source.emittedEvents
+      .filter((event) => event.type === "conversation_snapshot")
+      .at(-1)!.payload;
+
+    const restored = createHarness();
+    restored.runtime.restoreFromEvents([
+      { type: "conversation_snapshot", payload: JSON.parse(JSON.stringify(snapshot)) } as Any,
+    ]);
+
+    expect(restored.runtime.state.tooling.successfulToolUsageCounts.get("write_file")).toBe(2);
+    expect(restored.runtime.state.tooling.turnSuccessfulToolUsageCounts.get("write_file")).toBe(1);
   });
 
   it("restores an unconsumed receipt that was not yet added to a runtime snapshot", () => {
@@ -2713,6 +2735,32 @@ describe("SessionRuntime", () => {
     expect(renderToolsForContext).toHaveBeenCalledTimes(2);
   });
 
+  it("invalidates available tools after a successful exact-once tool call", () => {
+    const harness = createHarness();
+    const renderToolsForContext = vi.fn((tools: Any[]) => tools);
+    harness.setToolRegistry({
+      getTools: vi.fn(() => [{ name: "create_spreadsheet" }, { name: "read_file" }]),
+      getDeferredTools: vi.fn(() => []),
+      getToolCatalogVersion: vi.fn(() => "catalog:single-use"),
+      renderToolsForContext,
+      cleanup: vi.fn(async () => undefined),
+    });
+    harness.deps.applyStepScopedToolPolicy = (tools) =>
+      harness.runtime.state.tooling.turnSuccessfulToolUsageCounts.has("create_spreadsheet")
+        ? tools.filter((tool) => tool.name !== "create_spreadsheet")
+        : tools;
+
+    expect(harness.runtime.getAvailableTools().map((tool: Any) => tool.name)).toContain(
+      "create_spreadsheet",
+    );
+    harness.runtime.state.tooling.turnSuccessfulToolUsageCounts.set("create_spreadsheet", 1);
+
+    expect(harness.runtime.getAvailableTools().map((tool: Any) => tool.name)).not.toContain(
+      "create_spreadsheet",
+    );
+    expect(renderToolsForContext).toHaveBeenCalledTimes(2);
+  });
+
   it("restores pending slash-skill parameter collection from replay events", () => {
     const harness = createHarness();
 
@@ -2745,6 +2793,30 @@ describe("SessionRuntime", () => {
       }),
     );
     expect(harness.runtime.hasHandledPrimarySlashCommand()).toBe(true);
+  });
+
+  it("defers old checklist reminders without consuming their pending nudge", () => {
+    const harness = createHarness();
+    const checklist = harness.runtime.createTaskList([
+      { title: "Implement fix", status: "completed" },
+    ]);
+    const boundary = Math.max(...checklist.items.map((item) => item.updatedAt)) + 1;
+    expect((harness.runtime as Any).consumeTaskListVerificationReminder(boundary)).toBeNull();
+    expect((harness.runtime as Any).consumeTaskListVerificationReminder()).toContain(
+      "CHECKLIST REMINDER",
+    );
+    expect((harness.runtime as Any).consumeTaskListVerificationReminder()).toBeNull();
+  });
+
+  it("keeps reminders for checklist work belonging to the new follow-up", () => {
+    const harness = createHarness();
+    const checklist = harness.runtime.createTaskList([
+      { title: "Implement new request", status: "completed" },
+    ]);
+    const boundary = Math.min(...checklist.items.map((item) => item.updatedAt));
+    expect((harness.runtime as Any).consumeTaskListVerificationReminder(boundary)).toContain(
+      "CHECKLIST REMINDER",
+    );
   });
 
   it("triggers and clears the verification nudge under the expected conditions", () => {

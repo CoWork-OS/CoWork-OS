@@ -63,6 +63,33 @@ function createStreamingResponse(chunks: string[]) {
 }
 
 describe("AzureOpenAIProvider", () => {
+  it.each(["gpt-6-sol", "gpt-6-luna", "my deployment"])(
+    "routes a %s deployment through Responses with max reasoning",
+    async (model) => {
+      mockFetch.mockResolvedValue(createOkResponse({ output: [] }));
+      const provider = new AzureOpenAIProvider({
+        ...baseConfig,
+        azureDeployment: model,
+        azureReasoningEffort: "max",
+      });
+
+      await provider.createMessage({
+        model,
+        maxTokens: 128,
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toBe("https://example.openai.azure.com/openai/v1/responses");
+      expect(JSON.parse(options.body)).toMatchObject({
+        model,
+        reasoning: { effort: "max" },
+        max_output_tokens: 128,
+      });
+    },
+  );
+
   it("builds the request URL and payload for connection tests", async () => {
     mockFetch.mockResolvedValue(createOkResponse({ choices: [] }));
 

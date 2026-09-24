@@ -138,12 +138,31 @@ describe("LLMProviderFactory model status", () => {
 
     expect(status.currentModel).toBe("gpt-6-astra");
     expect(status.models.map((model) => model.key)).toContain("gpt-6-astra");
+    expect(status.models.map((model) => model.key)).toContain("gpt-6-sol");
+    expect(status.models.map((model) => model.key)).toContain("gpt-6-luna");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.6-sol");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.6-terra");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.6-luna");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.5");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.4");
     expect(status.models.map((model) => model.key)).toContain("gpt-5.3-codex-spark");
+  });
+
+  it("adds new GPT-6 choices to a stored OpenAI model cache without duplicating entries", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "gpt-6-astra",
+      openai: { authMethod: "oauth", model: "gpt-6-astra" },
+      cachedOpenAIModels: [
+        { key: "gpt-6-astra", displayName: "GPT-6 Astra", description: "OpenAI" },
+        { key: "gpt-6-sol", displayName: "GPT-6 Sol", description: "OpenAI" },
+      ],
+    };
+
+    const models = LLMProviderFactory.getProviderModelStatus(settings).models;
+
+    expect(models.filter((model) => model.key === "gpt-6-sol")).toHaveLength(1);
+    expect(models.some((model) => model.key === "gpt-6-luna")).toBe(true);
   });
 
   it("infers the ChatGPT route for legacy OAuth settings without authMethod", () => {

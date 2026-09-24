@@ -154,6 +154,13 @@ export function evaluateDomainCompletion(input: DomainCompletionInput): DomainCo
   const normalized = text.toLowerCase();
   const hadTaskToolSuccess = input.hadAnyToolSuccess || Boolean(input.hadPriorToolSuccess);
 
+  // An exact response explicitly requested by the user is the deliverable,
+  // including short replies in a session previously classified as writing.
+  const expectedLiteral = extractExpectedLiteralFromContext(input);
+  if (contextIndicatesDirectResult(input) && expectedLiteral && text === expectedLiteral) {
+    return { failed: false };
+  }
+
   // When tools succeeded, the tool evidence IS the proof of completion for most
   // domains. However, research and writing tasks still need a user-facing summary
   // or actual content — the work was done via tools, but the user still needs
@@ -212,7 +219,10 @@ export function evaluateDomainCompletion(input: DomainCompletionInput): DomainCo
     const hasResearchSignal =
       /\b(found|finding|source|evidence|according|result|conclusion|summary|data)\b/i.test(text) ||
       /\[[0-9]+\]/.test(text);
-    if (text.length < 60 || !hasResearchSignal) {
+    // A direct answer can contain concrete totals/comparisons without using
+    // research boilerplate such as "findings" or "according to". Respect the
+    // requested answer format while retaining the substantive-content floor.
+    if (text.length < 60 || (!hasResearchSignal && !contextIndicatesDirectResult(input))) {
       return {
         failed: true,
         reason:

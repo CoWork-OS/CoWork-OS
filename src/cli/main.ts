@@ -37,6 +37,11 @@ import {
   type WorkspaceLike,
 } from "./format";
 import { discoverLocalControlPlane } from "./local-control-plane-discovery";
+import {
+  buildDirectRuntimeLaunch,
+  resolveChildProcessExitCode,
+  type DirectRuntime,
+} from "./direct-runtime";
 import { promptMarker, renderWelcomeScreen } from "./terminal-ui";
 
 type Any = Record<string, any>;
@@ -686,13 +691,12 @@ async function runDirectDetachedTaskProcess(ctx: CommandContext, prompt: string)
     readyFile,
     ...(ctx.json ? ["--json"] : []),
   ];
-  const child = spawn(runtime.executable, [runtime.scriptPath, ...directRunArgs], {
-    cwd: path.resolve(getFlag(ctx.parsed, "--cwd") || process.cwd()),
+  const launch = buildDirectRuntimeLaunch(runtime, directRunArgs, process.env);
+  const child = spawn(launch.executable, launch.args, {
+    cwd: launch.cwd,
     detached: true,
     stdio: "ignore",
-    env: runtime.usesElectron
-      ? { ...process.env, ELECTRON_RUN_AS_NODE: "1", COWORK_HEADLESS: "1" }
-      : { ...process.env, COWORK_HEADLESS: "1" },
+    env: launch.env,
   });
   child.unref();
   const ready = await waitForDetachedReadyFile(readyFile, 30000);
@@ -758,31 +762,25 @@ async function waitForDetachedReadyFile(
 function runDirectCommandProcess(ctx: CommandContext, directArgs: string[]): Promise<number> {
   const runtime = resolveDirectRuntime();
   const directRunArgs = [...directArgs, ...(ctx.json ? ["--json"] : [])];
-  const args = [runtime.scriptPath, ...directRunArgs];
+  const launch = buildDirectRuntimeLaunch(runtime, directRunArgs, process.env);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(runtime.executable, args, {
-      cwd: path.resolve(getFlag(ctx.parsed, "--cwd") || process.cwd()),
+    const child = spawn(launch.executable, launch.args, {
+      cwd: launch.cwd,
       stdio: "inherit",
-      env: runtime.usesElectron
-        ? { ...process.env, ELECTRON_RUN_AS_NODE: "1", COWORK_HEADLESS: "1" }
-        : { ...process.env, COWORK_HEADLESS: "1" },
+      env: launch.env,
     });
     child.on("error", reject);
     child.on("close", (code, signal) => {
-      if (signal === "SIGINT") resolve(130);
-      else if (signal === "SIGTERM") resolve(143);
-      else resolve(code ?? 0);
+      if (signal) {
+        process.stderr.write(`CoWork direct runner exited after receiving ${signal}.\n`);
+      }
+      resolve(resolveChildProcessExitCode(code, signal));
     });
   });
 }
 
-function resolveDirectRuntime(): {
-  executable: string;
-  scriptPath: string;
-  appPath: string;
-  usesElectron: boolean;
-} {
+function resolveDirectRuntime(): DirectRuntime {
   const scriptPath = path.join(__dirname, "direct-run.js");
   const appPath = path.resolve(__dirname, "..", "..", "..");
   try {

@@ -14,6 +14,7 @@ import {
   nativeTheme,
   Menu,
   screen,
+  safeStorage,
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
@@ -23,6 +24,7 @@ import {
   SecureSettingsRepository,
   type SettingsCategory,
 } from "./database/SecureSettingsRepository";
+import { resetUnreadableSettings } from "./utils/secure-settings-recovery";
 import {
   setupIpcHandlers,
   getHooksServer,
@@ -158,7 +160,7 @@ import { KnowledgeGraphService } from "./knowledge-graph/KnowledgeGraphService";
 import { MailboxAutomationHub } from "./mailbox/MailboxAutomationHub";
 import { MailboxAutomationRegistry } from "./mailbox/MailboxAutomationRegistry";
 import { MailboxForwardingService } from "./mailbox/MailboxForwardingService";
-import { getMailboxServiceInstance } from "./mailbox/MailboxService";
+import { getMailboxServiceInstance, MailboxService } from "./mailbox/MailboxService";
 import { setMailboxForwardingServiceInstance } from "./mailbox/mailbox-forwarding-singleton";
 import {
   ControlPlaneSettingsManager,
@@ -238,10 +240,21 @@ import { rememberApprovedImportFiles } from "./security/file-import-approvals";
 import { healMovedDesktopWorkspacePaths } from "./utils/workspace-path-healer";
 import {
   APP_DISPLAY_NAME,
+  MAC_SAFE_STORAGE_MIGRATION_WORKER_FLAG,
   applyApplicationIdentity,
   getDesktopIconImage,
   getDesktopIconPath,
 } from "./branding";
+import { primeMacSafeStorageContext } from "./utils/mac-safe-storage-bootstrap";
+import {
+  keepDirectRunAliveWithoutWindows,
+  stripInjectedSystemCaOption,
+} from "./utils/direct-run-lifecycle";
+import {
+  runMacSafeStorageMigrationWorker,
+  migrateLegacyMacSafeStorageChannels,
+  migrateLegacyMacSafeStorageSettings,
+} from "./utils/mac-safe-storage-migration";
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -1007,16 +1020,16 @@ function healResettableSecureSettings(): void {
   }
 
   const repository = SecureSettingsRepository.getInstance();
-  for (const category of RESETTABLE_SECURE_SETTINGS_CATEGORIES) {
-    const status = repository.checkHealth(category, { logErrors: false });
-    if (status === "decryption_failed" || status === "checksum_mismatch") {
-      const didDelete = repository.delete(category);
-      if (didDelete) {
-        logger.warn(
-          `Reset corrupted secure settings category ${category} (${status}); defaults will be recreated.`,
-        );
-      }
-    }
+  const recovery = resetUnreadableSettings(repository, RESETTABLE_SECURE_SETTINGS_CATEGORIES);
+  for (const category of recovery.resetCategories) {
+    logger.warn(
+      `Reset secure settings category ${category} after a verified checksum mismatch; defaults will be recreated.`,
+    );
+  }
+  for (const { category, status } of recovery.preservedCategories) {
+    logger.error(
+      `Preserved secure settings category ${category} (${status}); encrypted data was not deleted and must be recovered before replacement.`,
+    );
   }
 }
 
@@ -1185,7 +1198,12 @@ registerLocationProbeScheme();
 registerTaskDeeplinkProtocol();
 
 applyApplicationIdentity();
-applyStableUserDataPath();
+const isMacSafeStorageMigrationWorker = process.argv.includes(
+  MAC_SAFE_STORAGE_MIGRATION_WORKER_FLAG,
+);
+if (!isMacSafeStorageMigrationWorker) {
+  applyStableUserDataPath();
+}
 
 const CLI_DIRECT_RUN_FLAG = "--cowork-cli-direct-run";
 const CLI_APPROVAL_RESPONSE_FLAG = "--cowork-cli-approval-response";
@@ -1236,7 +1254,14 @@ async function handleCliApprovalResponse(request: {
 async function runCliDirectMode(): Promise<void> {
   try {
     process.env.COWORK_HEADLESS = "1";
+    stripInjectedSystemCaOption(process.env);
+    keepDirectRunAliveWithoutWindows(app);
     await app.whenReady();
+    // Headless CLI runs should not appear as a second app in the Dock.
+    app.dock?.hide();
+    if (await primeMacSafeStorageContext()) {
+      logger.info("Initialized macOS Keychain context before loading secure settings.");
+    }
     const directRunPath = path.join(app.getAppPath(), "dist", "cli", "cli", "direct-run.js");
     if (!fsSync.existsSync(directRunPath)) {
       throw new Error(
@@ -1256,7 +1281,43 @@ async function runCliDirectMode(): Promise<void> {
   }
 }
 
-if (isCliDirectRunMode()) {
+async function runMacSafeStorageMigrationWorkerMode(): Promise<void> {
+  try {
+    // Destroying the bootstrap window must not trigger Electron's default quit
+    // before stdin has been read and the result written.
+    keepDirectRunAliveWithoutWindows(app);
+    await app.whenReady();
+    app.dock?.hide();
+    await primeMacSafeStorageContext();
+    let pendingResult = "";
+    await runMacSafeStorageMigrationWorker({
+      platform: process.platform,
+      safeStorage,
+      readInput: async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of process.stdin) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return Buffer.concat(chunks).toString("utf8");
+      },
+      writeResult: (result) => {
+        pendingResult = result;
+      },
+    });
+    // Pipe writes are asynchronous on macOS; wait for the flush before quitting
+    // so large results are not truncated.
+    await new Promise<void>((resolve) => process.stdout.write(pendingResult, () => resolve()));
+    app.quit();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    process.stderr.write(`[SafeStorageMigration] Worker failed: ${message}\n`);
+    app.exit(1);
+  }
+}
+
+if (isMacSafeStorageMigrationWorker) {
+  void runMacSafeStorageMigrationWorkerMode();
+} else if (isCliDirectRunMode()) {
   void runCliDirectMode();
 } else {
   // Ensure only one CoWork OS instance runs at a time.
@@ -1564,6 +1625,9 @@ if (isCliDirectRunMode()) {
     }
 
     app.whenReady().then(async () => {
+      if (await primeMacSafeStorageContext()) {
+        logger.info("Initialized macOS Keychain context before loading secure settings.");
+      }
       getDesktopLocationService().installPermissionHandlers();
       installMcpInstallConfirmationHandler();
       const startupStartedAt = Date.now();
@@ -1699,6 +1763,24 @@ if (isCliDirectRunMode()) {
       // This MUST be done before provider factories so they can migrate legacy settings
       new SecureSettingsRepository(dbManager.getDatabase());
       logger.info("SecureSettingsRepository initialized");
+      if (process.platform === "darwin") {
+        await migrateLegacyMacSafeStorageSettings({
+          platform: process.platform,
+          database: dbManager.getDatabase(),
+          repository: SecureSettingsRepository.getInstance(),
+          executable: process.execPath,
+          appPath: app.getAppPath(),
+          logger,
+        });
+        await migrateLegacyMacSafeStorageChannels({
+          platform: process.platform,
+          database: dbManager.getDatabase(),
+          safeStorage,
+          executable: process.execPath,
+          appPath: app.getAppPath(),
+          logger,
+        });
+      }
       new PulseService(dbManager.getDatabase(), {
         version: app.getVersion(),
         runtime: "desktop",
@@ -4252,7 +4334,16 @@ if (isCliDirectRunMode()) {
           },
         },
         { name: "channel gateway", run: () => channelGateway?.shutdown() },
+        { name: "mailbox", run: () => MailboxService.stopBackgroundServices() },
         { name: "box brain", run: () => BoxBrainService.getInstance().stop() },
+        {
+          name: "heartbeats",
+          run: async () => {
+            await heartbeatService?.stop();
+            heartbeatService = null;
+            setHeartbeatService(null);
+          },
+        },
         // Keep lifecycle listeners, MCP, memory, and storage alive until tasks settle.
         { name: "agent daemon", run: () => agentDaemon?.shutdown() },
         {

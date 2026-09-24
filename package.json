@@ -74,7 +74,7 @@
     "tsconfig.daemon.json",
     "tsconfig.electron.json",
     "tsconfig.node.json",
-    "vite.config.ts"
+    "vite.config.mts"
   ],
   "main": "dist/electron/electron/main.js",
   "scripts": {

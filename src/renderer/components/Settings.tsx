@@ -380,6 +380,7 @@ const AZURE_REASONING_EFFORT_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
+  { value: "none", label: "None (GPT-6)", description: "GPT-6 without reasoning tokens." },
   {
     value: "low",
     label: "Low",
@@ -396,6 +397,8 @@ const AZURE_REASONING_EFFORT_OPTIONS: Array<{
     label: "Extra High",
     description: "Maximum effort. Azure maps this to High on the request.",
   },
+  { value: "xhigh", label: "Extra High (GPT-6)", description: "GPT-6 extra high reasoning." },
+  { value: "max", label: "Max (GPT-6)", description: "GPT-6 maximum reasoning." },
 ];
 
 const OPENAI_REASONING_EFFORT_OPTIONS: Array<{
@@ -403,6 +406,11 @@ const OPENAI_REASONING_EFFORT_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
+  {
+    value: "none",
+    label: "None",
+    description: "Skip reasoning tokens for faster direct API requests.",
+  },
   {
     value: "low",
     label: "Low",
@@ -6377,12 +6385,13 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Deployment Names</h3>
                   <p className="settings-description">
-                    Enter one or more deployment names (one per line). These appear in the model
-                    selector.
+                    Enter one or more deployment names (one per line). For GPT-6 Sol or Luna, use
+                    the names of deployments available in your Azure resource. These appear in the
+                    model selector.
                   </p>
                   <textarea
                     className="settings-input"
-                    placeholder="gpt-4o-mini\nmy-other-deployment"
+                    placeholder="gpt-6-sol\ngpt-6-luna"
                     rows={3}
                     value={azureDeploymentsText}
                     onChange={(e) => setAzureDeploymentsText(e.target.value)}
@@ -6421,9 +6430,8 @@ export function Settings({
                 <div className="settings-section">
                   <h3>Reasoning Effort</h3>
                   <p className="settings-description">
-                    Controls how much reasoning Azure should spend on supported models. Azure
-                    currently accepts low, medium, and high. Extra High is stored in settings but
-                    sent as High to Azure requests.
+                    Controls how much reasoning Azure should spend on supported models. GPT-6 Sol
+                    and Luna support Extra High and Max when the deployment exposes those levels.
                   </p>
                   <select
                     className="settings-input"

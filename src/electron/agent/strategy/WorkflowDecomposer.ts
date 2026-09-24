@@ -38,12 +38,16 @@ export interface WorkflowPhase {
  * Connective patterns that indicate phase boundaries.
  * Ordered by specificity (most specific first).
  */
+const PHASE_ACTION_VERBS =
+  "research|search|create|write|generate|build|send|email|analyze|compare|find|make|deploy|publish|share|draft|design|review|test|fix|implement|read|verify|validate|check|run|open|save|update|edit|delete|move|rename|convert|extract|calculate|produce|summarize|format|merge|copy|organize|upload|download|export|import|install|configure|execute|perform|use|call|visit|navigate|inspect|confirm|collect|compile|report|summarize|tell";
+const PHASE_ACTION_PREFIX = `(?:(?:you|we|i)\\s+)?(?:${PHASE_ACTION_VERBS})\\b`;
+
 const PHASE_SPLITTERS = [
-  /\bthen\s+/i,
+  new RegExp(`\\band\\s+then\\s+(?=${PHASE_ACTION_PREFIX})`, "i"),
+  new RegExp(`\\bthen\\s+(?=${PHASE_ACTION_PREFIX})`, "i"),
   /\bafter\s+that\s*,?\s*/i,
   /\bnext\s*,?\s*/i,
   /\bfinally\s*,?\s*/i,
-  /\band\s+then\s+/i,
   /\bonce\s+(?:that'?s?\s+)?done\s*,?\s*/i,
   /\s→\s*/,
   /\s->\s*/,

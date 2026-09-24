@@ -46,6 +46,8 @@ const OPENAI_CODEX_API = "openai-codex-responses";
 const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
   "gpt-6-astra",
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -97,6 +99,12 @@ export class OpenAIProvider implements LLMProvider {
   private openaiBaseUrl?: string;
   private forceResponsesApi: boolean;
   private oauthTokenUpdater?: LLMProviderConfig["openaiOAuthTokenUpdater"];
+  // ChatGPT's compatibility backend can reject prompt-cache metadata for an
+  // entire provider session. Remember that capability after the first explicit
+  // rejection so every later turn does not pay for another failed request and
+  // retry. A new provider instance (for example after account/model changes)
+  // starts with a fresh capability probe.
+  private oauthPromptCacheUnsupported = false;
 
   constructor(config: LLMProviderConfig) {
     const apiKey = config.openaiApiKey;
@@ -231,7 +239,7 @@ export class OpenAIProvider implements LLMProvider {
       `Model ${normalizedId} not found in pi-ai registry; using OpenAI Codex model compatibility shim.`,
     );
     const contextWindow =
-      normalizedId === "gpt-6-astra" || normalizedId === "gpt-5.4"
+      normalizedId.startsWith("gpt-6-") || normalizedId === "gpt-5.4"
         ? 1_050_000
         : normalizedId === "gpt-5.5"
           ? 400_000
@@ -323,7 +331,7 @@ export class OpenAIProvider implements LLMProvider {
     const normalizedModelId = this.normalizeCodexModelId(modelId || this.model).toLowerCase();
     return (
       this.forceResponsesApi ||
-      normalizedModelId === "gpt-6-astra" ||
+      normalizedModelId.startsWith("gpt-6-") ||
       normalizedModelId.startsWith("gpt-5")
     );
   }
@@ -612,6 +620,10 @@ export class OpenAIProvider implements LLMProvider {
       throw new Error("OAuth tokens not available");
     }
 
+    if (request.promptCache && this.oauthPromptCacheUnsupported) {
+      return this.createMessageWithOAuth({ ...request, promptCache: undefined });
+    }
+
     try {
       const { getModels, complete: piAiComplete } = await loadPiAiModule();
       // Map model ID to ChatGPT internal model
@@ -631,14 +643,14 @@ export class OpenAIProvider implements LLMProvider {
         throw new Error(`Model not available: ${codexModelId}`);
       }
 
-      const { stableText, volatileText } = splitSystemBlocksForOpenAIPrefix(
+      const { allBlocks, stableText, volatileText } = splitSystemBlocksForOpenAIPrefix(
         request.system || "",
         request.systemBlocks,
       );
-      const piMessageInput =
-        request.promptCache && request.promptCache.mode !== "disabled"
-          ? prependVolatileSystemContextToMessages(request.messages, volatileText)
-          : request.messages;
+      const useStableCachePrefix = request.promptCache && request.promptCache.mode !== "disabled";
+      const piMessageInput = useStableCachePrefix
+        ? prependVolatileSystemContextToMessages(request.messages, volatileText)
+        : request.messages;
 
       // Convert messages to pi-ai format
       const piAiMessages = this.convertMessagesToPiAi(
@@ -665,7 +677,12 @@ export class OpenAIProvider implements LLMProvider {
 
       // Build context
       const context: PiAiContext = {
-        systemPrompt: stableText || request.system,
+        // Cache fallback changes transport metadata, never the instructions.
+        // Without prefix splitting, retain the normalized blocks in their
+        // original order rather than silently dropping current-turn context.
+        systemPrompt: useStableCachePrefix
+          ? stableText || undefined
+          : allBlocks.map((block) => block.text).join("\n\n") || request.system,
         messages: piAiMessages,
         tools: piAiTools,
       };
@@ -680,6 +697,7 @@ export class OpenAIProvider implements LLMProvider {
           : undefined,
         codexModelId,
       );
+      const configuredReasoningEffort = this.getOpenAIReasoningEffort(request);
       const response = await piAiComplete(model, context, {
         apiKey,
         maxTokens: request.maxTokens,
@@ -694,7 +712,8 @@ export class OpenAIProvider implements LLMProvider {
               }),
             }
           : {}),
-        reasoningEffort: this.getOpenAIReasoningEffort(request),
+        reasoningEffort:
+          configuredReasoningEffort === "none" ? "medium" : configuredReasoningEffort,
         textVerbosity: this.getOpenAITextVerbosity(request),
       });
 
@@ -723,6 +742,7 @@ export class OpenAIProvider implements LLMProvider {
         request.promptCache &&
         isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
       ) {
+        this.oauthPromptCacheUnsupported = true;
         logger.warn("ChatGPT prompt cache controls rejected; retrying without cache controls", {
           model: request.model,
           status: error?.status,
@@ -866,7 +886,9 @@ export class OpenAIProvider implements LLMProvider {
           }))
           .sort((a, b) => {
             const priority = (id: string) => {
-              if (id === "gpt-6-astra") return -1;
+              if (id === "gpt-6-astra") return -3;
+              if (id === "gpt-6-sol") return -2;
+              if (id === "gpt-6-luna") return -1;
               if (id.includes("gpt-4o")) return 0;
               if (id.includes("gpt-4")) return 1;
               if (id.includes("gpt-3.5")) return 2;
@@ -893,6 +915,8 @@ export class OpenAIProvider implements LLMProvider {
         name: "GPT-6 Astra",
         description: "Flagship model for complex reasoning and coding",
       },
+      { id: "gpt-6-sol", name: "GPT-6 Sol", description: "Complex coding and agentic workflows" },
+      { id: "gpt-6-luna", name: "GPT-6 Luna", description: "Efficient focused tasks" },
       { id: "gpt-4o", name: "GPT-4o", description: "Most capable model for complex tasks" },
       { id: "gpt-4o-mini", name: "GPT-4o Mini", description: "Fast and affordable for most tasks" },
       { id: "o1", name: "o1", description: "Advanced reasoning model" },
@@ -908,6 +932,16 @@ export class OpenAIProvider implements LLMProvider {
         id: "gpt-6-astra",
         name: "GPT-6 Astra",
         description: "GPT-6 Astra for ChatGPT subscription access",
+      },
+      {
+        id: "gpt-6-sol",
+        name: "GPT-6 Sol",
+        description: "GPT-6 Sol for ChatGPT subscription access",
+      },
+      {
+        id: "gpt-6-luna",
+        name: "GPT-6 Luna",
+        description: "GPT-6 Luna for ChatGPT subscription access",
       },
       {
         id: "gpt-5.6-sol",
@@ -980,6 +1014,8 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId === "o3-mini") return "o3 Mini";
     // ChatGPT internal models
     if (modelId === "gpt-6-astra") return "GPT-6 Astra";
+    if (modelId === "gpt-6-sol") return "GPT-6 Sol";
+    if (modelId === "gpt-6-luna") return "GPT-6 Luna";
     if (modelId === "gpt-5.6-sol") return "GPT-5.6 Sol";
     if (modelId === "gpt-5.6-terra") return "GPT-5.6 Terra";
     if (modelId === "gpt-5.6-luna") return "GPT-5.6 Luna";
@@ -1009,6 +1045,8 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId.includes("o3")) return "Next generation reasoning";
     // ChatGPT internal models
     if (modelId === "gpt-6-astra") return "GPT-6 Astra for ChatGPT subscription access";
+    if (modelId === "gpt-6-sol") return "GPT-6 Sol for ChatGPT subscription access";
+    if (modelId === "gpt-6-luna") return "GPT-6 Luna for ChatGPT subscription access";
     if (modelId === "gpt-5.6-sol") return "GPT-5.6 Sol for ChatGPT subscription access";
     if (modelId === "gpt-5.6-terra") return "GPT-5.6 Terra for ChatGPT subscription access";
     if (modelId === "gpt-5.6-luna") return "GPT-5.6 Luna for ChatGPT subscription access";

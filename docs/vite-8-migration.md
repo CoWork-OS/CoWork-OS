@@ -20,14 +20,14 @@ independent future evaluation rather than a prerequisite for this migration.
 
 The manifest ranges and current lockfile resolution are:
 
-| Package | Manifest range | Current resolution |
-| --- | --- | --- |
-| `vite` | `^8.3.0` | `8.3.0` |
-| `@vitejs/plugin-react` | `^6.1.1` | `6.1.1` |
-| `vitest` | `^4.1.10` | `4.1.11` |
-| `@vitest/coverage-v8` | `^4.1.10` | `4.1.11` |
-| `react-is` | `^19.3.0` | `19.3.0` |
-| `esbuild` | `^0.28.2` | `0.28.2` |
+| Package                | Manifest range | Current resolution |
+| ---------------------- | -------------- | ------------------ |
+| `vite`                 | `^8.3.0`       | `8.3.0`            |
+| `@vitejs/plugin-react` | `^6.1.1`       | `6.1.1`            |
+| `vitest`               | `^4.1.10`      | `4.1.11`           |
+| `@vitest/coverage-v8`  | `^4.1.10`      | `4.1.11`           |
+| `react-is`             | `^19.3.0`      | `19.3.0`           |
+| `esbuild`              | `^0.28.2`      | `0.28.2`           |
 
 Keep `package-lock.json` synchronized with `package.json`. Use the repository's normal
 Node.js 24+ setup before installing or rebuilding native dependencies.
@@ -36,7 +36,7 @@ Node.js 24+ setup before installing or rebuilding native dependencies.
 
 ### Renderer configuration
 
-The existing renderer contract is preserved in [`vite.config.ts`](../vite.config.ts):
+The existing renderer contract is preserved in [`vite.config.mts`](../vite.config.mts):
 
 - root: `src/renderer`
 - base URL: `./` for packaged Electron loading
@@ -98,12 +98,11 @@ Packaging smoke failures involving missing persona-template resources are packag
 manifest issues and should be investigated in Electron Builder `extraResources`; they
 are not evidence of a Vite renderer failure.
 
-## Known Vite 8 behavior
+## Vite 8 config loading
 
-Vite 8 may report a non-fatal config-loader warning because the repository's
-`vite.config.ts` and `vitest.config.ts` use ESM syntax while being loaded as CommonJS.
-If a future Vite release makes the native config loader stricter, evaluate renaming the
-files to `.mts` or setting the appropriate package module mode as a separate change.
+The Vite and Vitest configs use the `.mts` extension so the native config loader treats
+their ESM syntax as a module. This keeps the test and renderer commands free of the
+CommonJS config-loader warning and avoids relying on a future Vite compatibility fallback.
 
 Vite 8 also reports large-chunk warnings for existing renderer bundles. These are bundle
 budget/code-splitting follow-ups, not migration blockers.

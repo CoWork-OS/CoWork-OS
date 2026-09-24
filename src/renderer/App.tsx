@@ -25,7 +25,7 @@ import {
   isBotRecoveryBranch,
   matchesBotConversation,
   selectLatestBotConversation,
-  shouldAdoptBotConversation,
+  shouldReopenBotConversationInWorkspace,
 } from "./utils/bot-conversations";
 import type { SpreadsheetTurnContext } from "./components/SpreadsheetArtifactViewer";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
@@ -84,6 +84,10 @@ import {
 import type { ComposerDraft, DraftAttachmentRef } from "../shared/composer-drafts";
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { getEffectiveTaskEventType } from "./utils/task-event-compat";
+import {
+  getLatestTaskSnapshotAfterCreate,
+  shouldApplyReconciledTaskSnapshot,
+} from "./utils/task-create-reconciliation";
 import { isLlmRequestCancelledEvent } from "./utils/task-event-visibility";
 import { markSessionAutoResolvingApproval } from "./utils/approval-event-state";
 import { appendRendererTaskEvents, capTaskEvents } from "./utils/task-event-append";
@@ -5920,6 +5924,29 @@ export function App() {
       });
       tasksRef.current = optimisticTasks;
       setTasks((prev) => upsertTaskPreservingIdentity(prev, task, { prependIfMissing: true }));
+
+      // Startup can fail before the create-task IPC returns. In that case the
+      // terminal event may arrive before this task is in tasksRef, so reconcile
+      // the optimistic snapshot against the persisted task after registering it.
+      void getLatestTaskSnapshotAfterCreate(task, (taskId) => window.electronAPI.getTask(taskId))
+        .then((latestTask) => {
+          if (latestTask === task) return;
+          const currentTask = tasksRef.current.find((candidate) => candidate.id === task.id);
+          if (currentTask && !shouldApplyReconciledTaskSnapshot(currentTask, latestTask)) return;
+
+          tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, latestTask, {
+            prependIfMissing: true,
+          });
+          setTasks((prev) => {
+            const current = prev.find((candidate) => candidate.id === task.id);
+            if (current && !shouldApplyReconciledTaskSnapshot(current, latestTask)) return prev;
+            return upsertTaskPreservingIdentity(prev, latestTask, { prependIfMissing: true });
+          });
+        })
+        .catch((error) => {
+          console.warn("Failed to reconcile task state after creation:", error);
+        });
+
       await selectTaskAfterDraftFlush(task.id);
       setCurrentView("main");
       return true;
@@ -6791,6 +6818,51 @@ export function App() {
     [addToast, currentWorkspace?.id, handleCreateTask, loadBotConversations],
   );
   const openingBotRef = useRef(false);
+  // Source task id -> branch reopened into the current workspace, so repeated
+  // clicks on an old conversation reuse one branch instead of creating more.
+  const reopenedBotBranchesRef = useRef(new Map<string, Task>());
+  const continueBotConversationInWorkspace = useCallback(
+    async (task: Task, workspaceId: string): Promise<Task> => {
+      if (!isTempWorkspaceId(workspaceId)) return task;
+      const teams =
+        task.workspaceId === workspaceId && task.agentConfig?.botTeamId
+          ? await window.electronAPI.listTeams(workspaceId, true)
+          : [];
+      if (!shouldReopenBotConversationInWorkspace(task, workspaceId, teams)) return task;
+      const cachedBranch = reopenedBotBranchesRef.current.get(task.id);
+      if (cachedBranch?.workspaceId === workspaceId) {
+        const current = await window.electronAPI.getTask(cachedBranch.id).catch(() => null);
+        if (current) return current as Task;
+        reopenedBotBranchesRef.current.delete(task.id);
+      }
+      let reopened: Task;
+      try {
+        reopened = await window.electronAPI.reopenBotConversation({ workspaceId, taskId: task.id });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/BOT_(?:MEMBERSHIP_REVOKED|TEAM_UNAVAILABLE)/.test(message)) {
+          reopened = await window.electronAPI.reopenBotConversation({
+            workspaceId,
+            taskId: task.id,
+            repairMembership: true,
+          });
+        } else if (/BOT_WORKSPACE_CONFLICT/.test(message) && task.workspaceId !== workspaceId) {
+          // Legacy or custom-team transcripts can't be branched; adopt them into
+          // this workspace as before so they still open.
+          const adopted = (await window.electronAPI.updateTaskWorkspace(task.id, workspaceId)) as
+            | Task
+            | null
+            | undefined;
+          return adopted || task;
+        } else {
+          throw error;
+        }
+      }
+      if (reopened.id !== task.id) reopenedBotBranchesRef.current.set(task.id, reopened);
+      return reopened;
+    },
+    [],
+  );
   const handleOpenBot = useCallback(
     async (bot: BotRole) => {
       const workspaceId = currentWorkspace?.id;
@@ -6799,8 +6871,8 @@ export function App() {
       try {
         // Query the bot's canonical transcript, including records beyond the
         // sidebar page. Temporary UI workspaces are recreated on every launch,
-        // so search prior temporary workspaces and adopt the latest transcript
-        // into the current workspace before resuming it.
+        // so search prior workspaces and branch a mismatched transcript into
+        // the current workspace before resuming it.
         const includeAllWorkspaces = isTempWorkspaceId(workspaceId);
         const candidates = (await window.electronAPI.listBotConversations({
           workspaceId,
@@ -6830,12 +6902,7 @@ export function App() {
         // recovery branch rather than reopening the cancelled source task.
         let botTask =
           selectedTaskHasRecoveryBranch || !selectedBotTask ? latestBotTask : selectedBotTask;
-        if (botTask && botTask.workspaceId !== workspaceId && includeAllWorkspaces) {
-          const adopted = (await window.electronAPI.updateTaskWorkspace(botTask.id, workspaceId)) as
-            | Task
-            | undefined;
-          botTask = adopted || { ...botTask, workspaceId };
-        }
+        if (botTask) botTask = await continueBotConversationInWorkspace(botTask, workspaceId);
         if (botTask && !matchesBotConversation(botTask, workspaceId, bot.id)) {
           throw new Error("Restart CoWork OS to load the updated bot transcript service.");
         }
@@ -6880,6 +6947,7 @@ export function App() {
     [
       addToast,
       clearRemoteTaskView,
+      continueBotConversationInWorkspace,
       currentWorkspace?.id,
       handleCreateTask,
       loadBotConversations,
@@ -6907,29 +6975,18 @@ export function App() {
         return;
       }
       try {
-        let taskToReopen = task;
-        // Temporary UI workspaces are recreated between launches. The roster
-        // intentionally surfaces prior temporary-workspace conversations, so
-        // adopt that transcript before the daemon validates the reopen request
-        // against the current workspace.
-        if (shouldAdoptBotConversation(task, workspaceId)) {
-          const adopted = (await window.electronAPI.updateTaskWorkspace(task.id, workspaceId)) as
-            | Task
-            | undefined;
-          taskToReopen = adopted || { ...task, workspaceId };
-        }
         let reopened: Task;
         try {
           reopened = await window.electronAPI.reopenBotConversation({
             workspaceId,
-            taskId: taskToReopen.id,
+            taskId: task.id,
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (!/BOT_(?:MEMBERSHIP_REVOKED|TEAM_UNAVAILABLE)/.test(message)) throw error;
           reopened = await window.electronAPI.reopenBotConversation({
             workspaceId,
-            taskId: taskToReopen.id,
+            taskId: task.id,
             repairMembership: true,
           });
         }
@@ -7108,12 +7165,21 @@ export function App() {
         await openTaskById(conversationId);
         return;
       }
-      if (workspaceId && shouldAdoptBotConversation(selectedConversation, workspaceId)) {
-        const adopted = (await window.electronAPI.updateTaskWorkspace(
-          selectedConversation.id,
+      try {
+        selectedConversation = await continueBotConversationInWorkspace(
+          selectedConversation,
           workspaceId,
-        )) as Task | undefined;
-        selectedConversation = adopted || { ...selectedConversation, workspaceId };
+        );
+      } catch (error) {
+        addToast({
+          type: "error",
+          title: "Could not open bot conversation",
+          message:
+            error instanceof Error
+              ? error.message.replace(/^BOT_[A-Z_]+:\s*/, "")
+              : "The old transcript was preserved. Try again or reopen the bot team.",
+        });
+        return;
       }
 
       clearRemoteTaskView();
@@ -7131,8 +7197,10 @@ export function App() {
       setCurrentView("main");
     },
     [
+      addToast,
       botConversationTasks,
       clearRemoteTaskView,
+      continueBotConversationInWorkspace,
       currentWorkspace?.id,
       markTaskSwitchStart,
       openTaskById,
@@ -7158,12 +7226,7 @@ export function App() {
           ) {
             throw new Error("That bot conversation could not be found.");
           }
-          if (task.workspaceId !== workspaceId && isTempWorkspaceId(workspaceId)) {
-            const adopted = (await window.electronAPI.updateTaskWorkspace(task.id, workspaceId)) as
-              | Task
-              | undefined;
-            task = adopted || { ...task, workspaceId };
-          }
+          task = await continueBotConversationInWorkspace(task, workspaceId);
         } else {
           const candidates = (await window.electronAPI.listBotConversations({
             workspaceId,
@@ -7174,12 +7237,7 @@ export function App() {
             offset: 0,
           })) as Task[];
           task = selectLatestBotConversation(candidates, route.botId);
-          if (task && task.workspaceId !== workspaceId && isTempWorkspaceId(workspaceId)) {
-            const adopted = (await window.electronAPI.updateTaskWorkspace(task.id, workspaceId)) as
-              | Task
-              | undefined;
-            task = adopted || { ...task, workspaceId };
-          }
+          if (task) task = await continueBotConversationInWorkspace(task, workspaceId);
           if (!task) {
             const role = await window.electronAPI.getAgentRole(route.botId);
             if (!role) throw new Error("That bot could not be found.");
@@ -7212,6 +7270,7 @@ export function App() {
     [
       addToast,
       clearRemoteTaskView,
+      continueBotConversationInWorkspace,
       currentWorkspace?.id,
       handleNewBotConversation,
       markTaskSwitchStart,

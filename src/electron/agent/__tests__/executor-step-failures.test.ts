@@ -400,6 +400,17 @@ describe("TaskExecutor executeStep failure handling", () => {
     vi.clearAllMocks();
   });
 
+  it("keeps retry budgets finite when a retry callback omits its attempt number", () => {
+    const executor = createExecutorWithStubs([], {});
+    const timeout = (executor as Any).getRetryTimeoutMs(120_000, undefined, false, 8_192);
+    const tokenCap = (executor as Any).applyRetryTokenCap(16_000, undefined, 120_000, false);
+
+    expect(timeout).toBe(120_000);
+    expect(Number.isFinite(timeout)).toBe(true);
+    expect(Number.isFinite(tokenCap)).toBe(true);
+    expect(tokenCap).toBeGreaterThan(0);
+  });
+
   afterAll(() => {
     console.log = originalConsoleLog;
     console.error = originalConsoleError;
@@ -804,6 +815,70 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect(Array.from(contract.requiredTools)).not.toContain("create_directory");
   });
 
+  it("does not infer folder creation from a macOS absolute file path", () => {
+    executor = createExecutorWithStubs([], {});
+
+    const step: Any = {
+      id: "temp-file",
+      description:
+        "Create `/var/folders/ts/session/qa-file-roundtrip.md` with exactly three lines.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+    expect(Array.from(contract.requiredTools)).toContain("write_file");
+    expect(Array.from(contract.requiredTools)).not.toContain("create_directory");
+  });
+
+  it("does not infer a separate edit from a negated pre-write modification constraint", () => {
+    executor = createExecutorWithStubs([], {});
+    const step: Any = {
+      id: "delayed-shell-write",
+      description:
+        "Wait 3 seconds, then run `sleep 3 && printf %s MARKER > qa-shell-write-contract.txt`. After the command completes, use `read_file` to read the file. Do not create or modify it before the wait.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+
+    expect(Array.from(contract.requiredTools)).toContain("write_file");
+    expect(Array.from(contract.requiredTools)).not.toContain("edit_file");
+  });
+
+  it("does not turn a read-only guardrail step into a required file mutation", () => {
+    executor = createExecutorWithStubs([], {});
+    const step: Any = {
+      id: "read-only-guardrail",
+      description: "Do not create, modify, move, delete, or access any other file or directory.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+
+    expect(contract.mode).toBe("analysis_only");
+    expect(contract.requiresMutation).toBe(false);
+    expect(Array.from(contract.requiredTools)).not.toContain("delete_file");
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+  });
+
+  it("drops a prohibition-only plan step while keeping executable analysis steps", () => {
+    executor = createExecutorWithStubs([], {});
+    const analysisStep: Any = {
+      id: "verify-files",
+      description: "Read both named CSV files and compare their totals.",
+      status: "pending",
+    };
+    const guardrailStep: Any = {
+      id: "do-not-write",
+      description: "Do not create, modify, move, delete, or access any other file or directory.",
+      status: "pending",
+    };
+
+    expect((executor as Any).dropNonExecutablePlanSteps([analysisStep, guardrailStep])).toEqual([
+      analysisStep,
+    ]);
+  });
+
   it("requires rename_file without an unrelated write_file for rename-and-move steps", () => {
     executor = createExecutorWithStubs([], {});
 
@@ -962,6 +1037,307 @@ describe("TaskExecutor executeStep failure handling", () => {
 
     expect(step.status).toBe("completed");
     expect(String(step.error || "")).toBe("");
+  });
+
+  it("accepts an unchanged target read in the immediately preceding step", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-prior-read-"));
+    try {
+      const targetPath = path.join(workspacePath, "marker.txt");
+      fs.writeFileSync(targetPath, "POSTFIX_DELAYED_WRITE");
+      const stat = fs.statSync(targetPath);
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).workspace.path = workspacePath;
+      (executor as Any).task.prompt = "Write marker.txt and read it back.";
+      // Shell-created files need not appear in the file-operation tracker.
+      (executor as Any).fileOperationTracker.getCreatedFiles.mockReturnValue([]);
+      (executor as Any).filesReadTracker.set("marker.txt", {
+        step: "write-and-read",
+        sizeBytes: stat.size,
+        mtimeMs: stat.mtimeMs,
+        fileSize: stat.size,
+      });
+      const step: Any = {
+        id: "verify-marker",
+        description: "Verify that the target file contains exactly `POSTFIX_DELAYED_WRITE`.",
+        kind: "verification",
+        status: "pending",
+      };
+      (executor as Any).plan = {
+        description: "Plan",
+        steps: [
+          {
+            id: "write-and-read",
+            description: "Run `printf %s POSTFIX_DELAYED_WRITE > marker.txt` and read the file.",
+            status: "completed",
+          },
+          step,
+        ],
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "reuses unchanged artifact read evidence across intervening verification steps and symlink paths",
+    async () => {
+      const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-prior-read-chain-"));
+      const aliasWorkspacePath = `${workspacePath}-alias`;
+      try {
+        const targetPath = path.join(workspacePath, "marker.txt");
+        const aliasedTargetPath = path.join(aliasWorkspacePath, "marker.txt");
+        fs.symlinkSync(workspacePath, aliasWorkspacePath, "dir");
+        fs.writeFileSync(targetPath, "CROSS_STEP_OK");
+        const stat = fs.statSync(targetPath);
+        executor = createExecutorWithStubs([textResponse("OK")], {});
+        (executor as Any).workspace.path = workspacePath;
+        (executor as Any).task.prompt = "Create marker.txt and read it back.";
+        (executor as Any).fileOperationTracker.getCreatedFiles.mockReturnValue([]);
+        (executor as Any).filesReadTracker.set("marker.txt", {
+          step: "tool_lane:step:read-file-call",
+          sizeBytes: stat.size,
+          mtimeMs: stat.mtimeMs,
+          fileSize: stat.size,
+        });
+        const step: Any = {
+          id: "verify-exact-text",
+          description: "Verify that the file contains exactly `CROSS_STEP_OK`.",
+          kind: "verification",
+          status: "pending",
+        };
+        (executor as Any).plan = {
+          description: "Plan",
+          steps: [
+            {
+              id: "create-and-read",
+              description: `Create ${targetPath} and read the file.`,
+              status: "completed",
+            },
+            {
+              id: "intermediate-check",
+              description: `Confirm ${aliasedTargetPath} remains available.`,
+              kind: "verification",
+              status: "completed",
+            },
+            step,
+          ],
+        };
+
+        await (executor as Any).executeStep(step);
+
+        expect(step.status, String(step.error || "")).toBe("completed");
+      } finally {
+        fs.rmSync(aliasWorkspacePath, { force: true });
+        fs.rmSync(workspacePath, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rejects prior read evidence after the target changes", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-stale-read-"));
+    try {
+      const targetPath = path.join(workspacePath, "marker.txt");
+      fs.writeFileSync(targetPath, "original");
+      const stat = fs.statSync(targetPath);
+      fs.writeFileSync(targetPath, "changed content");
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).workspace.path = workspacePath;
+      (executor as Any).task.prompt = "Write marker.txt and read it back.";
+      (executor as Any).fileOperationTracker.getCreatedFiles.mockReturnValue([]);
+      (executor as Any).filesReadTracker.set("marker.txt", {
+        step: "write-and-read",
+        sizeBytes: stat.size,
+        mtimeMs: stat.mtimeMs,
+        fileSize: stat.size,
+      });
+      const step: Any = {
+        id: "verify-marker",
+        description: "Verify that the target file contains exactly `original`.",
+        kind: "verification",
+        status: "pending",
+      };
+      (executor as Any).plan = {
+        description: "Plan",
+        steps: [
+          {
+            id: "write-and-read",
+            description: "Run `printf %s original > marker.txt` and read the file.",
+            status: "completed",
+          },
+          step,
+        ],
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("expected artifact file evidence");
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unchanged prior read whose bytes differ from explicit exact text", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-exact-read-"));
+    try {
+      const targetPath = path.join(workspacePath, "marker.txt");
+      fs.writeFileSync(targetPath, "CROSS_STEP_OK\n");
+      const stat = fs.statSync(targetPath);
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).workspace.path = workspacePath;
+      (executor as Any).task.prompt = "Write marker.txt and read it back.";
+      (executor as Any).fileOperationTracker.getCreatedFiles.mockReturnValue([]);
+      (executor as Any).filesReadTracker.set("marker.txt", {
+        step: "write-and-read",
+        sizeBytes: stat.size,
+        mtimeMs: stat.mtimeMs,
+        fileSize: stat.size,
+      });
+      const step: Any = {
+        id: "verify-marker",
+        description: "Verify that the target file contains exactly `CROSS_STEP_OK`.",
+        kind: "verification",
+        status: "pending",
+      };
+      (executor as Any).plan = {
+        description: "Plan",
+        steps: [
+          {
+            id: "write-and-read",
+            description: "Run `printf %s CROSS_STEP_OK > marker.txt` and read the file.",
+            status: "completed",
+          },
+          step,
+        ],
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("requested exact text");
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an artifact that violates the user's exact line-count request", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-exact-lines-"));
+    try {
+      const targetPath = path.join(workspacePath, "qa-roundtrip.txt");
+      fs.writeFileSync(targetPath, "CoWork task round-trip\n\nprofile-safe QA\n");
+      const stat = fs.statSync(targetPath);
+      const originalPrompt =
+        "Use write_file to create qa-roundtrip.txt with exactly two lines: CoWork task round-trip, then profile-safe QA. Use read_file on the same path to verify it.";
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).workspace.path = workspacePath;
+      (executor as Any).task.prompt = originalPrompt;
+      (executor as Any).task.rawPrompt = originalPrompt;
+      (executor as Any).fileOperationTracker.getCreatedFiles.mockReturnValue([]);
+      (executor as Any).filesReadTracker.set("qa-roundtrip.txt", {
+        step: "create-file",
+        sizeBytes: stat.size,
+        mtimeMs: stat.mtimeMs,
+        fileSize: stat.size,
+      });
+      const step: Any = {
+        id: "verify-qa-roundtrip",
+        description: "Use read_file to verify qa-roundtrip.txt and report its exact contents.",
+        kind: "verification",
+        status: "pending",
+      };
+      (executor as Any).plan = {
+        description: "Plan",
+        steps: [
+          {
+            id: "create-file",
+            description:
+              "Create qa-roundtrip.txt with exactly two lines: 'CoWork task round-trip' followed by a blank line, then 'profile-safe QA'.",
+            status: "completed",
+          },
+          step,
+        ],
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("has 3 lines; exactly 2 were requested");
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts explicit exact text followed by one requested newline", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-exact-read-newline-"));
+    try {
+      const targetPath = path.join(workspacePath, "marker.txt");
+      fs.writeFileSync(targetPath, "CROSS_STEP_OK\n");
+      const stat = fs.statSync(targetPath);
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).workspace.path = workspacePath;
+      (executor as Any).task.prompt = "Write marker.txt and read it back.";
+      (executor as Any).fileOperationTracker.getCreatedFiles.mockReturnValue([]);
+      (executor as Any).filesReadTracker.set("marker.txt", {
+        step: "write-and-read",
+        sizeBytes: stat.size,
+        mtimeMs: stat.mtimeMs,
+        fileSize: stat.size,
+      });
+      const step: Any = {
+        id: "verify-marker-newline",
+        description:
+          "Verify that the target file contains exactly `CROSS_STEP_OK` followed by one newline.",
+        kind: "verification",
+        status: "pending",
+      };
+      (executor as Any).plan = {
+        description: "Plan",
+        steps: [
+          {
+            id: "write-and-read",
+            description: "Run `printf 'CROSS_STEP_OK\\n' > marker.txt` and read the file.",
+            status: "completed",
+          },
+          step,
+        ],
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("does not rewrite a verification OK response through the quality pass", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-verify-quality-"));
+    try {
+      fs.writeFileSync(path.join(workspacePath, "marker.txt"), "CLEAN_READ_OK");
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).workspace.path = workspacePath;
+      (executor as Any).task.prompt = "Verify marker.txt.";
+      const qualityPass = vi.fn(async ({ response }: Any) => response);
+      (executor as Any).maybeApplyQualityPasses = qualityPass;
+      const step: Any = {
+        id: "verify-marker-quality",
+        description: "Read marker.txt and verify that it contains exactly `CLEAN_READ_OK`.",
+        kind: "verification",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(qualityPass).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
   });
 
   it("rejects unrelated artifact inspection for generic verification steps", async () => {
@@ -1417,6 +1793,64 @@ relationship_memory:
         stepId: "plan-scaffold-1",
       }),
     );
+  });
+
+  it("reconciles a missing artifact-presence reference when a later step writes the same target", async () => {
+    executor = createExecutorWithStubs([textResponse("done")], {});
+    const prepareStep: Any = {
+      id: "plan-prepare-1",
+      description: "Prepare final summary document for attendees-summary-confirmed.md.",
+      status: "pending",
+      error: "Step expected an artifact reference/presence but none was detected.",
+    };
+    const writeStep: Any = {
+      id: "plan-write-2",
+      description: "Write attendees-summary-confirmed.md with the verified totals.",
+      status: "pending",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [prepareStep, writeStep] };
+    expect((executor as Any).resolveStepExecutionContract(prepareStep).mode).toBe(
+      "artifact_presence_required",
+    );
+    expect((executor as Any).resolveStepExecutionContract(prepareStep).targetPaths).toContain(
+      "attendees-summary-confirmed.md",
+    );
+    (executor as Any).executeStep = vi.fn(async (target: Any) => {
+      if (target.id === "plan-prepare-1") {
+        target.status = "failed";
+        target.error = "Step expected an artifact reference/presence but none was detected.";
+        target.completedAt = Date.now();
+        return;
+      }
+
+      target.status = "completed";
+      target.completedAt = Date.now();
+      (executor as Any).recordArtifactMutationLedgerEntry("attendees-summary-confirmed.md", {
+        stepId: target.id,
+        tool: "write_file",
+        evidence: {
+          tool_success: true,
+          canonical_tool: "write_file",
+          reported_path: path.resolve("/tmp", "attendees-summary-confirmed.md"),
+          artifact_registered: true,
+          fs_exists: true,
+          mtime_after_step_start: true,
+          size_bytes: 453,
+        },
+      });
+    });
+
+    await expect((executor as Any).executePlan()).resolves.toBeUndefined();
+    expect((executor as Any).daemon.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "step_contract_reconciled_posthoc",
+      expect.objectContaining({
+        stepId: "plan-prepare-1",
+        reconciledBy: "equivalent_artifact_evidence_presence_required",
+        details: expect.objectContaining({ matchedTargets: ["attendees-summary-confirmed.md"] }),
+      }),
+    );
+    expect((executor as Any).getResolvedRecoveredFailureStepIds()).toEqual(["plan-prepare-1"]);
   });
 
   it("returns from executePlan without emitting a timeout when the task was cancelled by the user", async () => {
@@ -2030,6 +2464,50 @@ relationship_memory:
     }
   });
 
+  it("treats a verified run_command file update as satisfying edit_file contract", async () => {
+    const tempDir = fs.mkdtempSync("/tmp/cowork-run-command-edit-");
+    const targetPath = path.join(tempDir, "marker.txt");
+    fs.writeFileSync(targetPath, "BEFORE");
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("run_command", {
+          command: "printf %s AFTER > marker.txt",
+        }),
+        textResponse("Updated marker.txt."),
+      ],
+      {},
+    );
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "run_command") {
+        fs.writeFileSync(targetPath, "AFTER");
+        return { success: true, stdout: "", stderr: "", exitCode: 0 };
+      }
+      return { success: true };
+    });
+
+    const step: Any = {
+      id: "artifact-run-command-edit",
+      description: "Modify the existing file `marker.txt` using `printf %s AFTER > marker.txt`.",
+      status: "pending",
+    };
+
+    try {
+      const contract = (executor as Any).resolveStepExecutionContract(step);
+      expect(Array.from(contract.requiredTools)).toContain("edit_file");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fs.readFileSync(targetPath, "utf8")).toBe("AFTER");
+      expect((executor.toolRegistry.executeTool as Any).mock.calls).toEqual([
+        ["run_command", { command: "printf %s AFTER > marker.txt" }],
+      ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("treats run_command task file events as satisfying write_file contract when the command mutates a workspace file", async () => {
     executor = createExecutorWithStubs(
       [
@@ -2233,6 +2711,56 @@ relationship_memory:
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("keeps read-only constraints when the task also requests a shell command", () => {
+    executor = createExecutorWithStubs([], {});
+    const request =
+      "In this workspace, use the run_command tool to run the read-only command wc -l orders.csv. Report the output and whether it includes the header. Do not modify files.";
+    executor.task.title = "Count orders.csv lines";
+    executor.task.rawPrompt = request;
+    executor.task.prompt = request;
+    (executor as Any).getEffectiveTaskDomain = vi.fn().mockReturnValue("code");
+    (executor as Any).isExecuteLikeToolMode = vi.fn().mockReturnValue(true);
+    (executor as Any).followUpRequiresCommandExecution = vi.fn().mockReturnValue(true);
+
+    const step: Any = {
+      id: "read-only-command",
+      description: "Run 'wc -l /tmp/orders.csv' via the shell to get line count and filename.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+    const requiredTools = Array.from(contract.requiredTools);
+
+    expect((executor as Any).promptHasReadOnlyConstraint(request)).toBe(true);
+    expect((executor as Any).detectExecutionRequirement(request)).toBe(true);
+    expect(contract.mode).toBe("analysis_only");
+    expect(contract.requiresMutation).toBe(false);
+    expect(contract.requiresArtifactEvidence).toBe(false);
+    expect(requiredTools).not.toContain("write_file");
+    expect(requiredTools).not.toContain("edit_file");
+  });
+
+  it("keeps the requested spreadsheet mutation when only other files are protected", () => {
+    executor = createExecutorWithStubs([], {});
+    const request =
+      "Read only source.csv, create output.xlsx, and do not access or modify any other files.";
+    executor.task.title = "Create a spreadsheet from source.csv";
+    executor.task.rawPrompt = request;
+    executor.task.prompt = request;
+
+    const contract = (executor as Any).resolveStepExecutionContract({
+      id: "create-output-workbook",
+      description:
+        "Invoke `create_spreadsheet` exactly once to create output.xlsx with the verified source data.",
+      status: "pending",
+    });
+
+    expect((executor as Any).promptHasReadOnlyConstraint(request)).toBe(false);
+    expect(contract.mode).toBe("mutation_required");
+    expect(contract.requiresMutation).toBe(true);
+    expect(Array.from(contract.requiredTools)).toContain("create_spreadsheet");
   });
 
   it("does not fail descriptive meta steps for mutation when they do not express read-only intent", async () => {
@@ -2449,6 +2977,98 @@ relationship_memory:
     expect(contract.requiresArtifactEvidence).toBe(false);
     expect(contract.requiredTools.has("create_directory")).toBe(true);
     expect((executor as Any).shouldPerformDeterministicArtifactBootstrap(contract)).toBe(false);
+  });
+
+  it("does not pre-create a file when the step defers its write until after a wait", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const delayedStep: Any = {
+      id: "delayed-write",
+      description:
+        "Wait 55 seconds and only then overwrite `qa-cancel-mid-shell.txt` with the marker. Do not create or modify the file before the wait.",
+      status: "pending",
+    };
+    const contract = (executor as Any).resolveStepExecutionContract(delayedStep);
+
+    expect(contract.requiresMutation).toBe(true);
+    expect(contract.requiresArtifactEvidence).toBe(true);
+    expect(
+      (executor as Any).shouldPerformDeterministicArtifactBootstrap(contract, delayedStep),
+    ).toBe(false);
+
+    const immediateStep: Any = {
+      ...delayedStep,
+      id: "immediate-write",
+      description: "Write `qa-cancel-mid-shell.txt`, then wait 55 seconds before reading it.",
+    };
+    const immediateContract = (executor as Any).resolveStepExecutionContract(immediateStep);
+    expect(
+      (executor as Any).shouldPerformDeterministicArtifactBootstrap(
+        immediateContract,
+        immediateStep,
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves a delayed-write target absent when no write tool has run", async () => {
+    executor = createExecutorWithStubs(
+      Array.from({ length: 8 }, () => textResponse("Waiting to perform the command.")),
+      {},
+    );
+    const tempDir = fs.mkdtempSync("/tmp/cowork-delayed-bootstrap-");
+    (executor as Any).workspace.path = tempDir;
+    const target = path.join(tempDir, "qa-cancel-mid-shell.txt");
+    const step: Any = {
+      id: "delayed-write-no-tool",
+      description:
+        "Wait 55 seconds and only then write `qa-cancel-mid-shell.txt`. Do not create or modify the file before the wait.",
+      status: "pending",
+    };
+
+    try {
+      await (executor as Any).executeStep(step);
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps file editing available for a CSV row step that omits the filename", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    (executor as Any).task.prompt =
+      "Create qa-event-budget.csv using local files only; no network or messages.";
+    const step: Any = {
+      id: "populate-csv",
+      description:
+        "Add the supplied items and calculate: Add a `TOTAL` row with quantity `25` and grand total `131.5`; leave `unit_cost` blank because it does not apply to the aggregate.",
+      status: "pending",
+    };
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+    expect(contract.requiresMutation).toBe(true);
+    expect(contract.mode).toBe("mutation_required");
+    const tools = (executor as Any).buildStepToolAllowlist(
+      contract,
+      "mutation_required",
+      "writing",
+      step.description,
+    );
+    expect(tools.has("write_file")).toBe(true);
+    expect(tools.has("edit_file")).toBe(true);
+  });
+
+  it.each([
+    "Read the CSV rows and calculate the total",
+    "Verify the totals without modifying any rows",
+    "Do not add any rows",
+    "Explain how to add a total row",
+  ])("does not turn a CSV analysis step into a mutation: %s", (description) => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    (executor as Any).task.prompt = "Create qa-event-budget.csv";
+    const contract = (executor as Any).resolveStepExecutionContract({
+      id: "inspect-csv",
+      description,
+      status: "pending",
+    });
+    expect(contract.requiresMutation).toBe(false);
   });
 
   it("does not turn an exclusion-only filename mention into an artifact write", () => {
@@ -3333,6 +3953,33 @@ relationship_memory:
     expect(step.error).toContain("Verification failed");
   });
 
+  it("accepts an evidence-based finding from a read-only factual verification step", async () => {
+    const request =
+      "Read the first line of orders.csv and report whether it is a header row. Do not modify any files.";
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("run_command", { command: "head -n 1 orders.csv" }),
+        textResponse("Based on the first line, orders.csv includes a header row."),
+      ],
+      { run_command: { success: true, stdout: "order_id,region,amount,units\n", exitCode: 0 } },
+    );
+    executor.task.title = "Check the orders.csv header";
+    executor.task.rawPrompt = request;
+    executor.task.prompt = request;
+
+    const step: Any = {
+      id: "verify-header",
+      description: "Read the first line of orders.csv to verify whether it is a header row.",
+      status: "pending",
+      kind: "verification",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [step] };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status, String(step.error || "")).toBe("completed");
+  });
+
   it("completes analysis steps when PDF vision config is missing but text extraction succeeded", async () => {
     executor = createExecutorWithStubs(
       [
@@ -3747,6 +4394,253 @@ relationship_memory:
     expect(verifyContextIncludesSummary).toBe(true);
   });
 
+  it("shows upcoming plan steps so an analysis step does not run ahead", async () => {
+    let activeStepContext = "";
+    const executor = createExecutorWithLLMHandler((messages) => {
+      activeStepContext = String(messages?.[0]?.content || "");
+      return textResponse("5 records, 13 units, and $33.00 total revenue.");
+    });
+    const request =
+      "Read orders.csv and create daily-orders-summary.md. Use write_file exactly once, then read_file to verify it. Do not use shell commands.";
+    executor.task.title = "Create an orders summary";
+    executor.task.prompt = request;
+    executor.task.rawPrompt = request;
+    executor.task.userPrompt = request;
+    executor.workspace.path = "/workspace";
+    executor.recordWebEvidence = vi.fn();
+    executor.trackFileRead = vi.fn();
+    executor.summarizeToolResult = vi.fn().mockReturnValue("");
+    executor.recordToolResult(
+      "read_file",
+      {
+        success: true,
+        path: "orders.csv",
+        content: [
+          "order_id,region,amount,units",
+          "A101,Lisbon,10.00,2",
+          "A102,Lisbon,5.00,1",
+          "A103,Porto,7.50,3",
+          "A104,Porto,3.00,2",
+          "A105,,7.50,5",
+        ].join("\n"),
+        truncated: false,
+      },
+      { path: "orders.csv" },
+    );
+
+    const readStep: Any = {
+      id: "1",
+      description: "Read orders.csv and calculate the requested metrics.",
+      status: "pending",
+    };
+    const writeStep: Any = {
+      id: "2",
+      description: "Create daily-orders-summary.md with the calculated metrics using write_file.",
+      status: "pending",
+    };
+    const verifyStep: Any = {
+      id: "3",
+      description: "Verify the new report by reading it back.",
+      status: "pending",
+    };
+    executor.plan = {
+      description: "Create and verify the report",
+      steps: [readStep, writeStep, verifyStep],
+    };
+
+    await executor.executeStep(readStep);
+
+    expect(activeStepContext).toContain("UPCOMING PLAN STEPS");
+    expect(activeStepContext).toContain("Step 2: Create daily-orders-summary.md");
+    expect(activeStepContext).toContain("Step 3: Verify the new report");
+    expect(activeStepContext).toContain("Complete only the active step");
+    expect(activeStepContext).toContain("DATA EVIDENCE AND UNITS (REQUIRED)");
+    expect(activeStepContext).toContain("Do not claim profit, margins, costs, causation");
+    expect(activeStepContext).toContain(
+      "Only group records by date when the source has a date field",
+    );
+    expect(activeStepContext).toContain("use bare numeric amounts");
+    expect(activeStepContext).toContain("currency is unspecified");
+    expect(activeStepContext).toContain("Do not infer currency from locale");
+    expect(activeStepContext).toContain("SOURCE CSV CALCULATIONS");
+    expect(activeStepContext).toContain("5 data rows; sum(amount)=33.00; sum(units)=13");
+    expect(activeStepContext).toContain("Unspecified (1 rows, amount=7.50, units=5)");
+    expect(activeStepContext).toContain(
+      "Example: a source value of 33.00 with no currency marker must remain 33.00, never $33.00 or €33.00.",
+    );
+    expect(activeStepContext).toContain(
+      "Do not infer currency from locale, country, region, language, or a person's location.",
+    );
+    expect(readStep.status).toBe("completed");
+  });
+
+  it("does not add data unit guidance to an unrelated conversational task", () => {
+    const executor = createExecutorWithStubs([], {}) as Any;
+    executor.task.prompt = "Tell me a short joke about a lighthouse.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.task.userPrompt = executor.task.prompt;
+
+    expect(executor.getDataUnitGuidance("Tell a short joke.")).toBeUndefined();
+  });
+
+  it("blocks unsupported CSV report claims before write_file mutates the workspace", async () => {
+    const executor = createExecutorWithStubs([], {}) as Any;
+    const request =
+      "Read orders.csv and create daily-orders-summary.md. Use write_file exactly once.";
+    executor.task.title = "Create a daily orders summary";
+    executor.task.prompt = request;
+    executor.task.rawPrompt = request;
+    executor.task.userPrompt = request;
+    executor.workspace.path = "/workspace";
+    executor.recordWebEvidence = vi.fn();
+    executor.trackFileRead = vi.fn();
+    executor.summarizeToolResult = vi.fn().mockReturnValue("");
+    executor.recordToolResult(
+      "read_file",
+      {
+        success: true,
+        path: "orders.csv",
+        content: ["order_id,region,amount,units", "A101,Lisbon,10.00,2", "A102,Porto,5.00,1"].join(
+          "\n",
+        ),
+        truncated: false,
+      },
+      { path: "orders.csv" },
+    );
+
+    const preflight = await executor.preflightToolInvocation({
+      content: {
+        id: "tool-write-report",
+        name: "write_file",
+        input: {
+          path: "daily-orders-summary.md",
+          content: [
+            "# Daily Orders Summary",
+            "| Day | Total Revenue |",
+            "| Day 1 | €15.00 |",
+            "Lisbon has lower margins.",
+            "## Recommendations",
+          ].join("\n"),
+        },
+      },
+      contextText: request,
+      stepMode: "mutation_required",
+      stepId: "2",
+      rewriteReason: "tool_pre_execution",
+    });
+
+    expect(preflight.status).toBe("blocked");
+    expect(preflight.blockedReason).toBe("source_evidence");
+    expect(preflight.blockedMessage).toContain("no date column");
+    expect(preflight.blockedMessage).toContain("generic amount field");
+    expect(preflight.blockedMessage).toContain("no cost or profit fields");
+    expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
+  });
+
+  it("explains plan-scoped tools and does not suggest shell workarounds when forbidden", () => {
+    const executor = createExecutorWithStubs([], {}) as Any;
+    const request =
+      "Create daily-orders-summary.md with write_file. Do not use shell commands or take external actions.";
+    executor.task.prompt = request;
+    executor.task.rawPrompt = request;
+    executor.task.userPrompt = request;
+    executor.plan = {
+      steps: [
+        {
+          id: "1",
+          description: "Read orders.csv and calculate the requested metrics.",
+          status: "in_progress",
+        },
+        {
+          id: "2",
+          description:
+            "Create daily-orders-summary.md with the calculated metrics using write_file.",
+          status: "pending",
+        },
+      ],
+    };
+    executor.currentStepId = "1";
+
+    const deferredHint = executor.getDeferredPlanToolHint("write_file");
+    const recovery = executor.buildToolRecoveryInstruction({
+      disabled: false,
+      duplicate: false,
+      unavailable: true,
+      hardFailure: false,
+      errors: ["Tool write_file is reserved for a later plan step."],
+      failingTools: ["write_file"],
+    });
+
+    expect(deferredHint).toContain("planned step 2");
+    expect(recovery).toContain("PLAN-ORDER RECOVERY");
+    expect(recovery).toContain("Do not use shell commands or external actions");
+    expect(recovery).not.toContain("safe workaround in-repo");
+
+    executor.plan = undefined;
+    executor.currentStepId = null;
+    const alternatives = executor.getUnavailableToolAlternatives(
+      "write_file",
+      { path: "daily-orders-summary.md" },
+      new Set(["edit_file", "run_command"]),
+    );
+    expect(alternatives).toEqual(["edit_file"]);
+  });
+
+  it("completes an analysis step after a useful answer to a deferred planned-tool attempt", async () => {
+    const metricsText =
+      "Calculated from orders.csv: 5 records, 13 units, and €33.00 revenue. Lisbon totals €15.00, Porto totals €10.50, and Unknown totals €7.50. These values come from the five source rows and are ready for the planned report step. ".repeat(
+        2,
+      );
+    const executor = createExecutorWithStubs(
+      [
+        toolUseResponse("write_file", {
+          path: "daily-orders-summary.md",
+          content: "The calculated summary.",
+        }),
+        textResponse(metricsText),
+      ],
+      {},
+    ) as Any;
+    const request =
+      "Read orders.csv and create daily-orders-summary.md. Use write_file once, then read_file to verify. Do not use shell commands.";
+    executor.task.title = "Create an orders summary";
+    executor.task.prompt = request;
+    executor.task.rawPrompt = request;
+    executor.task.userPrompt = request;
+    executor.getAvailableTools = vi
+      .fn()
+      .mockReturnValue([{ name: "read_file", description: "Read a workspace file." }]);
+    executor.hasSubstantivePartialSuccessEvidence = vi.fn().mockReturnValue(true);
+
+    const analysisStep: Any = {
+      id: "2",
+      description:
+        "Calculate the record count, total units, total revenue, and revenue grouped by region.",
+      status: "pending",
+    };
+    const writeStep: Any = {
+      id: "3",
+      description:
+        "Create daily-orders-summary.md with the calculated statistics using write_file.",
+      status: "pending",
+    };
+    executor.plan = { description: "Create and verify report", steps: [analysisStep, writeStep] };
+
+    await executor.executeStep(analysisStep);
+
+    expect(analysisStep.status).toBe("completed");
+    expect(analysisStep.error).toBeUndefined();
+    expect(writeStep.status).toBe("pending");
+    expect(executor.daemon.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "log",
+      expect.objectContaining({
+        metric: "deferred_plan_tool_attempt_recovered",
+        stepId: "2",
+      }),
+    );
+  });
+
   it("injects runtime mutation events into verification context for negative constraints", async () => {
     let verifyContext = "";
     const executor = createExecutorWithLLMHandler((messages) => {
@@ -4056,6 +4950,67 @@ relationship_memory:
     );
 
     expect(executor.plan.steps.map((step: Any) => step.id)).toEqual(["recovery-1", "next-primary"]);
+  });
+
+  it("keeps a content draft analysis-only when a later step writes the same artifact", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+
+    const draftStep: Any = {
+      id: "draft-report-content",
+      description:
+        "Draft the reconciliation report content for /tmp/receiving-reconciliation.md, preserving source units and noting limitations.",
+      status: "pending",
+    };
+    const writeStep: Any = {
+      id: "write-report",
+      description: "Create /tmp/receiving-reconciliation.md in exactly one write operation.",
+      status: "pending",
+    };
+    executor.plan = {
+      description: "Create and verify a receiving report",
+      steps: [draftStep, writeStep],
+    };
+
+    const draftContract = (executor as Any).resolveStepExecutionContract(draftStep);
+    const writeContract = (executor as Any).resolveStepExecutionContract(writeStep);
+
+    expect(draftContract.mode).toBe("analysis_only");
+    expect(draftContract.requiresArtifactEvidence).toBe(false);
+    expect(Array.from(draftContract.requiredTools)).not.toContain("write_file");
+    expect(writeContract.mode).toBe("mutation_required");
+    expect(Array.from(writeContract.requiredTools)).toContain("write_file");
+  });
+
+  it("reserves a prepared artifact path for the later explicit create step", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+
+    const prepareStep: Any = {
+      id: "prepare-report",
+      description:
+        "Prepare receiving-reconciliation-final.md with the classifications, order-level reconciliation details, quantity totals, and source-field limitations.",
+      status: "pending",
+    };
+    const createStep: Any = {
+      id: "create-report",
+      description:
+        "Create receiving-reconciliation-final.md exactly once while leaving the input CSV files unchanged.",
+      status: "pending",
+    };
+    executor.plan = {
+      description: "Create and verify a receiving report",
+      steps: [prepareStep, createStep],
+    };
+
+    const prepareContract = (executor as Any).resolveStepExecutionContract(prepareStep);
+    const createContract = (executor as Any).resolveStepExecutionContract(createStep);
+
+    expect(prepareContract.mode).toBe("analysis_only");
+    expect(prepareContract.requiresArtifactEvidence).toBe(false);
+    expect(Array.from(prepareContract.requiredTools)).not.toContain("write_file");
+    expect(createContract.mode).toBe("mutation_required");
+    expect(Array.from(createContract.requiredTools)).toContain("write_file");
   });
 
   it("requires artifact_write_required for summary/report steps with a concrete target path and write intent", () => {

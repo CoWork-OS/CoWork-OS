@@ -799,6 +799,35 @@ describe("ToolPolicyPipeline", () => {
     }
   });
 
+  it("keeps the boundary reason when an approval cannot be requested", async () => {
+    const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+    process.env.COWORK_APPROVAL_PROMPTS = "off";
+    try {
+      const result = await evaluateToolPolicyPipeline({
+        workspace,
+        toolName: "write_file",
+        toolInput: { path: "/tmp/other-workspace/report.md", content: "test" },
+        permissionEvaluation: async () => ({
+          decision: "ask",
+          reason: {
+            type: "workspace_capability",
+            capability: "write",
+            summary: "The requested path is outside the active workspace boundary.",
+          },
+          suggestions: [],
+          scopePreview: "write_file outside workspace",
+        }),
+      });
+
+      expect(result.decision).toBe("deny");
+      expect(result.reason).toContain("approval requests are disabled");
+      expect(result.reason).toContain("outside the active workspace boundary");
+    } finally {
+      if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+      else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+    }
+  });
+
   it("fails closed for malformed credential, body, and header inputs", async () => {
     const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
     process.env.COWORK_APPROVAL_PROMPTS = "off";

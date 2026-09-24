@@ -60,6 +60,7 @@ export interface ShellRunRequest {
   workspaceId: string;
   workspacePath: string;
   command: string;
+  signal?: AbortSignal;
   cwd?: string;
   scope?: ShellSessionScope;
   sessionId?: string;
@@ -321,7 +322,10 @@ function snapshotForPersistence(snapshot: ShellSnapshot): ShellSnapshot {
 export class ShellSessionManager {
   private static instance: ShellSessionManager | null = null;
   private sessions = new Map<string, ShellSessionRuntime>();
+  private stoppingSessions = new Map<string, Promise<ShellSessionInfo | null>>();
   private activeSessionRuns = new Set<string>();
+  private persistQueue: Promise<void> = Promise.resolve();
+  private persistSequence = 0;
   private stateLoaded = false;
 
   static getInstance(): ShellSessionManager {
@@ -402,7 +406,7 @@ export class ShellSessionManager {
     }
   }
 
-  private async persistState(): Promise<void> {
+  private persistState(): Promise<void> {
     const payload = {
       sessions: Array.from(this.sessions.values()).map((session) => ({
         id: session.info.id,
@@ -426,18 +430,32 @@ export class ShellSessionManager {
         snapshot: snapshotForPersistence(session.snapshot),
       })),
     };
-    await fsPromises.mkdir(path.dirname(STATE_FILE), { recursive: true });
-    try {
-      await fsPromises.chmod(path.dirname(STATE_FILE), 0o700);
-    } catch {
-      // Best effort only.
-    }
-    await fsPromises.writeFile(STATE_FILE, JSON.stringify(payload, null, 2), "utf-8");
-    try {
-      await fsPromises.chmod(STATE_FILE, 0o600);
-    } catch {
-      // Best effort only.
-    }
+    const sequence = ++this.persistSequence;
+    const writeSnapshot = async (): Promise<void> => {
+      const tempFile = `${STATE_FILE}.${process.pid}.${sequence}.tmp`;
+      await fsPromises.mkdir(path.dirname(STATE_FILE), { recursive: true });
+      try {
+        await fsPromises.chmod(path.dirname(STATE_FILE), 0o700);
+      } catch {
+        // Best effort only.
+      }
+      try {
+        await fsPromises.writeFile(tempFile, JSON.stringify(payload, null, 2), "utf-8");
+        try {
+          await fsPromises.chmod(tempFile, 0o600);
+        } catch {
+          // Best effort only.
+        }
+        await fsPromises.rename(tempFile, STATE_FILE);
+      } catch (error) {
+        await fsPromises.unlink(tempFile).catch(() => undefined);
+        throw error;
+      }
+    };
+
+    const queuedWrite = this.persistQueue.then(writeSnapshot, writeSnapshot);
+    this.persistQueue = queuedWrite.catch(() => undefined);
+    return queuedWrite;
   }
 
   private getSessionKey(taskId: string, workspaceId: string, scope: ShellSessionScope): string {
@@ -814,6 +832,17 @@ export class ShellSessionManager {
   async runCommand(request: ShellRunRequest): Promise<ShellCommandResult> {
     await this.ensureStateLoaded();
 
+    if (request.signal?.aborted) {
+      return {
+        success: false,
+        stdout: "",
+        stderr: "Terminal command stopped.",
+        exitCode: null,
+        terminationReason: "user_stopped",
+        usedPersistentSession: true,
+      };
+    }
+
     const session = this.getOrCreateRuntime({
       taskId: request.taskId,
       workspaceId: request.workspaceId,
@@ -847,6 +876,19 @@ export class ShellSessionManager {
         cwd: session.snapshot.cwd || request.workspacePath,
       });
       await this.persistState();
+    }
+
+    if (request.signal?.aborted) {
+      await this.stopSessionById(session.info.id);
+      return {
+        success: false,
+        stdout: "",
+        stderr: "Terminal command stopped.",
+        exitCode: null,
+        terminationReason: "user_stopped",
+        usedPersistentSession: true,
+        sessionId: session.info.id,
+      };
     }
 
     if (!session.process?.stdin || !session.process.stdout) {
@@ -888,6 +930,7 @@ export class ShellSessionManager {
       `printf '__COWORK_DONE__:%s:%s\\n' ${quoteForPosixShell(commandId)} "$__cowork_exit_code"`,
     ].join("\n");
 
+    let onAbort: (() => void) | undefined;
     const commandPromise = new Promise<ShellCommandResult>((resolve, reject) => {
       session.busy = true;
       const timeout = setTimeout(() => {
@@ -907,6 +950,18 @@ export class ShellSessionManager {
         cwd: targetCwd,
         onOutput: request.onOutput,
       });
+
+      if (request.signal) {
+        onAbort = () => {
+          void this.stopSessionById(session.info.id).catch(() => undefined);
+        };
+        request.signal.addEventListener("abort", onAbort, { once: true });
+        if (request.signal.aborted) {
+          onAbort();
+          return;
+        }
+      }
+
       session.process!.stdin!.write(`${wrapper}\n`);
       session.process!.stdin!.once("error", (error) => {
         clearTimeout(timeout);
@@ -916,6 +971,9 @@ export class ShellSessionManager {
       });
     });
     return commandPromise.finally(() => {
+      if (onAbort && request.signal) {
+        request.signal.removeEventListener("abort", onAbort);
+      }
       this.activeSessionRuns.delete(runKey);
     });
   }
@@ -1061,6 +1119,19 @@ export class ShellSessionManager {
   }
 
   async stopSessionById(sessionId: string): Promise<ShellSessionInfo | null> {
+    const inFlight = this.stoppingSessions.get(sessionId);
+    if (inFlight) return inFlight;
+
+    const stopping = this.stopSessionByIdInternal(sessionId).finally(() => {
+      if (this.stoppingSessions.get(sessionId) === stopping) {
+        this.stoppingSessions.delete(sessionId);
+      }
+    });
+    this.stoppingSessions.set(sessionId, stopping);
+    return stopping;
+  }
+
+  private async stopSessionByIdInternal(sessionId: string): Promise<ShellSessionInfo | null> {
     await this.ensureStateLoaded();
     const session = this.sessions.get(sessionId);
     if (!session) return null;
@@ -1077,13 +1148,13 @@ export class ShellSessionManager {
         stdout: "",
         stderr: "Terminal command stopped.",
         exitCode: null,
-        terminationReason: "error",
+        terminationReason: "user_stopped",
         usedPersistentSession: true,
         sessionId: session.info.id,
       });
     }
     session.pending = [];
-    this.updateRuntimeInfo(session, { status: "inactive", lastTerminationReason: "error" });
+    this.updateRuntimeInfo(session, { status: "inactive", lastTerminationReason: "user_stopped" });
     await this.persistState();
     return { ...session.info };
   }

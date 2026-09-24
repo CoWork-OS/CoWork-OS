@@ -233,7 +233,11 @@ const SCREEN_CONTEXT_INTENT_PATTERN =
 const EXPLICIT_APPLESCRIPT_INTENT_PATTERN =
   /\b(applescript|osascript|script editor|apple script|tell application|system events)\b/i;
 const NATIVE_APP_REFERENCE_PATTERN =
-  /\b(calculator|notes?|finder|preview|textedit|system settings|system preferences|simulator|ios simulator|xcode|mail|messages|photos|music|quicktime|terminal|iterm|warp|cursor|vscode|visual studio code|menu bar|dock|spotlight|native app|desktop app|macos app)\b/i;
+  /\b(calculator|notes?|finder|preview|textedit|system settings|system preferences|simulator|ios simulator|xcode|mail|photos|music|quicktime|terminal|iterm|warp|cursor|vscode|visual studio code|menu bar|dock|spotlight|native app|desktop app|macos app)\b/i;
+// Generic message references (including "no messages") are not requests to
+// control Apple's Messages application. Require an explicit app-use phrase.
+const MESSAGES_APP_REFERENCE_PATTERN =
+  /\b(?:open|launch|activate|focus|use|using|in|via|inside|through|switch to)\s+(?:(?:the|apple)\s+)?messages\b|\bmessages(?:\.app|\s+app(?:lication)?)\b/i;
 const NATIVE_GUI_ACTION_PATTERN =
   /\b(click|tap|press|type|enter|select|choose|toggle|drag|drop|scroll|hover|move (?:the )?mouse|cursor|navigate|create|rename|delete|compose|reply|submit)\b/i;
 const NATIVE_APP_OPEN_PATTERN =
@@ -265,7 +269,9 @@ export function hasNativeDesktopGuiIntent(taskText: string): boolean {
   if (!taskText) return false;
   if (COMPUTER_USE_INTENT_PATTERN.test(taskText)) return true;
   const hasNativeAppReference =
-    NATIVE_APP_REFERENCE_PATTERN.test(taskText) || GENERIC_NATIVE_SURFACE_PATTERN.test(taskText);
+    NATIVE_APP_REFERENCE_PATTERN.test(taskText) ||
+    MESSAGES_APP_REFERENCE_PATTERN.test(taskText) ||
+    GENERIC_NATIVE_SURFACE_PATTERN.test(taskText);
   const hasGuiAction = NATIVE_GUI_ACTION_PATTERN.test(taskText);
   const hasOpenOrFocusAction = NATIVE_APP_OPEN_PATTERN.test(taskText);
 

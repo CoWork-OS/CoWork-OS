@@ -507,6 +507,22 @@ describe("LLMSettingsSchema", () => {
     },
   );
 
+  it("accepts GPT-6 Sol API none and Azure Luna max reasoning settings", () => {
+    const openai = LLMSettingsSchema.parse({
+      providerType: "openai",
+      modelKey: "gpt-6-sol",
+      openai: { authMethod: "api_key", model: "gpt-6-sol", reasoningEffort: "none" },
+    });
+    const azure = LLMSettingsSchema.parse({
+      providerType: "azure",
+      modelKey: "gpt-6-luna",
+      azure: { deployment: "gpt-6-luna", reasoningEffort: "max" },
+    });
+
+    expect(openai.openai?.reasoningEffort).toBe("none");
+    expect(azure.azure?.reasoningEffort).toBe("max");
+  });
+
   it("accepts long OpenAI OAuth tokens and account metadata", () => {
     const accessToken = "a".repeat(5000);
     const refreshToken = "r".repeat(5000);

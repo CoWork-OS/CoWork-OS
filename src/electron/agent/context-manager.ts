@@ -21,6 +21,8 @@ const MODEL_LIMITS: Record<string, number> = {
   "gpt-4.1-mini": 128000,
   "gpt-4-turbo": 128000,
   "gpt-6-astra": 1_050_000,
+  "gpt-6-sol": 1_050_000,
+  "gpt-6-luna": 1_050_000,
   "gpt-3.5-turbo": 16000,
   default: 100000,
 };
@@ -29,7 +31,7 @@ function inferModelLimit(modelKey: string): number | null {
   const key = modelKey.toLowerCase().trim();
   if (!key) return null;
 
-  if (key.includes("gpt-6-astra")) return 1_050_000;
+  if (/gpt-6-(?:astra|sol|luna)/.test(key)) return 1_050_000;
 
   // Anthropic raw ids: e.g. "claude-3-5-sonnet-latest"
   if (

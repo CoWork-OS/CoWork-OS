@@ -738,18 +738,62 @@ function deriveFiles(
     .sort((a, b) => b.timestamp - a.timestamp);
 }
 
-function deriveToolUsage(events: TaskEvent[]): ToolUsage[] {
+export function deriveToolUsage(events: TaskEvent[]): ToolUsage[] {
   const toolMap = new Map<string, ToolUsage>();
+  const seenCalls = new Set<string>();
+  const pendingCommands = new Map<string, { taskId: string; command: string; cwd?: string }>();
 
   for (const event of events) {
     const payload = asObject(event.payload);
-    if (getEffectiveTaskEventType(event) !== "tool_call" || typeof payload.tool !== "string") {
+    const type = getEffectiveTaskEventType(event);
+    const callId = [payload.toolUseId, payload.callId, payload.id].find(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    );
+    const callKey = callId ? `${event.taskId}:${callId}` : undefined;
+    if (type === "tool_result" || type === "tool_error") {
+      if (callKey) pendingCommands.delete(callKey);
       continue;
+    }
+    if (type === "task_completed" || type === "task_cancelled" || type === "error") {
+      for (const [key, command] of pendingCommands) {
+        if (command.taskId === event.taskId) pendingCommands.delete(key);
+      }
+    }
+    if (type !== "tool_call" || typeof payload.tool !== "string") {
+      continue;
+    }
+    if (callKey) {
+      if (seenCalls.has(callKey)) continue;
+      seenCalls.add(callKey);
+    }
+    const input = asObject(payload.input);
+    if (payload.tool === "run_command") {
+      if (callKey && typeof input.command === "string") {
+        pendingCommands.set(callKey, {
+          taskId: event.taskId,
+          command: input.command,
+          ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
+        });
+      } else if (!callKey && typeof payload.command === "string") {
+        // Shell tools also emit a command-detail event for the executor's
+        // correlated call. Count the operation once, preserving standalone
+        // legacy calls and separate executions of the same command.
+        const pairedCall = [...pendingCommands].find(
+          ([, command]) =>
+            command.taskId === event.taskId &&
+            command.command === payload.command &&
+            (command.cwd === undefined || command.cwd === payload.cwd),
+        );
+        if (pairedCall) {
+          pendingCommands.delete(pairedCall[0]);
+          continue;
+        }
+      }
     }
     const existing = toolMap.get(payload.tool);
     if (existing) {
       existing.count += 1;
-      existing.lastUsed = event.timestamp;
+      existing.lastUsed = Math.max(existing.lastUsed, event.timestamp);
     } else {
       toolMap.set(payload.tool, {
         name: payload.tool,

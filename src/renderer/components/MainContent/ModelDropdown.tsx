@@ -573,8 +573,10 @@ export function ModelDropdown({
                               key={provider.type}
                               className="model-dropdown-provider-row"
                               onMouseEnter={() => {
-                                setActiveProviderMenu(provider.type);
-                                void loadProviderModels(provider.type);
+                                if (align !== "right") {
+                                  setActiveProviderMenu(provider.type);
+                                  void loadProviderModels(provider.type);
+                                }
                               }}
                             >
                               <button
@@ -582,7 +584,7 @@ export function ModelDropdown({
                                 aria-expanded={isActive}
                                 className={`model-dropdown-provider-option ${isActive ? "highlighted" : ""}`}
                                 onClick={() => {
-                                  setActiveProviderMenu(isActive ? null : provider.type);
+                                  setActiveProviderMenu(provider.type);
                                   void loadProviderModels(provider.type);
                                 }}
                               >
@@ -620,6 +622,15 @@ export function ModelDropdown({
           {pickerView === "advanced" && activeProvider && (
             <div className="model-dropdown-submenu">
               <div className="model-dropdown-submenu-header">
+                <button
+                  type="button"
+                  className="model-dropdown-submenu-back"
+                  onClick={() => setActiveProviderMenu(null)}
+                  aria-label="Back to model sources"
+                >
+                  <ChevronLeft size={13} aria-hidden="true" />
+                  <span>Other sources</span>
+                </button>
                 <span className="model-dropdown-kicker">SWITCH TO</span>
                 <strong>{activeProvider.name}</strong>
                 <span>{activeProviderModels.length} available models</span>

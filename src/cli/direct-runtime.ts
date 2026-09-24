@@ -122,4 +122,3 @@ function enableMacSystemCa(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): v
   // shells and MCP servers running older Node versions don't inherit it.
   env[DIRECT_RUN_INJECTED_SYSTEM_CA_ENV] = "1";
 }
-

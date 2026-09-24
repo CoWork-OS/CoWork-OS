@@ -186,7 +186,7 @@ describe("ShellSessionManager", () => {
     expect(interrupted.status).toBe("inactive");
     await expect(running).resolves.toMatchObject({
       success: false,
-      terminationReason: "error",
+      terminationReason: "user_stopped",
     });
 
     const restarted = await manager.writeToSession(tab.id, "");

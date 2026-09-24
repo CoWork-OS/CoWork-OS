@@ -1461,6 +1461,11 @@ export interface PermissionSettingsData {
   migration?: PermissionSettingsMigration;
 }
 
+export interface PermissionRuntimeInfo {
+  /** Approval queue availability for this process, independent of saved profiles. */
+  approvalPromptsEnabled: boolean;
+}
+
 export type ToolResultEnvelopeStatus =
   | "queued"
   | "running"
@@ -9277,6 +9282,7 @@ export const IPC_CHANNELS = {
 
   // Permissions
   PERMISSIONS_GET_SETTINGS: "permissions:getSettings",
+  PERMISSIONS_GET_RUNTIME_INFO: "permissions:getRuntimeInfo",
   PERMISSIONS_SAVE_SETTINGS: "permissions:saveSettings",
   PERMISSIONS_GET_WORKSPACE_RULES: "permissions:getWorkspaceRules",
   PERMISSIONS_DELETE_WORKSPACE_RULE: "permissions:deleteWorkspaceRule",
@@ -9992,8 +9998,15 @@ export interface MoaPreset {
   concurrency?: number;
 }
 
-export type OpenAIReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
-export type AzureReasoningEffort = "low" | "medium" | "high" | "extra_high";
+export type OpenAIReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+export type AzureReasoningEffort =
+  | "none"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "extra_high";
 export type LLMReasoningEffort = OpenAIReasoningEffort | AzureReasoningEffort;
 export type LLMTextVerbosity = "low" | "medium" | "high";
 

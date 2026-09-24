@@ -7,7 +7,7 @@ import {
   isBotRecoveryBranch,
   matchesBotConversation,
   selectLatestBotConversation,
-  shouldAdoptBotConversation,
+  shouldReopenBotConversationInWorkspace,
 } from "../bot-conversations";
 
 describe("bot conversations", () => {
@@ -34,10 +34,21 @@ describe("bot conversations", () => {
       matchesBotConversation({ ...conversation, agentConfig: {} }, "workspace-a", "bot-a"),
     ).toBe(false);
   });
-  it("adopts cross-workspace history only for temporary workspaces", () => {
-    expect(shouldAdoptBotConversation(conversation, "__temp_workspace__:session-1")).toBe(true);
-    expect(shouldAdoptBotConversation(conversation, "workspace-a")).toBe(false);
-    expect(shouldAdoptBotConversation(conversation, "workspace-b")).toBe(false);
+  it("branches cross-workspace history and mismatched teams only into temporary workspaces", () => {
+    const current = "__temp_workspace__:session-1";
+    const team = { id: "team-a", isActive: true, persistent: true };
+    expect(shouldReopenBotConversationInWorkspace(conversation, current, [])).toBe(true);
+    expect(shouldReopenBotConversationInWorkspace(conversation, "workspace-b", [])).toBe(false);
+    const local = {
+      ...conversation,
+      workspaceId: current,
+      agentConfig: { botConversation: true, botTeamId: team.id },
+    } as Task;
+    expect(shouldReopenBotConversationInWorkspace(local, current, [team])).toBe(false);
+    expect(shouldReopenBotConversationInWorkspace(local, current, [])).toBe(true);
+    expect(
+      shouldReopenBotConversationInWorkspace(local, current, [{ ...team, isActive: false }]),
+    ).toBe(true);
   });
   it("recognizes only labeled bot recovery branches", () => {
     expect(
@@ -76,6 +87,62 @@ describe("bot conversations", () => {
     } as Task;
 
     expect(selectLatestBotConversation([source, recovery], "bot-a")?.id).toBe("recovery-task");
+  });
+  it("shows a newer real conversation after an earlier recovery branch", () => {
+    const recovery = {
+      ...conversation,
+      id: "recovery-task",
+      createdAt: 200,
+      updatedAt: 500,
+      branchFromTaskId: "source-task",
+      branchLabel: "Reopened bot conversation",
+      resultSummary: "An older handoff",
+    } as Task;
+    const fresh = {
+      ...conversation,
+      id: "fresh-task",
+      createdAt: 600,
+      updatedAt: 700,
+      resultSummary: "The latest answer",
+    } as Task;
+
+    expect(selectLatestBotConversation([recovery, fresh], "bot-a")?.id).toBe("fresh-task");
+  });
+  it("does not treat an old handoff timeout as the latest bot conversation", () => {
+    const stale = {
+      ...conversation,
+      id: "old-wait",
+      status: "blocked",
+      terminalStatus: "needs_user_action",
+      error:
+        "No correlated reply arrived from Atlas within 120 seconds. Review the partial result or retry.",
+      createdAt: 100,
+      updatedAt: 900,
+      resultSummary: "Old handoff",
+    } as Task;
+    const fresh = {
+      ...conversation,
+      id: "fresh-answer",
+      status: "completed",
+      createdAt: 300,
+      updatedAt: 400,
+      resultSummary: "Current answer",
+    } as Task;
+
+    expect(selectLatestBotConversation([stale, fresh], "bot-a")?.id).toBe("fresh-answer");
+    expect(
+      selectLatestBotConversation(
+        [
+          {
+            ...stale,
+            error:
+              "No outstanding teammate reply is pending for this conversation. Review the prior result or retry.",
+          },
+          fresh,
+        ],
+        "bot-a",
+      )?.id,
+    ).toBe("fresh-answer");
   });
   it("creates fresh dormant hybrid options without copying task permissions, history, or transient execution state", () => {
     const options = createBotConversationOptions("bot-a");

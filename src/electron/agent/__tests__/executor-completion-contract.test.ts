@@ -10,6 +10,9 @@ import {
   hasUnrecoveredBlockingPlanFailureForAssistantOutput,
   hasUnrecoveredToolFailureForAssistantOutput,
   hasVerificationEvidence,
+  getBestFinalResponseCandidate,
+  responseHasDecisionSignal,
+  responseLooksOperationalOnly,
   responseHasExecutionReportEvidenceSignal,
 } from "../executor-completion-utils";
 
@@ -123,6 +126,56 @@ function createExecuteHarness(options: HarnessOptions) {
 }
 
 describe("TaskExecutor completion contract integration", () => {
+  it("recognizes explicit read-back match and mismatch outcomes as decision signals", () => {
+    expect(responseHasDecisionSignal("The read-back matched all requested totals.")).toBe(true);
+    expect(responseHasDecisionSignal("The report did not match the source totals.")).toBe(true);
+  });
+
+  it("recognizes a factual header-presence statement as a decision signal", () => {
+    expect(responseHasDecisionSignal("orders.csv includes one header row.")).toBe(true);
+  });
+
+  it("uses successful command calls as evidence for a completed read-only verification step", () => {
+    expect(
+      hasVerificationEvidence({
+        bestCandidate: "Based on the first line, orders.csv includes one header row.",
+        planSteps: [
+          {
+            status: "completed",
+            description: "Read the first line of orders.csv to verify whether a header row exists.",
+          },
+        ],
+        successfulTools: ["run_command"],
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts a successful file-info lookup as verification evidence", () => {
+    expect(
+      hasVerificationEvidence({
+        bestCandidate: "The workbook exists and its metadata was checked.",
+        planSteps: [{ status: "completed", description: "Verify the created workbook exists." }],
+        toolResultMemory: [{ tool: "get_file_info" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("retains existence and size from a successful file-info lookup for later steps", () => {
+    const executor = createExecuteHarness({
+      title: "Verify an output file",
+      prompt: "Verify the output file exists and report the result.",
+      lastOutput: "",
+    });
+
+    expect(
+      (executor as Any).summarizeToolResult(
+        "get_file_info",
+        { size: 8258, isFile: true, isDirectory: false, permissions: "644" },
+        { path: "attendee-summary.xlsx" },
+      ),
+    ).toBe("file exists: attendee-summary.xlsx, size=8258B, permissions=644");
+  });
+
   it("accepts checksum-backed bounded document extraction as review evidence", () => {
     expect(
       hasVerificationEvidence({
@@ -264,6 +317,184 @@ describe("TaskExecutor completion contract integration", () => {
     expect((executor as Any).buildResultSummary()).toBeUndefined();
   });
 
+  it("ignores a tool-unavailable response when those named tools succeeded", () => {
+    const unavailableResponse =
+      "PENDING_USER_ACTION — Created `attendee-summary.xlsx` successfully. `get_file_info` was not available in this execution context, so verification could not be performed.";
+    const executor = createExecuteHarness({
+      title: "Create and verify the attendee spreadsheet",
+      prompt:
+        "Create attendee-summary.xlsx from the source CSVs, verify the workbook, and tell me whether creation succeeded.",
+      lastOutput: unavailableResponse,
+      createdFiles: ["attendee-summary.xlsx"],
+    });
+    (executor as Any).successfulToolUsageCounts = new Map([
+      ["create_spreadsheet", 1],
+      ["get_file_info", 1],
+    ]);
+    (executor as Any).toolResultMemory = [
+      { tool: "create_spreadsheet", summary: "Created attendee-summary.xlsx." },
+      { tool: "get_file_info", summary: "attendee-summary.xlsx exists and is 7,847 bytes." },
+    ];
+
+    expect((executor as Any).buildResultSummary()).toBeUndefined();
+    expect((executor as Any).getBestFinalResponseCandidate()).toBe("");
+  });
+
+  it("drops an unavailable-tool claim after a later step successfully uses that tool", () => {
+    const executor = createExecuteHarness({
+      title: "Create and verify attendee spreadsheet",
+      prompt:
+        "Call create_spreadsheet exactly once, then call get_file_info exactly once and report whether the workbook exists.",
+      lastOutput: "",
+    });
+    const tick = String.fromCharCode(96);
+    const staleClaim =
+      "PENDING_USER_ACTION — The required " +
+      tick +
+      "get_file_info" +
+      tick +
+      " verification could not be performed because that tool was unavailable in this step.";
+    (executor as Any).successfulToolUsageCounts = new Map([["get_file_info", 1]]);
+    (executor as Any).toolResultMemory = [
+      { tool: "get_file_info", summary: "The workbook exists and is a file." },
+    ];
+    (executor as Any).lastNonVerificationOutput = staleClaim;
+    (executor as Any).lastAssistantText = "OK";
+    (executor as Any).lastAssistantOutput = "OK";
+
+    expect((executor as Any).isToolUnavailabilityClaimContradictedByEvidence(staleClaim)).toBe(
+      true,
+    );
+    expect((executor as Any).buildResultSummary()).toBeUndefined();
+    expect((executor as Any).getBestFinalResponseCandidate()).not.toContain("unavailable");
+  });
+
+  it("keeps correct answers that mention a used tool and unavailable data", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.successfulToolUsageCounts = new Map([
+      ["read_file", 1],
+      ["run_command", 1],
+      ["web_search", 1],
+    ]);
+    executor.toolResultMemory = [];
+
+    for (const answer of [
+      "I read the file with read_file, but the date field is not available, so I computed totals only.",
+      "After I read file contents for orders.csv, the author name is not available.",
+      "My web search turned up two sources; pricing is not available publicly.",
+      "I ran run_command to execute the tests, but the check could not be completed because 3 tests failed.",
+    ]) {
+      expect(executor.isToolUnavailabilityClaimContradictedByEvidence(answer)).toBe(false);
+    }
+    expect(
+      executor.isToolUnavailabilityClaimContradictedByEvidence(
+        "The read_file tool is unavailable in this step.",
+      ),
+    ).toBe(true);
+  });
+
+  it("drops a stale missing-in-this-step claim after a later file-info verification succeeds", async () => {
+    const staleClaim =
+      "PENDING_USER_ACTION — Workbook created successfully at `openai-qa-synthetic-multisource/attendee-completion-summary-cross-step-final-answer.xlsx`. The required `get_file_info` verification call was not exposed in this step, so post-creation verification did not succeed.";
+    const executor = createExecuteHarness({
+      title: "Create and verify attendee spreadsheet",
+      prompt:
+        "Create attendee-summary.xlsx, verify it with get_file_info, and report whether the workbook exists and verification succeeded.",
+      lastOutput: staleClaim,
+      createdFiles: [
+        "openai-qa-synthetic-multisource/attendee-completion-summary-cross-step-final-answer.xlsx",
+      ],
+    });
+    executor.successfulToolUsageCounts = new Map([
+      ["create_spreadsheet", 1],
+      ["get_file_info", 1],
+    ]);
+    executor.toolResultMemory = [
+      {
+        tool: "create_spreadsheet",
+        summary:
+          "Created openai-qa-synthetic-multisource/attendee-completion-summary-cross-step-final-answer.xlsx.",
+      },
+      {
+        tool: "get_file_info",
+        summary:
+          "file exists: openai-qa-synthetic-multisource/attendee-completion-summary-cross-step-final-answer.xlsx, size=8,258B, permissions=644",
+      },
+    ];
+    executor.plan = {
+      description: "Create and verify workbook",
+      steps: [
+        {
+          id: "verify",
+          description: "Verify the created workbook exists and report the result.",
+          kind: "verification",
+          status: "completed",
+        },
+      ],
+    };
+    executor.lastNonVerificationOutput = staleClaim;
+    executor.lastAssistantOutput = staleClaim;
+    executor.lastAssistantText = "OK";
+    executor.emitEvent = vi.fn();
+    executor.createMessageWithTimeout = vi.fn(async () => ({
+      content: [
+        {
+          type: "text",
+          text: "Yes. The workbook exists, and the successful get_file_info call verified it.",
+        },
+      ],
+    }));
+
+    expect(executor.isToolUnavailabilityClaimContradictedByEvidence(staleClaim)).toBe(true);
+    expect(executor.getBestFinalResponseCandidate()).not.toContain("PENDING_USER_ACTION");
+    expect(executor.buildCompletionContract().requiresDirectAnswer).toBe(true);
+
+    await executor.ensureDirectFinalAnswerForCompletion();
+
+    expect(executor.createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(executor.lastAssistantOutput).toBe(
+      "Yes. The workbook exists, and the successful get_file_info call verified it.",
+    );
+    expect(executor.buildResultSummary()).not.toContain("PENDING_USER_ACTION");
+  });
+
+  it("defers the single-use file-info requirement from a combined mutation step", () => {
+    const executor = createExecuteHarness({
+      title: "Create and verify attendee spreadsheet",
+      prompt:
+        "Call create_spreadsheet exactly once. If creation succeeds, call get_file_info exactly once on the returned workbook path and report whether it exists.",
+      lastOutput: "",
+    });
+    const createStep: Any = {
+      id: "create-and-verify",
+      description:
+        "Call `create_spreadsheet` exactly once to create attendee-summary.xlsx; if creation succeeds, call `get_file_info` exactly once on the returned path.",
+      status: "pending",
+    };
+    const verifyStep: Any = {
+      id: "verify-and-report",
+      description: "Verify that attendee-summary.xlsx exists and report the verification result.",
+      kind: "verification",
+      status: "pending",
+    };
+    executor.plan = {
+      description: "Create and verify attendee spreadsheet",
+      steps: [createStep, verifyStep],
+    };
+
+    const createContract = (executor as Any).resolveStepExecutionContract(createStep);
+    expect(createContract.requiredTools).toContain("create_spreadsheet");
+    expect(createContract.requiredTools).not.toContain("get_file_info");
+    expect(
+      (executor as Any).getMissingRequiredToolEvidence((executor as Any).buildCompletionContract()),
+    ).toEqual(["get_file_info"]);
+
+    (executor as Any).successfulToolUsageCounts = new Map([["get_file_info", 1]]);
+    expect(
+      (executor as Any).getMissingRequiredToolEvidence((executor as Any).buildCompletionContract()),
+    ).toEqual([]);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -378,6 +609,84 @@ checklist_contract:
     // Artifact evidence is still satisfied because the task created the file.
     expect(contract.requiredArtifactExtensions).toEqual([]);
     expect((executor as Any).hasArtifactEvidence(contract)).toBe(true);
+  });
+
+  it("accepts a successfully tracked shell mutation as output artifact evidence", () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-shell-artifact-"));
+    const outputPath = path.join(workspacePath, "detached-smoke.txt");
+    const content = "DETACHED_RUN_OK\n";
+    fs.writeFileSync(outputPath, content);
+    const executor = createExecuteHarness({
+      title: "Detached CLI runner smoke",
+      prompt:
+        "Use run_command exactly once to create detached-smoke.txt containing exactly DETACHED_RUN_OK followed by one newline. Then use read_file to verify it and report the byte count. Do not use write_file, edit_file, or any other file-creation tool.",
+      lastOutput: "Verified detached-smoke.txt is 16 bytes.",
+    });
+    executor.workspace.path = workspacePath;
+
+    const contract = (executor as Any).buildCompletionContract();
+
+    expect(contract.requiredArtifactExtensions).toContain(".txt");
+    expect((executor as Any).hasArtifactEvidence(contract)).toBe(false);
+    executor.artifactMutationLedger = {
+      [outputPath]: {
+        stepId: "1",
+        ts: Date.now(),
+        tool: "run_command",
+        evidence: {
+          tool_success: true,
+          canonical_tool: "run_command",
+          reported_path: outputPath,
+          artifact_registered: false,
+          fs_exists: true,
+          mtime_after_step_start: true,
+          size_bytes: Buffer.byteLength(content),
+        },
+      },
+    };
+
+    try {
+      expect((executor as Any).hasArtifactEvidence(contract)).toBe(true);
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count provisional bootstrap files as completed output artifacts", () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-bootstrap-artifact-"));
+    const outputPath = path.join(workspacePath, "detached-smoke.txt");
+    fs.writeFileSync(outputPath, "placeholder\n");
+    const executor = createExecuteHarness({
+      title: "Detached CLI runner smoke",
+      prompt: "Create detached-smoke.txt as a text file.",
+      lastOutput: "Prepared detached-smoke.txt.",
+    });
+    executor.workspace.path = workspacePath;
+    executor.artifactMutationLedger = {
+      [outputPath]: {
+        stepId: "bootstrap",
+        ts: Date.now(),
+        tool: "artifact_bootstrap",
+        evidence: {
+          tool_success: true,
+          canonical_tool: "write_file",
+          reported_path: outputPath,
+          artifact_registered: true,
+          fs_exists: true,
+          mtime_after_step_start: true,
+          size_bytes: 11,
+        },
+      },
+    };
+
+    try {
+      const contract = (executor as Any).buildCompletionContract();
+
+      expect(contract.requiresArtifactEvidence).toBe(true);
+      expect((executor as Any).hasArtifactEvidence(contract)).toBe(false);
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
   });
 
   it("preserves a substantive brief when a later recovery step reports narrow evidence", () => {
@@ -858,6 +1167,147 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
         status: "failed",
         error: expect.stringContaining("missing direct answer"),
       }),
+    );
+  });
+
+  it("accepts a concise created-file response when it includes verified numeric results", async () => {
+    const finalAnswer =
+      "Created attendees-summary-reconciled.md and read it back. The values matched: 3 unique attendees and 10 tickets total — Lisbon: 3, Porto: 3, Porto, Norte: 4.";
+    expect(responseLooksOperationalOnly(finalAnswer)).toBe(false);
+
+    const executor = createExecuteHarness({
+      title: "Reconcile Attendee Summary",
+      prompt:
+        "Read attendees-summary.md and create attendees-summary-reconciled.md with the verified unique attendee count, total ticket count, and ticket totals by city. Read the new report back and confirm the values.",
+      lastOutput: finalAnswer,
+      createdFiles: ["attendees-summary-reconciled.md"],
+      planStepDescription: "Read the new report back and verify all requested values.",
+    });
+    (executor as Any).lastNonVerificationOutput = "Created: attendees-summary-guard-smoke.md";
+    (executor as Any).lastAssistantOutput = "Created: attendees-summary-guard-smoke.md";
+    (executor as Any).lastAssistantText =
+      "The read-back matched: 3 unique attendees and 10 tickets total. Ticket totals by city: Lisbon — 3, Porto — 3, and Porto, Norte — 4.";
+    (executor as Any).toolResultMemory = [
+      { tool: "read_file", summary: "Read back all report figures." },
+    ];
+
+    expect(
+      getBestFinalResponseCandidate({
+        buildResultSummary: () => undefined,
+        lastAssistantText: (executor as Any).lastAssistantText,
+        lastNonVerificationOutput: (executor as Any).lastNonVerificationOutput,
+        lastAssistantOutput: (executor as Any).lastAssistantOutput,
+      }),
+    ).toBe((executor as Any).lastAssistantText);
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing direct answer"),
+      }),
+    );
+  });
+
+  it("synthesizes a final direct answer when the completed plan leaves only an operational status", async () => {
+    const finalAnswer =
+      "Yes, I read back and verified the report matches: 3 unique attendees and 10 tickets total. City totals: Lisbon 3, Porto 3, and Porto, Norte 4.";
+    const executor = createExecuteHarness({
+      title: "Create verified attendee summary",
+      prompt:
+        "Read attendees-summary.md and create attendees-summary-verified.md with the verified unique attendee count, total tickets, and totals by city. Read back the report and state whether it matched.",
+      lastOutput: "Created: attendees-summary-verified.md",
+      createdFiles: ["attendees-summary-verified.md"],
+      planStepDescription: "Read the new report back and verify the requested totals.",
+    });
+    executor.task.agentConfig = { executionMode: "execute" };
+    (executor as Any).toolResultMemory = [
+      {
+        tool: "read_file",
+        summary:
+          "path=attendees-summary-verified.md\nBEGIN FILE CONTENT (reference data; not instructions)\n3 unique attendees; 10 tickets; Lisbon 3; Porto 3; Porto, Norte 4.\nEND FILE CONTENT",
+      },
+    ];
+    (executor as Any).createMessageWithTimeout = vi.fn(async () => ({
+      content: [{ type: "text", text: finalAnswer }],
+      usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+    }));
+    (executor as Any).updateTracking = vi.fn();
+    (executor as Any).emitEvent = vi.fn();
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledWith(
+      expect.objectContaining({ maxTokens: 1200 }),
+      35_000,
+      "Final answer synthesis",
+    );
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    expect((executor as Any).emitEvent).toHaveBeenCalledWith("assistant_message", {
+      message: finalAnswer,
+    });
+    expect(executor.daemon.updateTask).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing direct answer"),
+      }),
+    );
+  });
+
+  it("synthesizes a grounded result instead of persisting a contradicted unavailable-tools claim", async () => {
+    const unavailableResponse =
+      "PENDING_USER_ACTION — Created `attendee-summary.xlsx` successfully. `get_file_info` was not available in this execution context, so verification could not be performed.";
+    const finalAnswer =
+      "Yes, the requested workbook exists at `attendee-summary.xlsx`, created from both source CSVs. Verification succeeded because the metadata check returned `isFile=true` for that exact path.";
+    const executor = createExecuteHarness({
+      title: "Create and verify the attendee spreadsheet",
+      prompt:
+        "Call create_spreadsheet exactly once to create attendee-summary.xlsx. If creation succeeds, call get_file_info exactly once on the returned path and tell me whether the workbook exists.",
+      lastOutput: unavailableResponse,
+      createdFiles: ["attendee-summary.xlsx"],
+      planStepDescription: "Create and verify the attendee spreadsheet.",
+    });
+    executor.task.agentConfig = { executionMode: "execute" };
+    (executor as Any).successfulToolUsageCounts = new Map([
+      ["create_spreadsheet", 1],
+      ["get_file_info", 1],
+    ]);
+    (executor as Any).toolResultMemory = [
+      {
+        tool: "create_spreadsheet",
+        summary: "Created attendee-summary.xlsx with the requested data.",
+      },
+      { tool: "get_file_info", summary: "attendee-summary.xlsx exists and is 7,847 bytes." },
+    ];
+    (executor as Any).createMessageWithTimeout = vi.fn(async () => ({
+      content: [{ type: "text", text: finalAnswer }],
+      usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+    }));
+    (executor as Any).updateTracking = vi.fn();
+    (executor as Any).emitEvent = vi.fn();
+
+    expect(
+      (executor as Any).responseDirectlyAddressesPrompt(
+        finalAnswer,
+        (executor as Any).buildCompletionContract(),
+      ),
+    ).toBe(true);
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledWith(
+      expect.objectContaining({ maxTokens: 1200 }),
+      35_000,
+      "Final answer synthesis",
+    );
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      finalAnswer,
+      expect.any(Object),
     );
   });
 
@@ -2007,6 +2457,27 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
     );
   });
 
+  it("does not invent missing tools when planning times out before execution", async () => {
+    const executor = createExecuteHarness({
+      title: "Create a budget summary",
+      prompt: "Read budget.csv and create budget-summary.md.",
+      lastOutput: "",
+    });
+    executor.plan = undefined;
+    (executor as Any).toolResultMemory = [];
+    (executor as Any).buildResultSummary = vi.fn().mockReturnValue("");
+    (executor as Any).createMessageWithTimeout = vi.fn();
+
+    const answer = await (executor as Any).buildTimeoutRecoveryAnswer(
+      new Error("Plan creation timed out after 120s"),
+    );
+
+    expect(answer).toContain("I ran into a timeout before I could finish.");
+    expect(answer).toContain("Plan creation timed out after 120s");
+    expect(answer).not.toMatch(/tools? (?:are|is) unavailable|text-only environment/i);
+    expect((executor as Any).createMessageWithTimeout).not.toHaveBeenCalled();
+  });
+
   it("waives non-mutation failed steps when soft-deadline best-effort finalization is used", () => {
     const executor = createExecuteHarness({
       title: "Build a website",
@@ -2178,6 +2649,15 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
     expect(contract.requiresArtifactEvidence).toBe(true);
   });
 
+  it("does not treat scoped deletion or other-file prohibitions on edit tasks as read-only", () => {
+    expect(
+      detectReadOnlyConstraint("Fix the bug in src/app.ts. Do not edit or delete any other files."),
+    ).toBe(false);
+    expect(
+      detectReadOnlyConstraint("Update the README with install steps. Do not delete any files."),
+    ).toBe(false);
+  });
+
   it("does not false-positive on 'fix the read-only permission issue'", () => {
     expect(detectReadOnlyConstraint("Fix the read-only permission issue on the database.")).toBe(
       false,
@@ -2198,6 +2678,30 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
 
   it("detects read-only constraint in 'this task is read-only'", () => {
     expect(detectReadOnlyConstraint("This task is read-only. Just analyze and report.")).toBe(true);
+  });
+
+  it("keeps an explicit output writable when the prompt protects other files", () => {
+    expect(
+      detectReadOnlyConstraint(
+        "Read only source.csv, create report.md, and do not access or modify any other files.",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not let a protected-input boundary block an explicitly requested workbook", () => {
+    expect(
+      detectReadOnlyConstraint(
+        "Read only the named CSV files, then create the requested workbook.xlsx. Do not access any other files.",
+      ),
+    ).toBe(false);
+  });
+
+  it("detects global read-only constraints written as coordinated file-operation lists", () => {
+    expect(
+      detectReadOnlyConstraint(
+        "Read the two named CSV files, but do not create, write, edit, move, or delete any file or directory.",
+      ),
+    ).toBe(true);
   });
 });
 

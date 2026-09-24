@@ -6057,21 +6057,7 @@ export class MessageRouter {
 
       case "openai": {
         currentModel = status.currentModel;
-        const cachedOpenAI = LLMProviderFactory.getCachedModels("openai");
-        if (cachedOpenAI && cachedOpenAI.length > 0) {
-          models = cachedOpenAI;
-        } else {
-          // Default OpenAI models
-          models = [
-            { key: "gpt-6-astra", displayName: "GPT-6 Astra" },
-            { key: "gpt-4o", displayName: "GPT-4o" },
-            { key: "gpt-4o-mini", displayName: "GPT-4o Mini" },
-            { key: "gpt-4-turbo", displayName: "GPT-4 Turbo" },
-            { key: "gpt-3.5-turbo", displayName: "GPT-3.5 Turbo" },
-            { key: "o1", displayName: "o1" },
-            { key: "o1-mini", displayName: "o1 Mini" },
-          ];
-        }
+        models = status.models;
         break;
       }
 
@@ -6230,20 +6216,7 @@ export class MessageRouter {
 
       case "openai": {
         currentModel = status.currentModel;
-        const cachedOpenAI = LLMProviderFactory.getCachedModels("openai");
-        if (cachedOpenAI && cachedOpenAI.length > 0) {
-          models = cachedOpenAI;
-        } else {
-          models = [
-            { key: "gpt-6-astra", displayName: "GPT-6 Astra" },
-            { key: "gpt-4o", displayName: "GPT-4o" },
-            { key: "gpt-4o-mini", displayName: "GPT-4o Mini" },
-            { key: "gpt-4-turbo", displayName: "GPT-4 Turbo" },
-            { key: "gpt-3.5-turbo", displayName: "GPT-3.5 Turbo" },
-            { key: "o1", displayName: "o1" },
-            { key: "o1-mini", displayName: "o1 Mini" },
-          ];
-        }
+        models = status.models;
         break;
       }
 

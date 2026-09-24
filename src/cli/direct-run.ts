@@ -48,6 +48,7 @@ import { NumbatService } from "../electron/security/numbat";
 import type { AgentSecurityFindingStatus } from "../shared/agent-security";
 import { requiresAgentSecurityConfirmation } from "./agent-security-confirmation";
 import { PulseService } from "../electron/telemetry/pulse-service";
+import { shouldRunDirectRunEntrypoint } from "./direct-runtime";
 
 type Any = Record<string, any>;
 
@@ -3026,9 +3027,11 @@ function formatLogItem(item: unknown): string {
 }
 
 function shouldRunEntrypoint(): boolean {
-  if (typeof require !== "undefined" && require.main === module) return true;
-  if (!process.versions.electron) return false;
-  return path.basename(process.argv[1] || "") === "direct-run.js";
+  return shouldRunDirectRunEntrypoint({
+    isMainModule: typeof require !== "undefined" && require.main === module,
+    isElectron: Boolean(process.versions.electron),
+    argv: process.argv,
+  });
 }
 
 if (shouldRunEntrypoint()) {

@@ -70,6 +70,31 @@ describe("OllamaProvider reasoning handling", () => {
     expect(JSON.parse(String(requestInit.body))).not.toHaveProperty("think");
   });
 
+  it("does not mislabel caller-signal aborts as user cancellations", async () => {
+    const requestController = new AbortController();
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("The operation was aborted", "AbortError")),
+              { once: true },
+            );
+          }),
+      ),
+    );
+    const provider = new OllamaProvider({ type: "ollama", model: "qwen3.5:latest" });
+
+    const request = provider.createMessage({ ...createRequest(), signal: requestController.signal });
+    requestController.abort();
+
+    await expect(request).rejects.toThrow("Request cancelled");
+    expect(console.log).toHaveBeenCalledWith("[Ollama] Request aborted by caller signal");
+  });
+
   it("retries a reasoning model without think when the server rejects the field", async () => {
     const unsupportedResponse = {
       ok: false,

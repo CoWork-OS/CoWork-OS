@@ -3,7 +3,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { TaskEvent } from "../../../../shared/types";
-import { ActionBlock, buildActionBlockSummary } from "../ActionBlock";
+import { ActionBlock } from "../ActionBlock";
+import { buildActionBlockSummary } from "../ActionBlockSummary";
 
 function toolEvent(id: string, tool: string, timestamp: number): TaskEvent {
   return {
@@ -46,6 +47,55 @@ function event(
 }
 
 describe("buildActionBlockSummary", () => {
+  it("counts one file for two edits and their duplicate internal/executor receipts", () => {
+    const events: TaskEvent[] = [];
+    for (const [index, callId] of ["edit-posters", "edit-total"].entries()) {
+      events.push(
+        event(`${callId}-call`, "tool_call", 1000 + index * 10, {
+          tool: "edit_file",
+          toolUseId: callId,
+          input: { file_path: "budget.csv" },
+        }),
+        toolOutcomeEvent(`${callId}-internal`, "tool_result", "edit_file", 1001 + index * 10, {
+          file_path: "budget.csv",
+          replacements: 1,
+        }),
+        event(`${callId}-result`, "tool_result", 1002 + index * 10, {
+          tool: "edit_file",
+          toolUseId: callId,
+          result: { success: true, file_path: "budget.csv" },
+        }),
+      );
+    }
+    expect(buildActionBlockSummary(events).summary).toBe("Edited 1 file");
+    expect(buildActionBlockSummary(events).toolCallCount).toBe(2);
+  });
+
+  it("uses correlated call paths when results omit them and excludes failed edits", () => {
+    const events = [
+      event("call-a", "tool_call", 1000, {
+        tool: "edit_file",
+        toolUseId: "a",
+        input: { path: "a.csv" },
+      }),
+      event("done-a", "tool_result", 1001, {
+        tool: "edit_file",
+        toolUseId: "a",
+        result: { success: true },
+      }),
+      event("call-b", "tool_call", 1002, {
+        tool: "edit_file",
+        toolUseId: "b",
+        input: { path: "b.csv" },
+      }),
+      event("fail-b", "tool_error", 1003, { tool: "edit_file", toolUseId: "b", error: "denied" }),
+    ];
+    expect(buildActionBlockSummary(events).summary).toBe("Edited 1 file");
+    expect(buildActionBlockSummary(events, undefined, { isActive: true }).summary).toBe(
+      "Editing files…",
+    );
+  });
+
   it("uses a command icon for file reads with command activity", () => {
     const summary = buildActionBlockSummary([
       toolEvent("read", "read_file", 1000),
@@ -159,6 +209,84 @@ describe("buildActionBlockSummary", () => {
     ]);
 
     expect(summary.summary).toBe("Created 1 file");
+    expect(summary.toolCallCount).toBe(2);
+  });
+
+  it("counts one shell execution when the executor also emits a command-detail receipt", () => {
+    const command = "pwd && printf '%s\\n' 'SHELL_SMOKE_OK'";
+    const summary = buildActionBlockSummary([
+      event("call", "tool_call", 1000, {
+        tool: "run_command",
+        toolUseId: "call-1",
+        input: { command },
+      }),
+      event("detail", "tool_call", 1001, { tool: "run_command", command }),
+      event("result", "tool_result", 1002, {
+        tool: "run_command",
+        toolUseId: "call-1",
+        result: { success: true, stdout: "/tmp\\nSHELL_SMOKE_OK\\n" },
+      }),
+      event("duplicate-result", "tool_result", 1003, { tool: "run_command", success: true }),
+    ]);
+
+    expect(summary.summary).toBe("Ran 1 command");
+    expect(summary.toolCallCount).toBe(1);
+  });
+
+  it("deduplicates the persisted timeline-v2 shell call and command detail", () => {
+    const command = "pwd && printf '%s\\n' 'SHELL_SMOKE_OK'";
+    const timelineEvent = (
+      id: string,
+      payload: Record<string, unknown>,
+      timestamp: number,
+      status?: TaskEvent["status"],
+    ): TaskEvent =>
+      ({
+        ...event(id, "timeline_step_updated", timestamp, payload),
+        ...(status ? { status } : {}),
+      }) as TaskEvent;
+
+    const summary = buildActionBlockSummary([
+      timelineEvent(
+        "call",
+        {
+          tool: "run_command",
+          input: { command },
+          toolUseId: "call-1",
+          legacyType: "tool_call",
+        },
+        1000,
+      ),
+      timelineEvent("detail", { tool: "run_command", command, legacyType: "tool_call" }, 1001),
+      timelineEvent(
+        "result",
+        {
+          tool: "run_command",
+          toolUseId: "call-1",
+          result: { success: true, stdout: "/tmp\\nSHELL_SMOKE_OK\\n" },
+          legacyType: "tool_result",
+        },
+        1002,
+      ),
+      timelineEvent(
+        "duplicate-result",
+        { tool: "run_command", success: true, legacyType: "tool_result" },
+        1003,
+      ),
+    ]);
+
+    expect(summary.summary).toBe("Ran 1 command");
+    expect(summary.toolCallCount).toBe(1);
+  });
+
+  it("keeps repeated legacy shell commands distinct when no call ids exist", () => {
+    const command = "printf '%s\\n' SAME";
+    const summary = buildActionBlockSummary([
+      event("call-1", "tool_call", 1000, { tool: "run_command", command }),
+      event("call-2", "tool_call", 1001, { tool: "run_command", command }),
+    ]);
+
+    expect(summary.summary).toBe("Ran 2 commands");
     expect(summary.toolCallCount).toBe(2);
   });
 

@@ -47,7 +47,7 @@ const isImageContent = (item: LLMContent | LLMToolResult): item is LLMImageConte
   item?.type === "image";
 
 type AzureRequestKind = "chat_completions" | "responses" | "test_connection";
-type AzureRequestReasoningEffort = "low" | "medium" | "high" | "xhigh";
+type AzureRequestReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export class AzureOpenAIProvider implements LLMProvider {
   readonly type = "azure" as const;
@@ -81,9 +81,12 @@ export class AzureOpenAIProvider implements LLMProvider {
 
   private getReasoningEffort(): AzureRequestReasoningEffort | undefined {
     switch (this.reasoningEffort) {
+      case "none":
       case "low":
       case "medium":
       case "high":
+      case "xhigh":
+      case "max":
         return this.reasoningEffort;
       case "extra_high":
         return "xhigh";
@@ -119,6 +122,10 @@ export class AzureOpenAIProvider implements LLMProvider {
 
   private getResponsesUrl(): string {
     return `${this.endpoint}/openai/v1/responses`;
+  }
+
+  private isGpt6SolOrLuna(model: string): boolean {
+    return model === "gpt-6-sol" || model === "gpt-6-luna";
   }
 
   private isMaxTokensUnsupported(errorData: Any): boolean {
@@ -1115,6 +1122,10 @@ export class AzureOpenAIProvider implements LLMProvider {
         return fromOpenAICompatibleResponse(data);
       };
 
+      if (this.isGpt6SolOrLuna(model) || requestedReasoningEffort === "max") {
+        return await runResponses(shouldStream, requestedReasoningEffort);
+      }
+
       const firstChatResult = await runChatCompletions(false, requestedReasoningEffort);
       if ((firstChatResult as Any).errorData) {
         let errorData = (firstChatResult as Any).errorData as { error?: { message?: string } };
@@ -1227,6 +1238,10 @@ export class AzureOpenAIProvider implements LLMProvider {
         }
         return { success: true };
       };
+
+      if (this.isGpt6SolOrLuna(model) || requestedReasoningEffort === "max") {
+        return await runResponses();
+      }
 
       const chatBody: Record<string, Any> = {
         model: this.deployment,

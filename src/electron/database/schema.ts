@@ -7500,6 +7500,22 @@ export class DatabaseManager {
           output: 50.0,
           cached: 1.0,
         },
+        {
+          key: "gpt-6-sol",
+          provider: "OpenAI",
+          display: "GPT-6 Sol",
+          input: 2.0,
+          output: 10.0,
+          cached: 0.2,
+        },
+        {
+          key: "gpt-6-luna",
+          provider: "OpenAI",
+          display: "GPT-6 Luna",
+          input: 0.1,
+          output: 0.5,
+          cached: 0.01,
+        },
         // ── OpenAI 5.4 ──
         {
           key: "gpt-5.4",

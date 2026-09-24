@@ -28,6 +28,7 @@ import { normalizeEventsForTimelineUi } from "../utils/timeline-projection";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { deriveRevisionAwarePlanSteps } from "../utils/task-status-projection";
 import {
+  deriveToolUsage,
   type FileInfo,
   type SharedTaskEventUiState,
   type ToolUsage,
@@ -2004,25 +2005,7 @@ function RightPanelComponent({
   // Extract tool usage from events
   const toolUsage = useMemo((): ToolUsage[] => {
     if (sharedTaskEventUi) return sharedTaskEventUi.toolUsage;
-    const toolMap = new Map<string, ToolUsage>();
-
-    events.forEach((event) => {
-      if (getEffectiveTaskEventType(event) === "tool_call" && event.payload.tool) {
-        const existing = toolMap.get(event.payload.tool);
-        if (existing) {
-          existing.count++;
-          existing.lastUsed = event.timestamp;
-        } else {
-          toolMap.set(event.payload.tool, {
-            name: event.payload.tool,
-            count: 1,
-            lastUsed: event.timestamp,
-          });
-        }
-      }
-    });
-
-    return Array.from(toolMap.values()).sort((a, b) => b.lastUsed - a.lastUsed);
+    return deriveToolUsage(events);
   }, [events, sharedTaskEventUi]);
   const usedSkills = useMemo((): string[] => {
     const skills = new Set<string>();

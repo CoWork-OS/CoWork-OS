@@ -1,4 +1,4 @@
-import { isTempWorkspaceId, type Task } from "../../shared/types";
+import { isTempWorkspaceId, type AgentTeam, type Task } from "../../shared/types";
 import type { CreateTaskOptions } from "../components/MainContent/main-content-types";
 
 /** Cross-component signal used by the bot details rail to reveal inline history. */
@@ -37,23 +37,44 @@ function hasVisibleBotMessage(task: Task): boolean {
   );
 }
 
+function botConversationActivityAt(task: Task): number {
+  // Timeout reconciliation can update a dormant blocked row hours later. That
+  // maintenance write is not a new conversation turn for the bot roster.
+  if (
+    task.status === "blocked" &&
+    task.terminalStatus === "needs_user_action" &&
+    (/^No correlated reply arrived from .+ within \d+ seconds\./.test(task.error || "") ||
+      /^No outstanding teammate reply is pending for this conversation\./.test(task.error || ""))
+  ) {
+    return task.completedAt || task.createdAt;
+  }
+  return task.updatedAt || task.createdAt;
+}
+
 /** Prefer a real transcript over a newer empty placeholder from a temp workspace. */
 export function selectLatestBotConversation(tasks: Task[], agentRoleId?: string): Task | undefined {
-  return tasks
-    .filter(
-      (task) =>
-        isBotConversation(task) &&
-        task.source !== "side_chat" &&
-        task.sessionArchived !== true &&
-        (!agentRoleId || task.assignedAgentRoleId === agentRoleId),
-    )
+  const candidates = tasks.filter(
+    (task) =>
+      isBotConversation(task) &&
+      task.source !== "side_chat" &&
+      task.sessionArchived !== true &&
+      (!agentRoleId || task.assignedAgentRoleId === agentRoleId),
+  );
+  // A recovered conversation replaces its own source, even if that source
+  // receives a late status update. It does not outrank newer, unrelated chats.
+  const replacedSourceIds = new Set(
+    candidates
+      .filter(isBotRecoveryBranch)
+      .map((task) => task.branchFromTaskId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  return candidates
+    .filter((task) => !replacedSourceIds.has(task.id))
     .sort((a, b) => {
-      const recoveryDifference = Number(isBotRecoveryBranch(b)) - Number(isBotRecoveryBranch(a));
-      if (recoveryDifference !== 0) return recoveryDifference;
       const visibleDifference = Number(hasVisibleBotMessage(b)) - Number(hasVisibleBotMessage(a));
       if (visibleDifference !== 0) return visibleDifference;
       return (
-        (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt) ||
+        botConversationActivityAt(b) - botConversationActivityAt(a) ||
         b.createdAt - a.createdAt ||
         b.id.localeCompare(a.id)
       );
@@ -109,10 +130,16 @@ export function matchesBotConversation(
   );
 }
 
-/** Temporary workspaces may safely adopt a prior bot transcript before recovery. */
-export function shouldAdoptBotConversation(
-  task: Pick<Task, "workspaceId">,
+/** Continue a mismatched bot transcript as a new branch, preserving its workspace and team. */
+export function shouldReopenBotConversationInWorkspace(
+  task: Pick<Task, "workspaceId" | "agentConfig">,
   workspaceId: string,
+  teams: ReadonlyArray<Pick<AgentTeam, "id" | "isActive" | "persistent">>,
 ): boolean {
-  return task.workspaceId !== workspaceId && isTempWorkspaceId(workspaceId);
+  if (!isTempWorkspaceId(workspaceId)) return false;
+  if (task.workspaceId !== workspaceId) return true;
+  const teamId = task.agentConfig?.botTeamId;
+  return Boolean(
+    teamId && !teams.some((team) => team.id === teamId && team.isActive && team.persistent),
+  );
 }

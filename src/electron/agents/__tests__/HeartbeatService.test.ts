@@ -205,14 +205,57 @@ describe("HeartbeatService v3", () => {
     }
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const service of services) {
-      void service.stop();
+      await service.stop();
     }
     vi.clearAllTimers();
     vi.useRealTimers();
     delete process.env.COWORK_USER_DATA_DIR;
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("cancels scheduled pulses before storage is closed", async () => {
+    createAgent("agent-1");
+    const service = createService();
+    await service.start();
+    await service.stop();
+    mockAgents.clear();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(heartbeatEvents).toHaveLength(0);
+    expect(createdTasks).toHaveLength(0);
+  });
+
+  it("waits for in-flight dispatch and suppresses queued manual wakes on stop", async () => {
+    createAgent("agent-1");
+    let releaseDispatch!: () => void;
+    const dispatched = new Promise<void>((resolve) => {
+      releaseDispatch = resolve;
+    });
+    const createTask = vi.fn(async () => {
+      await dispatched;
+      return { id: "shutdown-task", workspaceId: "workspace-1", status: "pending" } as Task;
+    });
+    const service = createService({ createTask });
+    await service.start();
+    const first = service.triggerHeartbeat("agent-1");
+    await vi.waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
+    const queued = service.triggerHeartbeat("agent-1");
+    let stopped = false;
+    const stop = service.stop().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    releaseDispatch();
+    await Promise.all([first, queued, stop]);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(stopped).toBe(true);
+    expect(createTask).toHaveBeenCalledTimes(1);
+    expect(await service.triggerHeartbeat("agent-1")).toMatchObject({
+      status: "error",
+      error: "Heartbeat service is stopped",
+    });
   });
 
   it("merges repeated identical hook signals into one compressed ledger entry", () => {

@@ -249,6 +249,26 @@ bounded_research=true
       expect(routed.intent).toBe("redirect");
     });
 
+    it("does not treat a rationale followed by later constraints as a task redirect", () => {
+      const routed = IntentRouter.route(
+        "Read orders.csv and create daily-orders-summary.md",
+        "Calculate totals from the source rows rather than guessing. Use write_file exactly once, then read_file the report. Do not change the source file or take external actions.",
+      );
+
+      expect(routed.intent).toBe("execution");
+      expect(routed.signals).not.toContain("redirect-contrast");
+    });
+
+    it("does not treat a negative constraint after a rationale as the redirected action", () => {
+      const routed = IntentRouter.route(
+        "Create daily-orders-summary.md",
+        "Calculate from source rows rather than guessing, and do not use shell commands.",
+      );
+
+      expect(routed.intent).toBe("execution");
+      expect(routed.signals).not.toContain("redirect-contrast");
+    });
+
     it("routes 'forget that, work on X instead' negate-and-pivot pattern", () => {
       const routed = IntentRouter.route(
         "",

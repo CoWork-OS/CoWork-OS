@@ -83,4 +83,45 @@ describe("AgentDaemon.resumeTask", () => {
     });
     expect(daemonLike.activeTasks.get("task-1")?.executor.resume).toHaveBeenCalledTimes(1);
   });
+
+  it("reconstructs a paused task after its executor was lost on restart", async () => {
+    const task = { id: "task-1", status: "paused", completedAt: null, terminalStatus: null };
+    const daemonLike = createDaemonLike({
+      activeTasks: new Map(),
+      taskRepo: {
+        findById: vi.fn().mockReturnValue(task),
+        update: vi.fn(),
+      },
+      resumeInterruptedTask: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const resumed = await AgentDaemon.prototype.resumeTask.call(daemonLike, task.id);
+
+    expect(resumed).toBe(true);
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(task.id, { status: "interrupted" });
+    expect(daemonLike.resumeInterruptedTask).toHaveBeenCalledWith({
+      ...task,
+      status: "interrupted",
+    });
+  });
+
+  it("keeps a paused task recoverable when checkpoint reconstruction fails", async () => {
+    const task = { id: "task-1", status: "paused", completedAt: null, terminalStatus: null };
+    const daemonLike = createDaemonLike({
+      activeTasks: new Map(),
+      taskRepo: {
+        findById: vi.fn().mockReturnValue(task),
+        update: vi.fn(),
+      },
+      resumeInterruptedTask: vi.fn().mockRejectedValue(new Error("checkpoint unavailable")),
+    });
+
+    await expect(AgentDaemon.prototype.resumeTask.call(daemonLike, task.id)).rejects.toThrow(
+      "checkpoint unavailable",
+    );
+    expect(daemonLike.taskRepo.update).toHaveBeenNthCalledWith(1, task.id, {
+      status: "interrupted",
+    });
+    expect(daemonLike.taskRepo.update).toHaveBeenNthCalledWith(2, task.id, { status: "paused" });
+  });
 });

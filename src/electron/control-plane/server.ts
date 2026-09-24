@@ -90,6 +90,16 @@ export interface ControlPlaneServerEvent {
   details?: unknown;
 }
 
+function isLoopbackBindHost(host: string): boolean {
+  const normalizedHost = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, "$1");
+  return (
+    normalizedHost === "localhost" || normalizedHost === "127.0.0.1" || normalizedHost === "::1"
+  );
+}
+
 /**
  * Method handler function signature
  */
@@ -225,13 +235,14 @@ export class ControlPlaneServer {
         this.emitEvent({ action: "error", timestamp: Date.now(), error: String(error) });
       });
 
-      this.httpServer.on("error", (error) => {
-        console.error("[ControlPlane] HTTP server error:", error);
-        reject(error);
-      });
-
-      // Start listening
-      this.httpServer.listen(this.config.port, this.config.host, () => {
+      let listening = false;
+      let retriedWithDynamicLoopbackPort = false;
+      const onListening = () => {
+        listening = true;
+        const address = this.httpServer?.address();
+        if (address && typeof address !== "string") {
+          this.config.port = address.port;
+        }
         console.info(
           `[ControlPlane] Server listening on ws://${this.config.host}:${this.config.port}`,
         );
@@ -244,7 +255,35 @@ export class ControlPlaneServer {
         this.startCleanup();
 
         resolve();
+      };
+      this.httpServer.on("error", (error: NodeJS.ErrnoException) => {
+        if (
+          !listening &&
+          !retriedWithDynamicLoopbackPort &&
+          error.code === "EADDRINUSE" &&
+          this.config.port > 0 &&
+          isLoopbackBindHost(this.config.host)
+        ) {
+          retriedWithDynamicLoopbackPort = true;
+          const requestedPort = this.config.port;
+          this.config.port = 0;
+          console.warn(
+            `[ControlPlane] Loopback port ${requestedPort} is already in use; retrying on an OS-assigned port`,
+          );
+          // The first listen() already registered onListening for the
+          // "listening" event; passing it again would run it twice.
+          this.httpServer?.listen(this.config.port, this.config.host);
+          return;
+        }
+
+        console.error("[ControlPlane] HTTP server error:", error);
+        this.emitEvent({ action: "error", timestamp: Date.now(), error: String(error) });
+        if (!listening) reject(error);
       });
+
+      // Bind the configured port first. If another local service owns it, the
+      // loopback-only fallback below asks the OS for an unused port atomically.
+      this.httpServer.listen(this.config.port, this.config.host, onListening);
     });
   }
 

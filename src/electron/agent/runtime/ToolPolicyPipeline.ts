@@ -332,8 +332,12 @@ export async function evaluateToolPolicyPipeline(
             agentSecurity,
           };
         }
+        // Preserve the permission engine's concrete boundary explanation. A
+        // generic approval error hides a correctable path mistake (for example,
+        // a file in a sibling temporary workspace) from the agent and user.
         const reason =
-          "This operation needs additional authority, but approval requests are disabled.";
+          "This operation needs additional authority, but approval requests are disabled. " +
+          permission.reason.summary;
         trace.add("approval", "deny", reason);
         return { decision: "deny", reason, trace: trace.build("deny"), agentSecurity };
       }

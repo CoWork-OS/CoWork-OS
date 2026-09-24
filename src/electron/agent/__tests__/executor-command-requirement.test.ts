@@ -2,6 +2,27 @@ import { describe, expect, it } from "vitest";
 import { TaskExecutor } from "../executor";
 
 describe("TaskExecutor command execution requirement detection", () => {
+  it.each([
+    "Read qa-resumed.txt and reply with its contents. Do not run shell commands or modify files.",
+    "Inspect the report without executing any terminal commands.",
+    "Never execute commands. Read the existing build log.",
+    "Explain the npm failure. Don't use shell commands.",
+  ])("does not turn a command prohibition into an execution requirement: %s", (message) => {
+    const executor: Any = Object.create(TaskExecutor.prototype);
+    executor.getEffectiveTaskDomain = () => "operations";
+    executor.getEffectiveExecutionMode = () => "execute";
+    expect(executor.followUpRequiresCommandExecution(message)).toBe(false);
+  });
+
+  it("keeps an allowed command requirement when only a specific command is prohibited", () => {
+    const executor: Any = Object.create(TaskExecutor.prototype);
+    executor.getEffectiveTaskDomain = () => "operations";
+    executor.getEffectiveExecutionMode = () => "execute";
+    expect(
+      executor.followUpRequiresCommandExecution("Do not run npm test. Run npm run lint instead."),
+    ).toBe(true);
+  });
+
   it("treats SSH connectivity failure transcripts as execution-required", () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
     fakeThis.getEffectiveTaskDomain = () => "operations";

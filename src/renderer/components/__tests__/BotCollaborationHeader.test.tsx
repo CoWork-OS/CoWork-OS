@@ -2,7 +2,11 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { BotConversationProjection } from "../../../shared/bot-lifecycle";
-import { BotCollaborationHeader, formatHandoffReplyState } from "../BotCollaborationHeader";
+import { BotCollaborationHeader } from "../BotCollaborationHeader";
+import {
+  formatHandoffReplyState,
+  resolveCollaboratorConversationIds,
+} from "../BotCollaborationHeader.helpers";
 
 describe("BotCollaborationHeader", () => {
   it.each(["queued", "started", "delivered"] as const)(
@@ -11,6 +15,12 @@ describe("BotCollaborationHeader", () => {
       expect(formatHandoffReplyState({ state, replyState: "received" })).toBe("Reply received");
     },
   );
+
+  it("labels a correlated reply as delivered even when its older event says pending", () => {
+    expect(
+      formatHandoffReplyState({ state: "delivered", replyState: "pending", isReply: true }),
+    ).toBe("Reply delivered");
+  });
 
   it("renders a calm teammate status and keeps details progressive", () => {
     const markup = renderToStaticMarkup(
@@ -279,6 +289,47 @@ describe("BotCollaborationHeader", () => {
 
     expect(markup).toContain('aria-label="Open Atlas conversation"');
     expect(markup).toContain('class="bot-collaboration-team-link"');
+  });
+
+  it("opens the exact conversation named by a handoff before the latest transcript for that bot", () => {
+    const ids = resolveCollaboratorConversationIds({
+      conversations: [
+        { id: "scribe-latest", title: "Scribe — Author and Publisher" },
+        { id: "scribe-handoff-target", title: "Scribe — Author and Publisher" },
+      ],
+      events: [],
+      handoffs: [
+        {
+          id: "handoff-1",
+          state: "delivered",
+          senderLabel: "Chief Community Officer",
+          recipientLabel: "Scribe — Author and Publisher",
+          targetTaskId: "scribe-handoff-target",
+          preview: "Read package.json.",
+          timestamp: 2_000,
+          replyState: "received",
+        },
+      ],
+    });
+
+    expect(ids.get("scribe — author and publisher")).toBe("scribe-handoff-target");
+  });
+
+  it("labels a durable partial result without a success badge", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BotCollaborationHeader, {
+        task: {
+          status: "completed",
+          terminalStatus: "partial_success",
+          resultSummary: "Unverified progress saved.",
+        },
+        botName: "Forge",
+      }),
+    );
+    expect(markup).toContain('data-bot-state="partial"');
+    expect(markup).toContain("Partial result");
+    expect(markup).not.toContain("Finished");
+    expect(markup).not.toContain("Your latest result is ready");
   });
 
   it("shows a partial-result state instead of claiming the team is still waiting", () => {

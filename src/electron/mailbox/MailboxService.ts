@@ -580,6 +580,8 @@ const MICROSOFT_GRAPH_MESSAGE_SELECT =
   "id,conversationId,parentFolderId,subject,bodyPreview,body,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,isRead,hasAttachments,internetMessageId";
 const MICROSOFT_GRAPH_READWRITE_SCOPES = [...MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES];
 const MICROSOFT_GRAPH_SEND_SCOPES = [...MICROSOFT_EMAIL_GRAPH_SEND_SCOPES];
+const MAILBOX_AUTH_SYNC_BACKOFF_MS = 15 * 60 * 1000;
+const MAILBOX_SYNC_ERROR_LABEL_MAX_LENGTH = 600;
 
 let mailboxCipherState: MailboxCipherState | null = null;
 
@@ -626,6 +628,17 @@ function summarizeMailboxConnectionError(error: unknown): string {
   if (code && code !== message) parts.push(code);
   if (message) parts.push(message);
   return parts.length ? parts.join(": ") : "connection failed";
+}
+
+function formatMailboxSyncErrors(
+  errors: readonly { message: string }[],
+  fallback = "Mailbox sync temporarily unavailable; retrying later",
+): string {
+  const messages = [...new Set(errors.map((entry) => entry.message.trim()).filter(Boolean))];
+  if (messages.length === 0) return fallback;
+  const label = messages.join(" · ");
+  if (label.length <= MAILBOX_SYNC_ERROR_LABEL_MAX_LENGTH) return label;
+  return `${label.slice(0, MAILBOX_SYNC_ERROR_LABEL_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
 function normalizeMicrosoftScope(scope: string): string {
@@ -1865,6 +1878,14 @@ function guessMimeType(filename: string): string {
 }
 
 export class MailboxService {
+  private static backgroundServices = new Set<MailboxService>();
+
+  static async stopBackgroundServices(): Promise<void> {
+    // Task tools create lightweight MailboxService instances too and can replace
+    // the active accessor. Shutdown must target the actual loop owners.
+    await Promise.all([...this.backgroundServices].map((service) => service.stop()));
+  }
+
   private channelRepo: ChannelRepository;
   private taskRepo: TaskRepository;
   private workspaceRepo: WorkspaceRepository;
@@ -1876,8 +1897,13 @@ export class MailboxService {
   private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
   private autoSyncInitialTimer: ReturnType<typeof setTimeout> | null = null;
   private outboxTimer: ReturnType<typeof setInterval> | null = null;
+  private stopped = false;
+  private backgroundRuns = new Set<Promise<void>>();
   private outboxDrainInFlight = false;
   private lastAutoSyncAttemptAt = 0;
+  private mailboxAuthSyncBackoffUntil = 0;
+  private mailboxAuthSyncBackoffKey: string | null = null;
+  private mailboxAuthSyncBackoffSuppressedCount = 0;
   private googleWorkspaceAutoSyncAuthNoticeKey: string | null = null;
   private gmailTransientSyncBackoffUntil = 0;
   private gmailTransientSyncNoticeKey: string | null = null;
@@ -1938,9 +1964,10 @@ export class MailboxService {
   }
 
   private startAutoSyncLoop(): void {
-    if (this.autoSyncTimer) return;
+    if (this.stopped || this.autoSyncTimer) return;
+    MailboxService.backgroundServices.add(this);
     const run = () => {
-      void this.runAutoSyncIfDue();
+      this.runInBackground(() => this.runAutoSyncIfDue());
     };
     this.autoSyncInitialTimer = setTimeout(run, MAILBOX_AUTO_SYNC_INITIAL_DELAY_MS);
     this.autoSyncInitialTimer.unref?.();
@@ -1949,13 +1976,40 @@ export class MailboxService {
   }
 
   private startOutboxLoop(): void {
-    if (this.outboxTimer) return;
+    if (this.stopped || this.outboxTimer) return;
+    MailboxService.backgroundServices.add(this);
     const run = () => {
-      void this.processMailboxQueue();
+      this.runInBackground(() => this.processMailboxQueue());
     };
     this.outboxTimer = setInterval(run, MAILBOX_OUTBOX_POLL_INTERVAL_MS);
     this.outboxTimer.unref?.();
     run();
+  }
+
+  private runInBackground(work: () => Promise<unknown>): void {
+    if (this.stopped) return;
+    const run = Promise.resolve()
+      .then(() => (this.stopped ? undefined : work()))
+      .then(() => undefined)
+      .catch((error) => {
+        mailboxLogger.warn("Mailbox background work failed:", error);
+      })
+      .finally(() => this.backgroundRuns.delete(run));
+    this.backgroundRuns.add(run);
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.autoSyncInitialTimer) clearTimeout(this.autoSyncInitialTimer);
+    if (this.autoSyncTimer) clearInterval(this.autoSyncTimer);
+    if (this.outboxTimer) clearInterval(this.outboxTimer);
+    this.autoSyncInitialTimer = null;
+    this.autoSyncTimer = null;
+    this.outboxTimer = null;
+    // Network work can resume with database writes; drain it before storage closes.
+    await Promise.allSettled(this.backgroundRuns);
+    MailboxService.backgroundServices.delete(this);
+    if (getMailboxServiceInstance() === this) setMailboxServiceInstance(null);
   }
 
   private async runAutoSyncIfDue(): Promise<void> {
@@ -1963,6 +2017,13 @@ export class MailboxService {
     if (this.syncInFlight) return;
     if (now - this.lastAutoSyncAttemptAt < MAILBOX_AUTO_SYNC_INTERVAL_MS - 1_000) return;
     if (!this.isAvailable()) return;
+    if (this.mailboxAuthSyncBackoffUntil > now) {
+      this.noteMailboxAuthSyncBackoff();
+      return;
+    }
+    if (this.mailboxAuthSyncBackoffUntil > 0) {
+      this.resetMailboxAuthSyncBackoff();
+    }
 
     const status = await this.getSyncStatus();
     const googleWorkspaceAuthIssue = this.getGoogleWorkspaceAuthIssue();
@@ -2007,14 +2068,48 @@ export class MailboxService {
         lastSyncedAt: status.lastSyncedAt || null,
       });
       const result = await this.sync(MAILBOX_AUTO_SYNC_LIMIT, { source: "auto" });
+      this.resetMailboxAuthSyncBackoff();
       mailboxLogger.info("Mailbox autosync complete", {
         accountCount: result.accounts.length,
         syncedThreads: result.syncedThreads,
         syncedMessages: result.syncedMessages,
       });
     } catch (error) {
+      if (isMailboxAuthConfigurationError(error instanceof Error ? error.message : String(error))) {
+        this.noteMailboxAuthSyncFailure(error);
+      }
       mailboxLogger.warn("Mailbox autosync failed:", error);
     }
+  }
+
+  private noteMailboxAuthSyncFailure(error: unknown): void {
+    const detail = summarizeMailboxConnectionError(error);
+    const key = detail || "mailbox-auth";
+    this.mailboxAuthSyncBackoffUntil = Date.now() + MAILBOX_AUTH_SYNC_BACKOFF_MS;
+    if (this.mailboxAuthSyncBackoffKey !== key) {
+      this.mailboxAuthSyncBackoffKey = key;
+      this.mailboxAuthSyncBackoffSuppressedCount = 0;
+      mailboxLogger.warn(
+        "Mailbox autosync paused after an authorization failure; reconnect the affected mailbox integration before retrying.",
+      );
+      return;
+    }
+    this.mailboxAuthSyncBackoffSuppressedCount += 1;
+  }
+
+  private noteMailboxAuthSyncBackoff(): void {
+    this.mailboxAuthSyncBackoffSuppressedCount += 1;
+    if (this.mailboxAuthSyncBackoffSuppressedCount % 5 === 0) {
+      mailboxLogger.warn(
+        `Mailbox autosync remains paused after an authorization failure; suppressed ${this.mailboxAuthSyncBackoffSuppressedCount} repeated authorization retry attempts.`,
+      );
+    }
+  }
+
+  private resetMailboxAuthSyncBackoff(): void {
+    this.mailboxAuthSyncBackoffUntil = 0;
+    this.mailboxAuthSyncBackoffKey = null;
+    this.mailboxAuthSyncBackoffSuppressedCount = 0;
   }
 
   private getAgentMailClient(): AgentMailClient {
@@ -4773,8 +4868,7 @@ export class MailboxService {
       const onlyTransientErrors =
         syncErrors.length > 0 && syncErrors.every((entry) => entry.transient);
       if (onlyTransientErrors && successfulProviderCount === 0) {
-        const label =
-          syncErrors[0]?.message || "Mailbox sync temporarily unavailable; retrying later";
+        const label = formatMailboxSyncErrors(syncErrors);
         this.updateSyncProgress({
           phase: "error",
           totalThreads: 0,
@@ -4796,9 +4890,15 @@ export class MailboxService {
 
       if (accounts.length === 0) {
         throw new Error(
-          syncErrors[0]?.message ||
+          formatMailboxSyncErrors(
+            syncErrors,
             "No connected mailbox was found. Enable AgentMail, Google Workspace, or configure the Email channel.",
+          ),
         );
+      }
+
+      if (successfulProviderCount > 0) {
+        this.resetMailboxAuthSyncBackoff();
       }
 
       const backlogResult =
@@ -4810,7 +4910,7 @@ export class MailboxService {
             );
 
       const lastSyncedAt = Date.now();
-      const syncWarning = syncErrors[0]?.message;
+      const syncWarning = syncErrors.length > 0 ? formatMailboxSyncErrors(syncErrors) : undefined;
       const doneLabel =
         syncedThreads > 0
           ? `Synced ${syncedThreads} thread${syncedThreads === 1 ? "" : "s"} and ${syncedMessages} message${syncedMessages === 1 ? "" : "s"}${backlogResult.reclassifiedThreads > 0 ? ` · classified ${backlogResult.reclassifiedThreads}` : ""}`

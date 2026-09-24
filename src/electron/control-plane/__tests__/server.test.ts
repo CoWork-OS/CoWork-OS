@@ -302,3 +302,41 @@ describe("ControlPlaneServer security boundaries", () => {
     });
   });
 });
+
+describe("ControlPlaneServer startup", () => {
+  it("uses an available loopback port when the configured port is occupied", async () => {
+    const { createServer } = await import("node:net");
+    const blocker = createServer();
+    await new Promise<void>((resolve, reject) => {
+      blocker.once("error", reject);
+      blocker.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    const blockerAddress = blocker.address();
+    if (!blockerAddress || typeof blockerAddress === "string") {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+      throw new Error("Expected the test port blocker to bind an IP address");
+    }
+
+    const { ControlPlaneServer } = await import("../server");
+    const server = new ControlPlaneServer({
+      token: "test-token",
+      port: blockerAddress.port,
+      host: "127.0.0.1",
+    });
+
+    try {
+      await server.start();
+      const address = server.getAddress();
+      expect(address?.port).toBeGreaterThan(0);
+      expect(address?.port).not.toBe(blockerAddress.port);
+
+      const response = await fetch(`http://127.0.0.1:${address?.port}/health`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(expect.objectContaining({ status: "ok" }));
+    } finally {
+      await server.stop();
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
+  });
+});

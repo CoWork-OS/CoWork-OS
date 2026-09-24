@@ -31,6 +31,28 @@ describe("llm model selection metadata", () => {
     ]);
   });
 
+  it.each(["gpt-6-sol", "gpt-6-luna"])(
+    "exposes documented direct API reasoning levels for %s",
+    (model) => {
+      expect(getLlmModelReasoningEfforts("openai", model, "api_key")).toEqual([
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ]);
+      expect(getLlmModelReasoningEfforts("azure", model)).toEqual([
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ]);
+    },
+  );
+
   it("declares model-specific Intelligence controls for GPT-5.6 subscription models", () => {
     expect(getLlmModelReasoningEfforts("azure", "deployment-a")).toEqual([
       "low",

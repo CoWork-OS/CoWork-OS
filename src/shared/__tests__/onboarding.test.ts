@@ -11,7 +11,7 @@ import {
 const baseProfile = (): OnboardingProfileData => ({
   assistantName: "Atlas",
   assistantTraits: ["sharp", "adaptive"],
-  userName: "Mesut",
+  userName: "Alex",
   userContext: "I run product, write specs, and spend too much time coordinating work.",
   timeDrains: ["planning", "other"],
   timeDrainsOther: "Switching between client updates",
@@ -84,7 +84,7 @@ describe("onboarding profile builders", () => {
     const facts = buildOnboardingProfileFacts(baseProfile());
     const factValues = facts.map((fact) => fact.value);
 
-    expect(factValues).toContain("Preferred name: Mesut");
+    expect(factValues).toContain("Preferred name: Alex");
     expect(factValues).toContain(
       "Current work context: I run product, write specs, and spend too much time coordinating work.",
     );

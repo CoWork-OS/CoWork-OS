@@ -21,21 +21,21 @@ describe("webview URL policy", () => {
   it("identifies local generated HTML previews without allowing them globally", () => {
     expect(
       isLocalHtmlFileUrl(
-        "file:///Users/mesut/Desktop/untitled%20folder/city-blueprint-preview.html",
+        "file:///Users/alex/Desktop/untitled%20folder/city-blueprint-preview.html",
       ),
     ).toBe(true);
     expect(isLocalHtmlFileUrl("file://localhost/tmp/preview.HTM")).toBe(true);
     expect(isLocalHtmlFileUrl("file:///tmp/report.xhtml?preview=1")).toBe(true);
     expect(
       isAllowedWebviewUrl(
-        "file:///Users/mesut/Desktop/untitled%20folder/city-blueprint-preview.html",
+        "file:///Users/alex/Desktop/untitled%20folder/city-blueprint-preview.html",
       ),
     ).toBe(false);
   });
 
   it("blocks non-HTML file URLs and remote file shares", () => {
-    expect(isAllowedWebviewUrl("file:///Users/mesut/Desktop/report.pdf")).toBe(false);
-    expect(isAllowedWebviewUrl("file:///Users/mesut/Desktop/secrets")).toBe(false);
+    expect(isAllowedWebviewUrl("file:///Users/alex/Desktop/report.pdf")).toBe(false);
+    expect(isAllowedWebviewUrl("file:///Users/alex/Desktop/secrets")).toBe(false);
     expect(isAllowedWebviewUrl("file://fileserver/share/preview.html")).toBe(false);
   });
 

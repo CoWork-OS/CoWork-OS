@@ -842,7 +842,7 @@ describe("AgentDaemon.completeTask", () => {
       "task-1",
       [
         "The exported file is 585 bytes.",
-        "Sources: [dev log](/Users/mesut/Downloads/app/cowork/logs/dev-latest.log:12)",
+        "Sources: [dev log](/Users/alex/Downloads/app/cowork/logs/dev-latest.log:12)",
       ].join("\n"),
     );
 

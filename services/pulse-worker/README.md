@@ -91,7 +91,7 @@ controls need review before broad client rollout.
 
 Deployment generated fresh 32-byte random secrets, uploaded both to Cloudflare, and retained a
 JSON recovery copy at `$HOME/.config/cowork-pulse/production-secrets.json` on the deploying Mac
-(`/Users/mesut/.config/cowork-pulse/production-secrets.json` in this setup). Directory mode is
+(`/Users/almarionai/.config/cowork-pulse/production-secrets.json` in this setup). Directory mode is
 `0700`, file mode `0600`; this is permission-protected plaintext, not Keychain encryption. Keep
 an encrypted operator backup/password-manager copy. Do not paste its contents into chat or docs.
 The interrupted secret from the earlier deployment attempt was not reused.

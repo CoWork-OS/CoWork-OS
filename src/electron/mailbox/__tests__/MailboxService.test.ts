@@ -1722,10 +1722,10 @@ describeWithSqlite("MailboxService", () => {
         (id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      "outlook-graph:mfelat@msn.com",
+      "outlook-graph:outlook-user@example.com",
       "outlook_graph",
-      "mfelat@msn.com",
-      "mfelat@msn.com",
+      "outlook-user@example.com",
+      "outlook-user@example.com",
       "connected",
       JSON.stringify(["sync", "provider_search", "mark_read", "mark_unread"]),
       null,
@@ -1740,7 +1740,7 @@ describeWithSqlite("MailboxService", () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       "outlook-graph-thread:junk-conv",
-      "outlook-graph:mfelat@msn.com",
+      "outlook-graph:outlook-user@example.com",
       "junk-conv",
       "outlook_graph",
       "Junk",
@@ -1783,8 +1783,8 @@ describeWithSqlite("MailboxService", () => {
         {
           authMethod: "oauth",
           oauthProvider: "microsoft",
-          email: "mfelat@msn.com",
-          displayName: "mfelat@msn.com",
+          email: "outlook-user@example.com",
+          displayName: "outlook-user@example.com",
         },
         25,
       );
@@ -2522,10 +2522,10 @@ describeWithSqlite("MailboxService", () => {
         (id, provider, address, display_name, status, capabilities_json, sync_cursor, last_synced_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      "imap:mfelat@msn.com",
+      "imap:outlook-user@example.com",
       "imap",
-      "mfelat@msn.com",
-      "mfelat@msn.com",
+      "outlook-user@example.com",
+      "outlook-user@example.com",
       "connected",
       JSON.stringify(["send", "mark_read"]),
       null,
@@ -2538,10 +2538,10 @@ describeWithSqlite("MailboxService", () => {
         (id, provider, address, display_name, status, capabilities_json, sync_cursor, last_synced_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      "outlook-graph:mfelat@msn.com",
+      "outlook-graph:outlook-user@example.com",
       "outlook_graph",
-      "mfelat@msn.com",
-      "mfelat@msn.com",
+      "outlook-user@example.com",
+      "outlook-user@example.com",
       "connected",
       JSON.stringify(["sync", "provider_search", "mark_read", "mark_unread"]),
       null,
@@ -2553,7 +2553,7 @@ describeWithSqlite("MailboxService", () => {
     const status = await service.getSyncStatus();
 
     expect(status.accounts.map((account) => account.id)).toEqual([
-      "outlook-graph:mfelat@msn.com",
+      "outlook-graph:outlook-user@example.com",
       "gmail:test@example.com",
     ]);
     expect(status.statusLabel).toContain("2 accounts synced");

@@ -89,7 +89,7 @@ describe("sanitizeToolCallTextFromAssistant", () => {
 
   it("removes namespaced cowork tool_use tags while preserving surrounding plan text", () => {
     const result = sanitizeToolCallTextFromAssistant(
-      'Bu kitap için bir inceleme planı oluşturuyorum.\n\n<cowork:tool_use name="list_files" input="{&quot;path&quot;: &quot;/Users/mesut/Downloads/app/kitap&quot;}">',
+      'Bu kitap için bir inceleme planı oluşturuyorum.\n\n<cowork:tool_use name="list_files" input="{&quot;path&quot;: &quot;/Users/alex/Downloads/app/kitap&quot;}">',
     );
 
     expect(result.text).toBe("Bu kitap için bir inceleme planı oluşturuyorum.");

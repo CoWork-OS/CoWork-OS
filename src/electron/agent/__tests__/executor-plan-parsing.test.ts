@@ -1582,7 +1582,7 @@ relationship_memory:
       content: [
         {
           type: "text",
-          text: '1. Bu kitap için bir inceleme planı oluşturuyorum.\n\n<cowork:tool_use name="list_files" input="{&quot;path&quot;: &quot;/Users/mesut/Downloads/app/kitap&quot;}">',
+          text: '1. Bu kitap için bir inceleme planı oluşturuyorum.\n\n<cowork:tool_use name="list_files" input="{&quot;path&quot;: &quot;/Users/alex/Downloads/app/kitap&quot;}">',
         },
       ],
     });

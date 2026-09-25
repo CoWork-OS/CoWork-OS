@@ -270,10 +270,10 @@ describe("getWorkspaceStatusFolderLabel", () => {
   it("shows only the final folder name for workspace paths", () => {
     expect(
       getWorkspaceStatusFolderLabel(
-        makeWorkspace({ path: "/Users/mesut/Downloads/app/cowork", name: "Custom name" }),
+        makeWorkspace({ path: "/Users/alex/Downloads/app/cowork", name: "Custom name" }),
       ),
     ).toBe("cowork");
-    expect(getWorkspaceStatusFolderLabel(makeWorkspace({ path: "C:\\Users\\mesut\\cowork" }))).toBe(
+    expect(getWorkspaceStatusFolderLabel(makeWorkspace({ path: "C:\\Users\\alex\\cowork" }))).toBe(
       "cowork",
     );
   });
@@ -1045,12 +1045,12 @@ describe("isTaskActivelyWorking", () => {
     });
     const absolute = makeEvent("absolute", 200, "assistant_message", {
       message:
-        "Updated /Users/mesut/Downloads/app/cowork/cowork-os-presentation.pptx and verified the deck.",
+        "Updated /Users/alex/Downloads/app/cowork/cowork-os-presentation.pptx and verified the deck.",
     });
 
     expect(collectLatestEndOfTaskArtifactCards([relative, absolute])).toEqual([
       {
-        path: "/Users/mesut/Downloads/app/cowork/cowork-os-presentation.pptx",
+        path: "/Users/alex/Downloads/app/cowork/cowork-os-presentation.pptx",
         kind: "presentation",
         eventId: "absolute",
         lastReferenceIndex: 1,

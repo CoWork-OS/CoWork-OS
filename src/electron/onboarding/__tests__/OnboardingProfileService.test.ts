@@ -29,7 +29,7 @@ function buildProfile(overrides: Partial<OnboardingProfileData> = {}): Onboardin
   return {
     assistantName: "CoWork",
     assistantTraits: ["adaptive"],
-    userName: "Mesut",
+    userName: "Alex",
     userContext: "I run product and coordinate shipping.",
     timeDrains: ["planning"],
     timeDrainsOther: "",

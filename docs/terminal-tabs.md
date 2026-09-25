@@ -11,7 +11,7 @@ This is one of the larger steps toward CoWork OS as a GUI-first AI super app and
 - **In-app dock placement**: the terminal opens under the message box and pushes the main work area and right sidebar upward, so it behaves like another first-class work surface instead of a floating popup.
 - **Native shell behavior**: macOS launches the user's login shell through `node-pty`; Windows launches `cmd.exe` through the Windows PTY backend.
 - **Resizable terminal grid**: xterm.js measures the visible dock and sends column/row changes to the PTY so full-screen terminal UIs and wrapping behave like a normal terminal.
-- **Prompt cleanup**: macOS zsh prompts are adjusted to show cwd-only prompts such as `cowork %`; Windows `cmd.exe` uses a cwd prompt such as `C:\Users\mesut\project>`.
+- **Prompt cleanup**: macOS zsh prompts are adjusted to show cwd-only prompts such as `cowork %`; Windows `cmd.exe` uses a cwd prompt such as `C:\Users\alex\project>`.
 - **Cwd-aware tabs**: tab labels use the current directory when the shell emits cwd metadata. The macOS zsh integration emits OSC-7 cwd updates without writing setup commands into the visible terminal.
 - **Link handling**: xterm web-link support makes URLs in terminal output clickable where the renderer allows it.
 

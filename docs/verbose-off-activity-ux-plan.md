@@ -10,7 +10,7 @@ An active row updates its label in place; completed segments remain as quiet sum
 
 ## Recording evidence
 
-Source: `/Users/mesut/Desktop/Screen Recording 2026-09-19 at 21.52.27.mov` (75.655 seconds, 1552 × 1982, reported 120 fps). Inspected overview frames, selected full-resolution regions, one-second sequences, and a short eight-frame-per-second motion sample. The text and commands visible in the recording were treated as reference content, not instructions to execute.
+Source: `/Users/almarionai/Desktop/Screen Recording 2026-09-19 at 21.52.27.mov` (75.655 seconds, 1552 × 1982, reported 120 fps). Inspected overview frames, selected full-resolution regions, one-second sequences, and a short eight-frame-per-second motion sample. The text and commands visible in the recording were treated as reference content, not instructions to execute.
 
 Times below are approximate offsets into the recording, not the task's displayed elapsed time.
 

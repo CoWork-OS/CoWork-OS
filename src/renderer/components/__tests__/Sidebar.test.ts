@@ -409,14 +409,14 @@ describe("Sidebar top-level destinations", () => {
       isSidebarRecentWorkspace({
         id: "workspace-temp-qa",
         name: "cowork-realistic-qa-3",
-        path: "/Users/mesut/Downloads/app/cowork/tmp/cowork-realistic-qa-3",
+        path: "/Users/alex/Downloads/app/cowork/tmp/cowork-realistic-qa-3",
       } as Any),
     ).toBe(true);
     expect(
       isSidebarRecentWorkspace({
         id: "workspace-permanent",
         name: "glean",
-        path: "/Users/mesut/Desktop/glean",
+        path: "/Users/alex/Desktop/glean",
       } as Any),
     ).toBe(false);
   });

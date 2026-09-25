@@ -314,11 +314,6 @@ Open **Automations** in the main sidebar to use Automation Studio. It provides D
 
 The wider automation model keeps a hard boundary: **Workflow Intelligence** is the always-on cognitive loop, structured Studio flows are the main visual multi-step workflow product, and prompt-based `Routines` remain available in **Settings > Automations**. `Scheduled Tasks`, `Webhooks`, and `Event Triggers` serve as advanced or compiled backends. Task view can also turn the current task into a routine with `Add automation...`, preserving its title, ID, and `cowork://tasks/<taskId>` deeplink while continuing the same thread by default. [Core Automation](docs/core-automation.md) | [Task Automations](docs/task-automations.md)
 
-<p align="center">
-  <img src="resources/branding/images/cowork-os-6.webp" alt="Automations dashboard" width="700">
-  <br><em>The advanced Settings console remains available for prompt-based routines, schedules, hooks, triggers, and core automation controls.</em>
-</p>
-
 ### Everyday Agent
 
 Everyday Agent turns personal priorities into a reviewable operating plan: goals, live plan items, priority queues, enabled capabilities, and focused settings stay visible instead of hiding inside a generic chat thread. [Learn more](docs/everyday-agent.md)
@@ -379,11 +374,6 @@ Local-first inbox workspace that turns email into an action queue while preservi
 - **Gmail auto-forwarding**: create forwarding automations from a Gmail thread with dry-run support, attachment filters, per-message dedupe, and thread-scoped execution
 - **Commitment tracking**: accept commitments into real follow-up tasks, mark already-handled threads done, or dismiss items
 - **Background sync**: load from the local database immediately and refresh in the background without blanking the inbox on restart
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-5.webp" alt="Inbox Agent workspace" width="700">
-  <br><em>Inbox Agent combines mailbox triage, thread evidence, drafts, and next actions.</em>
-</p>
 
 ### Desktop Location & Maps
 

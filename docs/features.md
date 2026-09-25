@@ -240,11 +240,6 @@ Every activation is immutable. Saving a later draft cannot change the starter, a
 
 Advanced and compatibility features remain grouped under `Settings > Automations`:
 
-<p align="center">
-  <img src="../resources/branding/images/cowork-os-6.webp" alt="Automations control center" width="700">
-  <br><em>Automations separate core runtime settings, scheduled tasks, webhooks, triggers, and briefing workflows.</em>
-</p>
-
 - **Routines**: prompt-based saved instructions plus execution target, triggers, outputs, approval policy, connector policy, and recent runs; structured Studio flows reuse the Routine shell but add a versioned graph and deterministic runtime
 - **Workflow Intelligence**: Memory, Heartbeat, internal Reflection, Dreaming, and reviewable Suggestions form one always-on runtime owned by automation profiles
 - **Task Queue**: concurrency, queueing, and background execution policy

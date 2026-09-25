@@ -16,11 +16,6 @@ provider scopes, and approval/export rules. Mailbox access or an `@Inbox` route
 does not grant command tools, broader filesystem access, or unrestricted
 external sending.
 
-<p align="center">
-  <img src="../resources/branding/images/cowork-os-5.webp" alt="Inbox Agent workspace" width="700">
-  <br><em>Inbox Agent keeps mailbox triage, thread evidence, drafts, and next actions in one workspace.</em>
-</p>
-
 ## What It Does
 
 Inbox Agent helps you move from "read everything" to "act on what matters":

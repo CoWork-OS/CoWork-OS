@@ -88,6 +88,8 @@ CLAUDE.md
 # Runtime-generated outputs
 artifacts/
 output/
+# Agent task outputs can contain personal notes; never commit them by default.
+outputs/
 
 # VM artifacts
 vm-bundle/

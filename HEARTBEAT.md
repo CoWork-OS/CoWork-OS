@@ -1,3 +1,0 @@
-# Draft
-
-Bootstrap artifact stub.

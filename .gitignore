@@ -156,3 +156,48 @@ scripts/release/*
 !scripts/release/registry-publication.test.mjs
 !scripts/release/smoke-bundle.mjs
 !scripts/release/smoke-input.test.mjs
+
+# Signing keys and certificates — never commit
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.cer
+*.csr
+*.keychain
+*.keychain-db
+*.mobileprovision
+*.provisionprofile
+
+# Screen recordings and debug captures (can contain personal data, cookies, tokens)
+*.mov
+*.mp4
+*.mkv
+*.har
+*.heapsnapshot
+*.cpuprofile
+trace.zip
+
+# Stray documents and images dropped at the repo root
+/*.png
+/*.jpg
+/*.jpeg
+/*.pdf
+!/ZeroLeaks-Report-*.pdf
+/*.docx
+/*.xlsx
+/*.pptx
+/*.csv
+
+# CoWork bootstrap stubs written to the root
+/HEARTBEAT.md
+/source-ledger.json
+
+# Xcode / SwiftPM / Python environments
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.swiftpm/
+.venv/
+venv/

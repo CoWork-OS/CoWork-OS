@@ -74,7 +74,15 @@
     "tsconfig.daemon.json",
     "tsconfig.electron.json",
     "tsconfig.node.json",
-    "vite.config.mts"
+    "vite.config.mts",
+    "!src/**/__tests__/**",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "!scripts/**/*.test.mjs",
+    "!scripts/**/*.test.cjs",
+    "!resources/skills/*/tests/**",
+    "!**/__pycache__/**",
+    "!**/*.pyc"
   ],
   "main": "dist/electron/electron/main.js",
   "scripts": {

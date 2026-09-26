@@ -1375,7 +1375,7 @@ if (isMacSafeStorageMigrationWorker) {
       if (HEADLESS) return;
       pendingTaskDeeplinkId = taskId;
       if (!revealWindow(mainWindow)) {
-        createWindow();
+        startupActionGate.runWhenReady(ensureMainWindowVisible);
         return;
       }
       if (mainWindow?.webContents.isLoadingMainFrame()) {
@@ -1389,7 +1389,7 @@ if (isMacSafeStorageMigrationWorker) {
       if (HEADLESS) return;
       pendingBotDeeplink = route;
       if (!revealWindow(mainWindow)) {
-        createWindow();
+        startupActionGate.runWhenReady(ensureMainWindowVisible);
         return;
       }
       if (mainWindow?.webContents.isLoadingMainFrame()) {
@@ -1418,7 +1418,9 @@ if (isMacSafeStorageMigrationWorker) {
       if (HEADLESS) return;
       const approvalResponse = getCliApprovalResponseArgv(argv);
       if (approvalResponse) {
-        void handleCliApprovalResponse(approvalResponse);
+        startupActionGate.runWhenReady(() => {
+          void handleCliApprovalResponse(approvalResponse);
+        });
         return;
       }
       const taskId = extractTaskDeeplinkArg(argv);
@@ -1435,8 +1437,9 @@ if (isMacSafeStorageMigrationWorker) {
       if (revealWindow(mainWindow)) {
         return;
       }
-      // If the window was closed (but app kept running), recreate it.
-      createWindow();
+      // During startup, wait for IPC registration before creating a renderer.
+      // After startup, recreate a closed window as usual.
+      startupActionGate.runWhenReady(ensureMainWindowVisible);
     });
 
     const startupApprovalResponse = getCliApprovalResponseArgv(process.argv);
@@ -3338,6 +3341,7 @@ if (isMacSafeStorageMigrationWorker) {
         // are registered before the renderer finishes loading and calls them
         setupCanvasHandlers(mainWindow, agentDaemon);
         setupQAHandlers(mainWindow, agentDaemon);
+        startupActionGate.open();
         CanvasManager.getInstance().setMainWindow(mainWindow);
 
         // Initialize Git Worktree & Comparison handlers

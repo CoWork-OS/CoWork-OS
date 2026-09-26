@@ -211,6 +211,8 @@ import {
   readWorkspacePriorities,
 } from "./briefing/workspace-briefing-context";
 import { setupBriefingHandlers } from "./ipc/briefing-handlers";
+import { setupMeetingArtifactHandlers } from "./ipc/meeting-artifacts-handlers";
+import { MeetingArtifactsService } from "./meetings/meeting-artifacts-service";
 import { setupImprovementHandlers, setupSubconsciousHandlers } from "./ipc/subconscious-handlers";
 import { FileHubService } from "./file-hub/FileHubService";
 import { setupFileHubHandlers } from "./ipc/file-hub-handlers";
@@ -1984,6 +1986,17 @@ if (isMacSafeStorageMigrationWorker) {
       } catch (error) {
         logger.error("Failed to initialize Box Brain Service:", error);
         // Box Brain is optional and must not block app startup.
+      }
+
+      try {
+        const meetingArtifacts = MeetingArtifactsService.initialize(
+          path.join(getUserDataDir(), "meeting-artifacts"),
+        );
+        setupMeetingArtifactHandlers(meetingArtifacts);
+        logger.info("Meeting artifacts service initialized");
+      } catch (error) {
+        // Meeting capture is optional and must not block app startup.
+        logger.error("Failed to initialize meeting artifacts service:", error);
       }
 
       try {
@@ -4308,6 +4321,10 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         { name: "channel gateway", run: () => channelGateway?.shutdown() },
+        {
+          name: "meeting artifacts",
+          run: () => MeetingArtifactsService.getInstance()?.shutdown(),
+        },
         { name: "mailbox", run: () => MailboxService.stopBackgroundServices() },
         { name: "box brain", run: () => BoxBrainService.getInstance().stop() },
         {

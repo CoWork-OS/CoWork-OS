@@ -264,13 +264,31 @@ export async function startMicrosoftEmailOAuth(
   if (!request.clientId) {
     throw new Error("Microsoft email OAuth requires a client ID");
   }
-
-  const tenant = resolveTenant(request.tenant);
   const scopes =
     request.scopes && request.scopes.length > 0
       ? normalizeMicrosoftEmailReadScopes(request.scopes)
       : [...MICROSOFT_EMAIL_OAUTH_DEFAULT_SCOPES];
+  return runAuthorizationCodeFlow(request, scopes);
+}
 
+/**
+ * Delegated Microsoft Graph OAuth (PKCE) for non-mail features such as Teams
+ * meeting artifacts. Scopes are passed through unchanged.
+ */
+export async function startMicrosoftGraphOAuth(
+  request: MicrosoftEmailOAuthRequest & { scopes: string[] },
+): Promise<MicrosoftEmailOAuthResult> {
+  if (!request.clientId) {
+    throw new Error("Microsoft OAuth requires a client ID");
+  }
+  return runAuthorizationCodeFlow(request, request.scopes);
+}
+
+async function runAuthorizationCodeFlow(
+  request: MicrosoftEmailOAuthRequest,
+  scopes: readonly string[],
+): Promise<MicrosoftEmailOAuthResult> {
+  const tenant = resolveTenant(request.tenant);
   const { redirectUri, waitForCode, state } = await startOAuthCallbackServer();
   const codeVerifier = createCodeVerifier();
   const codeChallenge = createCodeChallenge(codeVerifier);

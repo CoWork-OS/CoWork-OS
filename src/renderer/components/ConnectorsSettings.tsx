@@ -9,6 +9,7 @@ import { OneDriveSettings } from "./OneDriveSettings";
 import { GoogleWorkspaceSettings } from "./GoogleWorkspaceSettings";
 import { AgentMailSettings } from "./AgentMailSettings";
 import { DropboxSettings } from "./DropboxSettings";
+import { TeamsMeetingSettings } from "./TeamsMeetingSettings";
 import { SharePointSettings } from "./SharePointSettings";
 import { ConnectorBrandIcon } from "./ConnectorBrandIcon";
 
@@ -802,6 +803,12 @@ const INTEGRATIONS: IntegrationDefinition[] = [
     name: "Dropbox",
     description: "Search and access your Dropbox content.",
     component: <DropboxSettings />,
+  },
+  {
+    key: "teams-meetings",
+    name: "Teams meeting transcripts",
+    description: "Save transcripts of Teams meetings you organize as local notes.",
+    component: <TeamsMeetingSettings />,
   },
 ];
 

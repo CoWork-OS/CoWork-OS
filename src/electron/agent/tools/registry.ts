@@ -51,6 +51,7 @@ import { ShellTools } from "./shell-tools";
 import { ImageTools } from "./image-tools";
 import { VideoTools } from "./video-tools";
 import { YouTubeTools } from "./youtube-tools";
+import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
 import { CronTools } from "./cron-tools";
@@ -561,6 +562,7 @@ export class ToolRegistry {
   private imageTools: ImageTools;
   private videoTools: VideoTools;
   private youtubeTools: YouTubeTools;
+  private meetingArtifactTools = new MeetingArtifactTools();
   private visionTools: VisionTools;
   private systemTools: SystemTools;
   private computerUseTools: ComputerUseTools;
@@ -1367,6 +1369,9 @@ export class ToolRegistry {
 
     // YouTube transcript tools are local/best-effort and do not require YouTube API keys.
     allTools.push(...YouTubeTools.getToolDefinitions());
+
+    // Locally saved meeting transcripts (read-only; empty until meeting capture is connected).
+    allTools.push(...MeetingArtifactTools.getToolDefinitions());
 
     // Vision tools (image understanding); may surface setup guidance if API keys are missing
     allTools.push(...VisionTools.getToolDefinitions());
@@ -2560,6 +2565,16 @@ export class ToolRegistry {
     register(
       "youtube_list_ingested_videos",
       async ({ request }) => this.youtubeTools.listVideos(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "meeting_artifacts_list",
+      async ({ request }) => this.meetingArtifactTools.list(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "meeting_artifact_get",
+      async ({ request }) => this.meetingArtifactTools.get(request.input),
       readParallelSchedulerSpec,
     );
     register("tool_search", async ({ request }) =>
@@ -4552,6 +4567,8 @@ ${skillDescriptions}`;
       return await this.youtubeTools.askOrIngestVideo(input);
     if (name === "youtube_search_ingested_segments") return this.youtubeTools.searchSegments(input);
     if (name === "youtube_list_ingested_videos") return this.youtubeTools.listVideos(input);
+    if (name === "meeting_artifacts_list") return this.meetingArtifactTools.list(input);
+    if (name === "meeting_artifact_get") return this.meetingArtifactTools.get(input);
 
     // Vision tools
     if (name === "analyze_image") return await this.visionTools.analyzeImage(input);

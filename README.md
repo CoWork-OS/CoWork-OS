@@ -393,7 +393,7 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 
 ### Active Context Sidebar
 
-Real-time overview of your active integrations, always visible in the right panel. Shows connected MCP connectors (47 available) and native integrations with branded Lucide icons (HubSpot, Salesforce, Google Workspace, Discord, GitHub, Postgres, and more) and green status dots, plus enabled skills from active packs. Each section shows 4 items with internal scrolling for more. Auto-refreshes every 30 seconds. [Learn more](docs/plugin-packs.md#context-panel)
+Real-time overview of your active integrations, always visible in the right panel. Shows connected MCP connectors (see the [Connector Inventory](docs/connector-inventory.md)) and native integrations with branded Lucide icons (HubSpot, Salesforce, Google Workspace, Discord, GitHub, Postgres, and more) and green status dots, plus enabled skills from active packs. Each section shows 4 items with internal scrolling for more. Auto-refreshes every 30 seconds. [Learn more](docs/plugin-packs.md#context-panel)
 
 ### Usage Insights
 

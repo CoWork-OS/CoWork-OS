@@ -1,4 +1,8 @@
 import { useMemo, useState } from "react";
+import {
+  GOOGLE_SCOPE_CONTACTS_READONLY,
+  GOOGLE_SCOPE_MEET_READONLY,
+} from "../../shared/google-workspace";
 
 export type ConnectorProvider = "salesforce" | "jira" | "hubspot" | "zendesk" | "google-workspace";
 
@@ -90,6 +94,12 @@ export function ConnectorSetupModal({
   const [googleAccessToken, setGoogleAccessToken] = useState(initialEnv.GOOGLE_ACCESS_TOKEN || "");
   const [googleRefreshToken, setGoogleRefreshToken] = useState(
     initialEnv.GOOGLE_REFRESH_TOKEN || "",
+  );
+  const [googleContactsEnabled, setGoogleContactsEnabled] = useState(
+    (initialEnv.GOOGLE_SCOPES || "").split(/\s+/).includes(GOOGLE_SCOPE_CONTACTS_READONLY),
+  );
+  const [googleMeetEnabled, setGoogleMeetEnabled] = useState(
+    (initialEnv.GOOGLE_SCOPES || "").split(/\s+/).includes(GOOGLE_SCOPE_MEET_READONLY),
   );
 
   const isSalesforce = provider === "salesforce";
@@ -260,12 +270,17 @@ export function ConnectorSetupModal({
         provider,
         clientId: googleClientId,
         clientSecret: googleClientSecret,
+        scopes: [
+          ...(googleContactsEnabled ? [GOOGLE_SCOPE_CONTACTS_READONLY] : []),
+          ...(googleMeetEnabled ? [GOOGLE_SCOPE_MEET_READONLY] : []),
+        ],
       });
       await saveEnv({
         GOOGLE_ACCESS_TOKEN: result.accessToken,
         GOOGLE_REFRESH_TOKEN: result.refreshToken || "",
         GOOGLE_CLIENT_ID: googleClientId,
         GOOGLE_CLIENT_SECRET: googleClientSecret,
+        GOOGLE_SCOPES: result.scopes?.join(" ") || "",
       });
     } catch (error: Any) {
       setOauthError(error.message || "Google OAuth failed");
@@ -603,6 +618,29 @@ export function ConnectorSetupModal({
                 Create credentials at console.cloud.google.com. Redirect URI:
                 http://127.0.0.1:18765/oauth/callback
               </p>
+              <label className="settings-field connector-setup-checkbox">
+                <input
+                  type="checkbox"
+                  checked={googleContactsEnabled}
+                  onChange={(e) => setGoogleContactsEnabled(e.target.checked)}
+                />
+                <span>
+                  Also allow read-only access to Google Contacts. Changing this requires authorizing
+                  again.
+                </span>
+              </label>
+              <label className="settings-field connector-setup-checkbox">
+                <input
+                  type="checkbox"
+                  checked={googleMeetEnabled}
+                  onChange={(e) => setGoogleMeetEnabled(e.target.checked)}
+                />
+                <span>
+                  Also allow read-only access to Google Meet conference records (attendance,
+                  recordings, transcripts and smart notes). Changing this requires authorizing
+                  again.
+                </span>
+              </label>
               <div className="connector-setup-actions">
                 <button
                   className="button-primary"

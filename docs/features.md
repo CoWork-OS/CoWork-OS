@@ -1408,7 +1408,7 @@ See [Remote Access](remote-access.md) for details.
 
 ## Enterprise MCP Connectors
 
-**47 pre-built connectors** for enterprise integrations and local creative workflows. Install from **Settings > Connectors > Browse Registry**.
+Pre-built connectors for enterprise integrations, local services, and creative workflows. Install from **Settings > Connectors > Browse Registry**. The [Connector Inventory](connector-inventory.md) lists every shipped connector, channel and skill with its actions and requirements.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-11.webp" alt="Connector catalog" width="700">

@@ -72,6 +72,7 @@ const SHIPPED_CONNECTOR_IDS = new Set([
   "vercel",
   "monday",
   "maps",
+  "home-assistant",
   "miro",
   "supabase",
   "excalidraw",
@@ -212,7 +213,7 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: "Google Workspace",
     registryId: "google-workspace",
     description:
-      "Single Google MCP connector for Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, and Chat.",
+      "Single Google MCP connector for Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, Chat, and optional read-only Contacts.",
     supportsOAuth: true,
     provider: "google-workspace",
   },
@@ -257,7 +258,7 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: "Maps",
     registryId: "maps",
     description:
-      "Nearby place search and walking routes with OSM defaults and optional Google Maps.",
+      "Nearby place search, walking routes, and timezone lookup with OSM defaults and optional Google Maps.",
     supportsOAuth: false,
     envFields: [
       {
@@ -279,6 +280,41 @@ const CONNECTORS: ConnectorDefinition[] = [
         key: "OSRM_BASE_URL",
         label: "OSRM Base URL (optional)",
         placeholder: "https://router.project-osrm.org",
+      },
+      {
+        key: "MAPS_TIMEZONE_LOOKUP",
+        label: "Timezone lookup (auto, google, open-meteo, off)",
+        placeholder: "auto",
+      },
+    ],
+  },
+  {
+    key: "home-assistant",
+    name: "Home Assistant",
+    registryId: "home-assistant",
+    description:
+      "Read device states and control allowlisted entities on your Home Assistant instance.",
+    supportsOAuth: false,
+    envFields: [
+      {
+        key: "HOME_ASSISTANT_URL",
+        label: "Instance URL",
+        placeholder: "http://homeassistant.local:8123",
+      },
+      {
+        key: "HOME_ASSISTANT_TOKEN",
+        label: "Long-lived Access Token",
+        type: "password",
+      },
+      {
+        key: "HOME_ASSISTANT_ALLOWED_DOMAINS",
+        label: "Controllable domains (blank disables service calls)",
+        placeholder: "light,switch,climate",
+      },
+      {
+        key: "HOME_ASSISTANT_ALLOWED_ENTITIES",
+        label: "Controllable entities (optional, * allowed)",
+        placeholder: "lock.front_door,switch.fan_*",
       },
     ],
   },
@@ -845,6 +881,7 @@ function getConnectorCategory(connector: ConnectorDefinition): Exclude<Connector
       "huggingface",
       "mermaid-chart",
       "maps",
+      "home-assistant",
       "make",
       "smartsheet",
       "airtable",

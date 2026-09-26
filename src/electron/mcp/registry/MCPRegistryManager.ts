@@ -189,6 +189,7 @@ const SHIPPED_LOCAL_CONNECTOR_IDS = new Set([
   "vercel",
   "monday",
   "maps",
+  "home-assistant",
   "rhino",
   "blender",
   "comfyui",
@@ -308,6 +309,7 @@ function getConnectorEntries(): MCPRegistryEntry[] {
   const vercelCommand = getConnectorCommandArgs("vercel-mcp");
   const mondayCommand = getConnectorCommandArgs("monday-mcp");
   const mapsCommand = getConnectorCommandArgs("maps-mcp");
+  const homeAssistantCommand = getConnectorCommandArgs("home-assistant-mcp");
   const rhinoCommand = getConnectorCommandArgs("rhino-mcp");
   const blenderCommand = getConnectorCommandArgs("blender-mcp");
   const comfyuiCommand = getConnectorCommandArgs("comfyui-mcp");
@@ -802,6 +804,27 @@ function getConnectorEntries(): MCPRegistryEntry[] {
           name: "google-workspace.calendar_event_delete",
           description: "Delete a Google Calendar event",
         },
+        {
+          name: "google-workspace.contacts_search",
+          description: "Search Google Contacts (optional read-only Contacts permission)",
+        },
+        {
+          name: "google-workspace.contacts_list",
+          description: "List Google Contacts with incremental sync tokens",
+        },
+        { name: "google-workspace.contacts_get", description: "Get a Google Contact" },
+        {
+          name: "google-workspace.meet_conferences_list",
+          description: "List past Google Meet conferences (optional read-only Meet permission)",
+        },
+        {
+          name: "google-workspace.meet_conference_get",
+          description: "Get Meet attendance, recordings, transcripts and smart notes",
+        },
+        {
+          name: "google-workspace.meet_transcript_entries",
+          description: "Read a Meet transcript as speaker-attributed entries or Markdown",
+        },
         { name: "google-workspace.tasks_lists_list", description: "List Google Tasks task lists" },
         {
           name: "google-workspace.tasks_lists_create",
@@ -1096,7 +1119,7 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       id: "maps",
       name: "Maps",
       description:
-        "Maps connector for CoWork OS. Search nearby places and walking routes with keyless OSM defaults and optional Google Maps Platform.",
+        "Maps connector for CoWork OS. Search nearby places, walking routes, and timezones with keyless OSM defaults and optional Google Maps Platform.",
       version: LOCAL_CONNECTOR_VERSION,
       author: "CoWork OS",
       homepage: "https://github.com/CoWork-OS/CoWork-OS",
@@ -1111,6 +1134,7 @@ function getConnectorEntries(): MCPRegistryEntry[] {
         GOOGLE_MAPS_API_KEY: "",
         NOMINATIM_BASE_URL: "",
         OSRM_BASE_URL: "",
+        MAPS_TIMEZONE_LOOKUP: "auto",
       },
       tools: [
         { name: "maps.health", description: "Check maps connector provider configuration" },
@@ -1118,11 +1142,49 @@ function getConnectorEntries(): MCPRegistryEntry[] {
         { name: "maps.place_details", description: "Fetch normalized place details" },
         { name: "maps.route", description: "Estimate a walking route between coordinates" },
         { name: "maps.rank_nearby_options", description: "Rank nearby options for urgent errands" },
+        {
+          name: "maps.timezone",
+          description: "Resolve the IANA timezone and DST-aware UTC offset for a place and instant",
+        },
       ],
       tags: ["maps", "places", "location", "openstreetmap", "google-maps", "connector"],
       category: "productivity",
       verified: true,
       featured: true,
+    },
+    {
+      id: "home-assistant",
+      name: "Home Assistant",
+      description:
+        "Home Assistant connector for CoWork OS. Read entity states and services from a local instance; control devices only for allowlisted domains or entities.",
+      version: LOCAL_CONNECTOR_VERSION,
+      author: "CoWork OS",
+      homepage: "https://github.com/CoWork-OS/CoWork-OS",
+      repository: "https://github.com/CoWork-OS/CoWork-OS",
+      license: "MIT",
+      installMethod: "manual",
+      transport: "stdio",
+      defaultCommand: homeAssistantCommand.command,
+      defaultArgs: homeAssistantCommand.args,
+      defaultEnv: {
+        HOME_ASSISTANT_URL: "http://homeassistant.local:8123",
+        HOME_ASSISTANT_TOKEN: "",
+        HOME_ASSISTANT_ALLOWED_DOMAINS: "",
+        HOME_ASSISTANT_ALLOWED_ENTITIES: "",
+      },
+      tools: [
+        { name: "home-assistant.health", description: "Check reachability, token and allowlist" },
+        { name: "home-assistant.list_entities", description: "List or search entities and states" },
+        { name: "home-assistant.get_state", description: "Read one entity's state and attributes" },
+        { name: "home-assistant.list_services", description: "List available services and fields" },
+        {
+          name: "home-assistant.call_service",
+          description: "Call a service on allowlisted entities",
+        },
+      ],
+      tags: ["home-assistant", "smart-home", "iot", "local", "connector"],
+      category: "productivity",
+      verified: true,
     },
     {
       id: "rhino",
@@ -2720,6 +2782,10 @@ function getBuiltinRegistry(): MCPRegistry {
       tagProvenance(connector, "bundled"),
     ),
   };
+}
+
+export function getBuiltinRegistryServers(): MCPRegistryEntry[] {
+  return getBuiltinRegistry().servers;
 }
 
 export function getBuiltinRegistryServer(serverId: string): MCPRegistryEntry | undefined {

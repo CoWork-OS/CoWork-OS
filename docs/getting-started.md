@@ -582,7 +582,7 @@ Install enterprise connectors from **Settings** > **Integrations** > **Browse Re
 | **Blender**          | 3D/Rendering     | Localhost Blender bridge + `COWORK_ARCH_PROJECT_ROOT`                      |
 | **ComfyUI**          | Image Generation | Local ComfyUI API + `COWORK_ARCH_PROJECT_ROOT`                             |
 
-Most service connectors provide tools like `search`, `get`, `create`, and `update` for their respective APIs. Local creative connectors provide app-specific tools for Rhino, Blender, and ComfyUI; their file arguments must stay inside `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`. **47 connectors** are available in total, including Stripe, Tavily, Grafana, Metabase, Socket, Rhino, Blender, ComfyUI, and more. See [Enterprise Connectors](enterprise-connectors.md) for the full catalog.
+Most service connectors provide tools like `search`, `get`, `create`, and `update` for their respective APIs. Local creative connectors provide app-specific tools for Rhino, Blender, and ComfyUI; their file arguments must stay inside `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`. Available connectors include Stripe, Tavily, Grafana, Metabase, Socket, Home Assistant, Rhino, Blender, ComfyUI, and more. See the generated [Connector Inventory](connector-inventory.md) for the full list and [Enterprise Connectors](enterprise-connectors.md) for setup.
 
 ### Social Integrations (Optional)
 

@@ -287,6 +287,22 @@ const REQUIRED_GOOGLE_WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/chat.spaces.readonly",
 ];
 
+const CONTACTS_READ_SCOPES = [
+  "https://www.googleapis.com/auth/contacts.readonly",
+  "https://www.googleapis.com/auth/contacts",
+];
+const PEOPLE_API_BASE = "https://people.googleapis.com/v1";
+const DEFAULT_PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,metadata";
+const PERSON_FIELD_RE = /^[a-zA-Z]+(,[a-zA-Z]+)*$/;
+let contactsSearchWarmedUp = false;
+
+const MEET_READ_SCOPES = ["https://www.googleapis.com/auth/meetings.space.readonly"];
+const MEET_API_BASE = "https://meet.googleapis.com/v2";
+const CONFERENCE_RECORD_RE = /^conferenceRecords\/[A-Za-z0-9_-]+$/;
+const TRANSCRIPT_NAME_RE = /^(conferenceRecords\/[A-Za-z0-9_-]+)\/transcripts\/[A-Za-z0-9_-]+$/;
+const MEETING_CODE_RE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
+const MAX_TRANSCRIPT_ENTRIES = 2000;
+
 const GOOGLE_CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3";
 const MAX_CALENDAR_BATCH_READ_EVENTS = 50;
 const RFC3339_WITH_ZONE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -523,6 +539,126 @@ function buildCalendarEventBody(
     throw new Error("At least one calendar event field must be provided");
   }
   return body;
+}
+
+function optionalScopeStatus(accepted: string[]): "granted" | "missing" | "unknown" {
+  const configured = normalizeScopeList(GOOGLE_SCOPES);
+  if (configured.length === 0) return "unknown";
+  return configured.some((scope) => accepted.includes(scope)) ? "granted" : "missing";
+}
+
+function contactsScopeStatus(): "granted" | "missing" | "unknown" {
+  return optionalScopeStatus(CONTACTS_READ_SCOPES);
+}
+
+function meetScopeStatus(): "granted" | "missing" | "unknown" {
+  return optionalScopeStatus(MEET_READ_SCOPES);
+}
+
+async function meetRequest(pathAndQuery: string, params?: Record<string, string>): Promise<any> {
+  if (meetScopeStatus() === "missing") {
+    throw new Error(
+      "Google Meet is not enabled for this connection. Open Settings > Connectors > Google Workspace, tick 'Also allow read-only access to Google Meet conference records', and authorize again.",
+    );
+  }
+  try {
+    return await googleRequest("GET", `${MEET_API_BASE}/${pathAndQuery}`, undefined, params);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/^Google API 403/.test(message) && /insufficient|scope|PERMISSION_DENIED/i.test(message)) {
+      throw new Error(
+        "Google denied Meet access. Re-authorize Google Workspace with 'Also allow read-only access to Google Meet conference records' enabled; only meetings you own or joined are visible.",
+      );
+    }
+    throw error;
+  }
+}
+
+async function meetListAll(
+  pathAndQuery: string,
+  key: string,
+  maxItems: number,
+  params: Record<string, string> = {},
+): Promise<{ items: any[]; truncated: boolean }> {
+  const items: any[] = [];
+  let pageToken: string | undefined;
+  do {
+    const page = await meetRequest(pathAndQuery, {
+      ...params,
+      pageSize: "100",
+      ...(pageToken ? { pageToken } : {}),
+    });
+    items.push(...(page?.[key] || []));
+    pageToken = page?.nextPageToken;
+  } while (pageToken && items.length < maxItems);
+  return { items: items.slice(0, maxItems), truncated: Boolean(pageToken) || items.length > maxItems };
+}
+
+function participantDisplayName(participant: any): string {
+  return (
+    participant?.signedinUser?.displayName ||
+    participant?.anonymousUser?.displayName ||
+    participant?.phoneUser?.displayName ||
+    "Unknown participant"
+  );
+}
+
+function requireContactsScope(): void {
+  if (contactsScopeStatus() === "missing") {
+    throw new Error(
+      "Google Contacts is not enabled for this connection. Open Settings > Connectors > Google Workspace, tick 'Also allow read-only access to Google Contacts', and authorize again.",
+    );
+  }
+}
+
+function resolvePersonFields(value: unknown): string {
+  if (value === undefined || value === null || value === "") return DEFAULT_PERSON_FIELDS;
+  const text = String(value).replace(/\s+/g, "");
+  if (!PERSON_FIELD_RE.test(text)) {
+    throw new Error("personFields must be a comma-separated list such as names,emailAddresses");
+  }
+  return text;
+}
+
+async function peopleRequest(path: string, params: Record<string, string>): Promise<any> {
+  requireContactsScope();
+  try {
+    return await googleRequest("GET", `${PEOPLE_API_BASE}${path}`, undefined, params);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/^Google API 403/.test(message) && /insufficient|scope|PERMISSION_DENIED/i.test(message)) {
+      throw new Error(
+        "Google denied Contacts access. Re-authorize Google Workspace with 'Also allow read-only access to Google Contacts' enabled.",
+      );
+    }
+    throw error;
+  }
+}
+
+function normalizePerson(person: any, includeRaw = false): Record<string, any> {
+  const primary = (items: any[] | undefined) =>
+    (items || []).find((item) => item?.metadata?.primary) || (items || [])[0];
+  return {
+    resourceName: person?.resourceName,
+    etag: person?.etag,
+    displayName: primary(person?.names)?.displayName,
+    emails: (person?.emailAddresses || []).map((entry: any) => ({
+      value: entry?.value,
+      type: entry?.type,
+      primary: Boolean(entry?.metadata?.primary),
+    })),
+    phones: (person?.phoneNumbers || []).map((entry: any) => ({
+      value: entry?.value,
+      canonical: entry?.canonicalForm,
+      type: entry?.type,
+    })),
+    organizations: (person?.organizations || []).map((entry: any) => ({
+      name: entry?.name,
+      title: entry?.title,
+    })),
+    deleted: Boolean(person?.metadata?.deleted) || undefined,
+    raw: includeRaw ? person : undefined,
+  };
 }
 
 function requireRfc3339DateTime(value: unknown, label: string): string {
@@ -1156,6 +1292,131 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  // ── Contacts (People API, read-only, opt-in scope) ──────
+  {
+    name: "google-workspace.contacts_search",
+    description:
+      "Search the user's Google Contacts by name, email, phone or organization. Use to resolve a person to an email address or phone number before drafting mail or scheduling. Requires the optional Contacts permission.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Prefix-matched search text" },
+        pageSize: { type: "number", description: "Maximum results (default 10, max 30)" },
+        personFields: {
+          type: "string",
+          description: `Comma-separated People API fields (default ${DEFAULT_PERSON_FIELDS})`,
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "google-workspace.contacts_list",
+    description:
+      "List the user's Google Contacts page by page, or fetch only changes since a previous syncToken. Use for bulk export or incremental sync, not single lookups. Requires the optional Contacts permission.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageSize: { type: "number", description: "Contacts per page (default 100, max 1000)" },
+        pageToken: { type: "string", description: "Page token from a previous response" },
+        syncToken: {
+          type: "string",
+          description:
+            "nextSyncToken from a previous full listing. Expired tokens (older than 7 days) fall back to a full listing automatically.",
+        },
+        sortOrder: {
+          type: "string",
+          enum: [
+            "LAST_MODIFIED_ASCENDING",
+            "LAST_MODIFIED_DESCENDING",
+            "FIRST_NAME_ASCENDING",
+            "LAST_NAME_ASCENDING",
+          ],
+        },
+        personFields: {
+          type: "string",
+          description: `Comma-separated People API fields (default ${DEFAULT_PERSON_FIELDS})`,
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "google-workspace.contacts_get",
+    description:
+      "Get one Google Contact by resourceName (for example people/c123) returned by contacts_search or contacts_list. Requires the optional Contacts permission.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        resourceName: { type: "string", description: "Contact resource name, e.g. people/c123" },
+        personFields: {
+          type: "string",
+          description: `Comma-separated People API fields (default ${DEFAULT_PERSON_FIELDS})`,
+        },
+      },
+      required: ["resourceName"],
+      additionalProperties: false,
+    },
+  },
+  // ── Meet (conference records, read-only, opt-in scope) ──
+  {
+    name: "google-workspace.meet_conferences_list",
+    description:
+      "List past Google Meet conferences the user owned or joined, newest first. Filter by meeting code or start-time range to find a specific meeting before reading its transcript. Requires the optional Meet permission.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        meetingCode: { type: "string", description: "Meeting code such as abc-mnop-xyz" },
+        startAfter: { type: "string", description: "Only conferences starting at/after, RFC3339" },
+        startBefore: { type: "string", description: "Only conferences starting before, RFC3339" },
+        pageSize: { type: "number", description: "Results per page (default 10, max 100)" },
+        pageToken: { type: "string", description: "Page token from a previous response" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "google-workspace.meet_conference_get",
+    description:
+      "Get one Google Meet conference with its attendance (participants with join/leave times), recordings, transcripts and smart notes metadata, including Drive/Docs export links. Requires the optional Meet permission.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conferenceRecord: {
+          type: "string",
+          description: "Conference record name, e.g. conferenceRecords/abc123",
+        },
+      },
+      required: ["conferenceRecord"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "google-workspace.meet_transcript_entries",
+    description:
+      "Read a Google Meet transcript as speaker-attributed entries (and optional Markdown). Entries are only kept by Google for 30 days after the conference ends, so retrieve and save them soon after the meeting. Requires the optional Meet permission.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        transcript: {
+          type: "string",
+          description: "Transcript name, e.g. conferenceRecords/abc123/transcripts/def456",
+        },
+        maxEntries: {
+          type: "number",
+          description: `Maximum entries to return (default 500, max ${MAX_TRANSCRIPT_ENTRIES})`,
+        },
+        format: {
+          type: "string",
+          enum: ["entries", "markdown"],
+          description: "entries (default) or a Markdown transcript ready to save",
+        },
+      },
+      required: ["transcript"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "google-workspace.tasks_list",
     description: "List tasks in a Google Tasks task list",
@@ -1514,8 +1775,230 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
         scopeWarning: GOOGLE_SCOPES
           ? undefined
           : "GOOGLE_SCOPES is not configured, so health cannot verify every Workspace API scope.",
+        optionalCapabilities: { contacts: contactsScopeStatus(), meet: meetScopeStatus() },
       },
     };
+  },
+
+  // ── Contacts ────────────────────────────────────────────
+
+  "google-workspace.contacts_search": async (args) => {
+    const query = requireNonEmptyString(args.query, "query");
+    const readMask = resolvePersonFields(args.personFields);
+    const pageSize = String(Math.max(1, Math.min(numberOrDefault(args.pageSize, 10), 30)));
+    if (!contactsSearchWarmedUp) {
+      // The People API serves searchContacts from a lazily built cache; Google
+      // requires an empty-query warmup request before the first real search.
+      await peopleRequest("/people:searchContacts", { query: "", readMask });
+      contactsSearchWarmedUp = true;
+    }
+    const result = await peopleRequest("/people:searchContacts", { query, readMask, pageSize });
+    const includeRaw = readMask !== DEFAULT_PERSON_FIELDS;
+    return {
+      ok: true,
+      data: {
+        contacts: (result?.results || []).map((entry: any) =>
+          normalizePerson(entry?.person, includeRaw),
+        ),
+      },
+    };
+  },
+
+  "google-workspace.contacts_list": async (args) => {
+    const personFields = resolvePersonFields(args.personFields);
+    const base: Record<string, string> = {
+      personFields,
+      pageSize: String(Math.max(1, Math.min(numberOrDefault(args.pageSize, 100), 1000))),
+      requestSyncToken: "true",
+    };
+    if (typeof args.sortOrder === "string" && !args.syncToken) base.sortOrder = args.sortOrder;
+    if (typeof args.pageToken === "string" && args.pageToken) base.pageToken = args.pageToken;
+
+    let syncTokenExpired = false;
+    let result: any;
+    if (typeof args.syncToken === "string" && args.syncToken) {
+      try {
+        result = await peopleRequest("/people/me/connections", {
+          ...base,
+          syncToken: args.syncToken,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/^Google API 410/.test(message) && !/EXPIRED_SYNC_TOKEN/.test(message)) throw error;
+        syncTokenExpired = true;
+        const fresh = { ...base };
+        delete fresh.pageToken;
+        result = await peopleRequest("/people/me/connections", fresh);
+      }
+    } else {
+      result = await peopleRequest("/people/me/connections", base);
+    }
+
+    const includeRaw = personFields !== DEFAULT_PERSON_FIELDS;
+    return {
+      ok: true,
+      data: {
+        contacts: (result?.connections || []).map((person: any) =>
+          normalizePerson(person, includeRaw),
+        ),
+        nextPageToken: result?.nextPageToken,
+        nextSyncToken: result?.nextSyncToken,
+        totalItems: result?.totalItems,
+        fullSync: syncTokenExpired || !args.syncToken,
+        syncTokenExpired: syncTokenExpired || undefined,
+      },
+    };
+  },
+
+  // ── Meet ────────────────────────────────────────────────
+
+  "google-workspace.meet_conferences_list": async (args) => {
+    const filters: string[] = [];
+    if (args.meetingCode !== undefined) {
+      const code = String(args.meetingCode).trim().toLowerCase();
+      if (!MEETING_CODE_RE.test(code)) throw new Error("meetingCode must look like abc-mnop-xyz");
+      filters.push(`space.meeting_code = "${code}"`);
+    }
+    if (args.startAfter !== undefined) {
+      filters.push(`start_time >= "${requireRfc3339DateTime(args.startAfter, "startAfter")}"`);
+    }
+    if (args.startBefore !== undefined) {
+      filters.push(`start_time < "${requireRfc3339DateTime(args.startBefore, "startBefore")}"`);
+    }
+    const params: Record<string, string> = {
+      pageSize: String(Math.max(1, Math.min(numberOrDefault(args.pageSize, 10), 100))),
+    };
+    if (filters.length > 0) params.filter = filters.join(" AND ");
+    if (typeof args.pageToken === "string" && args.pageToken) params.pageToken = args.pageToken;
+    const result = await meetRequest("conferenceRecords", params);
+    return {
+      ok: true,
+      data: {
+        conferences: (result?.conferenceRecords || []).map((record: any) => ({
+          name: record?.name,
+          startTime: record?.startTime,
+          endTime: record?.endTime,
+          expireTime: record?.expireTime,
+          space: record?.space,
+          ended: Boolean(record?.endTime),
+        })),
+        nextPageToken: result?.nextPageToken,
+      },
+    };
+  },
+
+  "google-workspace.meet_conference_get": async (args) => {
+    const name = requireNonEmptyString(args.conferenceRecord, "conferenceRecord").trim();
+    if (!CONFERENCE_RECORD_RE.test(name)) {
+      throw new Error("conferenceRecord must look like conferenceRecords/abc123");
+    }
+    const [record, participants, recordings, transcripts, smartNotes] = await Promise.all([
+      meetRequest(name),
+      meetListAll(`${name}/participants`, "participants", 500),
+      meetListAll(`${name}/recordings`, "recordings", 100),
+      meetListAll(`${name}/transcripts`, "transcripts", 100),
+      meetListAll(`${name}/smartNotes`, "smartNotes", 100).catch(() => ({
+        items: [],
+        truncated: false,
+      })),
+    ]);
+    return {
+      ok: true,
+      data: {
+        name: record?.name,
+        startTime: record?.startTime,
+        endTime: record?.endTime,
+        space: record?.space,
+        attendance: participants.items.map((participant: any) => ({
+          name: participant?.name,
+          displayName: participantDisplayName(participant),
+          earliestStartTime: participant?.earliestStartTime,
+          latestEndTime: participant?.latestEndTime,
+        })),
+        attendanceTruncated: participants.truncated || undefined,
+        recordings: recordings.items.map((recording: any) => ({
+          name: recording?.name,
+          state: recording?.state,
+          startTime: recording?.startTime,
+          endTime: recording?.endTime,
+          driveFile: recording?.driveDestination?.file,
+          exportUri: recording?.driveDestination?.exportUri,
+        })),
+        transcripts: transcripts.items.map((transcript: any) => ({
+          name: transcript?.name,
+          state: transcript?.state,
+          startTime: transcript?.startTime,
+          endTime: transcript?.endTime,
+          document: transcript?.docsDestination?.document,
+          exportUri: transcript?.docsDestination?.exportUri,
+        })),
+        smartNotes: smartNotes.items.map((note: any) => ({
+          name: note?.name,
+          state: note?.state,
+          document: note?.docsDestination?.document,
+          exportUri: note?.docsDestination?.exportUri,
+        })),
+        note: "Transcript entries are deleted by Google 30 days after the conference ends; the Docs copies follow Drive retention.",
+      },
+    };
+  },
+
+  "google-workspace.meet_transcript_entries": async (args) => {
+    const transcriptName = requireNonEmptyString(args.transcript, "transcript").trim();
+    const match = TRANSCRIPT_NAME_RE.exec(transcriptName);
+    if (!match) {
+      throw new Error("transcript must look like conferenceRecords/abc123/transcripts/def456");
+    }
+    const conferenceName = match[1];
+    const maxEntries = Math.max(
+      1,
+      Math.min(numberOrDefault(args.maxEntries, 500), MAX_TRANSCRIPT_ENTRIES),
+    );
+    const [entries, participants] = await Promise.all([
+      meetListAll(`${transcriptName}/entries`, "transcriptEntries", maxEntries),
+      meetListAll(`${conferenceName}/participants`, "participants", 500),
+    ]);
+    const names = new Map<string, string>(
+      participants.items.map((participant: any) => [
+        participant?.name,
+        participantDisplayName(participant),
+      ]),
+    );
+    const normalized = entries.items.map((entry: any) => ({
+      speaker: names.get(entry?.participant) || "Unknown participant",
+      startTime: entry?.startTime,
+      endTime: entry?.endTime,
+      languageCode: entry?.languageCode,
+      text: entry?.text || "",
+    }));
+    const data: Record<string, any> = {
+      transcript: transcriptName,
+      entries: normalized,
+      truncated: entries.truncated || undefined,
+    };
+    if (args.format === "markdown") {
+      const lines = [`# Google Meet transcript`, "", `- **Source:** ${transcriptName}`, ""];
+      let previousSpeaker = "";
+      for (const entry of normalized) {
+        if (entry.speaker !== previousSpeaker) {
+          lines.push("", `**${entry.speaker}** \`${entry.startTime || ""}\``);
+          previousSpeaker = entry.speaker;
+        }
+        lines.push(entry.text.replace(/([\\`*_[\]#|<>])/g, "\\$1"));
+      }
+      data.markdown = `${lines.join("\n").trim()}\n`;
+    }
+    return { ok: true, data };
+  },
+
+  "google-workspace.contacts_get": async (args) => {
+    const resourceName = requireNonEmptyString(args.resourceName, "resourceName").trim();
+    if (!/^people\/[A-Za-z0-9_-]+$/.test(resourceName)) {
+      throw new Error("resourceName must look like people/c123");
+    }
+    const personFields = resolvePersonFields(args.personFields);
+    const result = await peopleRequest(`/${resourceName}`, { personFields });
+    return { ok: true, data: normalizePerson(result, personFields !== DEFAULT_PERSON_FIELDS) };
   },
 
   // ── Sheets ──────────────────────────────────────────────

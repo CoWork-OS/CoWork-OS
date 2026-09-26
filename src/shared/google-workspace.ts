@@ -19,6 +19,15 @@ export const GOOGLE_SCOPE_CHAT_MESSAGES = "https://www.googleapis.com/auth/chat.
 export const GOOGLE_SCOPE_CHAT_SPACES_READONLY =
   "https://www.googleapis.com/auth/chat.spaces.readonly";
 
+/**
+ * Opt-in only: never part of the default consent, so existing Workspace
+ * connections are not silently broadened. Requested when the user enables
+ * Google Contacts in the connector setup.
+ */
+export const GOOGLE_SCOPE_CONTACTS_READONLY = "https://www.googleapis.com/auth/contacts.readonly";
+/** Opt-in only, like Contacts: read past Meet conference records and artifacts. */
+export const GOOGLE_SCOPE_MEET_READONLY = "https://www.googleapis.com/auth/meetings.space.readonly";
+
 export const GOOGLE_WORKSPACE_DEFAULT_SCOPES = [
   GOOGLE_SCOPE_DRIVE,
   GOOGLE_SCOPE_GMAIL_READONLY,

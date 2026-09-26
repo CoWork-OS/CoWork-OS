@@ -1970,7 +1970,7 @@ Rate the attractiveness of entering with a [specific angle].
 | **DevOps & Infra**         | K8s, Terraform, Docker, CI/CD, cloud migration, incidents                                           | DevOps pack (8 skills), `run_command` tool                   |
 | **Mobile Development**     | iOS (SwiftUI), Android (Compose), React Native, Fastlane                                            | Mobile Development pack, iOS/Android skills                  |
 | **Game Development**       | Unity, Unreal, Godot, cross-engine performance                                                      | Game Development pack, 3 engine skills                       |
-| **Enterprise**             | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and 36 more | 44 shipped MCP connectors                                    |
+| **Enterprise**             | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and more           | See the [Connector Inventory](connector-inventory.md)        |
 | **Data & Analytics**       | CSV analysis, SQL, financial modeling, market screening                                             | Data Analysis pack, 8+ financial skills                      |
 | **Content & Marketing**    | Blog, social, email campaigns, SEO, copywriting                                                     | Marketing pack, marketing strategist skill                   |
 | **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 17 channels, scheduling, 10+ productivity skills             |

@@ -28,8 +28,9 @@ import { createLogger } from "../../utils/logger";
 import { isLikelyIntegrationAuthError } from "../../notifications/integration-auth";
 
 // MCP Protocol version we support
-const PROTOCOL_VERSION = "2024-11-05";
-const STREAMABLE_HTTP_PROTOCOL_VERSION = "2025-06-18";
+/** Latest MCP revision the client implements; servers may answer with an older one. */
+const PROTOCOL_VERSION = "2025-06-18";
+export const SUPPORTED_MCP_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 // Client info to send during initialize
 const CLIENT_INFO = {
@@ -335,10 +336,7 @@ export class MCPServerConnection extends EventEmitter {
     logger.debug(`Initializing connection to ${this.config.name}`);
 
     const result = await this.transport!.sendRequest(MCP_METHODS.INITIALIZE, {
-      protocolVersion:
-        this.config.transport === "streamable-http"
-          ? STREAMABLE_HTTP_PROTOCOL_VERSION
-          : PROTOCOL_VERSION,
+      protocolVersion: PROTOCOL_VERSION,
       capabilities: {
         // Declare capabilities we actually support
         // Note: roots capability removed - we don't respond to roots/list requests
@@ -346,6 +344,15 @@ export class MCPServerConnection extends EventEmitter {
       },
       clientInfo: CLIENT_INFO,
     });
+
+    if (
+      result?.protocolVersion &&
+      !SUPPORTED_MCP_PROTOCOL_VERSIONS.includes(String(result.protocolVersion))
+    ) {
+      logger.warn(
+        `${this.config.name} negotiated unsupported MCP protocol ${result.protocolVersion}; continuing, but some features may not work`,
+      );
+    }
 
     this.serverInfo = {
       name: result.serverInfo?.name || this.config.name,

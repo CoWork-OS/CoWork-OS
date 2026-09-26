@@ -26,6 +26,7 @@ Reference implementations:
 - `connectors/monday-mcp`
 - `connectors/finance-data-mcp`
 - `connectors/maps-mcp`
+- `connectors/home-assistant-mcp`
 - `connectors/rhino-mcp`
 - `connectors/blender-mcp`
 - `connectors/comfyui-mcp`

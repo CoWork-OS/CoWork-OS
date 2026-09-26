@@ -375,9 +375,9 @@ interface MainWindowState {
   isFullScreen?: boolean;
 }
 
-function normalizeTwinCoreBoundary(): void {
+function normalizeTemplatedRoleCoreBoundary(): void {
   const db = dbManager.getDatabase();
-  const twinRoles = db
+  const templatedRoles = db
     .prepare(
       `SELECT id
        FROM agent_roles
@@ -387,7 +387,7 @@ function normalizeTwinCoreBoundary(): void {
     )
     .all() as Array<{ id?: string }>;
 
-  const roleIds = twinRoles
+  const roleIds = templatedRoles
     .map((row) => (typeof row.id === "string" ? row.id : ""))
     .filter(Boolean);
   if (!roleIds.length) {
@@ -395,9 +395,16 @@ function normalizeTwinCoreBoundary(): void {
   }
 
   const placeholders = roleIds.map(() => "?").join(", ");
+  const targetKeys = roleIds.map((id) => `agent_role:${id}`);
+  const now = Date.now();
+  let changes = 0;
+  const run = (sql: string, ...params: unknown[]): void => {
+    changes += Number(db.prepare(sql).run(...params).changes || 0);
+  };
   db.exec("BEGIN");
   try {
-    db.prepare(
+    // Only touch rows that still need it, so repeat launches are no-ops.
+    run(
       `UPDATE agent_roles
        SET role_kind = 'persona_template',
            heartbeat_enabled = 0,
@@ -405,57 +412,46 @@ function normalizeTwinCoreBoundary(): void {
            heartbeat_last_pulse_result = NULL,
            heartbeat_last_dispatch_kind = NULL,
            updated_at = ?
-       WHERE id IN (${placeholders})`,
-    ).run(Date.now(), ...roleIds);
-
-    db.prepare(
+       WHERE id IN (${placeholders})
+         AND (COALESCE(role_kind, '') != 'persona_template'
+           OR COALESCE(heartbeat_enabled, 0) != 0
+           OR COALESCE(heartbeat_status, 'idle') != 'idle'
+           OR heartbeat_last_pulse_result IS NOT NULL
+           OR heartbeat_last_dispatch_kind IS NOT NULL)`,
+      now,
+      ...roleIds,
+    );
+    run(
       `UPDATE automation_profiles
        SET enabled = 0,
            updated_at = ?
-       WHERE agent_role_id IN (${placeholders})`,
-    ).run(Date.now(), ...roleIds);
-
-    db.prepare(
-      `DELETE FROM heartbeat_policies
-       WHERE agent_role_id IN (${placeholders})`,
-    ).run(...roleIds);
-
-    db.prepare(
-      `DELETE FROM subconscious_dispatch_records
-       WHERE target_key IN (${placeholders})`,
-    ).run(...roleIds.map((id) => `agent_role:${id}`));
-    db.prepare(
-      `DELETE FROM subconscious_backlog_items
-       WHERE target_key IN (${placeholders})`,
-    ).run(...roleIds.map((id) => `agent_role:${id}`));
-    db.prepare(
-      `DELETE FROM subconscious_decisions
-       WHERE target_key IN (${placeholders})`,
-    ).run(...roleIds.map((id) => `agent_role:${id}`));
-    db.prepare(
-      `DELETE FROM subconscious_critiques
-       WHERE target_key IN (${placeholders})`,
-    ).run(...roleIds.map((id) => `agent_role:${id}`));
-    db.prepare(
-      `DELETE FROM subconscious_hypotheses
-       WHERE target_key IN (${placeholders})`,
-    ).run(...roleIds.map((id) => `agent_role:${id}`));
-    db.prepare(
-      `DELETE FROM subconscious_runs
-       WHERE target_key IN (${placeholders})`,
-    ).run(...roleIds.map((id) => `agent_role:${id}`));
-    db.prepare(
-      `DELETE FROM subconscious_targets
-       WHERE target_key IN (${placeholders})`,
-    ).run(...roleIds.map((id) => `agent_role:${id}`));
+       WHERE agent_role_id IN (${placeholders}) AND enabled != 0`,
+      now,
+      ...roleIds,
+    );
+    run(`DELETE FROM heartbeat_policies WHERE agent_role_id IN (${placeholders})`, ...roleIds);
+    for (const table of [
+      "subconscious_dispatch_records",
+      "subconscious_backlog_items",
+      "subconscious_decisions",
+      "subconscious_critiques",
+      "subconscious_hypotheses",
+      "subconscious_runs",
+      "subconscious_targets",
+    ]) {
+      run(`DELETE FROM ${table} WHERE target_key IN (${placeholders})`, ...targetKeys);
+    }
 
     db.exec("COMMIT");
-    logger.info("Normalized Twin roles out of core cognition ownership", {
-      roleCount: roleIds.length,
-    });
+    if (changes > 0) {
+      logger.info("Detached templated agent roles from core automation", {
+        roleCount: roleIds.length,
+        changes,
+      });
+    }
   } catch (error) {
     db.exec("ROLLBACK");
-    logger.error("Failed to normalize Twin cognition ownership:", error);
+    logger.error("Failed to detach templated agent roles from core automation:", error);
   }
 }
 
@@ -1815,7 +1811,7 @@ if (isMacSafeStorageMigrationWorker) {
           });
         }
       }
-      normalizeTwinCoreBoundary();
+      normalizeTemplatedRoleCoreBoundary();
       ensureCoreAutomationProfiles();
       ensureCoreBotTeams();
       try {

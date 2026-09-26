@@ -185,7 +185,6 @@ async function startControlPlane(options: {
       host: settings.host,
       trustProxy: settings.trustProxy,
       token: settings.token,
-      nodeToken: settings.nodeToken,
       handshakeTimeoutMs: settings.handshakeTimeoutMs,
       heartbeatIntervalMs: settings.heartbeatIntervalMs,
       maxPayloadBytes: settings.maxPayloadBytes,

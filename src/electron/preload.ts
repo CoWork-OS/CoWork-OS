@@ -239,17 +239,6 @@ import type {
   SubconsciousTargetSummary,
 } from "../shared/subconscious";
 import type {
-  HealthDashboard,
-  HealthSource,
-  HealthSourceInput,
-  HealthSyncResult,
-  HealthWorkflow,
-  HealthWorkflowRequest,
-  HealthWritebackPreview,
-  HealthWritebackRequest,
-  HealthSourceConnectionMode,
-} from "../shared/health";
-import type {
   ChannelPreferenceSummary,
   ContactIdentity,
   ContactIdentityCandidate,
@@ -542,32 +531,6 @@ const IPC_CHANNELS = SHARED_IPC_CHANNELS;
  */
 const LEGACY_IPC_CHANNELS_MIRROR = IPC_CHANNELS;
 void LEGACY_IPC_CHANNELS_MIRROR;
-
-// Mobile Companion Node types (inlined for sandboxed preload)
-type NodePlatform = "ios" | "android" | "macos";
-type NodeCapabilityType = "camera" | "location" | "screen" | "sms" | "voice" | "canvas" | "system";
-
-interface NodeInfo {
-  id: string;
-  displayName: string;
-  platform: NodePlatform;
-  version: string;
-  deviceId?: string;
-  modelIdentifier?: string;
-  capabilities: NodeCapabilityType[];
-  commands: string[];
-  permissions: Record<string, boolean>;
-  connectedAt: number;
-  lastActivityAt: number;
-  isForeground?: boolean;
-}
-
-interface NodeEvent {
-  type: "connected" | "disconnected" | "capabilities_changed" | "foreground_changed";
-  nodeId: string;
-  node?: NodeInfo;
-  timestamp: number;
-}
 
 // Custom Skill types (inlined for sandboxed preload)
 interface SkillParameter {
@@ -1313,7 +1276,6 @@ interface ControlPlaneSettingsData {
   port: number;
   host: string;
   token: string;
-  nodeToken: string;
   handshakeTimeoutMs: number;
   heartbeatIntervalMs: number;
   maxPayloadBytes: number;
@@ -3551,34 +3513,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   testSharePointConnection: () => ipcRenderer.invoke(IPC_CHANNELS.SHAREPOINT_TEST_CONNECTION),
   getSharePointStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SHAREPOINT_GET_STATUS),
 
-  // Health Platform APIs
-  getHealthDashboard: () => ipcRenderer.invoke(IPC_CHANNELS.HEALTH_GET_DASHBOARD),
-  listHealthSources: () => ipcRenderer.invoke(IPC_CHANNELS.HEALTH_LIST_SOURCES),
-  upsertHealthSource: (source: HealthSourceInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_UPSERT_SOURCE, source),
-  removeHealthSource: (sourceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_REMOVE_SOURCE, sourceId),
-  syncHealthSource: (sourceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_SYNC_SOURCE, sourceId),
-  importHealthFiles: (sourceId: string, filePaths: string[]) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_IMPORT_FILES, { sourceId, filePaths }),
-  generateHealthWorkflow: (request: HealthWorkflowRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_GENERATE_WORKFLOW, request),
-  getAppleHealthStatus: (sourceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_STATUS, sourceId),
-  connectAppleHealth: (payload: {
-    sourceId?: string;
-    connectionMode?: HealthSourceConnectionMode;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_CONNECT, payload),
-  disconnectAppleHealth: (sourceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT, sourceId),
-  resetAppleHealth: (sourceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_RESET, sourceId),
-  previewAppleHealthWriteback: (request: HealthWritebackRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_PREVIEW_WRITEBACK, request),
-  applyAppleHealthWriteback: (request: HealthWritebackRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HEALTH_APPLE_APPLY_WRITEBACK, request),
-
   // App Update APIs
   getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
   checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_UPDATES),
@@ -4109,23 +4043,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const subscription = (_: Electron.IpcRendererEvent, data: CanvasEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.CANVAS_EVENT, subscription);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.CANVAS_EVENT, subscription);
-  },
-
-  // Mobile Companion Nodes
-  nodeList: () => ipcRenderer.invoke(IPC_CHANNELS.NODE_LIST),
-  nodeGet: (nodeId: string) => ipcRenderer.invoke(IPC_CHANNELS.NODE_GET, nodeId),
-  nodeInvoke: (params: {
-    nodeId: string;
-    command: string;
-    params?: Record<string, unknown>;
-    timeoutMs?: number;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.NODE_INVOKE, params),
-  onNodeEvent: (
-    callback: (event: { type: string; nodeId: string; node?: Any; timestamp: number }) => void,
-  ) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: Any) => callback(data);
-    ipcRenderer.on(IPC_CHANNELS.NODE_EVENT, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.NODE_EVENT, subscription);
   },
 
   // Device Management APIs
@@ -6909,37 +6826,6 @@ export interface ElectronAPI {
     name?: string;
     error?: string;
   }>;
-  // Health Platform
-  getHealthDashboard: () => Promise<HealthDashboard>;
-  listHealthSources: () => Promise<HealthSource[]>;
-  upsertHealthSource: (source: HealthSourceInput) => Promise<HealthSource>;
-  removeHealthSource: (sourceId: string) => Promise<{ success: boolean }>;
-  syncHealthSource: (sourceId: string) => Promise<HealthSyncResult>;
-  importHealthFiles: (sourceId: string, filePaths: string[]) => Promise<HealthSyncResult>;
-  generateHealthWorkflow: (
-    request: HealthWorkflowRequest,
-  ) => Promise<{ success: boolean; workflow?: HealthWorkflow; error?: string }>;
-  getAppleHealthStatus: (sourceId?: string) => Promise<{
-    available: boolean;
-    authorizationStatus: string;
-    readableTypes: string[];
-    writableTypes: string[];
-    sourceMode: HealthSourceConnectionMode;
-    lastSyncedAt?: number;
-    lastError?: string;
-  }>;
-  connectAppleHealth: (payload: {
-    sourceId?: string;
-    connectionMode?: HealthSourceConnectionMode;
-  }) => Promise<{ success: boolean; source?: HealthSource; error?: string }>;
-  disconnectAppleHealth: (sourceId: string) => Promise<{ success: boolean }>;
-  resetAppleHealth: (sourceId?: string) => Promise<{ success: boolean; removedCount: number }>;
-  previewAppleHealthWriteback: (
-    request: HealthWritebackRequest,
-  ) => Promise<{ success: boolean; preview?: HealthWritebackPreview; error?: string }>;
-  applyAppleHealthWriteback: (
-    request: HealthWritebackRequest,
-  ) => Promise<{ success: boolean; writtenCount?: number; warnings?: string[]; error?: string }>;
   // App Updates
   getAppVersion: () => Promise<{
     version: string;
@@ -7617,7 +7503,6 @@ export interface ElectronAPI {
   enableControlPlane: () => Promise<{
     ok: boolean;
     token?: string;
-    nodeToken?: string;
     error?: string;
   }>;
   disableControlPlane: () => Promise<{ ok: boolean; error?: string }>;
@@ -7632,14 +7517,12 @@ export interface ElectronAPI {
   getControlPlaneToken: () => Promise<{
     ok: boolean;
     token?: string;
-    nodeToken?: string;
     remoteToken?: string;
     error?: string;
   }>;
   regenerateControlPlaneToken: () => Promise<{
     ok: boolean;
     token?: string;
-    nodeToken?: string;
     error?: string;
   }>;
   onControlPlaneEvent: (callback: (event: ControlPlaneEvent) => void) => () => void;
@@ -7735,17 +7618,6 @@ export interface ElectronAPI {
   }) => Promise<{ success: boolean }>;
   canvasGetContent: (sessionId: string) => Promise<Record<string, string>>;
   onCanvasEvent: (callback: (event: CanvasEvent) => void) => () => void;
-
-  // Mobile Companion Nodes
-  nodeList: () => Promise<{ ok: boolean; nodes?: NodeInfo[]; error?: string }>;
-  nodeGet: (nodeId: string) => Promise<{ ok: boolean; node?: NodeInfo; error?: string }>;
-  nodeInvoke: (params: {
-    nodeId: string;
-    command: string;
-    params?: Record<string, unknown>;
-    timeoutMs?: number;
-  }) => Promise<{ ok: boolean; payload?: unknown; error?: { code: string; message: string } }>;
-  onNodeEvent: (callback: (event: NodeEvent) => void) => () => void;
 
   // Device Management
   deviceListTasks: (nodeId: string) => Promise<{ ok: boolean; tasks?: Any[]; error?: string }>;

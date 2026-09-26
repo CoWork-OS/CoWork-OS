@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Personal Health**: removed the dashboard, Apple Health integration, and the macOS HealthKit bridge. Upgrading deletes the retired Health data in the active CoWork profile; older settings backups cannot restore it. See the [decision record](personal-health-discontinuation.md).
+- **Mobile Companions**: removed the iOS/Android companion apps, their settings tab and token, and the Control Plane node role. Upgrading deletes the stored companion token; older companion apps are refused. See the [decision record](mobile-companions-discontinuation.md).
+
 ## [0.5.54] - 2026-09-20
 
 ### Changed

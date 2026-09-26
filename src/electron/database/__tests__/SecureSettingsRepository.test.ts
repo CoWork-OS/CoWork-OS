@@ -686,6 +686,55 @@ describe("SecureSettingsRepository", () => {
     });
   });
 
+  describe("retired Health category", () => {
+    beforeEach(() => {
+      repository = new SecureSettingsRepositoryClass(mockDb);
+    });
+
+    it("refuses to save Health settings", () => {
+      expect(() => repository.save("health" as SettingsCategory, { sources: [] })).toThrow(
+        "retired",
+      );
+      expect(mockStmt.run).not.toHaveBeenCalled();
+    });
+
+    it("leaves Health out of new backups even before startup cleanup has run", () => {
+      mockStmt.all.mockReturnValue([{ category: "health" }, { category: "voice" }]);
+      mockStmt.get.mockReturnValue(undefined);
+
+      const result = repository.createBackup("/mock/backup.enc");
+
+      expect(result.success).toBe(true);
+      expect(result.categoriesBackedUp).toEqual(["voice"]);
+    });
+
+    it("skips Health when restoring a backup made by an older release", () => {
+      const backup = repository.encrypt(
+        JSON.stringify({
+          version: 1,
+          timestamp: 1,
+          categories: { health: { sources: [] }, voice: { provider: "elevenlabs" } },
+        }),
+      );
+      mockFsExistsSync.mockReturnValue(true);
+      mockFsReadFileSync.mockReturnValue(backup);
+      mockStmt.get.mockReturnValue(undefined);
+
+      const result = repository.restoreBackup("/mock/backup.enc");
+
+      expect(result.success).toBe(true);
+      expect(result.categoriesRestored).toEqual(["voice"]);
+      expect(mockStmt.run).not.toHaveBeenCalledWith(
+        expect.any(String),
+        "health",
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
   describe("stable machine ID", () => {
     it("should generate and persist machine ID on first run", () => {
       mockFsExistsSync.mockReturnValue(false);

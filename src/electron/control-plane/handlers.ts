@@ -509,19 +509,9 @@ async function getManagedRemoteNodeInfo(device: ManagedDevice): Promise<NodeInfo
         : device.version || "unknown",
     deviceId: status.clientId,
     modelIdentifier: hostname,
-    capabilities: [],
-    commands: [],
-    permissions: {},
     connectedAt: status.connectedAt || Date.now(),
     lastActivityAt: status.lastActivityAt || status.connectedAt || Date.now(),
-    isForeground: false,
   };
-}
-
-async function listManagedRemoteNodes(): Promise<NodeInfo[]> {
-  const remoteDevices = listStoredManagedDevices();
-  const nodes = await Promise.all(remoteDevices.map((device) => getManagedRemoteNodeInfo(device)));
-  return nodes.filter((node): node is NodeInfo => !!node);
 }
 
 async function getManagedRemoteNodeAliases(
@@ -2512,7 +2502,6 @@ export async function startControlPlaneFromSettings(
         host: settings.host,
         trustProxy: settings.trustProxy,
         token: settings.token,
-        nodeToken: settings.nodeToken,
         handshakeTimeoutMs: settings.handshakeTimeoutMs,
         heartbeatIntervalMs: settings.heartbeatIntervalMs,
         maxPayloadBytes: settings.maxPayloadBytes,
@@ -3802,10 +3791,9 @@ function registerTaskAndWorkspaceMethods(
 
     const searchStatus = SearchProviderFactory.getConfigStatus();
 
-    // Redacted unconditionally: `config.get` is gated at `read` scope, which is
-    // what companion "node" clients hold, and the raw settings carry `token`
-    // (the admin credential), `nodeToken`, and per-device tokens. Redacting for
-    // admins too keeps the token out of `cowork doctor --json` stdout.
+    // Redacted unconditionally: `config.get` is gated at `read` scope, and the
+    // raw settings carry `token` (the admin credential) and per-device tokens.
+    // Redacting for admins too keeps the token out of `cowork doctor --json` stdout.
     //
     // The raw settings are kept separately for the deployment-posture check
     // below, which inspects the real token values; only the copy that leaves
@@ -3958,12 +3946,11 @@ export function setupControlPlaneHandlers(
     async (): Promise<{
       ok: boolean;
       token?: string;
-      nodeToken?: string;
       error?: string;
     }> => {
       try {
         const settings = ControlPlaneSettingsManager.enable();
-        return { ok: true, token: settings.token, nodeToken: settings.nodeToken };
+        return { ok: true, token: settings.token };
       } catch (error: any) {
         return { ok: false, error: error.message || String(error) };
       }
@@ -4055,7 +4042,6 @@ export function setupControlPlaneHandlers(
           host: settings.host,
           trustProxy: settings.trustProxy,
           token: settings.token,
-          nodeToken: settings.nodeToken,
           handshakeTimeoutMs: settings.handshakeTimeoutMs,
           heartbeatIntervalMs: settings.heartbeatIntervalMs,
           maxPayloadBytes: settings.maxPayloadBytes,
@@ -4195,7 +4181,6 @@ export function setupControlPlaneHandlers(
     async (): Promise<{
       ok: boolean;
       token?: string;
-      nodeToken?: string;
       remoteToken?: string;
       error?: string;
     }> => {
@@ -4204,7 +4189,6 @@ export function setupControlPlaneHandlers(
         return {
           ok: true,
           token: settings.token || "",
-          nodeToken: settings.nodeToken || "",
           remoteToken: settings.remote?.token || "",
         };
       } catch (error: any) {
@@ -4219,7 +4203,6 @@ export function setupControlPlaneHandlers(
     async (): Promise<{
       ok: boolean;
       token?: string;
-      nodeToken?: string;
       error?: string;
     }> => {
       try {
@@ -4239,7 +4222,6 @@ export function setupControlPlaneHandlers(
             host: settings.host,
             trustProxy: settings.trustProxy,
             token: settings.token,
-            nodeToken: settings.nodeToken,
             handshakeTimeoutMs: settings.handshakeTimeoutMs,
             heartbeatIntervalMs: settings.heartbeatIntervalMs,
             maxPayloadBytes: settings.maxPayloadBytes,
@@ -4267,8 +4249,7 @@ export function setupControlPlaneHandlers(
           writeLocalControlPlaneConnectionFileForServer(controlPlaneServer);
         }
 
-        const settings = ControlPlaneSettingsManager.loadSettings();
-        return { ok: true, token: newToken, nodeToken: settings.nodeToken };
+        return { ok: true, token: newToken };
       } catch (error: any) {
         return { ok: false, error: error.message || String(error) };
       }
@@ -4320,7 +4301,6 @@ export function setupControlPlaneHandlers(
             host: settings.host,
             trustProxy: settings.trustProxy,
             token: settings.token,
-            nodeToken: settings.nodeToken,
             handshakeTimeoutMs: settings.handshakeTimeoutMs,
             heartbeatIntervalMs: settings.heartbeatIntervalMs,
             maxPayloadBytes: settings.maxPayloadBytes,
@@ -4701,123 +4681,6 @@ export function setupControlPlaneHandlers(
         };
       } catch (error: any) {
         return { ok: false, error: error.message || String(error) };
-      }
-    },
-  );
-
-  // ===== Node (Mobile Companion) Handlers =====
-
-  // List connected nodes
-  ipcMain.handle(
-    IPC_CHANNELS.NODE_LIST,
-    async (): Promise<{
-      ok: boolean;
-      nodes?: import("../../shared/types").NodeInfo[];
-      error?: string;
-    }> => {
-      try {
-        const localNodes = controlPlaneServer?.isRunning
-          ? ((controlPlaneServer as any).clients.getNodeInfoList() as NodeInfo[])
-          : [];
-        const remoteNodes = await listManagedRemoteNodes();
-        return { ok: true, nodes: [...localNodes, ...remoteNodes] };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
-      }
-    },
-  );
-
-  // Get a specific node
-  ipcMain.handle(
-    IPC_CHANNELS.NODE_GET,
-    async (
-      _,
-      nodeId: string,
-    ): Promise<{
-      ok: boolean;
-      node?: import("../../shared/types").NodeInfo;
-      error?: string;
-    }> => {
-      try {
-        if (controlPlaneServer?.isRunning) {
-          const client = (controlPlaneServer as any).clients.getNodeByIdOrName(nodeId);
-          if (client) {
-            return { ok: true, node: client.getNodeInfo() };
-          }
-        }
-
-        const remoteNodes = await listManagedRemoteNodes();
-        const remoteNode = remoteNodes.find(
-          (candidate) => candidate.id === nodeId || candidate.displayName === nodeId,
-        );
-        if (remoteNode) {
-          return { ok: true, node: remoteNode };
-        }
-        return { ok: false, error: `Node not found: ${nodeId}` };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
-      }
-    },
-  );
-
-  // Invoke a command on a node
-  ipcMain.handle(
-    IPC_CHANNELS.NODE_INVOKE,
-    async (
-      _,
-      params: import("../../shared/types").NodeInvokeParams,
-    ): Promise<import("../../shared/types").NodeInvokeResult> => {
-      try {
-        if (!controlPlaneServer || !controlPlaneServer.isRunning) {
-          return {
-            ok: false,
-            error: { code: "SERVER_NOT_RUNNING", message: "Control Plane is not running" },
-          };
-        }
-
-        const { nodeId, command, params: commandParams, timeoutMs = 30000 } = params;
-
-        // Find the node
-        const client = (controlPlaneServer as any).clients.getNodeByIdOrName(nodeId);
-        if (!client) {
-          return {
-            ok: false,
-            error: { code: "NODE_NOT_FOUND", message: `Node not found: ${nodeId}` },
-          };
-        }
-
-        const nodeInfo = client.getNodeInfo();
-        if (!nodeInfo) {
-          return {
-            ok: false,
-            error: { code: "NODE_NOT_FOUND", message: `Node not found: ${nodeId}` },
-          };
-        }
-
-        // Check if node supports the command
-        if (!nodeInfo.commands.includes(command)) {
-          return {
-            ok: false,
-            error: {
-              code: "COMMAND_NOT_SUPPORTED",
-              message: `Node does not support command: ${command}`,
-            },
-          };
-        }
-
-        // Forward to the server's internal method
-        const result = await (controlPlaneServer as any).invokeNodeCommand(
-          client,
-          command,
-          commandParams,
-          timeoutMs,
-        );
-        return result;
-      } catch (error: any) {
-        return {
-          ok: false,
-          error: { code: "INVOKE_FAILED", message: error.message || String(error) },
-        };
       }
     },
   );

@@ -36,7 +36,6 @@ import {
   LayoutGrid,
   Zap,
   Monitor,
-  Smartphone,
   Puzzle,
   BarChart3,
   Lightbulb,
@@ -178,7 +177,6 @@ const PersonalitySettings = lazySettingsPanel(
   () => import("./PersonalitySettings"),
   "PersonalitySettings",
 );
-const NodesSettings = lazySettingsPanel(() => import("./NodesSettings"), "NodesSettings");
 const ExtensionsSettings = lazySettingsPanel(
   () => import("./ExtensionsSettings"),
   "ExtensionsSettings",
@@ -227,7 +225,6 @@ const SubconsciousSettingsPanel = lazySettingsPanel(
   "SubconsciousSettingsPanel",
 );
 const CompaniesPanel = lazySettingsPanel(() => import("./CompaniesPanel"), "CompaniesPanel");
-const HealthPanel = lazySettingsPanel(() => import("./HealthPanel"), "HealthPanel");
 const CouncilSettings = lazySettingsPanel(() => import("./CouncilSettings"), "CouncilSettings");
 const RoutineSettingsPanel = lazySettingsPanel(
   () => import("./RoutineSettingsPanel"),
@@ -280,7 +277,6 @@ type SettingsTab =
   | "scheduled"
   | "hooks"
   | "controlplane"
-  | "nodes"
   | "extensions"
   | "memory"
   | "git"
@@ -294,7 +290,6 @@ type SettingsTab =
   | "triggers"
   | "briefing"
   | "subconscious"
-  | "health"
   | "access"
   | "webaccess";
 
@@ -812,12 +807,6 @@ const sidebarItems: SidebarItem[] = [
     icon: <LayoutGrid {...I} />,
   },
   {
-    tab: "health",
-    label: "Health",
-    group: "Integrations",
-    icon: <HeartPulse {...I} />,
-  },
-  {
     tab: "customize",
     label: "Feature Packs",
     group: "Skills & Tools",
@@ -852,12 +841,6 @@ const sidebarItems: SidebarItem[] = [
     label: "Access",
     group: "Advanced",
     icon: <Monitor {...I} />,
-  },
-  {
-    tab: "nodes",
-    label: "Mobile Companions",
-    group: "Advanced",
-    icon: <Smartphone {...I} />,
   },
   {
     tab: "extensions",
@@ -1097,7 +1080,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
       target: { tab: "integrations", integrationsSubTab: "infrastructure" },
     },
   ],
-  health: [{ terms: ["health", "healthkit", "fitness", "wellness"] }],
   customize: [
     {
       terms: [
@@ -1141,7 +1123,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
       target: { tab: "access", accessSubTab: "webaccess" },
     },
   ],
-  nodes: [{ terms: ["mobile companions", "nodes", "mobile"] }],
   extensions: [{ terms: ["extensions", "browser extension", "extension"] }],
   insights: [{ terms: ["usage insights", "analytics", "metrics"] }],
   pulse: [
@@ -8782,8 +8763,6 @@ export function Settings({
                 />
               ) : activeTab === "everydayAgent" ? (
                 <EverydayAgentSettingsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
-              ) : activeTab === "health" ? (
-                <HealthPanel compact onCreateTask={onCreateTask} />
               ) : activeTab === "system" ? (
                 <div className="settings-combined-panel system-security-panel">
                   <div className="system-security-panel-header">
@@ -9137,8 +9116,6 @@ export function Settings({
                     {activeAccessSubTab === "webaccess" && <WebAccessSettingsPanel />}
                   </div>
                 </div>
-              ) : activeTab === "nodes" ? (
-                <NodesSettings />
               ) : activeTab === "extensions" ? (
                 <ExtensionsSettings />
               ) : activeTab === "memory" ? (

@@ -38,8 +38,6 @@ export interface ControlPlaneSettings {
   host: string;
   /** Authentication token */
   token: string;
-  /** Node authentication token for read-scoped companion clients */
-  nodeToken: string;
   /** Handshake timeout in milliseconds */
   handshakeTimeoutMs: number;
   /** Heartbeat interval in milliseconds */
@@ -70,6 +68,16 @@ export interface ControlPlaneSettings {
 }
 
 /**
+ * Delete the credential issued to the discontinued mobile companion apps.
+ * Returns true when settings from an older release still carried it.
+ */
+function stripRetiredMobileCompanionToken(settings: ControlPlaneSettings): boolean {
+  if (!Object.prototype.hasOwnProperty.call(settings, "nodeToken")) return false;
+  delete (settings as ControlPlaneSettings & { nodeToken?: unknown }).nodeToken;
+  return true;
+}
+
+/**
  * Default control plane settings
  */
 export const DEFAULT_CONTROL_PLANE_SETTINGS: ControlPlaneSettings = {
@@ -77,7 +85,6 @@ export const DEFAULT_CONTROL_PLANE_SETTINGS: ControlPlaneSettings = {
   port: 18789,
   host: "127.0.0.1",
   token: "",
-  nodeToken: "",
   handshakeTimeoutMs: 10000,
   heartbeatIntervalMs: 30000,
   maxPayloadBytes: 10 * 1024 * 1024, // 10MB
@@ -260,7 +267,7 @@ export class ControlPlaneSettingsManager {
 
         // Decrypt any existing encrypted values
         merged.token = decryptSecret(merged.token) || "";
-        merged.nodeToken = decryptSecret(merged.nodeToken) || "";
+        stripRetiredMobileCompanionToken(merged);
         if (parsed.remote) {
           merged.remote = {
             ...DEFAULT_REMOTE_GATEWAY_CONFIG,
@@ -319,8 +326,7 @@ export class ControlPlaneSettingsManager {
               ...stored.tailscale,
             },
           };
-          if (merged.token && !merged.nodeToken) {
-            merged.nodeToken = generateControlPlaneToken();
+          if (stripRetiredMobileCompanionToken(merged)) {
             repository.save("controlplane", merged);
           }
           if (stored.remote) {
@@ -383,6 +389,7 @@ export class ControlPlaneSettingsManager {
       }
 
       const repository = SecureSettingsRepository.getInstance();
+      stripRetiredMobileCompanionToken(settings);
       repository.save("controlplane", settings);
       this.cachedSettings = settings;
       logger.debug("Saved settings to encrypted database");
@@ -423,9 +430,6 @@ export class ControlPlaneSettingsManager {
       activeManagedDeviceId:
         updates.activeManagedDeviceId ?? settings.activeManagedDeviceId ?? LOCAL_MANAGED_DEVICE_ID,
     };
-    if (updated.token && !updated.nodeToken) {
-      updated.nodeToken = generateControlPlaneToken();
-    }
     this.saveSettings(updated);
     return updated;
   }
@@ -437,9 +441,6 @@ export class ControlPlaneSettingsManager {
     const settings = this.loadSettings();
     if (!settings.token) {
       settings.token = generateControlPlaneToken();
-    }
-    if (!settings.nodeToken) {
-      settings.nodeToken = generateControlPlaneToken();
     }
     settings.enabled = true;
     this.saveSettings(settings);
@@ -462,7 +463,6 @@ export class ControlPlaneSettingsManager {
   static regenerateToken(): string {
     const settings = this.loadSettings();
     settings.token = generateControlPlaneToken();
-    settings.nodeToken = generateControlPlaneToken();
     this.saveSettings(settings);
     return settings.token;
   }
@@ -472,8 +472,7 @@ export class ControlPlaneSettingsManager {
    *
    * This does NOT redact anything, despite what a "for display" name would
    * imply. Callers that expose the result beyond the local renderer must run
-   * it through `redactObjectSecrets` first — `token` and `nodeToken` are
-   * live credentials, and `nodeToken` is issued to read-scoped clients.
+   * it through `redactObjectSecrets` first — `token` is a live credential.
    */
   static loadSettingsWithSecrets(): ControlPlaneSettings {
     return this.loadSettings();

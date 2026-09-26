@@ -8,6 +8,7 @@ node_modules/
 dist/
 out/
 release/
+# Retired HealthKit bridge output that may remain in older checkouts
 build/healthkit-bridge/
 native/healthkit-bridge/.build/
 build/location-helper-macos/

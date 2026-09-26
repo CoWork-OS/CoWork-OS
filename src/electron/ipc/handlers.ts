@@ -282,7 +282,6 @@ import { ShellSessionManager } from "../agent/tools/shell-session-manager";
 import { GitHubReviewService } from "../git/GitHubReviewService";
 import { TerminalPtyManager } from "../terminal/TerminalPtyManager";
 import { normalizeTerminalAttachInput } from "../terminal/terminal-input-policy";
-import { HealthManager } from "../health/HealthManager";
 import { ChannelGateway } from "../gateway";
 import { CHANNEL_TYPES } from "../gateway/channels/types";
 import { updateManager } from "../updater";
@@ -351,10 +350,6 @@ import {
   SetImportedRecallIgnoredSchema,
   StepFeedbackSchema,
   ForkSessionSchema,
-  HealthSourceInputSchema,
-  HealthWorkflowRequestSchema,
-  HealthImportFilesSchema,
-  HealthWritebackRequestSchema,
   PersonalityImportSchema,
   PersonalityConfigV2Schema,
   ContextModeSchema,
@@ -10968,9 +10963,6 @@ export async function setupIpcHandlers(
     return { success: true, ...result };
   });
 
-  // Health handlers
-  setupHealthHandlers();
-
   // MCP handlers
   setupMCPHandlers();
 
@@ -10994,116 +10986,6 @@ export async function setupIpcHandlers(
 
   // Memory system handlers
   setupMemoryHandlers();
-}
-
-/**
- * Set up Health IPC handlers
- */
-export function setupHealthHandlers(): void {
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_UPSERT_SOURCE, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_REMOVE_SOURCE, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_SYNC_SOURCE, RATE_LIMIT_CONFIGS.standard);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_IMPORT_FILES, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_GENERATE_WORKFLOW, RATE_LIMIT_CONFIGS.expensive);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_APPLE_CONNECT, RATE_LIMIT_CONFIGS.expensive);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_APPLE_PREVIEW_WRITEBACK, RATE_LIMIT_CONFIGS.standard);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_APPLE_APPLY_WRITEBACK, RATE_LIMIT_CONFIGS.expensive);
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_GET_DASHBOARD, async (): Promise<Any> => {
-    return HealthManager.getDashboard();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_LIST_SOURCES, async (): Promise<Any> => {
-    return HealthManager.listSources();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_UPSERT_SOURCE, async (_, source: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_UPSERT_SOURCE);
-    const validated = validateInput(HealthSourceInputSchema, source, "health source");
-    return HealthManager.upsertSource(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_REMOVE_SOURCE, async (_, sourceId: string) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_REMOVE_SOURCE);
-    const validated = validateInput(StringIdSchema, sourceId, "health source ID");
-    return HealthManager.removeSource(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_SYNC_SOURCE, async (_, sourceId: string) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_SYNC_SOURCE);
-    const validated = validateInput(StringIdSchema, sourceId, "health source ID");
-    return HealthManager.syncSource(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_IMPORT_FILES, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_IMPORT_FILES);
-    const validated = validateInput(HealthImportFilesSchema, request, "health import request");
-    return HealthManager.importFiles(validated.sourceId, validated.filePaths);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_GENERATE_WORKFLOW, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_GENERATE_WORKFLOW);
-    const validated = validateInput(
-      HealthWorkflowRequestSchema,
-      request,
-      "health workflow request",
-    );
-    return HealthManager.generateWorkflow(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_STATUS, async (_, sourceId?: string) => {
-    return HealthManager.getAppleHealthStatus(sourceId);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_CONNECT, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_CONNECT);
-    const validated = validateInput(
-      z
-        .object({
-          sourceId: StringIdSchema.optional(),
-          connectionMode: z.enum(["native", "import"]).optional(),
-        })
-        .strict(),
-      request,
-      "Apple Health connect request",
-    );
-    return HealthManager.connectAppleHealth(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT, async (_, sourceId: string) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT);
-    const validated = validateInput(StringIdSchema, sourceId, "Apple Health source ID");
-    return HealthManager.disconnectAppleHealth(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_RESET, async (_, sourceId?: string) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT);
-    const validated = sourceId
-      ? validateInput(StringIdSchema, sourceId, "Apple Health source ID")
-      : undefined;
-    return HealthManager.resetAppleHealth(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_PREVIEW_WRITEBACK, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_PREVIEW_WRITEBACK);
-    const validated = validateInput(
-      HealthWritebackRequestSchema,
-      request,
-      "Apple Health writeback request",
-    );
-    return HealthManager.previewAppleHealthWriteback(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_APPLY_WRITEBACK, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_APPLY_WRITEBACK);
-    const validated = validateInput(
-      HealthWritebackRequestSchema,
-      request,
-      "Apple Health writeback request",
-    );
-    return HealthManager.applyAppleHealthWriteback(validated);
-  });
 }
 
 /**

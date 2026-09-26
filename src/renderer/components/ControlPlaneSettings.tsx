@@ -29,8 +29,6 @@ export function ControlPlaneSettings() {
   const [connectionMode, setConnectionMode] = useState<ControlPlaneConnectionMode>("local");
   const [showToken, setShowToken] = useState(false);
   const [localToken, setLocalToken] = useState("");
-  const [showNodeToken, setShowNodeToken] = useState(false);
-  const [localNodeToken, setLocalNodeToken] = useState("");
   const [showRemoteToken, setShowRemoteToken] = useState(false);
   const [allowLAN, setAllowLAN] = useState(false);
   const remoteConfigDirtyRef = useRef(false);
@@ -193,9 +191,6 @@ export function ControlPlaneSettings() {
       if (result?.ok && result.token) {
         setLocalToken(result.token);
       }
-      if (result?.ok && result.nodeToken) {
-        setLocalNodeToken(result.nodeToken);
-      }
       await loadData();
     } catch (error) {
       console.error("Failed to regenerate token:", error);
@@ -214,16 +209,6 @@ export function ControlPlaneSettings() {
     return token;
   }, [localToken]);
 
-  const ensureLocalNodeToken = useCallback(async (): Promise<string> => {
-    if (localNodeToken) return localNodeToken;
-    const result = await window.electronAPI?.getControlPlaneToken?.();
-    const token = result?.ok ? result.nodeToken || "" : "";
-    if (token) {
-      setLocalNodeToken(token);
-    }
-    return token;
-  }, [localNodeToken]);
-
   const handleToggleTokenVisibility = async () => {
     if (!showToken) {
       await ensureLocalToken();
@@ -233,18 +218,6 @@ export function ControlPlaneSettings() {
 
   const handleCopyLocalToken = async () => {
     const token = await ensureLocalToken();
-    copyToClipboard(token);
-  };
-
-  const handleToggleNodeTokenVisibility = async () => {
-    if (!showNodeToken) {
-      await ensureLocalNodeToken();
-    }
-    setShowNodeToken((value) => !value);
-  };
-
-  const handleCopyNodeToken = async () => {
-    const token = await ensureLocalNodeToken();
     copyToClipboard(token);
   };
 
@@ -544,11 +517,10 @@ export function ControlPlaneSettings() {
                     onChange={handleToggleLAN}
                     disabled={saving}
                   />
-                  Allow LAN Connections (Mobile Companions)
+                  Allow LAN Connections
                 </label>
                 <p className="hint" style={{ marginLeft: "1.5rem", marginTop: "0.25rem" }}>
-                  Enable this to allow connections from other devices on your local network
-                  (required for iOS/Android companion apps)
+                  Enable this to allow other CoWork devices on your local network to connect
                 </p>
               </div>
             )}
@@ -639,30 +611,11 @@ export function ControlPlaneSettings() {
                   Copy
                 </button>
               </div>
-              <h3>Mobile Companion Token</h3>
-              <div className="token-display">
-                <input
-                  type={showNodeToken ? "text" : "password"}
-                  value={showNodeToken ? localNodeToken : settings.nodeToken || ""}
-                  readOnly
-                  className="token-input"
-                />
-                <button
-                  className="btn-icon"
-                  onClick={handleToggleNodeTokenVisibility}
-                  title={showNodeToken ? "Hide" : "Show"}
-                >
-                  {showNodeToken ? "Hide" : "Show"}
-                </button>
-                <button className="btn-icon" onClick={handleCopyNodeToken} title="Copy">
-                  Copy
-                </button>
-              </div>
               <button onClick={handleRegenerateToken} disabled={saving} className="btn-secondary">
-                Regenerate Tokens
+                Regenerate Token
               </button>
               <p className="hint">
-                Warning: Regenerating tokens will disconnect all existing clients.
+                Warning: Regenerating the token will disconnect all existing clients.
               </p>
             </div>
           )}

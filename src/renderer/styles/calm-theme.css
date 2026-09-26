@@ -2281,13 +2281,6 @@ html.visual-calm .btn-primary:hover:not(:disabled) {
 }
 
 /* Page titles and eyebrows in the remaining panels. */
-html.visual-calm .health-hero-title {
-  font-family: var(--calm-font-display);
-  font-size: 28px;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-}
-
 html.visual-calm .dp-support-eyebrow,
 html.visual-calm .bot-profile-eyebrow,
 html.visual-calm .web-artifact-viewer-format span,

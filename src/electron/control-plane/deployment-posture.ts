@@ -4,7 +4,7 @@ import type { ControlPlaneSettings } from "./settings";
 export type ControlPlaneDeploymentPostureStatus = "ready" | "degraded" | "blocked";
 
 export interface ControlPlaneDeploymentPostureOptions {
-  settings: Pick<ControlPlaneSettings, "host" | "token" | "nodeToken" | "tailscale">;
+  settings: Pick<ControlPlaneSettings, "host" | "token" | "tailscale">;
   headless: boolean;
   managedDeployment: boolean;
   bindContext: ControlPlaneBindContext;
@@ -21,7 +21,6 @@ export interface ControlPlaneDeploymentPosture {
   tailscaleEnabled: boolean;
   insecurePublicBindAllowed: boolean;
   operatorTokenStrong: boolean;
-  nodeTokenStrong: boolean;
   reasons: string[];
   recommendations: string[];
 }
@@ -67,7 +66,6 @@ export function evaluateControlPlaneDeploymentPosture(
   const tailscaleEnabled =
     settings.tailscale?.mode !== undefined && settings.tailscale.mode !== "off";
   const operatorTokenStrong = isStrongControlPlaneToken(settings.token);
-  const nodeTokenStrong = isStrongControlPlaneToken(settings.nodeToken);
   const reasons: string[] = [];
   const recommendations: string[] = [];
 
@@ -109,12 +107,6 @@ export function evaluateControlPlaneDeploymentPosture(
       "Regenerate the Control Plane token or let CoWork create a 64-character token.",
     );
   }
-  if (managedMode && !nodeTokenStrong) {
-    reasons.push("Managed/headless deployment requires a strong node token.");
-    recommendations.push(
-      "Regenerate the Control Plane token pair before exposing remote device access.",
-    );
-  }
 
   let status: ControlPlaneDeploymentPostureStatus = "ready";
   if (
@@ -123,7 +115,7 @@ export function evaluateControlPlaneDeploymentPosture(
       !tailscaleEnabled &&
       options.bindContext !== "container" &&
       !options.allowInsecurePublicBind) ||
-    (managedMode && (!operatorTokenStrong || !nodeTokenStrong))
+    (managedMode && !operatorTokenStrong)
   ) {
     status = "blocked";
   } else if (publicBind || options.allowInsecurePublicBind) {
@@ -140,7 +132,6 @@ export function evaluateControlPlaneDeploymentPosture(
     tailscaleEnabled,
     insecurePublicBindAllowed: options.allowInsecurePublicBind,
     operatorTokenStrong,
-    nodeTokenStrong,
     reasons,
     recommendations,
   };

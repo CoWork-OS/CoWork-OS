@@ -74,14 +74,13 @@ describe("sanitizeManagedEnvironmentCreateParams", () => {
 
 describe("redactObjectSecrets on control-plane settings", () => {
   // Shape of ControlPlaneSettings as returned by loadSettingsWithSecrets().
-  // `config.get` is gated at `read` scope, which companion "node" clients hold,
-  // so none of these values may appear in its response.
+  // `config.get` is gated at `read` scope, so none of these values may appear
+  // in its response.
   const settings = {
     enabled: true,
     host: "127.0.0.1",
     port: 18789,
     token: "admin-token-value",
-    nodeToken: "node-token-value",
     remote: {
       url: "ws://host:18789",
       token: "remote-token-value",
@@ -95,7 +94,6 @@ describe("redactObjectSecrets on control-plane settings", () => {
     const redacted = redactObjectSecrets(settings) as typeof settings;
 
     expect(redacted.token).not.toBe("admin-token-value");
-    expect(redacted.nodeToken).not.toBe("node-token-value");
     expect(redacted.remote.token).not.toBe("remote-token-value");
     expect(redacted.savedRemoteDevices[0].config.token).not.toBe("saved-device-token");
     expect(redacted.managedDevices[0].config.token).not.toBe("managed-device-token");

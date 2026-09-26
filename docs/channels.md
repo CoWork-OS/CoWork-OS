@@ -581,24 +581,9 @@ Configure in **Settings** > **Menu Bar**.
 
 ---
 
-## Mobile Companions (iOS/Android)
+## Mobile Companions (discontinued)
 
-Access CoWork OS from mobile devices via local network.
-
-### Setup
-
-1. Enable Control Plane in **Settings** > **Control Plane**
-2. Prefer Tailscale or an SSH tunnel for remote access. Use **Allow LAN Connections (Mobile Companions)** only on a trusted private network.
-3. Enter server URL on mobile: `ws://<your-mac-ip>:18789` for private LAN, or the Tailscale `wss://...ts.net` URL.
-4. Enter authentication token. CoWork generates separate operator and node tokens; mobile companion/node clients use read-scoped node access.
-
-### Security
-
-- LAN/Tailscale only (not exposed to the public internet)
-- Token-based authentication
-- Ensure firewall allows port 18789
-- Both devices must be on the same network
-- Headless/managed deployments fail closed on raw public Control Plane binds unless Tailscale, private container context, or an explicit break-glass override is configured
+The iOS and Android companion apps were discontinued on 2026-09-26 to focus on core agent workflows, integrations, and reliability. To reach an agent from a phone, use a messaging channel such as [Telegram](#telegram), [WhatsApp](#whatsapp), or [Signal](#signal). See the [decision record](mobile-companions-discontinuation.md) for upgrade details.
 
 ---
 

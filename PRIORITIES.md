@@ -18,9 +18,8 @@
 ## Later (This Quarter)
 
 10. **Enterprise features** — SSO integration, audit logging, multi-tenant admin policies.
-11. **Mobile companion** — lightweight mobile app or PWA for monitoring agents on the go.
-12. **Marketplace** — launch a curated marketplace for community plugin packs and persona templates.
-13. **Sustainability** — establish a sponsorship program and explore enterprise licensing options.
+11. **Marketplace** — launch a curated marketplace for community plugin packs.
+12. **Sustainability** — establish a sponsorship program and explore enterprise licensing options.
 
 ## Heartbeat Notes
 

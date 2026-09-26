@@ -44,4 +44,3 @@ export {
   shutdownSSHTunnelManager,
   DEFAULT_SSH_TUNNEL_CONFIG,
 } from "./ssh-tunnel";
-export { NodeManager, getNodeManager, initNodeManager, shutdownNodeManager } from "./node-manager";

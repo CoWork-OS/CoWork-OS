@@ -65,7 +65,6 @@ export type SettingsCategory =
   | "google-drive"
   | "dropbox"
   | "sharepoint"
-  | "health"
   | "user-profile"
   | "relationship-memory"
   | "conway"
@@ -188,6 +187,9 @@ export class SecureSettingsRepository {
    * Save settings for a category (creates or updates)
    */
   save<T extends object>(category: SettingsCategory, settings: T): void {
+    if (String(category) === "health") {
+      throw new Error("The personal Health settings category has been retired");
+    }
     const now = Date.now();
     const jsonData = JSON.stringify(settings);
     const encryptedData = this.encrypt(jsonData);
@@ -399,7 +401,8 @@ export class SecureSettingsRepository {
     error?: string;
   } {
     try {
-      const categories = this.listCategories();
+      // Older profiles can still have this retired category before startup migration runs.
+      const categories = this.listCategories().filter((category) => String(category) !== "health");
       const backupData: Record<string, unknown> = {};
 
       for (const category of categories) {
@@ -454,6 +457,7 @@ export class SecureSettingsRepository {
       const categoriesRestored: string[] = [];
 
       for (const [category, data] of Object.entries(backup.categories)) {
+        if (category === "health") continue;
         const existingStatus = this.checkHealth(category as SettingsCategory);
 
         // Skip if exists and not overwriting
@@ -498,7 +502,7 @@ export class SecureSettingsRepository {
    * Useful after OS keychain becomes available or for migration
    */
   reEncryptAll(): { success: boolean; categoriesProcessed: string[]; errors: string[] } {
-    const categories = this.listCategories();
+    const categories = this.listCategories().filter((category) => String(category) !== "health");
     const processed: string[] = [];
     const errors: string[] = [];
 

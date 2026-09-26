@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { removeLegacyHealthBridgeTempDirs } from "../utils/retired-feature-cleanup";
 import { createLogger } from "../utils/logger";
 import { ensureEverydayAgentSchema } from "../everyday-agent/schema";
 import {
@@ -12,6 +13,7 @@ import {
 const schemaLogger = createLogger("DatabaseManager");
 const STARTUP_PHASE_WARN_MS = 250;
 const TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY = "task_event_payload_sanitizer_v1_completed";
+const RETIRED_HEALTH_CHECKPOINT_PENDING_KEY = "retired_health_checkpoint_pending";
 
 export class DatabaseManager {
   private static instance: DatabaseManager | null = null;
@@ -54,6 +56,19 @@ export class DatabaseManager {
     phaseStartedAt = Date.now();
     this.initializeSchema();
     logStartupPhase("initialize-schema", phaseStartedAt);
+
+    phaseStartedAt = Date.now();
+    this.retirePersonalHealthSettings();
+    logStartupPhase("retire-personal-health-settings", phaseStartedAt);
+
+    try {
+      const removedTempDirs = removeLegacyHealthBridgeTempDirs();
+      if (removedTempDirs > 0) {
+        schemaLogger.info(`Removed ${removedTempDirs} legacy HealthKit bridge temp folder(s)`);
+      }
+    } catch (error) {
+      schemaLogger.warn("Could not remove legacy HealthKit bridge temp folders", error);
+    }
 
     phaseStartedAt = Date.now();
     this.repairLegacyHeartbeatRunReferences();
@@ -100,6 +115,73 @@ export class DatabaseManager {
         updated_at INTEGER NOT NULL
       )
     `);
+  }
+
+  /** Retire Health data on every startup, including after an older database is restored. */
+  private retirePersonalHealthSettings(): void {
+    const hasSettingsTable = this.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'secure_settings'")
+      .get();
+    if (!hasSettingsTable) return;
+
+    const hasUnreadableBackupTable = Boolean(
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'secure_settings_unreadable_backup'",
+        )
+        .get(),
+    );
+    const settingsCount = (
+      this.db
+        .prepare("SELECT COUNT(*) AS count FROM secure_settings WHERE category = ?")
+        .get("health") as {
+        count: number;
+      }
+    ).count;
+    const backupCount = hasUnreadableBackupTable
+      ? (
+          this.db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM secure_settings_unreadable_backup WHERE category = ?",
+            )
+            .get("health") as { count: number }
+        ).count
+      : 0;
+    const checkpointPending =
+      this.getMaintenanceState(RETIRED_HEALTH_CHECKPOINT_PENDING_KEY) === "1";
+    if (settingsCount === 0 && backupCount === 0 && !checkpointPending) return;
+
+    if (settingsCount > 0 || backupCount > 0) {
+      const previousSecureDelete = this.db.pragma("secure_delete", { simple: true }) as number;
+      this.db.pragma("secure_delete = ON");
+      try {
+        this.db.transaction(() => {
+          this.db.prepare("DELETE FROM secure_settings WHERE category = ?").run("health");
+          if (hasUnreadableBackupTable) {
+            this.db
+              .prepare("DELETE FROM secure_settings_unreadable_backup WHERE category = ?")
+              .run("health");
+          }
+          this.setMaintenanceState(RETIRED_HEALTH_CHECKPOINT_PENDING_KEY, "1");
+        })();
+      } finally {
+        this.db.pragma(`secure_delete = ${previousSecureDelete ? "ON" : "OFF"}`);
+      }
+    }
+
+    try {
+      const checkpoint = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+      if (checkpoint[0]?.busy) {
+        schemaLogger.warn("Health retirement committed, but the WAL checkpoint is busy");
+      } else {
+        this.setMaintenanceState(RETIRED_HEALTH_CHECKPOINT_PENDING_KEY, "0");
+      }
+    } catch (error) {
+      schemaLogger.warn("Health retirement committed, but the WAL checkpoint failed", error);
+    }
+    schemaLogger.info(
+      `Retired ${settingsCount} Health settings row(s) and ${backupCount} unreadable backup row(s)`,
+    );
   }
 
   private getMaintenanceState(key: string): string | null {

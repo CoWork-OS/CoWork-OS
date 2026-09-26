@@ -155,6 +155,8 @@ export default defineConfig({
           { text: "Contributing", link: "/contributing" },
           { text: "Changelog", link: "/changelog" },
           { text: "Project Status", link: "/project-status" },
+          { text: "Discontinued: Personal Health", link: "/personal-health-discontinuation" },
+          { text: "Discontinued: Mobile Companions", link: "/mobile-companions-discontinuation" },
         ],
       },
     ],

@@ -236,70 +236,33 @@ describe("ControlPlaneServer security boundaries", () => {
     expect((server as Any).isOriginAllowed(undefined, "127.0.0.1:18789")).toBe(true);
   });
 
-  it("does not allow the node token to self-select operator privileges", async () => {
+  it("rejects older mobile companion apps that connect with the retired node role", async () => {
     const { ControlPlaneServer } = await import("../server");
-    const server = new ControlPlaneServer({
-      token: "operator-token",
-      nodeToken: "node-token",
-    });
+    const server = new ControlPlaneServer({ token: "operator-token" });
     const { client, socket, sent } = createClient();
 
     await (server as Any).handleConnect(
       client,
-      createRequestFrame(Methods.CONNECT, { token: "node-token" }),
-    );
-
-    expect(client.isAuthenticated).toBe(false);
-    expect(socket.close).toHaveBeenCalledWith(4001, "Authentication failed");
-    const response = JSON.parse(sent.at(-1) || "{}");
-    expect(response.ok).toBe(false);
-    expect(response.error?.code).toBe("UNAUTHORIZED");
-  });
-
-  it("grants only read scope when authenticating with the node role and node token", async () => {
-    const { ControlPlaneServer } = await import("../server");
-    const server = new ControlPlaneServer({
-      token: "operator-token",
-      nodeToken: "node-token",
-    });
-    const { client, sent } = createClient();
-
-    await (server as Any).handleConnect(
-      client,
       createRequestFrame(Methods.CONNECT, {
-        token: "node-token",
+        token: "operator-token",
         role: "node",
         client: { displayName: "Phone", platform: "ios", version: "1.0.0" },
       }),
     );
 
-    expect(client.isAuthenticated).toBe(true);
-    expect(client.isNode).toBe(true);
-    expect(client.hasScope("read")).toBe(true);
-    expect(client.hasScope("operator")).toBe(false);
-    const response = sent.map((payload) => JSON.parse(payload)).find((frame) => frame.ok);
-    expect(response.payload.scopes).toEqual(["read"]);
+    expect(client.isAuthenticated).toBe(false);
+    expect(socket.close).toHaveBeenCalledWith(4001, "Mobile companions discontinued");
+    const response = JSON.parse(sent.at(-1) || "{}");
+    expect(response.ok).toBe(false);
+    expect(response.error?.message).toMatch(/discontinued/);
   });
 
-  it("requires operator scope before invoking node commands", async () => {
+  it("no longer registers mobile companion node methods", async () => {
     const { ControlPlaneServer } = await import("../server");
-    const server = new ControlPlaneServer({
-      token: "operator-token",
-      nodeToken: "node-token",
-    });
-    const handler = (server as Any).methods.get(Methods.NODE_INVOKE);
-    const { client } = createClient();
-    client.authenticate(["read"], "read-client");
+    const server = new ControlPlaneServer({ token: "operator-token" });
+    const methods = [...((server as Any).methods as Map<string, unknown>).keys()];
 
-    await expect(
-      handler(client, {
-        nodeId: "phone",
-        command: "camera.snap",
-      }),
-    ).rejects.toMatchObject({
-      code: "UNAUTHORIZED",
-      message: "Missing required scope: operator",
-    });
+    expect(methods.some((method) => method.startsWith("node."))).toBe(false);
   });
 });
 

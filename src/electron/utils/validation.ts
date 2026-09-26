@@ -2724,82 +2724,6 @@ export const MCPConnectorOAuthSchema = z.object({
   prompt: z.enum(["select_account", "consent"]).optional(),
 });
 
-// ============ Health Platform Schemas ============
-
-export const HealthSourceInputSchema = z.object({
-  provider: z.enum([
-    "apple-health",
-    "fitbit",
-    "oura",
-    "garmin",
-    "whoop",
-    "lab-results",
-    "medical-records",
-    "custom",
-  ]),
-  kind: z.enum(["wearable", "lab", "record", "manual"]),
-  connectionMode: z.enum(["native", "import"]).optional(),
-  name: z.string().min(1).max(200),
-  description: z.string().max(500).optional(),
-  accountLabel: z.string().max(200).optional(),
-  notes: z.string().max(2000).optional(),
-});
-
-export const HealthWorkflowRequestSchema = z.object({
-  workflowType: z.enum(["marathon-training", "visit-prep", "nutrition-plan", "trend-analysis"]),
-  sourceIds: z.array(z.string().max(200)).max(20).optional(),
-});
-
-/**
- * Allowed roots for health import file paths (prevents path traversal).
- * Paths must resolve under one of these directories.
- */
-function getAllowedHealthImportRoots(): string[] {
-  const roots: string[] = [];
-  try {
-    const home = os.homedir();
-    roots.push(home);
-    roots.push(path.join(home, "Downloads"));
-    roots.push(path.join(home, "Desktop"));
-    roots.push(path.join(home, "Documents"));
-    roots.push(getUserDataDir());
-  } catch {
-    roots.push(process.cwd());
-  }
-  return roots;
-}
-
-function isPathAllowedForHealthImport(filePath: string): boolean {
-  const resolved = path.resolve(filePath);
-  const roots = getAllowedHealthImportRoots();
-  return roots.some((root) => resolved === root || resolved.startsWith(root + path.sep));
-}
-
-export const HealthImportFilesSchema = z
-  .object({
-    sourceId: z.string().min(1).max(200),
-    filePaths: z.array(z.string().min(1).max(MAX_PATH_LENGTH)).min(1).max(20),
-  })
-  .superRefine((data, ctx) => {
-    for (let i = 0; i < data.filePaths.length; i++) {
-      const p = data.filePaths[i];
-      if (!path.isAbsolute(p)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["filePaths", i],
-          message: "Health import paths must be absolute",
-        });
-      } else if (!isPathAllowedForHealthImport(p)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["filePaths", i],
-          message:
-            "Health import path must be under home, Downloads, Desktop, Documents, or app user data",
-        });
-      }
-    }
-  });
-
 const AwarenessSourceSchema = z.enum([
   "conversation",
   "feedback",
@@ -3062,34 +2986,6 @@ export const AutonomyUpdateDecisionSchema = z.object({
     .refine((p) => p == null || (typeof p === "object" && JSON.stringify(p).length <= 50000), {
       message: "Patch must be under 50KB",
     }),
-});
-
-// ============ Health Platform Schemas ============
-
-export const HealthWritebackRequestSchema = z.object({
-  sourceId: z.string().min(1).max(200),
-  items: z.array(
-    z.object({
-      id: z.string().min(1).max(200),
-      type: z.enum([
-        "steps",
-        "sleep",
-        "heart_rate",
-        "hrv",
-        "weight",
-        "workout",
-        "glucose",
-        "nutrition",
-        "custom",
-      ]),
-      label: z.string().min(1).max(200),
-      value: z.string().min(1).max(200),
-      unit: z.string().max(50).optional(),
-      startDate: z.number().optional(),
-      endDate: z.number().optional(),
-      sourceId: z.string().max(200).optional(),
-    }),
-  ),
 });
 
 // ============ Hooks (Webhooks) Schemas ============

@@ -28,7 +28,6 @@ import {
   Search,
   Server,
   Workflow,
-  HeartPulse,
   Lightbulb,
   Inbox,
   Users,
@@ -121,7 +120,6 @@ interface SidebarProps {
   isAgentsActive?: boolean;
   isEverydayAgentActive?: boolean;
   isMissionControlActive?: boolean;
-  isHealthActive?: boolean;
   isLoadingSessions?: boolean;
   isLoadingMoreTasks?: boolean;
   completionAttentionTaskIds?: string[];
@@ -135,7 +133,6 @@ interface SidebarProps {
   onBotUpdated?: (bot: BotRole) => void | Promise<void>;
   onBotDeleted?: (botId: string) => void | Promise<void>;
   onOpenEverydayAgent?: () => void;
-  onOpenHealth?: () => void;
   onNewSession?: () => void;
   onOpenSettings: () => void;
   onOpenMissionControl: () => void;
@@ -864,7 +861,6 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.isAgentsActive === next.isAgentsActive &&
     prev.isEverydayAgentActive === next.isEverydayAgentActive &&
     prev.isMissionControlActive === next.isMissionControlActive &&
-    prev.isHealthActive === next.isHealthActive &&
     prev.isDevicesActive === next.isDevicesActive &&
     prev.isBuildActive === next.isBuildActive &&
     prev.isLibraryActive === next.isLibraryActive &&
@@ -903,7 +899,6 @@ function SidebarComponent({
   isAgentsActive = false,
   isEverydayAgentActive = false,
   isMissionControlActive = false,
-  isHealthActive = false,
   isLoadingSessions = false,
   completionAttentionTaskIds = [],
   onSelectTask,
@@ -914,7 +909,6 @@ function SidebarComponent({
   onOpenBot,
   onReopenBot,
   onOpenEverydayAgent,
-  onOpenHealth,
   onNewSession,
   onOpenSettings,
   onOpenMissionControl,
@@ -999,7 +993,7 @@ function SidebarComponent({
     [deferredSessionSearch],
   );
   const hasSessionSearch = normalizedSessionSearch.length > 0;
-  const isMoreActive = isMissionControlActive || isHealthActive || isIdeasActive;
+  const isMoreActive = isMissionControlActive || isIdeasActive;
   const isMoreExpanded = isMoreActive || !moreCollapsed;
 
   const loadSidebarWorkspaces = useCallback(async () => {
@@ -2949,8 +2943,6 @@ function SidebarComponent({
             isDevicesActive,
             onOpenMissionControl,
             isMissionControlActive,
-            onOpenHealth,
-            isHealthActive,
             onOpenIdeas,
             isIdeasActive,
           }}
@@ -3135,28 +3127,6 @@ function SidebarComponent({
                       <Users size={16} strokeWidth={2} style={{ display: "block" }} />
                     </span>
                     <span>Mission Control</span>
-                  </span>
-                </span>
-              </button>
-
-              <button
-                type="button"
-                className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isHealthActive ? "active" : ""}`}
-                onClick={onOpenHealth}
-                aria-pressed={isHealthActive}
-                title="Health"
-              >
-                <span className="cli-btn-text">
-                  <span className="terminal-only">health</span>
-                  <span className="modern-only cli-new-task-modern-label">
-                    <span
-                      className="sidebar-home-btn-icon"
-                      aria-hidden="true"
-                      style={{ display: "flex" }}
-                    >
-                      <HeartPulse size={16} strokeWidth={2} style={{ display: "block" }} />
-                    </span>
-                    <span>Health</span>
                   </span>
                 </span>
               </button>

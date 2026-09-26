@@ -6,7 +6,6 @@ const settings = (overrides: Partial<ControlPlaneSettings> = {}) =>
   ({
     host: "127.0.0.1",
     token: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-    nodeToken: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
     tailscale: { mode: "off", resetOnExit: true },
     ...overrides,
   }) as ControlPlaneSettings;
@@ -78,7 +77,7 @@ describe("evaluateControlPlaneDeploymentPosture", () => {
 
   it("blocks weak tokens in managed mode", () => {
     const posture = evaluateControlPlaneDeploymentPosture({
-      settings: settings({ token: "test-token", nodeToken: "node-token" }),
+      settings: settings({ token: "test-token" }),
       headless: true,
       managedDeployment: true,
       bindContext: "host",
@@ -87,6 +86,18 @@ describe("evaluateControlPlaneDeploymentPosture", () => {
 
     expect(posture.status).toBe("blocked");
     expect(posture.operatorTokenStrong).toBe(false);
-    expect(posture.nodeTokenStrong).toBe(false);
+  });
+
+  it("does not block upgraded deployments that no longer store a mobile companion token", () => {
+    const posture = evaluateControlPlaneDeploymentPosture({
+      settings: settings(),
+      headless: true,
+      managedDeployment: true,
+      bindContext: "host",
+      allowInsecurePublicBind: false,
+    });
+
+    expect(posture.status).toBe("ready");
+    expect(posture).not.toHaveProperty("nodeTokenStrong");
   });
 });

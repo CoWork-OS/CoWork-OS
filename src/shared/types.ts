@@ -4979,33 +4979,6 @@ export interface ToolResult {
   timestamp: number;
 }
 
-/**
- * Result from node tool handler execution
- * Supports text, JSON, image, and video responses
- */
-export interface NodeToolResult {
-  type: "text" | "json" | "image" | "video";
-  content: string;
-  mimeType?: string;
-  isError?: boolean;
-}
-
-/**
- * Definition for node tools with handler functions
- */
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: "object";
-    properties: Record<string, Any>;
-    required: string[];
-  };
-  riskLevel: "read" | "write";
-  groups: readonly string[];
-  handler: (params: Any) => Promise<NodeToolResult>;
-}
-
 export interface ApprovalRequest {
   id: string;
   taskId: string;
@@ -9242,21 +9215,6 @@ export const IPC_CHANNELS = {
   SHAREPOINT_TEST_CONNECTION: "sharepoint:testConnection",
   SHAREPOINT_GET_STATUS: "sharepoint:getStatus",
 
-  // Health Platform
-  HEALTH_GET_DASHBOARD: "health:getDashboard",
-  HEALTH_LIST_SOURCES: "health:listSources",
-  HEALTH_UPSERT_SOURCE: "health:upsertSource",
-  HEALTH_REMOVE_SOURCE: "health:removeSource",
-  HEALTH_SYNC_SOURCE: "health:syncSource",
-  HEALTH_IMPORT_FILES: "health:importFiles",
-  HEALTH_GENERATE_WORKFLOW: "health:generateWorkflow",
-  HEALTH_APPLE_STATUS: "health:appleStatus",
-  HEALTH_APPLE_CONNECT: "health:appleConnect",
-  HEALTH_APPLE_DISCONNECT: "health:appleDisconnect",
-  HEALTH_APPLE_RESET: "health:appleReset",
-  HEALTH_APPLE_PREVIEW_WRITEBACK: "health:applePreviewWriteback",
-  HEALTH_APPLE_APPLY_WRITEBACK: "health:appleApplyWriteback",
-
   // App Updates
   APP_CHECK_UPDATES: "app:checkUpdates",
   APP_DOWNLOAD_UPDATE: "app:downloadUpdate",
@@ -9577,12 +9535,6 @@ export const IPC_CHANNELS = {
   CANVAS_AGENT_UPDATE: "canvas:agent-update",
   CANVAS_REQUEST_SNAPSHOT_FROM_WINDOW: "canvas:request-snapshot-from-window",
   CANVAS_LOG: "canvas:log",
-
-  // Mobile Companion Nodes
-  NODE_LIST: "node:list",
-  NODE_GET: "node:get",
-  NODE_INVOKE: "node:invoke",
-  NODE_EVENT: "node:event",
 
   // Device Management
   DEVICE_LIST_MANAGED: "device:listManaged",
@@ -11918,7 +11870,6 @@ export interface ControlPlaneSettingsData {
   port: number;
   host: string;
   token: string; // Will be masked in UI
-  nodeToken: string; // Will be masked in UI
   handshakeTimeoutMs: number;
   heartbeatIntervalMs: number;
   maxPayloadBytes: number;
@@ -12007,241 +11958,31 @@ export interface ControlPlaneEvent {
   details?: unknown;
 }
 
-// ============ Mobile Companion Node Types ============
-
 /**
- * Client role in the Control Plane
- * - 'operator': Desktop client for task management
- * - 'node': Mobile companion device exposing capabilities
- */
-export type ClientRole = "operator" | "node";
-
-/**
- * Node platform type
+ * Platform of a managed device
  */
 export type NodePlatform = "ios" | "android" | "macos" | "linux" | "windows";
 
 /**
- * Node capability categories
- */
-export type NodeCapabilityType =
-  | "camera"
-  | "location"
-  | "screen"
-  | "sms"
-  | "voice"
-  | "canvas"
-  | "system";
-
-/**
- * Standard node commands
- */
-export type NodeCommand =
-  | "camera.snap"
-  | "camera.clip"
-  | "location.get"
-  | "screen.record"
-  | "sms.send"
-  | "canvas.navigate"
-  | "canvas.snapshot"
-  | "canvas.eval"
-  | "system.notify";
-
-/**
- * Information about a connected node (mobile companion)
+ * Summary of a connected managed remote device, used as a task target
  */
 export interface NodeInfo {
-  /** Unique node connection ID */
+  /** Task node ID for the device */
   id: string;
-  /** Display name for the node (e.g., "iPhone 15 Pro") */
+  /** Display name for the device */
   displayName: string;
   /** Platform type */
   platform: NodePlatform;
-  /** Client version */
+  /** CoWork version running on the device */
   version: string;
-  /** Device identifier (persisted across connections) */
+  /** Control-plane client ID for the current connection */
   deviceId?: string;
-  /** Model identifier (e.g., "iPhone15,3") */
+  /** Hostname or model identifier */
   modelIdentifier?: string;
-  /** Capability categories supported by this node */
-  capabilities: NodeCapabilityType[];
-  /** Specific commands supported by this node */
-  commands: string[];
-  /** Permission status for each capability */
-  permissions: Record<string, boolean>;
   /** Connection timestamp */
   connectedAt: number;
   /** Last activity timestamp */
   lastActivityAt: number;
-  /** Whether the node app is in the foreground */
-  isForeground?: boolean;
-}
-
-/**
- * Parameters for invoking a command on a node
- */
-export interface NodeInvokeParams {
-  /** ID or display name of the target node */
-  nodeId: string;
-  /** Command to invoke (e.g., "camera.snap") */
-  command: string;
-  /** Command-specific parameters */
-  params?: Record<string, unknown>;
-  /** Timeout in milliseconds (default: 30000) */
-  timeoutMs?: number;
-}
-
-/**
- * Result of a node command invocation
- */
-export interface NodeInvokeResult {
-  /** Whether the command succeeded */
-  ok: boolean;
-  /** Command result payload (varies by command) */
-  payload?: unknown;
-  /** Error details if ok is false */
-  error?: {
-    code: string;
-    message: string;
-  };
-}
-
-/**
- * Node event payload for UI updates
- */
-export interface NodeEvent {
-  /** Event type */
-  type: "connected" | "disconnected" | "capabilities_changed" | "foreground_changed";
-  /** Node ID */
-  nodeId: string;
-  /** Node info (for connected/capabilities_changed events) */
-  node?: NodeInfo;
-  /** Timestamp */
-  timestamp: number;
-}
-
-/**
- * Camera snap command parameters
- */
-export interface CameraSnapParams {
-  /** Camera facing direction */
-  facing?: "front" | "back";
-  /** Maximum image width (for resizing) */
-  maxWidth?: number;
-  /** JPEG quality (0-1) */
-  quality?: number;
-}
-
-/**
- * Camera snap command result
- */
-export interface CameraSnapResult {
-  /** Image format (e.g., "jpeg", "png") */
-  format: string;
-  /** Base64-encoded image data */
-  base64: string;
-  /** Image width in pixels */
-  width?: number;
-  /** Image height in pixels */
-  height?: number;
-}
-
-/**
- * Camera clip (video) command parameters
- */
-export interface CameraClipParams {
-  /** Camera facing direction */
-  facing?: "front" | "back";
-  /** Duration in milliseconds (max: 60000) */
-  durationMs: number;
-  /** Whether to include audio */
-  noAudio?: boolean;
-}
-
-/**
- * Camera clip command result
- */
-export interface CameraClipResult {
-  /** Video format (e.g., "mp4") */
-  format: string;
-  /** Base64-encoded video data */
-  base64: string;
-  /** Video duration in milliseconds */
-  durationMs?: number;
-}
-
-/**
- * Location get command parameters
- */
-export interface LocationGetParams {
-  /** Desired accuracy: 'coarse' or 'precise' */
-  accuracy?: "coarse" | "precise";
-  /** Maximum age of cached location in milliseconds */
-  maxAge?: number;
-  /** Timeout for getting location in milliseconds */
-  timeout?: number;
-}
-
-/**
- * Location get command result
- */
-export interface LocationGetResult {
-  /** Latitude in degrees */
-  latitude: number;
-  /** Longitude in degrees */
-  longitude: number;
-  /** Accuracy in meters */
-  accuracy: number;
-  /** Altitude in meters (if available) */
-  altitude?: number;
-  /** Timestamp when location was captured */
-  timestamp: number;
-}
-
-/**
- * Screen record command parameters
- */
-export interface ScreenRecordParams {
-  /** Duration in milliseconds (max: 60000) */
-  durationMs: number;
-  /** Frames per second (default: 10) */
-  fps?: number;
-  /** Whether to include audio */
-  noAudio?: boolean;
-  /** Screen index for multi-display setups */
-  screen?: number;
-}
-
-/**
- * Screen record command result
- */
-export interface ScreenRecordResult {
-  /** Video format (e.g., "mp4") */
-  format: string;
-  /** Base64-encoded video data */
-  base64: string;
-  /** Video duration in milliseconds */
-  durationMs?: number;
-}
-
-/**
- * SMS send command parameters (Android only)
- */
-export interface SmsSendParams {
-  /** Phone number to send to */
-  to: string;
-  /** Message content */
-  message: string;
-}
-
-/**
- * SMS send command result
- */
-export interface SmsSendResult {
-  /** Whether the SMS was sent */
-  sent: boolean;
-  /** Error message if sending failed */
-  error?: string;
 }
 
 // ============ SSH Tunnel Types ============

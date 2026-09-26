@@ -1486,10 +1486,9 @@ export function registerControlPlaneMethods(
 
     const searchStatus = SearchProviderFactory.getConfigStatus();
 
-    // Redacted unconditionally: `config.get` is gated at `read` scope, which is
-    // what companion "node" clients hold, and the raw settings carry `token`
-    // (the admin credential), `nodeToken`, and per-device tokens. Redacting for
-    // admins too keeps the token out of `cowork doctor --json` stdout.
+    // Redacted unconditionally: `config.get` is gated at `read` scope, and the
+    // raw settings carry `token` (the admin credential) and per-device tokens.
+    // Redacting for admins too keeps the token out of `cowork doctor --json` stdout.
     //
     // The raw settings are kept separately for the deployment-posture check
     // below, which inspects the real token values; only the copy that leaves

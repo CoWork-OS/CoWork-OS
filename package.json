@@ -61,6 +61,7 @@
     "resources",
     "connectors",
     "build",
+    "!build/healthkit-bridge/**",
     "deploy",
     "bin",
     "docs",
@@ -95,20 +96,19 @@
     "dev:start": "node scripts/dev_start.mjs",
     "dev:log": "cross-env COWORK_DEV_LOG_CAPTURE=1 node scripts/dev_with_logs.mjs",
     "dev:react": "vite",
-    "build:healthkit-bridge": "node scripts/build_healthkit_bridge.mjs",
     "build:location-helper-macos": "node scripts/build_location_helper_macos.mjs",
     "build:location-helpers": "node scripts/copy_location_helpers.mjs",
-    "dev:electron": "tsc -p tsconfig.electron.json && cross-env ELECTRON_RUN_AS_NODE= NODE_ENV=development electron .",
+    "dev:electron": "npm run build:electron && cross-env ELECTRON_RUN_AS_NODE= NODE_ENV=development electron .",
     "tunnel-relay:dev": "npm run build:electron && node dist/electron/electron/tunnels/relay.js",
     "tunnel-relay:test": "npm run build:electron && node scripts/smoke-secure-mcp-tunnel.mjs",
-    "build": "npm run qa:docs-versions && npm run build:react && npm run build:healthkit-bridge && npm run build:location-helper-macos && npm run build:location-helpers && concurrently -n electron,daemon,cli \"npm run build:electron\" \"npm run build:daemon\" \"npm run build:cli\" && npm run build:connectors",
+    "build": "node scripts/clean-build-output.mjs retired && npm run qa:docs-versions && npm run build:react && npm run build:location-helper-macos && npm run build:location-helpers && concurrently -n electron,daemon,cli \"npm run build:electron\" \"npm run build:daemon\" \"npm run build:cli\" && npm run build:connectors",
     "build:with-numbat": "npm run numbat:build && npm run build",
     "numbat:build": "node scripts/build_numbat_runtime.mjs",
     "numbat:verify": "node scripts/build_numbat_runtime.mjs --verify-only",
     "build:react": "vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
-    "build:daemon": "tsc -p tsconfig.daemon.json",
-    "build:cli": "tsc -p tsconfig.cli.json",
+    "build:electron": "node scripts/clean-build-output.mjs electron && tsc -p tsconfig.electron.json",
+    "build:daemon": "node scripts/clean-build-output.mjs daemon && tsc -p tsconfig.daemon.json",
+    "build:cli": "node scripts/clean-build-output.mjs cli && tsc -p tsconfig.cli.json",
     "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend,discord,google-workspace,figma,vercel,monday,finance-data,maps,rhino,blender,comfyui \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\" \"tsc -p connectors/discord-mcp/tsconfig.json\" \"tsc -p connectors/google-workspace-mcp/tsconfig.json\" \"tsc -p connectors/figma-mcp/tsconfig.json\" \"tsc -p connectors/vercel-mcp/tsconfig.json\" \"tsc -p connectors/monday-mcp/tsconfig.json\" \"tsc -p connectors/finance-data-mcp/tsconfig.json\" \"tsc -p connectors/maps-mcp/tsconfig.json\" \"tsc -p connectors/rhino-mcp/tsconfig.json\" \"tsc -p connectors/blender-mcp/tsconfig.json\" \"tsc -p connectors/comfyui-mcp/tsconfig.json\"",
     "prepack": "npm run build",
     "release:smoke": "npm run build && node scripts/release-smoke-install.mjs",
@@ -116,7 +116,7 @@
     "adoption:render": "node scripts/render-public-adoption-summary.mjs",
     "adoption:update": "npm run adoption:collect && npm run adoption:render",
     "package": "npm run build:with-numbat && node scripts/run_electron_builder.mjs --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
-    "package:win:x64": "npm run numbat:build -- --target=win32-x64 && node scripts/run_electron_builder.mjs --win --x64 --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
+    "package:win:x64": "node scripts/clean-build-output.mjs retired && npm run numbat:build -- --target=win32-x64 && node scripts/run_electron_builder.mjs --win --x64 --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
     "package:mac": "node scripts/package-mac-with-env.mjs",
     "package:mac:unsigned": "cross-env COWORK_MAC_UNSIGNED=1 node scripts/package-mac-with-env.mjs",
     "package:desktop:smoke": "node scripts/smoke-desktop-artifacts.mjs",
@@ -358,10 +358,6 @@
         "filter": [
           "**/*"
         ]
-      },
-      {
-        "from": "build/healthkit-bridge",
-        "to": "healthkit-bridge"
       },
       {
         "from": "build/location-helper-macos",

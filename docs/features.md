@@ -1744,10 +1744,10 @@ See [Architecture: Web Browser Mode](architecture.md#web-browser-mode-planned--s
 
 ## WebSocket Control Plane
 
-Programmatic API for external automation and mobile companion apps.
+Programmatic API for external automation and remote CoWork devices.
 
 - Challenge-response token authentication
-- Strong operator/node tokens required for managed/headless deployments
+- Strong operator token required for managed/headless deployments
 - WebSocket browser Origin checks with explicit allowed-origin support for reverse proxies
 - Full task API (create, list, get, cancel)
 - Real-time event streaming
@@ -1759,7 +1759,9 @@ Programmatic API for external automation and mobile companion apps.
 | Mode                        | Binding                                                      | Use Case                              |
 | --------------------------- | ------------------------------------------------------------ | ------------------------------------- |
 | **Local Only**              | `127.0.0.1:18789`                                            | Desktop automation                    |
-| **Private LAN / Tailscale** | private interface or Tailscale URL                           | Mobile companions and remote devices  |
+| **Private LAN / Tailscale** | private interface or Tailscale URL                           | Remote devices                        |
 | **Container**               | `0.0.0.0:18789` inside container, host port loopback/private | Docker or Kubernetes-style deployment |
+
+Mobile Companions (iOS/Android node clients) were discontinued; see the [decision record](mobile-companions-discontinuation.md).
 
 Configure in **Settings** > **Control Plane**. For reverse proxies, keep the daemon loopback/private when possible, set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin, and only set `COWORK_CONTROL_PLANE_TRUST_PROXY=1` behind a proxy you control.

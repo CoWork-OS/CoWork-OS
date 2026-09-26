@@ -245,9 +245,6 @@ const HomeDashboard = lazy(() =>
   import("./components/HomeDashboard").then((module) => ({ default: module.HomeDashboard })),
 );
 const AutomationStudioPanel = lazy(() => import("./components/AutomationStudioPanel"));
-const HealthPanel = lazy(() =>
-  import("./components/HealthPanel").then((module) => ({ default: module.HealthPanel })),
-);
 const DevicesPanel = lazy(() =>
   import("./components/DevicesPanel").then((module) => ({ default: module.DevicesPanel })),
 );
@@ -675,7 +672,6 @@ type AppView =
   | "settings"
   | "browser"
   | "devices"
-  | "health"
   | "ideas"
   | "inboxAgent"
   | "agents"
@@ -2158,7 +2154,6 @@ export function App() {
     | "mcp"
     | "triggers"
     | "subconscious"
-    | "health"
     | "suggestions"
     | "insights"
     | "pulse"
@@ -7717,7 +7712,6 @@ export function App() {
         currentView === "home" ||
         currentView === "automations" ||
         currentView === "devices" ||
-        currentView === "health" ||
         currentView === "ideas" ||
         currentView === "inboxAgent" ||
         currentView === "agents" ||
@@ -7748,7 +7742,6 @@ export function App() {
                 isAgentsActive={currentView === "agents"}
                 isEverydayAgentActive={currentView === "everydayAgent"}
                 isMissionControlActive={currentView === "missionControl"}
-                isHealthActive={currentView === "health"}
                 isDevicesActive={currentView === "devices"}
                 isBuildActive={currentView === "build"}
                 isLibraryActive={currentView === "library"}
@@ -7775,7 +7768,6 @@ export function App() {
                   }
                 }}
                 onOpenEverydayAgent={() => setCurrentView("everydayAgent")}
-                onOpenHealth={() => setCurrentView("health")}
                 onOpenDevices={() => setCurrentView("devices")}
                 onNewSession={handleNewSession}
                 onOpenSettings={handleOpenSettings}
@@ -7943,17 +7935,6 @@ export function App() {
                     setCurrentView("settings");
                   }}
                   availableProviders={availableProviders}
-                />
-              ) : currentView === "health" ? (
-                <HealthPanel
-                  onOpenSettings={() => {
-                    setSettingsTab("health");
-                    setCurrentView("settings");
-                  }}
-                  onCreateTask={(title, prompt) => {
-                    setCurrentView("main");
-                    handleCreateTask(title, prompt, { generateTitle: true });
-                  }}
                 />
               ) : currentView === "ideas" ? (
                 <IdeasPanel

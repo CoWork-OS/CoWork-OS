@@ -417,15 +417,6 @@ Real-time overview of your active integrations, always visible in the right pane
 
 Dashboard with task metrics, cost/token tracking by model, prompt-cache read telemetry (`cachedTokens` and cache-read rate where available), activity heatmaps (day-of-week and hourly), top skills usage, per-pack analytics, persona-level success/retry/cost breakdowns, and feedback/retry quality metrics with 7/14/30-day period selection. Access from **Settings** > **Usage Insights**. [Learn more](docs/features.md#usage-insights)
 
-### Health
-
-Health pulls personal signals into a private, action-oriented view for readiness, notes, and workflow state.
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-9.webp" alt="Health dashboard" width="700">
-  <br><em>Health keeps personal signals organized for review and action.</em>
-</p>
-
 ### LLM Providers
 
 Dozens of routes across built-in, compatible/gateway, local, account-based, and virtual options. Use provider APIs, supported account connections, local Ollama or MLX-LM models, or Mixture of Agents presets that fan out to advisor models before a final aggregator answers. Configure ordered fallback chains for runtime failover and get prompt caching on supported routes. Claude supports direct API keys and account-token setup; Grok supports xAI API keys and an experimental browser OAuth route. Eligibility, model availability, and provider charges follow each service's current terms. [Learn more](docs/providers.md) · [MLX-LM guide](docs/mlx-lm.md) · [Mixture of Agents](docs/mixture-of-agents.md)

@@ -89,7 +89,6 @@ const VERIFIER_DENY_LIST = [
   "run_applescript",
   "terminate_macos_app_processes",
   "disable_macos_launch_agents",
-  "node_sms_send",
   "mention_agent",
   "acknowledge_mention",
   "complete_mention",

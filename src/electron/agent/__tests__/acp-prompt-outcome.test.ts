@@ -98,7 +98,19 @@ function acpExecutor() {
   tempDirs.push(workspace);
   const executor = Object.create(TaskExecutor.prototype) as Any;
   executor.task = { id: "task-acp", title: "t", prompt: "p", status: "executing" };
-  executor.workspace = { path: workspace };
+  // ACP runs only with an explicitly unrestricted profile (see assertAcpxExecutionAuthority).
+  executor.workspace = {
+    path: workspace,
+    permissions: {
+      read: true,
+      write: true,
+      delete: true,
+      shell: true,
+      network: true,
+      accessSandboxMode: "danger-full-access",
+      accessNetworkMode: "enabled",
+    },
+  };
   executor.cancelled = false;
   executor.emitEvent = vi.fn();
   executor.getAcpxRuntimeAgentDisplayName = () => "Codex";

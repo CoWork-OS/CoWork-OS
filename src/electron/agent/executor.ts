@@ -3739,8 +3739,10 @@ export class TaskExecutor {
       const resolved = path.resolve(root, candidate);
       const relative = path.relative(root, resolved);
       if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) continue;
+      const access = evaluateWorkspaceFilesystemAccess(this.workspace, resolved, "read");
+      if (access.decision !== "allow") continue;
       try {
-        if (fs.statSync(resolved).isFile()) verified.push(relative.split(path.sep).join("/"));
+        if (fs.statSync(access.path).isFile()) verified.push(relative.split(path.sep).join("/"));
       } catch {
         // Reported but absent: not evidence.
       }

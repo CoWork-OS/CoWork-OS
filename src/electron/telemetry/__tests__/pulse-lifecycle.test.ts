@@ -3,7 +3,12 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PulseService, type PulsePrivateSettings, type PulseSettingsStore } from "../pulse-service";
+import {
+  PulseService,
+  PulseSettingsWriteRefusedError,
+  type PulsePrivateSettings,
+  type PulseSettingsStore,
+} from "../pulse-service";
 
 // Synthetic identities, in-memory or temp-file SQLite and mocked HTTP only. Nothing
 // here reads a real profile or contacts a collector.
@@ -693,5 +698,74 @@ describe("Pulse settings upgrade", () => {
   it("does not infer a sent day from lastSentAt", () => {
     const f = fixture({ settings: enabledSettings({ lastSentAt: NOW - 1000 }) });
     expect(f.service.getSettings().preview.state).toBe("candidate");
+  });
+});
+
+describe("Pulse when encrypted settings refuse writes", () => {
+  function refusingFixture() {
+    const f = fixture({ settings: enabledSettings() });
+    const store = f.store;
+    let refusing = true;
+    const refusingStore: PulseSettingsStore = {
+      load: () => store.load(),
+      save: (settings) => {
+        if (refusing) throw new PulseSettingsWriteRefusedError();
+        store.save(settings);
+      },
+      refusesWrites: () => refusing,
+    };
+    const service = new PulseService(f.db, {
+      version: "0.0.0",
+      runtime: "desktop",
+      now: () => NOW,
+      fetch: (async () => ({ ok: true, status: 202 })) as unknown as typeof fetch,
+      settingsStore: refusingStore,
+    });
+    return { ...f, service, allowWrites: () => (refusing = false) };
+  }
+
+  it("reports a refused opt-out instead of pretending it was saved", async () => {
+    const f = refusingFixture();
+    const result = await f.service.setEnabled(false);
+    expect(result).toMatchObject({ success: false, error: "settings_write_refused" });
+    // Nothing half-applied: consent window and state unchanged.
+    expect(f.saved().consentState).toBe("enabled");
+    expect(
+      f.db.prepare("SELECT COUNT(*) AS n FROM pulse_consent_windows WHERE ended_at IS NULL").get(),
+    ).toEqual({ n: 1 });
+  });
+
+  it("refuses to send while decisions cannot be persisted", async () => {
+    const f = refusingFixture();
+    expect(await f.service.flush()).toMatchObject({
+      outcome: "error",
+      error: "settings_write_refused",
+    });
+    expect(f.dailyRequests()).toHaveLength(0);
+  });
+
+  it("does not loop on an unpersistable upgrade and recovers once writes work", async () => {
+    const f = fixture({
+      settings: { consentState: "enabled", installationId: "6ba7b810-9dad-41d1-80b4-00c04fd430c8" },
+    });
+    let refusing = true;
+    const service = new PulseService(f.db, {
+      version: "0.0.0",
+      runtime: "desktop",
+      now: () => NOW,
+      settingsStore: {
+        load: () => f.store.load(),
+        save: (settings) => {
+          if (refusing) throw new PulseSettingsWriteRefusedError();
+          f.store.save(settings);
+        },
+        refusesWrites: () => refusing,
+      },
+    });
+    expect(service.getSettings().revision).toBe(0);
+    expect(f.saved().identityStartedAt).toBeUndefined();
+    refusing = false;
+    expect((await service.setEnabled(false)).success).toBe(true);
+    expect(f.saved().consentState).toBe("disabled");
   });
 });

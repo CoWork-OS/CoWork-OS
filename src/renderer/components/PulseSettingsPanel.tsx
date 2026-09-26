@@ -46,6 +46,9 @@ function describeError(code: string | undefined): string {
   if (code === "deletion_pending") {
     return "Remote deletion is still pending. Retry deletion before opting in or rotating the ID.";
   }
+  if (code === "settings_write_refused") {
+    return "CoWork can't save settings right now because the system keychain key changed. Nothing was changed; resolve the keychain warning and try again.";
+  }
   return code || "Pulse operation failed";
 }
 

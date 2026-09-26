@@ -1827,11 +1827,19 @@ if (isMacSafeStorageMigrationWorker) {
       keychainIdentityMismatch = verifySecureSettingsKeychainIdentity();
       // One lifecycle-owned instance serves the timer and the Settings IPC, so a
       // user decision and an in-flight delivery share one fence and one shutdown.
-      pulseService = new PulseService(dbManager.getDatabase(), {
-        version: app.getVersion(),
-        runtime: "desktop",
-      });
-      pulseService.start();
+      // Opt-in telemetry must never block startup; Settings falls back to its own instance.
+      try {
+        pulseService = new PulseService(dbManager.getDatabase(), {
+          version: app.getVersion(),
+          runtime: "desktop",
+        });
+        pulseService.start();
+      } catch (error) {
+        pulseService = null;
+        logger.warn("CoWork Pulse could not start; reporting stays paused this session.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       healResettableSecureSettings();
       {
         const workspaceRepo = new WorkspaceRepository(dbManager.getDatabase());

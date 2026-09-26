@@ -246,11 +246,19 @@ async function main(): Promise<void> {
   const dbManager = new DatabaseManager();
   new SecureSettingsRepository(dbManager.getDatabase());
   console.log("[Daemon] SecureSettingsRepository initialized");
-  const pulseService = new PulseService(dbManager.getDatabase(), {
-    version: process.env.npm_package_version || "0.0.0",
-    runtime: "daemon",
-  });
-  pulseService.start();
+  // Opt-in telemetry must never block daemon startup.
+  let pulseService: PulseService | null = null;
+  try {
+    pulseService = new PulseService(dbManager.getDatabase(), {
+      version: process.env.npm_package_version || "0.0.0",
+      runtime: "daemon",
+    });
+    pulseService.start();
+  } catch (error) {
+    console.warn(
+      `[Daemon] CoWork Pulse could not start: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   // Initialize provider factories (loads settings from disk, migrates legacy files).
   LLMProviderFactory.initialize();
@@ -728,7 +736,7 @@ async function main(): Promise<void> {
           run: () => MemoryService.shutdown(),
         },
         // Settle in-flight Pulse requests so no late callback writes to a closed database.
-        { name: "pulse", run: () => pulseService.shutdown() },
+        { name: "pulse", run: () => pulseService?.shutdown() },
         {
           name: "database",
           requiresQuiescence: true,

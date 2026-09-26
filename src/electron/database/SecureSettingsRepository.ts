@@ -310,6 +310,11 @@ export class SecureSettingsRepository {
     return this.keychainIdentityMismatch;
   }
 
+  /** Whether save() currently refuses writes (keychain key changed while encryption is on). */
+  refusesWrites(): boolean {
+    return this.keychainIdentityMismatch && this.encryptionAvailable;
+  }
+
   /**
    * Explicitly accept the current OS keychain key after a mismatch. Settings the
    * current key cannot read are moved to the unreadable backup table (ciphertext

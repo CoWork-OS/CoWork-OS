@@ -60,7 +60,10 @@ export interface PulsePrivateSettings {
 /** Storage for the encrypted Pulse settings record. Injected in tests. */
 export interface PulseSettingsStore {
   load(): PulsePrivateSettings | null | undefined;
+  /** Throws PulseSettingsWriteRefusedError when the write cannot be persisted. */
   save(settings: PulsePrivateSettings): void;
+  /** Whether saves are currently refused, so decisions can fail before any change. */
+  refusesWrites?(): boolean;
 }
 
 interface PulseServiceOptions {
@@ -94,16 +97,40 @@ const DEFAULT_LEASE_MS = 30_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_SHUTDOWN_SETTLE_MS = 2_000;
 
-const secureSettingsStore: PulseSettingsStore = {
-  load: () => SecureSettingsRepository.getInstance().load<PulsePrivateSettings>("pulse"),
-  save: (settings) => SecureSettingsRepository.getInstance().save("pulse", settings),
-};
-
 class PulseClosedError extends Error {
   constructor() {
     super("pulse_service_closed");
   }
 }
+
+/**
+ * The encrypted settings store refused the write (the OS keychain key changed). Saving
+ * silently would let a decision look persisted when it was not, so this aborts the
+ * transaction and is reported to the caller instead.
+ */
+export class PulseSettingsWriteRefusedError extends Error {
+  constructor() {
+    super("settings_write_refused");
+  }
+}
+
+const secureSettingsStore: PulseSettingsStore = {
+  load: () => SecureSettingsRepository.getInstance().load<PulsePrivateSettings>("pulse"),
+  save: (settings) => {
+    const repository = SecureSettingsRepository.getInstance();
+    if (repository.refusesWrites()) throw new PulseSettingsWriteRefusedError();
+    repository.save("pulse", settings);
+  },
+  refusesWrites: () => {
+    try {
+      return SecureSettingsRepository.getInstance().refusesWrites();
+    } catch {
+      return false;
+    }
+  },
+};
+
+const SETTINGS_WRITE_REFUSED = "settings_write_refused";
 
 function clampCount(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value || 0);
@@ -297,7 +324,9 @@ export class PulseService {
   }
 
   async setEnabled(enabled: boolean): Promise<PulseMutationResult> {
-    const outcome = this.transact(() => {
+    const refused = this.refusedMutation();
+    if (refused) return refused;
+    const outcome = this.transactDecision(() => {
       const settings = this.loadState();
       if (enabled && settings.pendingDeletion) return "deletion_pending" as const;
       if ((settings.consentState === "enabled") === enabled && settings.consentState !== "unset") {
@@ -322,6 +351,9 @@ export class PulseService {
       this.commitDecision(settings);
       return "changed" as const;
     });
+    if (outcome === SETTINGS_WRITE_REFUSED) {
+      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    }
     if (!enabled) this.abortActiveDelivery();
     this.previewCache = null;
     if (outcome === "deletion_pending") {
@@ -332,7 +364,9 @@ export class PulseService {
   }
 
   async resetIdentity(): Promise<PulseMutationResult> {
-    const outcome = this.transact(() => {
+    const refused = this.refusedMutation();
+    if (refused) return refused;
+    const outcome = this.transactDecision(() => {
       const settings = this.loadState();
       if (settings.pendingDeletion) return "deletion_pending" as const;
       const now = this.now();
@@ -350,6 +384,9 @@ export class PulseService {
       this.commitDecision(settings);
       return "changed" as const;
     });
+    if (outcome === SETTINGS_WRITE_REFUSED) {
+      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    }
     this.abortActiveDelivery();
     this.previewCache = null;
     if (outcome === "deletion_pending") {
@@ -405,11 +442,16 @@ export class PulseService {
   }
 
   private async runFlush(): Promise<PulseSendResult> {
+    // If results cannot be persisted, a send would leave no receipt and repeat forever.
+    if (this.store.refusesWrites?.()) return this.sendResult("error", SETTINGS_WRITE_REFUSED);
     const controller = new AbortController();
     this.activeAbort = controller;
     let context: DeliveryContext | null = null;
     try {
-      const prepared = this.transact(() => this.prepareDelivery());
+      const prepared = this.transactDecision(() => this.prepareDelivery());
+      if (prepared === SETTINGS_WRITE_REFUSED) {
+        return this.sendResult("error", SETTINGS_WRITE_REFUSED);
+      }
       if (typeof prepared === "string") return this.sendResult(prepared);
       context = prepared;
 
@@ -571,7 +613,9 @@ export class PulseService {
         return true;
       });
     } catch (error) {
-      if (error instanceof PulseClosedError) return false;
+      if (error instanceof PulseClosedError || error instanceof PulseSettingsWriteRefusedError) {
+        return false;
+      }
       throw error;
     }
   }
@@ -595,7 +639,9 @@ export class PulseService {
         return true;
       });
     } catch (error) {
-      if (error instanceof PulseClosedError) return false;
+      if (error instanceof PulseClosedError || error instanceof PulseSettingsWriteRefusedError) {
+        return false;
+      }
       throw error;
     }
   }
@@ -632,7 +678,9 @@ export class PulseService {
     if (this.stopping || this.closed) {
       return { success: false, settings: this.safePublic(), error: "shutting_down" };
     }
-    const target = this.transact(() => {
+    const refused = this.refusedMutation();
+    if (refused) return refused;
+    const target = this.transactDecision(() => {
       const settings = this.loadState();
       const now = this.now();
       const captured: PulsePendingDeletion | null =
@@ -655,6 +703,9 @@ export class PulseService {
       this.commitDecision(settings);
       return captured;
     });
+    if (target === SETTINGS_WRITE_REFUSED) {
+      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    }
     this.abortActiveDelivery();
     this.previewCache = null;
     if (!target) {
@@ -677,7 +728,7 @@ export class PulseService {
     } catch (error) {
       const code = this.errorCode(error);
       if (this.closed) return { success: false, settings: this.safePublic(), error: code };
-      this.transact(() => {
+      this.transactDecision(() => {
         const settings = this.loadState();
         if (settings.pendingDeletion?.installationId !== target.installationId) return;
         settings.pendingDeletion.lastAttemptAt = this.now();
@@ -688,7 +739,7 @@ export class PulseService {
     }
 
     if (this.closed) return { success: true, settings: this.safePublic() };
-    this.transact(() => {
+    const finalized = this.transactDecision(() => {
       const settings = this.loadState();
       if (settings.pendingDeletion?.installationId === target.installationId) {
         delete settings.pendingDeletion;
@@ -711,6 +762,11 @@ export class PulseService {
         .run(target.installationId);
       this.commitDecision(settings);
     });
+    if (finalized === SETTINGS_WRITE_REFUSED) {
+      // The server deleted the data, but the local record could not be updated; keep
+      // reporting off and deletion pending so a retry (404/200) completes it later.
+      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    }
     return { success: true, settings: this.getSettings() };
   }
 
@@ -752,6 +808,22 @@ export class PulseService {
     });
   }
 
+  /** Like transact, but a refused settings write becomes a value instead of a throw. */
+  private transactDecision<T>(fn: () => T): T | typeof SETTINGS_WRITE_REFUSED {
+    try {
+      return this.transact(fn);
+    } catch (error) {
+      if (error instanceof PulseSettingsWriteRefusedError) return SETTINGS_WRITE_REFUSED;
+      throw error;
+    }
+  }
+
+  /** Fail a decision up front when the store is known to refuse writes. */
+  private refusedMutation(): PulseMutationResult | null {
+    if (!this.store.refusesWrites?.()) return null;
+    return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+  }
+
   private transact<T>(fn: () => T): T {
     if (this.closed) throw new PulseClosedError();
     return this.db.transaction(fn).immediate();
@@ -765,7 +837,13 @@ export class PulseService {
   private readState(): PulsePrivateSettings {
     const settings = this.rawSettings();
     if (!this.needsUpgrade(settings)) return settings;
-    return this.transact(() => this.loadState());
+    try {
+      return this.transact(() => this.loadState());
+    } catch (error) {
+      if (!(error instanceof PulseSettingsWriteRefusedError)) throw error;
+      // Cannot persist the upgrade: describe the record without pretending it changed.
+      return { ...settings, revision: settings.revision ?? 0 };
+    }
   }
 
   /** Runs inside a transaction; persists the one-time upgrade if needed. */
@@ -1096,7 +1174,14 @@ export class PulseService {
       ),
     );
     if (!outboxColumns.has("installation_id")) {
-      this.db.exec("ALTER TABLE pulse_outbox ADD COLUMN installation_id TEXT");
+      try {
+        this.db.exec("ALTER TABLE pulse_outbox ADD COLUMN installation_id TEXT");
+      } catch (error) {
+        // Another process sharing this profile may have added it first.
+        if (!/duplicate column/i.test(error instanceof Error ? error.message : String(error))) {
+          throw error;
+        }
+      }
       // Queued rows from older builds carry their identity only inside the payload.
       this.db
         .prepare(

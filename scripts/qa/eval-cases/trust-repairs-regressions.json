@@ -1,0 +1,92 @@
+{
+  "id": "trust-repairs-regressions-2026-09-26",
+  "title": "Trust repairs: consent fencing, outcome classification, learning evidence, update freshness",
+  "source": {
+    "incident": "internal-product-audit-2026-09-26",
+    "taskId": "trust-repairs-plan"
+  },
+  "categories": [
+    {
+      "id": "pulse-opt-out-survives-late-response",
+      "prompt": "Turn Pulse off while an enrollment or daily upload is in flight.",
+      "assertions": {
+        "expectedConsentState": "disabled",
+        "lateResponseMustNotReenable": true,
+        "executableTest": "src/electron/telemetry/__tests__/pulse-lifecycle.test.ts"
+      }
+    },
+    {
+      "id": "pulse-deletion-pending-retry",
+      "prompt": "Delete remote Pulse data while offline, restart, then retry.",
+      "assertions": {
+        "reportingOffBeforeRequest": true,
+        "deletionTargetRetainedAcrossRestart": true,
+        "enableBlockedWhilePending": true,
+        "executableTest": "src/electron/telemetry/__tests__/pulse-lifecycle.test.ts"
+      }
+    },
+    {
+      "id": "pulse-acknowledged-day-not-resent",
+      "prompt": "Send now twice on the same UTC day and after restart.",
+      "assertions": {
+        "dailyRequests": 1,
+        "collectorRowsPerDay": 1,
+        "executableTest": "src/electron/telemetry/__tests__/pulse-worker-dedup.test.ts"
+      }
+    },
+    {
+      "id": "acp-empty-end-turn-not-success",
+      "prompt": "An external ACP agent ends its turn with end_turn and no output.",
+      "assertions": {
+        "expectedTerminalStatus": "needs_user_action",
+        "recordsLearningSuccess": false,
+        "executableTest": "src/electron/agent/__tests__/acp-prompt-outcome.test.ts"
+      }
+    },
+    {
+      "id": "acp-local-cancel-wins",
+      "prompt": "Cancel a task while its ACP prompt returns a zero-exit end_turn.",
+      "assertions": {
+        "expectedStatus": "cancelled",
+        "finalizedAsSuccess": false,
+        "executableTest": "src/electron/agent/__tests__/acp-prompt-outcome.test.ts"
+      }
+    },
+    {
+      "id": "cron-needs-action-not-counted-as-success",
+      "prompt": "A scheduled task whose every run needs user action.",
+      "assertions": {
+        "runSuccessPercent": 0,
+        "executableTest": "src/electron/cron/__tests__/outcome-counts.test.ts"
+      }
+    },
+    {
+      "id": "cron-follow-up-classified-by-thread-result",
+      "prompt": "A thread follow-up schedule whose target thread fails.",
+      "assertions": {
+        "expectedRunStatus": "error",
+        "executableTest": "src/electron/cron/__tests__/outcome-counts.test.ts"
+      }
+    },
+    {
+      "id": "playbook-failure-not-reinforced",
+      "prompt": "A failed attempt followed by a successful one for the same request.",
+      "assertions": {
+        "failureReinforced": false,
+        "unrelatedPromptsReturnContext": false,
+        "executableTest": "src/electron/memory/__tests__/PlaybookService.test.ts"
+      }
+    },
+    {
+      "id": "update-check-bounded-and-labeled",
+      "prompt": "Check for updates while GitHub stalls, then while offline with a cache.",
+      "assertions": {
+        "settlesWithinDeadline": true,
+        "cachedResultLabeled": true,
+        "cachedResultCanInstall": false,
+        "executableTest": "src/electron/updater/__tests__/update-manager-freshness.test.ts"
+      }
+    }
+  ],
+  "notes": "Specification only; each category is covered by the named executable deterministic test, which is the source of truth. Synthetic identities, mocked HTTP and in-memory SQLite; no production requests or real profiles."
+}

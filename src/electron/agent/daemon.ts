@@ -5500,13 +5500,42 @@ export class AgentDaemon extends EventEmitter {
       this.activeTasks.delete(taskId);
     }
 
+    await this.settleRunningTaskCancellation(taskId, {
+      message: "Task was stopped by user",
+      actor: "user",
+      requestedAt: interruptRequestedAt,
+    });
+  }
+
+  /**
+   * Persist a cancellation that the external runtime reported for a running task
+   * (for example an ACP prompt that ended with stop reason `cancelled`) without a
+   * local cancel. Shares the canonical cleanup with cancelTask, but is not recorded as
+   * a user cancellation and does not re-enter executor cancellation.
+   */
+  recordExternalTaskCancellation(taskId: string, message: string): void {
+    this.pendingContinuationTaskIds.delete(taskId);
+    void this.settleRunningTaskCancellation(taskId, {
+      message,
+      actor: "external_runtime",
+      requestedAt: Date.now(),
+    }).catch((error) => {
+      log.error(`[cancel] External cancellation cleanup failed for ${taskId}:`, error);
+    });
+  }
+
+  /** Shared persistence and cleanup once a running task's execution has stopped. */
+  private async settleRunningTaskCancellation(
+    taskId: string,
+    input: { message: string; actor: "user" | "external_runtime"; requestedAt: number },
+  ): Promise<void> {
     // Persist cancellation for running tasks too (important for remote clients querying task status).
-    this.cancelTaskRecord(taskId, "Task was stopped by user");
+    this.cancelTaskRecord(taskId, input.message);
     this.logEvent(taskId, "agent_interrupt_confirmed", {
       taskId,
       reason: "cancel",
-      actor: "user",
-      requestedAt: interruptRequestedAt,
+      actor: input.actor,
+      requestedAt: input.requestedAt,
       confirmedAt: Date.now(),
       status: "cancelled",
     });
@@ -6205,19 +6234,17 @@ export class AgentDaemon extends EventEmitter {
       : [];
     const autonomyRules: PermissionRule[] =
       task?.agentConfig?.autonomousMode === true
-        ? (task.agentConfig.autoApproveTypes || []).map(
-            (approvalType): PermissionRule => ({
-              source: "session",
-              effect: "allow",
-              scope: {
-                kind: "tool",
-                toolName: this.inferToolNameFromApprovalType(approvalType),
-              },
-              metadata: {
-                legacyAutonomyType: approvalType,
-              },
-            }),
-          )
+        ? (task.agentConfig.autoApproveTypes || []).map((approvalType): PermissionRule => ({
+            source: "session",
+            effect: "allow",
+            scope: {
+              kind: "tool",
+              toolName: this.inferToolNameFromApprovalType(approvalType),
+            },
+            metadata: {
+              legacyAutonomyType: approvalType,
+            },
+          }))
         : [];
 
     return [
@@ -12169,9 +12196,7 @@ export class AgentDaemon extends EventEmitter {
       );
       if (quotedValues.length === 0 || !hasDistinctiveLiteral) return false;
 
-      return quotedValues.every((value) =>
-        citedReads.some((read) => read.content.includes(value)),
-      );
+      return quotedValues.every((value) => citedReads.some((read) => read.content.includes(value)));
     };
 
     return keyClaims.every((claim) => {
@@ -13639,7 +13664,12 @@ export class AgentDaemon extends EventEmitter {
     try {
       const isTopLevelTask =
         existingTask && !existingTask.parentTaskId && (existingTask.agentType ?? "main") === "main";
-      if (isCompletedOutcome && isTopLevelTask && existingTask.source !== "sample" && !taskDisablesMemoryCapture(existingTask)) {
+      if (
+        isCompletedOutcome &&
+        isTopLevelTask &&
+        existingTask.source !== "sample" &&
+        !taskDisablesMemoryCapture(existingTask)
+      ) {
         const workspaceName = this.workspaceRepo.findById(existingTask.workspaceId)?.name;
         PersonalityManager.recordTaskCompleted(workspaceName);
         const gatewayContext = existingTask.agentConfig?.gatewayContext ?? "private";

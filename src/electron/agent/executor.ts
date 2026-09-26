@@ -224,7 +224,9 @@ import {
   AcpxRuntimeUnavailableError,
   assertAcpxExecutionAuthority,
   getAcpxAgentDisplayName,
+  type AcpxPromptResult,
 } from "./AcpxRuntimeRunner";
+import { classifyAcpPromptResult, type AcpPromptOutcome } from "./runtime/acp-prompt-outcome";
 
 import {
   AwaitingUserInputError,
@@ -3618,21 +3620,7 @@ export class TaskExecutor {
     }
 
     const result = await runner.prompt(initialPrompt || this.getContractPrompt() || "");
-    const assistantText = result.assistantText.trim();
-    if (assistantText) {
-      this.lastAssistantOutput = assistantText;
-      this.lastAssistantText = assistantText;
-      this.lastNonVerificationOutput = assistantText;
-    }
-    if (result.stopReason && result.stopReason !== "end_turn") {
-      this.emitEvent("log", {
-        message: `acpx runtime completed with stop reason: ${result.stopReason}`,
-      });
-    }
-    this.finalizeTaskBestEffort(
-      assistantText || `${runtimeAgentName} via ACP completed without a final assistant message.`,
-      "acpx runtime completed",
-    );
+    this.applyAcpPromptResult(result, "initial");
   }
 
   private async sendMessageWithAcpxRuntime(
@@ -3663,17 +3651,153 @@ export class TaskExecutor {
     await options?.onExecutionAccepted?.();
     await runner.ensureSession();
     const result = await runner.prompt(followUpConversationMessage);
+    this.applyAcpPromptResult(result, "follow_up");
+  }
+
+  /**
+   * The single place an ACP prompt result becomes a task outcome, shared by initial
+   * prompts and follow-ups. Each result is classified exactly once.
+   *
+   * ACP completion is best-effort finalization: it keeps verification requirements and
+   * never records Playbook success learning.
+   */
+  private applyAcpPromptResult(result: AcpxPromptResult, phase: "initial" | "follow_up"): void {
+    // A local cancellation that raced the prompt wins; a late external result must not
+    // replace it. The daemon's cancel path persists the cancelled state.
+    if (this.cancelled) return;
+
+    const runtimeAgentName = this.getAcpxRuntimeAgentDisplayName();
     const assistantText = result.assistantText.trim();
     if (assistantText) {
       this.lastAssistantOutput = assistantText;
       this.lastAssistantText = assistantText;
       this.lastNonVerificationOutput = assistantText;
     }
-    this.finalizeTaskBestEffort(
-      assistantText ||
-        `${runtimeAgentName} via ACP follow-up completed without a final assistant message.`,
-      "acpx follow-up completed",
+    const verifiedArtifactPaths = this.verifyAcpReportedArtifacts(result.changedPaths || []);
+    const outcome = classifyAcpPromptResult({
+      stopReason: result.stopReason,
+      assistantText,
+      verifiedArtifactPaths,
+    });
+    this.emitEvent("log", {
+      message: `${runtimeAgentName} via ACP ${phase === "initial" ? "turn" : "follow-up"} ended: ${outcome.kind}.`,
+      acpStopReason: result.stopReason ?? null,
+      acpOutcome: outcome.kind,
+      acpPhase: phase,
+      ...(verifiedArtifactPaths.length > 0 ? { verifiedArtifactPaths } : {}),
+      ...(outcome.kind !== "completed" ? { reason: outcome.reason } : {}),
+    });
+
+    const completionLabel =
+      phase === "initial" ? "acpx runtime completed" : "acpx follow-up completed";
+    switch (outcome.kind) {
+      case "completed": {
+        const summary =
+          assistantText ||
+          `${runtimeAgentName} via ACP finished without a final message. Changed files: ${verifiedArtifactPaths.join(", ")}`;
+        this.finalizeTaskBestEffort(summary, completionLabel);
+        return;
+      }
+      case "needs_user_action": {
+        this.terminalStatus = "needs_user_action";
+        this.failureClass = undefined;
+        const terminalState = createTerminalState("needs_user_action", { reason: outcome.reason });
+        this.finalizeTaskBestEffort(assistantText || outcome.reason, outcome.reason, terminalState);
+        return;
+      }
+      case "partial_success": {
+        this.terminalStatus = "partial_success";
+        this.failureClass = outcome.failureClass;
+        this.emitEvent("log", { metric: "agent_budget_exhausted_total", value: 1 });
+        const terminalState = createTerminalState("partial_success", {
+          reason: outcome.reason,
+          failureClass: outcome.failureClass,
+        });
+        this.finalizeTaskBestEffort(
+          assistantText
+            ? `${assistantText}\n\n${outcome.reason}`
+            : `${outcome.reason} Changed files: ${verifiedArtifactPaths.join(", ")}`,
+          outcome.reason,
+          terminalState,
+        );
+        return;
+      }
+      case "failed":
+        this.persistAcpPromptFailure(outcome, assistantText);
+        return;
+      case "cancelled":
+        this.persistAcpExternalCancellation(outcome.reason, assistantText);
+        return;
+    }
+  }
+
+  /** Paths the ACP agent reported editing that exist as files inside the workspace. */
+  private verifyAcpReportedArtifacts(paths: readonly string[]): string[] {
+    const root = path.resolve(this.workspace.path);
+    const verified: string[] = [];
+    for (const candidate of paths) {
+      const resolved = path.resolve(root, candidate);
+      const relative = path.relative(root, resolved);
+      if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) continue;
+      try {
+        if (fs.statSync(resolved).isFile()) verified.push(relative.split(path.sep).join("/"));
+      } catch {
+        // Reported but absent: not evidence.
+      }
+    }
+    return verified;
+  }
+
+  /** A refused or contract-violating ACP turn: failed, with output and raw reason kept. */
+  private persistAcpPromptFailure(
+    outcome: Extract<AcpPromptOutcome, { kind: "failed" }>,
+    assistantText: string,
+  ): void {
+    this.stopProgressJournal();
+    this.saveConversationSnapshot();
+    this.taskCompleted = true;
+    this.terminalStatus = "failed";
+    this.failureClass = outcome.failureClass;
+    this.persistBestKnownOutcome(
+      assistantText || this.buildResultSummary() || "",
+      "failed",
+      outcome.failureClass,
+      outcome.reason,
     );
+    this.daemon.updateTask(this.task.id, {
+      status: "failed",
+      error: outcome.reason,
+      completedAt: Date.now(),
+      terminalStatus: "failed",
+      failureClass: outcome.failureClass,
+      bestKnownOutcome: this.bestKnownOutcome,
+      ...this.applyRuntimeTaskProjectionToTask(),
+    });
+    this.emitRunSummary(outcome.reason, "failed");
+    this.emitTerminalFailureOnce({
+      message: outcome.reason,
+      failureClass: outcome.failureClass,
+      acpStopReason: outcome.stopReason,
+    });
+    void this.closeAcpxRuntimeSession("failed turn");
+  }
+
+  /**
+   * The external runtime reported the turn as cancelled without a local cancel. Persist
+   * the cancelled lifecycle state through the daemon's shared cleanup; this is not a
+   * user cancellation and must not re-enter executor cancellation.
+   */
+  private persistAcpExternalCancellation(reason: string, assistantText: string): void {
+    this.stopProgressJournal();
+    this.saveConversationSnapshot();
+    this.taskCompleted = true;
+    if (assistantText) {
+      // Keep the partial answer reachable from the cancelled task.
+      this.persistBestKnownOutcome(assistantText, undefined, undefined, reason);
+      this.daemon.updateTask(this.task.id, { bestKnownOutcome: this.bestKnownOutcome });
+    }
+    this.daemon.recordExternalTaskCancellation(this.task.id, reason);
+    void this.closeAcpxRuntimeSession("external cancellation");
   }
 
   private async closeAcpxRuntimeSession(reason: string): Promise<void> {
@@ -17626,7 +17750,7 @@ ${transcript}
     // same MCP subset is not permanently hidden across iterations.
     if (lowSignal && scored.length > 1) {
       const rotated: typeof scored = [];
-      for (let i = 0; i < scored.length; ) {
+      for (let i = 0; i < scored.length;) {
         let j = i + 1;
         while (j < scored.length && scored[j].score === scored[i].score) j++;
         const group = scored.slice(i, j);

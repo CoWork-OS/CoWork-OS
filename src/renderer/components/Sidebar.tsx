@@ -57,6 +57,9 @@ import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 import { BotsPane, type BotRole } from "./BotsPane";
+import { useIsCalmTheme } from "../hooks/useIsCalmTheme";
+import { useAgentContext } from "../hooks/useAgentContext";
+import { CalmSidebarNav, CalmSidebarProfile, type CalmSidebarSegment } from "./calm/CalmSidebarNav";
 import { BOT_PROFILE_DELETED_EVENT, BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
 import type { BotConversationRosterProjection } from "../../shared/bot-lifecycle";
 
@@ -138,6 +141,13 @@ interface SidebarProps {
   onOpenMissionControl: () => void;
   onOpenDevices?: () => void;
   isDevicesActive?: boolean;
+  /** Calm-theme navigation targets. */
+  onOpenHome?: () => void;
+  onOpenBuild?: () => void;
+  isBuildActive?: boolean;
+  onOpenLibrary?: () => void;
+  isLibraryActive?: boolean;
+  onOpenPlugins?: () => void;
 
   onTasksChanged: () => void;
   onLoadMoreTasks?: () => void;
@@ -856,6 +866,8 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.isMissionControlActive === next.isMissionControlActive &&
     prev.isHealthActive === next.isHealthActive &&
     prev.isDevicesActive === next.isDevicesActive &&
+    prev.isBuildActive === next.isBuildActive &&
+    prev.isLibraryActive === next.isLibraryActive &&
     prev.isLoadingSessions === next.isLoadingSessions &&
     prev.isLoadingMoreTasks === next.isLoadingMoreTasks &&
     prev.hasMoreTasks === next.hasMoreTasks &&
@@ -908,6 +920,12 @@ function SidebarComponent({
   onOpenMissionControl,
   onOpenDevices,
   isDevicesActive = false,
+  onOpenHome,
+  onOpenBuild,
+  isBuildActive = false,
+  onOpenLibrary,
+  isLibraryActive = false,
+  onOpenPlugins,
   isLoadingMoreTasks = false,
 
   onTasksChanged,
@@ -919,6 +937,8 @@ function SidebarComponent({
   onBotUpdated,
   onBotDeleted,
 }: SidebarProps) {
+  const isCalm = useIsCalmTheme();
+  const calmAgentContext = useAgentContext();
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
   const [renameTaskId, setRenameTaskId] = useState<string | null>(null);
@@ -1359,6 +1379,21 @@ function SidebarComponent({
   }, [loadMailboxInboxUnread]);
 
   const inboxUnreadCount = mailboxDigest?.unreadCount ?? mailboxStatus?.unreadCount ?? 0;
+  const calmSegment: CalmSidebarSegment = isBuildActive
+    ? "build"
+    : isAgentsActive || sidebarTab === "bots"
+      ? "agents"
+      : "home";
+  const handleCalmSegmentChange = (segment: CalmSidebarSegment) => {
+    if (segment === "agents") {
+      setSidebarTab("bots");
+      onOpenAgents?.();
+      return;
+    }
+    setSidebarTab("sessions");
+    if (segment === "build") onOpenBuild?.();
+    else onOpenHome?.();
+  };
   const inboxNavLabel =
     inboxUnreadCount > 0 ? `Inbox (${inboxUnreadCount > 99 ? "99+" : inboxUnreadCount})` : "Inbox";
   // Build task tree from flat list
@@ -1693,9 +1728,12 @@ function SidebarComponent({
           ? taskRows
           : getSidebarProjectSessionPreview(taskRows, false).visibleItems;
       rows.push(
-        ...visibleTaskRows.map(
-          (row): SidebarVirtualRow => ({ kind: "task", row, section, grouped }),
-        ),
+        ...visibleTaskRows.map((row): SidebarVirtualRow => ({
+          kind: "task",
+          row,
+          section,
+          grouped,
+        })),
       );
       return taskRows.length;
     };
@@ -2880,9 +2918,46 @@ function SidebarComponent({
   };
 
   return (
-    <div className="sidebar cli-sidebar">
+    <div className={`sidebar cli-sidebar${isCalm ? " calm-sidebar" : ""}`}>
+      {isCalm && (
+        <CalmSidebarNav
+          segment={calmSegment}
+          onSegmentChange={handleCalmSegmentChange}
+          onNew={handleNewTask}
+          onSearch={() => {
+            setSidebarTab("sessions");
+            setSessionsCollapsed(false);
+            setShowSessionSearch((value) => {
+              if (value) setSessionSearch("");
+              return !value;
+            });
+          }}
+          isSearchActive={showSessionSearch}
+          onOpenLibrary={onOpenLibrary}
+          isLibraryActive={isLibraryActive}
+          onOpenPlugins={onOpenPlugins}
+          onOpenAutomations={onOpenAutomations}
+          isAutomationsActive={isAutomationsActive}
+          more={{
+            inboxLabel: "Inbox",
+            inboxUnread: inboxUnreadCount,
+            onOpenInbox: onOpenInboxAgent,
+            isInboxActive: isInboxAgentActive,
+            onOpenEveryday: onOpenEverydayAgent,
+            isEverydayActive: isEverydayAgentActive,
+            onOpenDevices,
+            isDevicesActive,
+            onOpenMissionControl,
+            isMissionControlActive,
+            onOpenHealth,
+            isHealthActive,
+            onOpenIdeas,
+            isIdeasActive,
+          }}
+        />
+      )}
       {/* New Session Button */}
-      <div className="sidebar-header">
+      <div className="sidebar-header" hidden={isCalm}>
         <div className="cli-header-actions sidebar-nav">
           <button
             className="new-task-btn cli-new-task-btn cli-action-btn sidebar-new-session-btn"
@@ -3233,7 +3308,12 @@ function SidebarComponent({
         </div>
       ) : (
         <>
-          <div className="sidebar-session-tabs" role="tablist" aria-label="Workspace views">
+          <div
+            className="sidebar-session-tabs"
+            role="tablist"
+            aria-label="Workspace views"
+            hidden={isCalm}
+          >
             <button
               type="button"
               role="tab"
@@ -3539,8 +3619,14 @@ function SidebarComponent({
         </>
       )}
 
+      {isCalm && (
+        <CalmSidebarProfile
+          agentName={calmAgentContext.agentName}
+          onOpenSettings={onOpenSettings}
+        />
+      )}
       {/* Footer */}
-      <div className="sidebar-footer cli-sidebar-footer">
+      <div className="sidebar-footer cli-sidebar-footer" hidden={isCalm && !updateInfo?.available}>
         <InfraWalletBadge onOpenSettings={onOpenSettings} />
         <div className="cli-footer-actions">
           <button

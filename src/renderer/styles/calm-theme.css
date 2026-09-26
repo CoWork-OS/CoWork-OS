@@ -1,0 +1,2768 @@
+/* ==========================================================================
+   Calm visual theme
+   --------------------------------------------------------------------------
+   Opt-in theme (Settings → Appearance → Calm). It layers on top of the modern
+   (".visual-oblivion") styles, so every selector here is prefixed with
+   `html.visual-calm` to win over both index.css and lazily loaded component
+   stylesheets without resorting to !important.
+   ========================================================================== */
+
+/* ---------- Tokens ---------- */
+
+html.visual-calm {
+  --calm-font-display: ui-serif, "New York", "Iowan Old Style", "Charter", Georgia, serif;
+  --calm-radius-pill: 999px;
+  --calm-radius-card: 20px;
+  --calm-radius-item: 10px;
+  --calm-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* Dark defaults; the light block below overrides them. */
+  --calm-page: #141518;
+  --calm-sidebar: #0f1013;
+  --calm-surface: #1b1d21;
+  --calm-surface-raised: #212329;
+  --calm-surface-muted: rgba(255, 255, 255, 0.05);
+  --calm-surface-hover: rgba(255, 255, 255, 0.07);
+  --calm-border: rgba(255, 255, 255, 0.07);
+  --calm-border-strong: rgba(255, 255, 255, 0.13);
+  --calm-text: #eceef1;
+  --calm-text-secondary: rgba(236, 238, 241, 0.72);
+  --calm-text-muted: rgba(236, 238, 241, 0.5);
+  --calm-ink: #eceef1;
+  --calm-ink-contrast: #141518;
+  --calm-shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.32);
+  --calm-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --calm-sky: rgba(96, 140, 255, 0.1);
+  --calm-sky-2: rgba(126, 168, 255, 0.06);
+  --calm-success: #4ade80;
+  --calm-warning-bg: rgba(251, 146, 60, 0.16);
+  --calm-warning-text: #fdba74;
+  --calm-agent: #b9a6ff;
+  --calm-accent: #8ab0ff;
+  --calm-accent-hover: #b3cbff;
+  --calm-accent-subtle: rgba(138, 176, 255, 0.14);
+  --calm-accent-contrast: #0b1530;
+
+  --font-ui:
+    "Source Sans 3", -apple-system, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-content: var(--font-ui);
+}
+
+html.visual-calm.theme-light {
+  --calm-page: #ffffff;
+  --calm-sidebar: #f6f7f9;
+  --calm-surface: #ffffff;
+  --calm-surface-raised: #ffffff;
+  --calm-surface-muted: rgba(15, 23, 42, 0.045);
+  --calm-surface-hover: rgba(15, 23, 42, 0.06);
+  --calm-border: rgba(15, 23, 42, 0.08);
+  --calm-border-strong: rgba(15, 23, 42, 0.14);
+  --calm-text: #16181d;
+  --calm-text-secondary: #4b5360;
+  /* ≥4.5:1 on white, ≥3:1 on the grey settings panels. */
+  --calm-text-muted: #6b7280;
+  --calm-ink: #16181d;
+  --calm-ink-contrast: #ffffff;
+  --calm-shadow-pop: 0 18px 48px rgba(15, 23, 42, 0.1), 0 2px 6px rgba(15, 23, 42, 0.05);
+  --calm-shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --calm-sky: rgba(59, 130, 246, 0.08);
+  --calm-sky-2: rgba(147, 197, 253, 0.16);
+  --calm-success: #15803d;
+  --calm-warning-bg: #fde6dc;
+  --calm-warning-text: #9a3412;
+  --calm-agent: #7c5cff;
+  --calm-accent: #2563eb;
+  --calm-accent-hover: #1d4ed8;
+  --calm-accent-subtle: rgba(37, 99, 235, 0.08);
+  --calm-accent-contrast: #ffffff;
+}
+
+/* Map the app's shared tokens onto the calm palette. The compound selectors
+   beat `.accent-*` and `.theme-light.accent-*`, so calm stays neutral no
+   matter which accent the user picked for the other themes. */
+html.visual-calm,
+html.visual-calm.theme-light {
+  --color-bg-primary: var(--calm-page);
+  --color-bg-sidebar: var(--calm-sidebar);
+  --color-bg-elevated: var(--calm-surface-raised);
+  --color-bg-secondary: var(--calm-surface-muted);
+  --color-bg-tertiary: var(--calm-surface-muted);
+  --color-bg-hover: var(--calm-surface-hover);
+  --color-bg-input: transparent;
+  --color-border: var(--calm-border-strong);
+  --color-border-subtle: var(--calm-border);
+  --color-text: var(--calm-text);
+  --color-text-primary: var(--calm-text);
+  --color-text-secondary: var(--calm-text-secondary);
+  --color-text-muted: var(--calm-text-muted);
+  /* Calm's own controls use --calm-ink directly. The shared accent (used by
+     older components for selection rings, links and highlights) is a quiet
+     sky blue instead, so those rings don't turn into heavy ink frames. */
+  --color-accent: var(--calm-accent);
+  --color-accent-hover: var(--calm-accent-hover);
+  --color-accent-subtle: var(--calm-accent-subtle);
+  --color-accent-dark: var(--calm-accent);
+  --shadow-glow: none;
+  --gradient-glossy: none;
+  --gradient-shine: none;
+  --dp-dropdown-bg: var(--calm-surface-raised);
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+}
+
+/* Softer keyboard focus ring than the ink accent; mouse clicks show none. */
+html.visual-calm :focus-visible {
+  outline: 2px solid rgba(14, 165, 233, 0.55);
+  outline-offset: 2px;
+}
+
+html.visual-calm button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Text fields are always "focus-visible"; their containers (composer pill,
+   search boxes, dialog inputs) already show focus, so skip the ring. */
+html.visual-calm textarea:focus-visible,
+html.visual-calm input:focus-visible,
+html.visual-calm [contenteditable="true"]:focus-visible {
+  outline: none;
+}
+
+/* `hidden` must win over component display rules while calm is active. */
+html.visual-calm [hidden] {
+  display: none !important;
+}
+
+/* ---------- Shell ---------- */
+
+html.visual-calm .app {
+  background: var(--calm-page);
+}
+
+/* Every main view paints --calm-view-bg (a view may set a glow). The base
+   light theme forces `.main-content` to white with !important, so this
+   needs it too. */
+html.visual-calm .main-content {
+  background: var(--calm-view-bg, var(--calm-page)) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html.visual-calm .app-layout:not(.left-collapsed) > .main-content {
+  border-top: none;
+  border-left: 1px solid var(--calm-border);
+}
+
+html.visual-calm .sidebar {
+  background: var(--calm-sidebar);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ---------- Shared primitives ---------- */
+
+html.visual-calm .calm-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .calm-segmented > button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--calm-text-secondary);
+  font: 500 13.5px/1 var(--font-ui);
+  padding: 7px 14px;
+  border-radius: var(--calm-radius-pill);
+  cursor: pointer;
+  transition:
+    background 0.18s var(--calm-ease),
+    color 0.18s var(--calm-ease),
+    box-shadow 0.18s var(--calm-ease);
+}
+
+html.visual-calm .calm-segmented > button:hover:not(.active):not(:disabled) {
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-segmented > button.active {
+  background: var(--calm-surface-raised);
+  color: var(--calm-text);
+  font-weight: 600;
+  box-shadow:
+    var(--calm-shadow-soft),
+    0 0 0 1px var(--calm-border);
+}
+
+html.visual-calm .calm-icon-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--calm-radius-item);
+  background: transparent;
+  color: var(--calm-text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+html.visual-calm .calm-icon-button:hover,
+html.visual-calm .calm-icon-button.open {
+  background: var(--calm-surface-hover);
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-send-button {
+  appearance: none;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+html.visual-calm .calm-send-button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+html.visual-calm .calm-send-button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+html.visual-calm .calm-greeting {
+  font-family: var(--calm-font-display);
+  font-weight: 400;
+  font-size: clamp(28px, 3vw, 36px);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--calm-text);
+  text-align: center;
+  margin: 0;
+}
+
+html.visual-calm .calm-card {
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border);
+  border-radius: var(--calm-radius-card);
+  box-shadow: var(--calm-shadow-soft);
+}
+
+/* ---------- Popovers ---------- */
+
+html.visual-calm .calm-menu {
+  position: relative;
+}
+
+html.visual-calm .calm-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  min-width: 300px;
+  max-width: 380px;
+  padding: 6px;
+  background: var(--calm-surface-raised);
+  border: 1px solid var(--calm-border);
+  border-radius: 16px;
+  box-shadow: var(--calm-shadow-pop);
+  animation: calm-pop-in 0.16s var(--calm-ease);
+}
+
+html.visual-calm .calm-popover-right {
+  left: auto;
+  right: 0;
+}
+
+@keyframes calm-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+html.visual-calm .calm-popover-scroll {
+  max-height: min(360px, 55vh);
+  overflow-y: auto;
+}
+
+html.visual-calm .calm-popover-heading {
+  padding: 8px 12px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-popover-item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--calm-radius-item);
+  background: transparent;
+  color: var(--calm-text);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-ui);
+}
+
+html.visual-calm .calm-popover-item:hover:not(:disabled) {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-popover-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+html.visual-calm .calm-popover-item > svg {
+  flex-shrink: 0;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-popover-item.danger > svg:first-child {
+  color: #dc2626;
+}
+
+html.visual-calm .calm-popover-item-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+html.visual-calm .calm-popover-item-icon svg,
+html.visual-calm .calm-popover-item-icon img {
+  width: 18px;
+  height: 18px;
+}
+
+html.visual-calm .calm-popover-item-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+html.visual-calm .calm-popover-item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-popover-item-desc {
+  font-size: 12.5px;
+  color: var(--calm-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+html.visual-calm .calm-popover-divider {
+  height: 1px;
+  margin: 6px 10px;
+  background: var(--calm-border);
+}
+
+html.visual-calm .calm-popover-back {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--calm-text-secondary);
+  font: 600 13px var(--font-ui);
+  cursor: pointer;
+  border-radius: var(--calm-radius-item);
+}
+
+html.visual-calm .calm-popover-back:hover {
+  background: var(--calm-surface-hover);
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-popover-empty {
+  padding: 16px 12px;
+  font-size: 13px;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-popover-footer-item .calm-popover-item-title {
+  font-size: 13.5px;
+  color: var(--calm-text-secondary);
+}
+
+/* ---------- Top bar ---------- */
+
+html.visual-calm .calm-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 2px 16px 2px 14px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+}
+
+html.visual-calm .calm-topbar-left,
+html.visual-calm .calm-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+html.visual-calm .calm-topbar-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 340px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--calm-radius-item);
+  background: transparent;
+  color: var(--calm-text);
+  font: 500 14px var(--font-ui);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s ease;
+}
+
+html.visual-calm .calm-topbar-button:hover,
+html.visual-calm .calm-topbar-button.open {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-topbar-button > svg {
+  flex-shrink: 0;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-topbar-button-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+html.visual-calm .calm-topbar-button-detail {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--calm-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+html.visual-calm .calm-access-button {
+  color: var(--calm-success);
+  -webkit-app-region: no-drag;
+}
+
+html.visual-calm .calm-access-button.danger {
+  color: #dc2626;
+}
+
+/* Task view: the top bar sits inside the existing header row. */
+html.visual-calm .calm-task .main-header {
+  gap: 8px;
+}
+
+html.visual-calm .calm-task .main-header > .calm-topbar {
+  margin-left: auto;
+  padding: 0;
+  min-height: 0;
+}
+
+/* ---------- Welcome (Home) ---------- */
+
+html.visual-calm .calm-welcome {
+  isolation: isolate;
+}
+
+html.visual-calm .calm-welcome::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 45% at 12% 105%, var(--calm-sky), transparent 70%),
+    radial-gradient(50% 40% at 95% -5%, var(--calm-sky-2), transparent 70%);
+}
+
+html.visual-calm .calm-welcome .welcome-view {
+  padding: 24px 32px 12vh;
+}
+
+html.visual-calm .calm-welcome .welcome-content {
+  max-width: 720px;
+  font-family: var(--font-ui);
+}
+
+html.visual-calm .calm-hero {
+  margin-bottom: 26px;
+}
+
+/* Composer: one calm pill. The model, access and folder controls live in the
+   top bar instead. */
+html.visual-calm .calm-main .welcome-input-container,
+html.visual-calm .calm-main .input-container {
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border);
+  border-radius: 26px;
+  box-shadow: var(--calm-shadow-pop);
+  padding: 6px 8px;
+}
+
+html.visual-calm .calm-main .input-container {
+  box-shadow:
+    var(--calm-shadow-soft),
+    0 8px 24px rgba(24, 24, 20, 0.05);
+}
+
+html.visual-calm .calm-main .welcome-input-container:focus-within,
+html.visual-calm .calm-main .input-container:focus-within {
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .calm-main .welcome-input-footer {
+  background: transparent;
+  padding: 2px 4px 4px;
+}
+
+html.visual-calm .calm-main .welcome-input,
+html.visual-calm .calm-main .input-textarea {
+  font-size: 15.5px;
+  font-family: var(--font-ui);
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-main .welcome-input-footer .permission-dropdown-container,
+html.visual-calm .calm-main .welcome-input-footer .workspace-dropdown-container,
+html.visual-calm .calm-main .welcome-input-footer .active-mode-badge,
+html.visual-calm .calm-task .input-container .workspace-dropdown-container > .folder-selector,
+html.visual-calm .calm-task .input-container .keyboard-hint,
+html.visual-calm .calm-task .input-container .permission-dropdown-container {
+  display: none;
+}
+
+html.visual-calm .calm-main .input-left-actions,
+html.visual-calm .calm-main .input-row {
+  gap: 6px;
+  align-items: center;
+}
+
+html.visual-calm .calm-main .attachment-btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-main .attachment-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+html.visual-calm .calm-main .attachment-btn:hover:not(:disabled) {
+  background: var(--calm-surface-hover);
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-main .overflow-menu-btn,
+html.visual-calm .calm-main .skills-menu-btn,
+html.visual-calm .calm-main .voice-input-btn {
+  border: none;
+  background: transparent;
+  color: var(--calm-text-secondary);
+  border-radius: 50%;
+}
+
+html.visual-calm .calm-main .overflow-menu-btn:hover,
+html.visual-calm .calm-main .skills-menu-btn:hover,
+html.visual-calm .calm-main .voice-input-btn:hover {
+  background: var(--calm-surface-hover);
+  color: var(--calm-text);
+}
+
+/* Round ink send button (welcome + task composers). */
+html.visual-calm .calm-main .lets-go-btn,
+html.visual-calm .calm-main .lets-go-btn.lets-go-btn-sm {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+  box-shadow: none;
+}
+
+html.visual-calm .calm-main .lets-go-btn::before,
+html.visual-calm .calm-main .lets-go-btn::after {
+  display: none;
+}
+
+html.visual-calm .calm-main .lets-go-btn:disabled {
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-muted);
+  opacity: 1;
+}
+
+html.visual-calm .calm-mode-toggle {
+  margin-left: 2px;
+}
+
+/* Suggestion chips */
+html.visual-calm .calm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+html.visual-calm .calm-chip {
+  appearance: none;
+  padding: 7px 14px;
+  border-radius: var(--calm-radius-pill);
+  border: 1px solid var(--calm-border);
+  background: var(--calm-surface);
+  color: var(--calm-text-secondary);
+  font: 500 13px var(--font-ui);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+html.visual-calm .calm-chip:hover {
+  color: var(--calm-text);
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .calm-chip-more {
+  padding: 7px 12px;
+  letter-spacing: 1px;
+}
+
+/* Next actions: quieter list below the chips. */
+html.visual-calm .calm-welcome .welcome-next-actions {
+  margin-top: 28px;
+}
+
+html.visual-calm .calm-welcome .welcome-next-actions-title {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-welcome .welcome-next-action {
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border);
+  border-radius: 14px;
+}
+
+/* ---------- Sidebar ---------- */
+
+html.visual-calm .calm-sidebar {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+html.visual-calm .calm-sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 2px 10px;
+}
+
+html.visual-calm .calm-sidebar-brand {
+  padding: 2px 8px 0;
+  font-family: var(--font-ui);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-sidebar-segments {
+  display: flex;
+  width: 100%;
+}
+
+html.visual-calm .calm-sidebar-segments > button {
+  flex: 1;
+  padding: 7px 6px;
+}
+
+html.visual-calm .calm-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+html.visual-calm .calm-nav-item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--calm-radius-item);
+  background: transparent;
+  color: var(--calm-text);
+  font: 450 14px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+html.visual-calm .calm-nav-item > svg {
+  flex-shrink: 0;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-nav-item:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-nav-item.active {
+  background: var(--calm-surface-muted);
+  font-weight: 600;
+}
+
+html.visual-calm .calm-nav-item-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+html.visual-calm .calm-nav-item-chevron {
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-nav-item-badge {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+html.visual-calm .calm-nav-new {
+  background: var(--calm-surface-muted);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+html.visual-calm .calm-nav-new:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-nav-new-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+}
+
+html.visual-calm .calm-nav-more {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 12px;
+}
+
+/* Session list typography */
+html.visual-calm .calm-sidebar .sidebar-navigation-section-header,
+html.visual-calm .calm-sidebar .sidebar-date-group {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-sidebar .cli-task-item {
+  border-radius: 8px;
+  font-family: var(--font-ui);
+}
+
+html.visual-calm .calm-sidebar .cli-task-item.active,
+html.visual-calm .calm-sidebar .cli-task-item.selected {
+  background: var(--calm-surface-muted);
+}
+
+/* Profile footer */
+html.visual-calm .calm-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 10px 6px 12px;
+  border-top: 1px solid var(--calm-border);
+}
+
+html.visual-calm .calm-profile-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #c7b8ff, #9fd8ff);
+  color: #1b1b19;
+  font: 700 12px var(--font-ui);
+}
+
+html.visual-calm .calm-profile-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+html.visual-calm .calm-profile-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--calm-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+html.visual-calm .calm-profile-detail {
+  font-size: 12px;
+  color: var(--calm-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Library / Build views ---------- */
+
+html.visual-calm .calm-view {
+  overflow-y: auto;
+}
+
+html.visual-calm .calm-view-inner {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 36px 32px 48px;
+}
+
+html.visual-calm .calm-view-header {
+  margin-bottom: 22px;
+}
+
+html.visual-calm .calm-view-title {
+  font-family: var(--calm-font-display);
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--calm-text);
+  margin: 0 0 6px;
+}
+
+html.visual-calm .calm-view-subtitle {
+  font-size: 15px;
+  color: var(--calm-text-secondary);
+  margin: 0;
+  max-width: 620px;
+}
+
+html.visual-calm .calm-library-card {
+  height: calc(100vh - 220px);
+  min-height: 420px;
+  overflow: hidden;
+  /* FileHub uses its own inline tokens; point them at the calm palette. */
+  --border-color: var(--calm-border);
+  --surface-secondary: var(--calm-surface-muted);
+  --text-primary: var(--calm-text);
+  --text-secondary: var(--calm-text-secondary);
+  --text-tertiary: var(--calm-text-muted);
+  --accent-bg: var(--calm-surface-muted);
+  --accent-color: var(--calm-text);
+}
+
+/* Build follows the light/dark setting like the rest of calm, with a soft
+   sky glow and a code-flavoured kicker to set it apart from Home. */
+html.visual-calm .main-content.calm-build {
+  --calm-view-bg:
+    radial-gradient(55% 45% at 50% -5%, var(--calm-sky-2), transparent 70%),
+    radial-gradient(45% 35% at 85% 105%, var(--calm-sky), transparent 70%), var(--calm-page);
+}
+
+html.visual-calm .calm-build-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 760px;
+  padding-top: 14vh;
+}
+
+html.visual-calm .calm-build-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 5px 12px;
+  border-radius: var(--calm-radius-pill);
+  border: 1px solid var(--calm-border);
+  background: var(--calm-surface);
+  color: var(--calm-text-secondary);
+  font: 600 12.5px var(--font-mono);
+}
+
+html.visual-calm .calm-build-title {
+  margin-bottom: 10px;
+}
+
+html.visual-calm .calm-build .calm-view-subtitle {
+  margin: 0 auto;
+}
+
+html.visual-calm .calm-build-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  width: 100%;
+  margin-top: 28px;
+  padding: 12px 12px 12px 20px;
+  border-radius: 26px;
+  border: 1px solid var(--calm-border);
+  background: var(--calm-surface);
+  box-shadow: var(--calm-shadow-pop);
+  text-align: left;
+  transition: border-color 0.15s ease;
+}
+
+html.visual-calm .calm-build-composer:focus-within {
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .calm-build-composer textarea {
+  flex: 1;
+  min-height: 44px;
+  max-height: 200px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--calm-text);
+  font: 400 16px/1.5 var(--font-ui);
+  padding: 8px 0;
+}
+
+html.visual-calm .calm-build-composer textarea::placeholder {
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-build-composer .calm-send-button:disabled {
+  opacity: 1;
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-build-starters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin-top: 18px;
+}
+
+html.visual-calm .calm-build-starter {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--calm-border);
+  background: var(--calm-surface);
+  box-shadow: var(--calm-shadow-soft);
+  color: var(--calm-text);
+  font: 500 14px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+html.visual-calm .calm-build-starter > svg {
+  box-sizing: content-box;
+  padding: 7px;
+  border-radius: 10px;
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-build-starter:hover {
+  border-color: var(--calm-border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--calm-shadow-pop);
+}
+
+/* ---------- Working view ---------- */
+
+/* The status strip becomes a single, prominent status line. */
+html.visual-calm .calm-task .task-status-strip-shell {
+  border-bottom: none;
+}
+
+html.visual-calm .calm-task .task-status-strip {
+  min-height: 44px;
+  padding: 8px 18px;
+  gap: 10px;
+  background: transparent;
+}
+
+html.visual-calm .calm-task .task-status-strip:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-task .task-status-strip-primary {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-task .task-status-strip-metric,
+html.visual-calm .calm-task .task-status-strip-phase {
+  font-size: 12.5px;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-strip-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+html.visual-calm .calm-strip-agent-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--calm-agent);
+}
+
+/* ---------- Result / briefing cards ---------- */
+
+html.visual-calm .calm-result-card {
+  position: relative;
+  overflow: hidden;
+  margin-top: 26px;
+  padding: 22px 24px 18px;
+  text-align: left;
+}
+
+html.visual-calm .calm-result-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(70% 90% at 100% 0%, var(--calm-sky-2), transparent 65%);
+  opacity: 0.6;
+}
+
+html.visual-calm .calm-result-card > * {
+  position: relative;
+}
+
+html.visual-calm .calm-result-when {
+  font-size: 13px;
+  color: var(--calm-text-muted);
+  margin-bottom: 4px;
+}
+
+html.visual-calm .calm-result-headline {
+  font-family: var(--font-ui);
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--calm-text);
+  margin: 0 0 14px;
+}
+
+html.visual-calm .calm-status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+html.visual-calm .calm-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 7px 12px;
+  border-radius: 12px;
+  background: var(--calm-surface-muted);
+  color: var(--calm-text);
+  font-size: 13px;
+}
+
+html.visual-calm .calm-status-chip > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+html.visual-calm .calm-status-chip > svg {
+  flex-shrink: 0;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-status-chip.status-success > svg {
+  color: var(--calm-success);
+}
+
+html.visual-calm .calm-status-chip.status-warning,
+html.visual-calm .calm-status-chip.status-error {
+  background: var(--calm-warning-bg);
+  color: var(--calm-warning-text);
+}
+
+html.visual-calm .calm-status-chip.status-warning > svg,
+html.visual-calm .calm-status-chip.status-error > svg {
+  color: currentColor;
+}
+
+html.visual-calm .calm-result-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+html.visual-calm .calm-trust-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-trust-badge > svg {
+  color: var(--calm-success);
+}
+
+html.visual-calm .calm-link-button {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--calm-text-muted);
+  font: 500 13px var(--font-ui);
+  cursor: pointer;
+}
+
+html.visual-calm .calm-link-button:hover {
+  color: var(--calm-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Summary events in the timeline read as result cards. */
+html.visual-calm .calm-task .summary-event-card .event-content {
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border);
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+html.visual-calm .calm-task .summary-event-card .event-summary-text {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--calm-text);
+}
+
+/* ---------- Agent ---------- */
+
+html.visual-calm .calm-agent-avatar {
+  flex-shrink: 0;
+  display: block;
+}
+
+html.visual-calm .calm-agent-avatar.animated {
+  animation: calm-agent-bob 2.4s ease-in-out infinite;
+  transform-origin: 50% 80%;
+}
+
+@keyframes calm-agent-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(-3deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.visual-calm .calm-agent-avatar.animated {
+    animation: none;
+  }
+}
+
+html.visual-calm .calm-setup-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+html.visual-calm .calm-setup-pill {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  border: none;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-surface-muted);
+  color: var(--calm-text);
+  font: 500 13.5px var(--font-ui);
+  cursor: pointer;
+}
+
+html.visual-calm .calm-setup-pill:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-profile-agent {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--calm-text-muted);
+  font: 400 12px var(--font-ui);
+  cursor: pointer;
+  text-align: left;
+}
+
+html.visual-calm .calm-profile-agent > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+html.visual-calm .calm-profile-agent:hover {
+  color: var(--calm-text);
+}
+
+/* ---------- Dialog ---------- */
+
+.calm-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 20, 18, 0.28);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: calm-fade-in 0.18s ease;
+}
+
+@keyframes calm-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.calm-dialog {
+  position: relative;
+  width: min(440px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 28px 28px 24px;
+  border-radius: 24px;
+  background: var(--calm-surface-raised, #fff);
+  color: var(--calm-text, #1b1b19);
+  border: 1px solid var(--calm-border, rgba(0, 0, 0, 0.08));
+  box-shadow: var(--calm-shadow-pop, 0 18px 48px rgba(0, 0, 0, 0.18));
+  font-family: var(--font-ui);
+  animation: calm-pop-in 0.2s var(--calm-ease, ease);
+}
+
+.calm-dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+}
+
+.calm-dialog-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+
+.calm-dialog-subtitle {
+  font-size: 14px;
+  color: var(--calm-text-secondary, #56564f);
+  margin: 0 0 18px;
+}
+
+.calm-field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--calm-text-secondary, #56564f);
+  margin: 14px 0 6px;
+}
+
+.calm-field-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.calm-input {
+  width: 100%;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--calm-border-strong, rgba(0, 0, 0, 0.16));
+  background: var(--calm-surface, #fff);
+  color: var(--calm-text, #1b1b19);
+  font: 400 15px var(--font-ui);
+  outline: none;
+}
+
+.calm-input:focus {
+  border-color: var(--calm-ink, #1b1b19);
+}
+
+.calm-agent-setup-preview {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 10px;
+}
+
+.calm-agent-swatches {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.calm-agent-swatch {
+  appearance: none;
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+
+.calm-agent-swatch:hover {
+  background: var(--calm-surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+.calm-agent-swatch.active {
+  border-color: var(--calm-ink, #1b1b19);
+}
+
+.calm-dialog-error {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #dc2626;
+}
+
+.calm-dialog-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 22px;
+}
+
+.calm-primary-button {
+  appearance: none;
+  padding: 11px 22px;
+  border: none;
+  border-radius: 12px;
+  background: var(--calm-ink, #1b1b19);
+  color: var(--calm-ink-contrast, #fff);
+  font: 600 15px var(--font-ui);
+  cursor: pointer;
+}
+
+.calm-primary-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- Fixes from the live walkthrough ---------- */
+
+/* A global button rule adds padding; calm's fixed-size icon buttons need none
+   or their icons collapse to zero width. */
+html.visual-calm .calm-icon-button,
+html.visual-calm .calm-send-button,
+html.visual-calm .calm-agent-swatch {
+  padding: 0;
+}
+
+html.visual-calm .calm-agent-swatch {
+  padding: 4px;
+}
+
+/* Menu rows (including footer actions) read left to right. */
+html.visual-calm .calm-popover-item,
+html.visual-calm .calm-nav-item,
+html.visual-calm .calm-build-starter {
+  justify-content: flex-start;
+}
+
+/* The composer input and its rotating placeholder use the UI font in calm;
+   the base styles force monospace with !important. */
+html.visual-calm .calm-main .cli-input,
+html.visual-calm .calm-main .cli-placeholder-measure,
+html.visual-calm .calm-main .cli-rotating-placeholder,
+html.visual-calm .calm-main .welcome-input {
+  font-family: var(--font-ui) !important;
+  font-size: 15.5px;
+  letter-spacing: 0;
+}
+
+/* Inputs already change border colour on focus; skip the extra ring. */
+html.visual-calm .calm-input:focus-visible,
+.calm-input:focus-visible {
+  outline: none;
+}
+
+html.visual-calm .calm-input:focus,
+.calm-input:focus {
+  border-color: rgba(14, 165, 233, 0.7);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.16);
+}
+
+/* Sessions header: plain row, no boxed button chrome. */
+/* The base .cli-new-task-btn rule uses !important, so this has to as well. */
+html.visual-calm .calm-sidebar .cli-sessions-header {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none;
+}
+
+html.visual-calm .calm-sidebar .cli-sessions-header::before {
+  display: none;
+}
+
+html.visual-calm .calm-sidebar .cli-sessions-header:hover {
+  background: var(--calm-surface-hover) !important;
+  transform: none;
+}
+
+/* macOS forces a translucent sidebar with !important; calm uses its own solid
+   surface so light and dark read the same everywhere. */
+html.platform-darwin.visual-calm .app-layout,
+html.platform-darwin.visual-calm .sidebar.cli-sidebar {
+  background: var(--calm-sidebar) !important;
+}
+
+/* Agents hub: bring the featured hero and headings in line with calm. */
+html.visual-calm .agents-showcase {
+  min-height: 380px;
+  padding: 36px;
+  border: 1px solid var(--calm-border);
+  border-radius: 24px;
+  background:
+    radial-gradient(60% 70% at 100% 0%, var(--calm-sky-2), transparent 70%),
+    radial-gradient(50% 60% at 0% 100%, var(--calm-sky), transparent 70%), var(--calm-surface);
+  box-shadow: var(--calm-shadow-soft);
+  color: var(--calm-text);
+}
+
+html.visual-calm .agents-showcase::before {
+  display: none;
+}
+
+html.visual-calm .agents-showcase-eyebrow {
+  color: var(--calm-text-secondary);
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+  box-shadow: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+html.visual-calm .agents-showcase-copy h2,
+html.visual-calm .agents-section-head h2,
+html.visual-calm .agents-library-header .agents-section-head h2 {
+  font-family: var(--calm-font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--calm-text);
+}
+
+html.visual-calm .agents-showcase-copy p {
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .agents-showcase-dot {
+  background: var(--calm-border-strong);
+}
+
+html.visual-calm .agents-showcase-dot.active {
+  background: var(--calm-ink);
+}
+
+html.visual-calm .agents-showcase-message {
+  background: var(--calm-surface-muted);
+  color: var(--calm-text);
+}
+
+html.visual-calm .agents-showcase-status span {
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .agents-primary-btn {
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html.visual-calm .agents-secondary-btn {
+  background: var(--calm-surface);
+  color: var(--calm-text);
+  border: 1px solid var(--calm-border-strong);
+  box-shadow: none;
+}
+
+/* ---------- Sidebar alignment ---------- */
+
+/* Every nav row uses a 20px icon column so labels share one left edge
+   (the "New" row's filled circle is 20px; line icons are 16px). */
+html.visual-calm .calm-nav-item > svg:first-child {
+  box-sizing: content-box;
+  padding: 0 2px;
+}
+
+/* Secondary "More" items sit on the same grid as the primary list. */
+html.visual-calm .calm-nav-more {
+  padding-left: 0;
+}
+
+html.visual-calm .calm-nav-more .calm-nav-item {
+  color: var(--calm-text-secondary);
+}
+
+/* The Sessions header lines up with the nav rows above it. The base rule
+   sets padding with !important. */
+html.visual-calm .calm-sidebar .sidebar-header-sessions {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+html.visual-calm .calm-sidebar .cli-sessions-header {
+  margin: 0 !important;
+  padding: 7px 10px !important;
+  width: 100%;
+}
+
+html.visual-calm .calm-sidebar .cli-sessions-header .cli-list-header-toggle {
+  gap: 10px;
+  padding: 0;
+}
+
+html.visual-calm .calm-sidebar .cli-sessions-header .cli-list-header-toggle > svg:first-child,
+html.visual-calm .calm-sidebar .cli-sessions-header .cli-list-header-toggle svg:first-of-type {
+  box-sizing: content-box;
+  padding: 0 2px;
+}
+
+/* Profile: the agent line starts under the user's name. */
+html.visual-calm .calm-profile-agent {
+  justify-content: flex-start;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+/* Settings nav: selection is a quiet fill, not a 2px ink border (calm maps
+   the accent to ink, which made the base style read as a heavy outline). */
+html.visual-calm .settings-nav-item.active {
+  background: var(--calm-surface-muted);
+  border-color: transparent;
+  color: var(--calm-text);
+  font-weight: 600;
+}
+
+html.visual-calm .settings-nav-item.active svg {
+  color: var(--calm-text);
+}
+
+/* ---------- Text on accent fills ----------
+   Calm's accent is ink (near-black in light, near-white in dark). Many
+   components fill with the accent and hard-code a light or dark label, which
+   vanishes in one of the two modes. Pair every accent fill with the ink's
+   contrast colour instead. Some base rules use !important, so this does too. */
+html.visual-calm .studio-primary,
+html.visual-calm .input-request-submit,
+html.visual-calm .settings-page .btn-primary,
+html.visual-calm .btn-primary,
+html.visual-calm .button-primary,
+html.visual-calm .dp-primary-btn,
+html.visual-calm .dp-filter-chip.active,
+html.visual-calm .queue-badge,
+html.visual-calm .toast-action-btn,
+html.visual-calm .quick-task-submit,
+html.visual-calm .quick-task-fab,
+html.visual-calm .slider-value,
+html.visual-calm .mcp-update-badge,
+html.visual-calm .builtin-tools-saving,
+html.visual-calm .registry-featured-badge,
+html.visual-calm .skill-param-modal-footer .button-primary,
+html.visual-calm .browser-toolbar-btn.primary,
+html.visual-calm .browser-annotation-primary,
+html.visual-calm .onboarding-btn-primary,
+html.visual-calm .provider-option .provider-badge,
+html.visual-calm .dispatch-get-started-btn,
+html.visual-calm .chatgpt-import-step-number,
+html.visual-calm .chatgpt-import-btn-primary,
+html.visual-calm .sc-btn.primary,
+html.visual-calm .bot-profile-actions button[type="submit"],
+html.visual-calm .insights-period-btn.active,
+html.visual-calm .insights-awu-toggle-btn.active,
+html.visual-calm .file-viewer-open-btn,
+html.visual-calm .mc-v2-filter-btn.active,
+html.visual-calm .mc-v2-comment-submit,
+html.visual-calm .quoted-follow-up-reply,
+html.visual-calm .voice-settings-link,
+html.visual-calm .send-btn,
+html.visual-calm .remote-file-picker-btn.primary,
+html.visual-calm .skills-menu-btn.active,
+html.visual-calm .task-automation-save-btn,
+html.visual-calm .ea-primary-button,
+html.visual-calm .mode-suggestion-pill:hover,
+html.visual-calm .leader-badge,
+html.visual-calm .bubble-feedback-btn.retry:hover:not(:disabled),
+html.visual-calm .bubble-feedback-btn.drift:hover:not(:disabled) {
+  color: var(--calm-accent-contrast) !important;
+}
+
+html.visual-calm .studio-primary {
+  background: var(--calm-ink);
+  border-color: transparent;
+}
+
+html.visual-calm .studio-primary:hover:not(:disabled) {
+  background: var(--calm-ink);
+  opacity: 0.88;
+}
+
+/* ---------- Narrow layouts ----------
+   .main-content is an inline-size container, so these respond to the space the
+   main column actually has (sidebar and right panel included). */
+
+/* The task title keeps priority over header controls. */
+html.visual-calm .calm-task .main-header-title-group {
+  min-width: 120px;
+  flex: 1 1 auto;
+}
+
+html.visual-calm .calm-task .main-header > .calm-topbar {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+html.visual-calm .calm-topbar-left {
+  min-width: 0;
+}
+
+@container (max-width: 900px) {
+  html.visual-calm .calm-topbar-button-detail {
+    display: none;
+  }
+}
+
+@container (max-width: 720px) {
+  html.visual-calm .calm-task .calm-scope-button .calm-topbar-button-label {
+    display: none;
+  }
+
+  html.visual-calm .calm-build-starters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html.visual-calm .calm-build-starter {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  html.visual-calm .calm-view-inner {
+    padding: 24px 18px 36px;
+  }
+}
+
+/* Very tight composer: drop the Ask/Do switch from the in-task row (the
+   mode is still visible and changeable from the Home composer and the
+   advanced mode menu). */
+@container (max-width: 560px) {
+  html.visual-calm .calm-task .input-row .calm-mode-toggle {
+    display: none;
+  }
+
+  html.visual-calm .calm-welcome .welcome-view {
+    padding: 16px 16px 8vh;
+  }
+
+  /* Header controls move under the title instead of squeezing it. */
+  html.visual-calm .calm-task .main-header {
+    flex-wrap: wrap;
+    height: auto;
+    row-gap: 2px;
+  }
+
+  html.visual-calm .calm-task .main-header > .calm-topbar {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}
+
+/* Build now has a header bar, so the hero needs less top padding. */
+html.visual-calm .calm-build-inner {
+  padding-top: 9vh;
+}
+
+/* ---------- Automations (Automation Studio) ---------- */
+
+html.visual-calm .app-layout > main.main-content.automation-studio-main {
+  --calm-view-bg:
+    radial-gradient(50% 35% at 0% 0%, var(--calm-sky-2), transparent 70%), var(--calm-page);
+}
+
+html.visual-calm .automation-studio {
+  --studio-surface: var(--calm-surface);
+  --studio-surface-solid: var(--calm-surface);
+  --studio-line: var(--calm-border);
+}
+
+html.visual-calm .studio-topbar h2 {
+  font-family: var(--calm-font-display);
+  font-size: clamp(28px, 3vw, 36px);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+html.visual-calm .studio-eyebrow,
+html.visual-calm .studio-section-index {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .studio-prompt-block h3,
+html.visual-calm .studio-template-heading h3 {
+  font-family: var(--calm-font-display);
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+html.visual-calm .studio-view-tabs {
+  border: none;
+  background: var(--calm-surface-muted);
+  padding: 3px;
+}
+
+html.visual-calm .studio-view-tabs button {
+  color: var(--calm-text-secondary);
+  font-weight: 500;
+}
+
+html.visual-calm .studio-view-tabs button.active {
+  background: var(--calm-surface-raised);
+  color: var(--calm-text);
+  font-weight: 600;
+  box-shadow:
+    var(--calm-shadow-soft),
+    0 0 0 1px var(--calm-border);
+}
+
+html.visual-calm .studio-prompt-input {
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border);
+  border-radius: 16px;
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .studio-prompt-input:focus {
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .studio-primary {
+  border-radius: 12px;
+}
+
+html.visual-calm .studio-secondary {
+  background: var(--calm-surface);
+  border-color: var(--calm-border-strong);
+  border-radius: 12px;
+}
+
+html.visual-calm .studio-template {
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border);
+  border-radius: 14px;
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .studio-template:hover {
+  border-color: var(--calm-border-strong);
+}
+
+/* ---------- Everyday ---------- */
+
+html.visual-calm .everyday-agent-main {
+  --calm-view-bg:
+    radial-gradient(50% 35% at 100% 0%, var(--calm-sky-2), transparent 70%), var(--calm-page);
+}
+
+html.visual-calm .ea-console-header h1 {
+  font-family: var(--calm-font-display);
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+html.visual-calm .ea-console-header p {
+  font-size: 15px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .ea-kicker {
+  color: var(--calm-text-muted);
+  font-weight: 600;
+}
+
+html.visual-calm .ea-operator-main h2 {
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+html.visual-calm .ea-section h2,
+html.visual-calm .ea-section-header h2 {
+  font-family: var(--calm-font-display);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  color: var(--calm-text);
+}
+
+html.visual-calm .ea-plan-step {
+  background: var(--calm-surface);
+  border-color: var(--calm-border);
+  border-radius: 14px;
+  box-shadow: var(--calm-shadow-soft);
+}
+
+/* ---------- Devices ---------- */
+
+html.visual-calm .dp-title {
+  font-family: var(--calm-font-display);
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+html.visual-calm .dp-section-label {
+  font-family: var(--calm-font-display);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+
+html.visual-calm .dp-task-card,
+html.visual-calm .dp-device-card {
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border);
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .dp-task-card:hover,
+html.visual-calm .dp-device-card:hover {
+  border-color: var(--calm-border-strong);
+}
+
+/* ---------- Composer model picker ----------
+   The model picker lives in the message box, as in the modern theme. Calm
+   renders the welcome composer's left action group in every density, so in
+   Focused density hide that copy and keep the right-hand label, matching
+   modern. */
+html.visual-calm.density-focused
+  .calm-main
+  .welcome-input-footer
+  .input-left-actions
+  .model-dropdown-container {
+  display: none;
+}
+
+/* Build's composer sits mid-page; its model picker opens upward like the
+   other composers. */
+html.visual-calm .calm-build-composer .model-dropdown-container {
+  align-self: center;
+}
+
+/* ---------- Reasoning slider (model picker) ----------
+   A vivid sky → violet fill so the chosen depth reads at a glance. */
+html.visual-calm .model-quick-panel {
+  --quick-track: color-mix(in srgb, var(--calm-text) 8%, transparent);
+  --quick-thumb: #ffffff;
+  --calm-effort-from: #0ea5e9;
+  --calm-effort-to: #7c5cff;
+}
+
+html.visual-calm .model-quick-effort-shell::before {
+  box-shadow: inset 0 0 0 1px var(--calm-border);
+}
+
+html.visual-calm .model-quick-effort-shell::after {
+  background-image:
+    radial-gradient(circle at 3.5px 3.5px, rgba(255, 255, 255, 0.28) 1.1px, transparent 1.5px),
+    linear-gradient(90deg, var(--calm-effort-from), var(--calm-effort-to));
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--calm-effort-to) 35%, transparent);
+}
+
+html.visual-calm .model-quick-effort-markers span {
+  width: 5px;
+  height: 5px;
+  background: color-mix(in srgb, var(--calm-text) 28%, transparent);
+}
+
+html.visual-calm .model-quick-effort-range::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--calm-effort-to) 55%, white),
+    0 2px 6px rgba(24, 24, 20, 0.25);
+}
+
+html.visual-calm .model-quick-effort-range:hover::-webkit-slider-thumb,
+html.visual-calm .model-quick-effort-range:focus-visible::-webkit-slider-thumb,
+html.visual-calm .model-quick-effort-range:active::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--calm-effort-to) 65%, white),
+    0 3px 10px rgba(24, 24, 20, 0.28);
+}
+
+html.visual-calm .model-quick-effort-range:focus-visible {
+  box-shadow: none;
+}
+
+html.visual-calm .model-quick-effort-caption strong {
+  background: linear-gradient(90deg, var(--calm-effort-from), var(--calm-effort-to));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- Access menu in the composer ---------- */
+html.visual-calm .calm-popover.calm-popover-up {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: auto;
+  z-index: 1000;
+  transform-origin: bottom left;
+}
+
+html.visual-calm .calm-access-menu .calm-access-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+
+/* ---------- Side rails ----------
+   Left sidebar and right panel share one quiet rail colour; the centre is
+   the brightest surface. Selected rows are white chips on the rail. */
+html.visual-calm .calm-sidebar {
+  --calm-sidebar-active: #ffffff;
+  --calm-sidebar-active-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.05);
+}
+
+html.visual-calm:not(.theme-light) .calm-sidebar {
+  --calm-sidebar-active: rgba(255, 255, 255, 0.08);
+  --calm-sidebar-active-shadow: none;
+}
+
+html.platform-darwin.visual-calm .app-layout,
+html.platform-darwin.visual-calm .sidebar.cli-sidebar,
+html.platform-darwin.theme-light.visual-calm .app-layout,
+html.platform-darwin.theme-light.visual-calm .sidebar.cli-sidebar {
+  background: var(--calm-sidebar) !important;
+}
+
+/* Selected and primary rows read as chips on the rail. */
+html.visual-calm .calm-sidebar .calm-nav-item.active,
+html.visual-calm .calm-sidebar .calm-nav-new,
+html.visual-calm .calm-sidebar .cli-task-item.active,
+html.visual-calm .calm-sidebar .cli-task-item.selected {
+  background: var(--calm-sidebar-active);
+  box-shadow: var(--calm-sidebar-active-shadow);
+}
+
+html.visual-calm .calm-sidebar .calm-nav-new:hover {
+  background: var(--calm-sidebar-active);
+  filter: brightness(0.98);
+}
+
+html.visual-calm .calm-sidebar .calm-segmented {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .calm-sidebar .calm-segmented > button.active {
+  background: var(--calm-sidebar-active);
+}
+
+/* Search box in the sessions list. */
+html.visual-calm .calm-sidebar .sidebar-sessions-search,
+html.visual-calm .calm-sidebar .sidebar-sessions-search input {
+  background: var(--calm-surface);
+}
+
+html.visual-calm:not(.theme-light) .calm-sidebar .sidebar-sessions-search,
+html.visual-calm:not(.theme-light) .calm-sidebar .sidebar-sessions-search input {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ---------- Icon buttons vs. the global button rule ----------
+   right-panel.css ships an unscoped `button { padding: 10px 16px }`. Fixed-size
+   icon buttons that don't set their own padding collapse their icon to 0px. */
+html.visual-calm .browser-workbench-device-btn,
+html.visual-calm .browser-workbench-icon-btn,
+html.visual-calm .title-bar-btn,
+html.visual-calm [class*="-icon-btn"] {
+  padding: 0;
+}
+
+/* ---------- Composer placeholder ----------
+   Keep the placeholder on one line (with an ellipsis) so a narrow composer
+   doesn't show a clipped second line. */
+html.visual-calm .calm-main .prompt-composer-input:empty::before {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- In-app browser ---------- */
+
+html.visual-calm .browser-workbench-newtab-eyebrow {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .browser-workbench-newtab-title {
+  font-family: var(--calm-font-display);
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+html.visual-calm .browser-workbench-newtab-subtitle {
+  font-size: 15px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .browser-workbench-newtab-tile {
+  border-color: var(--calm-border);
+  border-radius: 14px;
+  background: var(--calm-surface);
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .browser-workbench-newtab-tile:hover {
+  background: var(--calm-surface);
+  border-color: var(--calm-border-strong);
+  box-shadow: var(--calm-shadow-pop);
+}
+
+html.visual-calm .browser-workbench-newtab-mode .browser-workbench-surface {
+  background: radial-gradient(60% 45% at 100% 100%, var(--calm-sky-2), transparent 70%);
+}
+
+/* URL bar reads as one rounded field; toolbar buttons are quiet icons. */
+html.visual-calm .browser-workbench-url-form input {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--calm-surface-muted);
+  text-align: left;
+}
+
+html.visual-calm .browser-workbench-url-form input:focus {
+  background: var(--calm-surface);
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .browser-workbench-icon-btn,
+html.visual-calm .browser-workbench-device-btn {
+  border-color: transparent;
+  background: transparent;
+  border-radius: 10px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .browser-workbench-icon-btn:hover,
+html.visual-calm .browser-workbench-device-btn:hover,
+html.visual-calm .browser-workbench-device-btn.is-active {
+  background: var(--calm-surface-hover);
+  color: var(--calm-text);
+}
+
+/* ---------- Notifications popover ---------- */
+
+html.visual-calm .notification-panel,
+html.visual-calm [class*="notification-panel"] {
+  border-radius: 18px;
+  border-color: var(--calm-border);
+  box-shadow: var(--calm-shadow-pop);
+}
+
+/* ---------- Flat surfaces across remaining screens ----------
+   Older panels paint cards with glossy diagonal gradients; calm uses flat
+   white (light) / raised (dark) cards with a hairline border. */
+html.visual-calm .cp-sidebar,
+html.visual-calm .cp-detail-header,
+html.visual-calm .cp-command-card,
+html.visual-calm .ea-operator-card,
+html.visual-calm .ea-live-rail,
+html.visual-calm .ea-temporary-modes,
+html.visual-calm .ea-console .ea-section,
+html.visual-calm .dp-input-box,
+html.visual-calm .dp-support-card,
+html.visual-calm .dispatch-info-card,
+html.visual-calm .dispatch-settings-item,
+html.visual-calm .agents-showcase-core-card,
+html.visual-calm .agents-showcase-side-card {
+  background: var(--calm-surface);
+  border-color: var(--calm-border);
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .cp-command-card:hover,
+html.visual-calm .dispatch-settings-item:hover {
+  background: var(--calm-surface);
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .cp-command-card::before,
+html.visual-calm .dispatch-settings-item::before,
+html.visual-calm .dp-support-card::after {
+  display: none;
+}
+
+/* Agents hub: it ships its own light-only palette; map it onto calm tokens so
+   it follows light and dark. */
+html.visual-calm .agents-panel,
+html.visual-calm .agents-studio {
+  --agents-bg: var(--calm-page);
+  --agents-surface: var(--calm-surface);
+  --agents-surface-strong: var(--calm-surface-raised);
+  --agents-border: var(--calm-border);
+  --agents-border-strong: var(--calm-border-strong);
+  --agents-text: var(--calm-text);
+  --agents-muted: var(--calm-text-secondary);
+  --agents-subtle: var(--calm-text-muted);
+  --agents-accent: var(--calm-accent);
+  --agents-accent-soft: var(--calm-accent-subtle);
+  --agents-shadow: var(--calm-shadow-soft);
+  background: transparent;
+  font-family: var(--font-ui);
+}
+
+html.visual-calm .agents-create-screen {
+  background: var(--calm-surface);
+}
+
+/* Primary buttons: solid ink instead of the accent gradient. */
+html.visual-calm .button-primary,
+html.visual-calm .settings-page .btn-primary,
+html.visual-calm .btn-primary {
+  background: var(--calm-ink);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html.visual-calm .button-primary::before,
+html.visual-calm .btn-primary::before {
+  display: none;
+}
+
+html.visual-calm .button-primary:hover:not(:disabled),
+html.visual-calm .btn-primary:hover:not(:disabled) {
+  background: var(--calm-ink);
+  opacity: 0.88;
+}
+
+/* Page titles and eyebrows in the remaining panels. */
+html.visual-calm .health-hero-title {
+  font-family: var(--calm-font-display);
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+html.visual-calm .dp-support-eyebrow,
+html.visual-calm .bot-profile-eyebrow,
+html.visual-calm .web-artifact-viewer-format span,
+html.visual-calm .presentation-viewer-notes-title {
+  font-family: var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 600;
+}
+
+html.visual-calm .cp-sidebar-item--active {
+  background: var(--calm-surface-muted);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* ---------- Status colours in light mode ----------
+   The shared success/warning/error/info tokens are bright shades tuned for
+   dark backgrounds, and the base light theme doesn't override them, so status
+   text (badges, alerts, hints) was ~1.6:1 on white. Calm light uses darker,
+   readable shades with matching subtle fills. */
+html.visual-calm.theme-light {
+  --color-success: #15803d;
+  --color-success-subtle: rgba(21, 128, 61, 0.1);
+  --color-warning: #b45309;
+  --color-warning-subtle: rgba(180, 83, 9, 0.1);
+  --color-error: #c62828;
+  --color-error-subtle: rgba(198, 40, 40, 0.09);
+  --color-info: #1d4ed8;
+  /* Inbox badges/buttons read these (fallbacks keep other themes unchanged). */
+  --inbox-critical-text: #be123c;
+  --inbox-high-text: #b45309;
+}
+
+html.visual-calm {
+  --color-accent-contrast: var(--calm-accent-contrast);
+}
+
+/* Agents hub surfaces: its stylesheet hard-codes white/near-white fills, so
+   dark mode showed light text on white. Map them to calm surfaces. */
+html.visual-calm .agents-agent-action-button,
+html.visual-calm .agents-agent-add,
+html.visual-calm .agents-agent-channel-card,
+html.visual-calm .agents-agent-connect-row,
+html.visual-calm .agents-agent-detail-screen,
+html.visual-calm .agents-agent-editor-bar,
+html.visual-calm .agents-agent-starter-card,
+html.visual-calm .agents-approval-preview-card,
+html.visual-calm .agents-builder-choice-group,
+html.visual-calm .agents-builder-connect-row,
+html.visual-calm .agents-builder-plan-card,
+html.visual-calm .agents-builder-progress-card,
+html.visual-calm .agents-builder-starters button,
+html.visual-calm .agents-create-bar,
+html.visual-calm .agents-create-screen-input,
+html.visual-calm .agents-hero-card,
+html.visual-calm .agents-library-card,
+html.visual-calm .agents-link-card,
+html.visual-calm .agents-note-card,
+html.visual-calm .agents-runtime-surface-card,
+html.visual-calm .agents-section-card,
+html.visual-calm .agents-studio-test-summary-card,
+html.visual-calm .agents-studio-test-workpaper,
+html.visual-calm .agents-surface-preview-card,
+html.visual-calm .agents-tab.active,
+html.visual-calm .agents-governance-strip .agents-governance-item {
+  background: var(--calm-surface);
+  border-color: var(--calm-border);
+}
+
+html.visual-calm .agents-approval-preview-card select,
+html.visual-calm .agents-section-card input,
+html.visual-calm .agents-section-card select,
+html.visual-calm .agents-section-card textarea,
+html.visual-calm .agents-builder-choice-options button {
+  background: var(--calm-surface);
+  border-color: var(--calm-border-strong);
+  color: var(--calm-text);
+}
+
+html.visual-calm .agents-agent-instruction-list li,
+html.visual-calm .agents-agent-pill,
+html.visual-calm .agents-builder-plan-icon,
+html.visual-calm .agents-builder-plan-pills span,
+html.visual-calm .agents-chip,
+html.visual-calm .agents-detail-meta div,
+html.visual-calm .agents-metric-pill,
+html.visual-calm .agents-preset-chip,
+html.visual-calm .agents-runtime-pill,
+html.visual-calm .agents-tab.subtle,
+html.visual-calm .agents-template-meta span,
+html.visual-calm .agents-studio-test-bubble,
+html.visual-calm .agents-showcase-core-icon,
+html.visual-calm .agents-showcase-side-icon,
+html.visual-calm .agents-library-card-icon {
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+}
+
+html.visual-calm .agents-panel strong,
+html.visual-calm .agents-panel h3,
+html.visual-calm .agents-panel h4,
+html.visual-calm .agents-studio strong,
+html.visual-calm .agents-studio h3,
+html.visual-calm .agents-studio h4 {
+  color: var(--calm-text);
+}
+
+html.visual-calm .agents-template-meta .agents-template-warning {
+  background: var(--color-warning-subtle, rgba(251, 191, 36, 0.16));
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+  color: var(--color-warning);
+}
+
+/* Inbox account chips hard-code a dark teal; lighten it in calm dark. */
+html.visual-calm:not(.theme-light) {
+  --inbox-account-text: #5eead4;
+  --inbox-critical-text: #fda4af;
+  --inbox-high-text: #fcd34d;
+}
+
+/* ---------- Artifact viewers ---------- */
+/* The viewers are always-light "paper" UIs, so their labels use a fixed
+   mid-grey rather than the theme's text colour. */
+html.visual-calm [class$="-viewer-format"],
+html.visual-calm [class*="-viewer-format "],
+html.visual-calm .spreadsheet-viewer-fx {
+  color: #5b6270;
+}
+
+html.visual-calm .user-bubble-expand-btn {
+  font-family: var(--font-ui);
+  letter-spacing: 0;
+}
+
+/* ---------- Full-screen browser ---------- */
+html.visual-calm .browser-view {
+  background: var(--calm-page);
+}
+
+html.visual-calm .browser-toolbar {
+  background: var(--calm-surface);
+  border-bottom-color: var(--calm-border);
+}
+
+html.visual-calm .browser-toolbar-btn {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border-color: var(--calm-border-strong);
+  background: var(--calm-surface);
+  font-weight: 500;
+}
+
+html.visual-calm .browser-toolbar-btn:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .browser-toolbar-btn.primary {
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast) !important;
+}
+
+html.visual-calm .browser-url input {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border-color: transparent;
+  background: var(--calm-surface-muted);
+  font-size: 13px;
+}
+
+html.visual-calm .browser-url input:focus {
+  background: var(--calm-surface);
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .browser-surface {
+  background: var(--calm-page);
+}
+
+html.visual-calm .browser-empty {
+  color: var(--calm-text-secondary);
+}
+
+/* ---------- Dialogs and in-chat cards ---------- */
+
+html.visual-calm .modal-header,
+html.visual-calm .modal-footer {
+  background: transparent;
+  border-color: var(--calm-border);
+}
+
+/* Schedule / automation modal and its popovers. */
+html.visual-calm .task-automation-modal,
+html.visual-calm .task-automation-popover {
+  background: var(--calm-surface-raised);
+  border-color: var(--calm-border);
+  color: var(--calm-text);
+  box-shadow: var(--calm-shadow-pop);
+}
+
+html.visual-calm .task-automation-template-card,
+html.visual-calm .task-automation-pill-control {
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+  color: var(--calm-text);
+}
+
+html.visual-calm .task-automation-template-card:hover {
+  border-color: var(--calm-border-strong);
+}
+
+/* Agent questions shown in the chat. */
+html.visual-calm .input-request-card {
+  background:
+    radial-gradient(70% 90% at 100% 0%, var(--calm-sky-2), transparent 65%), var(--calm-surface);
+  border-color: var(--calm-border);
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .input-request-header {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+html.visual-calm .input-request-option {
+  background: var(--calm-surface);
+  border-color: var(--calm-border);
+}
+
+html.visual-calm .input-request-option:hover {
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .input-request-submit {
+  background: var(--calm-ink);
+}
+
+/* Browser-use approval. */
+html.visual-calm .browser-use-approval-allow {
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+}
+
+/* First-run disclaimer. */
+html.visual-calm .disclaimer-card {
+  background: var(--calm-surface-raised);
+  border-color: var(--calm-border);
+  box-shadow: var(--calm-shadow-pop);
+}
+
+html.visual-calm .disclaimer-card::before {
+  display: none;
+}
+
+html.visual-calm .disclaimer-option {
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .disclaimer-continue-btn {
+  background: var(--calm-ink);
+  border-color: transparent;
+  color: var(--calm-ink-contrast);
+}
+
+html.visual-calm .disclaimer-section,
+html.visual-calm .disclaimer-subtitle {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Document editor modal. */
+html.visual-calm .document-editor-header,
+html.visual-calm .document-editor-main {
+  background: var(--calm-page);
+  border-color: var(--calm-border);
+}
+
+html.visual-calm .document-editor-sidebar {
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+}
+
+html.visual-calm .document-editor-panel {
+  background: var(--calm-surface);
+  border-color: var(--calm-border);
+}
+
+html.visual-calm .document-editor-panel-title {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ---------- Right panel as a rail ----------
+   The base styles float the inspector as a shadowed card; calm docks it as a
+   full-height rail that mirrors the left sidebar. */
+html.visual-calm .right-panel,
+html.visual-calm.theme-light .right-panel {
+  align-self: stretch;
+  height: auto !important;
+  max-height: none;
+  margin: 0;
+  padding-top: var(--title-bar-height) !important;
+  background: var(--calm-sidebar) !important;
+  border: none !important;
+  border-left: 1px solid var(--calm-border) !important;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html.visual-calm .right-panel .cli-section,
+html.visual-calm .right-panel [class*="-section-card"] {
+  background: transparent;
+}
+
+/* ---------- Task status banners (paused / blocked / cancelled) ----------
+   A quiet notice instead of a filled warning block: neutral card, thin
+   status stripe on the left, neutral buttons, red text for Stop. */
+html.visual-calm .task-status-banner {
+  padding: 12px 14px 12px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--calm-border);
+  background: var(--calm-surface-muted);
+  box-shadow: inset 3px 0 0 var(--color-warning);
+}
+
+html.visual-calm .task-status-banner-blocked {
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+  box-shadow: inset 3px 0 0 var(--color-error);
+}
+
+html.visual-calm .task-status-banner-cancelled {
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+  box-shadow: inset 3px 0 0 var(--calm-text-muted);
+}
+
+html.visual-calm .task-status-banner-remote {
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border);
+  box-shadow: inset 3px 0 0 var(--calm-accent);
+}
+
+html.visual-calm .task-status-banner-content strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--calm-text);
+}
+
+html.visual-calm .task-status-banner-detail {
+  font-size: 13px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .task-status-banner-secondary-btn,
+html.visual-calm .task-status-banner-primary-btn,
+html.visual-calm .task-status-banner-stop-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+html.visual-calm .task-status-banner-secondary-btn {
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border-strong);
+  color: var(--calm-text);
+}
+
+html.visual-calm .task-status-banner-secondary-btn:hover {
+  background: var(--calm-surface);
+  border-color: var(--calm-text-muted);
+}
+
+html.visual-calm .task-status-banner-primary-btn {
+  background: var(--calm-ink);
+  border: 1px solid transparent;
+  color: var(--calm-ink-contrast);
+}
+
+html.visual-calm .task-status-banner-primary-btn:hover {
+  background: var(--calm-ink);
+  border-color: transparent;
+  opacity: 0.88;
+}
+
+html.visual-calm .task-status-banner-stop-btn {
+  background: transparent;
+  border: 1px solid var(--calm-border-strong);
+  color: var(--color-error);
+}
+
+html.visual-calm .task-status-banner-stop-btn:hover {
+  background: var(--color-error-subtle, rgba(198, 40, 40, 0.08));
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+}
+
+/* Profile footer: agent avatar + assistant name as one button. */
+html.visual-calm .calm-profile-identity {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px 4px 2px;
+  border: none;
+  border-radius: var(--calm-radius-item);
+  background: transparent;
+  color: var(--calm-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+html.visual-calm .calm-profile-identity:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-profile-avatar-agent {
+  background: var(--calm-surface);
+  box-shadow: 0 0 0 1px var(--calm-border);
+}
+
+/* Footer identity sits on the nav grid: avatar centred on the 20px icon
+   column, name on the label column. */
+html.visual-calm .calm-profile-identity {
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 4px 8px 4px 6px;
+}
+
+html.visual-calm .calm-profile-avatar.calm-profile-avatar-agent {
+  width: 24px;
+  height: 24px;
+}
+
+/* ---------- Reasoning slider layout (calm) ----------
+   Level caption under the slider, and fill/markers aligned to the thumb's
+   11px travel inset. Scoped to calm so the modern picker is unchanged. */
+html.visual-calm .model-quick-effort-control {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+html.visual-calm .model-quick-effort-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .model-quick-effort-caption strong {
+  flex-shrink: 0;
+  font-weight: 650;
+}
+
+html.visual-calm .model-quick-effort-caption span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.visual-calm .model-quick-effort-shell::after {
+  width: calc(22px + (100% - 22px) * var(--model-quick-ratio, 1));
+}
+
+html.visual-calm .model-quick-effort-markers {
+  inset: 0 11px;
+}

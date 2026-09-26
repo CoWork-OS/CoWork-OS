@@ -12,6 +12,7 @@ import {
 import { getModelAccessDescriptor } from "../../../shared/model-access";
 import { Check, ChevronLeft, ChevronRight, Search, Settings2, Sparkles } from "lucide-react";
 import { getLLMProviderIcon } from "../llm-provider-icons";
+import { useIsCalmTheme } from "../../hooks/useIsCalmTheme";
 import type { SettingsTab } from "./main-content-types";
 
 type ModelPickerView = "quick" | "advanced";
@@ -50,6 +51,7 @@ function QuickModelPicker({
   onReasoningEffortChange,
   onOpenAdvanced,
 }: QuickModelPickerProps) {
+  const isCalm = useIsCalmTheme();
   const fallbackIndex = Math.max(
     0,
     reasoningEffortOptions.findIndex((option) => option.value === "medium"),
@@ -89,7 +91,12 @@ function QuickModelPicker({
         <div className="model-quick-effort-control" aria-label="Reasoning effort">
           <div
             className={`model-quick-effort-shell ${isEffortLocked ? "disabled" : ""}`}
-            style={{ "--model-quick-progress": `${progress}%` } as React.CSSProperties}
+            style={
+              {
+                "--model-quick-progress": `${progress}%`,
+                "--model-quick-ratio": lastIndex > 0 ? sliderIndex / lastIndex : 1,
+              } as React.CSSProperties
+            }
           >
             {/* Markers render before the input so the thumb paints over them. */}
             <div className="model-quick-effort-markers" aria-hidden="true">
@@ -122,6 +129,15 @@ function QuickModelPicker({
               }}
             />
           </div>
+          {isCalm && selectedOption && (
+            <p className="model-quick-effort-caption" aria-hidden="true">
+              <strong>{selectedOption.label}</strong>
+              <span>
+                {REASONING_EFFORT_DESCRIPTIONS[selectedOption.value] ||
+                  "Reasoning depth for the next response"}
+              </span>
+            </p>
+          )}
         </div>
       ) : (
         <div className="model-quick-empty-state">

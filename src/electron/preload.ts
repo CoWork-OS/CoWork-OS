@@ -6999,7 +6999,7 @@ export interface ElectronAPI {
   // Appearance Settings
   getAppearanceSettings: () => Promise<{
     themeMode: "light" | "dark" | "system";
-    visualTheme: "terminal" | "warm" | "oblivion";
+    visualTheme: "terminal" | "warm" | "oblivion" | "calm";
     transparencyEffectsEnabled?: boolean;
     accentColor:
       | "cyan"
@@ -7030,7 +7030,7 @@ export interface ElectronAPI {
   logRendererPerf: (payload: unknown) => Promise<{ success: boolean }>;
   saveAppearanceSettings: (settings: {
     themeMode?: "light" | "dark" | "system";
-    visualTheme?: "terminal" | "warm" | "oblivion";
+    visualTheme?: "terminal" | "warm" | "oblivion" | "calm";
     transparencyEffectsEnabled?: boolean;
     accentColor?:
       | "cyan"
@@ -8786,6 +8786,7 @@ export interface ElectronAPI {
 
   // Daily Briefing
   generateDailyBriefing: (workspaceId: string) => Promise<Any>;
+  getLatestBriefing: (workspaceId: string) => Promise<unknown>;
   generateBriefing: (workspaceId: string) => Promise<Any>;
 
   // Proactive Suggestions

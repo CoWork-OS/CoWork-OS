@@ -3,7 +3,7 @@ import { ArrowUp, Code2, LayoutDashboard, AppWindow, Gauge } from "lucide-react"
 import { isTempWorkspaceId, type Workspace } from "../../../shared/types";
 import { getWorkspaceStatusFolderLabel } from "../MainContent/welcome-suggestions";
 import { ModelDropdown, type ModelDropdownProps } from "../MainContent/ModelDropdown";
-import { CalmTopBar } from "./CalmTopBar";
+import { CalmFolderMenu } from "./CalmTopBar";
 
 interface BuildPanelProps {
   onStart: (prompt: string) => void | Promise<void>;
@@ -86,16 +86,6 @@ export function BuildPanel({
 
   return (
     <main className="main-content calm-view calm-build">
-      <CalmTopBar
-        scope={{
-          label: getWorkspaceStatusFolderLabel(workspace),
-          workspaces: recentWorkspaces,
-          activeWorkspaceId: workspace?.id,
-          onSelect: onSelectWorkspace,
-          onNewFolder: onPickFolder,
-          onOpen: () => void loadRecentWorkspaces(),
-        }}
-      />
       <div className="calm-view-inner calm-build-inner">
         <div className="calm-build-kicker">
           <Code2 size={16} aria-hidden="true" />
@@ -139,6 +129,19 @@ export function BuildPanel({
             <ArrowUp size={18} aria-hidden="true" />
           </button>
         </form>
+
+        <div className="calm-build-status">
+          <CalmFolderMenu
+            scope={{
+              label: getWorkspaceStatusFolderLabel(workspace),
+              workspaces: recentWorkspaces,
+              activeWorkspaceId: workspace?.id,
+              onSelect: onSelectWorkspace,
+              onNewFolder: onPickFolder,
+              onOpen: () => void loadRecentWorkspaces(),
+            }}
+          />
+        </div>
 
         <div className="calm-build-starters">
           {BUILD_STARTERS.map((starter) => {

@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { OpenAIOAuth, type OpenAIOAuthTokens } from "../openai-oauth";
+import {
+  OpenAIOAuth,
+  extractChatGPTPlanType,
+  recommendChatGPTModelForPlan,
+  type OpenAIOAuthTokens,
+} from "../openai-oauth";
 
 const refreshOpenAICodexTokenMock = vi.fn();
 
@@ -59,5 +64,32 @@ describe("OpenAIOAuth", () => {
     await expect(
       OpenAIOAuth.getApiKeyFromTokens(makeTokens({ expires_at: Date.now() - 1_000 })),
     ).rejects.toThrow("OpenAI Codex token refresh error: fetch failed");
+  });
+});
+
+describe("ChatGPT plan-aware default model", () => {
+  const tokenWithPlan = (plan?: string) =>
+    [
+      "header",
+      Buffer.from(
+        JSON.stringify({
+          "https://api.openai.com/auth": plan ? { chatgpt_plan_type: plan } : {},
+        }),
+      ).toString("base64url"),
+      "sig",
+    ].join(".");
+
+  it("reads the plan claim from the access token", () => {
+    expect(extractChatGPTPlanType(tokenWithPlan("Plus"))).toBe("plus");
+    expect(extractChatGPTPlanType(tokenWithPlan())).toBeUndefined();
+    expect(extractChatGPTPlanType("not-a-jwt")).toBeUndefined();
+  });
+
+  it("defaults Free and Go plans to a model they can run", () => {
+    expect(recommendChatGPTModelForPlan("free")).toBe("gpt-6-luna");
+    expect(recommendChatGPTModelForPlan("go")).toBe("gpt-6-luna");
+    expect(recommendChatGPTModelForPlan("plus")).toBe("gpt-6-astra");
+    expect(recommendChatGPTModelForPlan(undefined)).toBe("gpt-6-astra");
+    expect(recommendChatGPTModelForPlan("Go")).toBe("gpt-6-luna");
   });
 });

@@ -93,7 +93,7 @@ describe("DEFAULT_CONTROL_PLANE_SETTINGS", () => {
     expect(DEFAULT_CONTROL_PLANE_SETTINGS.port).toBe(18789);
     expect(DEFAULT_CONTROL_PLANE_SETTINGS.host).toBe("127.0.0.1");
     expect(DEFAULT_CONTROL_PLANE_SETTINGS.token).toBe("");
-    expect(DEFAULT_CONTROL_PLANE_SETTINGS.nodeToken).toBe("");
+    expect(DEFAULT_CONTROL_PLANE_SETTINGS).not.toHaveProperty("nodeToken");
     expect(DEFAULT_CONTROL_PLANE_SETTINGS.handshakeTimeoutMs).toBe(10000);
     expect(DEFAULT_CONTROL_PLANE_SETTINGS.heartbeatIntervalMs).toBe(30000);
     expect(DEFAULT_CONTROL_PLANE_SETTINGS.maxPayloadBytes).toBe(10 * 1024 * 1024);
@@ -134,6 +134,28 @@ describe("ControlPlaneSettingsManager", () => {
       expect(settings.tailscale.mode).toBe("off");
     });
 
+    it("deletes the retired mobile companion token saved by older releases", () => {
+      mockStoredSettings = { enabled: true, token: "operator-token", nodeToken: "old-node-token" };
+      ControlPlaneSettingsManager.clearCache();
+      writeCount = 0;
+
+      const settings = ControlPlaneSettingsManager.loadSettings();
+
+      expect(settings.token).toBe("operator-token");
+      expect(settings).not.toHaveProperty("nodeToken");
+      expect(mockStoredSettings).not.toHaveProperty("nodeToken");
+      expect(writeCount).toBe(1);
+    });
+
+    it("never persists a mobile companion token passed in an update", () => {
+      ControlPlaneSettingsManager.updateSettings({
+        port: 9999,
+        nodeToken: "injected",
+      } as Parameters<typeof ControlPlaneSettingsManager.updateSettings>[0]);
+
+      expect(mockStoredSettings).not.toHaveProperty("nodeToken");
+    });
+
     it("should load existing settings", () => {
       mockStoredSettings = {
         enabled: true,
@@ -154,7 +176,7 @@ describe("ControlPlaneSettingsManager", () => {
       expect(settings.port).toBe(9999);
       expect(settings.host).toBe("0.0.0.0");
       expect(settings.token).toBe("test-token");
-      expect(settings.nodeToken).toHaveLength(64);
+      expect(settings).not.toHaveProperty("nodeToken");
       expect(settings.trustProxy).toBe(true);
       expect(settings.allowedOrigins).toEqual(["https://cowork.example.com"]);
       expect(settings.tailscale.mode).toBe("serve");
@@ -246,19 +268,17 @@ describe("ControlPlaneSettingsManager", () => {
 
       expect(settings.enabled).toBe(true);
       expect(settings.token).toBeDefined();
-      expect(settings.nodeToken).toBeDefined();
       expect(settings.token.length).toBe(64);
-      expect(settings.nodeToken.length).toBe(64);
+      expect(settings).not.toHaveProperty("nodeToken");
     });
 
-    it("should preserve existing tokens", () => {
-      mockStoredSettings = { token: "existing-token", nodeToken: "existing-node-token" };
+    it("should preserve the existing token", () => {
+      mockStoredSettings = { token: "existing-token" };
       ControlPlaneSettingsManager.clearCache();
 
       const settings = ControlPlaneSettingsManager.enable();
 
       expect(settings.token).toBe("existing-token");
-      expect(settings.nodeToken).toBe("existing-node-token");
     });
   });
 
@@ -291,7 +311,7 @@ describe("ControlPlaneSettingsManager", () => {
 
       expect(newToken).not.toBe("old-token");
       expect(newToken.length).toBe(64);
-      expect((mockStoredSettings as Any).nodeToken).toHaveLength(64);
+      expect(mockStoredSettings).not.toHaveProperty("nodeToken");
     });
 
     it("should save the new token", () => {

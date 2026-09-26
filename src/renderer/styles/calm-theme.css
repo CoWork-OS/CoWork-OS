@@ -1979,10 +1979,15 @@ html.visual-calm.density-focused
   display: none;
 }
 
-/* Build's composer sits mid-page; its model picker opens upward like the
-   other composers. */
+/* Build's composer bottom-aligns its children; keep the model picker on the
+   send button's row (same 36px height, vertically centered) rather than
+   centering it against the taller textarea. */
 html.visual-calm .calm-build-composer .model-dropdown-container {
-  align-self: center;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  height: 36px;
+  flex-shrink: 0;
 }
 
 /* ---------- Reasoning slider (model picker) ----------
@@ -2281,13 +2286,6 @@ html.visual-calm .btn-primary:hover:not(:disabled) {
 }
 
 /* Page titles and eyebrows in the remaining panels. */
-html.visual-calm .health-hero-title {
-  font-family: var(--calm-font-display);
-  font-size: 28px;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-}
-
 html.visual-calm .dp-support-eyebrow,
 html.visual-calm .bot-profile-eyebrow,
 html.visual-calm .web-artifact-viewer-format span,

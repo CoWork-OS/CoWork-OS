@@ -1,3 +1,4 @@
+import { estimateTaskCost } from "../agent/llm/usage-telemetry";
 import {
   ipcMain,
   shell,
@@ -7,6 +8,15 @@ import {
   type IpcMainInvokeEvent,
 } from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
+import { RELEASE_BRIEF_PROMPT, checkReleaseBriefRuntime, seedReleaseBriefWorkspace } from "../first-task/service";
+import { probeFirstTaskModel } from "../first-task/model-preflight";
+import { applyRevisionContract } from "../first-task/revision-contract";
+import { ensureFirstTaskTables } from "../first-task/attempt-schema";
+import { readLocalRealWork, recordLocalRealWorkInspection, recordLocalRealWorkUseful } from "../first-task/real-work-state";
+import { reconcilePendingSampleAttempts } from "../first-task/reconcile-attempts";
+import { verifyReleaseBrief } from "../first-task/verify-release-brief";
+import { randomUUID } from "node:crypto";
+import { RELEASE_BRIEF_ACCESS_PROFILE_ID } from "../security/access-profile-resolver";
 import * as path from "path";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
@@ -270,6 +280,7 @@ import {
   LLMProviderConfig,
   ModelKey,
   OpenAIOAuth,
+  recommendChatGPTModelForPlan,
   XAIOAuth,
 } from "../agent/llm";
 import {
@@ -282,7 +293,6 @@ import { ShellSessionManager } from "../agent/tools/shell-session-manager";
 import { GitHubReviewService } from "../git/GitHubReviewService";
 import { TerminalPtyManager } from "../terminal/TerminalPtyManager";
 import { normalizeTerminalAttachInput } from "../terminal/terminal-input-policy";
-import { HealthManager } from "../health/HealthManager";
 import { ChannelGateway } from "../gateway";
 import { CHANNEL_TYPES } from "../gateway/channels/types";
 import { updateManager } from "../updater";
@@ -331,6 +341,8 @@ import {
   PermissionSettingsSchema,
   AddChannelSchema,
   UpdateChannelSchema,
+  WhatsAppCloudChannelConfigSchema,
+  TwilioSmsChannelConfigSchema,
   GrantAccessSchema,
   RevokeAccessSchema,
   GeneratePairingSchema,
@@ -351,10 +363,6 @@ import {
   SetImportedRecallIgnoredSchema,
   StepFeedbackSchema,
   ForkSessionSchema,
-  HealthSourceInputSchema,
-  HealthWorkflowRequestSchema,
-  HealthImportFilesSchema,
-  HealthWritebackRequestSchema,
   PersonalityImportSchema,
   PersonalityConfigV2Schema,
   ContextModeSchema,
@@ -1073,6 +1081,7 @@ rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ACT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.FIRST_TASK_PREFLIGHT, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.JEV_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_ANTHROPIC_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, RATE_LIMIT_CONFIGS.standard);
@@ -1229,7 +1238,9 @@ async function approveTerminalCommand(params: {
     );
   }
   if (/\bapply_patch\b/.test(params.command)) {
-    throw new Error("Terminal tabs cannot invoke apply_patch. Use the apply_patch tool directly.");
+    throw new Error(
+      "Terminal tabs cannot invoke apply_patch, and CoWork has no apply_patch tool. Use edit_file to change an existing file or write_file to create or replace one.",
+    );
   }
   const approved = await params.agentDaemon.requestApproval(
     taskId,
@@ -4657,6 +4668,230 @@ export async function setupIpcHandlers(
   );
 
   // Task handlers
+  ensureFirstTaskTables(db);
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_GET, () => {
+    const row = db.prepare("SELECT schema_version, choice, updated_at, model_ready_at FROM first_task_setup WHERE id = 1")
+      .get() as { schema_version: number; choice: "ready" | "skipped" | "browsing_without_ai" | "connecting"; updated_at: number; model_ready_at: number | null } | undefined;
+    return row ? { schemaVersion: row.schema_version, choice: row.choice, updatedAt: row.updated_at, modelReadyAt: row.model_ready_at } : null;
+  });
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_SET, (_event, choice: string) => {
+    if (!["ready", "skipped", "browsing_without_ai", "connecting"].includes(choice)) throw new Error("Invalid first-task setup choice");
+    db.prepare("INSERT INTO first_task_setup (id, schema_version, choice, updated_at) VALUES (1, 1, ?, ?) ON CONFLICT(id) DO UPDATE SET choice = excluded.choice, updated_at = excluded.updated_at")
+      .run(choice, Date.now());
+  });
+  reconcilePendingSampleAttempts(
+    db,
+    (taskId) => taskRepo.findById(taskId),
+    (taskId, error, completedAt) => taskRepo.update(taskId, { status: "failed", error, completedAt }),
+  );
+  const requireRealWorkTask = (taskId: string) => {
+    if (!/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
+    const task = taskRepo.findById(taskId);
+    if (!task || task.source === "sample" || task.parentTaskId || task.evalCaseId) throw new Error("Real-work task not found");
+    return task;
+  };
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_GET, (_event, taskId: string) => {
+    requireRealWorkTask(taskId);
+    return readLocalRealWork(db, taskId);
+  });
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_INSPECT, (_event, taskId: string) => {
+    const task = requireRealWorkTask(taskId);
+    if (task.status !== "completed") throw new Error("Finish the task before inspecting its result");
+    return recordLocalRealWorkInspection(db, taskId);
+  });
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_USEFUL, (_event, taskId: string) => {
+    const task = requireRealWorkTask(taskId);
+    if (task.status !== "completed" || task.terminalStatus === "failed") {
+      throw new Error("Only a completed real-work task can be marked useful");
+    }
+    return recordLocalRealWorkUseful(db, taskId);
+  });
+  const firstTaskStarts = new Map<string, Promise<unknown>>();
+  const firstTaskPreflights = new Map<string, { routeKey: string; createdAt: number }>();
+  const selectedFirstTaskRoute = () => {
+    const selection = LLMProviderFactory.resolveTaskModelSelection();
+    return { selection, routeKey: `${selection.providerType}:${selection.modelId}` };
+  };
+  const readFirstTaskAttempt = (attemptId?: string, taskId?: string) => {
+    const row = attemptId
+      ? db.prepare("SELECT * FROM first_task_attempts WHERE attempt_id = ?").get(attemptId)
+      : taskId
+        ? db.prepare("SELECT * FROM first_task_attempts WHERE task_id = ?").get(taskId)
+        : db.prepare("SELECT * FROM first_task_attempts ORDER BY created_at DESC LIMIT 1").get();
+    if (!row || typeof row !== "object") return null;
+    const record = row as { attempt_id: string; mission_id: string; workspace_id: string; task_id: string; checked_at?: number; check_json?: string; inspected_at?: number; revision_requested_at?: number; revision_base_hashes_json?: string; revision_inspected_at?: number };
+    const task = taskRepo.findById(record.task_id);
+    const workspace = workspaceRepo.findById(record.workspace_id);
+    if (!task || !workspace) return null;
+    return { attemptId: record.attempt_id, missionId: record.mission_id, task, workspace,
+      check: record.check_json ? JSON.parse(record.check_json) : null,
+      checkedAt: record.checked_at ?? null, inspectedAt: record.inspected_at ?? null,
+      revisionRequestedAt: record.revision_requested_at ?? null,
+      revisionBaseHashes: record.revision_base_hashes_json ? JSON.parse(record.revision_base_hashes_json) as Record<string, string> : null,
+      revisionInspectedAt: record.revision_inspected_at ?? null };
+  };
+
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_GET, async (_event, attemptId?: string, taskId?: string) => {
+    if (attemptId && !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    if (taskId && !/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
+    const attempt = readFirstTaskAttempt(attemptId, taskId);
+    if (!attempt?.check?.passed) return attempt;
+    const current = attempt.task.status === "completed"
+      ? await verifyReleaseBrief(attempt.workspace.path).catch(() => null)
+      : null;
+    if (current?.passed && JSON.stringify(current.artifactHashes) === JSON.stringify(attempt.check.artifactHashes)) return attempt;
+    db.prepare("UPDATE first_task_attempts SET checked_at = NULL, check_json = NULL WHERE attempt_id = ?").run(attempt.attemptId);
+    return readFirstTaskAttempt(attempt.attemptId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_PREFLIGHT, async () => {
+    checkRateLimit(IPC_CHANNELS.FIRST_TASK_PREFLIGHT);
+    for (const [issuedToken, issued] of firstTaskPreflights) {
+      if (Date.now() - issued.createdAt > 10 * 60_000) firstTaskPreflights.delete(issuedToken);
+    }
+    const { selection, routeKey } = selectedFirstTaskRoute();
+    const workspace = await checkReleaseBriefRuntime(tempWorkspaceRoot)
+      .then(() => ({ status: "pass" as const }))
+      .catch((error: unknown) => ({
+        status: "fail" as const,
+        detail: error instanceof Error ? error.message : "The sample workspace is unavailable",
+      }));
+    if (workspace.status === "fail") {
+      return { endpoint: "unknown" as const, model: "unknown" as const,
+        toolCalls: "unknown" as const, workspace: workspace.status,
+        workspaceDetail: workspace.detail, token: null,
+        providerType: selection.providerType, modelId: selection.modelId };
+    }
+    const result = await (async () => {
+      try {
+        const provider = LLMProviderFactory.createProvider({
+          type: selection.providerType,
+          model: selection.modelId,
+        });
+        return await probeFirstTaskModel(provider, selection.modelId);
+      } catch {
+        return { endpoint: "fail" as const, model: "unknown" as const, toolCalls: "unknown" as const, reason: "endpoint" as const };
+      }
+    })();
+    const token = result.toolCalls === "pass" ? randomUUID() : null;
+    if (token) {
+      firstTaskPreflights.set(token, { routeKey, createdAt: Date.now() });
+      db.prepare("UPDATE first_task_setup SET model_ready_at = ? WHERE id = 1").run(Date.now());
+    }
+    return { ...result, workspace: workspace.status, token,
+      providerType: selection.providerType, modelId: selection.modelId };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_START, async (_event, attemptId: string, preflightToken?: string) => {
+    if (typeof attemptId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)) {
+      throw new Error("Invalid attempt ID");
+    }
+    const existing = readFirstTaskAttempt(attemptId);
+    if (existing) return existing;
+    const inFlight = firstTaskStarts.get(attemptId);
+    if (inFlight) return inFlight;
+    const preflight = preflightToken ? firstTaskPreflights.get(preflightToken) : undefined;
+    const { selection, routeKey } = selectedFirstTaskRoute();
+    if (!preflight || preflight.routeKey !== routeKey || Date.now() - preflight.createdAt > 10 * 60_000) {
+      throw new Error("Check the selected model route before starting the sample task.");
+    }
+    firstTaskPreflights.delete(preflightToken!);
+    const launch = (async () => {
+      await checkReleaseBriefRuntime(tempWorkspaceRoot);
+      const workspace = await getOrCreateTempWorkspace({ createNew: true });
+      await seedReleaseBriefWorkspace(workspace.path);
+      const task = db.transaction(() => {
+        const created = taskRepo.create({
+          title: "Turn a messy release folder into a launch brief",
+          prompt: RELEASE_BRIEF_PROMPT,
+          status: "pending",
+          workspaceId: workspace.id,
+          source: "sample",
+          agentConfig: {
+            accessProfileId: RELEASE_BRIEF_ACCESS_PROFILE_ID,
+            providerType: selection.providerType,
+            modelKey: selection.modelKey,
+            allowedTools: ["list_directory", "read_file", "write_file", "edit_file"],
+            executionMode: "execute",
+          },
+        });
+        db.prepare("INSERT INTO first_task_attempts (attempt_id, mission_id, workspace_id, task_id, created_at) VALUES (?, ?, ?, ?, ?)")
+          .run(attemptId, "release-brief-v1", workspace.id, created.id, Date.now());
+        return created;
+      })();
+      try {
+        await agentDaemon.startTask(task);
+      } catch (error) {
+        agentDaemon.failTask(task.id, error instanceof Error ? error.message : String(error));
+      }
+      return readFirstTaskAttempt(attemptId);
+    })();
+    firstTaskStarts.set(attemptId, launch);
+    try { return await launch; } finally { firstTaskStarts.delete(attemptId); }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_VERIFY, async (_event, attemptId: string) => {
+    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    const attempt = readFirstTaskAttempt(attemptId);
+    if (!attempt) throw new Error("Sample attempt not found");
+    if (attempt.task.status === "cancelled") throw new Error("Cancelled attempts cannot pass checks");
+    if (attempt.task.status !== "completed") throw new Error("Wait for the task to finish before checking outputs");
+    const verified = await verifyReleaseBrief(attempt.workspace.path);
+    const check = attempt.revisionRequestedAt
+      ? applyRevisionContract(verified, attempt.revisionBaseHashes)
+      : verified;
+    db.prepare("UPDATE first_task_attempts SET checked_at = ?, check_json = ? WHERE attempt_id = ?")
+      .run(Date.now(), JSON.stringify(check), attemptId);
+    return check;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_INSPECT, async (_event, attemptId: string) => {
+    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    const attempt = readFirstTaskAttempt(attemptId);
+    if (!attempt || !attempt.check?.passed) throw new Error("No checked sample output to inspect");
+    if (attempt.task.status !== "completed") throw new Error("Sample task is not complete");
+    const current = await verifyReleaseBrief(attempt.workspace.path);
+    if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)) {
+      db.prepare("UPDATE first_task_attempts SET checked_at = NULL, check_json = NULL WHERE attempt_id = ?").run(attemptId);
+      throw new Error("Sample output changed since the last check. Run checks again.");
+    }
+    if (attempt.revisionRequestedAt) {
+      if (current.artifactHashes["release-brief.html"] === attempt.revisionBaseHashes?.["release-brief.html"]) {
+        throw new Error("The release brief has not changed since the revision request.");
+      }
+      db.prepare("UPDATE first_task_attempts SET revision_inspected_at = ? WHERE attempt_id = ?").run(Date.now(), attemptId);
+    } else {
+      db.prepare("UPDATE first_task_attempts SET inspected_at = ? WHERE attempt_id = ?").run(Date.now(), attemptId);
+    }
+    return true;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REQUEST_REVISION, async (_event, attemptId: string) => {
+    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    const attempt = readFirstTaskAttempt(attemptId);
+    if (!attempt || attempt.task.status !== "completed" || !attempt.check?.passed || !attempt.inspectedAt) {
+      throw new Error("Open a checked sample result before requesting a revision.");
+    }
+    const current = await verifyReleaseBrief(attempt.workspace.path);
+    if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)) {
+      throw new Error("Sample output changed. Run checks again before revising.");
+    }
+    db.prepare("UPDATE first_task_attempts SET revision_requested_at = ?, revision_base_hashes_json = ?, revision_inspected_at = NULL, checked_at = NULL, check_json = NULL WHERE attempt_id = ?")
+      .run(Date.now(), JSON.stringify(current.artifactHashes), attemptId);
+    return true;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_CANCEL_REVISION, async (_event, attemptId: string) => {
+    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    const attempt = readFirstTaskAttempt(attemptId);
+    if (!attempt?.revisionRequestedAt || attempt.task.status !== "completed") return false;
+    const current = await verifyReleaseBrief(attempt.workspace.path);
+    if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.revisionBaseHashes)) return false;
+    db.prepare("UPDATE first_task_attempts SET revision_requested_at = NULL, revision_base_hashes_json = NULL, revision_inspected_at = NULL, checked_at = ?, check_json = ? WHERE attempt_id = ?")
+      .run(Date.now(), JSON.stringify(current), attemptId);
+    return true;
+  });
+
   ipcMain.handle(IPC_CHANNELS.TASK_CREATE, async (_, data) => {
     checkRateLimit(IPC_CHANNELS.TASK_CREATE);
     const validated = validateInput(TaskCreateSchema, data, "task");
@@ -7262,6 +7497,12 @@ export async function setupIpcHandlers(
     }));
   });
 
+  // Typical task cost for a model, from the user's own local history (read-only).
+  ipcMain.handle(IPC_CHANNELS.LLM_TASK_COST_ESTIMATE, async (_, modelId: unknown) => {
+    if (typeof modelId !== "string" || !modelId.trim() || modelId.length > 200) return null;
+    return estimateTaskCost(modelId.trim());
+  });
+
   ipcMain.handle(IPC_CHANNELS.LLM_GET_CONFIG_STATUS, async () => {
     return LLMProviderFactory.getConfigStatus();
   });
@@ -7599,6 +7840,7 @@ export async function setupIpcHandlers(
             accountId: tokens.accountId,
             email: tokens.email,
             authMethod: "oauth",
+            chatgptPlanType: tokens.planType,
             // Clear API key when using OAuth
             apiKey: undefined,
           };
@@ -7611,6 +7853,7 @@ export async function setupIpcHandlers(
         return {
           success: true,
           email: tokens.email,
+          recommendedModel: recommendChatGPTModelForPlan(tokens.planType),
           tokens: shouldPersist
             ? undefined
             : {
@@ -7619,6 +7862,7 @@ export async function setupIpcHandlers(
                 tokenExpiresAt: tokens.expires_at,
                 accountId: tokens.accountId,
                 email: tokens.email,
+                planType: tokens.planType,
               },
         };
       } catch (error: Any) {
@@ -8812,6 +9056,52 @@ export async function setupIpcHandlers(
       return toPublicChannel(channel, "connecting");
     }
 
+    if (validated.type === "whatsapp_cloud") {
+      const channel = await gateway.addWhatsAppCloudChannel(
+        validated.name,
+        {
+          phoneNumberId: validated.whatsappCloudPhoneNumberId!,
+          accessToken: validated.whatsappCloudAccessToken!,
+          appSecret: validated.whatsappCloudAppSecret!,
+          verifyToken: validated.whatsappCloudVerifyToken!,
+          fallbackTemplateName: validated.whatsappCloudFallbackTemplateName,
+          fallbackTemplateLanguage: validated.whatsappCloudFallbackTemplateLanguage,
+          webhookPort: validated.webhookPort,
+          webhookPath: validated.webhookPath,
+        },
+        validated.securityMode || "pairing",
+      );
+
+      gateway.enableChannel(channel.id).catch((err) => {
+        logger.error("Failed to enable WhatsApp Cloud channel:", err);
+      });
+
+      return toPublicChannel(channel, "connecting");
+    }
+
+    if (validated.type === "twilio_sms") {
+      const channel = await gateway.addTwilioSmsChannel(
+        validated.name,
+        {
+          accountSid: validated.twilioAccountSid!,
+          authToken: validated.twilioAuthToken!,
+          fromNumber: validated.twilioFromNumber,
+          messagingServiceSid: validated.twilioMessagingServiceSid,
+          webhookPublicUrl: validated.twilioWebhookPublicUrl!,
+          webhookPort: validated.webhookPort,
+          webhookPath: validated.webhookPath,
+          statusPath: validated.twilioStatusPath,
+        },
+        validated.securityMode || "pairing",
+      );
+
+      gateway.enableChannel(channel.id).catch((err) => {
+        logger.error("Failed to enable Twilio SMS channel:", err);
+      });
+
+      return toPublicChannel(channel, "connecting");
+    }
+
     if (validated.type === "x") {
       const channel = await gateway.addXChannel(
         validated.name,
@@ -8914,6 +9204,18 @@ export async function setupIpcHandlers(
           mergedConfig,
           "email channel update",
         );
+      } else if (channel.type === "whatsapp_cloud") {
+        updates.config = validateInput(
+          WhatsAppCloudChannelConfigSchema,
+          mergedConfig,
+          "WhatsApp Cloud channel update",
+        );
+      } else if (channel.type === "twilio_sms") {
+        updates.config = validateInput(
+          TwilioSmsChannelConfigSchema,
+          mergedConfig,
+          "Twilio SMS channel update",
+        );
       } else {
         updates.config = mergedConfig;
       }
@@ -8935,6 +9237,11 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.GATEWAY_DISABLE_CHANNEL, async (_, id: string) => {
     if (!gateway) throw new Error("Gateway not initialized");
     await gateway.disableChannel(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_GET_CHANNEL_HEALTH, async (_, id: string) => {
+    if (!gateway) return null;
+    return gateway.getChannelHealth(validateInput(StringIdSchema, id, "channel id"));
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, async (_, id: string) => {
@@ -10968,9 +11275,6 @@ export async function setupIpcHandlers(
     return { success: true, ...result };
   });
 
-  // Health handlers
-  setupHealthHandlers();
-
   // MCP handlers
   setupMCPHandlers();
 
@@ -10994,116 +11298,6 @@ export async function setupIpcHandlers(
 
   // Memory system handlers
   setupMemoryHandlers();
-}
-
-/**
- * Set up Health IPC handlers
- */
-export function setupHealthHandlers(): void {
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_UPSERT_SOURCE, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_REMOVE_SOURCE, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_SYNC_SOURCE, RATE_LIMIT_CONFIGS.standard);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_IMPORT_FILES, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_GENERATE_WORKFLOW, RATE_LIMIT_CONFIGS.expensive);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_APPLE_CONNECT, RATE_LIMIT_CONFIGS.expensive);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_APPLE_PREVIEW_WRITEBACK, RATE_LIMIT_CONFIGS.standard);
-  rateLimiter.configure(IPC_CHANNELS.HEALTH_APPLE_APPLY_WRITEBACK, RATE_LIMIT_CONFIGS.expensive);
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_GET_DASHBOARD, async (): Promise<Any> => {
-    return HealthManager.getDashboard();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_LIST_SOURCES, async (): Promise<Any> => {
-    return HealthManager.listSources();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_UPSERT_SOURCE, async (_, source: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_UPSERT_SOURCE);
-    const validated = validateInput(HealthSourceInputSchema, source, "health source");
-    return HealthManager.upsertSource(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_REMOVE_SOURCE, async (_, sourceId: string) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_REMOVE_SOURCE);
-    const validated = validateInput(StringIdSchema, sourceId, "health source ID");
-    return HealthManager.removeSource(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_SYNC_SOURCE, async (_, sourceId: string) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_SYNC_SOURCE);
-    const validated = validateInput(StringIdSchema, sourceId, "health source ID");
-    return HealthManager.syncSource(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_IMPORT_FILES, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_IMPORT_FILES);
-    const validated = validateInput(HealthImportFilesSchema, request, "health import request");
-    return HealthManager.importFiles(validated.sourceId, validated.filePaths);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_GENERATE_WORKFLOW, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_GENERATE_WORKFLOW);
-    const validated = validateInput(
-      HealthWorkflowRequestSchema,
-      request,
-      "health workflow request",
-    );
-    return HealthManager.generateWorkflow(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_STATUS, async (_, sourceId?: string) => {
-    return HealthManager.getAppleHealthStatus(sourceId);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_CONNECT, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_CONNECT);
-    const validated = validateInput(
-      z
-        .object({
-          sourceId: StringIdSchema.optional(),
-          connectionMode: z.enum(["native", "import"]).optional(),
-        })
-        .strict(),
-      request,
-      "Apple Health connect request",
-    );
-    return HealthManager.connectAppleHealth(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT, async (_, sourceId: string) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT);
-    const validated = validateInput(StringIdSchema, sourceId, "Apple Health source ID");
-    return HealthManager.disconnectAppleHealth(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_RESET, async (_, sourceId?: string) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_DISCONNECT);
-    const validated = sourceId
-      ? validateInput(StringIdSchema, sourceId, "Apple Health source ID")
-      : undefined;
-    return HealthManager.resetAppleHealth(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_PREVIEW_WRITEBACK, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_PREVIEW_WRITEBACK);
-    const validated = validateInput(
-      HealthWritebackRequestSchema,
-      request,
-      "Apple Health writeback request",
-    );
-    return HealthManager.previewAppleHealthWriteback(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.HEALTH_APPLE_APPLY_WRITEBACK, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.HEALTH_APPLE_APPLY_WRITEBACK);
-    const validated = validateInput(
-      HealthWritebackRequestSchema,
-      request,
-      "Apple Health writeback request",
-    );
-    return HealthManager.applyAppleHealthWriteback(validated);
-  });
 }
 
 /**

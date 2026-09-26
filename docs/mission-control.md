@@ -4,7 +4,7 @@ Mission Control is a centralized, GUI-first agent orchestration and monitoring d
 
 Heartbeat v3 is the default background automation model exposed here. Mission Control should be read as pulse/defer/dispatch truth, not as a wake-queue monitor. Mission Control also surfaces the `Core Harness` and should eventually surface Dreaming runs/candidates as the reviewable memory-curation lane. See [Heartbeat v3](heartbeat-v3.md), [Dreaming](dreaming.md), and [Core Automation](core-automation.md) for the runtime model.
 
-Access it from **Settings** > **Mission Control**. For company-ops workflows, you can also jump into it directly from **Settings** > **Companies** with the selected company preloaded.
+Access it from **Settings** > **Mission Control**.
 
 Mission Control observes and configures tasks; it is not a second permission
 plane. When creating or editing an agent or automation, review the attached
@@ -23,7 +23,6 @@ Mission Control now sits alongside the other operational entry points:
 - main-sidebar **Automations** for structured flow authoring, activation, approvals, and step-level Activity
 - **Settings > Automations** for prompt-based routines, core automation, queueing, scheduling, triggers, briefing, and Workflow Intelligence policies
 - **Settings > Memory Hub** for durable memory, structured observations, and future Dreaming candidate review
-- **Settings > Companies** for company graph editing and operator assignment
 
 ## Layout
 
@@ -183,7 +182,7 @@ These signals are also mirrored into the live feed so Mission Control stays the 
 
 ### Ops Tab
 
-The `Ops` tab is the company-operations view used by the zero-human-company workflow.
+The `Ops` tab is the company-operations view.
 
 It exposes:
 
@@ -196,9 +195,7 @@ It exposes:
 - run timeline events
 - linked task navigation
 
-Use it together with the strategic planner strip to watch company-level planning move into executable task work.
-
-The `Ops` tab is most useful when the company graph is maintained in **Settings** > **Companies**, since that tab is where companies, goals, projects, issues, and linked operators are created and edited.
+Use its **Planner** sub-tab to watch company-level planning move into executable task work.
 
 If the work itself is being executed on another machine, pair Mission Control with the **Devices** tab: Mission Control gives you company-level orchestration, while Devices gives you machine-level routing and remote task inspection.
 
@@ -217,14 +214,13 @@ This is the main monitoring surface for the `trace -> failure mining -> clusteri
 
 ---
 
-## Strategic Planner Strip
+## Strategic Planner
 
-Mission Control now includes a planner strip above the three-panel layout for company-ops configuration and review.
+The strategic planner lives in the **Planner** sub-tab of the `Ops` tab, where you configure and review company-ops planning.
 
 Available controls:
 
-- company selector
-- planner enabled/disabled toggle
+- scheduled runs on/off
 - auto-dispatch toggle
 - planner interval
 - planning workspace selector
@@ -233,9 +229,7 @@ Available controls:
 - manual `Run Planner`
 - recent planner cycle history
 
-This is the main desktop entry point for zero-human-company planning loops.
-
-Companies created in **Settings** > **Companies** appear here in the company selector. If you opened Mission Control from a company page, that company is preselected.
+This is the main desktop entry point for company planning loops.
 
 ---
 
@@ -266,31 +260,6 @@ Current behavior:
 - the selected-agent detail screen in Agents Hub does not host its own chat transcript; test, preview, and starter-prompt actions open the backing task in the main task UI
 
 Use this together with [Managed Agents](managed-agents.md) when testing reusable agents from the app.
-
----
-
-## Digital Twin Personas
-
-Access from the **Add Digital Twin** button in the agents panel (next to Add Agent).
-
-Browse pre-built persona templates — Software Engineer, Engineering Manager, Product Manager, and more — and activate them in one click. Twins are now optional persona presets and do not directly own the always-on core runtime.
-
-Each twin comes with:
-
-- **Prompt and personality defaults**
-- **Cognitive offload categories** targeting the mental work that fragments focus
-- **Recommended skills** for on-demand use (meeting prep, decision packages, status reports)
-
-Mission Control is also the best place to monitor venture/operator twins such as:
-
-- `Founder Office Operator`
-- `Company Planner`
-- `Growth Operator`
-- `Customer Ops Lead`
-
-If those twins were created from a company context, they still appear in Mission Control as normal agents, but they retain their company assignment for use in `Ops`, `Companies`, and company-aware Digital Twins views. If you want one of those operators to become always-on, attach a separate automation profile instead of relying on the twin template itself.
-
-See [Digital Twins](digital-twins.md) for full documentation, enterprise scenarios, and template reference.
 
 ---
 
@@ -339,11 +308,9 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 | Action                              | How                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------- |
 | Open Mission Control                | Settings > Mission Control                                                 |
-| Open company-scoped Mission Control | Settings > Companies > Open in Mission Control                             |
 | Add a new agent                     | Click "Add Agent" in the agents panel                                      |
-| Add a digital twin                  | Click "Add Digital Twin" in the agents panel ([details](digital-twins.md)) |
 | Review core automation learning     | Open the `Core Harness` view                                               |
-| Configure the company planner       | Use the planner strip above the board                                      |
+| Configure the company planner       | Open the `Ops` tab, then its `Planner` sub-tab                             |
 | Inspect company ops                 | Open the `Ops` tab in the right panel                                      |
 | Edit an agent                       | Double-click the agent card                                                |
 | Trigger immediate heartbeat review  | Click `Trigger Pulse` on the agent card                                    |
@@ -354,5 +321,3 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 | Create a team                       | Header > Teams > create team                                               |
 | Generate a performance review       | Header > Reviews > select agent > Generate                                 |
 | Generate a standup report           | Header > Standup > Generate Standup Report                                 |
-
-For a full founder-directed autonomous-company setup, see [Zero-Human Company Operations](zero-human-company.md).

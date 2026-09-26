@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plug, Zap, Package, Dna } from "lucide-react";
+import { Plug, Zap, Package } from "lucide-react";
 import type { CapabilitySecurityReport, QuarantinedImportRecord } from "../../shared/types";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { MESSAGE_SHORTCUTS_UPDATED_EVENT } from "../utils/message-slash-options";
@@ -425,14 +425,6 @@ export function CustomizePanel({
                   <span>Update available: v{packUpdates.get(activePack.name)}</span>
                 </div>
               )}
-              {activePack.personaTemplateId && (
-                <div className="cp-detail-twin-badge">
-                  <span>
-                    <Dna size={14} strokeWidth={1.5} />
-                  </span>
-                  <span>Includes Agent Persona</span>
-                </div>
-              )}
               {activePack.bestFitWorkflows && activePack.bestFitWorkflows.length > 0 && (
                 <div className="cp-best-fit-row">
                   <span className="cp-rc-label">Best for:</span>
@@ -573,21 +565,7 @@ export function CustomizePanel({
                       </div>
                     </div>
                   ))}
-                  {activePack.personaTemplateId && (
-                    <div className="cp-agent-twin">
-                      <span className="cp-agent-icon">
-                        <Dna size={18} strokeWidth={1.5} />
-                      </span>
-                      <div className="cp-agent-info">
-                        <span className="cp-agent-name">Agent Persona Available</span>
-                        <span className="cp-agent-desc">
-                          This pack includes an optional digital twin persona. Activate it from
-                          Agent Personas as a preset; core automation is configured separately.
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {activePack.agentRoles.length === 0 && !activePack.personaTemplateId && (
+                  {activePack.agentRoles.length === 0 && (
                     <p className="cp-tab-empty">No agents in this pack</p>
                   )}
                 </div>
@@ -976,19 +954,6 @@ export function CustomizePanel({
           border: 1px solid var(--color-border-subtle);
         }
 
-        .cp-detail-twin-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 10px;
-          background: var(--color-accent-subtle, rgba(34, 211, 238, 0.1));
-          color: var(--color-accent);
-          border-radius: 12px;
-          font-size: 12px;
-          font-weight: 600;
-          border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-        }
-
         .cp-detail-actions {
           display: flex;
           align-items: center;
@@ -1346,8 +1311,7 @@ export function CustomizePanel({
           gap: 12px;
         }
 
-        .cp-agent-row,
-        .cp-agent-twin {
+        .cp-agent-row {
           display: grid;
           grid-template-columns: 44px minmax(0, 1fr);
           align-items: flex-start;
@@ -1359,17 +1323,11 @@ export function CustomizePanel({
           transition: all 0.25s ease;
         }
 
-        .cp-agent-row:hover,
-        .cp-agent-twin:hover {
+        .cp-agent-row:hover {
           border-color: var(--color-accent-subtle);
           background: linear-gradient(135deg, var(--color-bg-elevated) 0%, var(--color-bg-hover) 100%);
           transform: translateX(4px);
           box-shadow: var(--shadow-md);
-        }
-
-        .cp-agent-twin {
-          border-style: dashed;
-          background: linear-gradient(135deg, var(--color-accent-subtle), var(--color-bg-glass));
         }
 
         .cp-agent-icon {
@@ -1519,8 +1477,7 @@ export function CustomizePanel({
             margin-left: 0;
           }
 
-          .cp-agent-row,
-          .cp-agent-twin {
+          .cp-agent-row {
             grid-template-columns: 38px minmax(0, 1fr);
           }
 

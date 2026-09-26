@@ -12,12 +12,21 @@ type ExtractedSection = {
   title: string;
   relPath: string;
   content: string;
+  /** Per-section cap; defaults to MAX_SECTION_CHARS. */
+  maxChars?: number;
 };
 
 const KIT_DIRNAME = ".cowork";
 const MAX_FILE_BYTES = 96 * 1024;
 const MAX_SECTION_CHARS = 6000;
-const MAX_TOTAL_CHARS = 16000;
+const MAX_TOTAL_CHARS = 24000;
+/**
+ * Repo-root agent instructions (AGENTS.md, the cross-tool standard; CLAUDE.md as a
+ * fallback). Loaded whether or not the workspace has a .cowork kit, with their own
+ * budget so they are never crowded out by kit files.
+ */
+const PROJECT_INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
+const MAX_PROJECT_INSTRUCTIONS_CHARS = 20000;
 const MAX_DESIGN_CONTEXT_CHARS = 7000;
 const AUTO_LORE_START = "<!-- cowork:auto:lore:start -->";
 const AUTO_LORE_END = "<!-- cowork:auto:lore:end -->";
@@ -447,7 +456,24 @@ function buildScopedKitSections(
       title: section.title,
       relPath: section.relPath,
       content: formatWorkspaceKitBody(section.parsed.body, section.contract),
+      maxChars: Math.max(MAX_SECTION_CHARS, section.contract.maxChars),
     }));
+}
+
+export function buildProjectInstructionsSection(
+  workspacePath: string,
+  readGuard?: MarkdownMemoryReadGuard,
+): string {
+  for (const file of PROJECT_INSTRUCTION_FILES) {
+    const absPath = safeResolveWithinWorkspace(workspacePath, file);
+    if (!absPath) continue;
+    const raw = readFilePrefix(absPath, MAX_FILE_BYTES, readGuard);
+    if (!raw?.trim()) continue;
+    const content = sanitizeForInjection(clampSection(raw, MAX_PROJECT_INSTRUCTIONS_CHARS));
+    if (!content) continue;
+    return `### Project Instructions (${file})\n${content}\n`;
+  }
+  return "";
 }
 
 export function buildWorkspaceKitContext(
@@ -489,14 +515,15 @@ export function buildWorkspaceKitContext(
     }
   }
 
-  if (collectedSections.length === 0) return "";
+  const projectInstructions = buildProjectInstructionsSection(workspacePath, opts?.readGuard);
+  if (collectedSections.length === 0) return projectInstructions.trim();
 
-  const parts: string[] = [];
+  const parts: string[] = projectInstructions ? [projectInstructions] : [];
   let totalChars = 0;
 
   for (const section of collectedSections) {
     const header = `### ${section.title} (${section.relPath})`;
-    const body = clampSection(section.content, MAX_SECTION_CHARS);
+    const body = clampSection(section.content, section.maxChars ?? MAX_SECTION_CHARS);
     const block = `${header}\n${body}\n`;
 
     if (totalChars + block.length > MAX_TOTAL_CHARS) {

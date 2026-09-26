@@ -560,6 +560,51 @@ describe("gateway channel schemas", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("validates WhatsApp Cloud and Twilio SMS add-channel requests", () => {
+    expect(
+      AddChannelSchema.safeParse({
+        type: "whatsapp_cloud",
+        name: "WhatsApp Business",
+        whatsappCloudPhoneNumberId: "123456789012345",
+        whatsappCloudAccessToken: "EAAG".padEnd(40, "x"),
+        whatsappCloudAppSecret: "0123456789abcdef0123",
+        whatsappCloudVerifyToken: "verify-token",
+        whatsappCloudFallbackTemplateName: "follow_up",
+      }).success,
+    ).toBe(true);
+    expect(
+      AddChannelSchema.safeParse({
+        type: "twilio_sms",
+        name: "SMS",
+        twilioAccountSid: `AC${"0".repeat(32)}`,
+        twilioAuthToken: "0123456789abcdef0123",
+        twilioFromNumber: "+15551234567",
+        twilioWebhookPublicUrl: "https://sms.example.com",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects Twilio requests without a sender, with national numbers, or with http URLs", () => {
+    const base = {
+      type: "twilio_sms",
+      name: "SMS",
+      twilioAccountSid: `AC${"0".repeat(32)}`,
+      twilioAuthToken: "0123456789abcdef0123",
+      twilioWebhookPublicUrl: "https://sms.example.com",
+    };
+    expect(AddChannelSchema.safeParse(base).success).toBe(false);
+    expect(AddChannelSchema.safeParse({ ...base, twilioFromNumber: "5551234567" }).success).toBe(
+      false,
+    );
+    expect(
+      AddChannelSchema.safeParse({
+        ...base,
+        twilioFromNumber: "+15551234567",
+        twilioWebhookPublicUrl: "http://sms.example.com",
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("EmailChannelConfigSchema", () => {

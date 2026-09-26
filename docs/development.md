@@ -1,5 +1,7 @@
 # Development Guide
 
+For ordinary desktop use, install a published build from the [getting-started guide](getting-started.md). The [first-task beta guide](first-task.md) describes the fixture-backed sample and its release gate.
+
 ## Prerequisites
 
 - Node.js 24+ and npm

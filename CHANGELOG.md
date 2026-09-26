@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Personal Health**: discontinued the Health dashboard, source imports, macOS Apple Health/HealthKit bridge, and related build and packaging paths to focus engineering effort on core agent workflows, integrations, and reliability. Upgrading deletes the retired Health data in the active CoWork profile; older settings backups cannot restore it. See the [decision record](docs/personal-health-discontinuation.md).
+- **Mobile Companions**: discontinued the iOS/Android companion apps, the Mobile Companions settings tab, the companion token, and the Control Plane node role and `node.*` methods to focus engineering effort on core agent workflows, integrations, and reliability. Upgrading deletes the stored companion token; older companion apps are refused with a discontinued error. See the [decision record](docs/mobile-companions-discontinuation.md).
+
 ## [0.5.54] - 2026-09-20
 
 ### Changed

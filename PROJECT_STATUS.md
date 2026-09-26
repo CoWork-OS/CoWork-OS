@@ -87,13 +87,11 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Device overlays for apps, storage, alerts, and resource details
 - [x] Located: `src/renderer/components/DevicesPanel.tsx`, `src/electron/control-plane/`
 
-#### Companies, Mission Control, and Self-Improve
+#### Mission Control and Self-Improve
 
-- [x] Companies tab for company metadata, goals, projects, issues, and linked operators
 - [x] Mission Control planner strip and Ops tab for company-run monitoring
-- [x] Company-linked digital twins shared across Companies, Digital Twins, and Mission Control
 - [x] Self-improvement loop with staged campaigns, promotion gates, cooldowns, and parked candidates
-- [x] Located: `src/renderer/components/CompaniesPanel.tsx`, `src/renderer/components/MissionControlPanel.tsx`, `src/electron/improvement/`
+- [x] Located: `src/renderer/components/mission-control/`, `src/electron/improvement/`
 
 ### 2. Tools & Skills
 

@@ -1,3 +1,5 @@
+import { GuardrailManager } from "../../guardrails/guardrail-manager";
+import { LLMProviderFactory } from "../llm/provider-factory";
 import { randomUUID } from "crypto";
 import { getInteractionModeSelection } from "../../../shared/interaction-mode";
 import {
@@ -49,7 +51,7 @@ import type {
   StreamProgressCallback,
 } from "../llm";
 import { estimateTokens, estimateTotalTokens, type ContextManager } from "../context-manager";
-import { calculateCost, getCacheTokenAccounting } from "../llm/pricing";
+import { calculateCost, getCacheTokenAccounting, isModelPriced } from "../llm/pricing";
 import { sanitizeToolCallHistory } from "../llm/openai-compatible";
 import {
   FileOperationTracker,
@@ -634,6 +636,8 @@ export class SessionRuntime {
   private deferredToolCatalog: DeferredToolCatalog | null = null;
   private toolSearchService: ToolSearchService | null = null;
   private taskListVerificationReminderPending = false;
+  /** Models used in this session that have no known price, so totalCost is a lower bound. */
+  private readonly unpricedModelIds = new Set<string>();
   private readonly queuedAttachmentStore: QueuedAttachmentStore;
   /** Monotonic identity for the live model-visible history projection. */
   private historyGeneration = 0;
@@ -1098,6 +1102,10 @@ export class SessionRuntime {
       },
     );
 
+    const { modelId, providerType } = this.deps.getModelMetadata();
+    const costKnown = isModelPriced(modelId, providerType);
+    if (!costKnown && (safeInput > 0 || safeOutput > 0)) this.unpricedModelIds.add(modelId);
+
     this.state.usage.totalInputTokens += safeInput;
     this.state.usage.totalOutputTokens += safeOutput;
     this.state.usage.totalCost += deltaCost;
@@ -1117,11 +1125,23 @@ export class SessionRuntime {
           ...(safeCacheWrite > 0 ? { cacheWriteTokens: safeCacheWrite } : {}),
           ...(cacheWriteTtl ? { cacheWriteTtl } : {}),
           cost: deltaCost,
+          costKnown,
         },
         totals: {
           inputTokens: cumulativeInput,
           outputTokens: cumulativeOutput,
           cost: cumulativeCost,
+          costKnown: this.unpricedModelIds.size === 0,
+          ...(() => {
+            const cap = GuardrailManager.isCostBudgetExceeded(cumulativeCost, {
+              taskBudget: this.deps.getTask().budgetCost,
+              subscriptionBilled: LLMProviderFactory.isSubscriptionBilledRoute(providerType),
+            });
+            return {
+              costLimit: cap.source === "none" ? null : cap.limit,
+              costLimitSource: cap.source,
+            };
+          })(),
         },
       });
     }

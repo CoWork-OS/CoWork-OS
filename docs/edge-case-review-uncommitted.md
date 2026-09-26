@@ -10,6 +10,8 @@ Review of uncommitted changes for overlooked risks, edge cases, and failure mode
 
 ### 1. Health import file path traversal ✅ FIXED
 
+> Historical: the files below were removed when the personal Health feature was discontinued.
+
 **File:** `src/electron/health/HealthManager.ts` (lines 812–856, 1584–1615)  
 **IPC:** `handlers.ts` → `HEALTH_IMPORT_FILES`
 
@@ -76,6 +78,8 @@ private recordQAExecution(toolName: string, result: Any): void {
 
 ### 7. Health import — sensitive paths in state ✅ FIXED
 
+> Historical: the files below were removed when the personal Health feature was discontinued.
+
 **File:** `src/electron/health/HealthManager.ts` (line 852)
 
 **Fix:** Store `path.basename(filePath)` instead of full path in `attachments`.
@@ -125,7 +129,7 @@ Both `generateDailyBriefing` and `generateBriefing` invoke the same channel. No 
 
 ## Open Questions / Assumptions
 
-1. **Health import UX:** The Health panel uses `selectFiles()` for import. If paths are always from the native dialog, risk is lower. Main-process validation is still recommended for defense in depth.
+1. ~~**Health import UX**~~: moot. The personal Health feature was discontinued; see [personal-health-discontinuation.md](personal-health-discontinuation.md).
 2. **`isVerifiedMode` removal:** Executor diff removes `if (this.isVerifiedMode())` around profile selection. Confirm this is intentional and matches the new “verified mode” design.
 3. **`hasEntries` in workspace preflight:** New `hasEntries` in `getWorkspaceSignalsForPath` — ensure all callers handle it correctly.
 
@@ -162,14 +166,6 @@ Both `generateDailyBriefing` and `generateBriefing` invoke the same channel. No 
 **File:** `src/electron/agent/tools/channel-tools.ts`
 
 **Fix:** Added `isValidDiscordSnowflake()` helper (17–19 digit regex). `channel_fetch_discord_messages` and `channel_download_discord_attachment` now validate `chat_id` and `message_id` before calling the provider.
-
----
-
-### 14. HealthKit bridge build — entitlements (P3)
-
-**File:** `scripts/build_healthkit_bridge.mjs`, `build/entitlements.mac.plist`
-
-**Note:** Ensure Apple Developer Program membership and HealthKit capability are configured for distribution. Not a code fix.
 
 ---
 

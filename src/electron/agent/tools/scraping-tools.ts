@@ -3,7 +3,11 @@ import * as path from "path";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
-import { ScrapingSettingsManager } from "../../scraping/scraping-settings";
+import {
+  SCRAPING_FETCHERS,
+  ScrapingSettingsManager,
+  normalizeScrapingFetcher,
+} from "../../scraping/scraping-settings";
 import {
   getScrapingRequestDelayMs,
   waitForScrapingSlot,
@@ -44,7 +48,8 @@ function buildScrapingBridgeEnvironment(): NodeJS.ProcessEnv {
 
 /**
  * ScrapingTools provides advanced web scraping capabilities powered by Scrapling.
- * Features anti-bot bypass, adaptive element tracking, stealth browsing, and structured data extraction.
+ * Features adaptive element tracking, JS rendering, and structured data extraction.
+ * It does not bypass bot protection, CAPTCHAs, or site access controls.
  */
 export class ScrapingTools {
   constructor(
@@ -72,12 +77,11 @@ export class ScrapingTools {
       {
         name: "scrape_page",
         description:
-          "Scrape a web page with advanced anti-bot bypass and stealth capabilities. " +
-          "Supports three fetcher modes: 'default' (fast HTTP with TLS fingerprinting), " +
-          "'stealth' (browser-based with Cloudflare bypass), 'playwright' (full browser for JS-heavy sites). " +
-          "Use this instead of web_fetch when sites block simple requests, require JavaScript rendering, " +
-          "or have anti-bot protection (Cloudflare, CAPTCHAs, etc.). " +
-          "Can extract text, links, images, and tables from the page.",
+          "Scrape a web page and extract text, links, images, and tables. " +
+          "Supports two fetcher modes: 'default' (fast HTTP) and 'playwright' (full browser for JS-heavy sites). " +
+          "Use this instead of web_fetch when a page needs JavaScript rendering or targeted CSS-selector extraction. " +
+          "It does not bypass bot protection or CAPTCHAs: if a site blocks automated access, report that to the user " +
+          "instead of retrying.",
         input_schema: {
           type: "object",
           properties: {
@@ -87,10 +91,9 @@ export class ScrapingTools {
             },
             fetcher: {
               type: "string",
-              enum: ["default", "stealth", "playwright"],
+              enum: [...SCRAPING_FETCHERS],
               description:
-                "Fetcher type. 'default': fast HTTP with TLS impersonation. " +
-                "'stealth': browser with Cloudflare/Turnstile bypass. " +
+                "Fetcher type. 'default': fast HTTP. " +
                 "'playwright': full browser for JS-rendered content. Default: 'default'",
             },
             selector: {
@@ -101,7 +104,7 @@ export class ScrapingTools {
             wait_for: {
               type: "string",
               description:
-                "CSS selector to wait for before extracting (useful for JS-rendered content). Only works with stealth/playwright fetcher.",
+                "CSS selector to wait for before extracting (useful for JS-rendered content). Only works with the playwright fetcher.",
             },
             extract_links: {
               type: "boolean",
@@ -133,7 +136,7 @@ export class ScrapingTools {
         description:
           "Scrape multiple URLs in a single operation. Efficient for batch extraction " +
           "from a list of pages (e.g., search results, product listings, article links). " +
-          "Returns content from each URL with the same anti-bot bypass capabilities. " +
+          "Returns content from each URL. " +
           "Limited to 20 URLs per batch.",
         input_schema: {
           type: "object",
@@ -145,7 +148,7 @@ export class ScrapingTools {
             },
             fetcher: {
               type: "string",
-              enum: ["default", "stealth", "playwright"],
+              enum: [...SCRAPING_FETCHERS],
               description: "Fetcher type to use for all URLs (default: 'default')",
             },
             selector: {
@@ -190,7 +193,7 @@ export class ScrapingTools {
             },
             fetcher: {
               type: "string",
-              enum: ["default", "stealth", "playwright"],
+              enum: [...SCRAPING_FETCHERS],
               description: "Fetcher type (default: 'default')",
             },
           },
@@ -321,7 +324,7 @@ export class ScrapingTools {
 
   private assertScopedFetcherAllowed(fetcher: string | undefined, toolName: string): void {
     if (
-      (fetcher === "stealth" || fetcher === "playwright") &&
+      fetcher === "playwright" &&
       (this.workspace.permissions.accessDomainRules?.length || 0) > 0
     ) {
       throw new Error(
@@ -348,18 +351,19 @@ export class ScrapingTools {
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
     const normalizedUrl = await this.ensureNetworkAllowed(input.url, "scrape_page");
-    this.assertScopedFetcherAllowed(input.fetcher || settings.defaultFetcher, "scrape_page");
+    const fetcher = normalizeScrapingFetcher(input.fetcher || settings.defaultFetcher);
+    this.assertScopedFetcherAllowed(fetcher, "scrape_page");
     await waitForScrapingSlot(normalizedUrl, settings.rateLimiting);
 
     this.daemon.logEvent(this.taskId, "log", {
-      message: `Scraping: ${normalizedUrl} (fetcher: ${input.fetcher || settings.defaultFetcher})`,
+      message: `Scraping: ${normalizedUrl} (fetcher: ${fetcher})`,
     });
 
     const params: Record<string, Any> = {
       ...input,
       url: normalizedUrl,
       allowed_hosts: [this.getAllowedHost(normalizedUrl)],
-      fetcher: input.fetcher || settings.defaultFetcher,
+      fetcher,
       headless: input.headless ?? settings.headless,
       timeout: settings.timeout,
       max_content_length: input.max_content_length || settings.maxContentLength,
@@ -390,7 +394,8 @@ export class ScrapingTools {
     max_content_length?: number;
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
-    this.assertScopedFetcherAllowed(input.fetcher || settings.defaultFetcher, "scrape_multiple");
+    const fetcher = normalizeScrapingFetcher(input.fetcher || settings.defaultFetcher);
+    this.assertScopedFetcherAllowed(fetcher, "scrape_multiple");
     const normalizedUrls = await Promise.all(
       input.urls.map((url) => this.ensureNetworkAllowed(url, "scrape_multiple")),
     );
@@ -406,7 +411,7 @@ export class ScrapingTools {
       ...input,
       urls: normalizedUrls,
       allowed_hosts: Array.from(new Set(normalizedUrls.map((url) => this.getAllowedHost(url)))),
-      fetcher: input.fetcher || settings.defaultFetcher,
+      fetcher,
       timeout: settings.timeout,
       request_delay_ms: settings.rateLimiting?.enabled
         ? getScrapingRequestDelayMs(settings.rateLimiting.requestsPerMinute)
@@ -438,7 +443,8 @@ export class ScrapingTools {
   }): Promise<Any> {
     const settings = ScrapingSettingsManager.loadSettings();
     const normalizedUrl = await this.ensureNetworkAllowed(input.url, "scrape_extract");
-    this.assertScopedFetcherAllowed(input.fetcher || settings.defaultFetcher, "scrape_extract");
+    const fetcher = normalizeScrapingFetcher(input.fetcher || settings.defaultFetcher);
+    this.assertScopedFetcherAllowed(fetcher, "scrape_extract");
     await waitForScrapingSlot(normalizedUrl, settings.rateLimiting);
 
     this.daemon.logEvent(this.taskId, "log", {
@@ -449,7 +455,7 @@ export class ScrapingTools {
       ...input,
       url: normalizedUrl,
       allowed_hosts: [this.getAllowedHost(normalizedUrl)],
-      fetcher: input.fetcher || settings.defaultFetcher,
+      fetcher,
       timeout: settings.timeout,
     };
 

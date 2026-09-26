@@ -104,7 +104,11 @@ describe("macOS safeStorage legacy migration", () => {
         stdio: ["pipe", "pipe", "ignore"],
       }),
     );
-    expect(save).toHaveBeenCalledWith("user-profile", { restored: "user-profile" });
+    expect(save).toHaveBeenCalledWith(
+      "user-profile",
+      { restored: "user-profile" },
+      { allowUnreadableOverwrite: true },
+    );
     expect(logger.info).toHaveBeenCalledWith(
       "Migrated encrypted settings from the legacy macOS Keychain identity.",
       expect.objectContaining({ migratedCount: 1 }),
@@ -149,7 +153,11 @@ describe("macOS safeStorage legacy migration", () => {
     expect(attemptedNames).toEqual(["cowork-os", "Electron"]);
     expect(migratedCount).toBe(1);
     expect(save).toHaveBeenCalledOnce();
-    expect(save).toHaveBeenCalledWith("voice", { restored: true });
+    expect(save).toHaveBeenCalledWith(
+      "voice",
+      { restored: true },
+      { allowUnreadableOverwrite: true },
+    );
   });
 
   it("does not run or touch the database outside macOS", async () => {

@@ -60,7 +60,7 @@ export function applyDefaultAccessProfile(
 }
 
 interface ResolveAccessProfileInput {
-  task?: Pick<Task, "agentConfig"> & Partial<Pick<Task, "workerRole">>;
+  task?: Pick<Task, "agentConfig"> & Partial<Pick<Task, "workerRole" | "source">>;
   workspace?: Pick<Workspace, "permissions" | "path">;
   settings?: PermissionSettingsData;
   adminPolicies?: AdminPolicies;
@@ -74,6 +74,20 @@ const LEGACY_PERMISSION_MODES = new Set<PermissionMode>([
   "dont_ask",
   "bypass_permissions",
 ]);
+
+/** Internal first-task boundary; never selected as a user-wide default. */
+export const RELEASE_BRIEF_ACCESS_PROFILE_ID = "release_brief_sample";
+const RELEASE_BRIEF_ACCESS_PROFILE: AccessProfileDefinition = {
+  id: RELEASE_BRIEF_ACCESS_PROFILE_ID,
+  label: "Release brief sample",
+  description: "Read and write only the sample workspace, without shell or network tools.",
+  sandbox: "workspace-write",
+  approval: "on-request",
+  reviewer: "user",
+  network: "disabled",
+  shellAccess: false,
+  workspaceRoots: ["."],
+};
 
 function getRequestedProfileId(
   task: ResolveAccessProfileInput["task"],
@@ -182,12 +196,20 @@ export function resolveEffectiveAccessProfile(
     requestedId,
     settings.accessProfiles || [],
   );
+  // Only the app-created sample task may use this internal profile; any other task
+  // requesting it resolves as an unavailable profile and fails closed.
+  const isReleaseBriefSample =
+    explicitProfile &&
+    requestedId === RELEASE_BRIEF_ACCESS_PROFILE_ID &&
+    input.task?.source === "sample";
   const profileUnavailable =
     !legacyTaskWithoutProfile &&
     (explicitProfile || Boolean(hasConfiguredDefaultProfile)) &&
-    profileResolution.status !== "resolved";
+    profileResolution.status !== "resolved" && !isReleaseBriefSample;
   let definition =
-    profileUnavailable && profileResolution.status !== "resolved"
+    isReleaseBriefSample
+      ? RELEASE_BRIEF_ACCESS_PROFILE
+      : profileUnavailable && profileResolution.status !== "resolved"
       ? unavailableProfileForId(profileResolution.profileId, profileResolution.status)
       : profileResolution.definition || resolveAccessProfileDefinition(requestedId);
   const legacyMode = getLegacyMode(input.task);
@@ -236,6 +258,15 @@ export function resolveEffectiveAccessProfile(
     definition = profileForMode(adminMode);
     adminConstrained = true;
     constraintReason = "Requested permission mode is blocked by administrator policy.";
+  }
+
+  // Administrator fallback modes can restrict a sample further, but must not
+  // turn this internal profile into an ordinary network or shell profile.
+  if (isReleaseBriefSample) {
+    definition = {
+      ...RELEASE_BRIEF_ACCESS_PROFILE,
+      ...(adminMode === "plan" ? { sandbox: "read-only" as const } : {}),
+    };
   }
 
   // A verifier or internal read-only helper is a separate trust boundary from

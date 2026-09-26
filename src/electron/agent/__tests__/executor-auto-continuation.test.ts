@@ -231,11 +231,13 @@ describe("TaskExecutor continuation budgets", () => {
       exceeded: false,
       used: 0,
       limit: 100000,
+      source: "global",
     });
     vi.spyOn(GuardrailManager, "isCostBudgetExceeded").mockReturnValue({
       exceeded: false,
       cost: 0,
       limit: 1,
+      source: "global",
     });
 
     const executor = makeExecutor({
@@ -259,11 +261,13 @@ describe("TaskExecutor continuation budgets", () => {
       exceeded: false,
       used: 0,
       limit: 100000,
+      source: "global",
     });
     vi.spyOn(GuardrailManager, "isCostBudgetExceeded").mockReturnValue({
       exceeded: false,
       cost: 0,
       limit: 1,
+      source: "global",
     });
 
     const executor = makeExecutor({
@@ -299,11 +303,13 @@ describe("TaskExecutor continuation budgets", () => {
       exceeded: false,
       used: 0,
       limit: 100000,
+      source: "global",
     });
     vi.spyOn(GuardrailManager, "isCostBudgetExceeded").mockReturnValue({
       exceeded: false,
       cost: 0,
       limit: 1,
+      source: "global",
     });
 
     const executor = makeExecutor({
@@ -335,11 +341,13 @@ describe("TaskExecutor continuation budgets", () => {
       exceeded: false,
       used: 0,
       limit: 100000,
+      source: "global",
     });
     vi.spyOn(GuardrailManager, "isCostBudgetExceeded").mockReturnValue({
       exceeded: false,
       cost: 0,
       limit: 1,
+      source: "global",
     });
 
     const executor = makeExecutor({
@@ -361,6 +369,7 @@ describe("TaskExecutor continuation budgets", () => {
       exceeded: true,
       used: 2100,
       limit: 2000,
+      source: "global",
     });
     vi.spyOn(GuardrailManager, "isIterationLimitExceeded").mockReturnValue({
       exceeded: false,
@@ -371,6 +380,7 @@ describe("TaskExecutor continuation budgets", () => {
       exceeded: false,
       cost: 0,
       limit: 5,
+      source: "global",
     });
 
     const executor = makeExecutor({
@@ -388,7 +398,7 @@ describe("TaskExecutor continuation budgets", () => {
     });
 
     expect(() => executor.checkBudgets()).toThrow(/Token budget exceeded/i);
-    expect(tokenBudgetSpy).toHaveBeenCalledWith(2100);
+    expect(tokenBudgetSpy).toHaveBeenCalledWith(2100, expect.objectContaining({}));
 
     vi.restoreAllMocks();
   });

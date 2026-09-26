@@ -1,11 +1,19 @@
 import { CUSTOM_PROVIDER_MAP } from "../../../shared/llm-provider-catalog";
 import type { LLMProviderType } from "../../../shared/types";
+import {
+  lookupModelMetadata,
+  modelIdCandidates,
+  type ModelMetadataEntry,
+} from "../../../shared/model-metadata";
+import { LOCAL_PROVIDER_TYPES, PRICING_OVERRIDES } from "./pricing-overrides";
 
 /**
- * Model Pricing Table
+ * Model pricing, per 1 million tokens in USD.
  *
- * Contains pricing information for various LLM models.
- * Prices are per 1 million tokens in USD.
+ * Prices come from the generated models.dev snapshot (src/shared/model-metadata.json,
+ * refreshed with `npm run models:sync`). Retired models and deliberate exceptions
+ * live in ./pricing-overrides.ts. Unknown models are reported as unpriced rather
+ * than silently free: see getModelPricing() / isModelPriced().
  */
 
 export interface ModelPricing {
@@ -15,6 +23,14 @@ export interface ModelPricing {
   cachedInputPer1M?: number;
   /** Cost per 1M cache-write tokens. Defaults to inputPer1M for legacy providers. */
   cacheWritePer1M?: number;
+  /** Rates for the whole request once input exceeds `thresholdTokens` (e.g. GPT-6 above 272K). */
+  longContext?: {
+    thresholdTokens: number;
+    inputPer1M: number;
+    outputPer1M: number;
+    cachedInputPer1M?: number;
+    cacheWritePer1M?: number;
+  };
 }
 
 export type CacheTokenAccounting = "inclusive" | "disjoint";
@@ -58,184 +74,58 @@ export function getCacheTokenAccounting(
   return "inclusive";
 }
 
+function fromMetadata(entry: ModelMetadataEntry): ModelPricing | null {
+  if (entry.input === undefined || entry.output === undefined) return null;
+  const pricing: ModelPricing = { inputPer1M: entry.input, outputPer1M: entry.output };
+  if (entry.cacheRead !== undefined) pricing.cachedInputPer1M = entry.cacheRead;
+  if (entry.cacheWrite !== undefined) pricing.cacheWritePer1M = entry.cacheWrite;
+  if (entry.longContext) {
+    pricing.longContext = {
+      thresholdTokens: entry.longContext.threshold,
+      inputPer1M: entry.longContext.input,
+      outputPer1M: entry.longContext.output,
+      ...(entry.longContext.cacheRead !== undefined
+        ? { cachedInputPer1M: entry.longContext.cacheRead }
+        : {}),
+      ...(entry.longContext.cacheWrite !== undefined
+        ? { cacheWritePer1M: entry.longContext.cacheWrite }
+        : {}),
+    };
+  }
+  return pricing;
+}
+
 /**
- * Model pricing table (per 1M tokens in USD)
- * Updated as of January 2025
+ * Resolve pricing for a model id in any shape (API id, OpenRouter id, Bedrock id,
+ * CoWork catalog key). Returns null when the model is unknown.
  */
-export const MODEL_PRICING: Record<string, ModelPricing> = {
-  // Anthropic Claude models — cache reads billed at 10% of input price (90% discount)
-  "claude-opus-4-6": { inputPer1M: 15.0, outputPer1M: 75.0, cachedInputPer1M: 1.5 },
-  "claude-opus-4-5-20251101": { inputPer1M: 15.0, outputPer1M: 75.0, cachedInputPer1M: 1.5 },
-  "claude-opus-4-5-20250101": { inputPer1M: 15.0, outputPer1M: 75.0, cachedInputPer1M: 1.5 },
-  "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
-  "claude-sonnet-4-5": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
-  "claude-sonnet-4-5-20250514": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
-  "claude-sonnet-4-20250514": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
-  "claude-3-5-sonnet-20241022": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
-  "claude-3-5-sonnet-latest": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
-  "claude-haiku-4-5": { inputPer1M: 0.8, outputPer1M: 4.0, cachedInputPer1M: 0.08 },
-  "claude-3-5-haiku-20241022": { inputPer1M: 0.8, outputPer1M: 4.0, cachedInputPer1M: 0.08 },
-  "claude-3-5-haiku-latest": { inputPer1M: 0.8, outputPer1M: 4.0, cachedInputPer1M: 0.08 },
-  "claude-3-opus-20240229": { inputPer1M: 15.0, outputPer1M: 75.0, cachedInputPer1M: 1.5 },
-  "claude-3-sonnet-20240229": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
-  "claude-3-haiku-20240307": { inputPer1M: 0.25, outputPer1M: 1.25, cachedInputPer1M: 0.025 },
+export function getModelPricing(
+  modelId: string,
+  providerType?: string | null,
+): ModelPricing | null {
+  const provider = String(providerType || "")
+    .trim()
+    .toLowerCase();
+  if (LOCAL_PROVIDER_TYPES.has(provider)) return { inputPer1M: 0, outputPer1M: 0 };
+  // OpenRouter ":free" routes and Ollama ":latest" tags are not billed per token.
+  if (/:(?:free|latest)$/i.test(String(modelId || "").trim())) {
+    return { inputPer1M: 0, outputPer1M: 0 };
+  }
 
-  // AWS Bedrock model IDs — Anthropic models: cache reads at 10% of input price
-  "anthropic.claude-3-5-sonnet-20241022-v2:0": {
-    inputPer1M: 3.0,
-    outputPer1M: 15.0,
-    cachedInputPer1M: 0.3,
-  },
-  "anthropic.claude-3-5-haiku-20241022-v1:0": {
-    inputPer1M: 0.8,
-    outputPer1M: 4.0,
-    cachedInputPer1M: 0.08,
-  },
-  "anthropic.claude-3-opus-20240229-v1:0": {
-    inputPer1M: 15.0,
-    outputPer1M: 75.0,
-    cachedInputPer1M: 1.5,
-  },
-  "anthropic.claude-3-sonnet-20240229-v1:0": {
-    inputPer1M: 3.0,
-    outputPer1M: 15.0,
-    cachedInputPer1M: 0.3,
-  },
-  "anthropic.claude-3-haiku-20240307-v1:0": {
-    inputPer1M: 0.25,
-    outputPer1M: 1.25,
-    cachedInputPer1M: 0.025,
-  },
-  "anthropic.claude-opus-4-6": { inputPer1M: 15.0, outputPer1M: 75.0, cachedInputPer1M: 1.5 },
-  "us.anthropic.claude-opus-4-5-20251101-v1:0": {
-    inputPer1M: 15.0,
-    outputPer1M: 75.0,
-    cachedInputPer1M: 1.5,
-  },
-  "anthropic.claude-opus-4-5-20251101": {
-    inputPer1M: 15.0,
-    outputPer1M: 75.0,
-    cachedInputPer1M: 1.5,
-  },
-  "anthropic.claude-opus-4-5-20250514": {
-    inputPer1M: 15.0,
-    outputPer1M: 75.0,
-    cachedInputPer1M: 1.5,
-  },
-  "us.anthropic.claude-sonnet-4-5-20250514-v1:0": {
-    inputPer1M: 3.0,
-    outputPer1M: 15.0,
-    cachedInputPer1M: 0.3,
-  },
-  "anthropic.claude-sonnet-4-5-20250514": {
-    inputPer1M: 3.0,
-    outputPer1M: 15.0,
-    cachedInputPer1M: 0.3,
-  },
-  "us.anthropic.claude-sonnet-4-20250514-v1:0": {
-    inputPer1M: 3.0,
-    outputPer1M: 15.0,
-    cachedInputPer1M: 0.3,
-  },
-  "anthropic.claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
+  for (const candidate of modelIdCandidates(modelId)) {
+    const override = PRICING_OVERRIDES[candidate];
+    if (override) return override;
+    const entry = lookupModelMetadata(candidate);
+    const pricing = entry ? fromMetadata(entry) : null;
+    if (pricing) return pricing;
+  }
+  return null;
+}
 
-  // Google Gemini models (prices may vary, free tier has limits)
-  "gemini-2.0-flash": { inputPer1M: 0.1, outputPer1M: 0.4 },
-  "gemini-2.0-flash-lite": { inputPer1M: 0.075, outputPer1M: 0.3 },
-  "gemini-2.5-pro": { inputPer1M: 1.25, outputPer1M: 5.0 },
-  "gemini-2.5-flash": { inputPer1M: 0.15, outputPer1M: 0.6 },
-  "gemini-1.5-pro": { inputPer1M: 1.25, outputPer1M: 5.0 },
-  "gemini-1.5-flash": { inputPer1M: 0.075, outputPer1M: 0.3 },
-
-  // OpenAI models (direct API)
-  "gpt-6-astra": {
-    inputPer1M: 10.0,
-    outputPer1M: 50.0,
-    cachedInputPer1M: 1.0,
-    cacheWritePer1M: 12.5,
-  },
-  "gpt-6-sol": {
-    inputPer1M: 2.0,
-    outputPer1M: 10.0,
-    cachedInputPer1M: 0.2,
-    cacheWritePer1M: 2.5,
-  },
-  "gpt-6-luna": {
-    inputPer1M: 0.1,
-    outputPer1M: 0.5,
-    cachedInputPer1M: 0.01,
-    cacheWritePer1M: 0.125,
-  },
-  "gpt-5.6-sol": {
-    inputPer1M: 4.0,
-    outputPer1M: 20.0,
-    cachedInputPer1M: 0.4,
-    cacheWritePer1M: 5.0,
-  },
-  "gpt-5.6-terra": {
-    inputPer1M: 2.0,
-    outputPer1M: 12.0,
-    cachedInputPer1M: 0.2,
-    cacheWritePer1M: 2.5,
-  },
-  "gpt-5.6-luna": {
-    inputPer1M: 0.2,
-    outputPer1M: 1.2,
-    cachedInputPer1M: 0.02,
-    cacheWritePer1M: 0.25,
-  },
-  "gpt-5.5": {
-    inputPer1M: 5.0,
-    outputPer1M: 30.0,
-    cachedInputPer1M: 0.5,
-    cacheWritePer1M: 0,
-  },
-  "gpt-5.4": {
-    inputPer1M: 2.5,
-    outputPer1M: 15.0,
-    cachedInputPer1M: 0.25,
-    cacheWritePer1M: 0,
-  },
-  "gpt-5.4-mini": {
-    inputPer1M: 0.75,
-    outputPer1M: 4.5,
-    cachedInputPer1M: 0.075,
-    cacheWritePer1M: 0,
-  },
-  "gpt-5.4-nano": {
-    inputPer1M: 0.2,
-    outputPer1M: 1.25,
-    cachedInputPer1M: 0.02,
-    cacheWritePer1M: 0,
-  },
-  "gpt-4o": { inputPer1M: 2.5, outputPer1M: 10.0 },
-  "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.6 },
-  "gpt-4-turbo": { inputPer1M: 10.0, outputPer1M: 30.0 },
-  "gpt-4": { inputPer1M: 30.0, outputPer1M: 60.0 },
-  "gpt-3.5-turbo": { inputPer1M: 0.5, outputPer1M: 1.5 },
-  o1: { inputPer1M: 15.0, outputPer1M: 60.0 },
-  "o1-mini": { inputPer1M: 3.0, outputPer1M: 12.0 },
-  "o1-preview": { inputPer1M: 15.0, outputPer1M: 60.0 },
-
-  // OpenRouter passes through various model pricing
-  // These are common models accessed through OpenRouter
-  "anthropic/claude-3.5-sonnet": { inputPer1M: 3.0, outputPer1M: 15.0 },
-  "anthropic/claude-3-opus": { inputPer1M: 15.0, outputPer1M: 75.0 },
-  "openai/gpt-4o": { inputPer1M: 2.5, outputPer1M: 10.0 },
-  "openai/gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.6 },
-  "google/gemini-pro-1.5": { inputPer1M: 1.25, outputPer1M: 5.0 },
-  "meta-llama/llama-3.1-405b-instruct": { inputPer1M: 3.0, outputPer1M: 3.0 },
-  "meta-llama/llama-3.1-70b-instruct": { inputPer1M: 0.52, outputPer1M: 0.75 },
-
-  // Ollama (local) - free
-  // Ollama models are free since they run locally
-
-  // Google Gemini image generation models
-  // Note: Image generation is priced per image, not per token
-  // These are approximate costs (actual pricing may vary)
-  "gemini-2.5-flash-image": { inputPer1M: 0.0, outputPer1M: 0.0 },
-  "gemini-3-pro-image-preview": { inputPer1M: 0.0, outputPer1M: 0.0 },
-};
+/** False when CoWork has no price for this model, so its cost is unknown (not $0). */
+export function isModelPriced(modelId: string, providerType?: string | null): boolean {
+  return getModelPricing(modelId, providerType) !== null;
+}
 
 /**
  * Image generation pricing (per image in USD)
@@ -265,22 +155,11 @@ export function calculateCost(
   cacheTokenAccounting?: CacheTokenAccounting,
   cacheCostOptions?: CacheCostOptions,
 ): number {
-  // Try exact match first
-  let pricing = MODEL_PRICING[modelId];
+  const basePricing = getModelPricing(modelId, cacheCostOptions?.providerType);
 
-  // If no exact match, try to find a partial match
-  if (!pricing) {
-    const modelIdLower = modelId.toLowerCase();
-    for (const [key, value] of Object.entries(MODEL_PRICING)) {
-      if (modelIdLower.includes(key.toLowerCase()) || key.toLowerCase().includes(modelIdLower)) {
-        pricing = value;
-        break;
-      }
-    }
-  }
-
-  // If still no match, return 0 (unknown model or local model)
-  if (!pricing) {
+  // Unknown model: callers that need to distinguish "unpriced" from "free"
+  // must check isModelPriced(); the numeric result stays 0 for compatibility.
+  if (!basePricing) {
     return 0;
   }
 
@@ -289,16 +168,17 @@ export function calculateCost(
     .toLowerCase()
     .replace(/^(?:openai-codex|openai)\//, "")
     .split("@", 1)[0];
-  // GPT-6 applies the long-context multiplier to the whole request once the
-  // input crosses 272K tokens: input/cache rates are doubled and output is
-  // charged at 1.5x.
-  const isGpt6LongContext =
-    (normalizedModelId === "gpt-6-astra" ||
-      normalizedModelId === "gpt-6-sol" ||
-      normalizedModelId === "gpt-6-luna") &&
-    inputTokens > 272_000;
-  const inputRateMultiplier = isGpt6LongContext ? 2 : 1;
-  const outputRateMultiplier = isGpt6LongContext ? 1.5 : 1;
+  // Long-context tiers (e.g. GPT-6 above 272K input tokens) reprice the whole request.
+  const tier = basePricing.longContext;
+  const pricing: ModelPricing =
+    tier && inputTokens > tier.thresholdTokens
+      ? {
+          inputPer1M: tier.inputPer1M,
+          outputPer1M: tier.outputPer1M,
+          cachedInputPer1M: tier.cachedInputPer1M ?? basePricing.cachedInputPer1M,
+          cacheWritePer1M: tier.cacheWritePer1M ?? basePricing.cacheWritePer1M,
+        }
+      : basePricing;
 
   // Cached tokens are already counted in inputTokens but billed at a discount.
   // Discount rate varies by provider: Anthropic = 10% of input price, OpenAI/Azure = 50%.
@@ -331,10 +211,10 @@ export function calculateCost(
     ? inputTokens - safeCached - safeCacheWrite
     : inputTokens;
   const inputCost =
-    (regularInputTokens / 1_000_000) * pricing.inputPer1M * inputRateMultiplier +
-    (safeCached / 1_000_000) * cachedRate * inputRateMultiplier +
-    (safeCacheWrite / 1_000_000) * cacheWriteRate * inputRateMultiplier;
-  const outputCost = (outputTokens / 1_000_000) * pricing.outputPer1M * outputRateMultiplier;
+    (regularInputTokens / 1_000_000) * pricing.inputPer1M +
+    (safeCached / 1_000_000) * cachedRate +
+    (safeCacheWrite / 1_000_000) * cacheWriteRate;
+  const outputCost = (outputTokens / 1_000_000) * pricing.outputPer1M;
 
   return inputCost + outputCost;
 }
@@ -344,14 +224,7 @@ function resolveCacheWriteRate(
   normalizedModelId: string,
   options?: CacheCostOptions,
 ): number {
-  // An explicit zero is meaningful: GPT-5.4/GPT-5.5 cache writes are not
-  // charged as a separate line item. Keep the table authoritative.
-  if (pricing.cacheWritePer1M !== undefined) return pricing.cacheWritePer1M;
-  // Preserve the legacy standalone helper behavior for callers that do not
-  // know the provider route yet.
-  if (!options) return pricing.inputPer1M;
-
-  const provider = String(options.providerType || "")
+  const provider = String(options?.providerType || "")
     .trim()
     .toLowerCase();
   const anthropicRoute =
@@ -360,9 +233,15 @@ function resolveCacheWriteRate(
     provider === "anthropic-compatible" ||
     provider === "bedrock" ||
     /(?:^|[./_-])(?:claude|anthropic)(?:[./_-]|$)/i.test(normalizedModelId);
-  if (anthropicRoute) {
-    return pricing.inputPer1M * (options.cacheTtl === "1h" ? 2 : 1.25);
-  }
+  // Catalogue cache-write prices for Claude are the 5-minute rate; 1-hour writes cost 2x input.
+  if (options && anthropicRoute && options.cacheTtl === "1h") return pricing.inputPer1M * 2;
+  // An explicit zero is meaningful: GPT-5.4/GPT-5.5 cache writes are not
+  // charged as a separate line item. Keep the table authoritative.
+  if (pricing.cacheWritePer1M !== undefined) return pricing.cacheWritePer1M;
+  // Preserve the legacy standalone helper behavior for callers that do not
+  // know the provider route yet.
+  if (!options) return pricing.inputPer1M;
+  if (anthropicRoute) return pricing.inputPer1M * 1.25;
 
   // OpenAI's newer GPT-5.6+ models charge a premium for cache creation when
   // the table does not yet have a model-specific entry.
@@ -382,28 +261,6 @@ function resolveCacheWriteRate(
     return 0;
   }
   return pricing.inputPer1M;
-}
-
-/**
- * Get pricing info for a model (for display)
- * @param modelId The model identifier
- * @returns Pricing info or null if unknown
- */
-export function getModelPricing(modelId: string): ModelPricing | null {
-  // Try exact match first
-  if (MODEL_PRICING[modelId]) {
-    return MODEL_PRICING[modelId];
-  }
-
-  // Try partial match
-  const modelIdLower = modelId.toLowerCase();
-  for (const [key, value] of Object.entries(MODEL_PRICING)) {
-    if (modelIdLower.includes(key.toLowerCase()) || key.toLowerCase().includes(modelIdLower)) {
-      return value;
-    }
-  }
-
-  return null;
 }
 
 /**

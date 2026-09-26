@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import { usageLocalDateKey } from "../../shared/usageInsightsDates";
 import { UsageInsightsProjector } from "./UsageInsightsProjector";
+import { calculateCost, getCacheTokenAccounting, isModelPriced } from "../agent/llm/pricing";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -17,6 +18,8 @@ export interface UsageInsightsCostByModelRow {
   outputTokens: number;
   cachedTokens: number;
   distinctTasks: number;
+  /** False when some calls used a model without a known price, so `cost` is a lower bound. */
+  costKnown: boolean;
 }
 
 export interface UsageInsightsLlmSummary {
@@ -31,6 +34,8 @@ export interface UsageInsightsLlmSummary {
   /** cached / input as percentage when input > 0 */
   cacheReadRate: number | null;
   distinctTaskCount: number;
+  /** Calls whose model has no known price; their cost is excluded from totalCost. */
+  unpricedCallCount: number;
 }
 
 export interface UsageInsightsJevPurposeRow {
@@ -203,12 +208,14 @@ interface LlmUsageScanResult {
   totalCachedTokens: number;
   totalLlmCalls: number;
   chargeableCalls: number;
+  unpricedCalls: number;
   distinctTaskIds: Set<string>;
   byModel: Map<
     string,
     {
       cost: number;
       calls: number;
+      unpricedCalls: number;
       inputTokens: number;
       outputTokens: number;
       cachedTokens: number;
@@ -255,6 +262,7 @@ function emptyLlmScan(): LlmUsageScanResult {
     totalCachedTokens: 0,
     totalLlmCalls: 0,
     chargeableCalls: 0,
+    unpricedCalls: 0,
     distinctTaskIds: new Set(),
     byModel: new Map(),
     byDay: new Map(),
@@ -269,6 +277,7 @@ function mergeLlmScans(target: LlmUsageScanResult, source: LlmUsageScanResult): 
   target.totalCachedTokens += source.totalCachedTokens;
   target.totalLlmCalls += source.totalLlmCalls;
   target.chargeableCalls += source.chargeableCalls;
+  target.unpricedCalls += source.unpricedCalls;
 
   for (const taskId of source.distinctTaskIds) {
     target.distinctTaskIds.add(taskId);
@@ -278,6 +287,7 @@ function mergeLlmScans(target: LlmUsageScanResult, source: LlmUsageScanResult): 
     const current = target.byModel.get(model) ?? {
       cost: 0,
       calls: 0,
+      unpricedCalls: 0,
       inputTokens: 0,
       outputTokens: 0,
       cachedTokens: 0,
@@ -285,6 +295,7 @@ function mergeLlmScans(target: LlmUsageScanResult, source: LlmUsageScanResult): 
     };
     current.cost += data.cost;
     current.calls += data.calls;
+    current.unpricedCalls += data.unpricedCalls;
     current.inputTokens += data.inputTokens;
     current.outputTokens += data.outputTokens;
     current.cachedTokens += data.cachedTokens;
@@ -350,13 +361,6 @@ function collectLocalDateKeysInRange(periodStart: number, periodEnd: number): st
  * Aggregates usage data from the tasks and task_events tables
  * to produce weekly/monthly insight reports.
  */
-interface LlmPricingRow {
-  model_key: string;
-  input_cost_per_mtok: number;
-  output_cost_per_mtok: number;
-  cached_input_cost_per_mtok: number;
-}
-
 interface TaskMetricsAccumulator {
   totalCreated: number;
   completed: number;
@@ -584,64 +588,27 @@ function mergeNonLlmAccumulator(
 }
 
 export class UsageInsightsService {
-  private pricingMap: Map<string, LlmPricingRow> | null = null;
-
   constructor(private db: Database.Database) {}
 
-  private loadPricingMap(): Map<string, LlmPricingRow> {
-    if (this.pricingMap) return this.pricingMap;
-    const map = new Map<string, LlmPricingRow>();
-    try {
-      const rows = this.db
-        .prepare(
-          "SELECT model_key, input_cost_per_mtok, output_cost_per_mtok, cached_input_cost_per_mtok FROM llm_pricing",
-        )
-        .all() as LlmPricingRow[];
-      for (const r of rows) {
-        map.set(r.model_key, r);
-        map.set(r.model_key.toLowerCase(), r);
-      }
-    } catch {
-      // Table may not exist yet
-    }
-    this.pricingMap = map;
-    return map;
-  }
-
-  private lookupPricing(modelKey: string): LlmPricingRow | undefined {
-    const map = this.loadPricingMap();
-    const lc = modelKey.toLowerCase();
-    if (map.has(modelKey)) return map.get(modelKey);
-    if (map.has(lc)) return map.get(lc);
-    // Bare version numbers like "5.4" → try "gpt-5.4"
-    if (/^\d/.test(lc) && map.has(`gpt-${lc}`)) return map.get(`gpt-${lc}`);
-    if (/^(sonnet|opus|haiku)-/.test(lc) && map.has(`claude-${lc}`)) return map.get(`claude-${lc}`);
-    if (lc.includes(":free") || lc.includes("ollama") || lc.includes(":latest"))
-      return {
-        model_key: modelKey,
-        input_cost_per_mtok: 0,
-        output_cost_per_mtok: 0,
-        cached_input_cost_per_mtok: 0,
-      };
-    for (const [k, v] of map) {
-      if (lc.startsWith(k.toLowerCase()) || k.toLowerCase().startsWith(lc)) return v;
-    }
-    return undefined;
-  }
-
+  /**
+   * Estimate cost for history rows recorded without one, using the same shared
+   * pricing as live tasks (src/electron/agent/llm/pricing.ts).
+   */
   private estimateCost(
     modelKey: string,
+    providerType: string | null,
     inputTokens: number,
     outputTokens: number,
     cachedTokens: number,
   ): number {
-    const p = this.lookupPricing(modelKey);
-    if (!p) return 0;
-    const billableInput = Math.max(0, inputTokens - cachedTokens);
-    return (
-      (billableInput / 1_000_000) * p.input_cost_per_mtok +
-      (outputTokens / 1_000_000) * p.output_cost_per_mtok +
-      (cachedTokens / 1_000_000) * p.cached_input_cost_per_mtok
+    return calculateCost(
+      modelKey,
+      inputTokens,
+      outputTokens,
+      cachedTokens,
+      0,
+      getCacheTokenAccounting(providerType, modelKey),
+      { providerType },
     );
   }
 
@@ -735,11 +702,16 @@ export class UsageInsightsService {
       (typeof entry.modelId === "string" && entry.modelId) ||
       "unknown";
     const rawCost = typeof entry.cost === "number" && Number.isFinite(entry.cost) ? entry.cost : 0;
+    const providerForPricing = normalizeLlmProviderType(entry.providerType) || null;
+    // A recorded $0 with tokens is ambiguous: older builds stored unknown prices as 0.
+    // Classify at read time so existing history is covered without a migration.
+    const unpriced =
+      rawCost <= 0 && deltaInput + deltaOutput > 0 && !isModelPriced(modelKey, providerForPricing);
     const deltaCost =
       rawCost > 0
         ? rawCost
-        : deltaInput + deltaOutput > 0
-          ? this.estimateCost(modelKey, deltaInput, deltaOutput, deltaCached)
+        : deltaInput + deltaOutput > 0 && !unpriced
+          ? this.estimateCost(modelKey, providerForPricing, deltaInput, deltaOutput, deltaCached)
           : 0;
 
     out.totalCost += deltaCost;
@@ -748,11 +720,13 @@ export class UsageInsightsService {
     out.totalCachedTokens += deltaCached;
     out.totalLlmCalls += 1;
     if (deltaCost > 0) out.chargeableCalls += 1;
+    if (unpriced) out.unpricedCalls += 1;
     if (entry.taskId) out.distinctTaskIds.add(entry.taskId);
 
     const byModel = out.byModel.get(modelKey) ?? {
       cost: 0,
       calls: 0,
+      unpricedCalls: 0,
       inputTokens: 0,
       outputTokens: 0,
       cachedTokens: 0,
@@ -760,6 +734,7 @@ export class UsageInsightsService {
     };
     byModel.cost += deltaCost;
     byModel.calls += 1;
+    if (unpriced) byModel.unpricedCalls += 1;
     byModel.inputTokens += deltaInput;
     byModel.outputTokens += deltaOutput;
     byModel.cachedTokens += deltaCached;
@@ -839,7 +814,6 @@ export class UsageInsightsService {
     periodDays: number,
     projector: UsageInsightsProjector,
   ): UsageInsights {
-    this.pricingMap = null;
     const now = Date.now();
     const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
@@ -952,7 +926,6 @@ export class UsageInsightsService {
   }
 
   private generateRawWindow(workspaceId: string | null, periodDays = 7): UsageInsights {
-    this.pricingMap = null;
     const now = Date.now();
     const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
@@ -1036,7 +1009,6 @@ export class UsageInsightsService {
   }
 
   private generateFast(workspaceId: string | null, periodDays = 7): UsageInsights {
-    this.pricingMap = null;
     const now = Date.now();
     const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
@@ -1899,6 +1871,7 @@ export class UsageInsightsService {
             ? rawCost
             : this.estimateCost(
                 modelKey,
+                null,
                 row.input_tokens || 0,
                 row.output_tokens || 0,
                 row.cached_tokens || 0,
@@ -2443,6 +2416,7 @@ export class UsageInsightsService {
         outputTokens: data.outputTokens,
         cachedTokens: data.cachedTokens,
         distinctTasks: data.taskIds.size,
+        costKnown: data.unpricedCalls === 0,
       }))
       .sort((a, b) => {
         if (b.cost !== a.cost) return b.cost - a.cost;
@@ -2478,6 +2452,7 @@ export class UsageInsightsService {
       totalCachedTokens: scan.totalCachedTokens,
       cacheReadRate,
       distinctTaskCount: scan.distinctTaskIds.size,
+      unpricedCallCount: scan.unpricedCalls,
     };
   }
 
@@ -2711,6 +2686,7 @@ export class UsageInsightsService {
               ? delta.cost
               : this.estimateCost(
                   payload.modelKey || "unknown",
+                  null,
                   delta.inputTokens || 0,
                   delta.outputTokens || 0,
                   delta.cachedTokens || 0,

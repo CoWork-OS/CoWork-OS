@@ -174,6 +174,7 @@ import {
   IdempotencyManager,
 } from "../security/concurrency";
 import { MemoryService } from "../memory/MemoryService";
+import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import {
@@ -9622,6 +9623,7 @@ export class AgentDaemon extends EventEmitter {
 
     const task = this.taskRepo.findById(taskId);
     if (!task) return;
+    if (taskDisablesMemoryCapture(task)) return;
 
     let effectiveMemoryWorkspace: Workspace | undefined;
     try {
@@ -12003,8 +12005,36 @@ export class AgentDaemon extends EventEmitter {
         normalized,
       );
     };
+    const splitTableRows = (block: string): string[] => {
+      const pieces: string[] = [];
+      let proseLines: string[] = [];
+      const flushProse = () => {
+        if (proseLines.length > 0) pieces.push(proseLines.join("\n"));
+        proseLines = [];
+      };
+
+      for (const line of block.split(/\r?\n/)) {
+        if (!/^\s*\|.*\|\s*$/.test(line)) {
+          proseLines.push(line);
+          continue;
+        }
+
+        flushProse();
+        if (/^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/.test(line)) continue;
+        pieces.push(
+          line
+            .split("|")
+            .map((cell) => cell.trim())
+            .filter(Boolean)
+            .join(" | "),
+        );
+      }
+      flushProse();
+      return pieces;
+    };
     const pieces = trimmed
       .split(/(?=^\s*(?:[-*+]|\d+[.)])\s+)/m)
+      .flatMap(splitTableRows)
       .flatMap((piece) => piece.split(/(?<=[.!?])\s+/))
       .map((piece) => normalizePiece(piece))
       .filter(Boolean);
@@ -12047,7 +12077,7 @@ export class AgentDaemon extends EventEmitter {
       (typeof this.getTaskEventsForReplay === "function"
         ? this.getTaskEventsForReplay(taskId)
         : []);
-    if (this.hasMatchingFileReadEvidenceForKeyClaims(keyClaims, evidenceEvents)) {
+    if (this.hasMatchingFileReadEvidenceForKeyClaims(keyClaims, evidenceEvents, text)) {
       return { passed: true, keyClaims };
     }
 
@@ -12067,6 +12097,7 @@ export class AgentDaemon extends EventEmitter {
   private hasMatchingFileReadEvidenceForKeyClaims(
     keyClaims: string[],
     events: TaskEvent[],
+    summary: string,
   ): boolean {
     if (keyClaims.length === 0 || events.length === 0) return false;
 
@@ -12121,45 +12152,188 @@ export class AgentDaemon extends EventEmitter {
 
     if (successfulReads.length === 0) return false;
 
-    return keyClaims.every((claim) => {
-      const hasFileReference =
-        /\b(?:file|document|report|text|contents?|read[ -]?back)\b/i.test(claim) ||
-        /\bit\s+(?:contains?|includes?|is|was)\b/i.test(claim);
-      if (!hasFileReference) {
-        return false;
-      }
-
-      const byteMatch = claim.match(/\b([\d,]+)\s*bytes?\b/i);
-      const claimedByteCount = byteMatch ? Number(byteMatch[1].replace(/,/g, "")) : undefined;
+    const citedReads = successfulReads.filter((read) => {
+      if (!read.path) return false;
+      const normalizedPath = read.path.replace(/\\/g, "/");
+      const basename = path.basename(normalizedPath);
+      return Boolean(basename && (summary.includes(normalizedPath) || summary.includes(basename)));
+    });
+    const hasCitedSourceLiteralsForClaim = (claim: string): boolean => {
+      if (citedReads.length === 0) return false;
       const quotedValues = Array.from(
         claim.matchAll(/`([^`]+)`|"([^"]+)"|'([^']+)'/g),
         (match) => match[1] || match[2] || match[3] || "",
       ).filter(Boolean);
-      if (claimedByteCount === undefined && quotedValues.length === 0) return false;
+      const hasDistinctiveLiteral = quotedValues.some(
+        (value) => value.trim().length >= 4 || /[^\w\s]/.test(value),
+      );
+      if (quotedValues.length === 0 || !hasDistinctiveLiteral) return false;
 
-      const exactContentClaim = /\bexactly\b/i.test(claim);
-      const contentHasOneTrailingNewline =
-        /\b(?:followed by|with|ending in|ends? in)\s+(?:exactly\s+)?(?:one|a single|a)\s+(?:trailing\s+)?newline\b/i.test(
-          claim,
-        );
-      return successfulReads.some((read) => {
-        const readPaths = [read.path, path.basename(read.path)].filter(Boolean);
-        const contentLiterals = quotedValues.filter(
-          (value) => !readPaths.some((readPath) => value.toLowerCase() === readPath.toLowerCase()),
-        );
-        if (
-          contentLiterals.some((literal) =>
-            exactContentClaim
-              ? read.content !== (contentHasOneTrailingNewline ? `${literal}\n` : literal)
-              : !read.content.includes(literal),
-          )
-        ) {
-          return false;
+      return quotedValues.every((value) =>
+        citedReads.some((read) => read.content.includes(value)),
+      );
+    };
+
+    return keyClaims.every((claim) => {
+      // A quoted substring cannot establish an exact readback or its byte count.
+      const requiresExactReadback = /\bexactly\b|\b[\d,]+\s*bytes?\b/i.test(claim);
+      if (!requiresExactReadback && hasCitedSourceLiteralsForClaim(claim)) return true;
+
+      const hasFileReference =
+        /\b(?:file|document|report|text|contents?|read[ -]?back)\b/i.test(claim) ||
+        /\bit\s+(?:contains?|includes?|is|was)\b/i.test(claim);
+      if (hasFileReference) {
+        const byteMatch = claim.match(/\b([\d,]+)\s*bytes?\b/i);
+        const claimedByteCount = byteMatch ? Number(byteMatch[1].replace(/,/g, "")) : undefined;
+        const quotedValues = Array.from(
+          claim.matchAll(/`([^`]+)`|"([^"]+)"|'([^']+)'/g),
+          (match) => match[1] || match[2] || match[3] || "",
+        ).filter(Boolean);
+
+        if (claimedByteCount !== undefined || quotedValues.length > 0) {
+          const exactContentClaim = /\bexactly\b/i.test(claim);
+          const contentHasOneTrailingNewline =
+            /\b(?:followed by|with|ending in|ends? in)\s+(?:exactly\s+)?(?:one|a single|a)\s+(?:trailing\s+)?newline\b/i.test(
+              claim,
+            );
+          const matchesReadback = successfulReads.some((read) => {
+            const readPaths = [read.path, path.basename(read.path)].filter(Boolean);
+            const contentLiterals = quotedValues.filter(
+              (value) =>
+                !readPaths.some((readPath) => value.toLowerCase() === readPath.toLowerCase()),
+            );
+            if (
+              contentLiterals.some((literal) =>
+                exactContentClaim
+                  ? read.content !== (contentHasOneTrailingNewline ? `${literal}\n` : literal)
+                  : !read.content.includes(literal),
+              )
+            ) {
+              return false;
+            }
+            if (claimedByteCount !== undefined && read.size !== claimedByteCount) return false;
+            return contentLiterals.length > 0 || claimedByteCount !== undefined;
+          });
+          if (matchesReadback) return true;
         }
-        if (claimedByteCount !== undefined && read.size !== claimedByteCount) return false;
-        return contentLiterals.length > 0 || claimedByteCount !== undefined;
-      });
+      }
+
+      return this.hasVerifiedDerivedCalculationForKeyClaim(claim, successfulReads);
     });
+  }
+
+  private hasVerifiedDerivedCalculationForKeyClaim(
+    claim: string,
+    reads: Array<{ path: string; content: string; size?: number }>,
+  ): boolean {
+    const equalsIndex = claim.indexOf("=");
+    if (equalsIndex < 0) return false;
+
+    const rightSide = claim.slice(equalsIndex + 1);
+    const reportedMatch = rightSide.match(/^\s*(-?[\d,]+(?:\.\d+)?)\s*(%)?/);
+    if (!reportedMatch) return false;
+
+    const reportedValue = Number(reportedMatch[1].replace(/,/g, ""));
+    const leftSide = claim
+      .slice(0, equalsIndex)
+      .replace(/[−–]/g, "-")
+      .replace(/[×·]/g, "*")
+      .replace(/÷/g, "/");
+    const sourceNumbers = new Set(
+      reads.flatMap((read) => {
+        const plainNumbers = Array.from(read.content.matchAll(/-?\d+(?:\.\d+)?/g), (match) =>
+          String(Number(match[0])),
+        );
+        const groupedNumbers = Array.from(
+          read.content.matchAll(/-?\d{1,3}(?:,\d{3})+(?:\.\d+)?/g),
+          (match) => String(Number(match[0].replace(/,/g, ""))),
+        );
+        return [...plainNumbers, ...groupedNumbers];
+      }),
+    );
+
+    const parseExpression = (
+      expression: string,
+    ): { value: number; operands: number[] } | undefined => {
+      const normalized = expression.replace(/,/g, "").replace(/\s+/g, "");
+      const tokens = normalized.match(/\d+(?:\.\d+)?|[()+\-*/]/g) ?? [];
+      if (tokens.join("") !== normalized || tokens.length === 0) return undefined;
+
+      let cursor = 0;
+      const operands: number[] = [];
+      const parseFactor = (): number | undefined => {
+        const token = tokens[cursor];
+        if (token === "+" || token === "-") {
+          cursor += 1;
+          const value = parseFactor();
+          return value === undefined ? undefined : token === "-" ? -value : value;
+        }
+        if (token === "(") {
+          cursor += 1;
+          const value = parseSum();
+          if (value === undefined || tokens[cursor] !== ")") return undefined;
+          cursor += 1;
+          return value;
+        }
+        if (token === undefined || !/^\d/.test(token)) return undefined;
+        cursor += 1;
+        const value = Number(token);
+        operands.push(value);
+        return value;
+      };
+      const parseProduct = (): number | undefined => {
+        let value = parseFactor();
+        if (value === undefined) return undefined;
+        while (tokens[cursor] === "*" || tokens[cursor] === "/") {
+          const operator = tokens[cursor++];
+          const right = parseFactor();
+          if (right === undefined || (operator === "/" && right === 0)) return undefined;
+          value = operator === "*" ? value * right : value / right;
+        }
+        return value;
+      };
+      const parseSum = (): number | undefined => {
+        let value = parseProduct();
+        if (value === undefined) return undefined;
+        while (tokens[cursor] === "+" || tokens[cursor] === "-") {
+          const operator = tokens[cursor++];
+          const right = parseProduct();
+          if (right === undefined) return undefined;
+          value = operator === "+" ? value + right : value - right;
+        }
+        return value;
+      };
+
+      const value = parseSum();
+      if (value === undefined || cursor !== tokens.length || !Number.isFinite(value))
+        return undefined;
+      return { value, operands };
+    };
+
+    let parsed: { value: number; operands: number[] } | undefined;
+    for (let start = 0; start < leftSide.length; start += 1) {
+      if (!/[\d(+-]/.test(leftSide[start])) continue;
+      const candidate = parseExpression(leftSide.slice(start));
+      if (candidate && /[+\-*/]/.test(leftSide.slice(start))) {
+        parsed = candidate;
+        break;
+      }
+    }
+    if (!parsed || parsed.operands.length < 2) return false;
+
+    const isPercentageScale = Boolean(reportedMatch[2]) && /\*\s*100\s*$/.test(leftSide);
+    const sourceOperands = isPercentageScale ? parsed.operands.slice(0, -1) : parsed.operands;
+    if (
+      sourceOperands.length === 0 ||
+      sourceOperands.some((operand) => !sourceNumbers.has(String(operand)))
+    ) {
+      return false;
+    }
+
+    const decimalPlaces = (reportedMatch[1].split(".")[1] ?? "").length;
+    const roundingTolerance =
+      0.5 * 10 ** -decimalPlaces + Math.max(1, Math.abs(parsed.value)) * 1e-10;
+    return Math.abs(parsed.value - reportedValue) <= roundingTolerance;
   }
 
   private async runPostCompletionVerification(
@@ -13062,7 +13236,7 @@ export class AgentDaemon extends EventEmitter {
       metadata?.verificationEvidenceBundle,
       historicalEvents,
     );
-    if (!evidenceCheck.passed) {
+    if (!evidenceCheck.passed && reviewDecision.explicitEvidenceRequired) {
       this.timelineMetrics.evidenceGateFails += 1;
       if (!explicitFailedTerminalStatus) {
         terminalStatus = "partial_success";
@@ -13465,7 +13639,7 @@ export class AgentDaemon extends EventEmitter {
     try {
       const isTopLevelTask =
         existingTask && !existingTask.parentTaskId && (existingTask.agentType ?? "main") === "main";
-      if (isCompletedOutcome && isTopLevelTask) {
+      if (isCompletedOutcome && isTopLevelTask && existingTask.source !== "sample" && !taskDisablesMemoryCapture(existingTask)) {
         const workspaceName = this.workspaceRepo.findById(existingTask.workspaceId)?.name;
         PersonalityManager.recordTaskCompleted(workspaceName);
         const gatewayContext = existingTask.agentConfig?.gatewayContext ?? "private";

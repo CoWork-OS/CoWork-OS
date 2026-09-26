@@ -36,3 +36,15 @@ describe("model access taxonomy", () => {
     expect(MODEL_ACCESS_GROUP_LABELS.local).toBe("Local models");
   });
 });
+
+describe("featured providers", () => {
+  it("shows about ten providers by default, all of them real provider types", async () => {
+    const { FEATURED_PROVIDER_TYPES } = await import("../model-access");
+    const { LLM_PROVIDER_TYPES } = await import("../types");
+    expect(FEATURED_PROVIDER_TYPES.length).toBeGreaterThanOrEqual(8);
+    expect(FEATURED_PROVIDER_TYPES.length).toBeLessThanOrEqual(12);
+    for (const type of FEATURED_PROVIDER_TYPES) {
+      expect(LLM_PROVIDER_TYPES as readonly string[]).toContain(type);
+    }
+  });
+});

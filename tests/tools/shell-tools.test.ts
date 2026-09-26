@@ -314,7 +314,7 @@ describe("ShellTools auto-approval", () => {
   it("rejects apply_patch invocation through run_command with remediation", async () => {
     await expect(
       shellTools.runCommand('apply_patch "*** Begin Patch\\n*** End Patch\\n"'),
-    ).rejects.toThrow(/use the apply_patch tool directly/i);
+    ).rejects.toThrow(/no apply_patch tool\. Use edit_file/i);
 
     expect(mockDaemon.logEvent).toHaveBeenCalledWith(
       "task-1",
@@ -322,7 +322,7 @@ describe("ShellTools auto-approval", () => {
       expect.objectContaining({
         tool: "run_command",
         reason: "apply_patch_via_shell",
-        remediation: "use_apply_patch_tool_directly",
+        remediation: "use_edit_file_or_write_file",
       }),
     );
     expect(mockDaemon.requestApproval).not.toHaveBeenCalled();
@@ -333,7 +333,7 @@ describe("ShellTools auto-approval", () => {
       shellTools.runCommand(
         "bash -lc \"echo before && apply_patch '*** Begin Patch\\n*** End Patch\\n'\"",
       ),
-    ).rejects.toThrow(/use the apply_patch tool directly/i);
+    ).rejects.toThrow(/no apply_patch tool\. Use edit_file/i);
 
     expect(mockDaemon.logEvent).toHaveBeenCalledWith(
       "task-1",
@@ -341,7 +341,7 @@ describe("ShellTools auto-approval", () => {
       expect.objectContaining({
         tool: "run_command",
         reason: "apply_patch_via_shell",
-        remediation: "use_apply_patch_tool_directly",
+        remediation: "use_edit_file_or_write_file",
       }),
     );
     expect(mockDaemon.requestApproval).not.toHaveBeenCalled();
@@ -597,7 +597,7 @@ describe("ShellTools auto-approval", () => {
     );
   });
 
-  it("fails closed without the explicit unsandboxed shell environment override even when sandboxing is not required", async () => {
+  it("asks explicitly, and fails closed when declined, when no OS sandbox is available", async () => {
     vi.mocked(loadPolicies).mockReturnValueOnce({
       version: 1,
       updatedAt: new Date().toISOString(),
@@ -630,9 +630,18 @@ describe("ShellTools auto-approval", () => {
       cleanup: vi.fn(),
     });
 
+    // No OS sandbox and none required: the user is asked explicitly; declining fails closed.
+    mockDaemon.requestApproval.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     await expect(
       shellTools.runCommand(`${SAFE_CMD_1} | cat`, { cwd: process.cwd() }),
-    ).rejects.toThrow(/requires an OS-level sandbox/i);
+    ).rejects.toThrow(/not approved to run without an OS sandbox/i);
+    expect(mockDaemon.requestApproval).toHaveBeenLastCalledWith(
+      "task-1",
+      "run_command",
+      expect.stringContaining("no OS sandbox"),
+      expect.objectContaining({ unsandboxed: true }),
+      expect.objectContaining({ allowAutoApprove: false, requireExplicitApproval: true }),
+    );
     expect(mockShellSessionManager.runCommand).not.toHaveBeenCalled();
     expect(mockDaemon.logEvent).toHaveBeenCalledWith(
       "task-1",

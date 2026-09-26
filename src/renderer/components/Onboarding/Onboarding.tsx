@@ -22,7 +22,7 @@ import {
 } from "../../../shared/onboarding";
 
 interface OnboardingProps {
-  onComplete: (dontShowAgain: boolean) => void;
+  onComplete: (dontShowAgain: boolean, firstPrompt?: string) => void | Promise<void>;
   workspaceId?: string | null;
 }
 
@@ -67,21 +67,37 @@ const PROVIDERS: {
   { id: "xai", name: "Grok", requiresKey: true },
   { id: "deepseek", name: "DeepSeek", requiresKey: true },
   { id: "kimi", name: "Kimi", requiresKey: true },
+  { id: "opencode-go", name: "OpenCode Go", requiresKey: true },
+  { id: "zai", name: "Z.ai (GLM)", requiresKey: true },
+  { id: "minimax", name: "MiniMax", requiresKey: true },
   { id: "nano-gpt", name: "NanoGPT", requiresKey: true },
+  { id: "ollama", name: "Ollama (local)", requiresKey: false },
   { id: "bedrock", name: "AWS Bedrock", requiresKey: false },
 ];
 
-// API key URLs for providers
-const PROVIDER_URLS: Record<string, string> = {
-  anthropic: "https://console.anthropic.com/settings/keys",
-  openai: "https://platform.openai.com/api-keys",
-  gemini: "https://aistudio.google.com/app/apikey",
-  openrouter: "https://openrouter.ai/keys",
-  groq: "https://console.groq.com/keys",
-  xai: "https://console.x.ai/",
-  deepseek: "https://platform.deepseek.com/api_keys",
-  kimi: "https://platform.moonshot.ai/",
-  "nano-gpt": "https://nano-gpt.com/api",
+// Where to get an API key for each provider, plus any key-type caveat.
+const PROVIDER_KEY_SITES: Partial<
+  Record<LLMProviderType, { url: string; label: string; note?: string }>
+> = {
+  anthropic: { url: "https://console.anthropic.com/settings/keys", label: "Anthropic" },
+  openai: { url: "https://platform.openai.com/api-keys", label: "OpenAI" },
+  gemini: { url: "https://aistudio.google.com/app/apikey", label: "Google AI Studio" },
+  openrouter: { url: "https://openrouter.ai/keys", label: "OpenRouter" },
+  groq: { url: "https://console.groq.com/keys", label: "Groq Console" },
+  xai: { url: "https://console.x.ai/", label: "xAI Console" },
+  deepseek: { url: "https://platform.deepseek.com/api_keys", label: "DeepSeek Platform" },
+  kimi: { url: "https://platform.moonshot.ai/", label: "Moonshot Platform" },
+  "nano-gpt": { url: "https://nano-gpt.com/api", label: "NanoGPT" },
+  "opencode-go": { url: "https://opencode.ai/workspace", label: "OpenCode" },
+  zai: {
+    url: "https://z.ai/manage-apikey/apikey-list",
+    label: "Z.ai",
+    note: "Use a pay-as-you-go API key. Z.ai's GLM Coding Plan only covers the coding tools Z.ai lists.",
+  },
+  minimax: {
+    url: "https://platform.minimax.io/user-center/basic-information/interface-key",
+    label: "MiniMax Platform",
+  },
 };
 
 const CAPABILITY_PILLARS = [
@@ -141,8 +157,6 @@ interface OnboardingUiDraft {
   inputMode: "voice" | "keyboard";
   musicEnabled: boolean;
   showControlHints: boolean;
-  confidencePrompt: string;
-  confidenceResponse: string;
 }
 
 const ONBOARDING_UI_DRAFT_KEY = "cowork:onboarding:ui:v1";
@@ -158,44 +172,26 @@ const clearOnboardingUiDraft = (): void => {
 };
 
 // Use shared starter missions — pick a subset for the onboarding final step
-const FINAL_TRY_SUGGESTIONS = STARTER_MISSIONS.slice(0, 8);
-
-const buildConfidenceResponse = (
-  prompt: string,
-  data: {
-    assistantName: string;
-    workStyle: "planner" | "flexible" | null;
-    memoryEnabled: boolean;
-  },
-): string => {
-  const name = data.assistantName || "CoWork";
-  const styleLine =
-    data.workStyle === "planner"
-      ? "I will break it into clear steps and keep progress visible."
-      : "I will move quickly and adapt as context changes.";
-  const memoryLine = data.memoryEnabled
-    ? "I will remember useful preferences and context for next time."
-    : "I will keep memory off until you enable it in Settings > Memory.";
-
-  return `${name}: Great prompt: "${prompt}". ${styleLine} ${memoryLine}`;
-};
+const FINAL_TRY_SUGGESTIONS = STARTER_MISSIONS.filter((mission) => mission.kind === "prompt").slice(
+  0,
+  8,
+);
 
 export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
+  const firstPromptRef = useRef("");
+  const handleFlowComplete = useCallback(
+    (done: boolean) => onComplete(done, firstPromptRef.current || undefined),
+    [onComplete],
+  );
   const uiDraftRef = useRef<OnboardingUiDraft | null>(null);
   const [inputValue, setInputValue] = useState(uiDraftRef.current?.inputValue ?? "");
   const [inputMode, setInputMode] = useState<"voice" | "keyboard">(
     uiDraftRef.current?.inputMode ?? "keyboard",
   );
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [musicEnabled, setMusicEnabled] = useState(uiDraftRef.current?.musicEnabled ?? true);
+  const [musicEnabled, setMusicEnabled] = useState(uiDraftRef.current?.musicEnabled ?? false);
   const [showControlHints, setShowControlHints] = useState(
     uiDraftRef.current?.showControlHints ?? true,
-  );
-  const [confidencePrompt, setConfidencePrompt] = useState(
-    uiDraftRef.current?.confidencePrompt ?? "",
-  );
-  const [confidenceResponse, setConfidenceResponse] = useState(
-    uiDraftRef.current?.confidenceResponse ?? "",
   );
   const [themeMode, setThemeMode] = useState<"light" | "dark">(() =>
     document.documentElement.classList.contains("theme-light") ? "light" : "dark",
@@ -209,7 +205,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
   const [additionalGuidanceDraft, setAdditionalGuidanceDraft] = useState("");
   const ambientAudioRef = useRef<OnboardingAmbientAudio | null>(null);
 
-  const onboarding = useOnboardingFlow({ onComplete, workspaceId });
+  const onboarding = useOnboardingFlow({ onComplete: handleFlowComplete, workspaceId });
   const isSensitiveInputState =
     onboarding.state === "llm_api_key" || onboarding.state === "llm_testing";
   const isCompactRecapStep = onboarding.state === "recap" || onboarding.state === "final_try";
@@ -692,8 +688,6 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
   const handleContinueFromRecap = useCallback(() => {
     setVoiceError(null);
     setInputValue("");
-    setConfidencePrompt("");
-    setConfidenceResponse("");
     onboarding.continueFromRecap();
   }, [onboarding]);
 
@@ -702,21 +696,10 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
     if (!prompt) return;
 
     setVoiceError(null);
-    setConfidencePrompt(prompt);
-    setConfidenceResponse(
-      buildConfidenceResponse(prompt, {
-        assistantName: onboarding.data.assistantName,
-        workStyle: onboarding.data.workStyle,
-        memoryEnabled: onboarding.data.memoryEnabled,
-      }),
-    );
+    firstPromptRef.current = prompt;
     setInputValue("");
-  }, [
-    inputValue,
-    onboarding.data.assistantName,
-    onboarding.data.memoryEnabled,
-    onboarding.data.workStyle,
-  ]);
+    onboarding.completeOnboarding();
+  }, [inputValue, onboarding]);
 
   // Handle input submission
   const handleInputSubmit = useCallback(() => {
@@ -1388,29 +1371,6 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
 
             <section className="onboarding-recap-card">
               <div className="onboarding-recap-card-copy">
-                <span className="onboarding-recap-row-label">CoWork Pulse</span>
-                <strong>{onboarding.data.pulseEnabled ? "Opted in" : "Off"}</strong>
-                <p>
-                  Optional, content-free daily usage counts. No prompts, responses, files, commands,
-                  URLs, model routes, or account data.
-                </p>
-              </div>
-              <div className="onboarding-recap-edit-actions">
-                <button
-                  type="button"
-                  className="onboarding-recap-edit-btn"
-                  aria-pressed={onboarding.data.pulseEnabled}
-                  onClick={() =>
-                    onboarding.updateData({ pulseEnabled: !onboarding.data.pulseEnabled })
-                  }
-                >
-                  {onboarding.data.pulseEnabled ? "Turn off" : "Opt in"}
-                </button>
-              </div>
-            </section>
-
-            <section className="onboarding-recap-card">
-              <div className="onboarding-recap-card-copy">
                 <span className="onboarding-recap-row-label">Memory</span>
                 <strong>{memoryLabel}</strong>
                 <p>
@@ -1594,7 +1554,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
           onClick={handleConfidencePromptSubmit}
           disabled={!inputValue.trim()}
         >
-          Try it
+          Run in workspace
         </button>
         <button
           className="onboarding-btn onboarding-btn-secondary"
@@ -1604,25 +1564,9 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         </button>
       </div>
 
-      {confidenceResponse && (
-        <div className="onboarding-final-try-response">
-          <div className="onboarding-final-try-response-title">
-            {onboarding.data.assistantName || "CoWork"}
-          </div>
-          <p>{confidenceResponse}</p>
-          {confidencePrompt && (
-            <div className="onboarding-final-try-prompt">
-              Prompt: <span>{confidencePrompt}</span>
-            </div>
-          )}
-          <button
-            className="onboarding-btn onboarding-btn-primary onboarding-final-try-enter-btn"
-            onClick={onboarding.completeOnboarding}
-          >
-            Start in workspace
-          </button>
-        </div>
-      )}
+      <p className="onboarding-final-try-prompt">
+        Your prompt will run as a normal task after setup is saved.
+      </p>
     </div>
   );
 
@@ -1685,6 +1629,10 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
           <span className="onboarding-ai-primary-copy">
             Use an eligible ChatGPT account. Provider plan limits and usage terms apply.
           </span>
+          <span className="onboarding-ai-primary-copy">
+            Unofficial: OpenAI does not support ChatGPT sign-in in third-party apps, so it may stop
+            working at any time. An API key is the supported route.
+          </span>
         </button>
       </div>
       <div className="onboarding-provider-heading">Local models</div>
@@ -1745,30 +1693,17 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
   // Render API key input
   const renderApiKeyInput = () => {
     const provider = onboarding.data.selectedProvider;
-    const url = provider ? PROVIDER_URLS[provider] : null;
+    const keySite = provider ? PROVIDER_KEY_SITES[provider] : undefined;
 
     return (
       <div className={`onboarding-api-input-section ${onboarding.showApiInput ? "visible" : ""}`}>
-        {url && (
+        {keySite && (
           <p className="onboarding-api-hint">
             Get your key from{" "}
-            <a href={url} target="_blank" rel="noopener noreferrer">
-              {provider === "anthropic"
-                ? "Anthropic"
-                : provider === "openai"
-                  ? "OpenAI"
-                  : provider === "gemini"
-                    ? "Google AI Studio"
-                    : provider === "openrouter"
-                      ? "OpenRouter"
-                      : provider === "groq"
-                        ? "Groq Console"
-                        : provider === "xai"
-                          ? "xAI Console"
-                          : provider === "deepseek"
-                            ? "DeepSeek Platform"
-                            : "Moonshot Platform"}
+            <a href={keySite.url} target="_blank" rel="noopener noreferrer">
+              {keySite.label}
             </a>
+            {keySite.note ? ` ${keySite.note}` : ""}
           </p>
         )}
         <div className="onboarding-input-container">

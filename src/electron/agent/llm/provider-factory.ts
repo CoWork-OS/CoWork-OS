@@ -73,6 +73,7 @@ import { getUserDataDir } from "../../utils/user-data-dir";
 import { getSafeStorage } from "../../utils/safe-storage";
 import { createLogger } from "../../utils/logger";
 import { ModelCapabilityRegistry } from "./ModelCapabilityRegistry";
+import { recommendChatGPTModelForPlan } from "../../../shared/chatgpt-plan";
 import { normalizePromptCachingSettings } from "./prompt-cache";
 import { wrapProviderWithLocalInferenceAdmission } from "./local-inference-admission";
 import { isLocalInferenceProvider } from "../runtime/local-model-execution-profile";
@@ -126,11 +127,15 @@ function safeContentLength(value: unknown): number {
 function normalizeOpenAIModelForAuth(
   model: string | undefined,
   authMethod?: "api_key" | "oauth",
+  chatgptPlanType?: string,
 ): string | undefined {
   const normalized = normalizeModelKey(model);
   if (authMethod !== "oauth") return normalized || undefined;
-  if (!normalized) return OPENAI_OAUTH_DEFAULT_MODEL;
-  return OPENAI_OAUTH_SUPPORTED_MODELS.has(normalized) ? normalized : OPENAI_OAUTH_DEFAULT_MODEL;
+  const planDefault = chatgptPlanType
+    ? recommendChatGPTModelForPlan(chatgptPlanType)
+    : OPENAI_OAUTH_DEFAULT_MODEL;
+  if (!normalized) return planDefault;
+  return OPENAI_OAUTH_SUPPORTED_MODELS.has(normalized) ? normalized : planDefault;
 }
 
 type OpenAIAuthSettings = {
@@ -138,6 +143,28 @@ type OpenAIAuthSettings = {
   accessToken?: string;
   refreshToken?: string;
   authMethod?: "api_key" | "oauth";
+};
+
+/** Provider routes billed by flat subscription, not per token. */
+const SUBSCRIPTION_PROVIDER_TYPES = new Set([
+  "xai-oauth",
+  "github-copilot",
+  "kimi-code",
+  "kimi-coding",
+  "qwen-portal",
+  "minimax-portal",
+]);
+
+/**
+ * Provider routes CoWork no longer offers. Both took a Google OAuth access token issued
+ * to Gemini CLI or Antigravity; Google's terms forbid reusing those sign-ins in other
+ * apps and it has suspended accounts that did. Saved settings are migrated off them.
+ */
+export const RETIRED_PROVIDER_TYPES: Record<string, string> = {
+  "google-antigravity":
+    "Google Antigravity sign-ins may only be used in Antigravity. Use Google Gemini (API key) or Google Vertex instead.",
+  "google-gemini-cli":
+    "Gemini CLI sign-ins may only be used in Gemini CLI. Use Google Gemini (API key) or Google Vertex instead.",
 };
 
 function resolveOpenAIAuthMethod(settings?: OpenAIAuthSettings): "api_key" | "oauth" {
@@ -922,6 +949,8 @@ export interface LLMSettings {
   fallbackProviders?: LLMProviderFallbackConfig[];
   failoverPrimaryRetryCooldownSeconds?: number;
   promptCaching?: PromptCachingSettings;
+  /** Opt-in daily refresh of model prices/limits from models.dev (one anonymous GET per day). */
+  modelMetadataAutoRefresh?: boolean;
   jev?: JevSettingsData;
   anthropic?: {
     apiKey?: string;
@@ -969,6 +998,8 @@ export interface LLMSettings {
     accountId?: string;
     email?: string;
     authMethod?: "api_key" | "oauth";
+    /** ChatGPT plan from the sign-in token ("free", "go", "plus", ...), used for default models. */
+    chatgptPlanType?: string;
   } & Omit<ProviderRoutingSettings, "reasoningEffort">;
   azure?: {
     apiKey?: string;
@@ -1644,6 +1675,7 @@ export class LLMProviderFactory {
         normalizeOpenAIModelForAuth(
           settings.openai?.model,
           resolveOpenAIAuthMethod(settings.openai),
+          settings.openai?.chatgptPlanType,
         ),
         azureDeployment,
         settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0],
@@ -1669,6 +1701,7 @@ export class LLMProviderFactory {
         normalizeOpenAIModelForAuth(
           settings.openai?.model,
           resolveOpenAIAuthMethod(settings.openai),
+          settings.openai?.chatgptPlanType,
         ),
         azureDeployment,
         settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0],
@@ -1682,7 +1715,11 @@ export class LLMProviderFactory {
 
     if (providerType === "openai") {
       return (
-        normalizeOpenAIModelForAuth(modelKey, resolveOpenAIAuthMethod(settings.openai)) || modelKey
+        normalizeOpenAIModelForAuth(
+          modelKey,
+          resolveOpenAIAuthMethod(settings.openai),
+          settings.openai?.chatgptPlanType,
+        ) || modelKey
       );
     }
 
@@ -1981,6 +2018,24 @@ export class LLMProviderFactory {
   /**
    * Load settings from encrypted database
    */
+  /**
+   * True when the route is paid through a flat subscription (ChatGPT sign-in, GitHub
+   * Copilot, coding plans) rather than per token. Cost estimates for these routes are
+   * API-equivalent figures, so the global cost guardrail does not stop them.
+   */
+  static isSubscriptionBilledRoute(
+    providerType: string | null | undefined,
+    settings: LLMSettings = this.loadSettings(),
+  ): boolean {
+    const provider = String(providerType || "")
+      .trim()
+      .toLowerCase();
+    if (SUBSCRIPTION_PROVIDER_TYPES.has(provider)) return true;
+    if (provider === "openai") return resolveOpenAIAuthMethod(settings.openai) === "oauth";
+    if (provider === "anthropic") return settings.anthropic?.authMethod === "subscription";
+    return false;
+  }
+
   static loadSettings(): LLMSettings {
     if (this.cachedSettings) {
       return this.cachedSettings;
@@ -1996,6 +2051,7 @@ export class LLMProviderFactory {
         const stored = repository.load<LLMSettings>("llm");
         if (stored) {
           settings = { ...DEFAULT_SETTINGS, ...stored };
+          this.dropRetiredProviders(settings);
           this.normalizeCustomProviders(settings);
           settingsExist = true;
         }
@@ -2016,6 +2072,37 @@ export class LLMProviderFactory {
     const normalizedSettings = this.applyProfileRoutingDefaults(settings);
     this.cachedSettings = normalizedSettings;
     return normalizedSettings;
+  }
+
+  /**
+   * Move saved settings off retired provider routes and discard their stored tokens.
+   */
+  static dropRetiredProviders(settings: LLMSettings): void {
+    const isRetired = (type: unknown) =>
+      typeof type === "string" &&
+      Object.prototype.hasOwnProperty.call(RETIRED_PROVIDER_TYPES, type);
+
+    if (settings.customProviders) {
+      for (const id of Object.keys(settings.customProviders)) {
+        if (isRetired(id)) delete settings.customProviders[id];
+      }
+    }
+    if (Array.isArray(settings.fallbackProviders)) {
+      settings.fallbackProviders = settings.fallbackProviders.filter(
+        (entry) => !isRetired(entry?.providerType),
+      );
+    }
+    if (isRetired(settings.providerType)) {
+      const retired = String(settings.providerType);
+      const replacement =
+        this.detectProviderFromSettings(settings) || DEFAULT_SETTINGS.providerType;
+      console.warn(
+        `[LLMProviderFactory] Provider "${retired}" was removed: ${RETIRED_PROVIDER_TYPES[retired]} Switched to "${replacement}".`,
+      );
+      settings.providerType = replacement;
+      if (replacement === DEFAULT_SETTINGS.providerType)
+        settings.modelKey = DEFAULT_SETTINGS.modelKey;
+    }
   }
 
   /**
@@ -2146,6 +2233,7 @@ export class LLMProviderFactory {
         : normalizeOpenAIModelForAuth(
             overrideConfig?.model,
             providerType === "openai" ? resolveOpenAIAuthMethod(settings.openai) : undefined,
+            settings.openai?.chatgptPlanType,
           ) ||
           this.getModelId(
             settings.modelKey,
@@ -2157,6 +2245,7 @@ export class LLMProviderFactory {
             normalizeOpenAIModelForAuth(
               settings.openai?.model,
               resolveOpenAIAuthMethod(settings.openai),
+              settings.openai?.chatgptPlanType,
             ),
             azureDeployment,
             azureAnthropicDeployment,
@@ -2218,6 +2307,7 @@ export class LLMProviderFactory {
             accountId: tokens.accountId,
             email: tokens.email,
             authMethod: "oauth",
+            chatgptPlanType: tokens.planType || latestSettings.openai?.chatgptPlanType,
           };
           this.saveSettings(latestSettings);
           this.clearCache();
@@ -2891,6 +2981,7 @@ export class LLMProviderFactory {
           normalizeOpenAIModelForAuth(
             settings.openai?.model,
             resolveOpenAIAuthMethod(settings.openai),
+            settings.openai?.chatgptPlanType,
           ) || "gpt-6-astra";
         const defaultOpenAIModels =
           resolveOpenAIAuthMethod(settings.openai) === "oauth"

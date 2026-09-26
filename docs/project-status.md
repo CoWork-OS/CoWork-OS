@@ -301,7 +301,6 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Persistent shell session status and retained-state controls for long-running operator workflows
 - [x] Worktree Settings - Git worktree configuration UI
 - [x] Devices tab - saved remote devices, remote task feed, remote workspace browser, remote file picker
-- [x] Companies tab - company shell setup, goals, projects, issues, linked operators
 - [x] Workflow Intelligence settings - heartbeat-triggered reflection, target kinds, last winner visibility, namespaced backlog, suggestion output, and dispatch history
 
 #### Settings UI

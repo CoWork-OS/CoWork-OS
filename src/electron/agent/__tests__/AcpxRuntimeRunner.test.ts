@@ -11,6 +11,8 @@ import {
   getAcpxSessionName,
   mapAcpxSessionUpdate,
   resetAcpxLauncherPreferenceForTests,
+  ACPX_PINNED_VERSION,
+  resolveWindowsLauncher,
 } from "../AcpxRuntimeRunner";
 
 describe("ACP authority boundary", () => {
@@ -502,7 +504,7 @@ describe("AcpxRuntimeRunner", () => {
     await expect(runner.createSession()).rejects.toBeInstanceOf(AcpxRuntimeUnavailableError);
   });
 
-  it("falls back to npx acpx@latest when acpx is missing", async () => {
+  it("falls back to the pinned npx acpx when acpx is missing", async () => {
     const missingProc = createFakeProcess();
     const fallbackProc = createFakeProcess();
     childProcessMocks.spawn.mockReturnValueOnce(missingProc).mockReturnValueOnce(fallbackProc);
@@ -553,7 +555,7 @@ describe("AcpxRuntimeRunner", () => {
       "npx",
       [
         "-y",
-        "acpx@latest",
+        `acpx@${ACPX_PINNED_VERSION}`,
         "--format",
         "json",
         "--json-strict",
@@ -572,7 +574,7 @@ describe("AcpxRuntimeRunner", () => {
     );
   });
 
-  it("falls back to npx acpx@latest for cancel when acpx is missing", async () => {
+  it("falls back to the pinned npx acpx for cancel when acpx is missing", async () => {
     const missingCreateProc = createFakeProcess();
     const fallbackCreateProc = createFakeProcess();
     const missingCancelProc = createFakeProcess();
@@ -622,7 +624,7 @@ describe("AcpxRuntimeRunner", () => {
     expect(childProcessMocks.spawn).toHaveBeenNthCalledWith(
       4,
       "npx",
-      ["-y", "acpx@latest", "claude", "cancel", "--session", "cowork-task-1"],
+      ["-y", `acpx@${ACPX_PINNED_VERSION}`, "claude", "cancel", "--session", "cowork-task-1"],
       expect.any(Object),
     );
   });
@@ -648,5 +650,41 @@ describe("AcpxRuntimeRunner", () => {
     proc.emit("close", 1);
 
     await expect(promptPromise).rejects.toThrow("adapter crashed");
+  });
+});
+
+describe("Windows acpx launcher resolution", () => {
+  const spec = { command: "acpx", prefixArgs: [], label: "acpx" };
+
+  it("runs the JS entry behind an npm .cmd shim with node, never through a shell", () => {
+    const resolved = resolveWindowsLauncher(spec, {
+      findOnPath: (name, exts) =>
+        name === "acpx" && exts.includes(".cmd")
+          ? "C:\\npm\\acpx.cmd"
+          : name === "node"
+            ? "C:\\node\\node.exe"
+            : null,
+      readFile: () => '@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\acpx\\dist\\cli.js" %*\r\n',
+    });
+    expect(resolved?.command).toMatch(/node\.exe$/);
+    expect(resolved?.prefixArgs[0]).toMatch(/node_modules[\\/]acpx[\\/]dist[\\/]cli\.js$/);
+  });
+
+  it("uses a real .exe directly and refuses shims it cannot parse", () => {
+    expect(
+      resolveWindowsLauncher(spec, {
+        findOnPath: (_n, exts) => (exts.includes(".exe") ? "C:\\bin\\acpx.exe" : null),
+      })?.command,
+    ).toBe("C:\\bin\\acpx.exe");
+    expect(
+      resolveWindowsLauncher(spec, {
+        findOnPath: (_n, exts) => (exts.includes(".cmd") ? "C:\\npm\\acpx.cmd" : null),
+        readFile: () => "@echo off\r\nsomething-unexpected %*",
+      }),
+    ).toBeNull();
+  });
+
+  it("pins the npx fallback version", () => {
+    expect(ACPX_PINNED_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });

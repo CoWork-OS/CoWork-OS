@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { LLMProviderType, LLMSettingsData, PersonaId } from "../../shared/types";
+import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
 import {
   deriveOnboardingPersonalityPreset,
   deriveOnboardingPersona,
@@ -123,6 +124,9 @@ const SCRIPT = {
       deepseek: "DeepSeek. Practical and cost-efficient.",
       kimi: "Kimi. Solid choice.",
       "nano-gpt": "NanoGPT. Flexible model routing.",
+      "opencode-go": "OpenCode Go. Lots of open models for one flat price.",
+      zai: "Z.ai GLM. Strong open models at a low price.",
+      minimax: "MiniMax. Fast and affordable.",
     };
     return responses[provider] || "Good choice.";
   },
@@ -141,7 +145,7 @@ const SCRIPT = {
 };
 
 interface UseOnboardingOptions {
-  onComplete: (dontShowAgain: boolean) => void;
+  onComplete: (dontShowAgain: boolean) => void | Promise<void>;
   workspaceId?: string | null;
 }
 
@@ -162,7 +166,6 @@ interface OnboardingData {
   voiceEnabled: boolean | null;
   workStyle: "planner" | "flexible" | null;
   memoryEnabled: boolean;
-  pulseEnabled: boolean;
   selectedProvider: LLMProviderType | null;
   apiKey: string;
   ollamaUrl: string;
@@ -205,7 +208,6 @@ const INITIAL_ONBOARDING_DATA: OnboardingData = {
   voiceEnabled: null,
   workStyle: null,
   memoryEnabled: true,
-  pulseEnabled: false,
   selectedProvider: null,
   apiKey: "",
   ollamaUrl: "http://localhost:11434",
@@ -304,10 +306,26 @@ const getRequiredUiForState = (state: OnboardingState) => ({
   showOllamaDetection: state === "ollama_detected",
 });
 
+/**
+ * OpenAI-compatible routes onboarding can set up with only an API key. Endpoints are the
+ * pay-as-you-go APIs; Z.ai's GLM Coding Plan uses a separate endpoint and is limited to
+ * the coding tools Z.ai lists, so it is not preset here.
+ */
+export const ONBOARDING_CUSTOM_PROVIDERS: Partial<
+  Record<LLMProviderType, { baseUrl: string; model: string }>
+> = {
+  "nano-gpt": { baseUrl: "https://nano-gpt.com/api/v1", model: "minimax/minimax-m2.7" },
+  "opencode-go": { baseUrl: "https://opencode.ai/zen/go/v1", model: "qwen3.7-plus" },
+  zai: { baseUrl: "https://api.z.ai/api/paas/v4", model: "glm-5.1" },
+  minimax: { baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M2.7" },
+};
+
 export function getOnboardingDefaultModel(provider: LLMProviderType): string {
+  const custom = ONBOARDING_CUSTOM_PROVIDERS[provider];
+  if (custom) return custom.model;
   switch (provider) {
     case "anthropic":
-      return "sonnet-4";
+      return "sonnet-4-6";
     case "openai":
       return "gpt-6-astra";
     case "gemini":
@@ -326,8 +344,6 @@ export function getOnboardingDefaultModel(provider: LLMProviderType): string {
       return "deepseek-chat";
     case "kimi":
       return "kimi-k2.5";
-    case "nano-gpt":
-      return "minimax/minimax-m2.7";
     default:
       return "sonnet-4";
   }
@@ -362,11 +378,11 @@ export function buildOnboardingLLMTestConfig(
     testConfig.deepseek = { apiKey, model: modelKey };
   } else if (provider === "kimi") {
     testConfig.kimi = { apiKey };
-  } else if (provider === "nano-gpt") {
+  } else if (ONBOARDING_CUSTOM_PROVIDERS[provider]) {
     testConfig.customProviders = {
-      "nano-gpt": {
+      [provider]: {
         apiKey,
-        baseUrl: "https://nano-gpt.com/api/v1",
+        baseUrl: ONBOARDING_CUSTOM_PROVIDERS[provider]?.baseUrl,
         model: modelKey,
       },
     };
@@ -417,23 +433,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
   }));
   const asyncMutationTokenRef = useRef(0);
   const pendingLlmSettingsRef = useRef<Record<string, unknown> | null>(null);
-
-  // Preserve an existing explicit Pulse choice when onboarding is opened again.
-  useEffect(() => {
-    const getPulseSettings = window.electronAPI?.getPulseSettings;
-    if (typeof getPulseSettings !== "function") return;
-    let cancelled = false;
-    void getPulseSettings()
-      .then((settings) => {
-        if (!cancelled && settings.consentState !== "unset") {
-          setData((current) => ({ ...current, pulseEnabled: settings.enabled }));
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Clear timeout on unmount
   useEffect(() => {
@@ -713,7 +712,11 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
                 if (!isActiveAsyncMutation(mutationToken)) {
                   return;
                 }
-                onComplete(true);
+                void Promise.resolve(onComplete(true)).catch((error) => {
+                  resetViewState();
+                  setState("recap");
+                  setCurrentText(error instanceof Error ? error.message : SCRIPT.save_error);
+                });
               }, 800);
             })();
           }, 1200);
@@ -895,7 +898,11 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     clearResumeSnapshot();
     setState("transitioning");
     timeoutRef.current = setTimeout(() => {
-      onComplete(true);
+      void Promise.resolve(onComplete(true)).catch((error) => {
+        resetViewState();
+        setState("recap");
+        setCurrentText(error instanceof Error ? error.message : SCRIPT.save_error);
+      });
     }, 250);
   }, [
     clearPendingTransition,
@@ -1175,11 +1182,10 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         case "kimi":
           currentModel = existingSettings.kimi?.model;
           break;
-        case "nano-gpt":
-          currentModel = existingSettings.customProviders?.["nano-gpt"]?.model;
-          break;
         default:
-          currentModel = undefined;
+          currentModel = ONBOARDING_CUSTOM_PROVIDERS[provider]
+            ? existingSettings.customProviders?.[provider]?.model
+            : undefined;
           break;
       }
 
@@ -1190,7 +1196,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         return existingSettings.modelKey;
       }
       if (provider === "openai" && existingSettings.openai?.authMethod === "oauth") {
-        return "gpt-6-astra";
+        return recommendChatGPTModelForPlan(existingSettings.openai?.chatgptPlanType);
       }
       if (provider === "ollama" && data.detectedOllamaModel) {
         return data.detectedOllamaModel;
@@ -1228,10 +1234,10 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           return !!existingSettings.deepseek?.apiKey;
         case "kimi":
           return !!existingSettings.kimi?.apiKey;
-        case "nano-gpt":
-          return !!existingSettings.customProviders?.["nano-gpt"]?.apiKey;
         default:
-          return false;
+          return ONBOARDING_CUSTOM_PROVIDERS[provider]
+            ? !!existingSettings.customProviders?.[provider]?.apiKey
+            : false;
       }
     },
     [],
@@ -1319,15 +1325,15 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
           model: modelKey,
         };
-      } else if (provider === "nano-gpt") {
+      } else if (ONBOARDING_CUSTOM_PROVIDERS[provider]) {
         settings.customProviders = {
           ...existingSettings?.customProviders,
-          "nano-gpt": {
-            ...existingSettings?.customProviders?.["nano-gpt"],
+          [provider]: {
+            ...existingSettings?.customProviders?.[provider],
             ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
             baseUrl:
-              existingSettings?.customProviders?.["nano-gpt"]?.baseUrl ||
-              "https://nano-gpt.com/api/v1",
+              existingSettings?.customProviders?.[provider]?.baseUrl ||
+              ONBOARDING_CUSTOM_PROVIDERS[provider]?.baseUrl,
             model: modelKey,
           },
         };
@@ -1362,6 +1368,34 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           providerHasSavedCredentials(provider, existingSettings);
 
         if (shouldSkipCredentialPrompt) {
+          // Picking Ollama manually: use a model that is actually installed.
+          let ollamaModel: string | null = null;
+          if (provider === "ollama") {
+            const installed = await Promise.race([
+              window.electronAPI.getOllamaModels().catch(() => null),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+            ]);
+            if (!isActiveAsyncMutation(mutationToken)) {
+              return;
+            }
+            const newest = [...(installed || [])].sort(
+              (a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime(),
+            )[0];
+            if (!newest) {
+              setTestResult({
+                success: false,
+                error:
+                  "Ollama isn't running or has no models. Start Ollama and run `ollama pull qwen3`, then pick it again.",
+              });
+              setState("llm_setup");
+              setCurrentText(SCRIPT.llm_intro);
+              setShowProviders(true);
+              return;
+            }
+            ollamaModel = newest.name;
+            setData((d) => ({ ...d, detectedOllamaModel: newest.name }));
+          }
+
           setShowProviders(false);
           setShowApiInput(false);
           setTestResult(null);
@@ -1369,6 +1403,13 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           const settings = buildSaveSettings(provider, "", existingSettings);
           if (!isActiveAsyncMutation(mutationToken)) {
             return;
+          }
+          if (ollamaModel && !existingSettings?.ollama?.model) {
+            settings.modelKey = ollamaModel;
+            settings.ollama = {
+              ...(settings.ollama as Record<string, unknown>),
+              model: ollamaModel,
+            };
           }
           stageLlmSettings(settings);
           setState("llm_confirmed");
@@ -1488,7 +1529,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         throw new Error("ChatGPT sign-in completed without onboarding credentials");
       }
 
-      const modelKey = existingSettings?.openai?.model || "gpt-6-astra";
+      const modelKey = existingSettings?.openai?.model || result.recommendedModel || "gpt-6-astra";
       const settings = buildSaveSettings("openai", "", {
         ...existingSettings,
         providerType: "openai",
@@ -1500,6 +1541,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
           tokenExpiresAt: result.tokens?.tokenExpiresAt,
           accountId: result.tokens?.accountId,
           email: result.tokens?.email,
+          chatgptPlanType: result.tokens?.planType,
           authMethod: "oauth",
           apiKey: undefined,
           model: modelKey,
@@ -1662,9 +1704,9 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         });
       }
 
-      if (window.electronAPI?.setPulseEnabled) {
-        await window.electronAPI.setPulseEnabled(data.pulseEnabled);
-      }
+      // Pulse consent is asked after the first successful task (PulseConsentPrompt), not
+      // here. Only an explicit choice already made elsewhere is preserved; an untouched
+      // default must not be recorded as "declined".
 
       const pendingLlmSettings = pendingLlmSettingsRef.current;
       if (pendingLlmSettings) {

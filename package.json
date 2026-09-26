@@ -61,6 +61,7 @@
     "resources",
     "connectors",
     "build",
+    "!build/healthkit-bridge/**",
     "deploy",
     "bin",
     "docs",
@@ -95,28 +96,27 @@
     "dev:start": "node scripts/dev_start.mjs",
     "dev:log": "cross-env COWORK_DEV_LOG_CAPTURE=1 node scripts/dev_with_logs.mjs",
     "dev:react": "vite",
-    "build:healthkit-bridge": "node scripts/build_healthkit_bridge.mjs",
     "build:location-helper-macos": "node scripts/build_location_helper_macos.mjs",
     "build:location-helpers": "node scripts/copy_location_helpers.mjs",
-    "dev:electron": "tsc -p tsconfig.electron.json && cross-env ELECTRON_RUN_AS_NODE= NODE_ENV=development electron .",
+    "dev:electron": "npm run build:electron && cross-env ELECTRON_RUN_AS_NODE= NODE_ENV=development electron .",
     "tunnel-relay:dev": "npm run build:electron && node dist/electron/electron/tunnels/relay.js",
     "tunnel-relay:test": "npm run build:electron && node scripts/smoke-secure-mcp-tunnel.mjs",
-    "build": "npm run qa:docs-versions && npm run build:react && npm run build:healthkit-bridge && npm run build:location-helper-macos && npm run build:location-helpers && concurrently -n electron,daemon,cli \"npm run build:electron\" \"npm run build:daemon\" \"npm run build:cli\" && npm run build:connectors",
+    "build": "node scripts/clean-build-output.mjs retired && npm run qa:docs-versions && npm run build:react && npm run build:location-helper-macos && npm run build:location-helpers && concurrently -n electron,daemon,cli \"npm run build:electron\" \"npm run build:daemon\" \"npm run build:cli\" && npm run build:connectors",
     "build:with-numbat": "npm run numbat:build && npm run build",
     "numbat:build": "node scripts/build_numbat_runtime.mjs",
     "numbat:verify": "node scripts/build_numbat_runtime.mjs --verify-only",
     "build:react": "vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
-    "build:daemon": "tsc -p tsconfig.daemon.json",
-    "build:cli": "tsc -p tsconfig.cli.json",
-    "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend,discord,google-workspace,figma,vercel,monday,finance-data,maps,rhino,blender,comfyui \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\" \"tsc -p connectors/discord-mcp/tsconfig.json\" \"tsc -p connectors/google-workspace-mcp/tsconfig.json\" \"tsc -p connectors/figma-mcp/tsconfig.json\" \"tsc -p connectors/vercel-mcp/tsconfig.json\" \"tsc -p connectors/monday-mcp/tsconfig.json\" \"tsc -p connectors/finance-data-mcp/tsconfig.json\" \"tsc -p connectors/maps-mcp/tsconfig.json\" \"tsc -p connectors/rhino-mcp/tsconfig.json\" \"tsc -p connectors/blender-mcp/tsconfig.json\" \"tsc -p connectors/comfyui-mcp/tsconfig.json\"",
+    "build:electron": "node scripts/clean-build-output.mjs electron && tsc -p tsconfig.electron.json",
+    "build:daemon": "node scripts/clean-build-output.mjs daemon && tsc -p tsconfig.daemon.json",
+    "build:cli": "node scripts/clean-build-output.mjs cli && tsc -p tsconfig.cli.json",
+    "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend,discord,google-workspace,figma,vercel,monday,finance-data,maps,home-assistant,rhino,blender,comfyui \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\" \"tsc -p connectors/discord-mcp/tsconfig.json\" \"tsc -p connectors/google-workspace-mcp/tsconfig.json\" \"tsc -p connectors/figma-mcp/tsconfig.json\" \"tsc -p connectors/vercel-mcp/tsconfig.json\" \"tsc -p connectors/monday-mcp/tsconfig.json\" \"tsc -p connectors/finance-data-mcp/tsconfig.json\" \"tsc -p connectors/maps-mcp/tsconfig.json\" \"tsc -p connectors/home-assistant-mcp/tsconfig.json\" \"tsc -p connectors/rhino-mcp/tsconfig.json\" \"tsc -p connectors/blender-mcp/tsconfig.json\" \"tsc -p connectors/comfyui-mcp/tsconfig.json\"",
     "prepack": "npm run build",
     "release:smoke": "npm run build && node scripts/release-smoke-install.mjs",
     "adoption:collect": "node scripts/collect-public-adoption-stats.mjs",
     "adoption:render": "node scripts/render-public-adoption-summary.mjs",
     "adoption:update": "npm run adoption:collect && npm run adoption:render",
     "package": "npm run build:with-numbat && node scripts/run_electron_builder.mjs --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
-    "package:win:x64": "npm run numbat:build -- --target=win32-x64 && node scripts/run_electron_builder.mjs --win --x64 --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
+    "package:win:x64": "node scripts/clean-build-output.mjs retired && npm run numbat:build -- --target=win32-x64 && node scripts/run_electron_builder.mjs --win --x64 --publish never && node scripts/release-artifact-names.mjs && node scripts/release-artifact-names.mjs --check",
     "package:mac": "node scripts/package-mac-with-env.mjs",
     "package:mac:unsigned": "cross-env COWORK_MAC_UNSIGNED=1 node scripts/package-mac-with-env.mjs",
     "package:desktop:smoke": "node scripts/smoke-desktop-artifacts.mjs",
@@ -158,6 +158,7 @@
     "qa:harness": "node scripts/qa/check_harness_dependencies.cjs && vitest run src/electron/agent/__tests__/executor-lifecycle-mutex.test.ts src/electron/agent/__tests__/executor-context-overflow-recovery.test.ts src/electron/agent/__tests__/executor-image-attachments.test.ts src/electron/agent/llm/__tests__/response-tool-metadata.test.ts src/electron/agent/__tests__/daemon-shutdown.test.ts src/electron/utils/__tests__/graceful-shutdown.test.ts src/electron/agent/runtime/__tests__ src/electron/agent/timeline/__tests__ src/electron/agent/__tests__/timeline-emitter.test.ts src/electron/agent/__tests__/timeline-payload-sanitizer.test.ts src/electron/agent/__tests__/daemon-complete-task.test.ts src/electron/agent/__tests__/context-manager-compaction.test.ts src/electron/agent/__tests__/executor-provider-refresh.test.ts src/electron/agent/__tests__/executor-step-failures.test.ts src/electron/agent/__tests__/executor-entrypoints.test.ts src/electron/agent/__tests__/executor-chat-mode.test.ts src/electron/agent/__tests__/executor-followup-acceptance.test.ts src/electron/memory/__tests__/TranscriptStore.test.ts src/electron/memory/__tests__/SessionRecallService.test.ts src/electron/sessions/__tests__ src/electron/eval/__tests__ src/electron/security/__tests__/access-profile-resolver.test.ts src/electron/agent/__tests__/daemon-followup-permissions.test.ts src/electron/agent/__tests__/daemon-agent-messaging.test.ts src/electron/agent/__tests__/daemon-child-task.test.ts src/electron/agent/llm/__tests__/openai-compatible.test.ts src/electron/agent/llm/__tests__/openai-provider.test.ts src/electron/agent/llm/__tests__/azure-openai-provider.test.ts src/electron/agent/llm/__tests__/openrouter-provider.test.ts src/electron/agent/llm/__tests__/ollama-provider.test.ts src/electron/agent/llm/__tests__/provider-tool-arguments.test.ts tests/security/security-harness.test.ts tests/qa-eval-runner.test.ts tests/qa-replay-assertions.test.ts tests/qa-eval-deadline.test.ts tests/qa-workflow-gates.test.ts && node scripts/qa/run_eval_suite.cjs --fixtures-only",
     "qa:reliability": "npm run qa:eval:run && node scripts/qa/run_battery.cjs",
     "skills:check:core": "npm run skills:validate-routing && npm run skills:validate-content && npm run skills:audit",
+    "connectors:inventory": "cross-env UPDATE_CONNECTOR_INVENTORY=1 vitest run src/electron/mcp/__tests__/connector-inventory.test.ts",
     "models:sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sync-model-metadata.mjs",
     "models:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sync-model-metadata.mjs --check",
     "skills:check": "node scripts/qa/skills-check.mjs",
@@ -245,6 +246,7 @@
     "globals": "^17.3.0",
     "oxfmt": "^0.68.0",
     "oxlint": "^1.47.0",
+    "twilio": "^6.1.1",
     "typescript": "^5.9.0",
     "vite": "^8.3.0",
     "vite-plugin-electron": "^0.29.0",
@@ -300,10 +302,10 @@
     ],
     "extraResources": [
       {
-        "from": "resources/persona-templates",
-        "to": "persona-templates",
+        "from": "resources/starter-missions",
+        "to": "starter-missions",
         "filter": [
-          "*.json"
+          "**/*"
         ]
       },
       {
@@ -358,10 +360,6 @@
         "filter": [
           "**/*"
         ]
-      },
-      {
-        "from": "build/healthkit-bridge",
-        "to": "healthkit-bridge"
       },
       {
         "from": "build/location-helper-macos",

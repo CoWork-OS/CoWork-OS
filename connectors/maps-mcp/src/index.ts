@@ -325,6 +325,27 @@ const tools: MCPTool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "maps.timezone",
+    description:
+      "Resolve the IANA timezone for a coordinate (or validate a timezone name) and return the UTC offset in effect at a given instant, accounting for daylight saving. Use before scheduling across locations or converting a local time. Coordinate lookups are sent to Google (Google provider) or Open-Meteo (keyless mode); passing timeZone stays local.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        location: locationSchema,
+        timeZone: {
+          type: "string",
+          description: "IANA timezone such as Europe/Berlin; used when location is omitted",
+        },
+        timestamp: {
+          type: "string",
+          description:
+            "Instant to evaluate as RFC3339, epoch seconds or epoch milliseconds; defaults to now",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 let lastNominatimRequestAt = 0;
@@ -736,6 +757,145 @@ async function rankNearbyOptions(args: Record<string, any>): Promise<{
   };
 }
 
+const OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
+
+/** Epoch values below this are seconds: 1e11 ms is 1973, 1e11 s is year 5138. */
+const EPOCH_SECONDS_THRESHOLD = 1e11;
+
+function parseInstant(value: unknown): Date {
+  if (value === undefined || value === null || value === "") return new Date();
+  let date: Date;
+  if (typeof value === "number" || /^\d+(\.\d+)?$/.test(String(value))) {
+    const numeric = Number(value);
+    date = new Date(numeric < EPOCH_SECONDS_THRESHOLD ? numeric * 1000 : numeric);
+  } else {
+    date = new Date(String(value));
+  }
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("timestamp must be RFC3339 or epoch seconds/milliseconds");
+  }
+  return date;
+}
+
+function assertTimeZone(timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone }).resolvedOptions().timeZone;
+  } catch {
+    throw new Error(`Unknown IANA timezone: ${timeZone}`);
+  }
+}
+
+function offsetMinutesAt(timeZone: string, instant: Date): number {
+  const label =
+    new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" })
+      .formatToParts(instant)
+      .find((part) => part.type === "timeZoneName")?.value || "GMT";
+  const match = /^GMT(?:([+-])(\d{1,2})(?::?(\d{2}))?)?$/.exec(label);
+  if (!match || !match[1]) return 0;
+  const minutes = Number(match[2]) * 60 + Number(match[3] || 0);
+  return match[1] === "-" ? -minutes : minutes;
+}
+
+function formatOffset(minutes: number): string {
+  const sign = minutes < 0 ? "-" : "+";
+  const abs = Math.abs(minutes);
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+}
+
+function localDateTime(timeZone: string, instant: Date): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(instant)
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+async function lookupTimeZoneForLocation(
+  location: Coordinates,
+  instant: Date,
+): Promise<{ timeZone: string; source: "google" | "open-meteo"; timeZoneName?: string }> {
+  const lookup = envValue("MAPS_TIMEZONE_LOOKUP", "auto").toLowerCase();
+  if (lookup === "off") {
+    throw new Error(
+      "Coordinate timezone lookup is disabled (MAPS_TIMEZONE_LOOKUP=off). Pass an IANA timeZone instead.",
+    );
+  }
+  const useGoogle = lookup === "google" || (lookup === "auto" && resolveProvider() === "google");
+  if (useGoogle) {
+    if (!hasGoogleKey()) {
+      throw new Error("MAPS_TIMEZONE_LOOKUP=google requires GOOGLE_MAPS_API_KEY");
+    }
+    const url = new URL("https://maps.googleapis.com/maps/api/timezone/json");
+    url.searchParams.set("location", `${location.latitude},${location.longitude}`);
+    url.searchParams.set("timestamp", String(Math.floor(instant.getTime() / 1000)));
+    url.searchParams.set("key", envValue("GOOGLE_MAPS_API_KEY"));
+    const data = await fetchJson(url.toString());
+    if (data?.status !== "OK" || typeof data.timeZoneId !== "string") {
+      throw new Error(
+        `Google Time Zone API returned ${data?.status || "no result"}${data?.errorMessage ? `: ${data.errorMessage}` : ""}`,
+      );
+    }
+    return { timeZone: data.timeZoneId, source: "google", timeZoneName: data.timeZoneName };
+  }
+  const url = new URL(OPEN_METEO_FORECAST_URL);
+  url.searchParams.set("latitude", String(location.latitude));
+  url.searchParams.set("longitude", String(location.longitude));
+  url.searchParams.set("timezone", "auto");
+  url.searchParams.set("forecast_days", "1");
+  const data = await fetchJson(url.toString(), {
+    headers: { Accept: "application/json", "User-Agent": USER_AGENT },
+  });
+  if (typeof data?.timezone !== "string" || !data.timezone) {
+    throw new Error("Timezone lookup returned no timezone for this location");
+  }
+  return { timeZone: data.timezone, source: "open-meteo" };
+}
+
+async function timezone(args: Record<string, any>): Promise<Record<string, any>> {
+  const instant = parseInstant(args.timestamp);
+  let resolved: { timeZone: string; source: string; timeZoneName?: string };
+  if (args.location !== undefined) {
+    resolved = await lookupTimeZoneForLocation(requireLocation(args.location, "location"), instant);
+  } else if (typeof args.timeZone === "string" && args.timeZone.trim()) {
+    resolved = { timeZone: args.timeZone.trim(), source: "input" };
+  } else {
+    throw new Error("Provide location or timeZone");
+  }
+  const timeZone = assertTimeZone(resolved.timeZone);
+  const offsetMinutes = offsetMinutesAt(timeZone, instant);
+  const year = instant.getUTCFullYear();
+  const standardOffset = Math.min(
+    offsetMinutesAt(timeZone, new Date(Date.UTC(year, 0, 1))),
+    offsetMinutesAt(timeZone, new Date(Date.UTC(year, 6, 1))),
+  );
+  return {
+    timeZone,
+    timeZoneName: resolved.timeZoneName,
+    source: resolved.source,
+    instant: instant.toISOString(),
+    localTime: localDateTime(timeZone, instant),
+    utcOffset: formatOffset(offsetMinutes),
+    utcOffsetMinutes: offsetMinutes,
+    isDst: offsetMinutes !== standardOffset,
+    attribution:
+      resolved.source === "google"
+        ? GOOGLE_ATTRIBUTION
+        : resolved.source === "open-meteo"
+          ? "Timezone lookup by Open-Meteo (open-meteo.com)."
+          : undefined,
+  };
+}
+
 const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
   "maps.health": async () => ({
     ok: true,
@@ -744,12 +904,14 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
       googleConfigured: hasGoogleKey(),
       nominatimBaseUrl: envValue("NOMINATIM_BASE_URL", DEFAULT_NOMINATIM_BASE_URL),
       osrmBaseUrl: envValue("OSRM_BASE_URL", DEFAULT_OSRM_BASE_URL),
+      timezoneLookup: envValue("MAPS_TIMEZONE_LOOKUP", "auto"),
     },
   }),
   "maps.search_places": searchPlaces,
   "maps.place_details": placeDetails,
   "maps.route": route,
   "maps.rank_nearby_options": rankNearbyOptions,
+  "maps.timezone": timezone,
 };
 
 const toolProvider = {

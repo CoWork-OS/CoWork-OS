@@ -94,7 +94,7 @@ Secure MCP Tunnels enforce relay-side and local policy, including tool allowlist
 
 ## Shipped Connector Allowlist
 
-The shipped connector catalog includes **47 connectors** across CRM, productivity, devtools, communication, legal, finance, and creative categories. Install from **Settings > Connectors > Browse Registry**.
+The shipped connector catalog spans CRM, productivity, devtools, communication, legal, finance, smart home, and creative categories. Install from **Settings > Connectors > Browse Registry**. The generated [Connector Inventory](connector-inventory.md) is the authoritative list, with actions, requirements and provenance for each entry.
 
 ### Enterprise & CRM
 
@@ -123,6 +123,10 @@ Mailtrap
 ### Creative / Architecture
 
 Rhino, Blender, ComfyUI
+
+### Local services
+
+Maps, Home Assistant
 
 ## Connector Contract
 
@@ -316,10 +320,22 @@ Google Workspace uses one shared OAuth connection for the built-in Google tools 
 - Tasks: task-list CRUD, task CRUD, complete/uncomplete, move, delete, and clear completed through MCP tools
 - Slides: create/get presentations, create/delete slides, add text boxes, replace text, and raw `batchUpdate` through MCP tools
 - Chat: message and space tools when the Google Workspace MCP connector exposes them
+- Meet (optional, read-only): conference listing, attendance, recordings, transcripts, transcript entries and smart notes. Tick **Also allow read-only access to Google Meet conference records** and authorize again. See [Meeting Artifacts](meeting-artifacts.md).
+- Contacts (optional, read-only): `contacts_search`, `contacts_list` and `contacts_get` through the People API. Tick **Also allow read-only access to Google Contacts** in the connector setup and authorize again; the `contacts.readonly` scope is never added to the default consent. `contacts_list` returns a `nextSyncToken` for incremental sync, and an expired token (older than seven days) automatically falls back to a full listing with `syncTokenExpired: true`.
 
 Authentication is OAuth 2.0 with PKCE. Settings uses local callback port `18766`; connector OAuth/setup uses local callback port `18765`. The default consent set includes Drive, Gmail read/send/modify, Calendar, Spreadsheets, Documents, Tasks, Presentations, Chat messages, and Chat spaces readonly. CoWork merges these required scopes during setup and reports missing scopes in Google Workspace health/status responses; existing users with older tokens must reconnect to grant newly added scopes such as Calendar MCP tools, Tasks, or Slides.
 
 Destructive or broad Google Workspace MCP actions require explicit confirmation fields, including calendar event create/update/delete, task-list deletion, task deletion, clearing completed tasks, slide deletion, replace-all-text, and raw Slides `batchUpdate`.
+
+## Home Assistant Connector
+
+The `home-assistant` connector talks to a Home Assistant instance over its REST API with a long-lived access token. It can list and search entities, read states, list services, and call services.
+
+Service calls stay disabled until you allowlist domains (`HOME_ASSISTANT_ALLOWED_DOMAINS`, e.g. `light,switch`) or entities (`HOME_ASSISTANT_ALLOWED_ENTITIES`, e.g. `lock.front_door,switch.fan_*`). Every call must name explicit entity IDs, and area/device/"all" targets are rejected. Domains that run code or reconfigure Home Assistant (`shell_command`, `python_script`, `hassio`, `recorder`, `backup`, and similar) are always blocked. Calls also go through CoWork's normal MCP approval. See `connectors/home-assistant-mcp/README.md`.
+
+## Maps Timezone Lookup
+
+`maps.timezone` returns the IANA timezone for a coordinate and the UTC offset in effect at a given instant, including whether daylight saving applies. It uses the Google Time Zone API when the Google provider is active and Open-Meteo otherwise. Passing an IANA `timeZone` directly needs no network call.
 
 ## Local Creative Connectors
 
@@ -363,7 +379,7 @@ Use it to bootstrap new connectors quickly. It includes:
 
 ## Built-in Connectors (Local Registry)
 
-**47 connectors** are included in the local MCP registry and appear in **Settings → Connectors → Browse Registry**. All are npm-installable MCP servers (stdio transport) unless noted as manual (bundled connectors).
+These connectors are included in the local MCP registry and appear in **Settings → Connectors → Browse Registry**. Most are npm-installable MCP servers (stdio transport); CoWork-built connectors are bundled and marked `first-party-api` in the generated [Connector Inventory](connector-inventory.md), which also holds the current counts.
 
 | Category                    | Connectors                                                                                                                                                                      |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -374,6 +390,8 @@ Use it to bootstrap new connectors quickly. It includes:
 | **Finance**                 | Stripe, PayPal, Square, Attio                                                                                                                                                   |
 | **Legal**                   | Clinical Trials                                                                                                                                                                 |
 | **Creative / Architecture** | Rhino, Blender, ComfyUI                                                                                                                                                         |
+| **Local services**          | Maps (OSM or Google, with timezone lookup), Home Assistant                                                                                                                      |
+| **Finance data**            | FactSet, LSEG, S&P Global, Daloopa, Morningstar, Moody's, MT Newswires, Aiera, PitchBook, Chronograph, Egnyte                                                                   |
 
 Not shipped in the current connector catalog: Slack, DocuSign, Outreach (removed from Tier-1). Slack remains available as a channel gateway. GitHub and Notion prefer native CoWork integrations first, with MCP as fallback.
 

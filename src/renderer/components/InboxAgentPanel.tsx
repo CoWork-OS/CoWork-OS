@@ -30,7 +30,6 @@ import {
   MailboxAutomationRecord,
   MailboxClientState,
   MailboxCommitment,
-  MailboxCompanyCandidate,
   MailboxDomainCategory,
   MailboxForwardRecipe,
   MailboxDigestSnapshot,
@@ -217,6 +216,8 @@ function formatChannelLabel(channelType: string): string {
   if (channelType === "signal") return "Signal";
   if (channelType === "feishu") return "Feishu / Lark";
   if (channelType === "wecom") return "WeCom";
+  if (channelType === "whatsapp_cloud") return "WhatsApp Business";
+  if (channelType === "twilio_sms") return "SMS (Twilio)";
   return channelType.charAt(0).toUpperCase() + channelType.slice(1);
 }
 
@@ -747,7 +748,6 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [handoffRecords, setHandoffRecords] = useState<MailboxMissionControlHandoffRecord[]>([]);
   const [handoffPanelOpen, setHandoffPanelOpen] = useState(false);
   const [handoffCompanyId, setHandoffCompanyId] = useState("");
-  const [handoffCompanyConfirmed, setHandoffCompanyConfirmed] = useState(false);
   const [handoffOperatorRoleId, setHandoffOperatorRoleId] = useState("");
   const [handoffIssueTitle, setHandoffIssueTitle] = useState("");
   const [handoffIssueSummary, setHandoffIssueSummary] = useState("");
@@ -945,17 +945,19 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     setHandoffRecords(records);
     if (preview) {
       const nextCompanyId =
-        preview.recommendedCompanyId || preview.companyCandidates[0]?.companyId || "";
+        preview.recommendedCompanyId ||
+        preview.companyCandidates[0]?.companyId ||
+        companies[0]?.id ||
+        "";
       const nextOperatorRoleId =
         preview.recommendedOperatorRoleId || preview.operatorRecommendations[0]?.agentRoleId || "";
+      // Companies are no longer user-managed; the single workspace company is implied.
       setHandoffCompanyId(nextCompanyId);
-      setHandoffCompanyConfirmed(false);
       setHandoffOperatorRoleId(nextOperatorRoleId);
       setHandoffIssueTitle(preview.issueTitle);
       setHandoffIssueSummary(preview.issueSummary);
     } else {
       setHandoffCompanyId("");
-      setHandoffCompanyConfirmed(false);
       setHandoffOperatorRoleId("");
       setHandoffIssueTitle("");
       setHandoffIssueSummary("");
@@ -1021,21 +1023,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
 
   const recommendedReplyTarget = selectedThreadReplyTargets[0] || null;
 
-  const companyCandidates = useMemo<MailboxCompanyCandidate[]>(() => {
-    if (handoffPreview?.companyCandidates?.length) return handoffPreview.companyCandidates;
-    return companies.map((company) => ({
-      companyId: company.id,
-      name: company.name,
-      slug: company.slug,
-      confidence: 0,
-      reason: "manual selection",
-      defaultWorkspaceId: company.defaultWorkspaceId,
-    }));
-  }, [companies, handoffPreview?.companyCandidates]);
-
   const selectedCompanyRoles = useMemo(
     () =>
-      agentRoles.filter((role) => role.companyId === handoffCompanyId && role.isActive !== false),
+      agentRoles.filter(
+        (role) =>
+          role.isActive !== false && (!role.companyId || role.companyId === handoffCompanyId),
+      ),
     [agentRoles, handoffCompanyId],
   );
 
@@ -2154,11 +2147,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const createMissionControlHandoff = async () => {
     if (!selectedThread || !handoffPreview) return;
     if (!handoffCompanyId || !handoffOperatorRoleId || !handoffIssueTitle.trim()) {
-      setError("Company, operator, and issue title are required for inbox handoff.");
-      return;
-    }
-    if (!handoffCompanyConfirmed) {
-      setError("Confirm the target company before creating the Mission Control handoff.");
+      setError("An operator and issue title are required for inbox handoff.");
       return;
     }
     await runAction(async () => {
@@ -5943,61 +5932,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                       marginBottom: "10px",
                     }}
                   >
-                    Create a company issue from this thread, assign the operator, then wake them
-                    immediately.
+                    Create a Mission Control issue from this thread, assign the operator, then wake
+                    them immediately.
                   </div>
 
                   <div style={{ display: "grid", gap: "8px", marginBottom: "10px" }}>
-                    <label style={{ display: "grid", gap: "4px" }}>
-                      <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                        Company
-                      </span>
-                      <select
-                        value={handoffCompanyId}
-                        onChange={(event) => {
-                          setHandoffCompanyId(event.target.value);
-                          setHandoffCompanyConfirmed(false);
-                        }}
-                        style={{
-                          width: "100%",
-                          boxSizing: "border-box",
-                          padding: "7px 10px",
-                          borderRadius: "var(--radius-sm, 8px)",
-                          border: "1px solid var(--color-border)",
-                          background: "var(--color-bg-input)",
-                          color: "var(--color-text-primary)",
-                          fontSize: "0.78rem",
-                        }}
-                      >
-                        <option value="">Select company</option>
-                        {companyCandidates.map((candidate) => (
-                          <option key={candidate.companyId} value={candidate.companyId}>
-                            {candidate.name}
-                            {candidate.confidence >= 0.7 ? " · recommended" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    {handoffCompanyId && (
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          fontSize: "0.74rem",
-                          color: "var(--color-text-secondary)",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={handoffCompanyConfirmed}
-                          onChange={(event) => setHandoffCompanyConfirmed(event.target.checked)}
-                        />
-                        Confirm target company
-                      </label>
-                    )}
-
                     <label style={{ display: "grid", gap: "4px" }}>
                       <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
                         Operator

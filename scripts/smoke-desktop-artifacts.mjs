@@ -276,15 +276,36 @@ async function validateNumbatRuntime(resourcesRoot, targetKey) {
   );
 }
 
-async function validatePersonaTemplates(resourcesRoot) {
-  const templatesRoot = path.join(resourcesRoot, "persona-templates");
-  const companyPlanner = path.join(templatesRoot, "company-planner.json");
-  const stat = await fs.stat(companyPlanner).catch(() => null);
-  if (!stat?.isFile()) {
-    throw new Error(
-      `Packaged persona templates are missing company-planner.json: ${companyPlanner}`,
-    );
+async function validateStarterMission(resourcesRoot) {
+  const missionRoot = path.join(resourcesRoot, "starter-missions", "release-brief-v1");
+  const manifestPath = path.join(missionRoot, "manifest.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const expectedFiles = ["brief-instructions.md", "issues.csv", "release-notes.md"];
+  if (manifest.id !== "release-brief-v1" ||
+      JSON.stringify(Object.keys(manifest.inputs || {}).sort()) !== JSON.stringify(expectedFiles)) {
+    throw new Error("Packaged starter mission manifest is incomplete");
   }
+  for (const name of expectedFiles) {
+    const stat = await fs.lstat(path.join(missionRoot, name));
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) {
+      throw new Error(`Packaged starter mission input is unsafe: ${name}`);
+    }
+    const digest = createHash("sha256").update(await fs.readFile(path.join(missionRoot, name))).digest("hex");
+    if (!/^[a-f0-9]{64}$/.test(manifest.inputs[name]) || digest !== manifest.inputs[name]) {
+      throw new Error(`Packaged starter mission input failed integrity check: ${name}`);
+    }
+  }
+}
+
+async function assertNoRetiredHealthBridge(resourcesRoot) {
+  const bridgePath = path.join(resourcesRoot, "healthkit-bridge");
+  try {
+    await fs.access(bridgePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(`Retired HealthKit bridge is still packaged: ${bridgePath}`);
 }
 
 async function walkDirs(dir, predicate, maxDepth = 3) {
@@ -336,6 +357,14 @@ function assertMacCodeSignature(appPath, allowUnsigned) {
     throw new Error(`Failed to inspect macOS app code signature:\n${details}`);
   }
 
+  const entitlements = runStatus("codesign", ["-d", "--entitlements", ":-", appPath], {
+    shell: false,
+  });
+  const entitlementDetails = summarizeCommandOutput(entitlements);
+  if (/com\.apple\.developer\.healthkit/.test(entitlementDetails)) {
+    throw new Error("Retired HealthKit entitlement is still present in the macOS app");
+  }
+
   const isAdHoc = /\bSignature=adhoc\b/.test(details);
   const teamMatch = details.match(/^TeamIdentifier=(.+)$/m);
   const teamIdentifier = teamMatch?.[1]?.trim();
@@ -345,10 +374,6 @@ function assertMacCodeSignature(appPath, allowUnsigned) {
     if (!isAdHoc) {
       throw new Error("Expected an unsigned macOS app to be ad hoc signed, but it was not.");
     }
-    const entitlements = runStatus("codesign", ["-d", "--entitlements", ":-", appPath], {
-      shell: false,
-    });
-    const entitlementDetails = summarizeCommandOutput(entitlements);
     if (/com\.apple\.developer\./.test(entitlementDetails)) {
       throw new Error(
         `Unsigned macOS app contains restricted developer entitlements:\n${entitlementDetails}`,
@@ -424,6 +449,23 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
 
   validateUpdaterMetadata(releaseDir);
 
+  const zip = await findSingleVersionedFile(
+    releaseDir,
+    (file) => file.name.endsWith(".zip"),
+    "macOS ZIP",
+    expectedVersion,
+  );
+  const retiredZipEntries = runStatus("unzip", ["-Z1", zip.fullPath, "*/healthkit-bridge/*"], {
+    shell: false,
+    quiet: true,
+  });
+  if (retiredZipEntries.status === 0 && String(retiredZipEntries.stdout || "").trim()) {
+    throw new Error(`Retired HealthKit bridge is still present in macOS ZIP: ${zip.name}`);
+  }
+  if (retiredZipEntries.status !== 11 && retiredZipEntries.status !== 0) {
+    throw new Error(`Could not inspect macOS ZIP for retired HealthKit bridge: ${zip.name}`);
+  }
+
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-mac-dmg-smoke-"));
   const mountPoint = path.join(tempRoot, "mount");
   await fs.mkdir(mountPoint, { recursive: true });
@@ -465,7 +507,8 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
       path.join(appPath, "Contents", "Resources"),
       `darwin-${process.arch}`,
     );
-    await validatePersonaTemplates(path.join(appPath, "Contents", "Resources"));
+    await validateStarterMission(path.join(appPath, "Contents", "Resources"));
+    await assertNoRetiredHealthBridge(path.join(appPath, "Contents", "Resources"));
     assertMacCodeSignature(appPath, allowUnsigned);
     await smokeLaunchMac(executablePath);
     console.log(`[desktop-smoke] macOS DMG passed: ${dmg.name} (${path.basename(appPath)})`);
@@ -588,7 +631,8 @@ Write-Output $item.VersionInfo.ProductVersion
       path.join(path.dirname(appExe), "resources"),
       `win32-${process.arch}`,
     );
-    await validatePersonaTemplates(path.join(path.dirname(appExe), "resources"));
+    await validateStarterMission(path.join(path.dirname(appExe), "resources"));
+    await assertNoRetiredHealthBridge(path.join(path.dirname(appExe), "resources"));
 
     if (!skipLaunch) {
       let spawnError = null;

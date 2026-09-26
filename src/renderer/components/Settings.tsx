@@ -12,6 +12,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
 import {
   Sparkles,
   Sun,
@@ -36,7 +37,6 @@ import {
   LayoutGrid,
   Zap,
   Monitor,
-  Smartphone,
   Puzzle,
   BarChart3,
   Lightbulb,
@@ -83,6 +83,7 @@ import {
 import { CUSTOM_PROVIDER_MAP } from "../../shared/llm-provider-catalog";
 import {
   getModelAccessDescriptor,
+  isFeaturedProvider,
   MODEL_ACCESS_GROUP_LABELS,
   MODEL_ACCESS_GROUP_ORDER,
 } from "../../shared/model-access";
@@ -129,6 +130,14 @@ const GoogleChatSettings = lazySettingsPanel(
 );
 const FeishuSettings = lazySettingsPanel(() => import("./FeishuSettings"), "FeishuSettings");
 const WeComSettings = lazySettingsPanel(() => import("./WeComSettings"), "WeComSettings");
+const WhatsAppCloudSettings = lazySettingsPanel(
+  () => import("./WhatsAppCloudSettings"),
+  "WhatsAppCloudSettings",
+);
+const TwilioSmsSettings = lazySettingsPanel(
+  () => import("./TwilioSmsSettings"),
+  "TwilioSmsSettings",
+);
 const XSettings = lazySettingsPanel(() => import("./XSettings"), "XSettings");
 const SearchSettings = lazySettingsPanel(() => import("./SearchSettings"), "SearchSettings");
 const UpdateSettings = lazySettingsPanel(() => import("./UpdateSettings"), "UpdateSettings");
@@ -178,7 +187,6 @@ const PersonalitySettings = lazySettingsPanel(
   () => import("./PersonalitySettings"),
   "PersonalitySettings",
 );
-const NodesSettings = lazySettingsPanel(() => import("./NodesSettings"), "NodesSettings");
 const ExtensionsSettings = lazySettingsPanel(
   () => import("./ExtensionsSettings"),
   "ExtensionsSettings",
@@ -218,16 +226,10 @@ const WebAccessSettingsPanel = lazySettingsPanel(
   "WebAccessSettingsPanel",
 );
 const InfraSettings = lazySettingsPanel(() => import("./InfraSettings"), "InfraSettings");
-const DigitalTwinsPanel = lazySettingsPanel(
-  () => import("./DigitalTwinsPanel"),
-  "DigitalTwinsPanel",
-);
 const SubconsciousSettingsPanel = lazySettingsPanel(
   () => import("./SubconsciousSettingsPanel"),
   "SubconsciousSettingsPanel",
 );
-const CompaniesPanel = lazySettingsPanel(() => import("./CompaniesPanel"), "CompaniesPanel");
-const HealthPanel = lazySettingsPanel(() => import("./HealthPanel"), "HealthPanel");
 const CouncilSettings = lazySettingsPanel(() => import("./CouncilSettings"), "CouncilSettings");
 const RoutineSettingsPanel = lazySettingsPanel(
   () => import("./RoutineSettingsPanel"),
@@ -249,7 +251,6 @@ const EverydayAgentSettingsPanel = lazySettingsPanel(
 type SettingsTab =
   | "appearance"
   | "personality"
-  | "companies"
   | "system"
   | "tray"
   | "guardrails"
@@ -280,7 +281,6 @@ type SettingsTab =
   | "scheduled"
   | "hooks"
   | "controlplane"
-  | "nodes"
   | "extensions"
   | "memory"
   | "git"
@@ -289,12 +289,10 @@ type SettingsTab =
   | "suggestions"
   | "traces"
   | "customize"
-  | "digitaltwins"
   | "everydayAgent"
   | "triggers"
   | "briefing"
   | "subconscious"
-  | "health"
   | "access"
   | "webaccess";
 
@@ -313,7 +311,9 @@ type SecondaryChannel =
   | "email"
   | "googlechat"
   | "feishu"
-  | "wecom";
+  | "wecom"
+  | "whatsapp_cloud"
+  | "twilio_sms";
 
 interface SettingsProps {
   onBack: () => void;
@@ -342,8 +342,6 @@ interface SettingsProps {
   workspaceId?: string;
   onCreateTask?: (title: string, prompt: string) => void;
   onOpenTask?: (taskId: string) => void;
-  onNavigateToMissionControl?: (companyId: string) => void;
-  onNavigateToAgents?: () => void;
 }
 
 interface ModelOption {
@@ -733,24 +731,12 @@ const sidebarItems: SidebarItem[] = [
     icon: <User {...I} />,
   },
   {
-    tab: "companies",
-    label: "Companies",
-    group: "General",
-    icon: <Building2 {...I} />,
-  },
-  {
     tab: "system",
     label: "System & Security",
     group: "General",
     icon: <Shield {...I} />,
   },
   { tab: "voice", label: "Voice Mode", group: "General", icon: <Mic {...I} /> },
-  {
-    tab: "digitaltwins",
-    label: "Agent Personas",
-    group: "General",
-    icon: <User {...I} />,
-  },
   {
     tab: "everydayAgent",
     label: "Everyday Agent",
@@ -812,12 +798,6 @@ const sidebarItems: SidebarItem[] = [
     icon: <LayoutGrid {...I} />,
   },
   {
-    tab: "health",
-    label: "Health",
-    group: "Integrations",
-    icon: <HeartPulse {...I} />,
-  },
-  {
     tab: "customize",
     label: "Feature Packs",
     group: "Skills & Tools",
@@ -852,12 +832,6 @@ const sidebarItems: SidebarItem[] = [
     label: "Access",
     group: "Advanced",
     icon: <Monitor {...I} />,
-  },
-  {
-    tab: "nodes",
-    label: "Mobile Companions",
-    group: "Advanced",
-    icon: <Smartphone {...I} />,
   },
   {
     tab: "extensions",
@@ -914,6 +888,8 @@ const secondaryChannelItems: Array<{
   { key: "googlechat", label: "Google Chat", icon: <MessagesSquare {...S} /> },
   { key: "feishu", label: "Feishu / Lark", icon: <MessageCircle {...S} /> },
   { key: "wecom", label: "WeCom", icon: <Building2 {...S} /> },
+  { key: "whatsapp_cloud", label: "WhatsApp Business", icon: <MessageCircle {...S} /> },
+  { key: "twilio_sms", label: "SMS (Twilio)", icon: <MessageSquare {...S} /> },
   { key: "mattermost", label: "Mattermost", icon: <Square {...S} /> },
   { key: "matrix", label: "Matrix", icon: <LayoutGrid {...S} /> },
   { key: "twitch", label: "Twitch", icon: <Tv {...S} /> },
@@ -931,6 +907,8 @@ const secondaryChannelSearchTerms: Partial<Record<SecondaryChannel, string[]>> =
   googlechat: ["google chat", "gchat"],
   feishu: ["feishu", "lark"],
   wecom: ["wecom", "wechat work", "enterprise wechat"],
+  whatsapp_cloud: ["whatsapp business", "whatsapp cloud", "meta cloud api"],
+  twilio_sms: ["twilio", "sms", "text message", "mms"],
   mattermost: ["mattermost"],
   matrix: ["matrix"],
   twitch: ["twitch", "stream chat"],
@@ -953,7 +931,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
     },
   ],
   personality: [{ terms: ["personality", "assistant behavior", "system prompt"] }],
-  companies: [{ terms: ["companies", "company", "mission control", "organization"] }],
   system: [
     {
       terms: [
@@ -969,7 +946,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
     },
   ],
   voice: [{ terms: ["voice", "voice mode", "speech", "microphone", "audio"] }],
-  digitaltwins: [{ terms: ["agent personas", "personas", "digital twins", "agents"] }],
   aimodels: [
     {
       terms: [
@@ -1097,7 +1073,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
       target: { tab: "integrations", integrationsSubTab: "infrastructure" },
     },
   ],
-  health: [{ terms: ["health", "healthkit", "fitness", "wellness"] }],
   customize: [
     {
       terms: [
@@ -1141,7 +1116,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
       target: { tab: "access", accessSubTab: "webaccess" },
     },
   ],
-  nodes: [{ terms: ["mobile companions", "nodes", "mobile"] }],
   extensions: [{ terms: ["extensions", "browser extension", "extension"] }],
   insights: [{ terms: ["usage insights", "analytics", "metrics"] }],
   pulse: [
@@ -1365,8 +1339,6 @@ export function Settings({
   workspaceId,
   onCreateTask,
   onOpenTask,
-  onNavigateToMissionControl,
-  onNavigateToAgents,
 }: SettingsProps) {
   const normalizedInitialTab: SettingsTab =
     initialTab === "tray" || initialTab === "guardrails" || initialTab === "policies"
@@ -1385,7 +1357,6 @@ export function Settings({
                 ? "access"
                 : (initialTab ?? "appearance");
   const [activeTab, setActiveTab] = useState<SettingsTab>(normalizedInitialTab);
-  const [digitalTwinsCompanyId, setDigitalTwinsCompanyId] = useState<string | null>(null);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
     initialTab === "skillhub" ? "store" : "custom",
@@ -1437,6 +1408,7 @@ export function Settings({
     Record<string, ModelOption[]>
   >({});
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [showAllProviders, setShowAllProviders] = useState(false);
   const [routingRuntime, setRoutingRuntime] = useState<LLMRoutingRuntimeState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2732,7 +2704,7 @@ export function Settings({
         // If authMethod is 'oauth', check if tokens are available
         if (loadedSettings.openai.authMethod === "oauth") {
           if (!loadedSettings.openai.model) {
-            setOpenaiModel("gpt-6-astra");
+            setOpenaiModel(recommendChatGPTModelForPlan(loadedSettings.openai.chatgptPlanType));
           }
           if (loadedSettings.openai.accessToken || loadedSettings.openai.refreshToken) {
             // Tokens available - fully connected
@@ -3435,7 +3407,7 @@ export function Settings({
         setOpenaiAuthMethod("oauth");
         setOpenaiApiKey(""); // Clear API key when using OAuth
         if (!openaiModel || openaiModel === "gpt-4o-mini") {
-          setOpenaiModel("gpt-6-astra");
+          setOpenaiModel(result.recommendedModel || "gpt-6-astra");
         }
         onSettingsChanged?.();
         // Load models after OAuth success
@@ -5763,7 +5735,11 @@ export function Settings({
         {MODEL_ACCESS_GROUP_ORDER.map((group) => {
           const groupedProviders = providers.filter(
             (provider) =>
-              getModelAccessDescriptor(provider.type as LLMProviderType).group === group,
+              getModelAccessDescriptor(provider.type as LLMProviderType).group === group &&
+              (showAllProviders ||
+                isFeaturedProvider(provider.type as LLMProviderType) ||
+                provider.configured ||
+                settings.providerType === provider.type),
           );
           if (groupedProviders.length === 0) return null;
 
@@ -5799,6 +5775,26 @@ export function Settings({
             </section>
           );
         })}
+        {(() => {
+          const hiddenCount = providers.filter(
+            (provider) =>
+              !isFeaturedProvider(provider.type as LLMProviderType) &&
+              !provider.configured &&
+              settings.providerType !== provider.type,
+          ).length;
+          if (hiddenCount === 0) return null;
+          return (
+            <button
+              type="button"
+              className="button-small button-secondary"
+              style={{ alignSelf: "flex-start", marginTop: "8px" }}
+              onClick={() => setShowAllProviders((value) => !value)}
+              aria-expanded={showAllProviders}
+            >
+              {showAllProviders ? "Show fewer providers" : `More providers (${hiddenCount})`}
+            </button>
+          );
+        })()}
       </div>
       <div className="llm-provider-content">
         {settings.providerType === "anthropic" && (
@@ -6097,7 +6093,7 @@ export function Settings({
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                     <circle cx="12" cy="7" r="4" />
                   </svg>
-                  Sign in with ChatGPT
+                  Sign in with ChatGPT (unofficial)
                 </button>
                 <button
                   className={`auth-method-tab ${openaiAuthMethod === "api_key" ? "active" : ""}`}
@@ -6141,6 +6137,10 @@ export function Settings({
                       Your ChatGPT account is connected. You can use Codex GPT models with your
                       subscription.
                     </p>
+                    <p className="settings-hint">
+                      Unofficial: OpenAI does not support ChatGPT sign-in in third-party apps, so it
+                      may stop working at any time. An OpenAI API key is the supported route.
+                    </p>
                     <button
                       className="button-small button-secondary"
                       onClick={handleOpenAIOAuthLogout}
@@ -6154,6 +6154,10 @@ export function Settings({
                     <p className="settings-description">
                       Sign in with your ChatGPT account to use Codex GPT models with your
                       subscription.
+                    </p>
+                    <p className="settings-hint">
+                      Unofficial: OpenAI does not support ChatGPT sign-in in third-party apps, so it
+                      may stop working at any time. An OpenAI API key is the supported route.
                     </p>
                     <button
                       className="button-primary oauth-login-btn"
@@ -8723,6 +8727,25 @@ export function Settings({
           </div>
         )}
 
+        <div className="settings-section" style={{ marginTop: "16px" }}>
+          <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+            <input
+              type="checkbox"
+              checked={settings.modelMetadataAutoRefresh === true}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setSettings((prev) => ({ ...prev, modelMetadataAutoRefresh: enabled }));
+              }}
+            />
+            Refresh model prices and context limits daily
+          </label>
+          <p className="settings-hint">
+            Off by default. CoWork ships with a price list that is updated with each release. When
+            on, CoWork downloads the public models.dev catalogue once a day (one anonymous request,
+            no prompts, usage or identifiers) so cost estimates stay current between releases.
+          </p>
+        </div>
+
         {renderModelSettingsActions({ includeProviderActions: true })}
       </div>
     </div>
@@ -8765,25 +8788,8 @@ export function Settings({
                 />
               ) : activeTab === "personality" ? (
                 <PersonalitySettings onSettingsChanged={onSettingsChanged} />
-              ) : activeTab === "companies" ? (
-                <CompaniesPanel
-                  onOpenMissionControl={(companyId: string) =>
-                    onNavigateToMissionControl?.(companyId)
-                  }
-                  onOpenDigitalTwins={(companyId: string) => {
-                    setDigitalTwinsCompanyId(companyId);
-                    setActiveTab("digitaltwins");
-                  }}
-                />
-              ) : activeTab === "digitaltwins" ? (
-                <DigitalTwinsPanel
-                  initialCompanyId={digitalTwinsCompanyId}
-                  onOpenAgents={onNavigateToAgents}
-                />
               ) : activeTab === "everydayAgent" ? (
                 <EverydayAgentSettingsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
-              ) : activeTab === "health" ? (
-                <HealthPanel compact onCreateTask={onCreateTask} />
               ) : activeTab === "system" ? (
                 <div className="settings-combined-panel system-security-panel">
                   <div className="system-security-panel-header">
@@ -8898,6 +8904,8 @@ export function Settings({
                         {effectiveSecondary === "googlechat" && <GoogleChatSettings />}
                         {effectiveSecondary === "feishu" && <FeishuSettings />}
                         {effectiveSecondary === "wecom" && <WeComSettings />}
+                        {effectiveSecondary === "whatsapp_cloud" && <WhatsAppCloudSettings />}
+                        {effectiveSecondary === "twilio_sms" && <TwilioSmsSettings />}
                       </div>
                     </div>
                   );
@@ -9137,8 +9145,6 @@ export function Settings({
                     {activeAccessSubTab === "webaccess" && <WebAccessSettingsPanel />}
                   </div>
                 </div>
-              ) : activeTab === "nodes" ? (
-                <NodesSettings />
               ) : activeTab === "extensions" ? (
                 <ExtensionsSettings />
               ) : activeTab === "memory" ? (

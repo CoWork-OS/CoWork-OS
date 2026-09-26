@@ -416,18 +416,6 @@
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/debug-error.json"
     },
     {
-      "id": "twin-decision-prep",
-      "name": "Decision Preparation Package",
-      "description": "Assemble data, options, and analysis for a pending decision. Presents trade-offs and recommendations without making the decision. Used by digital twin personas to reduce decision fatigue.",
-      "version": "1.0.0",
-      "author": "CoWork OS",
-      "tags": ["digital-twin", "decision", "analysis", "trade-off"],
-      "icon": "⚖️",
-      "category": "Digital Twin",
-      "updatedAt": "2026-05-11",
-      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/twin-decision-prep.json"
-    },
-    {
       "id": "dependency-check",
       "name": "Dependency Check",
       "description": "Audit dependencies for updates and vulnerabilities",
@@ -1064,18 +1052,6 @@
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/mcporter.json"
     },
     {
-      "id": "twin-meeting-prep",
-      "name": "Meeting Preparation Brief",
-      "description": "Prepare a structured brief for an upcoming meeting with relevant context, open items, data points, and talking points. Used by digital twin personas to reduce meeting preparation overhead.",
-      "version": "1.0.0",
-      "author": "CoWork OS",
-      "tags": ["digital-twin", "meeting", "preparation", "brief"],
-      "icon": "📅",
-      "category": "Digital Twin",
-      "updatedAt": "2026-05-11",
-      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/twin-meeting-prep.json"
-    },
-    {
       "id": "memory-kit",
       "name": "Memory Kit",
       "description": "Create a workspace-local .cowork/ memory kit (rules, identity, long-term notes, daily logs, heartbeat templates).",
@@ -1302,18 +1278,6 @@
       "category": "Finance",
       "updatedAt": "2026-05-11",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/portfolio-optimizer.json"
-    },
-    {
-      "id": "twin-pr-triage",
-      "name": "PR Triage & Review Queue",
-      "description": "Scan open pull requests, assess risk and complexity, and build a prioritized review queue. Used by digital twin personas to reduce PR review cognitive load.",
-      "version": "1.0.0",
-      "author": "CoWork OS",
-      "tags": ["digital-twin", "code-review", "PR", "triage", "github"],
-      "icon": "🔍",
-      "category": "Digital Twin",
-      "updatedAt": "2026-05-11",
-      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/twin-pr-triage.json"
     },
     {
       "id": "prd",
@@ -1566,18 +1530,6 @@
       "category": "Finance",
       "updatedAt": "2026-05-11",
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/startup-cfo.json"
-    },
-    {
-      "id": "twin-status-report",
-      "name": "Status Report Generator",
-      "description": "Generate a concise status report from recent activity, tasks, commits, and conversations. Used by digital twin personas to prepare standup updates and progress summaries.",
-      "version": "1.0.0",
-      "author": "CoWork OS",
-      "tags": ["digital-twin", "status", "reporting", "standup"],
-      "icon": "📋",
-      "category": "Digital Twin",
-      "updatedAt": "2026-05-11",
-      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/twin-status-report.json"
     },
     {
       "id": "stock-analysis",

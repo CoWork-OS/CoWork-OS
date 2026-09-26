@@ -412,6 +412,19 @@ describe("AgentDaemon.completeTask", () => {
     );
   });
 
+  it("does not learn from a completed synthetic sample task", () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.taskRepo.findById.mockReturnValue({
+      id: "task-1", title: "Synthetic sample", status: "executing",
+      workspaceId: "workspace-1", agentType: "main", source: "sample",
+    });
+    (PersonalityManager.recordTaskCompleted as Any).mockClear();
+
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done", { terminalStatus: "ok" });
+
+    expect(PersonalityManager.recordTaskCompleted).not.toHaveBeenCalled();
+  });
+
   it("persists semanticSummary and verification metadata on completion when provided", () => {
     const daemonLike = createDaemonLike();
 
@@ -630,6 +643,59 @@ describe("AgentDaemon.completeTask", () => {
     expect(keyClaims).toEqual(["The due date is 2026-04-13 and the exported file is 585 bytes."]);
   });
 
+  it("keeps markdown table rows from collapsing into one factual claim", () => {
+    const daemonLike = createDaemonLike();
+
+    const keyClaims = (AgentDaemon.prototype as Any).extractKeyClaimSentences.call(
+      daemonLike,
+      [
+        "## Validated run-of-show",
+        "| Time | Duration | Segment | Owner |",
+        "|---|---|---|---|",
+        "| 10:00–10:03 | 3 minutes | Welcome | Maya |",
+        "| 10:03–10:08 | 5 minutes | Introduction | Maya |",
+        "The agenda is 45 minutes long.",
+      ].join("\n"),
+    );
+
+    expect(keyClaims).toEqual(["The agenda is 45 minutes long."]);
+  });
+
+  it("does not downgrade low-risk planning work when explicit evidence is not required", () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.taskRepo.findById.mockReturnValue({
+      id: "task-1",
+      title: "Webinar run-of-show",
+      prompt: "Create a 45-minute webinar plan using the supplied speaker and topic details.",
+      status: "executing",
+      workspaceId: "workspace-1",
+      parentTaskId: "parent-task",
+      agentType: "sub",
+      agentConfig: { reviewPolicy: "balanced" },
+    });
+    daemonLike.hasEvidenceForKeyClaims.mockReturnValue({
+      passed: false,
+      keyClaims: ["The agenda is 45 minutes long."],
+    });
+
+    AgentDaemon.prototype.completeTask.call(
+      daemonLike,
+      "task-1",
+      "The agenda is 45 minutes long.",
+    );
+
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ status: "completed", terminalStatus: "ok" }),
+    );
+    expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
+      "task-1",
+      "timeline_step_updated",
+      expect.objectContaining({ stepId: "evidence_gate:key_claims", status: "blocked" }),
+    );
+    expect(daemonLike.timelineMetrics.evidenceGateFails).toBe(0);
+  });
+
   it("treats successful structured verification evidence as satisfying the key-claim gate", () => {
     const daemonLike = createDaemonLike();
 
@@ -737,6 +803,99 @@ describe("AgentDaemon.completeTask", () => {
     });
   });
 
+  it("accepts a rounded calculation when its operands come from a complete file read", () => {
+    const daemonLike = createDaemonLike();
+    const evidenceEvents = [
+      {
+        id: "event-read-file",
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "timeline_step_updated",
+        legacyType: "tool_result",
+        schemaVersion: 2,
+        payload: {
+          tool: "read_file",
+          envelope: {
+            toolName: "read_file",
+            status: "success",
+            structuredData: {
+              path: "weekly-active-teams.csv",
+              content: "week,teams\nSep 1,128\nSep 8,134\nSep 15,131\nSep 22,149\n",
+              size: 58,
+              truncated: false,
+              window: { start: 0, end: 58, total: 58 },
+            },
+          },
+        },
+      },
+    ];
+
+    const evidenceCheck = (AgentDaemon.prototype as Any).hasEvidenceForKeyClaims.call(
+      daemonLike,
+      "task-1",
+      "Percent change: (149 − 128) / 128 × 100 = 16.4% increase.",
+      undefined,
+      evidenceEvents,
+    );
+
+    expect(evidenceCheck).toEqual({
+      passed: true,
+      keyClaims: ["Percent change: (149 − 128) / 128 × 100 = 16.4% increase."],
+    });
+  });
+
+  it("rejects calculations with unsupported operands or a result that does not match", () => {
+    const daemonLike = createDaemonLike();
+    const evidenceEvent = {
+      id: "event-read-file",
+      taskId: "task-1",
+      timestamp: Date.now(),
+      type: "timeline_step_updated",
+      legacyType: "tool_result",
+      schemaVersion: 2,
+      payload: {
+        tool: "read_file",
+        envelope: {
+          toolName: "read_file",
+          status: "success",
+          structuredData: {
+            path: "weekly-active-teams.csv",
+            content: "week,teams\nSep 1,128\nSep 8,134\nSep 15,131\nSep 22,149\n",
+            size: 58,
+            truncated: false,
+            window: { start: 0, end: 58, total: 58 },
+          },
+        },
+      },
+    };
+    const check = (claim: string, read = evidenceEvent) =>
+      (AgentDaemon.prototype as Any).hasEvidenceForKeyClaims.call(
+        daemonLike,
+        "task-1",
+        claim,
+        undefined,
+        [read],
+      );
+
+    expect(check("Percent change: (149 − 128) / 128 × 100 = 15.4% increase.").passed).toBe(false);
+    expect(check("Percent change: (149 − 127) / 127 × 100 = 17.3% increase.").passed).toBe(false);
+    expect(
+      check("Percent change: (149 − 128) / 128 × 100 = 16.4% increase.", {
+        ...evidenceEvent,
+        payload: {
+          ...evidenceEvent.payload,
+          envelope: {
+            ...evidenceEvent.payload.envelope,
+            structuredData: {
+              ...evidenceEvent.payload.envelope.structuredData,
+              truncated: true,
+            },
+          },
+        },
+      }).passed,
+    ).toBe(false);
+  });
+
   it("matches an implicit output reference and requested trailing newline to its file read", () => {
     const daemonLike = createDaemonLike();
     const evidenceEvents = [
@@ -829,6 +988,25 @@ describe("AgentDaemon.completeTask", () => {
         makeReadEvent("SHELL_WRITE_FIXED\n", 17),
       ).passed,
     ).toBe(false);
+    const citedRead = makeReadEvent("hello world", 11);
+    expect(
+      check(
+        "The file `qa-shell-write-fix-live-20260922.txt` contains exactly `hello` and is 11 bytes.",
+        citedRead,
+      ).passed,
+    ).toBe(false);
+    expect(
+      check(
+        "The file `qa-shell-write-fix-live-20260922.txt` contains `hello` and is 999 bytes.",
+        citedRead,
+      ).passed,
+    ).toBe(false);
+    expect(
+      check(
+        "The file `qa-shell-write-fix-live-20260922.txt` contains `hello` and is 11 bytes.",
+        citedRead,
+      ).passed,
+    ).toBe(true);
     expect(check("The due date is 2026-09-22.", makeReadEvent("2026-09-22", 10)).passed).toBe(
       false,
     );

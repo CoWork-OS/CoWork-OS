@@ -35,13 +35,11 @@ import {
   setHookTriggerEmitter,
 } from "./ipc/handlers";
 import { setupMissionControlHandlers } from "./ipc/mission-control-handlers";
-import { setupPersonaTemplateHandlers } from "./ipc/persona-template-handlers";
 import { setupPluginPackHandlers } from "./ipc/plugin-pack-handlers";
 import { setupPluginDistributionHandlers } from "./ipc/plugin-distribution-handlers";
 import { setupAdminPolicyHandlers } from "./ipc/admin-policy-handlers";
 import { setupAgentSecurityHandlers } from "./ipc/agent-security-handlers";
 import { NumbatService } from "./security/numbat";
-import { getPersonaTemplateService } from "./agents/PersonaTemplateService";
 import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
 import { ComparisonService } from "./git/ComparisonService";
 import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
@@ -100,6 +98,7 @@ import {
   WorkspaceRepository,
 } from "./database/repositories";
 import { LLMProviderFactory } from "./agent/llm";
+import { ModelMetadataRefresher } from "./agent/llm/model-metadata-refresh";
 import { SearchProviderFactory } from "./agent/search";
 import { ChannelGateway } from "./gateway";
 import { formatChatTranscriptForPrompt } from "./gateway/chat-transcript";
@@ -127,7 +126,6 @@ import {
   StrategicPlannerService,
   setStrategicPlannerService,
 } from "./control-plane/StrategicPlannerService";
-import { SymphonyService, setSymphonyService } from "./control-plane/SymphonyService";
 import { attachControlPlaneTaskLifecycleSync } from "./control-plane/task-run-sync";
 import {
   buildManagedScheduledWorkspacePath,
@@ -156,6 +154,7 @@ import {
   ChronicleSettingsManager,
 } from "./chronicle";
 import { revealWindow } from "./utils/window-visibility";
+import { StartupActionGate } from "./utils/startup-action-gate";
 import { KnowledgeGraphService } from "./knowledge-graph/KnowledgeGraphService";
 import { MailboxAutomationHub } from "./mailbox/MailboxAutomationHub";
 import { MailboxAutomationRegistry } from "./mailbox/MailboxAutomationRegistry";
@@ -212,6 +211,8 @@ import {
   readWorkspacePriorities,
 } from "./briefing/workspace-briefing-context";
 import { setupBriefingHandlers } from "./ipc/briefing-handlers";
+import { setupMeetingArtifactHandlers } from "./ipc/meeting-artifacts-handlers";
+import { MeetingArtifactsService } from "./meetings/meeting-artifacts-service";
 import { setupImprovementHandlers, setupSubconsciousHandlers } from "./ipc/subconscious-handlers";
 import { FileHubService } from "./file-hub/FileHubService";
 import { setupFileHubHandlers } from "./ipc/file-hub-handlers";
@@ -274,7 +275,6 @@ let feedbackService: FeedbackService | null = null;
 let loreService: LoreService | null = null;
 let xMentionBridgeService: XMentionBridgeService | null = null;
 let strategicPlannerService: StrategicPlannerService | null = null;
-let symphonyService: SymphonyService | null = null;
 let automationOutcomeService: AutomationOutcomeService | null = null;
 let recurringApprovalService: RecurringApprovalService | null = null;
 let eventTriggerService: EventTriggerService | null = null;
@@ -1338,7 +1338,7 @@ if (isMacSafeStorageMigrationWorker) {
     if (!ACTIVE_FOREGROUND_TASK_STATUSES.has(task.status)) return false;
     if (isAutomatedTaskLike(task)) return false;
     const source = task.source || "manual";
-    return source === "manual" || source === "api";
+    return source === "manual" || source === "api" || source === "sample";
   }
   if (!gotTheLock) {
     if (process.env.NODE_ENV === "development") {
@@ -1351,6 +1351,12 @@ if (isMacSafeStorageMigrationWorker) {
       app.quit();
     }
   } else {
+    const startupActionGate = new StartupActionGate();
+
+    function ensureMainWindowVisible(): void {
+      if (!revealWindow(mainWindow)) createWindow();
+    }
+
     function flushPendingTaskDeeplink(): void {
       const taskId = pendingTaskDeeplinkId;
       if (!taskId || !mainWindow || mainWindow.isDestroyed()) return;
@@ -1369,7 +1375,7 @@ if (isMacSafeStorageMigrationWorker) {
       if (HEADLESS) return;
       pendingTaskDeeplinkId = taskId;
       if (!revealWindow(mainWindow)) {
-        createWindow();
+        startupActionGate.runWhenReady(ensureMainWindowVisible);
         return;
       }
       if (mainWindow?.webContents.isLoadingMainFrame()) {
@@ -1383,7 +1389,7 @@ if (isMacSafeStorageMigrationWorker) {
       if (HEADLESS) return;
       pendingBotDeeplink = route;
       if (!revealWindow(mainWindow)) {
-        createWindow();
+        startupActionGate.runWhenReady(ensureMainWindowVisible);
         return;
       }
       if (mainWindow?.webContents.isLoadingMainFrame()) {
@@ -1412,7 +1418,9 @@ if (isMacSafeStorageMigrationWorker) {
       if (HEADLESS) return;
       const approvalResponse = getCliApprovalResponseArgv(argv);
       if (approvalResponse) {
-        void handleCliApprovalResponse(approvalResponse);
+        startupActionGate.runWhenReady(() => {
+          void handleCliApprovalResponse(approvalResponse);
+        });
         return;
       }
       const taskId = extractTaskDeeplinkArg(argv);
@@ -1429,8 +1437,9 @@ if (isMacSafeStorageMigrationWorker) {
       if (revealWindow(mainWindow)) {
         return;
       }
-      // If the window was closed (but app kept running), recreate it.
-      createWindow();
+      // During startup, wait for IPC registration before creating a renderer.
+      // After startup, recreate a closed window as usual.
+      startupActionGate.runWhenReady(ensureMainWindowVisible);
     });
 
     const startupApprovalResponse = getCliApprovalResponseArgv(process.argv);
@@ -1877,6 +1886,9 @@ if (isMacSafeStorageMigrationWorker) {
 
       // Initialize provider factories (loads settings from disk, migrates legacy files)
       LLMProviderFactory.initialize();
+      new ModelMetadataRefresher(
+        () => LLMProviderFactory.loadSettings().modelMetadataAutoRefresh === true,
+      ).start();
       SearchProviderFactory.initialize();
       GuardrailManager.initialize();
       AppearanceManager.initialize();
@@ -1980,6 +1992,17 @@ if (isMacSafeStorageMigrationWorker) {
       }
 
       try {
+        const meetingArtifacts = MeetingArtifactsService.initialize(
+          path.join(getUserDataDir(), "meeting-artifacts"),
+        );
+        setupMeetingArtifactHandlers(meetingArtifacts);
+        logger.info("Meeting artifacts service initialized");
+      } catch (error) {
+        // Meeting capture is optional and must not block app startup.
+        logger.error("Failed to initialize meeting artifacts service:", error);
+      }
+
+      try {
         const chronicleSettings = ChronicleSettingsManager.loadSettings();
         await ChronicleCaptureService.getInstance().applySettings(chronicleSettings);
         ChronicleMemoryService.getInstance().applySettings(chronicleSettings);
@@ -2003,18 +2026,6 @@ if (isMacSafeStorageMigrationWorker) {
         db: dbManager.getDatabase(),
         log: (...args) => logger.warn(...args),
       });
-      try {
-        symphonyService = new SymphonyService({
-          db: dbManager.getDatabase(),
-          agentDaemon,
-          log: (...args) => logger.info(...args),
-        });
-        setSymphonyService(symphonyService);
-        symphonyService.start();
-        logger.info("Symphony issue orchestration initialized");
-      } catch (error) {
-        logger.error("Failed to initialize Symphony issue orchestration:", error);
-      }
 
       // Optional: bootstrap a default workspace on startup for headless/server deployments.
       // This makes a fresh VPS instance usable without first opening the desktop UI.
@@ -3128,7 +3139,6 @@ if (isMacSafeStorageMigrationWorker) {
             standupService,
             heartbeatService,
             getPlannerService: () => strategicPlannerService,
-            getSymphonyService: () => symphonyService,
             getMainWindow: () => mainWindow,
             coreTraceService,
             coreMemoryDistiller,
@@ -3189,18 +3199,6 @@ if (isMacSafeStorageMigrationWorker) {
         logger.info("Strategic Planner initialized");
       } catch (error) {
         logger.error("Failed to initialize Strategic Planner:", error);
-      }
-
-      // Register Persona Template handlers; templates are loaded lazily when the
-      // Digital Twins UI requests them.
-      try {
-        const db = dbManager.getDatabase();
-        const agentRoleRepo = new AgentRoleRepository(db);
-        const personaTemplateService = getPersonaTemplateService(agentRoleRepo);
-        setupPersonaTemplateHandlers({ personaTemplateService });
-        logger.debug("Persona Template handlers initialized");
-      } catch (error) {
-        logger.error("Failed to initialize Persona Template handlers:", error);
       }
 
       // Initialize Plugin Pack handlers (Customize panel)
@@ -3343,6 +3341,7 @@ if (isMacSafeStorageMigrationWorker) {
         // are registered before the renderer finishes loading and calls them
         setupCanvasHandlers(mainWindow, agentDaemon);
         setupQAHandlers(mainWindow, agentDaemon);
+        startupActionGate.open();
         CanvasManager.getInstance().setMainWindow(mainWindow);
 
         // Initialize Git Worktree & Comparison handlers
@@ -4303,14 +4302,6 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         {
-          name: "symphony",
-          run: () => {
-            symphonyService?.stop();
-            symphonyService = null;
-            setSymphonyService(null);
-          },
-        },
-        {
           name: "X mention bridge",
           run: () => {
             xMentionBridgeService?.stop();
@@ -4334,6 +4325,10 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         { name: "channel gateway", run: () => channelGateway?.shutdown() },
+        {
+          name: "meeting artifacts",
+          run: () => MeetingArtifactsService.getInstance()?.shutdown(),
+        },
         { name: "mailbox", run: () => MailboxService.stopBackgroundServices() },
         { name: "box brain", run: () => BoxBrainService.getInstance().stop() },
         {

@@ -120,7 +120,7 @@ Minimum fields:
 - `sourceType` (`web_fetch`, `browser`, `scrape`, `email`, `document`, `connector`, `ocr`)
 - `sourceLocator` (URL, file path, message id, connector object id)
 - `domain` or origin
-- `fetchMode` (`default`, `browser`, `scrape_default`, `scrape_stealth`, `scrape_playwright`, `local_file`, etc.)
+- `fetchMode` (`default`, `browser`, `scrape_default`, `scrape_playwright`, `local_file`, etc.)
 - `capturedAt`
 - `contentHash`
 - `integrityVerdict` (`trusted`, `caution`, `suspicious`, `blocked`)

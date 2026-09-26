@@ -3284,7 +3284,7 @@ function StorageModal({
   return (
     <ModalShell
       title={`${summary.device.name} storage`}
-      subtitle="Workspace roots, artifact volume, and safe storage indicators."
+      subtitle="Workspace roots, saved artifacts, and free disk space."
       onClose={onClose}
     >
       <div className="dp-support-stats">

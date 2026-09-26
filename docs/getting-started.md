@@ -5,58 +5,19 @@
   <br><em>The home screen is the fastest way to start tasks, reopen recent work, and launch common workflows.</em>
 </p>
 
-CoWork OS is the free, open-source AI super app for real work. Its open multi-provider harness lets supported provider accounts, APIs, compatible gateways, cloud credentials, and local models share the same tools, skills, memory, agents, approvals, artifacts, and workflows. CoWork itself is free and MIT-licensed; providers and connected services keep their own eligibility, limits, and charges. See [Model Providers](providers.md) and [Compare CoWork OS](comparisons/index.md).
+CoWork OS is an open desktop for getting work done with the AI you choose. Code, browser work, documents, and automations live in one workspace with visible actions and approvals. CoWork is free and open source. Model providers may charge for usage. Your workspace stays local; cloud models and connected services receive the data needed for tasks you run. See [Model Providers](providers.md).
 
 ## Quick Start
 
 The desktop app requires **macOS 13 Ventura or later** or Windows 10/11. CoWork OS `0.5.51` is the final release compatible with macOS 12 Monterey.
 
-### Step 1: Install Dependencies
+### Step 1: Download and open the desktop app
 
-```bash
-git clone https://github.com/CoWork-OS/CoWork-OS.git
-cd CoWork-OS
-npm run setup
-```
+Choose the macOS or Windows installer from the [latest release](https://github.com/CoWork-OS/CoWork-OS/releases/latest). On macOS, open the DMG and drag CoWork OS into Applications. On Windows, run the published installer. Match your computer's architecture to the available release asset. If no matching installer is listed, do not use an asset for another architecture.
 
-### Step 2: Run the Desktop App
+No Git checkout, compiler, or Node.js installation is needed for the desktop installer. For macOS first-launch security prompts, see the [README installation steps](../README.md#quick-start). If you want the terminal interface, use the [released CLI guide](cli.md). To clone, build, or contribute, use the [development guide](development.md).
 
-```bash
-npm run dev
-```
-
-This will:
-
-1. Start the Vite dev server (React UI)
-2. Launch Electron with hot reload enabled
-3. Open DevTools automatically
-
-### Step 2b: Run the CLI
-
-Build the CLI once, then launch the terminal UI:
-
-```bash
-npm run build:cli
-cowork
-```
-
-For a one-shot local task:
-
-```bash
-cowork run "who are you?"
-```
-
-`cowork` uses the same local profile, database, provider settings, workspaces, skills, and MCP connector configuration as the desktop app. It does not need a Control Plane token for normal local use. If the desktop app is installed and already configured, one-shot local CLI runs prefer a hidden app-entry runtime so encrypted desktop settings keep using the same app identity.
-
-Use remote mode only when intentionally calling a remote Control Plane endpoint:
-
-```bash
-cowork run "check the remote workspace status" --remote
-```
-
-See [CoWork OS CLI](cli.md) for command syntax, local-vs-remote behavior, JSON output, and troubleshooting.
-
-### Step 3: Choose How CoWork Runs AI
+### Step 2: Choose How CoWork Runs AI
 
 On first launch, choose the easiest working model route for your machine:
 
@@ -230,7 +191,6 @@ Once the app opens, the most important places to know are:
 - **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
 - **Settings > Automations**: advanced prompt-based Routines, Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing controls
 - **Settings > Profiles**: create, switch, export, and import isolated app profiles
-- **Settings > Companies**: company shell setup, goals, projects, issues, planner state, and linked operators
 - **Mission Control**: company and operator monitoring, Heartbeat-agent state, global runtime queue status, workspace Mission Board, feed, and Ops view
 - **Settings > Skills**: Skill Store imports plus optional external read-only skill directories
 - **Settings > Channels**: Slack multi-workspace setup, Telegram group routing, Discord guild allowlists, channel/chat/thread specialization, and enterprise channels such as Feishu/Lark and WeCom
@@ -241,7 +201,7 @@ Once the app opens, the most important places to know are:
 - **Presentation artifacts**: when a task creates a PowerPoint deck, the output card appears in the task feed. PPTX opens in the right-sidebar presentation viewer with thumbnails, slide navigation, zoom, speaker notes, and fast text-first loading while slide images render or load from cache. Fullscreen mode keeps the follow-up composer so you can request deck edits and see the preview refresh after the file is updated. See [Presentation Artifacts and PPTX Preview](pptx-generation-and-preview.md).
 - **Web page artifacts**: when a task creates `.html` / `.htm` or built React output such as `dist/index.html`, the output card appears in the task feed. The main **Open** action opens a sandboxed web preview in the right sidebar; fullscreen mode keeps the follow-up composer so you can request page edits and see the preview refresh after the file or build output is updated. React-style projects without built output show a build-output-needed state instead of starting a dev server. See [Web Page Artifacts](web-page-artifacts.md).
 
-If you are just getting started, do not configure everything at once. Set up an LLM provider, run one local task, then add Devices, Automations, or Companies as needed.
+If you are just getting started, do not configure everything at once. Set up an LLM provider, run one local task, then add Devices or Automations as needed.
 
 ## Optional: Try Chronicle
 
@@ -319,28 +279,6 @@ Rule of thumb:
 - use prompt-based `Routines` for one saved instruction block with target, policy, outputs, and run history
 - use `Scheduled Tasks`, `Webhooks`, or `Event Triggers` directly only when you specifically need the advanced underlying engine
 - use a task's three-dot menu and `Add automation...` when a task you just ran should become a recurring automation; this creates a task-sourced routine, continues the same thread by default, and preserves a source task/deeplink reference
-
-## Zero-Human Company Quick Start
-
-If you want to use CoWork OS as a founder-operated autonomous company shell:
-
-1. Choose a real git-backed workspace.
-2. Open **Settings** > **Memory Hub**.
-3. Initialize **Venture operator kit**.
-4. Fill in the generated `.cowork/` company files (`COMPANY.md`, `OPERATIONS.md`, `KPIS.md`, `PRIORITIES.md`, `HEARTBEAT.md`).
-5. Open **Settings** > **Companies**.
-6. Create or select the company shell you want to operate.
-7. Click **Open Digital Twins** from that company.
-8. Activate:
-   - `Company Planner`
-   - `Founder Office Operator`
-9. Enable heartbeat for both operators.
-10. Return to **Settings** > **Companies** and confirm the operators are linked to the intended company.
-11. Open **Mission Control** from that company.
-12. In the planner strip, enable scheduling, set the planner agent, and click **Run Planner**.
-13. Use the `Ops` tab to monitor goals, projects, planner-managed issues, and linked execution runs.
-
-See [Zero-Human Company Operations](zero-human-company.md) for the full architecture, recipe, use cases, and operating model.
 
 ## Example Tasks to Try
 
@@ -605,7 +543,7 @@ Install enterprise connectors from **Settings** > **Integrations** > **Browse Re
 | **Blender**          | 3D/Rendering     | Localhost Blender bridge + `COWORK_ARCH_PROJECT_ROOT`                      |
 | **ComfyUI**          | Image Generation | Local ComfyUI API + `COWORK_ARCH_PROJECT_ROOT`                             |
 
-Most service connectors provide tools like `search`, `get`, `create`, and `update` for their respective APIs. Local creative connectors provide app-specific tools for Rhino, Blender, and ComfyUI; their file arguments must stay inside `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`. **47 connectors** are available in total, including Stripe, Tavily, Grafana, Metabase, Socket, Rhino, Blender, ComfyUI, and more. See [Enterprise Connectors](enterprise-connectors.md) for the full catalog.
+Most service connectors provide tools like `search`, `get`, `create`, and `update` for their respective APIs. Local creative connectors provide app-specific tools for Rhino, Blender, and ComfyUI; their file arguments must stay inside `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`. Available connectors include Stripe, Tavily, Grafana, Metabase, Socket, Home Assistant, Rhino, Blender, ComfyUI, and more. See the generated [Connector Inventory](connector-inventory.md) for the full list and [Enterprise Connectors](enterprise-connectors.md) for setup.
 
 ### Social Integrations (Optional)
 
@@ -763,7 +701,7 @@ Don't use system folders like `/System` or `/Applications`.
 5. **Goal Mode**: Define success criteria and let the agent auto-retry until verification passes
 6. **Custom Skills**: Create reusable workflows with custom prompts in Settings > Custom Skills
 7. **MCP Servers**: Connect to external tools via MCP in Settings > MCP Servers
-8. **Enterprise Connectors**: Install from 47 connectors (Salesforce, Jira, HubSpot, Stripe, Tavily, Grafana, Rhino, Blender, ComfyUI, and more) via Settings > Connectors
+8. **Enterprise Connectors**: Install shipped connectors (Salesforce, Jira, HubSpot, Stripe, Tavily, Grafana, Rhino, Blender, ComfyUI, and more) via Settings > Connectors
 9. **Cloud Storage/Productivity**: Connect Notion, Box, OneDrive, Google Workspace (Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks/Chat), Dropbox, or SharePoint — click their cards in Settings > Integrations
 10. **Parallel Tasks**: Run multiple tasks concurrently (configure in Settings > Task Queue)
 11. **Guardrails**: Set token/cost budgets and blocked commands in Settings > Guardrails

@@ -177,7 +177,7 @@ Desktop behavior:
 | Gmail                     | First-class sync, classification, attachment metadata, read/unread, archive/trash where modify scope is granted, Gmail API send for replies, Ask Inbox, and Gmail forwarding automations.               |
 | IMAP/SMTP                 | Sync/read through IMAP and send through SMTP. Read/unread support depends on account connection and provider capability. Archive/trash/labels are more limited than Gmail.                              |
 | AgentMail                 | AgentMail sync and reply-all support for AgentMail threads. Manual forwarding is not yet available for AgentMail threads.                                                                               |
-| Outlook / Microsoft Graph | Represented in the provider model and capability surface. Dedicated Microsoft Graph mail execution is still planned; existing Outlook-style accounts currently use IMAP/SMTP fallback where configured. |
+| Outlook / Microsoft Graph | Microsoft Graph-backed sync (recent, unread inbox and junk), provider search, mail-folder sync, read/unread, archive (move to the Archive folder), trash, and draft-then-send replies with attachments. Outlook accounts connected through IMAP/SMTP instead of Graph keep the IMAP/SMTP behavior above. |
 
 ## Replacement Client Foundation
 
@@ -192,7 +192,7 @@ Inbox Agent now includes the foundation for a replacement-grade email client:
 
 Current replacement-client gap:
 
-- native new-mail compose, provider-backed draft save/update, attachment upload, full outgoing queue draining, Microsoft Graph execution, folder/label navigation, and notification preferences still need the next implementation passes before Inbox Agent can fully replace every email-client workflow.
+- native new-mail compose, provider-backed draft save/update, attachment upload, full outgoing queue draining, folder/label navigation in the UI, and notification preferences still need the next implementation passes before Inbox Agent can fully replace every email-client workflow.
 
 ## Gmail Forwarding Automations
 

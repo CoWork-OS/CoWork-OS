@@ -18,7 +18,6 @@ import {
   CompanyOutputContract,
   CompanyOutputFeedItem,
   CompanyReviewQueueItem,
-  SymphonyConfigUpdate,
   MissionControlBrief,
   MissionControlItem,
   MissionControlItemEvidence,
@@ -42,8 +41,6 @@ import { validateInput, UUIDSchema } from "../utils/validation";
 import { createLogger } from "../utils/logger";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
 import { StrategicPlannerService } from "../control-plane/StrategicPlannerService";
-import { SymphonyService } from "../control-plane/SymphonyService";
-import { AgentCompaniesService } from "../control-plane/AgentCompaniesService";
 import { SubconsciousRunRepository } from "../subconscious/SubconsciousRepositories";
 import { CoreMemoryCandidateRepository } from "../core/CoreMemoryCandidateRepository";
 import { CoreMemoryDistillRunRepository } from "../core/CoreMemoryDistillRunRepository";
@@ -224,7 +221,6 @@ export interface MissionControlDeps {
   standupService: StandupReportService;
   heartbeatService: HeartbeatService;
   getPlannerService: () => StrategicPlannerService | null;
-  getSymphonyService: () => SymphonyService | null;
   getMainWindow: () => BrowserWindow | null;
   coreTraceService: CoreTraceService;
   coreMemoryDistiller: CoreMemoryDistiller;
@@ -255,20 +251,12 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   const coreMemoryDistillRunRepo = new CoreMemoryDistillRunRepository(db);
   const missionControlIntelligence = new MissionControlIntelligenceService(db);
   const automationOutcomeRepo = new AutomationRunOutcomeRepository(db);
-  const agentCompanies = new AgentCompaniesService(db, core, agentRoleRepo);
   const taskRepo = new TaskRepository(db);
   const activityRepo = new ActivityRepository(db);
   const requirePlannerService = (): StrategicPlannerService => {
     const service = deps.getPlannerService();
     if (!service) {
       throw new Error("Strategic planner is unavailable");
-    }
-    return service;
-  };
-  const requireSymphonyService = (): SymphonyService => {
-    const service = deps.getSymphonyService();
-    if (!service) {
-      throw new Error("Symphony service is unavailable");
     }
     return service;
   };
@@ -825,117 +813,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     const validated = validateInput(UUIDSchema, companyId, "company ID");
     return core.getCompany(validated);
   });
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_COMPANY_CREATE,
-    async (
-      _,
-      request: {
-        name: string;
-        slug?: string;
-        description?: string;
-        status?: "active" | "inactive" | "suspended";
-        isDefault?: boolean;
-        monthlyBudgetCost?: number | null;
-        budgetPausedAt?: number | null;
-      },
-    ) => {
-      checkRateLimit(IPC_CHANNELS.MC_COMPANY_CREATE);
-      return core.createCompany({
-        name: requireString(request.name, "company name"),
-        slug: optionalString(request.slug),
-        description: request.description === null ? undefined : optionalString(request.description),
-        status: optionalString(request.status) as "active" | "inactive" | "suspended" | undefined,
-        isDefault: typeof request.isDefault === "boolean" ? request.isDefault : undefined,
-        monthlyBudgetCost:
-          request.monthlyBudgetCost === null ? null : optionalNumber(request.monthlyBudgetCost),
-        budgetPausedAt:
-          request.budgetPausedAt === null ? null : optionalNumber(request.budgetPausedAt),
-      });
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_COMPANY_UPDATE,
-    async (
-      _,
-      request: {
-        companyId: string;
-        name?: string;
-        slug?: string;
-        description?: string;
-        status?: "active" | "inactive" | "suspended";
-        isDefault?: boolean;
-        monthlyBudgetCost?: number | null;
-        budgetPausedAt?: number | null;
-      },
-    ) => {
-      checkRateLimit(IPC_CHANNELS.MC_COMPANY_UPDATE);
-      const validated = validateInput(UUIDSchema, request.companyId, "company ID");
-      return core.updateCompany(validated, {
-        name: optionalString(request.name),
-        slug: optionalString(request.slug),
-        description: request.description === null ? "" : optionalString(request.description),
-        status: optionalString(request.status) as "active" | "inactive" | "suspended" | undefined,
-        isDefault: typeof request.isDefault === "boolean" ? request.isDefault : undefined,
-        monthlyBudgetCost:
-          request.monthlyBudgetCost === null ? null : optionalNumber(request.monthlyBudgetCost),
-        budgetPausedAt:
-          request.budgetPausedAt === null ? null : optionalNumber(request.budgetPausedAt),
-      });
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.MC_COMPANY_PACKAGE_SOURCE_LIST, async (_, companyId?: string) => {
-    return agentCompanies.listSources(companyId);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_COMPANY_PACKAGE_PREVIEW_IMPORT,
-    async (_, request: import("../../shared/types").CompanyPackageImportRequest) => {
-      checkRateLimit(IPC_CHANNELS.MC_COMPANY_PACKAGE_PREVIEW_IMPORT);
-      return agentCompanies.previewImport(request);
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_COMPANY_PACKAGE_IMPORT,
-    async (_, request: import("../../shared/types").CompanyPackageImportRequest) => {
-      checkRateLimit(IPC_CHANNELS.MC_COMPANY_PACKAGE_IMPORT);
-      return agentCompanies.importPackage(request);
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.MC_COMPANY_GRAPH_GET, async (_, companyId: string) => {
-    const validated = validateInput(UUIDSchema, companyId, "company ID");
-    return agentCompanies.getResolvedGraph(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.MC_COMPANY_SYNC_LIST, async (_, companyId: string) => {
-    const validated = validateInput(UUIDSchema, companyId, "company ID");
-    return agentCompanies.listSyncStates(validated);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_COMPANY_ORG_LINK_ROLE,
-    async (
-      _,
-      request: {
-        companyId: string;
-        orgNodeId: string;
-        agentRoleId: string | null;
-      },
-    ) => {
-      checkRateLimit(IPC_CHANNELS.MC_COMPANY_ORG_LINK_ROLE);
-      return agentCompanies.linkOrgNodeToAgentRole({
-        companyId: validateInput(UUIDSchema, request.companyId, "company ID"),
-        orgNodeId: validateInput(UUIDSchema, request.orgNodeId, "org node ID"),
-        agentRoleId: request.agentRoleId
-          ? validateInput(UUIDSchema, request.agentRoleId, "agent role ID")
-          : null,
-      });
-    },
-  );
 
   ipcMain.handle(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, async (_, companyId: string) => {
     const validated = validateInput(UUIDSchema, companyId, "company ID");
@@ -1508,32 +1385,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       return requirePlannerService().listRuns({ companyId: validated, limit: params.limit });
     },
   );
-
-  ipcMain.handle(IPC_CHANNELS.MC_SYMPHONY_GET_CONFIG, async () => {
-    return requireSymphonyService().getConfig();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.MC_SYMPHONY_STATUS, async () => {
-    return requireSymphonyService().getStatus();
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.MC_SYMPHONY_UPDATE_CONFIG,
-    async (_, updates: SymphonyConfigUpdate) => {
-      checkRateLimit(IPC_CHANNELS.MC_SYMPHONY_UPDATE_CONFIG);
-      return requireSymphonyService().updateConfig(updates || {});
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.MC_SYMPHONY_RUN, async () => {
-    checkRateLimit(IPC_CHANNELS.MC_SYMPHONY_RUN);
-    return requireSymphonyService().runOnce("manual");
-  });
-
-  ipcMain.handle(IPC_CHANNELS.MC_SYMPHONY_PAUSE, async () => {
-    checkRateLimit(IPC_CHANNELS.MC_SYMPHONY_PAUSE);
-    return requireSymphonyService().updateConfig({ enabled: false });
-  });
 
   logger.debug("Handlers initialized");
 }

@@ -216,6 +216,9 @@ export function appendAssistantResponseToConversation(
     messages.push({
       role: "assistant",
       content: response.content,
+      ...(Array.isArray(response.reasoning) && response.reasoning.length > 0
+        ? { reasoning: response.reasoning }
+        : {}),
     });
     return 0;
   }

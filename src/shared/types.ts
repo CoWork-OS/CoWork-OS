@@ -2099,7 +2099,46 @@ export type ExecutionMode = "execute" | "chat" | "plan" | "analyze" | "verified"
 export type ExecutionModeSource = "user" | "strategy" | "auto_promote";
 
 export type ExternalRuntimePermissionMode = "approve-reads" | "approve-all" | "deny-all";
-export type ExternalRuntimeAgent = "codex" | "claude";
+/**
+ * Coding agents CoWork can drive through acpx (Agent Client Protocol). Each runs its
+ * vendor's official, unmodified CLI with the user's own sign-in. Names match acpx's
+ * built-in agent profiles (https://github.com/openclaw/acpx/blob/main/docs/agents.md).
+ */
+export const EXTERNAL_RUNTIME_AGENTS = [
+  "codex",
+  "claude",
+  "gemini",
+  "opencode",
+  "qwen",
+  "kimi",
+  "cursor",
+  "copilot",
+  "droid",
+  "pi",
+] as const;
+export type ExternalRuntimeAgent = (typeof EXTERNAL_RUNTIME_AGENTS)[number];
+
+export const EXTERNAL_RUNTIME_AGENT_LABELS: Record<ExternalRuntimeAgent, string> = {
+  codex: "Codex",
+  claude: "Claude Code",
+  gemini: "Gemini CLI",
+  opencode: "OpenCode",
+  qwen: "Qwen Code",
+  kimi: "Kimi CLI",
+  cursor: "Cursor CLI",
+  copilot: "GitHub Copilot CLI",
+  droid: "Factory Droid",
+  pi: "Pi",
+};
+
+export function normalizeExternalRuntimeAgent(value: unknown): ExternalRuntimeAgent | undefined {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return (EXTERNAL_RUNTIME_AGENTS as readonly string[]).includes(normalized)
+    ? (normalized as ExternalRuntimeAgent)
+    : undefined;
+}
 
 export interface ExternalRuntimeConfig {
   kind: "acpx";
@@ -2604,6 +2643,7 @@ export interface Task {
     | "subconscious"
     | "symphony"
     | "managed_agent_panel"
+    | "sample"
     | "side_chat";
   // Strategy/routing controls
   strategyLock?: boolean; // When true, do not re-route intent at runtime
@@ -4979,33 +5019,6 @@ export interface ToolResult {
   timestamp: number;
 }
 
-/**
- * Result from node tool handler execution
- * Supports text, JSON, image, and video responses
- */
-export interface NodeToolResult {
-  type: "text" | "json" | "image" | "video";
-  content: string;
-  mimeType?: string;
-  isError?: boolean;
-}
-
-/**
- * Definition for node tools with handler functions
- */
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: "object";
-    properties: Record<string, Any>;
-    required: string[];
-  };
-  riskLevel: "read" | "write";
-  groups: readonly string[];
-  handler: (params: Any) => Promise<NodeToolResult>;
-}
-
 export interface ApprovalRequest {
   id: string;
   taskId: string;
@@ -7203,10 +7216,10 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, "id" | "createdAt" | "updatedA
   },
 ];
 
-// ============ Persona Templates (Digital Twins) ============
+// ============ Heartbeat cognitive offload ============
 
 /**
- * Cognitive offload category - types of mental work a digital twin absorbs
+ * Cognitive offload category - types of mental work a proactive agent absorbs
  * so the human can stay in flow.
  */
 export type CognitiveOffloadCategory =
@@ -7235,97 +7248,6 @@ export interface ProactiveTaskDefinition {
   minSignalStrength?: number;
   priority: number; // Lower = higher priority (1-10)
   enabled: boolean;
-}
-
-/**
- * Skill reference within a persona template
- */
-export interface PersonaTemplateSkillRef {
-  skillId: string;
-  reason: string;
-  required: boolean;
-}
-
-export interface PersonaTemplateHeartbeatConfig {
-  enabled: boolean;
-  intervalMinutes: number;
-  staggerOffset?: number;
-  dispatchCooldownMinutes?: number;
-  maxDispatchesPerDay?: number;
-  profile?: HeartbeatProfile;
-  activeHours?: HeartbeatActiveHours | null;
-}
-
-export interface PersonaTemplateCognitiveOffloadConfig {
-  primaryCategories: CognitiveOffloadCategory[];
-  proactiveTasks: ProactiveTaskDefinition[];
-}
-
-/**
- * Category for persona template gallery grouping
- */
-export type PersonaTemplateCategory =
-  | "engineering"
-  | "management"
-  | "product"
-  | "data"
-  | "operations";
-
-/**
- * A persona template defines a pre-built digital twin configuration.
- * Templates are instantiated into AgentRoles when activated.
- */
-export interface PersonaTemplate {
-  id: string;
-  version: string;
-  name: string;
-  description: string;
-  icon: string;
-  color: string;
-  category: PersonaTemplateCategory;
-
-  role: {
-    capabilities: AgentCapability[];
-    autonomyLevel: AgentAutonomyLevel;
-    personalityId: PersonalityId;
-    toolRestrictions?: AgentToolRestrictions;
-    systemPrompt: string;
-    soul: string; // JSON string for role-persona
-  };
-
-  heartbeat?: PersonaTemplateHeartbeatConfig;
-  cognitiveOffload?: PersonaTemplateCognitiveOffloadConfig;
-
-  skills: PersonaTemplateSkillRef[];
-
-  tags: string[];
-  seniorityRange: string[];
-  industryAgnostic: boolean;
-}
-
-/**
- * Result from activating (instantiating) a persona template
- */
-export interface PersonaTemplateActivationResult {
-  agentRole: AgentRole;
-  installedSkillIds: string[];
-  proactiveTaskCount: number;
-  warnings: string[];
-}
-
-/**
- * Request to activate a persona template
- */
-export interface ActivatePersonaTemplateRequest {
-  templateId: string;
-  customization?: {
-    companyId?: string;
-    displayName?: string;
-    icon?: string;
-    color?: string;
-    modelKey?: string;
-    providerType?: LLMProviderType;
-  };
 }
 
 // ============ Mission Control Types ============
@@ -8839,14 +8761,6 @@ export const IPC_CHANNELS = {
   // Mission Control - Company Ops / Planner
   MC_COMPANY_LIST: "missionControl:companyList",
   MC_COMPANY_GET: "missionControl:companyGet",
-  MC_COMPANY_CREATE: "missionControl:companyCreate",
-  MC_COMPANY_UPDATE: "missionControl:companyUpdate",
-  MC_COMPANY_PACKAGE_SOURCE_LIST: "missionControl:companyPackageSourceList",
-  MC_COMPANY_PACKAGE_PREVIEW_IMPORT: "missionControl:companyPackagePreviewImport",
-  MC_COMPANY_PACKAGE_IMPORT: "missionControl:companyPackageImport",
-  MC_COMPANY_GRAPH_GET: "missionControl:companyGraphGet",
-  MC_COMPANY_SYNC_LIST: "missionControl:companySyncList",
-  MC_COMPANY_ORG_LINK_ROLE: "missionControl:companyOrgLinkRole",
   MC_COMMAND_CENTER_SUMMARY: "missionControl:commandCenterSummary",
   MC_GOAL_LIST: "missionControl:goalList",
   MC_GOAL_GET: "missionControl:goalGet",
@@ -8867,11 +8781,6 @@ export const IPC_CHANNELS = {
   MC_PLANNER_UPDATE_CONFIG: "missionControl:plannerUpdateConfig",
   MC_PLANNER_RUN: "missionControl:plannerRun",
   MC_PLANNER_LIST_RUNS: "missionControl:plannerListRuns",
-  MC_SYMPHONY_GET_CONFIG: "missionControl:symphonyGetConfig",
-  MC_SYMPHONY_UPDATE_CONFIG: "missionControl:symphonyUpdateConfig",
-  MC_SYMPHONY_STATUS: "missionControl:symphonyStatus",
-  MC_SYMPHONY_RUN: "missionControl:symphonyRun",
-  MC_SYMPHONY_PAUSE: "missionControl:symphonyPause",
   MC_AUTOMATION_OUTCOME_RETRY: "missionControl:automationOutcomeRetry",
 
   // Mission Control - Agent Performance Reviews
@@ -8916,11 +8825,6 @@ export const IPC_CHANNELS = {
   TEAM_RUN_FIND_BY_ROOT_TASK: "teamRun:findByRootTask",
 
   // Mission Control - Persona Templates (Digital Twins)
-  PERSONA_TEMPLATE_LIST: "personaTemplate:list",
-  PERSONA_TEMPLATE_GET: "personaTemplate:get",
-  PERSONA_TEMPLATE_ACTIVATE: "personaTemplate:activate",
-  PERSONA_TEMPLATE_PREVIEW: "personaTemplate:preview",
-  PERSONA_TEMPLATE_GET_CATEGORIES: "personaTemplate:getCategories",
 
   // Plugin Packs (Customize panel)
   PLUGIN_PACK_LIST: "pluginPack:list",
@@ -9052,6 +8956,18 @@ export const IPC_CHANNELS = {
   WORKSPACE_TOUCH: "workspace:touch",
   WORKSPACE_GET_TEMP: "workspace:getTemp", // Get or create temp workspace
   WORKSPACE_PRUNE_TEMP: "workspace:pruneTemp", // Check or delete unused temp workspaces
+  FIRST_TASK_START: "firstTask:start",
+  FIRST_TASK_PREFLIGHT: "firstTask:preflight",
+  FIRST_TASK_SETUP_GET: "firstTask:setupGet",
+  FIRST_TASK_SETUP_SET: "firstTask:setupSet",
+  FIRST_TASK_GET: "firstTask:get",
+  FIRST_TASK_VERIFY: "firstTask:verify",
+  FIRST_TASK_INSPECT: "firstTask:inspect",
+  FIRST_TASK_REQUEST_REVISION: "firstTask:requestRevision",
+  FIRST_TASK_CANCEL_REVISION: "firstTask:cancelRevision",
+  FIRST_TASK_REAL_WORK_GET: "firstTask:realWorkGet",
+  FIRST_TASK_REAL_WORK_INSPECT: "firstTask:realWorkInspect",
+  FIRST_TASK_REAL_WORK_USEFUL: "firstTask:realWorkUseful",
 
   // Approval operations
   APPROVAL_RESPOND: "approval:respond",
@@ -9113,6 +9029,7 @@ export const IPC_CHANNELS = {
   LLM_TEST_PROVIDER: "llm:testProvider",
   LLM_GET_MODELS: "llm:getModels",
   LLM_GET_CONFIG_STATUS: "llm:getConfigStatus",
+  LLM_TASK_COST_ESTIMATE: "llm:taskCostEstimate",
   LLM_SET_MODEL: "llm:setModel",
   LLM_GET_ANTHROPIC_MODELS: "llm:getAnthropicModels",
   LLM_GET_OLLAMA_MODELS: "llm:getOllamaModels",
@@ -9151,6 +9068,19 @@ export const IPC_CHANNELS = {
   GATEWAY_ENABLE_CHANNEL: "gateway:enableChannel",
   GATEWAY_DISABLE_CHANNEL: "gateway:disableChannel",
   GATEWAY_TEST_CHANNEL: "gateway:testChannel",
+  GATEWAY_GET_CHANNEL_HEALTH: "gateway:getChannelHealth",
+  MEETINGS_TEAMS_GET_SETTINGS: "meetings:teams:getSettings",
+  MEETINGS_TEAMS_UPDATE_SETTINGS: "meetings:teams:updateSettings",
+  MEETINGS_TEAMS_CONNECT: "meetings:teams:connect",
+  MEETINGS_TEAMS_DISCONNECT: "meetings:teams:disconnect",
+  MEETINGS_TEAMS_GET_STATUS: "meetings:teams:getStatus",
+  MEETINGS_TEAMS_SYNC_NOW: "meetings:teams:syncNow",
+  MEETINGS_TEAMS_RETRY_FAILED: "meetings:teams:retryFailed",
+  MEETINGS_LIST_ARTIFACTS: "meetings:listArtifacts",
+  MEETINGS_GET_ARTIFACT: "meetings:getArtifact",
+  MEETINGS_DOWNLOAD_RECORDING: "meetings:downloadRecording",
+  MEETINGS_REVEAL_ARTIFACT: "meetings:revealArtifact",
+  MEETINGS_CHANGED: "meetings:changed",
   GATEWAY_GET_USERS: "gateway:getUsers",
   GATEWAY_LIST_CHATS: "gateway:listChats",
   GATEWAY_SEND_TEST_MESSAGE: "gateway:sendTestMessage",
@@ -9241,21 +9171,6 @@ export const IPC_CHANNELS = {
   PROFILE_IMPORT: "profile:import",
   SHAREPOINT_TEST_CONNECTION: "sharepoint:testConnection",
   SHAREPOINT_GET_STATUS: "sharepoint:getStatus",
-
-  // Health Platform
-  HEALTH_GET_DASHBOARD: "health:getDashboard",
-  HEALTH_LIST_SOURCES: "health:listSources",
-  HEALTH_UPSERT_SOURCE: "health:upsertSource",
-  HEALTH_REMOVE_SOURCE: "health:removeSource",
-  HEALTH_SYNC_SOURCE: "health:syncSource",
-  HEALTH_IMPORT_FILES: "health:importFiles",
-  HEALTH_GENERATE_WORKFLOW: "health:generateWorkflow",
-  HEALTH_APPLE_STATUS: "health:appleStatus",
-  HEALTH_APPLE_CONNECT: "health:appleConnect",
-  HEALTH_APPLE_DISCONNECT: "health:appleDisconnect",
-  HEALTH_APPLE_RESET: "health:appleReset",
-  HEALTH_APPLE_PREVIEW_WRITEBACK: "health:applePreviewWriteback",
-  HEALTH_APPLE_APPLY_WRITEBACK: "health:appleApplyWriteback",
 
   // App Updates
   APP_CHECK_UPDATES: "app:checkUpdates",
@@ -9578,12 +9493,6 @@ export const IPC_CHANNELS = {
   CANVAS_REQUEST_SNAPSHOT_FROM_WINDOW: "canvas:request-snapshot-from-window",
   CANVAS_LOG: "canvas:log",
 
-  // Mobile Companion Nodes
-  NODE_LIST: "node:list",
-  NODE_GET: "node:get",
-  NODE_INVOKE: "node:invoke",
-  NODE_EVENT: "node:event",
-
   // Device Management
   DEVICE_LIST_MANAGED: "device:listManaged",
   DEVICE_GET_SUMMARY: "device:getSummary",
@@ -9865,8 +9774,6 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "opencode",
   "opencode-go",
   "google-vertex",
-  "google-antigravity",
-  "google-gemini-cli",
   "zai",
   "glm",
   "vercel-ai-gateway",
@@ -10085,6 +9992,8 @@ export interface LLMSettingsData {
   fallbackProviders?: LLMProviderFallbackConfig[];
   failoverPrimaryRetryCooldownSeconds?: number;
   promptCaching?: PromptCachingSettings;
+  /** Opt-in daily refresh of model prices/limits from models.dev (one anonymous GET per day). */
+  modelMetadataAutoRefresh?: boolean;
   jev?: JevSettingsData;
   anthropic?: {
     apiKey?: string;
@@ -10132,6 +10041,8 @@ export interface LLMSettingsData {
     accountId?: string;
     email?: string;
     authMethod?: "api_key" | "oauth";
+    /** ChatGPT plan from the sign-in token ("free", "go", "plus", ...), used for default models. */
+    chatgptPlanType?: string;
   } & Omit<ProviderRoutingSettings, "reasoningEffort">;
   azure?: {
     apiKey?: string;
@@ -10332,9 +10243,120 @@ export type ChannelType =
   | "googlechat"
   | "feishu"
   | "wecom"
-  | "x";
+  | "x"
+  | "whatsapp_cloud"
+  | "twilio_sms";
 export type ChannelStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SecurityMode = "open" | "allowlist" | "pairing";
+
+export type WebhookDeliveryState =
+  | "queued"
+  | "sent"
+  | "delivered"
+  | "read"
+  | "failed"
+  | "undelivered";
+
+/** Operational health of a webhook-based channel (WhatsApp Cloud, Twilio SMS). */
+export interface WebhookChannelHealth {
+  lastInboundAt?: number;
+  rejectedWebhooks: number;
+  lastRejectedAt?: number;
+  lastRejectedReason?: string;
+  pendingInbound: number;
+  failedInbound: Array<{ id: string; attempts: number; lastError?: string }>;
+  deliveryCounts: Partial<Record<WebhookDeliveryState, number>>;
+  recentDeliveryFailures: Array<{
+    messageId: string;
+    chatId: string;
+    state: WebhookDeliveryState;
+    at: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+  heldReplies: Array<{ chatId: string; count: number; oldestHeldAt: number }>;
+}
+
+// Meeting artifacts (post-meeting transcripts and recordings)
+export type MeetingArtifactProvider = "teams" | "google-meet";
+
+export interface MeetingArtifactRecording {
+  id: string;
+  createdDateTime?: string;
+  /** Set once the user has downloaded the recording on demand. */
+  localPath?: string;
+}
+
+export interface MeetingArtifactSummary {
+  id: string;
+  provider: MeetingArtifactProvider;
+  title: string;
+  organizer?: string;
+  startTime?: string;
+  endTime?: string;
+  joinUrl?: string;
+  retrievedAt: string;
+  markdownPath: string;
+  cueCount: number;
+  recordings: MeetingArtifactRecording[];
+  /** Provider identifiers needed to fetch more content later (e.g. recordings). */
+  sourceRef: Record<string, string>;
+}
+
+export type TeamsMeetingSyncState =
+  | "disconnected"
+  | "idle"
+  | "syncing"
+  | "error"
+  | "auth_expired"
+  | "blocked";
+
+export interface TeamsMeetingSubscriptionView {
+  id: string;
+  expiresAt: string;
+  lastRenewedAt?: string;
+  lastNotificationAt?: string;
+}
+
+export interface TeamsMeetingStatus {
+  state: TeamsMeetingSyncState;
+  account?: string;
+  lastSyncAt?: string;
+  nextSyncAt?: string;
+  lastError?: string;
+  pendingJobs: number;
+  failedJobs: Array<{ key: string; attempts: number; lastError?: string }>;
+  artifactCount: number;
+  subscription?: TeamsMeetingSubscriptionView;
+  subscriptionError?: string;
+}
+
+export interface TeamsMeetingSettingsView {
+  enabled: boolean;
+  connected: boolean;
+  clientId?: string;
+  tenant?: string;
+  pollIntervalMinutes: number;
+  lookbackHours: number;
+  notificationPublicUrl?: string;
+  notificationPort: number;
+}
+
+export interface TeamsMeetingSettingsUpdate {
+  enabled?: boolean;
+  clientId?: string;
+  tenant?: string;
+  pollIntervalMinutes?: number;
+  lookbackHours?: number;
+  notificationPublicUrl?: string;
+  notificationPort?: number;
+}
+
+export interface ChannelHealthResponse {
+  status: ChannelStatus;
+  health?: WebhookChannelHealth;
+  [key: string]: unknown;
+}
 
 /**
  * Context type for channel messages (DM vs group chat)
@@ -10568,6 +10590,20 @@ export interface AddChannelRequest {
   wecomSecret?: string;
   wecomToken?: string;
   wecomEncodingAESKey?: string;
+  // WhatsApp Cloud-specific fields
+  whatsappCloudPhoneNumberId?: string;
+  whatsappCloudAccessToken?: string;
+  whatsappCloudAppSecret?: string;
+  whatsappCloudVerifyToken?: string;
+  whatsappCloudFallbackTemplateName?: string;
+  whatsappCloudFallbackTemplateLanguage?: string;
+  // Twilio SMS-specific fields
+  twilioAccountSid?: string;
+  twilioAuthToken?: string;
+  twilioFromNumber?: string;
+  twilioMessagingServiceSid?: string;
+  twilioWebhookPublicUrl?: string;
+  twilioStatusPath?: string;
   // X-specific fields
   xCommandPrefix?: string;
   xAllowedAuthors?: string[];
@@ -11918,7 +11954,6 @@ export interface ControlPlaneSettingsData {
   port: number;
   host: string;
   token: string; // Will be masked in UI
-  nodeToken: string; // Will be masked in UI
   handshakeTimeoutMs: number;
   heartbeatIntervalMs: number;
   maxPayloadBytes: number;
@@ -12007,241 +12042,31 @@ export interface ControlPlaneEvent {
   details?: unknown;
 }
 
-// ============ Mobile Companion Node Types ============
-
 /**
- * Client role in the Control Plane
- * - 'operator': Desktop client for task management
- * - 'node': Mobile companion device exposing capabilities
- */
-export type ClientRole = "operator" | "node";
-
-/**
- * Node platform type
+ * Platform of a managed device
  */
 export type NodePlatform = "ios" | "android" | "macos" | "linux" | "windows";
 
 /**
- * Node capability categories
- */
-export type NodeCapabilityType =
-  | "camera"
-  | "location"
-  | "screen"
-  | "sms"
-  | "voice"
-  | "canvas"
-  | "system";
-
-/**
- * Standard node commands
- */
-export type NodeCommand =
-  | "camera.snap"
-  | "camera.clip"
-  | "location.get"
-  | "screen.record"
-  | "sms.send"
-  | "canvas.navigate"
-  | "canvas.snapshot"
-  | "canvas.eval"
-  | "system.notify";
-
-/**
- * Information about a connected node (mobile companion)
+ * Summary of a connected managed remote device, used as a task target
  */
 export interface NodeInfo {
-  /** Unique node connection ID */
+  /** Task node ID for the device */
   id: string;
-  /** Display name for the node (e.g., "iPhone 15 Pro") */
+  /** Display name for the device */
   displayName: string;
   /** Platform type */
   platform: NodePlatform;
-  /** Client version */
+  /** CoWork version running on the device */
   version: string;
-  /** Device identifier (persisted across connections) */
+  /** Control-plane client ID for the current connection */
   deviceId?: string;
-  /** Model identifier (e.g., "iPhone15,3") */
+  /** Hostname or model identifier */
   modelIdentifier?: string;
-  /** Capability categories supported by this node */
-  capabilities: NodeCapabilityType[];
-  /** Specific commands supported by this node */
-  commands: string[];
-  /** Permission status for each capability */
-  permissions: Record<string, boolean>;
   /** Connection timestamp */
   connectedAt: number;
   /** Last activity timestamp */
   lastActivityAt: number;
-  /** Whether the node app is in the foreground */
-  isForeground?: boolean;
-}
-
-/**
- * Parameters for invoking a command on a node
- */
-export interface NodeInvokeParams {
-  /** ID or display name of the target node */
-  nodeId: string;
-  /** Command to invoke (e.g., "camera.snap") */
-  command: string;
-  /** Command-specific parameters */
-  params?: Record<string, unknown>;
-  /** Timeout in milliseconds (default: 30000) */
-  timeoutMs?: number;
-}
-
-/**
- * Result of a node command invocation
- */
-export interface NodeInvokeResult {
-  /** Whether the command succeeded */
-  ok: boolean;
-  /** Command result payload (varies by command) */
-  payload?: unknown;
-  /** Error details if ok is false */
-  error?: {
-    code: string;
-    message: string;
-  };
-}
-
-/**
- * Node event payload for UI updates
- */
-export interface NodeEvent {
-  /** Event type */
-  type: "connected" | "disconnected" | "capabilities_changed" | "foreground_changed";
-  /** Node ID */
-  nodeId: string;
-  /** Node info (for connected/capabilities_changed events) */
-  node?: NodeInfo;
-  /** Timestamp */
-  timestamp: number;
-}
-
-/**
- * Camera snap command parameters
- */
-export interface CameraSnapParams {
-  /** Camera facing direction */
-  facing?: "front" | "back";
-  /** Maximum image width (for resizing) */
-  maxWidth?: number;
-  /** JPEG quality (0-1) */
-  quality?: number;
-}
-
-/**
- * Camera snap command result
- */
-export interface CameraSnapResult {
-  /** Image format (e.g., "jpeg", "png") */
-  format: string;
-  /** Base64-encoded image data */
-  base64: string;
-  /** Image width in pixels */
-  width?: number;
-  /** Image height in pixels */
-  height?: number;
-}
-
-/**
- * Camera clip (video) command parameters
- */
-export interface CameraClipParams {
-  /** Camera facing direction */
-  facing?: "front" | "back";
-  /** Duration in milliseconds (max: 60000) */
-  durationMs: number;
-  /** Whether to include audio */
-  noAudio?: boolean;
-}
-
-/**
- * Camera clip command result
- */
-export interface CameraClipResult {
-  /** Video format (e.g., "mp4") */
-  format: string;
-  /** Base64-encoded video data */
-  base64: string;
-  /** Video duration in milliseconds */
-  durationMs?: number;
-}
-
-/**
- * Location get command parameters
- */
-export interface LocationGetParams {
-  /** Desired accuracy: 'coarse' or 'precise' */
-  accuracy?: "coarse" | "precise";
-  /** Maximum age of cached location in milliseconds */
-  maxAge?: number;
-  /** Timeout for getting location in milliseconds */
-  timeout?: number;
-}
-
-/**
- * Location get command result
- */
-export interface LocationGetResult {
-  /** Latitude in degrees */
-  latitude: number;
-  /** Longitude in degrees */
-  longitude: number;
-  /** Accuracy in meters */
-  accuracy: number;
-  /** Altitude in meters (if available) */
-  altitude?: number;
-  /** Timestamp when location was captured */
-  timestamp: number;
-}
-
-/**
- * Screen record command parameters
- */
-export interface ScreenRecordParams {
-  /** Duration in milliseconds (max: 60000) */
-  durationMs: number;
-  /** Frames per second (default: 10) */
-  fps?: number;
-  /** Whether to include audio */
-  noAudio?: boolean;
-  /** Screen index for multi-display setups */
-  screen?: number;
-}
-
-/**
- * Screen record command result
- */
-export interface ScreenRecordResult {
-  /** Video format (e.g., "mp4") */
-  format: string;
-  /** Base64-encoded video data */
-  base64: string;
-  /** Video duration in milliseconds */
-  durationMs?: number;
-}
-
-/**
- * SMS send command parameters (Android only)
- */
-export interface SmsSendParams {
-  /** Phone number to send to */
-  to: string;
-  /** Message content */
-  message: string;
-}
-
-/**
- * SMS send command result
- */
-export interface SmsSendResult {
-  /** Whether the SMS was sent */
-  sent: boolean;
-  /** Error message if sending failed */
-  error?: string;
 }
 
 // ============ SSH Tunnel Types ============
@@ -14109,163 +13934,6 @@ export interface CompanyImportResult {
   issueCount: number;
 }
 
-export type CompanyPackageSourceKind = "local" | "git" | "github";
-export type CompanyPackageTrustLevel = "local" | "trusted" | "untrusted";
-export type CompanyPackageSourceStatus = "ready" | "needs_attention" | "imported";
-export type CompanyPackageManifestKind =
-  | "company"
-  | "team"
-  | "agent"
-  | "project"
-  | "task"
-  | "skill";
-export type CompanyGraphNodeKind = CompanyPackageManifestKind;
-export type CompanyGraphEdgeKind =
-  | "contains"
-  | "belongs_to"
-  | "reports_to"
-  | "manages_team"
-  | "includes"
-  | "attaches_skill"
-  | "assigned_to"
-  | "related_to_project";
-export type CompanySyncStatus = "in_sync" | "diverged" | "local_override" | "unlinked";
-export type CompanyImportAction = "create" | "update" | "link" | "skip" | "conflict" | "warning";
-export type CompanyRuntimeEntityKind = "company" | "goal" | "project" | "issue" | "agent_role";
-
-export interface CompanyPackageSource {
-  id: string;
-  companyId?: string;
-  sourceKind: CompanyPackageSourceKind;
-  name: string;
-  rootUri: string;
-  localPath?: string;
-  ref?: string;
-  pin?: string;
-  trustLevel: CompanyPackageTrustLevel;
-  status: CompanyPackageSourceStatus;
-  notes?: string;
-  lastSyncedAt?: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CompanyPackageSourceInput {
-  companyId?: string | null;
-  sourceKind: CompanyPackageSourceKind;
-  name?: string;
-  rootUri: string;
-  localPath?: string | null;
-  ref?: string | null;
-  pin?: string | null;
-  trustLevel?: CompanyPackageTrustLevel;
-  status?: CompanyPackageSourceStatus;
-  notes?: string | null;
-}
-
-export interface CompanyPackageManifest {
-  id: string;
-  sourceId: string;
-  kind: CompanyPackageManifestKind;
-  slug: string;
-  name: string;
-  description?: string;
-  relativePath: string;
-  body: string;
-  bodyHash: string;
-  frontmatter: Record<string, unknown>;
-  provenance: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CompanyGraphNode {
-  id: string;
-  companyId?: string;
-  sourceId?: string;
-  manifestId?: string;
-  kind: CompanyGraphNodeKind;
-  slug: string;
-  name: string;
-  description?: string;
-  relativePath?: string;
-  parentNodeId?: string;
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CompanyGraphEdge {
-  id: string;
-  companyId?: string;
-  sourceId?: string;
-  fromNodeId: string;
-  toNodeId: string;
-  kind: CompanyGraphEdgeKind;
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CompanySyncState {
-  id: string;
-  companyId: string;
-  sourceId?: string;
-  manifestId?: string;
-  orgNodeId?: string;
-  runtimeEntityKind: CompanyRuntimeEntityKind;
-  runtimeEntityId: string;
-  syncStatus: CompanySyncStatus;
-  lastSyncedAt?: number;
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface ResolvedCompanyGraph {
-  packageName: string;
-  companyManifest: CompanyPackageManifest | null;
-  manifests: CompanyPackageManifest[];
-  nodes: CompanyGraphNode[];
-  edges: CompanyGraphEdge[];
-  warnings: string[];
-}
-
-export interface CompanyImportPreviewItem {
-  id: string;
-  manifestKind: CompanyPackageManifestKind;
-  action: CompanyImportAction;
-  label: string;
-  details?: string;
-  manifestId?: string;
-  orgNodeId?: string;
-  runtimeEntityKind?: CompanyRuntimeEntityKind;
-  runtimeEntityId?: string;
-}
-
-export interface CompanyImportPreview {
-  source: CompanyPackageSourceInput;
-  graph: ResolvedCompanyGraph;
-  targetCompany?: Company;
-  items: CompanyImportPreviewItem[];
-  warnings: string[];
-}
-
-export interface CompanyPackageImportRequest {
-  companyId?: string | null;
-  source: CompanyPackageSourceInput;
-}
-
-export interface CompanyPackageImportResult {
-  source: CompanyPackageSource;
-  company: Company;
-  graph: ResolvedCompanyGraph;
-  createdCount: number;
-  updatedCount: number;
-  linkedCount: number;
-  warningCount: number;
-}
-
 export type AutonomyPolicyPreset = "manual" | "safe_autonomy" | "founder_edge";
 export type HumanInputPolicy = "none" | "hard_blockers" | "structured_plan" | "legacy_interactive";
 
@@ -14304,75 +13972,6 @@ export interface StrategicPlannerConfigUpdate {
   maxIssuesPerRun?: number;
   staleIssueDays?: number;
   lastRunAt?: number | null;
-}
-
-export type SymphonyRuntimeMode = "native" | "acpx";
-
-export type SymphonyRunStatus = "idle" | "running" | "blocked" | "error";
-
-export interface SymphonyWorkflowDefinition {
-  path: string;
-  config: Record<string, unknown>;
-  promptTemplate: string;
-  loadedAt: number;
-  error?: string;
-}
-
-export interface SymphonyConfig {
-  enabled: boolean;
-  workspaceId?: string;
-  workflowPath?: string;
-  activeStatuses: Issue["status"][];
-  terminalStatuses: Issue["status"][];
-  maxConcurrentIssueRuns: number;
-  approvalPreset: AutonomyPolicyPreset;
-  runtimeMode: SymphonyRuntimeMode;
-  runtimeAgent?: ExternalRuntimeAgent;
-  handoffStatus: Issue["status"];
-  maxRetries: number;
-  retryBaseDelayMs: number;
-  pollIntervalMs: number;
-  createdAt: number;
-  updatedAt: number;
-  lastRunAt?: number;
-}
-
-export interface SymphonyConfigUpdate {
-  enabled?: boolean;
-  workspaceId?: string | null;
-  workflowPath?: string | null;
-  activeStatuses?: Issue["status"][];
-  terminalStatuses?: Issue["status"][];
-  maxConcurrentIssueRuns?: number;
-  approvalPreset?: AutonomyPolicyPreset;
-  runtimeMode?: SymphonyRuntimeMode;
-  runtimeAgent?: ExternalRuntimeAgent | null;
-  handoffStatus?: Issue["status"];
-  maxRetries?: number;
-  retryBaseDelayMs?: number;
-  pollIntervalMs?: number;
-  lastRunAt?: number | null;
-}
-
-export interface SymphonyStatusIssueRef {
-  issueId: string;
-  title: string;
-  status: Issue["status"];
-  taskId?: string;
-  runId?: string;
-  retryCount?: number;
-  retryDueAt?: number;
-  lastDispatchAt?: number;
-}
-
-export interface SymphonyStatus {
-  state: SymphonyRunStatus;
-  config: SymphonyConfig;
-  workflow: SymphonyWorkflowDefinition;
-  activeRuns: SymphonyStatusIssueRef[];
-  retryQueue: SymphonyStatusIssueRef[];
-  latestDispatches: SymphonyStatusIssueRef[];
-  lastError?: string;
 }
 
 export interface StrategicPlannerRun {

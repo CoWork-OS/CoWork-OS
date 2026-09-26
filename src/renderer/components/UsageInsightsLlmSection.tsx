@@ -26,6 +26,8 @@ export interface LlmSummaryProps {
   totalCachedTokens: number;
   cacheReadRate: number | null;
   distinctTaskCount: number;
+  /** Calls whose model has no known price; their cost is not in totalCost. */
+  unpricedCallCount?: number;
 }
 
 export interface RequestDayRow {
@@ -56,6 +58,13 @@ export interface CostByModelRow {
   outputTokens: number;
   cachedTokens: number;
   distinctTasks: number;
+  /** False when some calls used a model without a known price. */
+  costKnown?: boolean;
+}
+
+function formatModelCost(row: CostByModelRow): string {
+  if (row.costKnown === false) return row.cost > 0 ? `$${row.cost.toFixed(4)}+` : "Unknown";
+  return `$${row.cost.toFixed(4)}`;
 }
 
 export interface JevUsageSummaryProps {
@@ -160,6 +169,12 @@ export function UsageInsightsLlmSection({
       <p className="insights-llm-section-hint">
         LLM call success measures completed model responses vs logged LLM errors (not task outcome).
       </p>
+      {(ls.unpricedCallCount ?? 0) > 0 && (
+        <p className="insights-llm-section-hint">
+          {ls.unpricedCallCount} {ls.unpricedCallCount === 1 ? "call" : "calls"} used a model
+          without a known price, so cost totals are a lower bound.
+        </p>
+      )}
 
       <div className="insights-llm-kpi-grid">
         <div className="insights-hero-card insights-llm-kpi-card">
@@ -446,7 +461,7 @@ export function UsageInsightsLlmSection({
                       </td>
                       <td className="num">{row.calls}</td>
                       <td className="num">{row.distinctTasks}</td>
-                      <td className="num">${row.cost.toFixed(4)}</td>
+                      <td className="num">{formatModelCost(row)}</td>
                       <td className="num">{formatTokens(row.inputTokens)}</td>
                       <td className="num">{formatTokens(row.outputTokens)}</td>
                       <td className="num">{formatTokens(row.cachedTokens)}</td>

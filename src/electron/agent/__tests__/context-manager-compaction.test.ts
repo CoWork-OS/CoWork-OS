@@ -1,11 +1,70 @@
 import { describe, it, expect } from "vitest";
-import { ContextManager, truncateToolResult } from "../context-manager";
+import { ContextManager, getTokenizerInflation, truncateToolResult } from "../context-manager";
 import type { LLMMessage } from "../llm";
 
 describe("ContextManager.compactMessagesWithMeta", () => {
   it("uses Astra's documented long context window", () => {
     expect(new ContextManager("gpt-6-astra").getModelTokenLimit()).toBe(1_050_000);
     expect(new ContextManager("openai/gpt-6-astra").getModelTokenLimit()).toBe(1_050_000);
+  });
+
+  it("gives Claude 4.6+ and the Claude 5 family their 1M window across id shapes", () => {
+    const limit = (key: string) => new ContextManager(key).getModelTokenLimit();
+    for (const key of [
+      "opus-4-6",
+      "sonnet-4-6",
+      "claude-opus-4-6",
+      "claude-sonnet-5",
+      "claude-opus-5-5",
+      "claude-fable-5-1",
+      "anthropic/claude-sonnet-4.6",
+      "us.anthropic.claude-opus-4-6-v1:0",
+    ]) {
+      expect(limit(key)).toBe(1_000_000);
+    }
+    for (const key of [
+      "opus-4-5",
+      "haiku-4-5",
+      "claude-haiku-4-5",
+      "claude-opus-4-5-20251101",
+      "claude-sonnet-4-20250514",
+      "claude-3-5-sonnet-20241022",
+      "claude-3-5-sonnet-latest",
+    ]) {
+      expect(limit(key)).toBe(200000);
+    }
+  });
+
+  it("budgets for the newer Claude tokenizer on Opus 4.7+ and Fable", () => {
+    expect(getTokenizerInflation("claude-opus-4-7")).toBe(1.35);
+    expect(getTokenizerInflation("claude-opus-5-5")).toBe(1.35);
+    expect(getTokenizerInflation("claude-fable-5-1")).toBe(1.35);
+    expect(getTokenizerInflation("claude-opus-4-6")).toBe(1);
+    expect(getTokenizerInflation("claude-sonnet-4-6")).toBe(1);
+    expect(getTokenizerInflation("gpt-6-sol")).toBe(1);
+    const newer = new ContextManager("claude-opus-5-5");
+    const older = new ContextManager("claude-opus-4-6");
+    expect(newer.getModelTokenLimit()).toBe(older.getModelTokenLimit());
+    expect(newer.getAvailableTokens()).toBeLessThan(older.getAvailableTokens());
+  });
+
+  it("uses the generated catalogue windows for listed models", () => {
+    const limit = (key: string) => new ContextManager(key).getModelTokenLimit();
+    expect(limit("glm-5.3")).toBe(1_000_000);
+    expect(limit("deepseek-v4-flash")).toBe(1_000_000);
+    expect(limit("minimax-m2.7")).toBe(204_800);
+    expect(limit("minimax/minimax-m2.7")).toBe(204_800);
+    expect(limit("gemini-3.5-flash")).toBe(1_048_576);
+  });
+
+  it("falls back to family windows for models the catalogue does not list", () => {
+    const limit = (key: string) => new ContextManager(key).getModelTokenLimit();
+    expect(limit("glm-4.5-custom")).toBe(131_072);
+    expect(limit("glm-5-custom")).toBe(200_000);
+    expect(limit("deepseek-chat")).toBe(131_072);
+    expect(limit("kimi-k2-0711-preview")).toBe(131_072);
+    expect(limit("moonshot-v1-32k")).toBe(32_000);
+    expect(limit("some-unknown-model")).toBe(100000);
   });
 
   it("returns kind=none when within limits", () => {

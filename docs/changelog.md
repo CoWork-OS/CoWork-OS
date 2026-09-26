@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **WhatsApp Business (Cloud API) channel**: signed webhooks, a durable inbound spool with retries, delivery receipts, and held replies with a fallback template outside the 24-hour window. See [Channels](channels.md#whatsapp-business-cloud-api).
+- **Twilio SMS channel**: SMS/MMS with signed inbound and status webhooks, delivery receipts, and carrier keywords (STOP, HELP, …) recorded without routing.
+- **Teams meeting transcripts**: saved as local meeting artifacts (**Settings > Integrations**) and readable by the agent with `meeting_artifacts_list` / `meeting_artifact_get`. See [Meeting Artifacts](meeting-artifacts.md).
+- **Connectors**: Home Assistant (service calls only for allowlisted domains/entities), optional read-only Google Contacts and Google Meet tools, and a `maps.timezone` tool. See the [Connector Inventory](connector-inventory.md).
+- **Model prices and context limits** from a bundled models.dev snapshot, with an opt-in daily refresh; models without a price are reported as unknown rather than free. See [Providers](providers.md).
+- **ACP runtime agents** beyond Codex and Claude Code: Gemini CLI, OpenCode, Qwen Code, Kimi CLI, Cursor, Copilot, Droid and Pi.
+- **Admin policy confirmation**: policy updates that weaken safety settings need confirmation in a native dialog. See [Admin Policies](admin-policies.md#ipc-channels).
+- **First-task sample (beta preview)** behind `VITE_FIRST_TASK_BETA=1`. See [First Task](first-task.md).
+
+### Changed
+
+- **Cost budget guardrail** is on by default at $10 per task. Subscription-billed routes (ChatGPT sign-in, Copilot, coding plans) skip the global cap. A task's own token/cost budget is always enforced but can only lower the global limit.
+- **Shell without an OS sandbox** (Windows, Linux without Docker): when admin policy sets `allowUnsandboxedShell`, the user can approve individual commands to run unsandboxed; otherwise they fail closed.
+- **Unreadable secure settings** (for example after a keychain change) are backed up as ciphertext and replaced on the next save instead of blocking it.
+- **Tool list**: rarely used tools are deferred by default and found with `tool_search`.
+- **acpx** npx fallback is pinned to a reviewed version instead of `@latest`.
+
+### Removed
+
+- **Personal Health**: removed the dashboard, Apple Health integration, and the macOS HealthKit bridge. Upgrading deletes the retired Health data in the active CoWork profile; older settings backups cannot restore it. See the [decision record](personal-health-discontinuation.md).
+- **Mobile Companions**: removed the iOS/Android companion apps, their settings tab and token, and the Control Plane node role. Upgrading deletes the stored companion token; older companion apps are refused. See the [decision record](mobile-companions-discontinuation.md).
+- **Digital Twins and persona templates**, the **Companies** settings panel, and **Symphony** issue orchestration, including the `twin-*` skills.
+- **Stealth (anti-bot) scraping fetcher**; saved `stealth` settings fall back to the Playwright fetcher.
+- **Google Antigravity and Gemini CLI sign-in** provider routes; saved settings are moved to another configured provider.
+
 ## [0.5.54] - 2026-09-20
 
 ### Changed

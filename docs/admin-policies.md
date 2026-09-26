@@ -175,7 +175,7 @@ replace the profile selector and they cannot widen a profile:
 | `allowedPermissionModes`                                    | Constrains legacy permission-mode mappings. An explicitly selected profile is still subject to the resulting admin ceiling. An empty list allows all legacy modes.                          |
 | `allowedSandboxTypes`                                       | Restricts the sandbox backends that may enforce a profile. An unavailable backend fails closed; it does not become an unsandboxed fallback. Valid values are `macos`, `docker`, and `none`. |
 | `requireSandboxForShell`                                    | Requires OS sandboxing for command execution and can constrain a full-access/unsandboxed request to the sandboxed compatibility path.                                                       |
-| `allowUnsandboxedShell`                                     | Allows an explicit environment-gated local fallback only when the administrator permits it. It is not a user-facing profile and is not a general bypass.                                    |
+| `allowUnsandboxedShell`                                     | Allows an explicit environment-gated local fallback only when the administrator permits it. When no OS sandbox exists (Windows, Linux without Docker) and `requireSandboxForShell` is off, it also lets the user approve individual commands to run unsandboxed; each approval is explicit and never auto-approved. It is not a user-facing profile and is not a general bypass. |
 | `network.defaultAction`, `allowedDomains`, `blockedDomains` | Apply administrator network policy before legacy domain guardrails and profile/network-tool evaluation. Blocked destinations remain blocked.                                                |
 | `network.allowShellNetwork`                                 | Coarse command-process egress gate. Shell networking is not domain-scoped today; full access still needs this gate and an unrestricted profile network posture.                             |
 | `autoReview.enabled`                                        | Controls the narrow automatic-review helper. It cannot grant an action outside the selected profile or suppress hard/export/location approvals.                                             |
@@ -420,6 +420,23 @@ A complete enterprise setup:
 | `admin:policiesUpdate` | Accepts partial updates, merges with existing policies      |
 | `admin:checkPack`      | Returns `{ packId, allowed, required }` for a specific pack |
 
+`admin:policiesUpdate` asks for confirmation in a native dialog, which the renderer
+cannot answer, before it saves a change that weakens the policy. Cancelling rejects the
+update and leaves the saved policy unchanged. Changes that need confirmation:
+
+- turning off `requireSandboxForShell`, turning on `allowUnsandboxedShell`, or adding
+  `none` to `allowedSandboxTypes`
+- allowing additional permission modes
+- network: default `allow`, turning on `allowShellNetwork`, unblocking domains, newly
+  allowed domains (when the default is not `allow`), or new internal hosts
+- turning on `autoReview`, or exporting telemetry (turning it on or changing
+  `otlpEndpoint`)
+- agent security: turning it off, `enforce` → `monitor`, or `failurePolicy` → `open`
+- Everyday Agent: removing `blocked` or `forceReviewOnly`
+- unblocking connectors or packs, clearing or extending `packs.allowed`, or changing
+  `general.orgPluginDir`
+- turning on `allowCustomPacks`, `allowGitInstall` or `allowUrlInstall`
+
 ### Preload API
 
 ```typescript
@@ -514,5 +531,4 @@ Enforcement:
 ## Further Reading
 
 - [Plugin Packs](plugin-packs.md) — Complete plugin pack system documentation
-- [Digital Twin Personas](digital-twins.md) — Proactive AI twin personas
 - [Features](features.md) — Complete feature reference

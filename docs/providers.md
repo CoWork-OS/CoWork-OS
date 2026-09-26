@@ -194,6 +194,20 @@ These values flow into Usage Insights and cost accounting.
 
 ---
 
+## Model Prices and Context Limits
+
+Cost estimates, cost budgets and context-window sizes come from a price list generated from the public [models.dev](https://models.dev) catalogue (`src/shared/model-metadata.json`).
+
+- **Bundled with each release.** A weekly CI job (`.github/workflows/model-metadata-sync.yml`) runs `npm run models:sync` and opens a pull request when prices or models change.
+- **Live provider data.** When CoWork lists OpenRouter models, OpenRouter's reported prices and context lengths take precedence.
+- **Optional daily refresh (off by default).** Enable **Refresh model prices and context limits daily** in **Settings > AI & Models > Model Access** to download the models.dev catalogue once a day between releases. It is one anonymous `GET https://models.dev/api.json` with no prompts, usage data or identifiers; set `COWORK_DISABLE_MODEL_METADATA_REFRESH=1` to block it entirely.
+- **Unknown models are not free.** A model without a price shows cost as **Unknown** (or `$x+` when some usage was priced). Usage Insights counts these calls separately, and cost budgets cannot account for them.
+- **Local models** (Ollama, MLX, Atomic Chat) and OpenRouter `:free` routes are counted as $0.
+- **Per-task cost:** the task panel's **Cost** section shows spend so far, the cap that applies (the task's own budget or **Settings > Guardrails**), and token counts; on a finished task it is the receipt. Before any usage it shows the typical cost of a task on the selected model, from your own last 30 tasks (computed locally).
+- **Newer Claude tokenizer:** Opus 4.7 and later (including Opus 5.x and Fable) produce up to ~1.35x as many tokens for the same text. Costs use the provider's reported token counts, so they are unaffected; CoWork's own context estimate is scaled so compaction runs early enough.
+
+Retired models and deliberate exceptions live in `src/electron/agent/llm/pricing-overrides.ts`. `pricing-coverage.test.ts` fails when a model CoWork offers has no price.
+
 ## Adaptive Output Budgeting
 
 When `COWORK_LLM_OUTPUT_POLICY=adaptive` is enabled, CoWork OS applies a shared output-budget policy for agentic execution turns across the main provider families instead of relying on provider defaults.

@@ -1,5 +1,6 @@
 import { LLMMessage, LLMContent as _LLMContent, LLMToolResult as _LLMToolResult } from "./llm";
 import { estimateImageTokens } from "./llm/image-utils";
+import { getModelContextWindow } from "../../shared/model-metadata";
 
 /**
  * Context Manager handles conversation history to prevent "input too long" errors
@@ -8,6 +9,10 @@ import { estimateImageTokens } from "./llm/image-utils";
 
 // Approximate token limits for different models
 const MODEL_LIMITS: Record<string, number> = {
+  // Claude Opus/Sonnet 4.6+ and the Claude 5 family ship a 1M window by default
+  // (no beta header); Haiku 4.5 and the 4.5-and-older Opus/Sonnet models stay at 200K.
+  "opus-4-6": 1_000_000,
+  "sonnet-4-6": 1_000_000,
   "opus-4-5": 200000,
   "sonnet-4-5": 200000,
   "haiku-4-5": 200000,
@@ -24,8 +29,61 @@ const MODEL_LIMITS: Record<string, number> = {
   "gpt-6-sol": 1_050_000,
   "gpt-6-luna": 1_050_000,
   "gpt-3.5-turbo": 16000,
+  o1: 200000,
+  "o1-mini": 128000,
   default: 100000,
 };
+
+/**
+ * Resolve a Claude context window from any id shape: catalog keys ("opus-4-6"),
+ * API ids ("claude-sonnet-5", "claude-opus-4-5-20251101"), OpenRouter ids
+ * ("anthropic/claude-sonnet-4.6"), Bedrock ids ("us.anthropic.claude-opus-4-6-v1:0"),
+ * and legacy ids ("claude-3-5-sonnet-latest").
+ */
+function inferClaudeLimit(key: string): number | null {
+  // Versions are 1-2 digits so date suffixes ("sonnet-4-20250514") are not read as one.
+  const current = key.match(
+    /(opus|sonnet|haiku|fable|mythos)[-_.]?(\d{1,2})(?!\d)(?:[-_.](\d{1,2})(?!\d))?/,
+  );
+  if (current) {
+    const family = current[1];
+    const major = Number(current[2]);
+    const minor = current[3] ? Number(current[3]) : 0;
+    if (family === "fable" || family === "mythos") return 1_000_000;
+    if (family === "haiku") return 200000;
+    if (major >= 5 || (major === 4 && minor >= 6)) return 1_000_000;
+    return 200000;
+  }
+
+  if (
+    key.includes("claude") ||
+    key.includes("sonnet") ||
+    key.includes("opus") ||
+    key.includes("haiku")
+  ) {
+    return 200000;
+  }
+
+  return null;
+}
+
+/**
+ * Fallback windows for models the catalogue does not list. Values are the smallest
+ * window across the family's API models, so compaction never overruns.
+ */
+function inferOpenModelLimit(key: string): number | null {
+  if (key.includes("gemini")) return 1_000_000;
+  if (/kimi-k2(?![-.]?0711)/.test(key)) return 262_144;
+  if (key.includes("kimi") || key.includes("moonshot")) return 131_072;
+  if (/glm-(?:4\.[6-9]|[5-9])/.test(key)) return 200_000;
+  if (key.includes("glm")) return 131_072;
+  if (key.includes("deepseek")) return 131_072;
+  if (key.includes("minimax")) return 200_000;
+  if (key.includes("qwen")) return 131_072;
+  if (/grok-(?:[4-9])/.test(key)) return 256_000;
+  if (key.includes("grok")) return 131_072;
+  return null;
+}
 
 function inferModelLimit(modelKey: string): number | null {
   const key = modelKey.toLowerCase().trim();
@@ -33,15 +91,13 @@ function inferModelLimit(modelKey: string): number | null {
 
   if (/gpt-6-(?:astra|sol|luna)/.test(key)) return 1_050_000;
 
-  // Anthropic raw ids: e.g. "claude-3-5-sonnet-latest"
-  if (
-    key.startsWith("claude-") ||
-    key.includes("sonnet") ||
-    key.includes("opus") ||
-    key.includes("haiku")
-  ) {
-    return 200000;
-  }
+  // Claude first: the catalogue lists Sonnet 4.5's beta 1M window, which CoWork does not enable.
+  const claudeLimit = inferClaudeLimit(key);
+  if (claudeLimit) return claudeLimit;
+
+  // Generated models.dev snapshot (npm run models:sync), then family heuristics.
+  const catalogueLimit = getModelContextWindow(key);
+  if (catalogueLimit) return catalogueLimit;
 
   // Try to parse "8k", "16k", "32k", "128k" patterns.
   const match = key.match(/(^|[^0-9])(\d{1,3})k([^0-9]|$)/);
@@ -52,7 +108,7 @@ function inferModelLimit(modelKey: string): number | null {
     }
   }
 
-  return null;
+  return inferOpenModelLimit(key);
 }
 
 // Reserve tokens for system prompt and response
@@ -254,22 +310,47 @@ export type CompactionResult = {
 };
 
 /**
+ * How many real tokens the model produces per token that estimateTokens() counts.
+ * Claude Opus 4.7 introduced a tokenizer (also used by Opus 4.8, Opus 5.x and Fable)
+ * that produces up to ~1.35x as many tokens as earlier Claude models for the same
+ * text. CoWork's chars/4 estimate is calibrated on the older tokenizers, so without
+ * this factor compaction would kick in too late and requests could overrun the window.
+ * Billing is unaffected: costs use the token counts the provider reports.
+ */
+export function getTokenizerInflation(modelKey: string): number {
+  const key = String(modelKey || "").toLowerCase();
+  if (/(fable|mythos)/.test(key)) return 1.35;
+  const opus = key.match(/opus[-_.]?(\d{1,2})(?!\d)(?:[-_.](\d{1,2})(?!\d))?/);
+  if (opus) {
+    const major = Number(opus[1]);
+    const minor = opus[2] ? Number(opus[2]) : 0;
+    if (major >= 5 || (major === 4 && minor >= 7)) return 1.35;
+  }
+  return 1;
+}
+
+/**
  * Context Manager class
  */
 export class ContextManager {
   private modelKey: string;
   private maxTokens: number;
+  private tokenizerInflation: number;
 
   constructor(modelKey: string = "default") {
     this.modelKey = modelKey;
     this.maxTokens = MODEL_LIMITS[modelKey] || inferModelLimit(modelKey) || MODEL_LIMITS.default;
+    this.tokenizerInflation = getTokenizerInflation(modelKey);
   }
 
   /**
-   * Get available tokens for messages (after reserving for system and response)
+   * Get available tokens for messages (after reserving for system and response),
+   * expressed in estimateTokens() units so callers can compare estimates directly.
    */
   getAvailableTokens(systemPromptTokens: number = 0): number {
-    return this.maxTokens - RESERVED_TOKENS - systemPromptTokens;
+    return (
+      Math.floor(this.maxTokens / this.tokenizerInflation) - RESERVED_TOKENS - systemPromptTokens
+    );
   }
 
   /**
@@ -283,7 +364,9 @@ export class ContextManager {
    * Estimate how many output tokens remain for a request, given current input.
    */
   estimateMaxOutputTokens(messages: LLMMessage[], systemPrompt: string = ""): number {
-    const inputTokens = estimateTotalTokens(messages, systemPrompt);
+    const inputTokens = Math.ceil(
+      estimateTotalTokens(messages, systemPrompt) * this.tokenizerInflation,
+    );
     return Math.max(1, this.maxTokens - inputTokens);
   }
 

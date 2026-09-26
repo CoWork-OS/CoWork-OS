@@ -1054,15 +1054,13 @@ export class ControlPlaneCoreService {
             : "failed";
     const issueStatus =
       runStatus === "completed"
-        ? task.source === "symphony"
+        ? task.terminalStatus === "needs_user_action" ||
+          task.terminalStatus === "awaiting_approval" ||
+          task.terminalStatus === "awaiting_verification" ||
+          task.terminalStatus === "resume_available" ||
+          task.terminalStatus === "partial_success"
           ? "review"
-          : task.terminalStatus === "needs_user_action" ||
-              task.terminalStatus === "awaiting_approval" ||
-              task.terminalStatus === "awaiting_verification" ||
-              task.terminalStatus === "resume_available" ||
-              task.terminalStatus === "partial_success"
-            ? "review"
-            : "done"
+          : "done"
         : runStatus === "cancelled" || runStatus === "interrupted"
           ? "todo"
           : "blocked";

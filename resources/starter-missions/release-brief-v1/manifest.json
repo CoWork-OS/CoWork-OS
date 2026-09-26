@@ -1,0 +1,10 @@
+{
+  "id": "release-brief-v1",
+  "version": 1,
+  "inputs": {
+    "brief-instructions.md": "b4cac1e4f04fb9dde6bb0a638a6208dc11bf4a878f81cf6b791964bf0384c008",
+    "issues.csv": "11d465c7964dea05a26ffffd2ffa0a4d4bf0c75ddc94dfae6f464b0e09612282",
+    "release-notes.md": "87c0af4533e5fee823b47d3a89e7ae3f93774f27c20f5d79f9c7007ecf408872"
+  },
+  "outputs": ["issues-clean.csv", "summary.json", "release-brief.html"]
+}

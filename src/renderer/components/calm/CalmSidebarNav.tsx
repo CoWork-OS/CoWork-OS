@@ -3,7 +3,6 @@ import {
   ChevronDown,
   ChevronRight,
   Ellipsis,
-  HeartPulse,
   Inbox,
   Library,
   Lightbulb,
@@ -52,8 +51,6 @@ export interface CalmSidebarNavProps {
     isDevicesActive?: boolean;
     onOpenMissionControl?: () => void;
     isMissionControlActive?: boolean;
-    onOpenHealth?: () => void;
-    isHealthActive?: boolean;
     onOpenIdeas?: () => void;
     isIdeasActive?: boolean;
   };
@@ -91,7 +88,6 @@ export function CalmSidebarNav(props: CalmSidebarNavProps) {
     more.isEverydayActive ||
     more.isDevicesActive ||
     more.isMissionControlActive ||
-    more.isHealthActive ||
     more.isIdeasActive,
   );
   const [moreOpen, setMoreOpen] = useState(moreActive);
@@ -151,13 +147,6 @@ export function CalmSidebarNav(props: CalmSidebarNavProps) {
       icon: Users,
       active: more.isMissionControlActive,
       onClick: more.onOpenMissionControl,
-    },
-    {
-      id: "health",
-      label: "Health",
-      icon: HeartPulse,
-      active: more.isHealthActive,
-      onClick: more.onOpenHealth,
     },
     {
       id: "ideas",

@@ -3,10 +3,10 @@
  * Provides type-safe validation to prevent malformed input attacks
  */
 
-import * as os from "os";
 import * as path from "path";
 import { z } from "zod";
 import {
+  EXTERNAL_RUNTIME_AGENTS,
   CoreEvalCaseStatus,
   CoreExperimentStatus,
   CoreFailureCategory,
@@ -22,7 +22,6 @@ import {
   TaskStatus,
 } from "../../shared/types";
 import { SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
-import { getUserDataDir } from "./user-data-dir";
 import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl } from "./loom";
 
 // Common validation patterns
@@ -70,6 +69,8 @@ const OriginChannelSchema = z.preprocess(
     "feishu",
     "wecom",
     "x",
+    "whatsapp_cloud",
+    "twilio_sms",
   ] as const),
 );
 
@@ -336,7 +337,7 @@ export const AgentConfigSchema = z
     externalRuntime: z
       .object({
         kind: z.literal("acpx"),
-        agent: z.enum(["codex", "claude"]),
+        agent: z.enum(EXTERNAL_RUNTIME_AGENTS),
         sessionMode: z.literal("persistent"),
         outputMode: z.literal("json"),
         permissionMode: z.enum(["approve-reads", "approve-all", "deny-all"]),
@@ -790,6 +791,7 @@ export const OpenAISettingsSchema = z
     accountId: z.string().max(500).optional(),
     email: z.string().max(500).optional(),
     authMethod: z.enum(["api_key", "oauth"]).optional(),
+    chatgptPlanType: z.string().max(50).optional(),
     ...ProviderRoutingSettingsSchema,
   })
   .optional();
@@ -1002,6 +1004,7 @@ export const LLMSettingsSchema = z.object({
     .optional(),
   failoverPrimaryRetryCooldownSeconds: z.number().int().min(0).max(3600).optional(),
   promptCaching: PromptCachingSettingsSchema,
+  modelMetadataAutoRefresh: z.boolean().optional(),
   jev: JevSettingsSchema,
   anthropic: AnthropicSettingsSchema,
   bedrock: BedrockSettingsSchema,
@@ -1620,6 +1623,130 @@ export const AddWeComChannelSchema = z.object({
   securityMode: SecurityModeSchema.optional(),
 });
 
+const WebhookPathSchema = z
+  .string()
+  .min(2)
+  .max(200)
+  .regex(/^\/[A-Za-z0-9/_-]*$/, "Webhook path must start with / and use URL-safe characters");
+
+export const AddWhatsAppCloudChannelSchema = z.object({
+  type: z.literal("whatsapp_cloud"),
+  name: z.string().min(1).max(MAX_TITLE_LENGTH),
+  whatsappCloudPhoneNumberId: z
+    .string()
+    .trim()
+    .regex(/^\d{5,30}$/, "Phone number ID is numeric"),
+  whatsappCloudAccessToken: z.string().trim().min(20).max(1000),
+  whatsappCloudAppSecret: z.string().trim().min(16).max(200),
+  whatsappCloudVerifyToken: z.string().trim().min(8).max(200),
+  whatsappCloudFallbackTemplateName: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9_]{1,512}$/, "Template names use lowercase letters, digits and underscores")
+    .optional(),
+  whatsappCloudFallbackTemplateLanguage: z
+    .string()
+    .trim()
+    .regex(/^[a-z]{2,3}(_[A-Z]{2})?$/)
+    .optional(),
+  webhookPort: z.number().int().min(1024).max(65535).optional(),
+  webhookPath: WebhookPathSchema.optional(),
+  securityMode: SecurityModeSchema.optional(),
+});
+
+export const AddTwilioSmsChannelSchema = z
+  .object({
+    type: z.literal("twilio_sms"),
+    name: z.string().min(1).max(MAX_TITLE_LENGTH),
+    twilioAccountSid: z
+      .string()
+      .trim()
+      .regex(/^AC[0-9a-fA-F]{32}$/, "Account SID starts with AC"),
+    twilioAuthToken: z.string().trim().min(16).max(200),
+    twilioFromNumber: z
+      .string()
+      .trim()
+      .regex(/^\+[1-9]\d{6,14}$/, "Use E.164 format, e.g. +15551234567")
+      .optional(),
+    twilioMessagingServiceSid: z
+      .string()
+      .trim()
+      .regex(/^MG[0-9a-fA-F]{32}$/, "Messaging Service SID starts with MG")
+      .optional(),
+    twilioWebhookPublicUrl: z
+      .string()
+      .trim()
+      .url()
+      .max(500)
+      .refine((value) => value.startsWith("https://"), "Public webhook URL must use https"),
+    webhookPort: z.number().int().min(1024).max(65535).optional(),
+    webhookPath: WebhookPathSchema.optional(),
+    twilioStatusPath: WebhookPathSchema.optional(),
+    securityMode: SecurityModeSchema.optional(),
+  })
+  .refine((value) => Boolean(value.twilioFromNumber || value.twilioMessagingServiceSid), {
+    message: "Provide a sending number or a Messaging Service SID",
+    path: ["twilioFromNumber"],
+  });
+
+/** Stored-config shape, validated after an update is merged into the existing config. */
+export const WhatsAppCloudChannelConfigSchema = z
+  .object({
+    phoneNumberId: z
+      .string()
+      .trim()
+      .regex(/^\d{5,30}$/, "Phone number ID is numeric"),
+    accessToken: z.string().trim().min(20).max(1000),
+    appSecret: z.string().trim().min(16).max(200),
+    verifyToken: z.string().trim().min(8).max(200),
+    fallbackTemplateName: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9_]{1,512}$/)
+      .optional(),
+    fallbackTemplateLanguage: z
+      .string()
+      .trim()
+      .regex(/^[a-z]{2,3}(_[A-Z]{2})?$/)
+      .optional(),
+    webhookPort: z.number().int().min(1024).max(65535).optional(),
+    webhookPath: WebhookPathSchema.optional(),
+  })
+  .passthrough();
+
+export const TwilioSmsChannelConfigSchema = z
+  .object({
+    accountSid: z
+      .string()
+      .trim()
+      .regex(/^AC[0-9a-fA-F]{32}$/),
+    authToken: z.string().trim().min(16).max(200),
+    fromNumber: z
+      .string()
+      .trim()
+      .regex(/^\+[1-9]\d{6,14}$/, "Use E.164 format, e.g. +15551234567")
+      .optional(),
+    messagingServiceSid: z
+      .string()
+      .trim()
+      .regex(/^MG[0-9a-fA-F]{32}$/)
+      .optional(),
+    webhookPublicUrl: z
+      .string()
+      .trim()
+      .url()
+      .max(500)
+      .refine((value) => value.startsWith("https://"), "Public webhook URL must use https"),
+    webhookPort: z.number().int().min(1024).max(65535).optional(),
+    webhookPath: WebhookPathSchema.optional(),
+    statusPath: WebhookPathSchema.optional(),
+  })
+  .passthrough()
+  .refine((value) => Boolean(value.fromNumber || value.messagingServiceSid), {
+    message: "Provide a sending number or a Messaging Service SID",
+    path: ["fromNumber"],
+  });
+
 const getOptionalString = (value: unknown): string | undefined => {
   return typeof value === "string" ? value.trim() || undefined : undefined;
 };
@@ -1902,6 +2029,8 @@ export const AddChannelSchema = z.discriminatedUnion("type", [
   AddGoogleChatChannelSchema,
   AddFeishuChannelSchema,
   AddWeComChannelSchema,
+  AddWhatsAppCloudChannelSchema,
+  AddTwilioSmsChannelSchema,
   AddXChannelSchema,
   AddEmailChannelSchema,
 ]);
@@ -2000,6 +2129,8 @@ const CHANNEL_TYPE_VALUES = [
   "feishu",
   "wecom",
   "x",
+  "whatsapp_cloud",
+  "twilio_sms",
 ] as const;
 export const HeartbeatProfileSchema = z.enum(HEARTBEAT_PROFILE_VALUES);
 export const ChannelTypeSchema = z.enum(CHANNEL_TYPE_VALUES);
@@ -2724,82 +2855,6 @@ export const MCPConnectorOAuthSchema = z.object({
   prompt: z.enum(["select_account", "consent"]).optional(),
 });
 
-// ============ Health Platform Schemas ============
-
-export const HealthSourceInputSchema = z.object({
-  provider: z.enum([
-    "apple-health",
-    "fitbit",
-    "oura",
-    "garmin",
-    "whoop",
-    "lab-results",
-    "medical-records",
-    "custom",
-  ]),
-  kind: z.enum(["wearable", "lab", "record", "manual"]),
-  connectionMode: z.enum(["native", "import"]).optional(),
-  name: z.string().min(1).max(200),
-  description: z.string().max(500).optional(),
-  accountLabel: z.string().max(200).optional(),
-  notes: z.string().max(2000).optional(),
-});
-
-export const HealthWorkflowRequestSchema = z.object({
-  workflowType: z.enum(["marathon-training", "visit-prep", "nutrition-plan", "trend-analysis"]),
-  sourceIds: z.array(z.string().max(200)).max(20).optional(),
-});
-
-/**
- * Allowed roots for health import file paths (prevents path traversal).
- * Paths must resolve under one of these directories.
- */
-function getAllowedHealthImportRoots(): string[] {
-  const roots: string[] = [];
-  try {
-    const home = os.homedir();
-    roots.push(home);
-    roots.push(path.join(home, "Downloads"));
-    roots.push(path.join(home, "Desktop"));
-    roots.push(path.join(home, "Documents"));
-    roots.push(getUserDataDir());
-  } catch {
-    roots.push(process.cwd());
-  }
-  return roots;
-}
-
-function isPathAllowedForHealthImport(filePath: string): boolean {
-  const resolved = path.resolve(filePath);
-  const roots = getAllowedHealthImportRoots();
-  return roots.some((root) => resolved === root || resolved.startsWith(root + path.sep));
-}
-
-export const HealthImportFilesSchema = z
-  .object({
-    sourceId: z.string().min(1).max(200),
-    filePaths: z.array(z.string().min(1).max(MAX_PATH_LENGTH)).min(1).max(20),
-  })
-  .superRefine((data, ctx) => {
-    for (let i = 0; i < data.filePaths.length; i++) {
-      const p = data.filePaths[i];
-      if (!path.isAbsolute(p)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["filePaths", i],
-          message: "Health import paths must be absolute",
-        });
-      } else if (!isPathAllowedForHealthImport(p)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["filePaths", i],
-          message:
-            "Health import path must be under home, Downloads, Desktop, Documents, or app user data",
-        });
-      }
-    }
-  });
-
 const AwarenessSourceSchema = z.enum([
   "conversation",
   "feedback",
@@ -3064,53 +3119,9 @@ export const AutonomyUpdateDecisionSchema = z.object({
     }),
 });
 
-// ============ Health Platform Schemas ============
-
-export const HealthWritebackRequestSchema = z.object({
-  sourceId: z.string().min(1).max(200),
-  items: z.array(
-    z.object({
-      id: z.string().min(1).max(200),
-      type: z.enum([
-        "steps",
-        "sleep",
-        "heart_rate",
-        "hrv",
-        "weight",
-        "workout",
-        "glucose",
-        "nutrition",
-        "custom",
-      ]),
-      label: z.string().min(1).max(200),
-      value: z.string().min(1).max(200),
-      unit: z.string().max(50).optional(),
-      startDate: z.number().optional(),
-      endDate: z.number().optional(),
-      sourceId: z.string().max(200).optional(),
-    }),
-  ),
-});
-
 // ============ Hooks (Webhooks) Schemas ============
 
-export const HookMappingChannelSchema = z.enum([
-  "telegram",
-  "discord",
-  "slack",
-  "whatsapp",
-  "imessage",
-  "signal",
-  "mattermost",
-  "matrix",
-  "twitch",
-  "line",
-  "bluebubbles",
-  "email",
-  "feishu",
-  "wecom",
-  "last",
-]);
+export const HookMappingChannelSchema = z.enum([...CHANNEL_TYPE_VALUES, "last"]);
 
 export const HookMappingSchema = z.object({
   id: z.string().max(100).optional(),

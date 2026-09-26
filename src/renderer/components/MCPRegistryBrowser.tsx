@@ -32,11 +32,13 @@ interface MCPRegistryEntry {
 interface MCPRegistryBrowserProps {
   onInstall?: (serverId: string) => void;
   installedServerIds?: string[];
+  installDisabled?: boolean;
 }
 
 export function MCPRegistryBrowser({
   onInstall,
   installedServerIds = [],
+  installDisabled = false,
 }: MCPRegistryBrowserProps) {
   const [servers, setServers] = useState<MCPRegistryEntry[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -96,6 +98,8 @@ export function MCPRegistryBrowser({
   };
 
   const handleInstall = async (entry: MCPRegistryEntry) => {
+    if (installDisabled) return;
+
     try {
       setInstallingId(entry.id);
       await window.electronAPI.installMCPServer(entry.id);
@@ -237,7 +241,7 @@ export function MCPRegistryBrowser({
                   <button
                     className="button-primary"
                     onClick={() => handleInstall(entry)}
-                    disabled={installingId === entry.id}
+                    disabled={installDisabled || installingId === entry.id}
                   >
                     {installingId === entry.id ? "Installing..." : "Install"}
                   </button>
@@ -392,7 +396,7 @@ export function MCPRegistryBrowser({
                       handleInstall(viewingDetails);
                       setViewingDetails(null);
                     }}
-                    disabled={installingId === viewingDetails.id}
+                    disabled={installDisabled || installingId === viewingDetails.id}
                   >
                     {installingId === viewingDetails.id ? "Installing..." : "Install Server"}
                   </button>

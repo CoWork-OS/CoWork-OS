@@ -54,8 +54,6 @@ const ACCESS_KIND_OVERRIDES: Partial<Record<LLMProviderType, ModelAccessKind>> =
   azure: "cloud",
   "azure-anthropic": "cloud",
   "google-vertex": "cloud",
-  "google-antigravity": "gateway",
-  "google-gemini-cli": "gateway",
   "vercel-ai-gateway": "gateway",
   "openai-compatible": "gateway",
   "anthropic-compatible": "gateway",
@@ -102,6 +100,27 @@ const BILLING_NOTICES: Record<ModelAccessKind, string> = {
   mixed: "The selected account or API route controls eligibility, limits, and billing.",
   orchestration: "Each model route in the orchestration bills according to its provider.",
 };
+
+/**
+ * Providers shown by default in Model Access. These are the routes CoWork tests most and
+ * that most users pick; every other provider is one click away under "More providers".
+ */
+export const FEATURED_PROVIDER_TYPES: readonly LLMProviderType[] = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "openrouter",
+  "deepseek",
+  "zai",
+  "kimi",
+  "minimax",
+  "opencode-go",
+  "ollama",
+];
+
+export function isFeaturedProvider(providerType: LLMProviderType): boolean {
+  return FEATURED_PROVIDER_TYPES.includes(providerType);
+}
 
 export const MODEL_ACCESS_GROUP_LABELS: Record<ModelAccessGroup, string> = {
   accounts: "Subscriptions and sign-ins",

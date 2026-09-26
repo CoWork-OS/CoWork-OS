@@ -174,11 +174,27 @@ export interface MCPResourceReadResult {
   }>;
 }
 
-export type MCPContent = MCPTextContent | MCPImageContent | MCPResourceContent;
+/** MCP 2025-06-18: a link to a resource the client can fetch. */
+export interface MCPResourceLinkContent {
+  type: "resource_link";
+  uri: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+export type MCPContent =
+  | MCPTextContent
+  | MCPImageContent
+  | MCPResourceContent
+  | MCPResourceLinkContent;
 
 // Tool call result
 export interface MCPCallResult {
   content: MCPContent[];
+  /** MCP 2025-06-18: machine-readable result matching the tool's outputSchema. */
+  structuredContent?: unknown;
   isError?: boolean;
 }
 

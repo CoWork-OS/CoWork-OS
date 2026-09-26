@@ -839,7 +839,7 @@ Turn this meeting transcript into action items. For each item:
 
 ### Web Scraping & Monitoring
 
-Scrape websites, monitor prices, map site structures, and extract structured data with anti-bot bypass.
+Scrape websites, monitor prices, map site structures, and extract structured data from pages that allow automated access.
 
 For normal-user website testing, JavaScript-heavy app checks, forms, screenshots, responsive breakpoints, or visual QA, CoWork opens the [Browser Workbench](browser-workbench.md): a visible right-sidebar/fullscreen Browser V2 surface where the agent and user share the same page, with cursor movement, desktop/tablet/mobile viewport control, snapshot refs, diagnostics, screenshot capture, downloads/uploads, and annotation.
 
@@ -848,8 +848,7 @@ For normal-user website testing, JavaScript-heavy app checks, forms, screenshots
 - Visible browser-use testing for live websites and local apps, including responsive viewport checks
 - Shared right-sidebar/fullscreen browser sessions with persistent workspace profile
 - Screenshots and screenshot annotation for visual feedback
-- Single and batch URL scraping with TLS fingerprinting
-- Stealth mode with Cloudflare bypass
+- Single and batch URL scraping, with a full browser for JavaScript-rendered pages
 - Structured data extraction (tables, lists, metadata)
 - Persistent sessions for login→navigate→extract workflows
 - Price tracking and change detection
@@ -916,32 +915,6 @@ Suggest 3-4 discussion topics including career growth.
 ```
 
 **Powered by:** Engineering Management plugin pack (1-on-1 Prep skill)
-
----
-
-### Digital Twin Automation
-
-Activate role-specific AI twins that proactively handle cognitive overhead in the background — PR triage, sprint health reports, dependency scans, and more.
-
-**What it handles:**
-
-- 10 pre-built persona templates across engineering, management, product, data, and operations
-- Heartbeat-driven background tasks on configurable schedules
-- Proactive insights — flagging issues, preparing reports, surfacing patterns
-- Cognitive offload categories per role
-- Persistent across sessions
-
-**Available twins:**
-
-- Software Engineer — PR triage, dependency checks, test coverage monitoring
-- Engineering Manager — Sprint health, standup summaries, blocker detection
-- Product Manager — Feature request triage, roadmap risk flagging
-- DevOps/SRE — Deployment health, uptime monitoring, incident summaries
-- QA/Test Engineer — Coverage reports, regression risk, flaky test detection
-- Data Scientist — Pipeline health, data quality scans, anomaly detection
-- Technical Writer — Doc freshness scans, style consistency checks
-
-**Powered by:** Digital Twin system, Mission Control, plugin pack integration
 
 ---
 
@@ -1997,11 +1970,11 @@ Rate the attractiveness of entering with a [specific angle].
 | **DevOps & Infra**         | K8s, Terraform, Docker, CI/CD, cloud migration, incidents                                           | DevOps pack (8 skills), `run_command` tool                   |
 | **Mobile Development**     | iOS (SwiftUI), Android (Compose), React Native, Fastlane                                            | Mobile Development pack, iOS/Android skills                  |
 | **Game Development**       | Unity, Unreal, Godot, cross-engine performance                                                      | Game Development pack, 3 engine skills                       |
-| **Enterprise**             | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and 36 more | 44 shipped MCP connectors                                    |
+| **Enterprise**             | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and more           | See the [Connector Inventory](connector-inventory.md)        |
 | **Data & Analytics**       | CSV analysis, SQL, financial modeling, market screening                                             | Data Analysis pack, 8+ financial skills                      |
 | **Content & Marketing**    | Blog, social, email campaigns, SEO, copywriting                                                     | Marketing pack, marketing strategist skill                   |
 | **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 17 channels, scheduling, 10+ productivity skills             |
-| **Team & Management**      | Sprints, 1-on-1 prep, status reports, digital twins                                                 | EM pack, PM pack, 10 persona templates                       |
+| **Team & Management**      | Sprints, 1-on-1 prep, status reports                                                                | EM pack, PM pack                                             |
 | **Security**               | Vulnerability scanning, compliance, dependency auditing, authorized data-broker privacy cleanup     | Security audit skill, dependency check skill, Unbroker skill |
 | **Remote Ops**             | Chat-driven deployment, headless mode, WebSocket API                                                | Gateway, headless daemon, remote access                      |
 | **Voice & Audio**          | Calls, TTS, STT, dictation, music/speaker control                                                   | ElevenLabs MCP, Whisper, Spotify/Sonos/BluOS MCP             |
@@ -2022,5 +1995,4 @@ Rate the attractiveness of entering with a [specific angle].
 - [Plugin Packs](plugin-packs.md) — Browse and configure plugin packs
 - [Channels](channels.md) — Messaging channel setup
 - [Enterprise Connectors](enterprise-connectors.md) — MCP connector development
-- [Digital Twins](digital-twins.md) — Role-based AI twin personas
 - [Test Prompts](use-cases.md) — Copy-paste prompts for end-to-end validation

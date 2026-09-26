@@ -29,7 +29,9 @@ const BASE_CONTRACTS = {
     title: "Workspace Rules",
     scope: ["task", "main-session"] as KitScope[],
     parser: "sectioned" as KitParser,
-    maxChars: 3000,
+    // Workspace rules are the main place users steer the agent; 3,000 chars cut off
+    // ordinary rule files mid-way.
+    maxChars: 12000,
     freshnessDays: 90,
     mutability: "system_locked" as KitMutability,
     belongsHere: [

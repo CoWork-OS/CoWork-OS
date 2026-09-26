@@ -4,7 +4,7 @@ import { calculateCost, getCacheTokenAccounting, getModelPricing } from "../pric
 
 describe("Astra pricing", () => {
   it("exposes the documented standard and cache rates", () => {
-    expect(getModelPricing("gpt-6-astra")).toEqual({
+    expect(getModelPricing("gpt-6-astra")).toMatchObject({
       inputPer1M: 10,
       outputPer1M: 50,
       cachedInputPer1M: 1,
@@ -30,7 +30,8 @@ describe("Astra pricing", () => {
     const cost = calculateCost("claude-sonnet-4-5", 100, 0, 50, 50, "disjoint");
 
     expect(cost).toBeCloseTo(
-      (100 / 1_000_000) * 3 + (50 / 1_000_000) * 0.3 + (50 / 1_000_000) * 3,
+      // Cache writes use the catalogue's 5-minute rate (1.25x input).
+      (100 / 1_000_000) * 3 + (50 / 1_000_000) * 0.3 + (50 / 1_000_000) * 3.75,
       10,
     );
     expect(getCacheTokenAccounting("anthropic", "claude-sonnet-4-5")).toBe("disjoint");
@@ -47,7 +48,7 @@ describe("GPT-6 Sol and Luna pricing", () => {
   ] as const)(
     "prices %s at published rates and applies the long-context multiplier",
     (model, input, output, cached, write) => {
-      expect(getModelPricing(model)).toEqual({
+      expect(getModelPricing(model)).toMatchObject({
         inputPer1M: input,
         outputPer1M: output,
         cachedInputPer1M: cached,
@@ -69,11 +70,11 @@ describe("current OpenAI prompt-cache pricing", () => {
       cacheWritePer1M: 5,
     });
     expect(
-      calculateCost("gpt-5.6-sol", 1_000_000, 0, 0, 1_000_000, "inclusive", {
+      calculateCost("gpt-5.6-sol", 200_000, 0, 0, 200_000, "inclusive", {
         providerType: "openai",
         cacheTtl: "5m",
       }),
-    ).toBeCloseTo(5, 10);
+    ).toBeCloseTo(1, 10);
   });
 
   it("uses the Anthropic TTL multiplier for cache writes", () => {

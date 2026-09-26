@@ -2863,7 +2863,13 @@ export class MailboxService {
     }
 
     const operator = this.agentRoleRepo.findById(request.operatorRoleId);
-    if (!operator || operator.companyId !== company.id || operator.isActive === false) {
+    // Companies are no longer user-managed: any active agent without a company can
+    // take the handoff; agents explicitly linked to a different company still cannot.
+    if (
+      !operator ||
+      (operator.companyId && operator.companyId !== company.id) ||
+      operator.isActive === false
+    ) {
       throw new Error("Selected operator is not available for the chosen company");
     }
 
@@ -9631,10 +9637,13 @@ export class MailboxService {
     detail: MailboxThreadDetail,
     companyId?: string,
   ): MailboxOperatorRecommendation[] {
-    const companyRoles = companyId
-      ? this.agentRoleRepo.findByCompanyId(companyId, false)
-      : this.agentRoleRepo.findAll(false);
-    const roles = companyRoles.filter((role) => role.isActive !== false);
+    const roles = this.agentRoleRepo
+      .findAll(false)
+      .filter(
+        (role) =>
+          role.isActive !== false &&
+          (!companyId || !role.companyId || role.companyId === companyId),
+      );
     const text = [
       detail.subject,
       detail.summary?.summary,

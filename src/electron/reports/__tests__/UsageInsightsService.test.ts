@@ -767,6 +767,42 @@ describe("UsageInsightsService", () => {
     expect(insights.llmSummary.totalLlmCalls).toBe(2);
   });
 
+  it("counts history with an unknown model price as unpriced instead of free", () => {
+    const ts = Date.now();
+    const llmRows = [
+      {
+        task_id: "t1",
+        timestamp: ts,
+        payload: JSON.stringify({
+          modelKey: "totally-made-up-model",
+          delta: { inputTokens: 1_000_000, outputTokens: 0, cost: 0 },
+        }),
+      },
+      {
+        task_id: "t2",
+        timestamp: ts,
+        payload: JSON.stringify({
+          modelKey: "claude-opus-4-6",
+          delta: { inputTokens: 1_000_000, outputTokens: 0, cost: 0 },
+        }),
+      },
+    ];
+
+    const db = defaultMockDb({ llmRows });
+    const service = new UsageInsightsService(
+      db as ConstructorParameters<typeof UsageInsightsService>[0],
+    );
+    const insights = service.generate("ws-1", 7);
+
+    // Opus 4.6 is estimated from the shared catalogue ($5/1M input); the unknown model is not $0.
+    expect(insights.costMetrics.totalCost).toBeCloseTo(5, 6);
+    expect(insights.llmSummary.unpricedCallCount).toBe(1);
+    const unknownRow = insights.costMetrics.costByModel.find(
+      (row) => row.model === "totally-made-up-model",
+    );
+    expect(unknownRow?.costKnown).toBe(false);
+  });
+
   it("aggregates persona metrics with per-persona cost", () => {
     const ts = Date.now();
     const db = defaultMockDb({

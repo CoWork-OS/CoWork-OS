@@ -1,5 +1,7 @@
 # Release Notes 0.5.13
 
+> Historical release note: the personal Health feature was discontinued on 2026-09-26. See the [decision record](personal-health-discontinuation.md) for current support status.
+
 This page summarizes the product changes included in `0.5.13`, based on changes merged after `v0.5.12` on 2026-03-22.
 
 ## Overview

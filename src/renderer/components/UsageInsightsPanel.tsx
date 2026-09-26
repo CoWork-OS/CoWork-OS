@@ -36,6 +36,7 @@ interface CostByModelRow {
   outputTokens?: number;
   cachedTokens?: number;
   distinctTasks?: number;
+  costKnown?: boolean;
 }
 
 interface CostMetrics {
@@ -55,6 +56,7 @@ interface LlmSummary {
   totalCachedTokens: number;
   cacheReadRate: number | null;
   distinctTaskCount: number;
+  unpricedCallCount?: number;
 }
 
 interface JevSummary {
@@ -890,6 +892,7 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
             outputTokens: m.outputTokens ?? 0,
             cachedTokens: m.cachedTokens ?? 0,
             distinctTasks: m.distinctTasks ?? 0,
+            costKnown: m.costKnown,
           }))}
         />
       )}
@@ -1015,7 +1018,11 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                         <span className="insights-model-name">{m.model}</span>
                         <MiniBar value={hasModelCost ? m.cost : m.calls} max={modelBarMax} />
                         <span className="insights-model-cost">
-                          {hasModelCost ? `$${m.cost.toFixed(4)}` : formatUsageCount(m.calls)}
+                          {hasModelCost
+                            ? m.costKnown === false
+                              ? `$${m.cost.toFixed(4)}+`
+                              : `$${m.cost.toFixed(4)}`
+                            : formatUsageCount(m.calls)}
                         </span>
                         <span className="insights-model-calls">
                           {hasModelCost ? formatUsageCount(m.calls) : "\u00A0"}

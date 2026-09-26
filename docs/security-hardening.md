@@ -224,6 +224,9 @@ The accessor was renamed `loadSettingsWithSecrets` because the old name invited
 the bug, and the raw settings are kept separately for the deployment-posture
 check, which inspects real token values.
 
+The node token and companion node clients were later removed with the
+[Mobile Companions discontinuation](mobile-companions-discontinuation.md).
+
 ### App-level settings encryption
 
 The PBKDF2 arguments were semantically inverted: a hardcoded constant shared by

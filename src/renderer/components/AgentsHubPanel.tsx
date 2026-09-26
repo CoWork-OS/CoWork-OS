@@ -164,7 +164,6 @@ type AgentConnectionSettingsTab = "integrations" | "mcp" | "skills" | "morechann
 
 interface AgentsHubPanelProps {
   onOpenMissionControl?: () => void;
-  onOpenAgentPersonas?: () => void;
   onOpenSlackSettings?: () => void;
   onOpenSettings?: (tab: AgentConnectionSettingsTab) => void;
   onOpenTask?: (taskId: string) => void;
@@ -1002,7 +1001,6 @@ function getTemplateGlyph(template: AgentTemplate) {
 
 export function AgentsHubPanel({
   onOpenMissionControl,
-  onOpenAgentPersonas,
   onOpenSlackSettings,
   onOpenSettings,
   onOpenTask,
@@ -2143,8 +2141,8 @@ export function AgentsHubPanel({
             <h2>Turn a team workflow into a shared operator</h2>
             <p>
               Start from the workflow itself, then shape tools, approvals, deployment surfaces,
-              memory, and governance in one place. Mission Control and Agent Personas remain
-              available in parallel as legacy ops surfaces.
+              memory, and governance in one place. Mission Control remains available in parallel as
+              a legacy ops surface.
             </p>
           </section>
 
@@ -3861,9 +3859,6 @@ export function AgentsHubPanel({
           <div className="agents-row-actions">
             <button className="agents-link-btn" onClick={() => setConversionPanel(null)}>
               Close
-            </button>
-            <button className="agents-link-btn" onClick={onOpenAgentPersonas}>
-              Open legacy surface
             </button>
           </div>
         </section>

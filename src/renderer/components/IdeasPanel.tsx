@@ -2,12 +2,10 @@ import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   AlignLeft,
-  BarChart2,
   BookOpen,
   Bug,
   Building2,
   Calculator,
-  Calendar,
   CheckSquare,
   Clipboard,
   ClipboardList,
@@ -18,7 +16,6 @@ import {
   FileSearch,
   FileText,
   Filter,
-  GitPullRequest,
   Globe,
   Home,
   Image,
@@ -38,7 +35,6 @@ import {
   RefreshCw,
   Replace,
   Rss,
-  Scale,
   Scroll,
   Search,
   Send,
@@ -131,33 +127,6 @@ const IDEAS: Idea[] = [
     icon: Clipboard,
     category: "daily-ops",
     skill: "chief-of-staff-briefing",
-  },
-  {
-    title: "Status report for standup",
-    description: "Concise standup update from recent commits, tasks, and conversations.",
-    prompt:
-      "Use the twin-status-report skill. Generate a concise standup status report from my recent activity: tasks completed, in-progress work, blockers, and next steps. Keep it tight — 5 bullets max per section.",
-    icon: BarChart2,
-    category: "daily-ops",
-    skill: "twin-status-report",
-  },
-  {
-    title: "Meeting preparation brief",
-    description: "Structured context, open items, and talking points for an upcoming meeting.",
-    prompt:
-      "Use the twin-meeting-prep skill. I'll tell you the meeting title and attendees. Prepare a structured brief with: relevant context, open items, key data points, and talking points. Flag any gaps I should fill before the meeting.",
-    icon: Calendar,
-    category: "daily-ops",
-    skill: "twin-meeting-prep",
-  },
-  {
-    title: "Decision preparation package",
-    description: "Data, options, and trade-off analysis before making a key call.",
-    prompt:
-      "Use the twin-decision-prep skill. I'll describe the decision I'm facing. Assemble relevant data, enumerate the options with pros/cons, identify risks, and present a recommendation — but don't make the decision for me.",
-    icon: Scale,
-    category: "daily-ops",
-    skill: "twin-decision-prep",
   },
   {
     title: "Family digest draft",
@@ -287,15 +256,6 @@ const IDEAS: Idea[] = [
     icon: Eye,
     category: "dev",
     skill: "code-review",
-  },
-  {
-    title: "PR triage & review queue",
-    description: "Scan open pull requests, assess risk, and build a prioritised review queue.",
-    prompt:
-      "Use the twin-pr-triage skill. Scan open PRs for a repo I specify. Assess complexity, risk, and staleness. Produce a prioritised review queue with recommended reviewer and a one-line change summary.",
-    icon: GitPullRequest,
-    category: "dev",
-    skill: "twin-pr-triage",
   },
   {
     title: "Debug error",

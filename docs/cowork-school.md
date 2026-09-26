@@ -254,7 +254,7 @@ That usually means combining:
 
 - a git-backed workspace
 - company files in `.cowork/`
-- one or more operator personas
+- one or more operator agents
 - automations
 - Mission Control as the monitoring surface
 

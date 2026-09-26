@@ -1,3 +1,8 @@
+import {
+  EXTERNAL_RUNTIME_AGENTS,
+  normalizeExternalRuntimeAgent,
+  type ExternalRuntimeAgent,
+} from "../../../shared/types";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -46,6 +51,7 @@ import { ShellTools } from "./shell-tools";
 import { ImageTools } from "./image-tools";
 import { VideoTools } from "./video-tools";
 import { YouTubeTools } from "./youtube-tools";
+import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
 import { CronTools } from "./cron-tools";
@@ -299,7 +305,7 @@ const READ_MOSTLY_CODEX_PROMPT_PATTERN =
   /\b(review|analy[sz]e|analysis|plan|audit|inspect|investigate|research|summari[sz]e|critique)\b/i;
 
 export type SpawnAgentRuntimeMode = "native" | "acpx";
-export type SpawnAgentRuntimeAgent = "codex" | "claude";
+export type SpawnAgentRuntimeAgent = ExternalRuntimeAgent;
 
 export function isExplicitCodexSpawnRequest(input: {
   runtime_agent?: string;
@@ -349,8 +355,8 @@ export function resolveSpawnAgentExternalRuntime(input: {
   }
 
   const codexRequested = isExplicitCodexSpawnRequest(input);
-  const explicitRuntimeAgent =
-    typeof input.runtime_agent === "string" ? input.runtime_agent : undefined;
+  // Only agents acpx is known to support; anything else falls back to native execution.
+  const explicitRuntimeAgent = normalizeExternalRuntimeAgent(input.runtime_agent);
   const shouldUseAcpx =
     (explicitRuntime === "acpx" && Boolean(explicitRuntimeAgent)) ||
     (input.defaultCodexRuntimeMode === "acpx" && codexRequested);
@@ -556,6 +562,7 @@ export class ToolRegistry {
   private imageTools: ImageTools;
   private videoTools: VideoTools;
   private youtubeTools: YouTubeTools;
+  private meetingArtifactTools = new MeetingArtifactTools();
   private visionTools: VisionTools;
   private systemTools: SystemTools;
   private computerUseTools: ComputerUseTools;
@@ -1363,6 +1370,9 @@ export class ToolRegistry {
     // YouTube transcript tools are local/best-effort and do not require YouTube API keys.
     allTools.push(...YouTubeTools.getToolDefinitions());
 
+    // Locally saved meeting transcripts (read-only; empty until meeting capture is connected).
+    allTools.push(...MeetingArtifactTools.getToolDefinitions());
+
     // Vision tools (image understanding); may surface setup guidance if API keys are missing
     allTools.push(...VisionTools.getToolDefinitions());
 
@@ -1441,7 +1451,7 @@ export class ToolRegistry {
       allTools.push(...SupermemoryTools.getToolDefinitions());
     }
 
-    // Scraping tools (Scrapling integration - anti-bot, stealth, structured extraction)
+    // Scraping tools (Scrapling integration - JS rendering, structured extraction)
     // Only add when scraping is enabled in settings
     if (ScrapingTools.isEnabled()) {
       allTools.push(...ScrapingTools.getToolDefinitions());
@@ -2555,6 +2565,16 @@ export class ToolRegistry {
     register(
       "youtube_list_ingested_videos",
       async ({ request }) => this.youtubeTools.listVideos(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "meeting_artifacts_list",
+      async ({ request }) => this.meetingArtifactTools.list(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "meeting_artifact_get",
+      async ({ request }) => this.meetingArtifactTools.get(request.input),
       readParallelSchedulerSpec,
     );
     register("tool_search", async ({ request }) =>
@@ -4135,7 +4155,7 @@ Channel Message Log (Local Gateway):
 	- set_quirks: Set personality quirks (catchphrase, sign_off, analogy_domain).
 - set_vibes: Update the workspace's current energy/mode (crunch, explore, deep-focus, maintenance, playful, low-energy, default). Call when you detect a shift in the user's working energy.
 - update_lore: Record a notable shared moment or reference in the workspace lore. Use after significant accomplishments, breakthroughs, or discoveries.
-- manage_heartbeat: Enable or disable the heartbeat (periodic wake-up) for a digital twin / agent role. Use when asked to start or stop a twin.
+- manage_heartbeat: Enable or disable the heartbeat (periodic wake-up) for an agent role. Use when asked to start or stop an agent's scheduled check-ins.
 - set_agent_name: Set or change the assistant's name when the user wants to give you a name.
 - set_user_name: Store the user's name when they introduce themselves (e.g., "I'm Alice", "My name is Bob").`;
 
@@ -4547,6 +4567,8 @@ ${skillDescriptions}`;
       return await this.youtubeTools.askOrIngestVideo(input);
     if (name === "youtube_search_ingested_segments") return this.youtubeTools.searchSegments(input);
     if (name === "youtube_list_ingested_videos") return this.youtubeTools.listVideos(input);
+    if (name === "meeting_artifacts_list") return this.meetingArtifactTools.list(input);
+    if (name === "meeting_artifact_get") return this.meetingArtifactTools.get(input);
 
     // Vision tools
     if (name === "analyze_image") return await this.visionTools.analyzeImage(input);
@@ -5220,10 +5242,22 @@ ${skillDescriptions}`;
         }
       }
 
-      // Combine text content
-      const textParts = result.content
-        .filter((c: Any) => c.type === "text")
-        .map((c: Any) => c.text);
+      // Combine text content. MCP 2025-06-18 servers may also return embedded
+      // resources, resource links and structuredContent; surface those as text too.
+      const textParts: string[] = [];
+      for (const c of result.content as Any[]) {
+        if (c?.type === "text" && typeof c.text === "string") {
+          textParts.push(c.text);
+        } else if (c?.type === "resource" && typeof c.resource?.text === "string") {
+          textParts.push(c.resource.text);
+        } else if (c?.type === "resource_link" && typeof c.uri === "string") {
+          const label = [c.name || c.title, c.description].filter(Boolean).join(" - ");
+          textParts.push(`Resource: ${label ? `${label} ` : ""}(${c.uri})`);
+        }
+      }
+      if (textParts.length === 0 && result.structuredContent !== undefined) {
+        textParts.push(JSON.stringify(result.structuredContent, null, 2));
+      }
 
       if (textParts.length > 0) {
         const baseText = textParts.join("\n");
@@ -13397,9 +13431,9 @@ ${skillDescriptions}`;
             },
             runtime_agent: {
               type: "string",
-              enum: ["codex", "claude"],
+              enum: [...EXTERNAL_RUNTIME_AGENTS],
               description:
-                'When runtime is "acpx", selects the target adapter, such as "codex" or "claude".',
+                'When runtime is "acpx", selects the coding agent CLI to run, such as "codex", "claude", "gemini" or "opencode". The CLI must be installed and signed in.',
             },
             wait: {
               type: "boolean",
@@ -13648,8 +13682,8 @@ ${skillDescriptions}`;
       {
         name: "manage_heartbeat",
         description:
-          "Enable or disable the heartbeat (periodic wake-up) for a digital twin / agent role. " +
-          "Use this when the user asks to start or stop a twin. Disabling the heartbeat prevents " +
+          "Enable or disable the heartbeat (periodic wake-up) for an agent role. " +
+          "Use this when the user asks to start or stop an agent. Disabling the heartbeat prevents " +
           "the agent from waking up on its own schedule.",
         input_schema: {
           type: "object",
@@ -13657,7 +13691,7 @@ ${skillDescriptions}`;
             agent_name: {
               type: "string",
               description:
-                "The display name of the agent role / digital twin (e.g. 'Engineering Manager Twin')",
+                "The display name of the agent role (e.g. 'Engineering Manager')",
             },
             enabled: {
               type: "boolean",

@@ -422,6 +422,34 @@ describe("buildSavedLLMSettings", () => {
     expect(saved.anthropic).toEqual(existingSettings.anthropic);
   });
 
+  it("persists the opt-in model metadata refresh and keeps it when a save omits it", () => {
+    const base: LLMSettingsData = { providerType: "anthropic", modelKey: "sonnet-4-5" };
+
+    const enabled = buildSavedLLMSettings({ ...base, modelMetadataAutoRefresh: true }, base);
+    expect(enabled.modelMetadataAutoRefresh).toBe(true);
+
+    const untouched = buildSavedLLMSettings(base, enabled);
+    expect(untouched.modelMetadataAutoRefresh).toBe(true);
+
+    const disabled = buildSavedLLMSettings({ ...base, modelMetadataAutoRefresh: false }, enabled);
+    expect(disabled.modelMetadataAutoRefresh).toBe(false);
+    expect(LLMSettingsSchema.safeParse({ ...base, modelMetadataAutoRefresh: "yes" }).success).toBe(
+      false,
+    );
+  });
+
+  it("keeps the ChatGPT plan from sign-in so default models fit the plan", () => {
+    const base: LLMSettingsData = { providerType: "openai", modelKey: "gpt-6-luna" };
+    const saved = buildSavedLLMSettings(
+      { ...base, openai: { authMethod: "oauth", chatgptPlanType: "free" } },
+      base,
+    );
+    expect(saved.openai?.chatgptPlanType).toBe("free");
+    expect(
+      LLMSettingsSchema.safeParse({ ...base, openai: { chatgptPlanType: "free" } }).success,
+    ).toBe(true);
+  });
+
   it("persists Claude subscription auth settings", () => {
     const existingSettings: LLMSettingsData = {
       providerType: "anthropic",

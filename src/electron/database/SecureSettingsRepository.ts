@@ -34,6 +34,14 @@ export interface LoadResult<T> {
   error?: string;
 }
 
+export interface SaveOptions {
+  /**
+   * Replace an unreadable row without backing it up first; only for recovery paths that
+   * already hold its plaintext.
+   */
+  allowUnreadableOverwrite?: boolean;
+}
+
 /** Settings categories supported */
 export type SettingsCategory =
   | "skills"
@@ -65,7 +73,6 @@ export type SettingsCategory =
   | "google-drive"
   | "dropbox"
   | "sharepoint"
-  | "health"
   | "user-profile"
   | "relationship-memory"
   | "conway"
@@ -88,6 +95,7 @@ export type SettingsCategory =
   | "supermemory"
   | "pulse"
   | "plugin-packs"
+  | "meeting-artifacts"
   | `plugin:${string}`;
 
 interface SecureSettingsRow {
@@ -187,7 +195,20 @@ export class SecureSettingsRepository {
   /**
    * Save settings for a category (creates or updates)
    */
-  save<T extends object>(category: SettingsCategory, settings: T): void {
+  save<T extends object>(category: SettingsCategory, settings: T, options: SaveOptions = {}): void {
+    if (String(category) === "health") {
+      throw new Error("The personal Health settings category has been retired");
+    }
+    const existing = this.findByCategory(category);
+    if (existing && !options.allowUnreadableOverwrite) {
+      const health = this.loadWithStatus(category, { logErrors: false, skipMigration: true });
+      if (health.status !== "success" && health.status !== "not_found") {
+        // Keep the unreadable ciphertext recoverable (e.g. if the original keychain
+        // identity returns) instead of blocking every future save of this category.
+        this.backupUnreadableRow(existing, health.status);
+      }
+    }
+
     const now = Date.now();
     const jsonData = JSON.stringify(settings);
     const encryptedData = this.encrypt(jsonData);
@@ -197,8 +218,6 @@ export class SecureSettingsRepository {
     // AES-GCM's auth tag (and by safeStorage for `os:` records); this column
     // only needs to detect a corrupted or swapped stored blob.
     const checksum = this.computeChecksum(encryptedData);
-
-    const existing = this.findByCategory(category);
 
     if (existing) {
       // Update existing
@@ -221,6 +240,43 @@ export class SecureSettingsRepository {
     logger.debug(`Saved settings for category: ${category}`);
   }
 
+  /** Copy an unreadable row's ciphertext (never plaintext) aside before it is replaced. */
+  private backupUnreadableRow(row: SecureSettingsRow, status: LoadStatus): void {
+    this.db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS secure_settings_unreadable_backup (
+          id TEXT PRIMARY KEY,
+          category TEXT NOT NULL,
+          encrypted_data TEXT NOT NULL,
+          checksum TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          backed_up_at INTEGER NOT NULL
+        )`,
+      )
+      .run();
+    this.db
+      .prepare(
+        `INSERT INTO secure_settings_unreadable_backup
+          (id, category, encrypted_data, checksum, status, created_at, updated_at, backed_up_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        uuidv4(),
+        row.category,
+        row.encrypted_data,
+        row.checksum,
+        status,
+        row.created_at,
+        row.updated_at,
+        Date.now(),
+      );
+    logger.warn(
+      `Replacing unreadable settings for category ${row.category} (${status}); the previous encrypted data was backed up.`,
+    );
+  }
+
   /**
    * Load settings for a category
    * Returns undefined if no settings exist or if decryption fails
@@ -236,7 +292,7 @@ export class SecureSettingsRepository {
    */
   loadWithStatus<T extends object>(
     category: SettingsCategory,
-    options: { logErrors?: boolean } = {},
+    options: { logErrors?: boolean; skipMigration?: boolean } = {},
   ): LoadResult<T> {
     const row = this.findByCategory(category);
     if (!row) {
@@ -287,7 +343,7 @@ export class SecureSettingsRepository {
       const usesLegacyKeyDerivation = row.encrypted_data.startsWith("app:");
       const usesLegacyPlaintextChecksum =
         ciphertextChecksum !== row.checksum && legacyPlaintextChecksum === row.checksum;
-      if (usesLegacyKeyDerivation || usesLegacyPlaintextChecksum) {
+      if ((usesLegacyKeyDerivation || usesLegacyPlaintextChecksum) && !options.skipMigration) {
         try {
           this.save(category, parsed as object);
           console.info(
@@ -399,7 +455,8 @@ export class SecureSettingsRepository {
     error?: string;
   } {
     try {
-      const categories = this.listCategories();
+      // Older profiles can still have this retired category before startup migration runs.
+      const categories = this.listCategories().filter((category) => String(category) !== "health");
       const backupData: Record<string, unknown> = {};
 
       for (const category of categories) {
@@ -454,15 +511,18 @@ export class SecureSettingsRepository {
       const categoriesRestored: string[] = [];
 
       for (const [category, data] of Object.entries(backup.categories)) {
+        if (category === "health") continue;
         const existingStatus = this.checkHealth(category as SettingsCategory);
 
         // Skip if exists and not overwriting
-        if (existingStatus === "success" && !overwrite) {
+        if (existingStatus !== "not_found" && !overwrite) {
           logger.debug(`Skipping ${category} (exists, overwrite=false)`);
           continue;
         }
 
-        this.save(category as SettingsCategory, data as object);
+        this.save(category as SettingsCategory, data as object, {
+          allowUnreadableOverwrite: overwrite,
+        });
         categoriesRestored.push(category);
       }
 
@@ -476,15 +536,15 @@ export class SecureSettingsRepository {
   }
 
   /**
-   * Delete corrupted settings for a category
-   * Use this when checkHealth returns 'checksum_mismatch' or 'decryption_failed'
-   * to allow the user to start fresh
+   * Delete settings only when a checksum mismatch confirms stored data corruption.
+   * A decryption failure can mean the original OS keychain identity is unavailable,
+   * so those records must remain available for recovery.
    */
   deleteCorrupted(category: SettingsCategory): boolean {
     const status = this.checkHealth(category);
-    if (status === "success" || status === "not_found") {
+    if (status !== "checksum_mismatch") {
       console.warn(
-        `[SecureSettingsRepository] Category ${category} is not corrupted, not deleting`,
+        `[SecureSettingsRepository] Category ${category} is not confirmed corrupt (status: ${status}), not deleting`,
       );
       return false;
     }
@@ -498,7 +558,7 @@ export class SecureSettingsRepository {
    * Useful after OS keychain becomes available or for migration
    */
   reEncryptAll(): { success: boolean; categoriesProcessed: string[]; errors: string[] } {
-    const categories = this.listCategories();
+    const categories = this.listCategories().filter((category) => String(category) !== "health");
     const processed: string[] = [];
     const errors: string[] = [];
 

@@ -83,6 +83,84 @@ const EXCLUSIVE_TOOLS = new Set([
   "git_merge_to_base",
 ]);
 
+/**
+ * Long-tail tools hidden from the per-call tool list by default. Sending ~190 schemas
+ * on every request costs ~30K tokens and makes tool choice worse. These stay reachable:
+ * the step's task text auto-exposes the best-matching deferred tools, and the model can
+ * find any of them with tool_search (found tools stay exposed for the rest of the task).
+ */
+const DEFERRED_BY_DEFAULT_TOOLS = new Set([
+  // Persona and personality settings
+  "set_personality",
+  "add_behavioral_rule",
+  "set_expertise",
+  "set_persona",
+  "set_agent_name",
+  "set_user_name",
+  "set_response_style",
+  "set_quirks",
+  "set_vibes",
+  "update_lore",
+  // Skill management (Skill itself stays visible)
+  "skill_create",
+  "skill_duplicate",
+  "skill_update",
+  "skill_delete",
+  "skill_proposal",
+  // YouTube ingestion
+  "youtube_ingest_video",
+  "youtube_ask_video",
+  "youtube_ask_or_ingest_video",
+  "youtube_search_ingested_segments",
+  "youtube_list_ingested_videos",
+  // macOS process and launch-agent management
+  "resolve_app_bundle_id",
+  "find_macos_app_processes",
+  "terminate_macos_app_processes",
+  "list_macos_launch_agents",
+  "disable_macos_launch_agents",
+  // Advanced browser diagnostics
+  "browser_trace_start",
+  "browser_trace_stop",
+  "browser_storage",
+  "browser_emulate",
+  "browser_network",
+  "browser_downloads",
+  "browser_save_pdf",
+  // Canvas history and annotators
+  "canvas_checkpoint",
+  "canvas_restore",
+  "canvas_checkpoints",
+  "visual_open_annotator",
+  "visual_update_annotator",
+  // Monty transforms
+  "monty_list_transforms",
+  "monty_run_transform",
+  "monty_transform_file",
+  // Memory internals (search_memories / memory_save stay visible)
+  "memory_timeline",
+  "memory_details",
+  "memory_topics_load",
+  "search_quotes",
+  "search_sessions",
+  "memory_curate",
+  "memory_curated_read",
+  // Agent lifecycle management (spawn_agent / orchestrate_agents stay visible)
+  "capture_agent_events",
+  "send_agent_message",
+  "pause_agent",
+  "resume_agent",
+  "cancel_agent",
+  "get_orchestration_status",
+  "manage_heartbeat",
+  // Niche generators and workspace admin
+  "generate_epub",
+  "generate_narration_audio",
+  "compile_latex",
+  "link_project_workspace",
+  "task_events",
+]);
+
 const ALWAYS_EXPOSE_TOOLS = new Set([
   "read_file",
   "read_files",
@@ -278,7 +356,10 @@ export function getDefaultRuntimeToolMetadata(toolName: string): RuntimeToolMeta
     interruptBehavior: inferInterruptBehavior(canonicalName, readOnly),
     approvalKind: inferApprovalKind(canonicalName, readOnly),
     sideEffectLevel: inferSideEffectLevel(canonicalName, readOnly),
-    deferLoad: canonicalName.startsWith("mcp_") || canonicalName.endsWith("_action"),
+    deferLoad:
+      canonicalName.startsWith("mcp_") ||
+      canonicalName.endsWith("_action") ||
+      DEFERRED_BY_DEFAULT_TOOLS.has(canonicalName),
     alwaysExpose: ALWAYS_EXPOSE_TOOLS.has(canonicalName),
     resultKind: inferResultKind(canonicalName),
     supportsContextMutation: !readOnly,

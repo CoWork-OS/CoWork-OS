@@ -778,6 +778,7 @@ export class ShellTools {
       promptPrefix: string;
       env?: Record<string, string>;
       policies: AdminPolicies;
+      signal?: AbortSignal;
     },
   ): Promise<{
     success: boolean;
@@ -807,6 +808,40 @@ export class ShellTools {
           });
           return null;
         }
+        // Windows, and Linux without Docker, have no OS sandbox CoWork can use. When the
+        // admin policy permits unsandboxed shell (and does not require a sandbox), let the
+        // user explicitly approve this one command running unsandboxed instead of failing
+        // every command. The prompt cannot be auto-approved, bundled or answered by a
+        // "never ask" profile (that denies, failing closed).
+        const unsandboxedApprovalAllowed =
+          sandbox.type === "none" &&
+          !policies.runtime.requireSandboxForShell &&
+          policies.runtime.allowUnsandboxedShell === true;
+        if (unsandboxedApprovalAllowed) {
+          const approvedUnsandboxed = await this.daemon.requestApproval(
+            this.taskId,
+            "run_command",
+            "This computer has no OS sandbox for shell commands, so this command would run with your full user permissions, outside the workspace limits. Approve only if you trust it.",
+            {
+              command,
+              cwd: options.cwd,
+              timeout: options.timeout,
+              unsandboxed: true,
+              reason: "no_os_sandbox_available",
+            },
+            { allowAutoApprove: false, requireExplicitApproval: true, signal: options.signal },
+          );
+          if (approvedUnsandboxed) {
+            this.daemon.logEvent(this.taskId, "shell_sandbox_bypassed", {
+              command,
+              cwd: options.cwd,
+              reason: "user_approved_no_os_sandbox",
+              sandboxType: sandbox.type,
+              platform: process.platform,
+            });
+            return null;
+          }
+        }
         this.daemon.logEvent(this.taskId, "sandbox_denied", {
           tool: "run_command",
           command,
@@ -817,7 +852,11 @@ export class ShellTools {
         });
         throw new Error(
           sandbox.type === "none"
-            ? `run_command requires an OS-level sandbox for complex shell execution. Configure macOS sandboxing or Docker, or set ${UNSANDBOXED_SHELL_OVERRIDE_ENV}=1 with admin policy allowUnsandboxedShell=true for explicit local development fallback.`
+            ? policies.runtime.requireSandboxForShell
+              ? `run_command requires an OS-level sandbox by admin policy, and none is available on this computer. Install Docker (or use macOS), or ask your admin to change requireSandboxForShell.`
+              : unsandboxedApprovalAllowed
+                ? `run_command was not approved to run without an OS sandbox. Approve the command when asked, install Docker to run commands sandboxed, or use write_file / edit_file for file changes.`
+                : `run_command requires an OS-level sandbox, and none is available on this computer. Install Docker (or use macOS), use write_file / edit_file for file changes, or ask your admin to set allowUnsandboxedShell=true.`
             : `run_command sandbox type "${sandbox.type}" is blocked by admin policy.`,
         );
       }
@@ -1171,13 +1210,16 @@ export class ShellTools {
 
     const applyPatchViaShell = isDirectApplyPatchInvocation(String(command || ""));
     if (applyPatchViaShell) {
+      // Models trained on Codex reach for its `apply_patch` shell helper; CoWork has no
+      // such tool, so point them at the file tools that do exist.
       const remediation =
-        "Tool protocol violation: run_command cannot invoke apply_patch. Use the apply_patch tool directly.";
+        "Tool protocol violation: run_command cannot invoke apply_patch, and CoWork has no apply_patch tool. " +
+        "Use edit_file to change an existing file or write_file to create or replace one.";
       this.daemon.logEvent(this.taskId, "tool_protocol_violation", {
         tool: "run_command",
         command,
         reason: "apply_patch_via_shell",
-        remediation: "use_apply_patch_tool_directly",
+        remediation: "use_edit_file_or_write_file",
         message: remediation,
       });
       throw new Error(remediation);
@@ -1363,6 +1405,7 @@ export class ShellTools {
         promptPrefix,
         env: options?.env,
         policies,
+        signal: options?.signal,
       });
       if (sandboxResult) {
         return this.recordVerificationCommandResult(verificationCommandKey, sandboxResult);

@@ -560,3 +560,24 @@ describe("child task creation params", () => {
     expect(params.agentConfig.modelKey).toBe("haiku-3-5");
   });
 });
+
+describe("acpx coding agents beyond Codex and Claude Code", () => {
+  it("routes supported agents and ignores unknown ones", () => {
+    for (const agent of ["gemini", "opencode", "qwen"] as const) {
+      expect(
+        resolveSpawnAgentExternalRuntime({
+          runtime: "acpx",
+          runtime_agent: agent,
+          prompt: "fix it",
+        })?.agent,
+      ).toBe(agent);
+    }
+    expect(
+      resolveSpawnAgentExternalRuntime({
+        runtime: "acpx",
+        runtime_agent: "not-an-agent" as never,
+        prompt: "fix it",
+      }),
+    ).toBeUndefined();
+  });
+});

@@ -1,12 +1,15 @@
 // Shared starter mission templates used across Onboarding and MainContent welcome screen
 
-export interface StarterMission {
+interface StarterMissionBase {
   id: string;
   title: string;
-  prompt: string;
   icon: string;
   category: "productivity" | "code" | "research" | "writing" | "planning";
 }
+
+export type StarterMission =
+  | (StarterMissionBase & { kind: "prompt"; prompt: string })
+  | (StarterMissionBase & { kind: "bundled"; fixtureId: "release-brief-v1"; version: 1 });
 
 export const LLM_WIKI_GUI_PROMPT =
   "Build a persistent Obsidian-friendly research vault in this workspace. If I have not given the topic yet, ask me for it first. Preserve raw sources, create linked notes, keep the index, inbox, and log current, and file durable answers or visuals back into the vault.";
@@ -30,6 +33,16 @@ export const LLM_WIKI_BRIEF_GUI_PROMPT =
  */
 export const STARTER_MISSIONS: StarterMission[] = [
   {
+    kind: "bundled",
+    id: "release-brief-v1",
+    title: "Turn a messy release folder into a launch brief",
+    fixtureId: "release-brief-v1",
+    version: 1,
+    icon: "📦",
+    category: "writing",
+  },
+  {
+    kind: "prompt",
     id: "plan-30min",
     title: "Plan my next 30 minutes",
     prompt:
@@ -38,6 +51,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "productivity",
   },
   {
+    kind: "prompt",
     id: "landing-page",
     title: "Build a landing page",
     prompt:
@@ -46,6 +60,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "code",
   },
   {
+    kind: "prompt",
     id: "competitor-research",
     title: "Research my competitors",
     prompt:
@@ -54,6 +69,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "research",
   },
   {
+    kind: "prompt",
     id: "autoresearch-report",
     title: "Research a science question",
     prompt:
@@ -62,6 +78,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "research",
   },
   {
+    kind: "prompt",
     id: "llm-wiki",
     title: "Build a research vault",
     prompt: LLM_WIKI_GUI_PROMPT,
@@ -69,6 +86,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "research",
   },
   {
+    kind: "prompt",
     id: "review-commit",
     title: "Review my last commit",
     prompt:
@@ -77,6 +95,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "code",
   },
   {
+    kind: "prompt",
     id: "draft-brief",
     title: "Draft a project brief",
     prompt:
@@ -85,6 +104,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "writing",
   },
   {
+    kind: "prompt",
     id: "novelist",
     title: "Write a novel end-to-end",
     prompt: "/novelist",
@@ -92,6 +112,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "writing",
   },
   {
+    kind: "prompt",
     id: "summarize-pdf",
     title: "Summarize a document",
     prompt:
@@ -100,6 +121,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "writing",
   },
   {
+    kind: "prompt",
     id: "weekly-plan",
     title: "Create a weekly plan",
     prompt:
@@ -108,6 +130,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "planning",
   },
   {
+    kind: "prompt",
     id: "debug-error",
     title: "Debug an error",
     prompt:
@@ -116,6 +139,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "code",
   },
   {
+    kind: "prompt",
     id: "follow-up-email",
     title: "Draft a follow-up email",
     prompt:
@@ -124,6 +148,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "writing",
   },
   {
+    kind: "prompt",
     id: "focus-today",
     title: "What should I focus on today?",
     prompt:
@@ -132,6 +157,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "planning",
   },
   {
+    kind: "prompt",
     id: "daily-brief",
     title: "Create a daily brief",
     prompt:
@@ -140,6 +166,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "productivity",
   },
   {
+    kind: "prompt",
     id: "inbox-triage",
     title: "Triage my inbox",
     prompt:
@@ -148,6 +175,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "productivity",
   },
   {
+    kind: "prompt",
     id: "slide-deck",
     title: "Make a slide deck",
     prompt:
@@ -156,6 +184,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "writing",
   },
   {
+    kind: "prompt",
     id: "spreadsheet-model",
     title: "Build a spreadsheet",
     prompt:
@@ -164,6 +193,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "planning",
   },
   {
+    kind: "prompt",
     id: "transcribe-audio",
     title: "Transcribe audio",
     prompt:
@@ -172,6 +202,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "writing",
   },
   {
+    kind: "prompt",
     id: "build-automation",
     title: "Automate a workflow",
     prompt:
@@ -180,6 +211,7 @@ export const STARTER_MISSIONS: StarterMission[] = [
     category: "productivity",
   },
   {
+    kind: "prompt",
     id: "decision-memo",
     title: "Compare options",
     prompt:

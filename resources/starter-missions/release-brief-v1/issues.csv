@@ -1,0 +1,14 @@
+id,title,status,priority,release_blocker,owner
+AST-101,Shared folder permissions fail for guests,open,critical,yes,Mira
+AST-102,Search index misses recently edited notes,open,high,yes,Jon
+AST-103,Export panel freezes on large projects,open,high,yes,
+AST-104,Keyboard focus skips folder menu,open,medium,no,Amara
+AST-105,Mobile folder badge overlaps title,open,low,no,
+AST-106,Upgrade banner has stale copy,open,low,no,Lea
+AST-107,Project search shows duplicate results,open,medium,no,Jon
+AST-108,Shared folder invite email typo,closed,low,no,Lea
+AST-109,Export progress text missing,closed,medium,no,Amara
+AST-110,Search benchmark fixture updated,closed,medium,no,Jon
+AST-111,Release notes reviewed,closed,low,no,Mira
+AST-112,Support FAQ draft approved,closed,low,no,Lea
+AST-103,Export panel freezes on large projects,open,high,yes,

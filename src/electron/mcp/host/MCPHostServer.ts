@@ -26,8 +26,9 @@ import {
 
 const logger = createLogger("MCPHostServer");
 
-// Protocol version we support
-const PROTOCOL_VERSION = "2024-11-05";
+/** MCP revisions the host can speak; it answers with the client's version when supported. */
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+const PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 
 // Server info
 const SERVER_INFO: MCPServerInfo = {
@@ -392,8 +393,11 @@ export class MCPHostServer extends EventEmitter {
 
     logger.info("Initialize request from client:", params?.clientInfo);
 
+    const requested = typeof params?.protocolVersion === "string" ? params.protocolVersion : "";
     return {
-      protocolVersion: PROTOCOL_VERSION,
+      protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+        ? requested
+        : PROTOCOL_VERSION,
       capabilities: SERVER_INFO.capabilities!,
       serverInfo: SERVER_INFO,
     };

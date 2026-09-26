@@ -42,7 +42,8 @@ export function detectCliAgentFromTitle(title: string): CliAgentType | null {
 export function detectCliAgentFromTask(task: Task): CliAgentType | null {
   const externalRuntime = task.agentConfig?.externalRuntime;
   if (externalRuntime?.kind === "acpx") {
-    return externalRuntime.agent === "claude" ? "claude-acpx" : "codex-acpx";
+    if (externalRuntime.agent === "claude") return "claude-acpx";
+    if (externalRuntime.agent === "codex") return "codex-acpx";
   }
   return detectCliAgentFromTitle(task.title);
 }

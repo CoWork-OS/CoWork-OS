@@ -36,6 +36,15 @@ export const REQUIRED_FILES = [
   "tsconfig.cli.json",
   "tsconfig.electron.json",
 ];
+const RETIRED_HEALTH_PATHS = [
+  "package/build/healthkit-bridge/",
+  "package/dist/electron/electron/health/",
+  "package/dist/electron/shared/health.js",
+  "package/src/electron/health/",
+  "package/src/shared/health.ts",
+  "package/src/renderer/components/HealthPanel.tsx",
+  "package/scripts/build_healthkit_bridge.mjs",
+];
 
 const fail = (message) => {
   throw new Error(message);
@@ -161,6 +170,10 @@ export function validatePackageTarball(file, expected) {
   const bytes = readFileSync(file);
   const entries = tarEntries(file);
   validateEntries(entries);
+  const retiredHealthEntry = entries.find((entry) =>
+    RETIRED_HEALTH_PATHS.some((retiredPath) => entry.replace(/\\/g, "/").startsWith(retiredPath)),
+  );
+  if (retiredHealthEntry) fail(`package still contains retired Health code: ${retiredHealthEntry}`);
   assertNoArchiveLinks(file);
   const temp = mkdtempSync(join(tmpdir(), "cowork-pkg-"));
   try {

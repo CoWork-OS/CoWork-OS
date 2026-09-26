@@ -4,7 +4,7 @@ const ipcAPI = window.electronAPI;
 
 interface ScrapingSettingsData {
   enabled: boolean;
-  defaultFetcher: "default" | "stealth" | "playwright";
+  defaultFetcher: "default" | "playwright";
   headless: boolean;
   timeout: number;
   maxContentLength: number;
@@ -123,8 +123,8 @@ export function ScrapingSettings() {
         >
           Scrapling
         </a>
-        . Anti-bot bypass, stealth browsing, adaptive element tracking, and structured data
-        extraction.
+        . JavaScript rendering, adaptive element tracking, and structured data extraction. It does
+        not bypass bot protection or CAPTCHAs.
       </p>
 
       {/* Status Banner */}
@@ -212,8 +212,7 @@ export function ScrapingSettings() {
               }
               style={selectStyle}
             >
-              <option value="default">Default (fast HTTP + TLS fingerprinting)</option>
-              <option value="stealth">Stealth (Cloudflare bypass)</option>
+              <option value="default">Default (fast HTTP)</option>
               <option value="playwright">Playwright (full browser)</option>
             </select>
           </SettingRow>

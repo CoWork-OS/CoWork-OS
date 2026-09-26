@@ -59,6 +59,12 @@ interface MCPServerStatus {
 
 interface MCPSettingsData {
   servers: MCPServerConfig[];
+  storageStatus?:
+    | "success"
+    | "not_found"
+    | "decryption_failed"
+    | "checksum_mismatch"
+    | "os_encryption_unavailable";
   autoConnect: boolean;
   toolNamePrefix: string;
   maxReconnectAttempts: number;
@@ -188,6 +194,11 @@ export function MCPSettings() {
     serverName: string;
     env?: Record<string, string>;
   } | null>(null);
+
+  const mcpSettingsUnreadable =
+    settings?.storageStatus !== undefined &&
+    settings.storageStatus !== "success" &&
+    settings.storageStatus !== "not_found";
 
   // Edit server modal state
   const [editingServer, setEditingServer] = useState<string | null>(null);
@@ -695,6 +706,13 @@ export function MCPSettings() {
         </button>
       </div>
 
+      {mcpSettingsUnreadable && (
+        <p className="settings-hint warning" role="alert">
+          MCP server settings could not be read safely. Existing encrypted data is preserved; server
+          changes are paused until access is restored or settings are recovered.
+        </p>
+      )}
+
       {activeView === "servers" && (
         <>
           <div className="settings-section">
@@ -711,6 +729,7 @@ export function MCPSettings() {
                 <button
                   className="button-small button-primary"
                   onClick={() => setShowAddForm(!showAddForm)}
+                  disabled={mcpSettingsUnreadable}
                 >
                   {showAddForm ? "Cancel" : "+ Add Server"}
                 </button>
@@ -769,7 +788,9 @@ export function MCPSettings() {
                   <button
                     className="button-primary"
                     onClick={handleAddServer}
-                    disabled={!newServerName || !newServerCommand || saving}
+                    disabled={
+                      !newServerName || !newServerCommand || saving || mcpSettingsUnreadable
+                    }
                   >
                     {saving ? "Adding..." : "Add Server"}
                   </button>
@@ -779,8 +800,16 @@ export function MCPSettings() {
 
             {serverStatuses.length === 0 && !showAddForm ? (
               <div className="mcp-empty-state">
-                <p>{agentContext.getUiCopy("mcpEmptyTitle")}</p>
-                <p className="settings-hint">{agentContext.getUiCopy("mcpEmptyHint")}</p>
+                <p>
+                  {mcpSettingsUnreadable
+                    ? "Saved MCP server list is unavailable."
+                    : agentContext.getUiCopy("mcpEmptyTitle")}
+                </p>
+                <p className="settings-hint">
+                  {mcpSettingsUnreadable
+                    ? "The encrypted configuration is preserved but cannot be read in this app session."
+                    : agentContext.getUiCopy("mcpEmptyHint")}
+                </p>
               </div>
             ) : (
               <div className="mcp-server-list">
@@ -974,6 +1003,7 @@ export function MCPSettings() {
             details and install with one click.
           </p>
           <MCPRegistryBrowser
+            installDisabled={mcpSettingsUnreadable}
             onInstall={() => {
               loadData();
               setActiveView("servers");
@@ -1214,6 +1244,7 @@ export function MCPSettings() {
                 type="checkbox"
                 checked={settings.autoConnect}
                 onChange={(e) => setSettings({ ...settings, autoConnect: e.target.checked })}
+                disabled={mcpSettingsUnreadable}
               />
               <span>Auto-connect to enabled servers on startup</span>
             </label>
@@ -1227,6 +1258,7 @@ export function MCPSettings() {
               placeholder="mcp_"
               value={settings.toolNamePrefix}
               onChange={(e) => setSettings({ ...settings, toolNamePrefix: e.target.value })}
+              disabled={mcpSettingsUnreadable}
             />
             <p className="settings-hint">
               Prefix added to MCP tool names to avoid conflicts with built-in tools. For example, a
@@ -1242,6 +1274,7 @@ export function MCPSettings() {
               min={0}
               max={20}
               value={settings.maxReconnectAttempts}
+              disabled={mcpSettingsUnreadable}
               onChange={(e) =>
                 setSettings({ ...settings, maxReconnectAttempts: parseInt(e.target.value) || 0 })
               }
@@ -1259,6 +1292,7 @@ export function MCPSettings() {
               min={100}
               max={60000}
               value={settings.reconnectDelayMs}
+              disabled={mcpSettingsUnreadable}
               onChange={(e) =>
                 setSettings({ ...settings, reconnectDelayMs: parseInt(e.target.value) || 1000 })
               }
@@ -1269,7 +1303,11 @@ export function MCPSettings() {
           </div>
 
           <div className="settings-actions">
-            <button className="button-primary" onClick={handleSaveSettings} disabled={saving}>
+            <button
+              className="button-primary"
+              onClick={handleSaveSettings}
+              disabled={saving || mcpSettingsUnreadable}
+            >
               {saving ? "Saving..." : "Save Settings"}
             </button>
           </div>

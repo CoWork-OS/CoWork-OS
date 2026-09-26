@@ -112,9 +112,8 @@ describe("New Events constants", () => {
     expect(Events.MANAGED_SESSION_FAILED).toBe("managedSession.failed");
   });
 
-  it("has node events", () => {
-    expect(Events.NODE_CONNECTED).toBe("node.connected");
-    expect(Events.NODE_DISCONNECTED).toBe("node.disconnected");
+  it("no longer defines retired mobile companion events", () => {
+    expect(Object.values(Events).some((event) => event.startsWith("node."))).toBe(false);
   });
 
   it("has config event", () => {
@@ -123,12 +122,7 @@ describe("New Events constants", () => {
 });
 
 describe("New ErrorCodes constants", () => {
-  it("has node-related error codes", () => {
-    expect(ErrorCodes.NODE_NOT_FOUND).toBe("NODE_NOT_FOUND");
-    expect(ErrorCodes.NODE_UNAVAILABLE).toBe("NODE_UNAVAILABLE");
-    expect(ErrorCodes.NODE_TIMEOUT).toBe("NODE_TIMEOUT");
-    expect(ErrorCodes.NODE_PERMISSION_DENIED).toBe("NODE_PERMISSION_DENIED");
-    expect(ErrorCodes.NODE_COMMAND_FAILED).toBe("NODE_COMMAND_FAILED");
-    expect(ErrorCodes.NODE_BACKGROUND_UNAVAILABLE).toBe("NODE_BACKGROUND_UNAVAILABLE");
+  it("no longer defines retired mobile companion error codes", () => {
+    expect(Object.keys(ErrorCodes).some((code) => code.startsWith("NODE_"))).toBe(false);
   });
 });

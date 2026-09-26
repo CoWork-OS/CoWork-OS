@@ -2643,6 +2643,7 @@ export interface Task {
     | "subconscious"
     | "symphony"
     | "managed_agent_panel"
+    | "sample"
     | "side_chat";
   // Strategy/routing controls
   strategyLock?: boolean; // When true, do not re-route intent at runtime
@@ -8955,6 +8956,18 @@ export const IPC_CHANNELS = {
   WORKSPACE_TOUCH: "workspace:touch",
   WORKSPACE_GET_TEMP: "workspace:getTemp", // Get or create temp workspace
   WORKSPACE_PRUNE_TEMP: "workspace:pruneTemp", // Check or delete unused temp workspaces
+  FIRST_TASK_START: "firstTask:start",
+  FIRST_TASK_PREFLIGHT: "firstTask:preflight",
+  FIRST_TASK_SETUP_GET: "firstTask:setupGet",
+  FIRST_TASK_SETUP_SET: "firstTask:setupSet",
+  FIRST_TASK_GET: "firstTask:get",
+  FIRST_TASK_VERIFY: "firstTask:verify",
+  FIRST_TASK_INSPECT: "firstTask:inspect",
+  FIRST_TASK_REQUEST_REVISION: "firstTask:requestRevision",
+  FIRST_TASK_CANCEL_REVISION: "firstTask:cancelRevision",
+  FIRST_TASK_REAL_WORK_GET: "firstTask:realWorkGet",
+  FIRST_TASK_REAL_WORK_INSPECT: "firstTask:realWorkInspect",
+  FIRST_TASK_REAL_WORK_USEFUL: "firstTask:realWorkUseful",
 
   // Approval operations
   APPROVAL_RESPOND: "approval:respond",

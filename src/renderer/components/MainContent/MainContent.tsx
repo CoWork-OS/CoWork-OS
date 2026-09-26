@@ -102,6 +102,8 @@ import {
   type ModeSuggestion,
 } from "../../../shared/mode-suggestion-detection";
 import { CollaborativeAgentLines } from "../CollaborativeAgentLines";
+import { FirstTaskCard } from "../FirstTaskCard";
+import { RealWorkFeedback } from "../RealWorkFeedback";
 import { CollaborativeSummaryPanel } from "../CollaborativeSummaryPanel";
 import { DispatchedAgentsPanel } from "../DispatchedAgentsPanel";
 import { CliAgentFrame } from "../CliAgentFrame";
@@ -584,6 +586,7 @@ interface MainContentProps {
     options?: CreateTaskOptions,
     images?: ImageAttachment[],
   ) => void | boolean | Promise<void | boolean>;
+  onFirstTaskReady?: (task: Task, workspace: Workspace) => void;
   onAskInbox?: (query: string) => void;
   onChangeWorkspace?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
@@ -3587,6 +3590,7 @@ function MainContentComponent({
   onStartOnboarding,
   onStartFreshSession,
   onCreateTask,
+  onFirstTaskReady,
   onAskInbox,
   onChangeWorkspace,
   onSelectWorkspace,
@@ -9299,8 +9303,16 @@ function MainContentComponent({
 
             {!isCalm && (
               <p className="welcome-positioning modern-only">
-                Your AI super app, powered by the models you choose.
+                An open desktop for getting work done with the AI you choose.
               </p>
+            )}
+
+            {import.meta.env.VITE_FIRST_TASK_BETA === "1" && onFirstTaskReady && onOpenWebArtifact && onOpenSettings && (
+              <FirstTaskCard
+                onTaskReady={onFirstTaskReady}
+                onOpenBrief={onOpenWebArtifact}
+                onOpenSettings={() => onOpenSettings("llm")}
+              />
             )}
 
             <div className="terminal-only">
@@ -10670,6 +10682,19 @@ function MainContentComponent({
         isCalm ? " calm-main calm-task" : ""
       }`}
     >
+      {import.meta.env.VITE_FIRST_TASK_BETA === "1" && task?.source === "sample" && onFirstTaskReady && onOpenWebArtifact && onOpenSettings && (
+        <FirstTaskCard
+          taskId={task.id}
+          onTaskReady={onFirstTaskReady}
+          onOpenBrief={onOpenWebArtifact}
+          onOpenSettings={() => onOpenSettings("llm")}
+          onRevise={(prompt) => onSendMessage(prompt)}
+          onUseOwnFiles={onChangeWorkspace}
+        />
+      )}
+      {import.meta.env.VITE_FIRST_TASK_BETA === "1" && task?.status === "completed" && task.source !== "sample" && !task.parentTaskId && !task.evalCaseId && hasTaskOutputs(taskOutputSummary) && onViewTaskOutputs && (
+        <RealWorkFeedback taskId={task.id} primaryOutputPath={taskOutputSummary.primaryOutputPath} onViewOutputs={onViewTaskOutputs} />
+      )}
       {/* Header */}
       <div className="main-header">
         {!isBotConversation && (task?.parentTaskId || task?.branchFromTaskId) && onSelectTask && (

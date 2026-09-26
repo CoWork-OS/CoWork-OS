@@ -319,11 +319,12 @@ export class PulseService {
     );
     const rootClause = taskColumns.has("parent_task_id") ? "AND parent_task_id IS NULL" : "";
     const evalClause = taskColumns.has("eval_case_id") ? "AND eval_case_id IS NULL" : "";
+    const sampleClause = taskColumns.has("source") ? "AND COALESCE(source, 'manual') <> 'sample'" : "";
     const sessionExpr = taskColumns.has("session_id") ? "COALESCE(session_id, id)" : "id";
     const created = this.db
       .prepare(
         `SELECT COUNT(*) AS tasks_started, COUNT(DISTINCT ${sessionExpr}) AS sessions_started
-       FROM tasks WHERE created_at >= ? AND created_at < ? ${rootClause} ${evalClause}`,
+       FROM tasks WHERE created_at >= ? AND created_at < ? ${rootClause} ${evalClause} ${sampleClause}`,
       )
       .get(start, end) as Record<string, number>;
     const terminal = this.db
@@ -334,7 +335,7 @@ export class PulseService {
          SUM(CASE WHEN status = 'failed' OR terminal_status = 'failed' THEN 1 ELSE 0 END) AS failed_tasks,
          SUM(CASE WHEN status = 'cancelled' OR terminal_status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_tasks,
          SUM(CASE WHEN status = 'completed' THEN COALESCE(last_run_duration_ms, 0) ELSE 0 END) AS active_ms
-       FROM tasks WHERE completed_at >= ? AND completed_at < ? ${rootClause} ${evalClause}`,
+       FROM tasks WHERE completed_at >= ? AND completed_at < ? ${rootClause} ${evalClause} ${sampleClause}`,
       )
       .get(start, end) as Record<string, number>;
 
@@ -353,6 +354,7 @@ export class PulseService {
        WHERE e.timestamp >= ? AND e.timestamp < ?
        ${taskColumns.has("parent_task_id") ? "AND (t.parent_task_id IS NULL OR t.id IS NULL)" : ""}
        ${taskColumns.has("eval_case_id") ? "AND (t.eval_case_id IS NULL OR t.id IS NULL)" : ""}
+       ${taskColumns.has("source") ? "AND (t.source IS NULL OR t.source <> 'sample')" : ""}
        AND COALESCE(e.type, e.legacy_type) IN ('tool_call','tool_error','approval_requested','approval_denied')`,
       )
       .all(start, end) as Array<{ type: string; legacy_type?: string; payload: string }>;
@@ -377,7 +379,10 @@ export class PulseService {
     }
     const llm = this.db
       .prepare(
-        "SELECT COUNT(*) AS errors FROM llm_call_events WHERE timestamp >= ? AND timestamp < ? AND success = 0",
+        `SELECT COUNT(*) AS errors FROM llm_call_events l
+         LEFT JOIN tasks t ON t.id = l.task_id
+         WHERE l.timestamp >= ? AND l.timestamp < ? AND l.success = 0
+         ${taskColumns.has("source") ? "AND (t.source IS NULL OR t.source <> 'sample')" : ""}`,
       )
       .get(start, end) as { errors: number };
     for (const key of Object.keys(tools) as Array<keyof PulseToolCounts>)

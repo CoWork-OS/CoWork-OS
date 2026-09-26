@@ -48,6 +48,7 @@ export default defineConfig({
         items: [
           { text: "Introduction", link: "/" },
           { text: "Getting Started", link: "/getting-started" },
+          { text: "First Task (Beta Preview)", link: "/first-task" },
           { text: "CoWork CLI", link: "/cli" },
           { text: "Beginner's Guide", link: "/cowork-school" },
           { text: "Platform Updates", link: "/integration-skill-bootstrap-lifecycle" },

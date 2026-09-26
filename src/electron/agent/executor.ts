@@ -7932,6 +7932,8 @@ ${transcript}
     this.cachedLlmSettings = LLMProviderFactory.loadSettings();
     const llmSelection = LLMProviderFactory.resolveTaskModelSelection(task.agentConfig, {
       isVerificationTask,
+      allowProviderOverride: task.source === "sample",
+      allowModelOverride: task.source === "sample",
     });
     this.applyResolvedProviderSelection(llmSelection);
     this.rebuildProviderFailoverSelections(llmSelection, this.llmProfileUsed);
@@ -37420,6 +37422,12 @@ Return ONLY a JSON object:
     forceProfile?: LlmProfile,
     opts?: { requiresImageInput?: boolean },
   ): void {
+    if (this.task.source === "sample") {
+      this.providerFailoverSelections = [primarySelection];
+      this.providerFailoverIndex = 0;
+      this.providerFailoverPreserveUntil = 0;
+      return;
+    }
     this.providerFailoverRequiresImageInput = opts?.requiresImageInput === true;
     this.providerFailoverSelections = LLMProviderFactory.resolveProviderFailoverChain(
       primarySelection,

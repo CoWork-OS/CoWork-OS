@@ -4,8 +4,9 @@ CoWork Pulse is an explicitly opt-in, content-free analytics stream for one prod
 
 > How many installations reach value, and how many return to do useful work again?
 
-Pulse is disabled by default. The consent choice is available during onboarding and under
-**Settings → CoWork Pulse**. The CLI provides the same controls:
+Pulse is disabled by default. CoWork asks once, after your first successful task (not during
+onboarding), and the choice is always available under **Settings → CoWork Pulse**. Until you
+answer, nothing is recorded as a decision. The CLI provides the same controls:
 
 ```sh
 cowork telemetry status
@@ -50,7 +51,7 @@ Example request shape:
 ## Included
 
 - Coarse client version, operating-system family, CPU family, and runtime family.
-- Daily counts of root sessions/tasks started, completed, failed, cancelled, and useful outcomes.
+- Daily counts of root sessions/tasks started, completed, failed, cancelled, and useful outcomes. Bundled synthetic sample tasks are excluded from these counts, tool-event categories, and task-linked model-error counts.
 - A coarse active-minutes bucket.
 - Daily tool-use counts reduced to six closed categories.
 - Counts of approval requests/denials and tool/LLM failures.
@@ -172,7 +173,7 @@ are separate from Pulse's daily aggregate contract.
 
 - Client collection/storage: `src/electron/telemetry/pulse-service.ts`.
 - Shared types: `src/shared/pulse.ts`; IPC wiring: `src/shared/types.ts`, preload and IPC handlers.
-- Consent controls: `PulseSettingsPanel.tsx`, onboarding, `src/cli/main.ts` and `direct-run.ts`.
+- Consent controls: `PulseSettingsPanel.tsx`, the first-success prompt (`PulseConsentPrompt.tsx`), `src/cli/main.ts` and `direct-run.ts`.
 - Startup: Electron and daemon entrypoints; updater: `src/electron/updater/update-manager.ts`.
 - Server/schema: `services/pulse-worker/src/index.ts` and `migrations/`.
 - Separate operator export: `src/electron/telemetry/task-event-exporter.ts`.

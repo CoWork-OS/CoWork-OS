@@ -55,14 +55,34 @@ function newManager() {
 describe("update check release resolution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // NODE_ENV is "test" under vitest, which already short-circuits the Pulse
-    // branch, so assert on the consent gate rather than on the request itself
-    // where the environment guard would hide a regression.
     mocks.pulseConsent.mockReturnValue(false);
     mocks.fetch.mockResolvedValue(githubResponse());
   });
 
-  it("never contacts the Pulse collector when consent was not granted", async () => {
+  it("asks CoWork's identifier-free version endpoint without needing Pulse consent", async () => {
+    const env = { NODE_ENV: process.env.NODE_ENV, CI: process.env.CI };
+    process.env.NODE_ENV = "production";
+    delete process.env.CI;
+    try {
+      await newManager().checkForUpdates();
+    } finally {
+      process.env.NODE_ENV = env.NODE_ENV;
+      if (env.CI !== undefined) process.env.CI = env.CI;
+    }
+
+    const urls = mocks.fetch.mock.calls.map((call) => String(call[0]));
+    const pulse = urls.find((url) => url.includes("pulse.coworkosapp.com/v1/latest-version"));
+    expect(pulse).toBeDefined();
+    // Only version, platform, arch and surface: nothing that identifies the install.
+    expect([...new URL(pulse as string).searchParams.keys()].sort()).toEqual([
+      "arch",
+      "platform",
+      "surface",
+      "version",
+    ]);
+  });
+
+  it("skips the version endpoint in tests and CI and uses GitHub directly", async () => {
     await newManager().checkForUpdates();
 
     const urls = mocks.fetch.mock.calls.map((call) => String(call[0]));

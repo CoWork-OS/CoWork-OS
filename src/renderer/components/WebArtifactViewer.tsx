@@ -60,6 +60,7 @@ type WebArtifactViewerProps = {
   onOpenSettings?: (tab?: WebSettingsTab) => void;
   turnContext?: SpreadsheetTurnContext | null;
   refreshKey?: string | number | null;
+  readOnlyPreview?: boolean;
 };
 
 type ViewerData = NonNullable<FileViewerResult["data"]>;
@@ -118,6 +119,7 @@ export function WebArtifactViewer({
   onOpenSettings,
   turnContext,
   refreshKey,
+  readOnlyPreview = false,
 }: WebArtifactViewerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -325,7 +327,7 @@ export function WebArtifactViewer({
         className="web-artifact-frame"
         title={fileName}
         srcDoc={htmlContent}
-        sandbox="allow-scripts allow-forms allow-pointer-lock"
+        sandbox={readOnlyPreview ? "" : "allow-scripts allow-forms allow-pointer-lock"}
       />
     );
   };

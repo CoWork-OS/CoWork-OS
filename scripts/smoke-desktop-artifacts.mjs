@@ -276,14 +276,24 @@ async function validateNumbatRuntime(resourcesRoot, targetKey) {
   );
 }
 
-async function validatePersonaTemplates(resourcesRoot) {
-  const templatesRoot = path.join(resourcesRoot, "persona-templates");
-  const companyPlanner = path.join(templatesRoot, "company-planner.json");
-  const stat = await fs.stat(companyPlanner).catch(() => null);
-  if (!stat?.isFile()) {
-    throw new Error(
-      `Packaged persona templates are missing company-planner.json: ${companyPlanner}`,
-    );
+async function validateStarterMission(resourcesRoot) {
+  const missionRoot = path.join(resourcesRoot, "starter-missions", "release-brief-v1");
+  const manifestPath = path.join(missionRoot, "manifest.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const expectedFiles = ["brief-instructions.md", "issues.csv", "release-notes.md"];
+  if (manifest.id !== "release-brief-v1" ||
+      JSON.stringify(Object.keys(manifest.inputs || {}).sort()) !== JSON.stringify(expectedFiles)) {
+    throw new Error("Packaged starter mission manifest is incomplete");
+  }
+  for (const name of expectedFiles) {
+    const stat = await fs.lstat(path.join(missionRoot, name));
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) {
+      throw new Error(`Packaged starter mission input is unsafe: ${name}`);
+    }
+    const digest = createHash("sha256").update(await fs.readFile(path.join(missionRoot, name))).digest("hex");
+    if (!/^[a-f0-9]{64}$/.test(manifest.inputs[name]) || digest !== manifest.inputs[name]) {
+      throw new Error(`Packaged starter mission input failed integrity check: ${name}`);
+    }
   }
 }
 
@@ -497,7 +507,7 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
       path.join(appPath, "Contents", "Resources"),
       `darwin-${process.arch}`,
     );
-    await validatePersonaTemplates(path.join(appPath, "Contents", "Resources"));
+    await validateStarterMission(path.join(appPath, "Contents", "Resources"));
     await assertNoRetiredHealthBridge(path.join(appPath, "Contents", "Resources"));
     assertMacCodeSignature(appPath, allowUnsigned);
     await smokeLaunchMac(executablePath);
@@ -621,7 +631,7 @@ Write-Output $item.VersionInfo.ProductVersion
       path.join(path.dirname(appExe), "resources"),
       `win32-${process.arch}`,
     );
-    await validatePersonaTemplates(path.join(path.dirname(appExe), "resources"));
+    await validateStarterMission(path.join(path.dirname(appExe), "resources"));
     await assertNoRetiredHealthBridge(path.join(path.dirname(appExe), "resources"));
 
     if (!skipLaunch) {

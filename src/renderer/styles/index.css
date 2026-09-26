@@ -11358,6 +11358,13 @@ a,
   flex-wrap: wrap;
 }
 
+.connector-setup-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
 /* ──────────────────────────────────────
    Connector Marketplace
    ────────────────────────────────────── */
@@ -26630,51 +26637,46 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
  * SemanticTimeline — base layout
  * ------------------------------------------------------------------------- */
 
-/* ── Page header ─────────────────────────────────────────── */
-.co-page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.co-page-header h2 {
-  margin: 0;
-}
-
-/* ── Two-column layout ───────────────────────────────────── */
-.co-layout {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-
-/* ── Sidebar ─────────────────────────────────────────────── */
-.co-sidebar {
+.semantic-timeline {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  position: sticky;
-  top: 8px;
+  gap: 0;
 }
 
-.co-sidebar-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.semantic-timeline-empty {
+  min-height: 0;
 }
 
-.co-sidebar-heading {
+.semantic-timeline-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 700;
+  gap: 8px;
+  padding: 0 0 6px 0;
+  flex-wrap: wrap;
+}
+
+.semantic-timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.semantic-timeline-phases {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.phase-chip {
+  font-size: 10px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 10px;
+  opacity: 0.4;
 }
 
 .phase-chip.active {
@@ -26683,14 +26685,16 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
 
 .semantic-timeline-verbosity-toggle {
   display: flex;
-  flex-direction: column;
   gap: 2px;
-  padding: 8px 10px;
+}
+
+.verbosity-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-text-primary);
-  text-align: left;
+  color: var(--text-muted, #888);
   cursor: pointer;
   transition:
     background 0.15s,
@@ -26711,142 +26715,113 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
 /* Show-all toggle */
 .semantic-timeline-show-all-btn {
   font-size: 11px;
-  color: var(--color-text-muted);
-}
-
-/* ── Create toggle + form ────────────────────────────────── */
-.co-create-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px dashed var(--color-border-subtle);
-  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
   background: transparent;
-  color: var(--color-text-secondary);
-  font: inherit;
-  font-size: 13px;
+  color: var(--text-muted, #888);
   cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.co-create-toggle:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.co-create-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-glass);
-  animation: co-slide-down 0.15s ease;
-}
-
-@keyframes co-slide-down {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.co-create-btn {
-  width: 100%;
-}
-
-/* ── Main content ────────────────────────────────────────── */
-.co-main {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-/* ── Stat bar ────────────────────────────────────────────── */
-.co-stat-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 4px;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-glass);
-  border: 1px solid var(--color-border-subtle);
-}
-
-.co-stat {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--color-text-secondary);
   white-space: nowrap;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
-.co-stat strong {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--color-text-primary);
+.semantic-timeline-show-all-btn:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary, #fff);
 }
 
-.co-stat svg {
-  color: var(--color-accent);
-  flex-shrink: 0;
+/* ---------------------------------------------------------------------------
+ * Windowed scroll container
+ * ------------------------------------------------------------------------- */
+
+.semantic-timeline-window {
+  position: relative;
 }
 
-.co-stat--wide {
-  flex: 1 1 auto;
-  justify-content: flex-end;
+/* Windowed mode: fixed height, hides overflow, auto-scrolls to latest */
+.semantic-timeline-window.windowed {
+  height: 240px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  /* Subtle fade at top to hint more content above */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 18%);
+  mask-image: linear-gradient(to bottom, transparent 0%, black 18%);
 }
 
-.co-stat-run {
-  font-size: 12px;
-  color: var(--color-text-muted);
+/* Expanded (show all): no height cap */
+.semantic-timeline-window.expanded {
+  overflow-y: visible;
 }
 
-/* ── Detail card ─────────────────────────────────────────── */
-.co-detail-card {
+.semantic-timeline-feed {
   display: flex;
   flex-direction: column;
-  gap: 14px;
 }
 
-.co-detail-header {
+.semantic-timeline-feed-virtual {
+  height: 100%;
+}
+
+.document-editor-modal {
+  width: min(1400px, 94vw);
+  height: min(920px, 92vh);
+  background: var(--bg-secondary, #111315);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.document-editor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0));
 }
 
-.co-detail-title {
+.document-editor-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary, #f3f4f6);
+}
+
+.document-editor-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #9ca3af);
+}
+
+.document-editor-header-actions {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
-.co-detail-title h3 {
-  margin: 0;
-  font-size: 16px;
+.document-editor-header-actions .file-viewer-action-btn {
+  width: auto;
+  height: auto;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  letter-spacing: 0.01em;
 }
 
-.co-detail-actions {
-  display: flex;
-  gap: 8px;
+.document-editor-header-actions .file-viewer-close-btn:hover {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #f87171;
 }
 
-.co-detail-grid {
+.document-editor-body {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
 }
@@ -29652,3 +29627,52 @@ html:not(.theme-light) .selected-workspace-main-row {
 .sidebar-bot-preview {
   color: var(--color-text-muted);
 }
+/* First successful task beta: compact setup and a normal workspace card. */
+.quick-first-run {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1rem;
+  max-width: 42rem;
+  margin: auto;
+  padding: 2rem;
+  color: var(--text-primary, #eee);
+}
+
+.quick-first-run h1 { font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.1; }
+.quick-first-run p { line-height: 1.6; }
+.quick-first-run button,
+.first-task-card button {
+  cursor: pointer;
+  border-radius: 0.65rem;
+  border: 1px solid currentColor;
+  padding: 0.65rem 1rem;
+  color: inherit;
+  background: transparent;
+}
+.quick-first-run button:first-of-type,
+.first-task-card button:first-of-type { background: var(--accent-color, #5d68d8); color: #fff; border-color: transparent; }
+.quick-first-run button:disabled,
+.first-task-card button:disabled { opacity: 0.55; cursor: wait; }
+.first-task-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border-color, #555);
+  border-radius: 1rem;
+  background: var(--surface-secondary, #1d1d1d);
+  color: var(--text-primary, #eee);
+}
+.first-task-card h2,
+.first-task-card p,
+.first-task-card ul,
+.first-task-card small { flex-basis: 100%; margin: 0; }
+.first-task-card h2 { font-size: 1.2rem; }
+.first-task-card p,
+.first-task-card small { line-height: 1.5; }
+.first-task-card [role="alert"] { color: #e89090; }

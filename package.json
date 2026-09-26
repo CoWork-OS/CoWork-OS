@@ -302,10 +302,10 @@
     ],
     "extraResources": [
       {
-        "from": "resources/persona-templates",
-        "to": "persona-templates",
+        "from": "resources/starter-missions",
+        "to": "starter-missions",
         "filter": [
-          "*.json"
+          "**/*"
         ]
       },
       {

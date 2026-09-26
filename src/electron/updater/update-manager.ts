@@ -13,7 +13,6 @@ import {
   type ReleaseSignatureResult,
 } from "./release-signature";
 import { createLogger } from "../utils/logger";
-import { isPulseConsentGranted } from "../telemetry/pulse-service";
 
 const log = createLogger("UpdateManager");
 const execAsync = promisify(exec);
@@ -268,7 +267,11 @@ export class UpdateManager {
         : null;
 
     let release: GitHubRelease | null = null;
-    if (isPulseConsentGranted() && !process.env.CI && process.env.NODE_ENV !== "test") {
+    // The update check always happens (to GitHub otherwise). Asking CoWork's own endpoint
+    // first sends only version/platform/arch/surface: no ID, cookie or usage. It is what
+    // lets the project count active installs, so it does not depend on Pulse consent,
+    // as documented in docs/cowork-pulse.md. Skipped in CI and tests.
+    if (!process.env.CI && process.env.NODE_ENV !== "test") {
       try {
         const params = new URLSearchParams({
           version: currentVersion,

@@ -852,7 +852,8 @@ type CronJobStatus =
   | "error"
   | "skipped"
   | "timeout"
-  | "cancelled";
+  | "cancelled"
+  | "unknown";
 type CronDeliveryMode = "direct" | "outbox";
 type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
 

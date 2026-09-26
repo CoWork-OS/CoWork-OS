@@ -50,7 +50,8 @@ interface CronJobState {
     | "error"
     | "skipped"
     | "timeout"
-    | "cancelled";
+    | "cancelled"
+    | "unknown";
   lastError?: string;
   lastDurationMs?: number;
   lastTaskId?: string;
@@ -446,6 +447,8 @@ function formatStatusLabel(status?: CronJobState["lastStatus"]): string {
       return "Timed out";
     case "cancelled":
       return "Cancelled";
+    case "unknown":
+      return "Outcome unknown";
     default:
       return "No runs yet";
   }
@@ -454,7 +457,8 @@ function formatStatusLabel(status?: CronJobState["lastStatus"]): string {
 function getStatusTone(
   status?: CronJobState["lastStatus"],
 ): "success" | "warning" | "error" | "muted" {
-  if (!status || status === "skipped" || status === "cancelled") return "muted";
+  if (!status || status === "skipped" || status === "cancelled" || status === "unknown")
+    return "muted";
   if (status === "ok") return "success";
   if (isWarningLikeLastStatus(status)) return "warning";
   return "error";
@@ -535,7 +539,7 @@ function describeRunSuccess(summary: CronRunSuccessSummary): string {
   if (summary.cancelled) parts.push(`${summary.cancelled} cancelled`);
   const excluded: string[] = [];
   if (summary.skipped) excluded.push(`${summary.skipped} skipped`);
-  if (summary.unclassified) excluded.push(`${summary.unclassified} older unclassified`);
+  if (summary.unclassified) excluded.push(`${summary.unclassified} unclassified`);
   return `${parts.join(" · ")} among classified attempts${excluded.length ? `; excludes ${excluded.join(", ")}` : ""}`;
 }
 
@@ -1363,7 +1367,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                             </span>
                             <span
                               style={styles.resultMetricLabel}
-                              title="Fully successful runs among classified attempts. Skipped and older unclassified runs are excluded. This is not a measure of whether the result was accepted."
+                              title="Fully successful runs among classified attempts. Skipped runs and runs without a known outcome are excluded. This is not a measure of whether the result was accepted."
                             >
                               Run success
                             </span>

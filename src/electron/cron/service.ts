@@ -766,7 +766,7 @@ export class CronService {
 
       const startTime = Date.now();
       let taskId: string | undefined;
-      let status: Exclude<CronJobStatus, "skipped"> = "ok";
+      let status: CronJobStatus = "ok";
       let errorMsg: string | undefined;
       let resultText: string | undefined;
       let workspaceContext: CronWorkspaceContext | null = null;
@@ -822,6 +822,7 @@ export class CronService {
             });
             resultText = workflowResult.resultText;
             errorMsg = workflowResult.error;
+            // queued/running means the scheduler did not observe an outcome.
             status =
               workflowResult.status === "completed"
                 ? "ok"
@@ -831,7 +832,10 @@ export class CronService {
                     ? "needs_user_action"
                     : workflowResult.status === "failed"
                       ? "error"
-                      : "partial_success";
+                      : "unknown";
+            if (status === "unknown" && !errorMsg) {
+              errorMsg = `Routine run ${workflowResult.status}; its outcome was not observed by the scheduler`;
+            }
             log.info(`Job ${job.name} executed Routine v2 run ${workflowResult.runId}`);
           }
         } else if (job.runMode === "thread_follow_up") {
@@ -853,7 +857,7 @@ export class CronService {
             }
 
             if (status === "ok") {
-              await deps.sendTaskMessage({
+              const sent = await deps.sendTaskMessage({
                 taskId,
                 message: renderedPrompt,
                 allowUserInput: job.allowUserInput ?? false,
@@ -861,7 +865,18 @@ export class CronService {
               });
               job.state.lastTaskId = taskId;
               await this.persist();
-              log.info(`Job ${job.name} sent scheduled follow-up to task ${taskId}`);
+              if (sent?.queued) {
+                // Queued behind an active run of the thread: this schedule did not run
+                // now, and the eventual result belongs to that thread, not this run.
+                status = "skipped";
+                errorMsg = "Follow-up queued behind an active run of the target thread";
+                log.info(`Job ${job.name} queued scheduled follow-up for busy task ${taskId}`);
+              } else {
+                // Sending returns after the follow-up ran; classify the thread's durable
+                // result rather than the fact that a message was sent.
+                shouldPollTaskStatus = true;
+                log.info(`Job ${job.name} sent scheduled follow-up to task ${taskId}`);
+              }
             }
           }
         } else {

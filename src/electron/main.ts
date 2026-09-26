@@ -2704,7 +2704,8 @@ if (isMacSafeStorageMigrationWorker) {
                         : evt.status === "partial_success" ||
                             evt.status === "needs_user_action" ||
                             evt.status === "cancelled" ||
-                            evt.status === "skipped"
+                            evt.status === "skipped" ||
+                            evt.status === "unknown"
                           ? "warning"
                           : "task_failed",
                     title: `${statusEmoji} ${jobName} ${statusText}`,

@@ -1317,8 +1317,10 @@ describe("CronService", () => {
         }),
       );
       const history = await service.getRunHistory("job-1");
+      // Queued behind an active run: the schedule did not observe a result, so it is
+      // not a successful run.
       expect(history?.entries[0]).toMatchObject({
-        status: "ok",
+        status: "skipped",
         taskId: "task-existing",
         runMode: "thread_follow_up",
       });

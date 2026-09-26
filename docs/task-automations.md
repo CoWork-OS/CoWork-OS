@@ -188,7 +188,10 @@ reconciles an interrupted run or a repeated completion notification cannot count
 counts are classified from the task's durable result (a completed task whose terminal status is
 `failed` is an error; a cancelled task is `cancelled`, not a failure). Delivery state is kept
 beside the execution outcome: a successful run whose channel delivery failed stays successful and
-shows the delivery failure separately. When upgrading, runs still in retained history are
+shows the delivery failure separately. A thread follow-up is classified by the thread's result
+after the follow-up ran; one queued behind an active run of that thread is recorded as skipped.
+A workflow run still queued or running when the scheduler stops waiting is recorded with an
+unknown outcome and never counts as success. When upgrading, runs still in retained history are
 classified once; earlier runs whose outcome is no longer known are shown as unclassified rather
 than guessed from the old combined success counter.
 

@@ -220,3 +220,85 @@ describe("CronService run outcome classification", () => {
     expect(history.entries[0].deliverableStatus).toBe("queued");
   });
 });
+
+describe("CronService follow-up and workflow runs", () => {
+  async function runJob(job: Record<string, unknown>, overrides: Partial<CronServiceDeps>) {
+    const service = new CronService({
+      cronEnabled: true,
+      storePath: "/test/cron/jobs.json",
+      createTask: vi.fn().mockResolvedValue({ id: "unused" }),
+      nowMs: (() => {
+        let clock = 2_000_000;
+        return () => clock++;
+      })(),
+      log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      ...overrides,
+    } as CronServiceDeps);
+    await service.start();
+    const added = await service.add({
+      name: "Job",
+      enabled: true,
+      workspaceId: "ws",
+      taskPrompt: "Do it",
+      schedule: { kind: "every", everyMs: 60_000 },
+      ...job,
+    } as never);
+    if (!added.ok) throw new Error(added.error);
+    await service.run(added.job.id, "force");
+    const history = await service.getRunHistory(added.job.id);
+    await service.stop();
+    return history!;
+  }
+
+  it("classifies a delivered thread follow-up by the thread's durable result", async () => {
+    const history = await runJob(
+      { runMode: "thread_follow_up", targetTaskId: "thread-1" },
+      {
+        sendTaskMessage: vi.fn().mockResolvedValue({ queued: false }),
+        getTaskStatus: vi
+          .fn()
+          .mockResolvedValue({ status: "completed", terminalStatus: "needs_user_action" }),
+      },
+    );
+    expect(history.entries[0].status).toBe("needs_user_action");
+    expect(history.outcomeCounts.ok).toBe(0);
+  });
+
+  it("does not count a merely sent message as success when the thread failed", async () => {
+    const history = await runJob(
+      { runMode: "thread_follow_up", targetTaskId: "thread-1" },
+      {
+        sendTaskMessage: vi.fn().mockResolvedValue({ queued: false }),
+        getTaskStatus: vi.fn().mockResolvedValue({ status: "failed", error: "boom" }),
+      },
+    );
+    expect(history.entries[0].status).toBe("error");
+  });
+
+  it("records a follow-up queued behind an active run as skipped, not success", async () => {
+    const history = await runJob(
+      { runMode: "thread_follow_up", targetTaskId: "thread-1" },
+      {
+        sendTaskMessage: vi.fn().mockResolvedValue({ queued: true }),
+        getTaskStatus: vi.fn().mockResolvedValue({ status: "executing" }),
+      },
+    );
+    expect(history.entries[0].status).toBe("skipped");
+    expect(summarizeCronRunSuccess(history.outcomeCounts).ratePercent).toBeNull();
+  });
+
+  it.each(["queued", "running"])(
+    "records a workflow run that is still %s as an unknown outcome",
+    async (workflowStatus) => {
+      const history = await runJob(
+        { runMode: "workflow", workflowRoutineId: "routine-1" },
+        {
+          executeWorkflow: vi.fn().mockResolvedValue({ runId: "r1", status: workflowStatus }),
+        },
+      );
+      expect(history.entries[0].status).toBe("unknown");
+      expect(history.outcomeCounts.legacyUnknown).toBe(1);
+      expect(history.outcomeCounts.partial_success).toBe(0);
+    },
+  );
+});

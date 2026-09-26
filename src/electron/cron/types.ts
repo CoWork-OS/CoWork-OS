@@ -28,7 +28,11 @@ export type CronJobStatus =
   | "error"
   | "skipped"
   | "timeout"
-  | "cancelled";
+  | "cancelled"
+  // The run was started but its durable outcome was not observed (for example a
+  // workflow still running when the scheduler stopped waiting). Never counted as
+  // success; reported as unclassified.
+  | "unknown";
 
 export type CronDeliveryMode = "direct" | "outbox";
 export type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";

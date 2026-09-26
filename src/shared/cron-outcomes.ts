@@ -21,7 +21,10 @@ export const CRON_OUTCOME_CATEGORIES = [
 export type CronOutcomeCategory = (typeof CRON_OUTCOME_CATEGORIES)[number];
 
 export type CronOutcomeCountMap = Record<CronOutcomeCategory, number> & {
-  /** Runs recorded before classification existed that retained history cannot explain. */
+  /**
+   * Runs without a known outcome: recorded before classification existed and no longer
+   * explained by retained history, or started but never observed to finish (`unknown`).
+   */
   legacyUnknown: number;
 };
 
@@ -142,6 +145,12 @@ export function describeCronRunStatus(status: string | undefined): CronRunStatus
       return { emoji: "⏭️", sentence: "Run was skipped.", short: "skipped" };
     case "timeout":
       return { emoji: "⏱️", sentence: "Task timed out.", short: "timed out" };
+    case "unknown":
+      return {
+        emoji: "❔",
+        sentence: "Run started; its outcome was not observed.",
+        short: "outcome unknown",
+      };
     default:
       return { emoji: "❔", sentence: "Run finished with an unknown status.", short: "finished" };
   }

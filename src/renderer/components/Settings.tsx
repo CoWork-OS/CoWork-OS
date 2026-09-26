@@ -130,6 +130,14 @@ const GoogleChatSettings = lazySettingsPanel(
 );
 const FeishuSettings = lazySettingsPanel(() => import("./FeishuSettings"), "FeishuSettings");
 const WeComSettings = lazySettingsPanel(() => import("./WeComSettings"), "WeComSettings");
+const WhatsAppCloudSettings = lazySettingsPanel(
+  () => import("./WhatsAppCloudSettings"),
+  "WhatsAppCloudSettings",
+);
+const TwilioSmsSettings = lazySettingsPanel(
+  () => import("./TwilioSmsSettings"),
+  "TwilioSmsSettings",
+);
 const XSettings = lazySettingsPanel(() => import("./XSettings"), "XSettings");
 const SearchSettings = lazySettingsPanel(() => import("./SearchSettings"), "SearchSettings");
 const UpdateSettings = lazySettingsPanel(() => import("./UpdateSettings"), "UpdateSettings");
@@ -303,7 +311,9 @@ type SecondaryChannel =
   | "email"
   | "googlechat"
   | "feishu"
-  | "wecom";
+  | "wecom"
+  | "whatsapp_cloud"
+  | "twilio_sms";
 
 interface SettingsProps {
   onBack: () => void;
@@ -878,6 +888,8 @@ const secondaryChannelItems: Array<{
   { key: "googlechat", label: "Google Chat", icon: <MessagesSquare {...S} /> },
   { key: "feishu", label: "Feishu / Lark", icon: <MessageCircle {...S} /> },
   { key: "wecom", label: "WeCom", icon: <Building2 {...S} /> },
+  { key: "whatsapp_cloud", label: "WhatsApp Business", icon: <MessageCircle {...S} /> },
+  { key: "twilio_sms", label: "SMS (Twilio)", icon: <MessageSquare {...S} /> },
   { key: "mattermost", label: "Mattermost", icon: <Square {...S} /> },
   { key: "matrix", label: "Matrix", icon: <LayoutGrid {...S} /> },
   { key: "twitch", label: "Twitch", icon: <Tv {...S} /> },
@@ -895,6 +907,8 @@ const secondaryChannelSearchTerms: Partial<Record<SecondaryChannel, string[]>> =
   googlechat: ["google chat", "gchat"],
   feishu: ["feishu", "lark"],
   wecom: ["wecom", "wechat work", "enterprise wechat"],
+  whatsapp_cloud: ["whatsapp business", "whatsapp cloud", "meta cloud api"],
+  twilio_sms: ["twilio", "sms", "text message", "mms"],
   mattermost: ["mattermost"],
   matrix: ["matrix"],
   twitch: ["twitch", "stream chat"],
@@ -8890,6 +8904,8 @@ export function Settings({
                         {effectiveSecondary === "googlechat" && <GoogleChatSettings />}
                         {effectiveSecondary === "feishu" && <FeishuSettings />}
                         {effectiveSecondary === "wecom" && <WeComSettings />}
+                        {effectiveSecondary === "whatsapp_cloud" && <WhatsAppCloudSettings />}
+                        {effectiveSecondary === "twilio_sms" && <TwilioSmsSettings />}
                       </div>
                     </div>
                   );

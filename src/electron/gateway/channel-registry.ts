@@ -33,6 +33,8 @@ import {
   BlueBubblesConfig,
   EmailConfig,
   XConfig,
+  WhatsAppCloudConfig,
+  TwilioSmsConfig,
 } from "./channels/types";
 import { createTelegramAdapter } from "./channels/telegram";
 import { createDiscordAdapter } from "./channels/discord";
@@ -51,6 +53,8 @@ import { createLineAdapter } from "./channels/line";
 import { createBlueBubblesAdapter } from "./channels/bluebubbles";
 import { createEmailAdapter } from "./channels/email";
 import { createXAdapter } from "./channels/x";
+import { createWhatsAppCloudAdapter } from "./channels/whatsapp-cloud";
+import { createTwilioSmsAdapter } from "./channels/twilio-sms";
 import { createLogger } from "../utils/logger";
 import {
   assertSafeLoomMailboxFolder,
@@ -867,6 +871,164 @@ export class ChannelRegistry extends EventEmitter {
         },
       },
       factory: (config) => createWeComAdapter(config as WeComConfig),
+    });
+
+    // WhatsApp Business Cloud API
+    this.register({
+      metadata: {
+        type: "whatsapp_cloud",
+        displayName: "WhatsApp Business (Cloud API)",
+        description:
+          "Meta-hosted WhatsApp Business Cloud API using signed webhooks; separate from the personal WhatsApp Web channel",
+        icon: "🟢",
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: true,
+          reactions: false,
+          inlineKeyboards: false,
+          replyKeyboards: false,
+          polls: false,
+          voice: true,
+          video: true,
+          location: true,
+          editMessage: false,
+          deleteMessage: false,
+          typing: false,
+          readReceipts: true,
+          groups: false,
+          threads: false,
+          webhooks: true,
+          e2eEncryption: false,
+        },
+        configSchema: {
+          type: "object",
+          properties: {
+            phoneNumberId: {
+              type: "string",
+              description: "Business phone number ID",
+              required: true,
+            },
+            accessToken: {
+              type: "string",
+              description: "System-user access token",
+              required: true,
+              secret: true,
+            },
+            appSecret: {
+              type: "string",
+              description: "Meta app secret (verifies webhook signatures)",
+              required: true,
+              secret: true,
+            },
+            verifyToken: {
+              type: "string",
+              description: "Webhook verify token",
+              required: true,
+              secret: true,
+            },
+            fallbackTemplateName: {
+              type: "string",
+              description: "Approved template sent when the 24-hour window is closed",
+            },
+            fallbackTemplateLanguage: {
+              type: "string",
+              description: "Fallback template language code (default: en_US)",
+              default: "en_US",
+            },
+            webhookPort: {
+              type: "number",
+              description: "Webhook endpoint port (default: 3982)",
+              default: 3982,
+            },
+            webhookPath: {
+              type: "string",
+              description: "Webhook path (default: /whatsapp-cloud/webhook)",
+              default: "/whatsapp-cloud/webhook",
+            },
+          },
+          required: ["phoneNumberId", "accessToken", "appSecret", "verifyToken"],
+        },
+      },
+      factory: (config) => createWhatsAppCloudAdapter(config as WhatsAppCloudConfig),
+    });
+
+    // Twilio SMS
+    this.register({
+      metadata: {
+        type: "twilio_sms",
+        displayName: "Twilio SMS",
+        description: "SMS and MMS through Twilio Programmable Messaging with signed webhooks",
+        icon: "💬",
+        builtin: true,
+        capabilities: {
+          sendMessage: true,
+          receiveMessage: true,
+          attachments: true,
+          reactions: false,
+          inlineKeyboards: false,
+          replyKeyboards: false,
+          polls: false,
+          voice: false,
+          video: false,
+          location: false,
+          editMessage: false,
+          deleteMessage: false,
+          typing: false,
+          readReceipts: true,
+          groups: false,
+          threads: false,
+          webhooks: true,
+          e2eEncryption: false,
+        },
+        configSchema: {
+          type: "object",
+          properties: {
+            accountSid: {
+              type: "string",
+              description: "Twilio Account SID (AC...)",
+              required: true,
+            },
+            authToken: {
+              type: "string",
+              description: "Twilio auth token",
+              required: true,
+              secret: true,
+            },
+            fromNumber: {
+              type: "string",
+              description: "Sending number in E.164 format",
+            },
+            messagingServiceSid: {
+              type: "string",
+              description: "Messaging Service SID (MG...), used instead of fromNumber when set",
+            },
+            webhookPublicUrl: {
+              type: "string",
+              description: "Public HTTPS base URL that forwards to this machine",
+              required: true,
+            },
+            webhookPort: {
+              type: "number",
+              description: "Webhook endpoint port (default: 3983)",
+              default: 3983,
+            },
+            webhookPath: {
+              type: "string",
+              description: "Inbound webhook path (default: /twilio-sms/webhook)",
+              default: "/twilio-sms/webhook",
+            },
+            statusPath: {
+              type: "string",
+              description: "Status callback path (default: /twilio-sms/status)",
+              default: "/twilio-sms/status",
+            },
+          },
+          required: ["accountSid", "authToken", "webhookPublicUrl"],
+        },
+      },
+      factory: (config) => createTwilioSmsAdapter(config as TwilioSmsConfig),
     });
 
     // Mattermost

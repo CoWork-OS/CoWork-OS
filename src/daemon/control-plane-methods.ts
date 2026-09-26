@@ -1609,6 +1609,8 @@ export function registerControlPlaneMethods(
       "bluebubbles",
       "email",
       "x",
+      "whatsapp_cloud",
+      "twilio_sms",
     ];
     return { types };
   });

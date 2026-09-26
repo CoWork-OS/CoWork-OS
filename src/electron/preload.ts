@@ -5,6 +5,14 @@ import * as os from "os";
 import { randomBytes } from "crypto";
 import { IPC_CHANNELS as SHARED_IPC_CHANNELS, isTempWorkspaceId } from "../shared/types";
 import type {
+  ChannelHealthResponse,
+  MeetingArtifactProvider,
+  MeetingArtifactSummary,
+  TeamsMeetingSettingsUpdate,
+  TeamsMeetingSettingsView,
+  TeamsMeetingStatus,
+} from "../shared/types";
+import type {
   ApplyOnboardingProfileRequest,
   ApplyOnboardingProfileResult,
 } from "../shared/onboarding";
@@ -889,7 +897,9 @@ interface CronDeliveryConfig {
     | "email"
     | "teams"
     | "googlechat"
-    | "x";
+    | "x"
+    | "whatsapp_cloud"
+    | "twilio_sms";
   channelId?: string;
   deliverOnSuccess?: boolean;
   deliverOnError?: boolean;
@@ -3313,6 +3323,29 @@ contextBridge.exposeInMainWorld("electronAPI", {
   disableGatewayChannel: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_DISABLE_CHANNEL, id),
   testGatewayChannel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, id),
+  getGatewayChannelHealth: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_CHANNEL_HEALTH, id),
+  getTeamsMeetingSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_TEAMS_GET_SETTINGS),
+  getTeamsMeetingStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_TEAMS_GET_STATUS),
+  updateTeamsMeetingSettings: (update: TeamsMeetingSettingsUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_TEAMS_UPDATE_SETTINGS, update),
+  connectTeamsMeetings: (data: { clientId: string; tenant?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_TEAMS_CONNECT, data),
+  disconnectTeamsMeetings: () => ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_TEAMS_DISCONNECT),
+  syncTeamsMeetingsNow: () => ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_TEAMS_SYNC_NOW),
+  retryFailedTeamsMeetings: () => ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_TEAMS_RETRY_FAILED),
+  listMeetingArtifacts: (options?: { provider?: MeetingArtifactProvider; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_LIST_ARTIFACTS, options),
+  getMeetingArtifact: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_GET_ARTIFACT, id),
+  downloadMeetingRecording: (artifactId: string, recordingId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_DOWNLOAD_RECORDING, { artifactId, recordingId }),
+  revealMeetingArtifact: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEETINGS_REVEAL_ARTIFACT, id),
+  onMeetingArtifactsChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on(IPC_CHANNELS.MEETINGS_CHANGED, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MEETINGS_CHANGED, listener);
+  },
   getGatewayUsers: (channelId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GET_USERS, channelId),
   getGatewayChats: (channelId: string) =>
@@ -6389,6 +6422,29 @@ export interface ElectronAPI {
   testGatewayChannel: (
     id: string,
   ) => Promise<{ success: boolean; error?: string; botUsername?: string }>;
+  getGatewayChannelHealth: (id: string) => Promise<ChannelHealthResponse | null>;
+  getTeamsMeetingSettings: () => Promise<TeamsMeetingSettingsView>;
+  getTeamsMeetingStatus: () => Promise<TeamsMeetingStatus>;
+  updateTeamsMeetingSettings: (
+    update: TeamsMeetingSettingsUpdate,
+  ) => Promise<TeamsMeetingSettingsView>;
+  connectTeamsMeetings: (data: {
+    clientId: string;
+    tenant?: string;
+  }) => Promise<TeamsMeetingStatus>;
+  disconnectTeamsMeetings: () => Promise<void>;
+  syncTeamsMeetingsNow: () => Promise<TeamsMeetingStatus>;
+  retryFailedTeamsMeetings: () => Promise<TeamsMeetingStatus>;
+  listMeetingArtifacts: (options?: {
+    provider?: MeetingArtifactProvider;
+    limit?: number;
+  }) => Promise<MeetingArtifactSummary[]>;
+  getMeetingArtifact: (
+    id: string,
+  ) => Promise<{ summary: MeetingArtifactSummary; markdown: string } | null>;
+  downloadMeetingRecording: (artifactId: string, recordingId: string) => Promise<string>;
+  revealMeetingArtifact: (id: string) => Promise<void>;
+  onMeetingArtifactsChanged: (callback: () => void) => () => void;
   getGatewayUsers: (channelId: string) => Promise<Any[]>;
   getGatewayChats: (channelId: string) => Promise<Array<{ chatId: string; lastTimestamp: number }>>;
   sendGatewayTestMessage: (data: {

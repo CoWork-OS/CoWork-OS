@@ -216,6 +216,8 @@ function formatChannelLabel(channelType: string): string {
   if (channelType === "signal") return "Signal";
   if (channelType === "feishu") return "Feishu / Lark";
   if (channelType === "wecom") return "WeCom";
+  if (channelType === "whatsapp_cloud") return "WhatsApp Business";
+  if (channelType === "twilio_sms") return "SMS (Twilio)";
   return channelType.charAt(0).toUpperCase() + channelType.slice(1);
 }
 

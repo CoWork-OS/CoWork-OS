@@ -302,6 +302,60 @@ Enterprise WeCom gateway integration with signed/encrypted event handling.
 
 ---
 
+## WhatsApp Business (Cloud API)
+
+Meta-hosted WhatsApp Business Cloud API. This is a separate channel from **WhatsApp** (the personal-account WhatsApp Web integration); both can run at once.
+
+### Setup
+
+1. In the Meta developer console, add the WhatsApp product to an app and note the **Phone Number ID**
+2. Create a system-user **access token** with `whatsapp_business_messaging` (temporary API Setup tokens expire after 24 hours)
+3. Copy the app's **App Secret** (Settings > Basic) and choose a random **Verify Token**
+4. Configure the channel in **Settings** > **Channels** > **More Channels** > **WhatsApp Business**
+5. Expose the local webhook port (default `3982`) over public HTTPS with a tunnel or reverse proxy, set the Meta callback URL to that address plus the webhook path (default `/whatsapp-cloud/webhook`), and subscribe to the `messages` field
+6. Enable and test
+
+### Behavior
+
+- Every webhook POST must carry a valid `X-Hub-Signature-256` for the App Secret; the listener refuses to start without the App Secret and Verify Token. Rejected webhooks are counted and logged (throttled to one warning a minute) so a wrong secret or callback URL is visible
+- Each inbound message is written to a durable spool before the webhook is acknowledged, then processed. If processing fails it is retried with backoff (up to six attempts), including after a restart. Message IDs are deduplicated for 24 hours, and the dedup record is also persisted
+- Text, captions, button/list replies and locations are routed to the agent; images, documents, audio and video are downloaded (up to 25 MB) and saved as inbound attachments
+- Replies can include media, and long text is split at WhatsApp's 4,096-character limit
+- Free-form replies are only possible within 24 hours of the contact's last message. Outside that window CoWork **holds the reply**, sends the configured **fallback template** at most once per 24 hours per contact, and delivers the held replies as soon as the contact writes back. The window check happens before any media is sent. Without a fallback template such replies fail with an explanation. Meta's window-closed error triggers the same path, which covers restarts and reinstalls
+- Unknown senders get no reply (`silentUnauthorized` is on by default); pairing codes still work
+- **Settings > WhatsApp Business** shows webhook health: last inbound message, rejected webhooks, pending and retrying messages, held replies, and delivery counts with recent failures. Receipts are also emitted as `message:delivery_status` gateway events
+- Credentials, template and port can be changed with **Update settings** without removing the channel; secrets are never shown
+- Expired tokens and rate limits are reported with actionable errors, and **Test connection** checks credentials without binding a second listener
+- Spooled messages and held replies are stored under the CoWork user-data folder (`channels/webhook-state/<channel id>`, owner-only permissions; held attachment bytes live in its `held/` subfolder) and deleted when the channel is removed
+
+---
+
+## Twilio SMS
+
+SMS and MMS through Twilio Programmable Messaging.
+
+### Setup
+
+1. Copy the **Account SID** and **Auth Token** from the Twilio console
+2. Choose a sending number (E.164, e.g. `+15551234567`) or a **Messaging Service SID**
+3. Expose the local webhook port (default `3983`) at a public HTTPS base URL, then configure the channel in **Settings** > **Channels** > **More Channels** > **SMS (Twilio)** with that base URL
+4. In the Twilio console set **A message comes in** to `<base URL>/twilio-sms/webhook` (HTTP POST)
+5. Enable and test
+
+### Behavior
+
+- Every inbound and status webhook's `X-Twilio-Signature` (HMAC-SHA1 of the URL plus the sorted form parameters) is verified against the exact public URL, with or without the default port, so the base URL must match what Twilio calls. A rejected signature is logged with the URL CoWork verified against (throttled), which usually shows a changed tunnel URL. Update it with **Update settings**; no need to remove the channel
+- A base URL with a path prefix (for example `https://gw.example.com/cowork`) works whether or not the reverse proxy strips the prefix
+- Outbound messages request delivery receipts at `<base URL>/twilio-sms/status`. The channel settings show delivery counts and recent failures, and receipts are also emitted as `message:delivery_status` events (queued, sent, delivered, undelivered, failed)
+- Inbound messages are spooled durably before the webhook is acknowledged and retried if processing fails; `MessageSid` values (and status callbacks per SID and status) are deduplicated for 24 hours across restarts
+- Unknown senders get no reply (`silentUnauthorized` is on by default), so strangers cannot trigger billed pairing prompts; pairing codes still work
+- Recipients must be E.164 numbers; national numbers without a country code are rejected rather than guessed
+- Replies longer than 1,600 characters are split and labelled `(1/3)`, `(2/3)`, … because carriers do not guarantee ordering
+- Inbound MMS media (up to 5 MB each) is downloaded with account credentials; outbound media must be public HTTPS URLs
+- Carrier keywords (STOP, UNSUBSCRIBE, …, START, UNSTOP, HELP, INFO) are recorded but not routed to the agent, since Twilio answers them itself; sends to opted-out numbers report Twilio error 21610 clearly. Messages from short codes, alphanumeric senders and `whatsapp:` addresses are recorded without routing because this number cannot reply to them
+
+---
+
 ## Microsoft Teams
 
 Bot Framework SDK with DM/channel mentions and adaptive cards.
@@ -583,7 +637,7 @@ Configure in **Settings** > **Menu Bar**.
 
 ## Mobile Companions (discontinued)
 
-The iOS and Android companion apps were discontinued on 2026-09-26 to focus on core agent workflows, integrations, and reliability. To reach an agent from a phone, use a messaging channel such as [Telegram](#telegram), [WhatsApp](#whatsapp), or [Signal](#signal). See the [decision record](mobile-companions-discontinuation.md) for upgrade details.
+The iOS and Android companion apps were discontinued on 2026-09-26 to focus on core agent workflows, integrations, and reliability. To reach an agent from a phone, use a messaging channel such as [Telegram](#telegram), [WhatsApp](#whatsapp), or [Twilio SMS](#twilio-sms). See the [decision record](mobile-companions-discontinuation.md) for upgrade details.
 
 ---
 

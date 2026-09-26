@@ -43,6 +43,8 @@ import { ImessageAdapter, createImessageAdapter } from "./channels/imessage";
 import { SignalAdapter, createSignalAdapter } from "./channels/signal";
 import { createFeishuAdapter } from "./channels/feishu";
 import { createWeComAdapter } from "./channels/wecom";
+import { createWhatsAppCloudAdapter } from "./channels/whatsapp-cloud";
+import { createTwilioSmsAdapter } from "./channels/twilio-sms";
 import { MattermostAdapter, createMattermostAdapter } from "./channels/mattermost";
 import { MatrixAdapter, createMatrixAdapter } from "./channels/matrix";
 import { TwitchAdapter, createTwitchAdapter } from "./channels/twitch";
@@ -1495,6 +1497,93 @@ export class ChannelGateway {
   }
 
   /**
+   * Add a new WhatsApp Business Cloud API channel
+   */
+  async addWhatsAppCloudChannel(
+    name: string,
+    config: {
+      phoneNumberId: string;
+      accessToken: string;
+      appSecret: string;
+      verifyToken: string;
+      graphApiVersion?: string;
+      fallbackTemplateName?: string;
+      fallbackTemplateLanguage?: string;
+      webhookPort?: number;
+      webhookPath?: string;
+    },
+    securityMode: "open" | "allowlist" | "pairing" = "pairing",
+  ): Promise<Channel> {
+    if (this.channelRepo.findByType("whatsapp_cloud")) {
+      throw new Error("WhatsApp Cloud channel already configured. Update or remove it first.");
+    }
+    return this.channelRepo.create({
+      type: "whatsapp_cloud",
+      name,
+      enabled: false,
+      config: {
+        ...config,
+        // A business number is public; answering every stranger with a
+        // pairing prompt is spam and, on paid channels, a cost amplifier.
+        silentUnauthorized: true,
+        webhookPort: config.webhookPort ?? 3982,
+        webhookPath: config.webhookPath ?? "/whatsapp-cloud/webhook",
+      },
+      securityConfig: {
+        mode: securityMode,
+        allowedUsers: [],
+        pairingCodeTTL: 300,
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: "disconnected",
+    });
+  }
+
+  /**
+   * Add a new Twilio SMS channel
+   */
+  async addTwilioSmsChannel(
+    name: string,
+    config: {
+      accountSid: string;
+      authToken: string;
+      fromNumber?: string;
+      messagingServiceSid?: string;
+      webhookPublicUrl: string;
+      webhookPort?: number;
+      webhookPath?: string;
+      statusPath?: string;
+    },
+    securityMode: "open" | "allowlist" | "pairing" = "pairing",
+  ): Promise<Channel> {
+    if (this.channelRepo.findByType("twilio_sms")) {
+      throw new Error("Twilio SMS channel already configured. Update or remove it first.");
+    }
+    return this.channelRepo.create({
+      type: "twilio_sms",
+      name,
+      enabled: false,
+      config: {
+        ...config,
+        // Every reply to an unknown sender is a billed SMS; stay silent until paired.
+        silentUnauthorized: true,
+        webhookPort: config.webhookPort ?? 3983,
+        webhookPath: config.webhookPath ?? "/twilio-sms/webhook",
+        statusPath: config.statusPath ?? "/twilio-sms/status",
+      },
+      securityConfig: {
+        mode: securityMode,
+        allowedUsers: [],
+        pairingCodeTTL: 300,
+        maxPairingAttempts: 5,
+        rateLimitPerMinute: 30,
+      },
+      status: "disconnected",
+    });
+  }
+
+  /**
    * Add a new X channel
    */
   async addXChannel(
@@ -1744,6 +1833,13 @@ export class ChannelGateway {
     // Delete the channel and all associated records atomically.
     this.channelRepo.delete(channelId);
     this.router.unregisterAdapter(channelId);
+
+    if (channel.type === "whatsapp_cloud" || channel.type === "twilio_sms") {
+      // Spooled messages and held replies contain message content.
+      await fs.promises
+        .rm(this.getWebhookStateDir(channelId), { recursive: true, force: true })
+        .catch((error) => logger.warn("Failed to remove webhook channel state:", error));
+    }
   }
 
   /**
@@ -1768,11 +1864,15 @@ export class ChannelGateway {
 
       const adapter = this.createAdapterForChannel(channel);
       let info: Awaited<ReturnType<ChannelAdapter["getInfo"]>>;
-      try {
-        await adapter.connect();
-        info = await adapter.getInfo();
-      } finally {
-        await adapter.disconnect().catch(() => undefined);
+      if (adapter.probe) {
+        info = await adapter.probe();
+      } else {
+        try {
+          await adapter.connect();
+          info = await adapter.getInfo();
+        } finally {
+          await adapter.disconnect().catch(() => undefined);
+        }
       }
 
       return {
@@ -2444,6 +2544,37 @@ export class ChannelGateway {
           responsePrefix: channel.config.responsePrefix as string | undefined,
         } as _WeComConfig);
 
+      case "whatsapp_cloud":
+        return createWhatsAppCloudAdapter({
+          enabled: channel.enabled,
+          stateDir: this.getWebhookStateDir(channel.id),
+          phoneNumberId: channel.config.phoneNumberId as string,
+          accessToken: channel.config.accessToken as string,
+          appSecret: channel.config.appSecret as string,
+          verifyToken: channel.config.verifyToken as string,
+          graphApiVersion: channel.config.graphApiVersion as string | undefined,
+          fallbackTemplateName: channel.config.fallbackTemplateName as string | undefined,
+          fallbackTemplateLanguage: channel.config.fallbackTemplateLanguage as string | undefined,
+          webhookPort: channel.config.webhookPort as number | undefined,
+          webhookPath: channel.config.webhookPath as string | undefined,
+          responsePrefix: channel.config.responsePrefix as string | undefined,
+        });
+
+      case "twilio_sms":
+        return createTwilioSmsAdapter({
+          enabled: channel.enabled,
+          stateDir: this.getWebhookStateDir(channel.id),
+          accountSid: channel.config.accountSid as string,
+          authToken: channel.config.authToken as string,
+          fromNumber: channel.config.fromNumber as string | undefined,
+          messagingServiceSid: channel.config.messagingServiceSid as string | undefined,
+          webhookPublicUrl: channel.config.webhookPublicUrl as string,
+          webhookPort: channel.config.webhookPort as number | undefined,
+          webhookPath: channel.config.webhookPath as string | undefined,
+          statusPath: channel.config.statusPath as string | undefined,
+          responsePrefix: channel.config.responsePrefix as string | undefined,
+        });
+
       case "x":
         return createXAdapter({
           enabled: channel.enabled,
@@ -2480,6 +2611,31 @@ export class ChannelGateway {
     }
   }
 
+  private getWebhookStateDir(channelId: string): string {
+    return path.join(getUserDataDir(), "channels", "webhook-state", channelId);
+  }
+
+  /**
+   * Operational health for a webhook channel (delivery receipts, rejected
+   * webhooks, pending inbound events, held replies), read from the running
+   * adapter when there is one and from its persisted state otherwise.
+   */
+  async getChannelHealth(channelId: string): Promise<Record<string, unknown> | null> {
+    const channel = this.channelRepo.findById(channelId);
+    if (!channel) return null;
+    const running = this.router.getAdapterByChannelId(channelId);
+    if (!running && channel.type !== "whatsapp_cloud" && channel.type !== "twilio_sms") {
+      return { status: channel.status };
+    }
+    // An idle webhook adapter only reads its persisted state here; it never connects.
+    const adapter = running || this.createAdapterForChannel(channel);
+    const info = await adapter.getInfo();
+    return {
+      status: running ? running.status : "disconnected",
+      ...(info.extra || {}),
+    };
+  }
+
   private getLoomStatePath(channelId: string): string {
     return path.join(getUserDataDir(), "loom", `${channelId}.json`);
   }
@@ -2500,6 +2656,8 @@ export { SignalAdapter, createSignalAdapter } from "./channels/signal";
 export { SignalClient } from "./channels/signal-client";
 export { FeishuAdapter, createFeishuAdapter } from "./channels/feishu";
 export { WeComAdapter, createWeComAdapter } from "./channels/wecom";
+export { WhatsAppCloudAdapter, createWhatsAppCloudAdapter } from "./channels/whatsapp-cloud";
+export { TwilioSmsAdapter, createTwilioSmsAdapter } from "./channels/twilio-sms";
 export { MattermostAdapter, createMattermostAdapter } from "./channels/mattermost";
 export { MattermostClient } from "./channels/mattermost-client";
 export { MatrixAdapter, createMatrixAdapter } from "./channels/matrix";

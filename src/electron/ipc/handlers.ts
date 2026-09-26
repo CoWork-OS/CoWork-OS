@@ -332,6 +332,8 @@ import {
   PermissionSettingsSchema,
   AddChannelSchema,
   UpdateChannelSchema,
+  WhatsAppCloudChannelConfigSchema,
+  TwilioSmsChannelConfigSchema,
   GrantAccessSchema,
   RevokeAccessSchema,
   GeneratePairingSchema,
@@ -8820,6 +8822,52 @@ export async function setupIpcHandlers(
       return toPublicChannel(channel, "connecting");
     }
 
+    if (validated.type === "whatsapp_cloud") {
+      const channel = await gateway.addWhatsAppCloudChannel(
+        validated.name,
+        {
+          phoneNumberId: validated.whatsappCloudPhoneNumberId!,
+          accessToken: validated.whatsappCloudAccessToken!,
+          appSecret: validated.whatsappCloudAppSecret!,
+          verifyToken: validated.whatsappCloudVerifyToken!,
+          fallbackTemplateName: validated.whatsappCloudFallbackTemplateName,
+          fallbackTemplateLanguage: validated.whatsappCloudFallbackTemplateLanguage,
+          webhookPort: validated.webhookPort,
+          webhookPath: validated.webhookPath,
+        },
+        validated.securityMode || "pairing",
+      );
+
+      gateway.enableChannel(channel.id).catch((err) => {
+        logger.error("Failed to enable WhatsApp Cloud channel:", err);
+      });
+
+      return toPublicChannel(channel, "connecting");
+    }
+
+    if (validated.type === "twilio_sms") {
+      const channel = await gateway.addTwilioSmsChannel(
+        validated.name,
+        {
+          accountSid: validated.twilioAccountSid!,
+          authToken: validated.twilioAuthToken!,
+          fromNumber: validated.twilioFromNumber,
+          messagingServiceSid: validated.twilioMessagingServiceSid,
+          webhookPublicUrl: validated.twilioWebhookPublicUrl!,
+          webhookPort: validated.webhookPort,
+          webhookPath: validated.webhookPath,
+          statusPath: validated.twilioStatusPath,
+        },
+        validated.securityMode || "pairing",
+      );
+
+      gateway.enableChannel(channel.id).catch((err) => {
+        logger.error("Failed to enable Twilio SMS channel:", err);
+      });
+
+      return toPublicChannel(channel, "connecting");
+    }
+
     if (validated.type === "x") {
       const channel = await gateway.addXChannel(
         validated.name,
@@ -8922,6 +8970,18 @@ export async function setupIpcHandlers(
           mergedConfig,
           "email channel update",
         );
+      } else if (channel.type === "whatsapp_cloud") {
+        updates.config = validateInput(
+          WhatsAppCloudChannelConfigSchema,
+          mergedConfig,
+          "WhatsApp Cloud channel update",
+        );
+      } else if (channel.type === "twilio_sms") {
+        updates.config = validateInput(
+          TwilioSmsChannelConfigSchema,
+          mergedConfig,
+          "Twilio SMS channel update",
+        );
       } else {
         updates.config = mergedConfig;
       }
@@ -8943,6 +9003,11 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.GATEWAY_DISABLE_CHANNEL, async (_, id: string) => {
     if (!gateway) throw new Error("Gateway not initialized");
     await gateway.disableChannel(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_GET_CHANNEL_HEALTH, async (_, id: string) => {
+    if (!gateway) return null;
+    return gateway.getChannelHealth(validateInput(StringIdSchema, id, "channel id"));
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_TEST_CHANNEL, async (_, id: string) => {

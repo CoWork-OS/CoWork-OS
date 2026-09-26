@@ -26,6 +26,8 @@ export const CHANNEL_TYPES = [
   "feishu",
   "wecom",
   "x",
+  "whatsapp_cloud",
+  "twilio_sms",
 ] as const;
 
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
@@ -681,6 +683,69 @@ export interface WeComConfig extends ChannelConfig {
 }
 
 /**
+ * WhatsApp Business Cloud API configuration (Meta-hosted, webhook-based).
+ * Separate from the personal-account `whatsapp` (WhatsApp Web) channel.
+ */
+export interface WhatsAppCloudConfig extends ChannelConfig {
+  /** Business phone number ID from the WhatsApp Manager */
+  phoneNumberId: string;
+  /** System-user or permanent access token */
+  accessToken: string;
+  /** Meta app secret, used to verify X-Hub-Signature-256 on webhooks */
+  appSecret: string;
+  /** Token echoed during Meta's webhook verification handshake */
+  verifyToken: string;
+  /** Graph API version (default: v21.0) */
+  graphApiVersion?: string;
+  /** Approved template used when the 24-hour customer-service window has closed */
+  fallbackTemplateName?: string;
+  /** Language code for the fallback template (default: en_US) */
+  fallbackTemplateLanguage?: string;
+  /** Webhook port to listen on (default: 3982) */
+  webhookPort?: number;
+  /** Webhook path (default: /whatsapp-cloud/webhook) */
+  webhookPath?: string;
+  /** Bot display name */
+  displayName?: string;
+  /** Response prefix for bot replies */
+  responsePrefix?: string;
+  /** Directory for durable webhook state; memory-only when omitted */
+  stateDir?: string;
+}
+
+/**
+ * Twilio Programmable Messaging (SMS/MMS) configuration.
+ */
+export interface TwilioSmsConfig extends ChannelConfig {
+  /** Account SID (AC...) */
+  accountSid: string;
+  /** Auth token; signs inbound webhooks and authenticates REST calls */
+  authToken: string;
+  /** Sending number in E.164 (e.g. +15551234567) */
+  fromNumber?: string;
+  /** Messaging Service SID (MG...); preferred over fromNumber when set */
+  messagingServiceSid?: string;
+  /**
+   * Public HTTPS base URL that forwards to this machine (e.g. a tunnel URL).
+   * Twilio signs the exact public URL, so inbound and status-callback URLs are
+   * built from this base plus webhookPath/statusPath.
+   */
+  webhookPublicUrl: string;
+  /** Webhook port to listen on (default: 3983) */
+  webhookPort?: number;
+  /** Webhook path for inbound messages (default: /twilio-sms/webhook) */
+  webhookPath?: string;
+  /** Webhook path for delivery status callbacks (default: /twilio-sms/status) */
+  statusPath?: string;
+  /** Bot display name */
+  displayName?: string;
+  /** Response prefix for bot replies */
+  responsePrefix?: string;
+  /** Directory for durable webhook state; memory-only when omitted */
+  stateDir?: string;
+}
+
+/**
  * X (Twitter) channel configuration
  */
 export interface XConfig extends ChannelConfig {
@@ -821,10 +886,37 @@ export interface ChannelAdapter {
   onStatusChange(handler: StatusHandler): void;
 
   /**
+   * Register a handler for provider delivery receipts (optional; webhook
+   * channels such as WhatsApp Cloud and Twilio report sent/delivered/failed).
+   */
+  onDeliveryStatus?(handler: DeliveryStatusHandler): void;
+
+  /**
+   * Validate configuration and credentials against the provider without
+   * starting listeners. Webhook adapters implement this so a connection test
+   * does not collide with the running adapter's port.
+   */
+  probe?(): Promise<ChannelInfo>;
+
+  /**
    * Get channel-specific info (bot info, etc.)
    */
   getInfo(): Promise<ChannelInfo>;
 }
+
+export type DeliveryState = "queued" | "sent" | "delivered" | "read" | "failed" | "undelivered";
+
+export interface DeliveryStatusUpdate {
+  /** Provider message ID returned by sendMessage */
+  messageId: string;
+  chatId: string;
+  state: DeliveryState;
+  timestamp: Date;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export type DeliveryStatusHandler = (update: DeliveryStatusUpdate) => void;
 
 /**
  * Message handler callback
@@ -927,6 +1019,7 @@ export type GatewayEventType =
   | "channel:error"
   | "message:received"
   | "message:sent"
+  | "message:delivery_status"
   | "user:paired"
   | "user:blocked"
   | "session:created"

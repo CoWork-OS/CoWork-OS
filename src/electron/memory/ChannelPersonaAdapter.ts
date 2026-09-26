@@ -72,6 +72,25 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
     structuredFormatting: false,
     formalFraming: false,
   },
+  whatsapp_cloud: {
+    directive:
+      "You are replying to a customer through a WhatsApp Business account. Keep messages short, " +
+      "polite and professional, and use plain text with at most basic bold/italic. " +
+      "Break long answers into short paragraphs.",
+    lengthHint: "shorter",
+    emojiEncouraged: false,
+    structuredFormatting: false,
+    formalFraming: false,
+  },
+  twilio_sms: {
+    directive:
+      "You are replying by SMS. Use plain text only — no Markdown, tables or code blocks. " +
+      "Keep replies brief (ideally under 320 characters) because long messages are split and billed per segment.",
+    lengthHint: "shorter",
+    emojiEncouraged: false,
+    structuredFormatting: false,
+    formalFraming: false,
+  },
   imessage: {
     directive:
       "You are responding via iMessage. Keep messages concise and natural. " +

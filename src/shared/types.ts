@@ -9055,6 +9055,19 @@ export const IPC_CHANNELS = {
   GATEWAY_ENABLE_CHANNEL: "gateway:enableChannel",
   GATEWAY_DISABLE_CHANNEL: "gateway:disableChannel",
   GATEWAY_TEST_CHANNEL: "gateway:testChannel",
+  GATEWAY_GET_CHANNEL_HEALTH: "gateway:getChannelHealth",
+  MEETINGS_TEAMS_GET_SETTINGS: "meetings:teams:getSettings",
+  MEETINGS_TEAMS_UPDATE_SETTINGS: "meetings:teams:updateSettings",
+  MEETINGS_TEAMS_CONNECT: "meetings:teams:connect",
+  MEETINGS_TEAMS_DISCONNECT: "meetings:teams:disconnect",
+  MEETINGS_TEAMS_GET_STATUS: "meetings:teams:getStatus",
+  MEETINGS_TEAMS_SYNC_NOW: "meetings:teams:syncNow",
+  MEETINGS_TEAMS_RETRY_FAILED: "meetings:teams:retryFailed",
+  MEETINGS_LIST_ARTIFACTS: "meetings:listArtifacts",
+  MEETINGS_GET_ARTIFACT: "meetings:getArtifact",
+  MEETINGS_DOWNLOAD_RECORDING: "meetings:downloadRecording",
+  MEETINGS_REVEAL_ARTIFACT: "meetings:revealArtifact",
+  MEETINGS_CHANGED: "meetings:changed",
   GATEWAY_GET_USERS: "gateway:getUsers",
   GATEWAY_LIST_CHATS: "gateway:listChats",
   GATEWAY_SEND_TEST_MESSAGE: "gateway:sendTestMessage",
@@ -10217,9 +10230,120 @@ export type ChannelType =
   | "googlechat"
   | "feishu"
   | "wecom"
-  | "x";
+  | "x"
+  | "whatsapp_cloud"
+  | "twilio_sms";
 export type ChannelStatus = "disconnected" | "connecting" | "connected" | "error";
 export type SecurityMode = "open" | "allowlist" | "pairing";
+
+export type WebhookDeliveryState =
+  | "queued"
+  | "sent"
+  | "delivered"
+  | "read"
+  | "failed"
+  | "undelivered";
+
+/** Operational health of a webhook-based channel (WhatsApp Cloud, Twilio SMS). */
+export interface WebhookChannelHealth {
+  lastInboundAt?: number;
+  rejectedWebhooks: number;
+  lastRejectedAt?: number;
+  lastRejectedReason?: string;
+  pendingInbound: number;
+  failedInbound: Array<{ id: string; attempts: number; lastError?: string }>;
+  deliveryCounts: Partial<Record<WebhookDeliveryState, number>>;
+  recentDeliveryFailures: Array<{
+    messageId: string;
+    chatId: string;
+    state: WebhookDeliveryState;
+    at: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+  heldReplies: Array<{ chatId: string; count: number; oldestHeldAt: number }>;
+}
+
+// Meeting artifacts (post-meeting transcripts and recordings)
+export type MeetingArtifactProvider = "teams" | "google-meet";
+
+export interface MeetingArtifactRecording {
+  id: string;
+  createdDateTime?: string;
+  /** Set once the user has downloaded the recording on demand. */
+  localPath?: string;
+}
+
+export interface MeetingArtifactSummary {
+  id: string;
+  provider: MeetingArtifactProvider;
+  title: string;
+  organizer?: string;
+  startTime?: string;
+  endTime?: string;
+  joinUrl?: string;
+  retrievedAt: string;
+  markdownPath: string;
+  cueCount: number;
+  recordings: MeetingArtifactRecording[];
+  /** Provider identifiers needed to fetch more content later (e.g. recordings). */
+  sourceRef: Record<string, string>;
+}
+
+export type TeamsMeetingSyncState =
+  | "disconnected"
+  | "idle"
+  | "syncing"
+  | "error"
+  | "auth_expired"
+  | "blocked";
+
+export interface TeamsMeetingSubscriptionView {
+  id: string;
+  expiresAt: string;
+  lastRenewedAt?: string;
+  lastNotificationAt?: string;
+}
+
+export interface TeamsMeetingStatus {
+  state: TeamsMeetingSyncState;
+  account?: string;
+  lastSyncAt?: string;
+  nextSyncAt?: string;
+  lastError?: string;
+  pendingJobs: number;
+  failedJobs: Array<{ key: string; attempts: number; lastError?: string }>;
+  artifactCount: number;
+  subscription?: TeamsMeetingSubscriptionView;
+  subscriptionError?: string;
+}
+
+export interface TeamsMeetingSettingsView {
+  enabled: boolean;
+  connected: boolean;
+  clientId?: string;
+  tenant?: string;
+  pollIntervalMinutes: number;
+  lookbackHours: number;
+  notificationPublicUrl?: string;
+  notificationPort: number;
+}
+
+export interface TeamsMeetingSettingsUpdate {
+  enabled?: boolean;
+  clientId?: string;
+  tenant?: string;
+  pollIntervalMinutes?: number;
+  lookbackHours?: number;
+  notificationPublicUrl?: string;
+  notificationPort?: number;
+}
+
+export interface ChannelHealthResponse {
+  status: ChannelStatus;
+  health?: WebhookChannelHealth;
+  [key: string]: unknown;
+}
 
 /**
  * Context type for channel messages (DM vs group chat)
@@ -10453,6 +10577,20 @@ export interface AddChannelRequest {
   wecomSecret?: string;
   wecomToken?: string;
   wecomEncodingAESKey?: string;
+  // WhatsApp Cloud-specific fields
+  whatsappCloudPhoneNumberId?: string;
+  whatsappCloudAccessToken?: string;
+  whatsappCloudAppSecret?: string;
+  whatsappCloudVerifyToken?: string;
+  whatsappCloudFallbackTemplateName?: string;
+  whatsappCloudFallbackTemplateLanguage?: string;
+  // Twilio SMS-specific fields
+  twilioAccountSid?: string;
+  twilioAuthToken?: string;
+  twilioFromNumber?: string;
+  twilioMessagingServiceSid?: string;
+  twilioWebhookPublicUrl?: string;
+  twilioStatusPath?: string;
   // X-specific fields
   xCommandPrefix?: string;
   xAllowedAuthors?: string[];

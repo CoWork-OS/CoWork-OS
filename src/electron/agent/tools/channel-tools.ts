@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { ChannelRepository } from "../../database/repositories";
-import { ChannelType } from "../../gateway/channels/types";
+import { CHANNEL_TYPES, ChannelType } from "../../gateway/channels/types";
 import { getChannelLiveFetchProvider } from "../../gateway/channel-live-fetch";
 import { FileProvenanceRegistry } from "../../security/file-provenance-registry";
 
@@ -84,24 +84,7 @@ export class ChannelTools {
   }
 
   static getToolDefinitions(): LLMTool[] {
-    // Keep this list in sync with src/electron/gateway/channels/types.ts
-    const channelEnum: ChannelType[] = [
-      "telegram",
-      "discord",
-      "slack",
-      "whatsapp",
-      "imessage",
-      "signal",
-      "mattermost",
-      "matrix",
-      "twitch",
-      "line",
-      "bluebubbles",
-      "email",
-      "teams",
-      "googlechat",
-      "x",
-    ];
+    const channelEnum: ChannelType[] = [...CHANNEL_TYPES];
 
     return [
       {

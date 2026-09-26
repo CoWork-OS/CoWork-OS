@@ -67,6 +67,18 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_REINFORCEMENT_LINKS = 2;
 
+/** Read title, approach and request back out of a generated Playbook memory. */
+export function parseGeneratedPlaybookMemory(content: string): {
+  title: string;
+  approach: string;
+  request: string;
+} {
+  const title = content.match(/^\s*\[PLAYBOOK\] Task (?:succeeded|failed): "(.*)"\s*$/m)?.[1] ?? "";
+  const approach = content.match(/^(?:Attempted approach|Approach): (.*)$/m)?.[1] ?? "";
+  const request = content.match(/^Original request: (.*)$/m)?.[1] ?? "";
+  return { title: title.trim(), approach: approach.trim(), request: request.trim() };
+}
+
 /** One execution per task unless a reliable persisted turn identity is supplied. */
 export function derivePlaybookExecutionKey(taskId: string, turnId?: string): string {
   const turn = turnId?.trim();
@@ -124,7 +136,17 @@ export class PlaybookService {
     const db = MemoryService.getDatabase?.();
     if (!db) return null;
     if (this.evidenceStoreCache?.db !== db) {
-      this.evidenceStoreCache = { db, store: new PlaybookEvidenceStore(db) };
+      const store = new PlaybookEvidenceStore(db);
+      this.evidenceStoreCache = { db, store };
+      // Deleting, clearing, pruning or editing memory scrubs dependent ledger text.
+      MemoryService.onMemoryChanged?.(({ type, workspaceId }) => {
+        if (!["deleted", "cleared", "pruned", "updated"].includes(type)) return;
+        try {
+          store.sweepWorkspace(workspaceId);
+        } catch (error) {
+          logger.warn("Failed to sweep Playbook evidence after a memory change:", error);
+        }
+      });
     }
     return this.evidenceStoreCache.store;
   }
@@ -234,6 +256,9 @@ export class PlaybookService {
       );
       if (!memory) return { status: "skipped", reason: "memory_not_recorded" };
 
+      // Ledger text comes from the memory exactly as stored, so inline <private>
+      // redaction and truncation apply to it too; never from the raw prompt.
+      const stored = parseGeneratedPlaybookMemory(memory.content);
       const { created, record } = store.record({
         workspaceId,
         taskId,
@@ -250,9 +275,9 @@ export class PlaybookService {
               ? "corrected"
               : "failure",
         patternKey: derivePlaybookPatternKey(toolsUsed, destinationHints),
-        title: taskTitle.slice(0, 200),
-        approach: planSummary.slice(0, 300),
-        requestExcerpt: taskPrompt.slice(0, 300),
+        title: stored.title.slice(0, 200),
+        approach: stored.approach.slice(0, 300),
+        requestExcerpt: stored.request.slice(0, 300),
         toolsUsed: toolsUsed.slice(0, 10),
         sourceRefs: [`task:${taskId}`, `memory:${memory.id}`],
       });

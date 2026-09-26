@@ -6,14 +6,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const memoryState = vi.hoisted(() => ({
   db: null as import("better-sqlite3").Database | null,
   enabled: true,
+  listeners: [] as Array<(data: { type: string; workspaceId: string }) => void>,
 }));
 
 vi.mock("../MemoryService", () => ({
   MemoryService: {
     getDatabase: () => memoryState.db,
+    onMemoryChanged: (listener: (data: { type: string; workspaceId: string }) => void) => {
+      memoryState.listeners.push(listener);
+      return () => undefined;
+    },
     capture: vi.fn(
       async (_workspaceId: string, taskId: string | undefined, type: string, content: string) => {
         if (!memoryState.enabled || !memoryState.db) return null;
+        // Same inline privacy redaction MemoryService.capture applies.
+        content = content.replace(
+          /<\s*private\s*>[\s\S]*?<\s*\/\s*private\s*>/gi,
+          "[private content redacted]",
+        );
         const id = randomUUID();
         memoryState.db
           .prepare("INSERT INTO memories (id, task_id, type, content) VALUES (?, ?, ?, ?)")
@@ -42,6 +52,7 @@ afterEach(() => {
   PlaybookService.events.removeAllListeners();
   PlaybookService.setEvidenceStoreForTesting(undefined);
   memoryState.db = null;
+  memoryState.listeners = [];
   db.close();
 });
 
@@ -170,6 +181,53 @@ describe("Playbook evidence capture", () => {
     expect(evidenceCount()).toBe(0);
     expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
     expect(PlaybookSkillPromoter.findCandidates(WS, 1)).toEqual([]);
+  });
+});
+
+describe("Playbook evidence privacy", () => {
+  function ledgerText(): string {
+    PlaybookService.getEvidenceStore();
+    return JSON.stringify(
+      db
+        .prepare("SELECT title, approach, request_excerpt, tools_json FROM playbook_evidence")
+        .all(),
+    );
+  }
+
+  it("stores only the redacted text memory kept, never the raw prompt", async () => {
+    await PlaybookService.captureOutcome(
+      WS,
+      "task-p",
+      "Reconcile invoices",
+      "Reconcile invoices for <private>ACME account 4411</private> this month",
+      "success",
+      "Use the ledger export",
+      ["read_file"],
+    );
+    const text = ledgerText();
+    expect(text).not.toContain("4411");
+    expect(text).toContain("[private content redacted]");
+  });
+
+  it("scrubs ledger text when memory is deleted, cleared or redacted", async () => {
+    const captured = await success("task-1", "Reconcile invoices");
+    await success("task-2", "Reconcile vendor invoices");
+    if (captured.status !== "recorded") throw new Error("setup");
+    db.prepare("DELETE FROM memories WHERE id = ?").run(captured.memoryId);
+    for (const listener of memoryState.listeners) listener({ type: "deleted", workspaceId: WS });
+    expect(ledgerText()).not.toContain("approach for Reconcile invoices");
+    expect(ledgerText()).toContain("Reconcile vendor invoices");
+
+    // Redaction rewrites content without an event; the next read scrubs it.
+    db.prepare("UPDATE memories SET content = '[redacted]'").run();
+    PlaybookService.getPlaybookForContext(WS, "Reconcile vendor invoices");
+    expect(ledgerText()).not.toContain("Reconcile");
+    // The rows remain, so the same executions still cannot be counted again.
+    expect(evidenceCount()).toBe(2);
+    expect(await success("task-1", "Reconcile invoices")).toMatchObject({
+      status: "skipped",
+      reason: "duplicate_execution",
+    });
   });
 });
 

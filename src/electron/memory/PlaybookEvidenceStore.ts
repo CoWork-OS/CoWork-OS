@@ -264,6 +264,52 @@ export class PlaybookEvidenceStore {
       .all(workspaceId, workspaceId) as Array<{ from: string; to: string }>;
   }
 
+  /**
+   * Remove the human-readable text of a row whose source memory is gone or changed, so
+   * deleted, cleared or redacted memory content does not survive in the ledger. The row
+   * itself stays so the execution is still not counted twice.
+   */
+  scrub(id: string): void {
+    this.db
+      .prepare(
+        `UPDATE playbook_evidence SET title = '', approach = '', request_excerpt = '',
+         tools_json = '[]', source_refs_json = '[]' WHERE id = ?`,
+      )
+      .run(id);
+  }
+
+  /** Verify every row that still carries text for a workspace; scrub the unbacked ones. */
+  sweepWorkspace(workspaceId: string): number {
+    const rows = (
+      this.db
+        .prepare(
+          `SELECT * FROM playbook_evidence WHERE workspace_id = ?
+           AND (title <> '' OR approach <> '' OR request_excerpt <> '')`,
+        )
+        .all(workspaceId) as EvidenceRow[]
+    ).map(toRecord);
+    let scrubbed = 0;
+    for (const record of rows) {
+      if (record.invalidatedAt ? this.sourceMissingOrChanged(record) : !this.verifySource(record)) {
+        this.scrub(record.id);
+        scrubbed++;
+      }
+    }
+    return scrubbed;
+  }
+
+  private sourceMissingOrChanged(record: PlaybookEvidenceRecord): boolean {
+    if (!record.sourceMemoryId || !record.sourceContentHash) return true;
+    try {
+      const row = this.db
+        .prepare("SELECT content FROM memories WHERE id = ?")
+        .get(record.sourceMemoryId) as { content: string } | undefined;
+      return !row || hashMemoryContent(row.content) !== record.sourceContentHash;
+    } catch {
+      return false;
+    }
+  }
+
   invalidate(id: string, reason: string): boolean {
     return (
       this.db
@@ -292,6 +338,7 @@ export class PlaybookEvidenceStore {
     if (record.invalidatedAt) return false;
     if (!record.sourceMemoryId || !record.sourceContentHash) {
       this.invalidate(record.id, "missing_source_memory");
+      this.scrub(record.id);
       return false;
     }
     let row: { content: string } | undefined;
@@ -305,10 +352,12 @@ export class PlaybookEvidenceStore {
     }
     if (!row) {
       this.invalidate(record.id, "source_memory_deleted");
+      this.scrub(record.id);
       return false;
     }
     if (hashMemoryContent(row.content) !== record.sourceContentHash) {
       this.invalidate(record.id, "source_memory_edited");
+      this.scrub(record.id);
       return false;
     }
     return true;

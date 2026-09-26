@@ -64,6 +64,11 @@ export interface PulseSettingsStore {
   save(settings: PulsePrivateSettings): void;
   /** Whether saves are currently refused, so decisions can fail before any change. */
   refusesWrites?(): boolean;
+  /**
+   * Whether writes go through `db`, the connection whose transactions fence decisions.
+   * Checked before every transaction; a store that cannot answer is assumed to share it.
+   */
+  sharesConnection?(db: Database.Database): boolean;
 }
 
 interface PulseServiceOptions {
@@ -109,8 +114,19 @@ class PulseClosedError extends Error {
  * transaction and is reported to the caller instead.
  */
 export class PulseSettingsWriteRefusedError extends Error {
+  constructor(readonly code: string = "settings_write_refused") {
+    super(code);
+  }
+}
+
+/**
+ * The settings store writes through a different SQLite connection than this service.
+ * Its writes would then fall outside the service's transactions, so a decision could no
+ * longer be applied atomically with the consent windows and outbox. Fail closed.
+ */
+export class PulseSettingsConnectionMismatchError extends PulseSettingsWriteRefusedError {
   constructor() {
-    super("settings_write_refused");
+    super("settings_connection_mismatch");
   }
 }
 
@@ -128,9 +144,30 @@ const secureSettingsStore: PulseSettingsStore = {
       return false;
     }
   },
+  sharesConnection: (db) => {
+    try {
+      return SecureSettingsRepository.getInstance().usesConnection(db);
+    } catch {
+      // Not initialized: nothing can be loaded or saved, so nothing to split.
+      return true;
+    }
+  },
 };
 
 const SETTINGS_WRITE_REFUSED = "settings_write_refused";
+
+/** A decision that could not run because settings cannot be written safely. */
+interface SettingsFailure {
+  settingsFailure: string;
+}
+
+function isSettingsFailure(value: unknown): value is SettingsFailure {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as SettingsFailure).settingsFailure === "string"
+  );
+}
 
 function clampCount(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value || 0);
@@ -351,8 +388,8 @@ export class PulseService {
       this.commitDecision(settings);
       return "changed" as const;
     });
-    if (outcome === SETTINGS_WRITE_REFUSED) {
-      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    if (isSettingsFailure(outcome)) {
+      return { success: false, settings: this.safePublic(), error: outcome.settingsFailure };
     }
     if (!enabled) this.abortActiveDelivery();
     this.previewCache = null;
@@ -384,8 +421,8 @@ export class PulseService {
       this.commitDecision(settings);
       return "changed" as const;
     });
-    if (outcome === SETTINGS_WRITE_REFUSED) {
-      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    if (isSettingsFailure(outcome)) {
+      return { success: false, settings: this.safePublic(), error: outcome.settingsFailure };
     }
     this.abortActiveDelivery();
     this.previewCache = null;
@@ -449,8 +486,8 @@ export class PulseService {
     let context: DeliveryContext | null = null;
     try {
       const prepared = this.transactDecision(() => this.prepareDelivery());
-      if (prepared === SETTINGS_WRITE_REFUSED) {
-        return this.sendResult("error", SETTINGS_WRITE_REFUSED);
+      if (isSettingsFailure(prepared)) {
+        return this.sendResult("error", prepared.settingsFailure);
       }
       if (typeof prepared === "string") return this.sendResult(prepared);
       context = prepared;
@@ -703,8 +740,8 @@ export class PulseService {
       this.commitDecision(settings);
       return captured;
     });
-    if (target === SETTINGS_WRITE_REFUSED) {
-      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    if (isSettingsFailure(target)) {
+      return { success: false, settings: this.safePublic(), error: target.settingsFailure };
     }
     this.abortActiveDelivery();
     this.previewCache = null;
@@ -762,10 +799,10 @@ export class PulseService {
         .run(target.installationId);
       this.commitDecision(settings);
     });
-    if (finalized === SETTINGS_WRITE_REFUSED) {
+    if (isSettingsFailure(finalized)) {
       // The server deleted the data, but the local record could not be updated; keep
       // reporting off and deletion pending so a retry (404/200) completes it later.
-      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+      return { success: false, settings: this.safePublic(), error: finalized.settingsFailure };
     }
     return { success: true, settings: this.getSettings() };
   }
@@ -809,11 +846,13 @@ export class PulseService {
   }
 
   /** Like transact, but a refused settings write becomes a value instead of a throw. */
-  private transactDecision<T>(fn: () => T): T | typeof SETTINGS_WRITE_REFUSED {
+  private transactDecision<T>(fn: () => T): T | SettingsFailure {
     try {
       return this.transact(fn);
     } catch (error) {
-      if (error instanceof PulseSettingsWriteRefusedError) return SETTINGS_WRITE_REFUSED;
+      if (error instanceof PulseSettingsWriteRefusedError) {
+        return { settingsFailure: error.code };
+      }
       throw error;
     }
   }
@@ -826,6 +865,11 @@ export class PulseService {
 
   private transact<T>(fn: () => T): T {
     if (this.closed) throw new PulseClosedError();
+    // The settings save must join this transaction; re-checked every time because the
+    // secure-settings singleton can be replaced after this service was created.
+    if (this.store.sharesConnection && !this.store.sharesConnection(this.db)) {
+      throw new PulseSettingsConnectionMismatchError();
+    }
     return this.db.transaction(fn).immediate();
   }
 

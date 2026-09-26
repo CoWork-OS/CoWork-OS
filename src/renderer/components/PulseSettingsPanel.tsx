@@ -49,6 +49,9 @@ function describeError(code: string | undefined): string {
   if (code === "settings_write_refused") {
     return "CoWork can't save settings right now because the system keychain key changed. Nothing was changed; resolve the keychain warning and try again.";
   }
+  if (code === "settings_connection_mismatch") {
+    return "CoWork Pulse settings are unavailable because of an internal storage error. Nothing was changed; restart CoWork and try again.";
+  }
   return code || "Pulse operation failed";
 }
 

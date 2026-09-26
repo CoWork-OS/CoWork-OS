@@ -769,3 +769,48 @@ describe("Pulse when encrypted settings refuse writes", () => {
     expect(f.saved().consentState).toBe("disabled");
   });
 });
+
+describe("Pulse settings store must share the service's SQLite connection", () => {
+  it("fails closed when settings would be written through another connection", async () => {
+    const serviceDb = new Database(":memory:");
+    const otherDb = new Database(":memory:");
+    openDbs.push(serviceDb, otherDb);
+    createTaskTables(serviceDb);
+    const otherStore = tableStore(otherDb);
+    otherStore.save(enabledSettings());
+    const requests: string[] = [];
+    const service = new PulseService(serviceDb, {
+      version: "0.0.0",
+      runtime: "desktop",
+      now: () => NOW,
+      fetch: (async (url: string) => {
+        requests.push(url);
+        return { ok: true, status: 202 };
+      }) as unknown as typeof fetch,
+      settingsStore: { ...otherStore, sharesConnection: (db) => db === otherDb },
+    });
+    serviceDb
+      .prepare("INSERT INTO pulse_consent_windows (started_at) VALUES (?)")
+      .run(NOW - 3 * DAY_MS);
+
+    for (const result of [
+      await service.setEnabled(false),
+      await service.resetIdentity(),
+      await service.deleteRemoteData(),
+    ]) {
+      expect(result).toMatchObject({ success: false, error: "settings_connection_mismatch" });
+    }
+    expect(await service.flush()).toMatchObject({
+      outcome: "error",
+      error: "settings_connection_mismatch",
+    });
+    // Nothing changed on either connection and nothing was sent.
+    expect(otherStore.load()).toEqual(enabledSettings());
+    expect(
+      serviceDb
+        .prepare("SELECT COUNT(*) AS n FROM pulse_consent_windows WHERE ended_at IS NULL")
+        .get(),
+    ).toEqual({ n: 1 });
+    expect(requests).toEqual([]);
+  });
+});

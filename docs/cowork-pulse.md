@@ -170,6 +170,10 @@ event currently measures how often consent was offered or declined.
   identity must cover the whole previous UTC day; first enrollment can therefore be delayed by
   more than a day. After upgrading from a build without revisions, eligibility for the existing
   identity starts conservatively at upgrade time.
+- The encrypted settings record, consent windows and outbox are changed in one SQLite
+  transaction, so the settings store must use the same connection as the Pulse service. This is
+  checked before every transaction; if it ever differs, decisions and sends fail with
+  `settings_connection_mismatch` and nothing is changed.
 - Desktop timer and Settings share one service instance. Concurrent flushes in one process share
   one attempt; across processes sharing a profile, a 30-second delivery lease allows one sender
   and the other reports `busy`. The lease and the captured revision are re-checked before each

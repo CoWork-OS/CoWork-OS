@@ -310,6 +310,11 @@ export class SecureSettingsRepository {
     return this.keychainIdentityMismatch;
   }
 
+  /** Whether this repository reads and writes through the given SQLite connection. */
+  usesConnection(db: Database.Database): boolean {
+    return this.db === db;
+  }
+
   /** Whether save() currently refuses writes (keychain key changed while encryption is on). */
   refusesWrites(): boolean {
     return this.keychainIdentityMismatch && this.encryptionAvailable;

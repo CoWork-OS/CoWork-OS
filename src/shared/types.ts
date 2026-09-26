@@ -6,7 +6,7 @@ import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles
 
 // Theme and Appearance types
 export type ThemeMode = "light" | "dark" | "system";
-export type VisualTheme = "terminal" | "warm" | "oblivion";
+export type VisualTheme = "terminal" | "warm" | "oblivion" | "calm";
 export type AccentColor =
   | "cyan"
   | "blue"

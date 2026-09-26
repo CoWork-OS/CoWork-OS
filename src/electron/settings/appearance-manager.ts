@@ -382,7 +382,7 @@ function isValidThemeMode(value: unknown): value is ThemeMode {
 }
 
 function isValidVisualTheme(value: unknown): value is VisualTheme {
-  return value === "terminal" || value === "warm" || value === "oblivion";
+  return value === "terminal" || value === "warm" || value === "oblivion" || value === "calm";
 }
 
 function isValidAccentColor(value: unknown): value is AccentColor {

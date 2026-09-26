@@ -43,6 +43,9 @@ import {
 } from "./components/BrowserUseApprovalDialog";
 import { GenericApprovalDialog } from "./components/GenericApprovalDialog";
 import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWarningDialog";
+import { LibraryPanel } from "./components/calm/LibraryPanel";
+import { BuildPanel } from "./components/calm/BuildPanel";
+import { CalmAgentSetupHost } from "./components/calm/CalmAgentSetup";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { WebAccessClient } from "./components/WebAccessClient";
@@ -271,6 +274,8 @@ const MissionControlPanel = lazy(() =>
 const SPREADSHEET_SIDEBAR_DEFAULT_WIDTH = 720;
 const SPREADSHEET_SIDEBAR_MIN_WIDTH = 420;
 const SPREADSHEET_MAIN_MIN_WIDTH = 390;
+/** Conversation column width beside an open artifact in the calm theme. */
+const CALM_CHAT_COLUMN_WIDTH = 400;
 const SPREADSHEET_SIDEBAR_WIDTH_STORAGE_KEY = "cowork:spreadsheetSidebarWidth";
 type ActiveArtifactKind = "spreadsheet" | "document" | "presentation" | "webpage";
 type BrowserWorkbenchOpenRequest = {
@@ -675,7 +680,9 @@ type AppView =
   | "inboxAgent"
   | "agents"
   | "everydayAgent"
-  | "missionControl";
+  | "missionControl"
+  | "library"
+  | "build";
 type RemoteTaskView = {
   deviceId: string;
   deviceName: string;
@@ -983,41 +990,61 @@ const SelectedTaskWorkspaceView = memo(
       setBrowserWorkbench(null);
       setSpawnedAgentSidebar(null);
     }, [sideChat?.task?.id]);
+    // Calm theme: artifacts take most of the width and the conversation narrows
+    // to a column beside them, instead of opening the right panel as well.
+    const prepareArtifactSidebar = useCallback(() => {
+      if (!document.documentElement.classList.contains("visual-calm")) {
+        onRevealRightSidebar?.();
+        return;
+      }
+      const containerWidth =
+        splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
+      const maxWidth = Math.max(
+        SPREADSHEET_SIDEBAR_MIN_WIDTH,
+        containerWidth - SPREADSHEET_MAIN_MIN_WIDTH,
+      );
+      setSpreadsheetSidebarWidth(
+        Math.min(
+          Math.max(containerWidth - CALM_CHAT_COLUMN_WIDTH, SPREADSHEET_SIDEBAR_MIN_WIDTH),
+          maxWidth,
+        ),
+      );
+    }, [onRevealRightSidebar]);
     const openSpreadsheetArtifact = useCallback(
       (path: string) => {
         setBrowserWorkbench(null);
         setSpawnedAgentSidebar(null);
-        onRevealRightSidebar?.();
+        prepareArtifactSidebar();
         setSpreadsheetArtifact({ kind: "spreadsheet", path, mode: "sidebar" });
       },
-      [onRevealRightSidebar],
+      [prepareArtifactSidebar],
     );
     const openDocumentArtifact = useCallback(
       (path: string) => {
         setBrowserWorkbench(null);
         setSpawnedAgentSidebar(null);
-        onRevealRightSidebar?.();
+        prepareArtifactSidebar();
         setSpreadsheetArtifact({ kind: "document", path, mode: "sidebar" });
       },
-      [onRevealRightSidebar],
+      [prepareArtifactSidebar],
     );
     const openPresentationArtifact = useCallback(
       (path: string) => {
         setBrowserWorkbench(null);
         setSpawnedAgentSidebar(null);
-        onRevealRightSidebar?.();
+        prepareArtifactSidebar();
         setSpreadsheetArtifact({ kind: "presentation", path, mode: "sidebar" });
       },
-      [onRevealRightSidebar],
+      [prepareArtifactSidebar],
     );
     const openWebArtifact = useCallback(
       (path: string) => {
         setBrowserWorkbench(null);
         setSpawnedAgentSidebar(null);
-        onRevealRightSidebar?.();
+        prepareArtifactSidebar();
         setSpreadsheetArtifact({ kind: "webpage", path, mode: "sidebar" });
       },
-      [onRevealRightSidebar],
+      [prepareArtifactSidebar],
     );
     const closeSpreadsheetArtifact = useCallback(() => {
       setSpreadsheetArtifact(null);
@@ -2137,6 +2164,7 @@ export function App() {
     | "pulse"
     | "traces"
     | "everydayAgent"
+    | "customize"
   >("appearance");
   const [homeAutomationFocusTick, setHomeAutomationFocusTick] = useState(0);
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -3412,9 +3440,14 @@ export function App() {
     // dark is default, no class needed unless specified otherwise by visual styles
 
     // Remove existing visual theme classes
-    root.classList.remove("visual-terminal", "visual-warm", "visual-oblivion");
-    const resolvedVisualTheme = visualTheme === "warm" ? "oblivion" : visualTheme;
+    root.classList.remove("visual-terminal", "visual-warm", "visual-oblivion", "visual-calm");
+    // Calm layers its overrides on top of the modern (oblivion) styles.
+    const resolvedVisualTheme =
+      visualTheme === "warm" || visualTheme === "calm" ? "oblivion" : visualTheme;
     root.classList.add(`visual-${resolvedVisualTheme}`);
+    if (visualTheme === "calm") {
+      root.classList.add("visual-calm");
+    }
 
     // Remove existing accent classes
     root.classList.remove(
@@ -5673,45 +5706,56 @@ export function App() {
     [addToast, remoteTaskView, selectedTaskId],
   );
 
+  // Opens the folder dialog and returns the matching (or newly created)
+  // workspace, without applying it anywhere.
+  const pickFolderWorkspace = async (): Promise<Workspace | null> => {
+    const pickerDefaultPath =
+      currentWorkspace && !currentWorkspace.isTemp && !isTempWorkspaceId(currentWorkspace.id)
+        ? currentWorkspace.path
+        : undefined;
+
+    // Open folder selection dialog
+    const folderPath = await window.electronAPI.selectFolder(pickerDefaultPath);
+    if (!folderPath) return null; // User cancelled
+
+    // Reuse the workspace if this folder already is one
+    const existingWorkspaces = await window.electronAPI.listWorkspaces();
+    const existingWorkspace = existingWorkspaces.find((w: Workspace) => w.path === folderPath);
+    if (existingWorkspace) return existingWorkspace;
+
+    // Create a new workspace for this folder
+    const folderName = folderPath.split(/[\\/]/).filter(Boolean).pop() || "Workspace";
+    return window.electronAPI.createWorkspace({
+      name: folderName,
+      path: folderPath,
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        // Command tools are enabled by the selected access profile for a
+        // task; keep the persisted workspace baseline fail-closed.
+        shell: false,
+      },
+    });
+  };
+
   // Handle workspace change - opens folder selection dialog directly
   const handleChangeWorkspace = async () => {
     try {
-      const pickerDefaultPath =
-        currentWorkspace && !currentWorkspace.isTemp && !isTempWorkspaceId(currentWorkspace.id)
-          ? currentWorkspace.path
-          : undefined;
+      const workspace = await pickFolderWorkspace();
+      if (workspace) await handleSelectWorkspace(workspace);
+    } catch (error) {
+      console.error("Failed to change workspace:", error);
+    }
+  };
 
-      // Open folder selection dialog
-      const folderPath = await window.electronAPI.selectFolder(pickerDefaultPath);
-      if (!folderPath) return; // User cancelled
-
-      // Get list of existing workspaces for reference
-      const existingWorkspaces = await window.electronAPI.listWorkspaces();
-
-      // Check if this folder is already a workspace
-      const existingWorkspace = existingWorkspaces.find((w: Workspace) => w.path === folderPath);
-      if (existingWorkspace) {
-        await handleSelectWorkspace(existingWorkspace);
-        return;
-      }
-
-      // Create a new workspace for this folder
-      const folderName = folderPath.split(/[\\/]/).filter(Boolean).pop() || "Workspace";
-      const workspace = await window.electronAPI.createWorkspace({
-        name: folderName,
-        path: folderPath,
-        permissions: {
-          read: true,
-          write: true,
-          delete: true,
-          network: true,
-          // Command tools are enabled by the selected access profile for a
-          // task; keep the persisted workspace baseline fail-closed.
-          shell: false,
-        },
-      });
-
-      await handleSelectWorkspace(workspace);
+  // Build starts a new task, so picking a folder there only changes the
+  // working folder and never moves the currently selected task.
+  const handlePickBuildFolder = async () => {
+    try {
+      const workspace = await pickFolderWorkspace();
+      if (workspace) setCurrentWorkspace(workspace);
     } catch (error) {
       console.error("Failed to change workspace:", error);
     }
@@ -7678,7 +7722,9 @@ export function App() {
         currentView === "inboxAgent" ||
         currentView === "agents" ||
         currentView === "everydayAgent" ||
-        currentView === "missionControl") && (
+        currentView === "missionControl" ||
+        currentView === "library" ||
+        currentView === "build") && (
         <>
           <div
             className={`app-layout ${leftSidebarCollapsed ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
@@ -7704,6 +7750,15 @@ export function App() {
                 isMissionControlActive={currentView === "missionControl"}
                 isHealthActive={currentView === "health"}
                 isDevicesActive={currentView === "devices"}
+                isBuildActive={currentView === "build"}
+                isLibraryActive={currentView === "library"}
+                onOpenHome={() => setCurrentView("main")}
+                onOpenBuild={() => setCurrentView("build")}
+                onOpenLibrary={() => setCurrentView("library")}
+                onOpenPlugins={() => {
+                  setSettingsTab("customize");
+                  setCurrentView("settings");
+                }}
                 isLoadingSessions={isInitialTaskListLoading}
                 isLoadingMoreTasks={isLoadingMoreTasks}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
@@ -7960,6 +8015,27 @@ export function App() {
                     handleCreateTask(title, prompt, { generateTitle: true });
                   }}
                 />
+              ) : currentView === "library" ? (
+                <LibraryPanel workspaceId={currentWorkspace?.id} />
+              ) : currentView === "build" ? (
+                <BuildPanel
+                  onStart={handleCreateTaskFromIdea}
+                  workspace={currentWorkspace}
+                  onSelectWorkspace={setCurrentWorkspace}
+                  onPickFolder={handlePickBuildFolder}
+                  model={{
+                    models: availableModels,
+                    selectedModel,
+                    selectedProvider,
+                    selectedReasoningEffort,
+                    providers: availableProviders,
+                    onModelChange: handleModelChange,
+                    onOpenSettings: (tab) => {
+                      if (tab) setSettingsTab(tab);
+                      setCurrentView("settings");
+                    },
+                  }}
+                />
               ) : currentView === "missionControl" ? (
                 <main className="main-content mission-control-main">
                   <MissionControlPanel
@@ -8062,6 +8138,7 @@ export function App() {
           {currentWorkspace && currentView === "main" && (
             <QuickTaskFAB onCreateTask={handleQuickTask} />
           )}
+          <CalmAgentSetupHost />
 
           {approveAllSessionWarningOpen ? (
             <ApproveAllSessionWarningDialog

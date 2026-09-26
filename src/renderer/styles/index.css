@@ -9535,6 +9535,25 @@ a,
   padding: 8px;
 }
 
+.theme-option-preview.calm {
+  background:
+    radial-gradient(70% 60% at 10% 110%, rgba(56, 189, 248, 0.35), transparent 70%),
+    #fbfbf9;
+  border: 1px solid rgba(24, 24, 20, 0.08);
+  padding: 8px;
+  gap: 4px;
+}
+
+.theme-option-preview.calm .ui-line {
+  background: rgba(24, 24, 20, 0.16);
+  height: 3px;
+  border-radius: 999px;
+}
+
+.theme-option-preview.calm .ui-line:nth-child(2) {
+  width: 70%;
+}
+
 .theme-option-preview.warm {
   background: linear-gradient(135deg, #fff1e6 0%, #f4d9c8 100%);
   border: 1px solid rgba(120, 90, 70, 0.18);

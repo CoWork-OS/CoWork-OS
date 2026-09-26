@@ -178,9 +178,17 @@ function formatDateTimeLocalValue(timestamp?: number): string {
 function priorityBadge(band: MailboxPriorityBand): { color: string; bg: string; label: string } {
   switch (band) {
     case "critical":
-      return { color: "#fb7185", bg: "rgba(251,113,133,0.12)", label: "Critical" };
+      return {
+        color: "var(--inbox-critical-text, #fb7185)",
+        bg: "rgba(251,113,133,0.12)",
+        label: "Critical",
+      };
     case "high":
-      return { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", label: "High" };
+      return {
+        color: "var(--inbox-high-text, #f59e0b)",
+        bg: "rgba(245,158,11,0.12)",
+        label: "High",
+      };
     case "medium":
       return { color: "var(--color-accent)", bg: "var(--color-accent-subtle)", label: "Medium" };
     default:
@@ -572,12 +580,12 @@ function ActionBtn({
         ? "var(--color-accent-hover, var(--color-accent))"
         : "var(--color-accent)",
       border: "1px solid var(--color-accent)",
-      color: "#fff",
+      color: "var(--color-accent-contrast, #fff)",
     },
     danger: {
       background: hovered ? "rgba(248,113,113,0.18)" : "rgba(248,113,113,0.1)",
       border: "1px solid rgba(248,113,113,0.25)",
-      color: "#fb7185",
+      color: "var(--inbox-critical-text, #fb7185)",
     },
   };
 
@@ -4423,7 +4431,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                                     padding: "2px 6px",
                                     borderRadius: "999px",
                                     background: "rgba(16,185,129,0.08)",
-                                    color: "#0f766e",
+                                    color: "var(--inbox-account-text, #0f766e)",
                                     border: "1px solid rgba(16,185,129,0.16)",
                                     maxWidth: "160px",
                                     overflow: "hidden",
@@ -4591,7 +4599,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                         padding: "3px 8px",
                         borderRadius: "999px",
                         background: "rgba(16,185,129,0.08)",
-                        color: "#0f766e",
+                        color: "var(--inbox-account-text, #0f766e)",
                         fontSize: "0.68rem",
                         border: "1px solid rgba(16,185,129,0.16)",
                       }}

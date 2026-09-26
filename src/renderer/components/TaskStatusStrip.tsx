@@ -26,6 +26,8 @@ interface TaskStatusStripProps {
   telemetryEnabled?: boolean;
   onOpenOutput?: (path?: string) => void;
   markdownComponents?: unknown;
+  /** Optional identity shown before the status label (calm theme agent). */
+  leading?: ReactNode;
 }
 
 type InlineMarkdownNodeProps = {
@@ -99,6 +101,7 @@ export function TaskStatusStrip({
   telemetryEnabled = false,
   onOpenOutput,
   markdownComponents,
+  leading,
 }: TaskStatusStripProps) {
   const [open, setOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -265,6 +268,7 @@ export function TaskStatusStrip({
           })
         }
       >
+        {leading}
         <StatusIcon model={model} />
         <strong className="task-status-strip-primary">{model.primaryLabel}</strong>
         {model.hasUnreadActivity && (model.newActivityCount ?? 0) > 0 && (

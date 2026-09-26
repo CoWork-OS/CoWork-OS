@@ -136,6 +136,18 @@ export function AppearanceSettings({
             </div>
             <span className="theme-option-label">Modern</span>
           </button>
+
+          <button
+            className={`theme-option ${visualTheme === "calm" ? "selected" : ""}`}
+            onClick={() => onVisualThemeChange("calm")}
+          >
+            <div className="theme-option-preview calm">
+              <div className="theme-option-preview-line ui-line" />
+              <div className="theme-option-preview-line ui-line" />
+              <div className="theme-option-preview-line ui-line" />
+            </div>
+            <span className="theme-option-label">Calm</span>
+          </button>
         </div>
       </div>
 

@@ -91,6 +91,14 @@ export function useAgentContext(): AgentContext {
     loadSettings();
   }, [loadSettings]);
 
+  // Pick up name changes made elsewhere (settings, calm agent setup).
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onPersonalitySettingsChanged?.(() => {
+      void loadSettings();
+    });
+    return () => unsubscribe?.();
+  }, [loadSettings]);
+
   // Build message context
   const messageContext = useMemo<AgentMessageContext>(
     () => ({

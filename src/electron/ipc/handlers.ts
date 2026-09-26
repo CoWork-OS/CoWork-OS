@@ -1226,7 +1226,9 @@ async function approveTerminalCommand(params: {
     );
   }
   if (/\bapply_patch\b/.test(params.command)) {
-    throw new Error("Terminal tabs cannot invoke apply_patch. Use the apply_patch tool directly.");
+    throw new Error(
+      "Terminal tabs cannot invoke apply_patch, and CoWork has no apply_patch tool. Use edit_file to change an existing file or write_file to create or replace one.",
+    );
   }
   const approved = await params.agentDaemon.requestApproval(
     taskId,

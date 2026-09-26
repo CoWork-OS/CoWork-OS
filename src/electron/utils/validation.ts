@@ -7,6 +7,7 @@ import * as os from "os";
 import * as path from "path";
 import { z } from "zod";
 import {
+  EXTERNAL_RUNTIME_AGENTS,
   CoreEvalCaseStatus,
   CoreExperimentStatus,
   CoreFailureCategory,
@@ -336,7 +337,7 @@ export const AgentConfigSchema = z
     externalRuntime: z
       .object({
         kind: z.literal("acpx"),
-        agent: z.enum(["codex", "claude"]),
+        agent: z.enum(EXTERNAL_RUNTIME_AGENTS),
         sessionMode: z.literal("persistent"),
         outputMode: z.literal("json"),
         permissionMode: z.enum(["approve-reads", "approve-all", "deny-all"]),

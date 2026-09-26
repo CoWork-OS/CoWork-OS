@@ -28,6 +28,29 @@ describe("WorkspaceKitContext", () => {
     }
   });
 
+  it("loads repo-root AGENTS.md even without a .cowork kit", () => {
+    writeFile(path.join(tmpDir, "AGENTS.md"), "# Rules\n- Run npm test before finishing.");
+    const out = buildWorkspaceKitContext(tmpDir, "fix a bug", new Date("2026-09-26T10:00:00Z"));
+    expect(out).toContain("Project Instructions (AGENTS.md)");
+    expect(out).toContain("Run npm test before finishing.");
+  });
+
+  it("falls back to CLAUDE.md and prefers AGENTS.md when both exist", () => {
+    writeFile(path.join(tmpDir, "CLAUDE.md"), "claude rules");
+    expect(buildWorkspaceKitContext(tmpDir, "task")).toContain("Project Instructions (CLAUDE.md)");
+    writeFile(path.join(tmpDir, "AGENTS.md"), "agents rules");
+    const out = buildWorkspaceKitContext(tmpDir, "task");
+    expect(out).toContain("agents rules");
+    expect(out).not.toContain("claude rules");
+  });
+
+  it("keeps long workspace rules instead of cutting them at 3,000 characters", () => {
+    const rules = `# Rules\n\n## Coding\n${"- keep this rule\n".repeat(400)}- FINAL RULE`;
+    writeFile(path.join(tmpDir, ".cowork", "AGENTS.md"), rules);
+    const out = buildWorkspaceKitContext(tmpDir, "task");
+    expect(out).toContain("FINAL RULE");
+  });
+
   it("returns empty string when .cowork does not exist", () => {
     expect(buildWorkspaceKitContext(tmpDir, "test")).toBe("");
   });

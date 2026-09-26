@@ -1,6 +1,15 @@
 export function detectTestRequirement(prompt: string): boolean {
-  return /(run|execute)\s+(unit\s+)?tests?|test suite|npm test|pnpm test|yarn test|vitest|jest|pytest|go test|cargo test|mvn test|gradle test|bun test/i.test(
+  const negatedTestRequestPatterns = [
+    /\b(?:do not|don't|dont|never|must not|should not|avoid|no need to|don't need to)\s+(?:run|execute|perform|running|executing)\s+(?:(?:any|the)\s+)?(?:(?:unit|integration|end-to-end)\s+)?(?:tests?|test suite)\b/gi,
+    /\b(?:do not|don't|dont|never|must not|should not)\s+(?:run|execute)\s+(?:(?:any|the)\s+)?(?:commands?|shell(?:\s+commands?)?)(?:[^.!?;]{0,100}?\b(?:or|and)\s+(?:(?:run|execute)\s+)?(?:(?:any|the)\s+)?(?:(?:unit|integration|end-to-end)\s+)?(?:tests?|test suite)\b)/gi,
+  ];
+  const promptWithoutNegatedRequests = negatedTestRequestPatterns.reduce(
+    (remaining, pattern) => remaining.replace(pattern, " "),
     prompt,
+  );
+
+  return /\b(?:run|execute|perform|running|executing)\s+(?:(?:any|the|all)\s+)?(?:(?:unit|integration|end-to-end)\s+)?(?:tests?|test suite)\b|test suite|npm test|pnpm test|yarn test|vitest|jest|pytest|go test|cargo test|mvn test|gradle test|bun test/i.test(
+    promptWithoutNegatedRequests,
   );
 }
 

@@ -1,5 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { ExternalRuntimeConfig, WorkspacePermissions } from "../../shared/types";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import {
+  EXTERNAL_RUNTIME_AGENT_LABELS,
+  type ExternalRuntimeConfig,
+  type WorkspacePermissions,
+} from "../../shared/types";
 import type { AdminPolicies } from "../admin/policies";
 
 /** ACP adapters cannot enforce CoWork's bounded filesystem/network policy. */
@@ -68,13 +74,7 @@ export function getAcpxPermissionArgs(
 }
 
 export function getAcpxAgentDisplayName(agent: ExternalRuntimeConfig["agent"]): string {
-  switch (agent) {
-    case "claude":
-      return "Claude Code";
-    case "codex":
-    default:
-      return "Codex";
-  }
+  return EXTERNAL_RUNTIME_AGENT_LABELS[agent] || "Codex";
 }
 
 export function buildAcpxBaseArgs(input: {
@@ -117,11 +117,90 @@ type AcpxLauncherSpec = {
 
 let preferredAcpxLauncherLabel: string | null = null;
 
+/**
+ * Pinned so the npx fallback cannot silently pull new, unreviewed code at runtime.
+ * Bump deliberately after checking the release.
+ */
+export const ACPX_PINNED_VERSION = "0.19.3";
+
+function findOnPath(name: string, exts: string[]): string | null {
+  const dirs = String(process.env.PATH || process.env.Path || "")
+    .split(path.delimiter)
+    .filter(Boolean);
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, `${name}${ext}`);
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch {
+        // not here
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Windows: npm installs CLIs as `.cmd` shims, which Node will not spawn without a
+ * shell, and a shell would re-parse the prompt text we pass as arguments (command
+ * injection). Instead, read the JavaScript entry the shim wraps and run it with
+ * node.exe directly, so arguments are passed verbatim and no shell is involved.
+ * Returns null when the command cannot be resolved safely.
+ */
+export function resolveWindowsLauncher(
+  spec: AcpxLauncherSpec,
+  deps: { findOnPath?: typeof findOnPath; readFile?: (file: string) => string } = {},
+): AcpxLauncherSpec | null {
+  const find = deps.findOnPath || findOnPath;
+  const readFile = deps.readFile || ((file: string) => fs.readFileSync(file, "utf8"));
+  const exe = find(spec.command, [".exe"]);
+  if (exe) return { ...spec, command: exe };
+  const shim = find(spec.command, [".cmd"]);
+  if (!shim) return null;
+  let shimText: string;
+  try {
+    shimText = readFile(shim);
+  } catch {
+    return null;
+  }
+  // cmd-shim quotes the entry directly ("%dp0%\node_modules\x\cli.js"); npm's own
+  // npx.cmd assigns it first (SET "NPX_CLI_JS=%~dp0\...\npx-cli.js") after a
+  // npm-prefix.js helper, so take the last script that is not that helper.
+  const entry = [...shimText.matchAll(/"(?:[A-Z_]+=)?%~?dp0%?\\?([^"%]+?\.(?:c|m)?js)"/gi)]
+    .map((match) => match[1])
+    .filter((file) => !/(?:^|\\)npm-prefix\.js$/i.test(file))
+    .pop();
+  if (!entry) return null;
+  const shimDir = path.dirname(shim);
+  const script = path.join(shimDir, entry);
+  const siblingNode = path.join(shimDir, "node.exe");
+  const node = (() => {
+    try {
+      if (fs.statSync(siblingNode).isFile()) return siblingNode;
+    } catch {
+      // fall back to PATH
+    }
+    return find("node", [".exe"]);
+  })();
+  if (!node) return null;
+  return { ...spec, command: node, prefixArgs: [script, ...spec.prefixArgs] };
+}
+
 function getAcpxLaunchCandidates(): AcpxLauncherSpec[] {
-  const candidates: AcpxLauncherSpec[] = [
+  const baseCandidates: AcpxLauncherSpec[] = [
     { command: "acpx", prefixArgs: [], label: "acpx" },
-    { command: "npx", prefixArgs: ["-y", "acpx@latest"], label: "npx acpx@latest" },
+    {
+      command: "npx",
+      prefixArgs: ["-y", `acpx@${ACPX_PINNED_VERSION}`],
+      label: `npx acpx@${ACPX_PINNED_VERSION}`,
+    },
   ];
+  const candidates =
+    process.platform === "win32"
+      ? baseCandidates
+          .map((candidate) => resolveWindowsLauncher(candidate))
+          .filter((candidate): candidate is AcpxLauncherSpec => candidate !== null)
+      : baseCandidates;
   if (!preferredAcpxLauncherLabel) return candidates;
   const preferred = candidates.find((candidate) => candidate.label === preferredAcpxLauncherLabel);
   const remaining = candidates.filter(
@@ -386,9 +465,22 @@ export class AcpxRuntimeRunner {
           });
           return true;
         };
+        const primaryLauncher = getAcpxLaunchCandidates().find(
+          (candidate) => candidate.label === "acpx",
+        );
+        if (!primaryLauncher) {
+          if (!startFallbackCancel()) resolveOnce();
+          return;
+        }
         const proc = spawn(
-          "acpx",
-          [this.input.runtimeConfig.agent, "cancel", "--session", this.sessionName],
+          primaryLauncher.command,
+          [
+            ...primaryLauncher.prefixArgs,
+            this.input.runtimeConfig.agent,
+            "cancel",
+            "--session",
+            this.sessionName,
+          ],
           { cwd: this.input.cwd, env: process.env, stdio: "ignore" },
         );
         proc.on("close", (code) => {
@@ -550,7 +642,7 @@ export class AcpxRuntimeRunner {
             settled = true;
             reject(
               new AcpxRuntimeUnavailableError(
-                "acpx is not installed and CoWork could not launch it via npx acpx@latest",
+                `acpx is not installed and CoWork could not launch it via npx acpx@${ACPX_PINNED_VERSION}`,
               ),
             );
             return;
@@ -596,6 +688,14 @@ export class AcpxRuntimeRunner {
         proc.stdin.end();
       };
 
+      if (launchCandidates.length === 0) {
+        reject(
+          new AcpxRuntimeUnavailableError(
+            `acpx could not be found. Install it with \`npm install -g acpx@${ACPX_PINNED_VERSION}\`.`,
+          ),
+        );
+        return;
+      }
       startAttempt(0);
     });
   }

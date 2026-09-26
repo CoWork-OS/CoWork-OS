@@ -2099,7 +2099,46 @@ export type ExecutionMode = "execute" | "chat" | "plan" | "analyze" | "verified"
 export type ExecutionModeSource = "user" | "strategy" | "auto_promote";
 
 export type ExternalRuntimePermissionMode = "approve-reads" | "approve-all" | "deny-all";
-export type ExternalRuntimeAgent = "codex" | "claude";
+/**
+ * Coding agents CoWork can drive through acpx (Agent Client Protocol). Each runs its
+ * vendor's official, unmodified CLI with the user's own sign-in. Names match acpx's
+ * built-in agent profiles (https://github.com/openclaw/acpx/blob/main/docs/agents.md).
+ */
+export const EXTERNAL_RUNTIME_AGENTS = [
+  "codex",
+  "claude",
+  "gemini",
+  "opencode",
+  "qwen",
+  "kimi",
+  "cursor",
+  "copilot",
+  "droid",
+  "pi",
+] as const;
+export type ExternalRuntimeAgent = (typeof EXTERNAL_RUNTIME_AGENTS)[number];
+
+export const EXTERNAL_RUNTIME_AGENT_LABELS: Record<ExternalRuntimeAgent, string> = {
+  codex: "Codex",
+  claude: "Claude Code",
+  gemini: "Gemini CLI",
+  opencode: "OpenCode",
+  qwen: "Qwen Code",
+  kimi: "Kimi CLI",
+  cursor: "Cursor CLI",
+  copilot: "GitHub Copilot CLI",
+  droid: "Factory Droid",
+  pi: "Pi",
+};
+
+export function normalizeExternalRuntimeAgent(value: unknown): ExternalRuntimeAgent | undefined {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return (EXTERNAL_RUNTIME_AGENTS as readonly string[]).includes(normalized)
+    ? (normalized as ExternalRuntimeAgent)
+    : undefined;
+}
 
 export interface ExternalRuntimeConfig {
   kind: "acpx";

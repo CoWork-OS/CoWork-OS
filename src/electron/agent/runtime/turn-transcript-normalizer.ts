@@ -44,7 +44,7 @@ function isToolResultOnlyUserMessage(message: LLMMessage | undefined): boolean {
 
 function cloneMessage(message: LLMMessage): LLMMessage {
   return {
-    role: message.role,
+    ...message,
     content: Array.isArray(message.content)
       ? ([...message.content] as LLMMessage["content"])
       : message.content,

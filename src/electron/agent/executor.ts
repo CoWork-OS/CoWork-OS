@@ -170,6 +170,7 @@ import {
 import { assertNormalizedTurnTranscript } from "./runtime/turn-transcript-normalizer";
 import { getCustomSkillLoader } from "./custom-skill-loader";
 import { MemoryService } from "../memory/MemoryService";
+import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
 import { DurableContextService } from "../memory/DurableContextService";
 import { PlaybookService } from "../memory/PlaybookService";
 import { SessionRecallService } from "../memory/SessionRecallService";
@@ -218,6 +219,7 @@ import {
 import { createDecisionService, type DecisionService } from "./decisions";
 import { decideLoopActionWithJev } from "./jev/loop-decision";
 import {
+  ACPX_PINNED_VERSION,
   AcpxRuntimeRunner,
   AcpxRuntimeUnavailableError,
   assertAcpxExecutionAuthority,
@@ -5870,7 +5872,7 @@ ${transcript}
     allowMemoryInjection: boolean;
     summaryBlock: string;
   }): Promise<void> {
-    if (!opts.allowMemoryInjection) return;
+    if (!opts.allowMemoryInjection || taskDisablesMemoryCapture(this.task)) return;
     const content = this.extractPinnedBlockContent(
       opts.summaryBlock,
       TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
@@ -6001,7 +6003,7 @@ ${transcript}
     allowMemoryInjection: boolean;
     contextLabel: string;
   }): Promise<void> {
-    if (!opts.allowMemoryInjection) return;
+    if (!opts.allowMemoryInjection || taskDisablesMemoryCapture(this.task)) return;
 
     const now = Date.now();
     if (
@@ -10238,6 +10240,7 @@ ${transcript}
           ...(cacheWriteTtl ? { cacheWriteTtl } : {}),
           totalTokens: safeInput + safeOutput,
           cost: deltaCost,
+          costKnown,
         },
         totals: {
           inputTokens: cumulativeInput,
@@ -13596,8 +13599,14 @@ ${transcript}
         toolRestrictions: Array.from(existing),
       };
     }
-    if (directives?.allowedTools?.length) {
-      const existing = new Set(this.task.agentConfig?.allowedTools || []);
+    // A task-level allowlist is an authority boundary. Skills can supply (and
+    // extend) an allowlist when the caller set none, but must never widen one
+    // set by the caller.
+    if (
+      directives?.allowedTools?.length &&
+      (!Array.isArray(this.task.agentConfig?.allowedTools) || this.allowedToolsFromSkills)
+    ) {
+      const existing = new Set<string>(this.task.agentConfig?.allowedTools || []);
       for (const toolName of directives.allowedTools) {
         existing.add(toolName);
       }
@@ -13605,6 +13614,7 @@ ${transcript}
         ...this.task.agentConfig,
         allowedTools: Array.from(existing),
       };
+      this.allowedToolsFromSkills = true;
     }
     this.availableToolsCacheKey = null;
     this.availableToolsCache = null;
@@ -14367,6 +14377,26 @@ ${transcript}
     return this.getFinalOutcomeGuardError();
   }
 
+  private selectFinalTaskSummary(requestedSummary?: string): string {
+    const validatedCandidate = this.getBestFinalResponseCandidate().trim();
+    const completionContract = this.buildCompletionContract();
+    if (
+      completionContract.requiresDirectAnswer &&
+      validatedCandidate &&
+      this.responseDirectlyAddressesPrompt(validatedCandidate, completionContract)
+    ) {
+      return validatedCandidate;
+    }
+
+    for (const candidate of [requestedSummary, this.buildResultSummary()]) {
+      const trimmed = String(candidate || "").trim();
+      if (!trimmed || this.isToolUnavailabilityClaimContradictedByEvidence(trimmed)) continue;
+      return trimmed;
+    }
+
+    return "";
+  }
+
   private finalizeTask(resultSummary?: string): void {
     if (this.getEffectiveExecutionMode() === "chat") {
       this.finalizeChatTurn();
@@ -14397,12 +14427,7 @@ ${transcript}
     );
     const terminalStatus: Task["terminalStatus"] = statusWithVerification.terminalStatus;
     const failureClass: Task["failureClass"] = statusWithVerification.failureClass;
-    const requestedSummary =
-      typeof resultSummary === "string" && resultSummary.trim() ? resultSummary.trim() : "";
-    const summaryCandidate =
-      requestedSummary && this.isToolUnavailabilityClaimContradictedByEvidence(requestedSummary)
-        ? this.buildResultSummary() || ""
-        : requestedSummary || this.buildResultSummary() || "";
+    const summaryCandidate = this.selectFinalTaskSummary(resultSummary);
     const summary = this.reconcileSummaryWithWorkspaceOutputs(summaryCandidate);
     const runtimeProjection = this.applyRuntimeTaskProjectionToTask();
     this.task.status = "completed";
@@ -14493,12 +14518,7 @@ ${transcript}
     const nonBlockingFailedStepIds = this.getNonBlockingFailedStepIdsAtCompletion();
     const failedMutationRequiredStepIds = this.getFailedMutationRequiredStepIdsAtCompletion();
     const waivedVerificationStepIds = this.getVerificationStepIds(waivableFailedStepIds);
-    const requestedSummary =
-      typeof resultSummary === "string" && resultSummary.trim() ? resultSummary.trim() : "";
-    const summaryCandidate =
-      requestedSummary && this.isToolUnavailabilityClaimContradictedByEvidence(requestedSummary)
-        ? this.buildResultSummary() || ""
-        : requestedSummary || this.buildResultSummary() || "";
+    const summaryCandidate = this.selectFinalTaskSummary(resultSummary);
     const summary = this.reconcileSummaryWithWorkspaceOutputs(summaryCandidate);
     this.task.status = "completed";
     this.task.completedAt = Date.now();
@@ -14809,6 +14829,8 @@ ${transcript}
     outcome: "success" | "failure",
     errorMessage?: string,
   ): Promise<void> {
+    if (taskDisablesMemoryCapture(this.task)) return;
+
     try {
       const planSummary = this.plan?.steps?.map((s) => s.description).join("; ") || "";
       const toolsUsed = [...new Set(this.toolResultMemory.map((t) => t.tool))].slice(0, 10);
@@ -27061,7 +27083,7 @@ You are continuing a previous conversation. The context from the previous conver
             const runtimeAgentName = this.getAcpxRuntimeAgentDisplayName();
             if (this.getAcpxExternalRuntimeConfig()?.agent === "claude") {
               throw new Error(
-                `${runtimeAgentName} acpx runtime unavailable. This task explicitly requires ACP, so CoWork did not fall back. Ensure \`acpx\` is installed or that \`npx acpx@latest\` can run in this environment.`,
+                `${runtimeAgentName} acpx runtime unavailable. This task explicitly requires ACP, so CoWork did not fall back. Ensure \`acpx\` is installed or that \`npx acpx@${ACPX_PINNED_VERSION}\` can run in this environment.`,
               );
             }
             this.disableExternalRuntimeForFallback(
@@ -37762,7 +37784,7 @@ Return ONLY a JSON object:
           const runtimeAgentName = this.getAcpxRuntimeAgentDisplayName();
           if (this.getAcpxExternalRuntimeConfig()?.agent === "claude") {
             throw new Error(
-              `${runtimeAgentName} acpx runtime unavailable for follow-up. This task explicitly requires ACP, so CoWork did not fall back. Ensure \`acpx\` is installed or that \`npx acpx@latest\` can run in this environment.`,
+              `${runtimeAgentName} acpx runtime unavailable for follow-up. This task explicitly requires ACP, so CoWork did not fall back. Ensure \`acpx\` is installed or that \`npx acpx@${ACPX_PINNED_VERSION}\` can run in this environment.`,
             );
           }
           this.disableExternalRuntimeForFallback(

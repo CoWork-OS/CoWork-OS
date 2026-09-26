@@ -92,6 +92,33 @@ function createExecutorForFinalization(overrides: Partial<Any> = {}): Any {
 }
 
 describe("TaskExecutor terminal finalization state", () => {
+  it("persists the substantive response candidate validated by the completion guard", () => {
+    const answer =
+      "Shared team inbox ranked first with 42 votes; total feature votes were 132. Active teams rose from 128 to 149, a change of 21 or 16.4% based on the observed baseline and latest week.";
+    const executor = createExecutorForFinalization();
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+    executor.getFinalResponseGuardError = vi.fn().mockReturnValue(null);
+    executor.getBestFinalResponseCandidate = vi.fn().mockReturnValue(answer);
+    executor.buildCompletionContract = vi.fn().mockReturnValue({ requiresDirectAnswer: true });
+    executor.responseDirectlyAddressesPrompt = vi.fn().mockReturnValue(true);
+    executor.getResolvedRecoveredFailureStepIds = vi.fn().mockReturnValue([]);
+    executor.capturePlaybookOutcome = vi.fn();
+    executor.autoGenerateReport = vi.fn().mockResolvedValue(undefined);
+    executor.closeAcpxRuntimeSession = vi.fn().mockResolvedValue(undefined);
+
+    (TaskExecutor as Any).prototype.finalizeTask.call(
+      executor,
+      "Read-only and no-memory constraints preserved.",
+    );
+
+    expect(executor.task.resultSummary).toBe(answer);
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-terminal-state",
+      answer,
+      expect.objectContaining({ terminalStatus: "ok" }),
+    );
+  });
+
   it("preserves explicit failed terminal status through completed daemon outcome normalization", () => {
     const outcome = decideTaskOutcome({
       requestedStatus: "completed",

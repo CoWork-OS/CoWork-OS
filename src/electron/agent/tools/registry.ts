@@ -1,3 +1,8 @@
+import {
+  EXTERNAL_RUNTIME_AGENTS,
+  normalizeExternalRuntimeAgent,
+  type ExternalRuntimeAgent,
+} from "../../../shared/types";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -299,7 +304,7 @@ const READ_MOSTLY_CODEX_PROMPT_PATTERN =
   /\b(review|analy[sz]e|analysis|plan|audit|inspect|investigate|research|summari[sz]e|critique)\b/i;
 
 export type SpawnAgentRuntimeMode = "native" | "acpx";
-export type SpawnAgentRuntimeAgent = "codex" | "claude";
+export type SpawnAgentRuntimeAgent = ExternalRuntimeAgent;
 
 export function isExplicitCodexSpawnRequest(input: {
   runtime_agent?: string;
@@ -349,8 +354,8 @@ export function resolveSpawnAgentExternalRuntime(input: {
   }
 
   const codexRequested = isExplicitCodexSpawnRequest(input);
-  const explicitRuntimeAgent =
-    typeof input.runtime_agent === "string" ? input.runtime_agent : undefined;
+  // Only agents acpx is known to support; anything else falls back to native execution.
+  const explicitRuntimeAgent = normalizeExternalRuntimeAgent(input.runtime_agent);
   const shouldUseAcpx =
     (explicitRuntime === "acpx" && Boolean(explicitRuntimeAgent)) ||
     (input.defaultCodexRuntimeMode === "acpx" && codexRequested);
@@ -5220,10 +5225,22 @@ ${skillDescriptions}`;
         }
       }
 
-      // Combine text content
-      const textParts = result.content
-        .filter((c: Any) => c.type === "text")
-        .map((c: Any) => c.text);
+      // Combine text content. MCP 2025-06-18 servers may also return embedded
+      // resources, resource links and structuredContent; surface those as text too.
+      const textParts: string[] = [];
+      for (const c of result.content as Any[]) {
+        if (c?.type === "text" && typeof c.text === "string") {
+          textParts.push(c.text);
+        } else if (c?.type === "resource" && typeof c.resource?.text === "string") {
+          textParts.push(c.resource.text);
+        } else if (c?.type === "resource_link" && typeof c.uri === "string") {
+          const label = [c.name || c.title, c.description].filter(Boolean).join(" - ");
+          textParts.push(`Resource: ${label ? `${label} ` : ""}(${c.uri})`);
+        }
+      }
+      if (textParts.length === 0 && result.structuredContent !== undefined) {
+        textParts.push(JSON.stringify(result.structuredContent, null, 2));
+      }
 
       if (textParts.length > 0) {
         const baseText = textParts.join("\n");
@@ -13397,9 +13414,9 @@ ${skillDescriptions}`;
             },
             runtime_agent: {
               type: "string",
-              enum: ["codex", "claude"],
+              enum: [...EXTERNAL_RUNTIME_AGENTS],
               description:
-                'When runtime is "acpx", selects the target adapter, such as "codex" or "claude".',
+                'When runtime is "acpx", selects the coding agent CLI to run, such as "codex", "claude", "gemini" or "opencode". The CLI must be installed and signed in.',
             },
             wait: {
               type: "boolean",

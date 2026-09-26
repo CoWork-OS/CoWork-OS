@@ -58,6 +58,7 @@ export interface LLMProviderConfig {
     expires_at: number;
     email?: string;
     accountId?: string;
+    planType?: string;
   }) => void | Promise<void>;
   // Azure OpenAI-specific
   azureApiKey?: string;
@@ -285,11 +286,20 @@ export interface LLMToolResult {
   companion_user_content?: LLMToolResultCompanionContent[];
 }
 
+/** Opaque provider reasoning state, replayed only to the model that produced it. */
+export interface LLMReasoningItem {
+  format: "openai-responses" | "pi-ai";
+  model: string;
+  data: unknown;
+}
+
 export interface LLMMessage {
   role: "user" | "assistant";
   content: string | LLMContent[] | LLMToolResult[];
   /** Responses API assistant item phase used when replaying assistant state. */
   phase?: "commentary" | "final_answer";
+  /** Reasoning state from the response that produced this assistant message. */
+  reasoning?: LLMReasoningItem[];
 }
 
 export type LLMSystemBlockScope = "session" | "turn" | "none";
@@ -371,6 +381,8 @@ export interface LLMRequest {
 
 export interface LLMResponse {
   content: LLMContent[];
+  /** Opaque reasoning state to carry on the assistant message (see reasoning-replay.ts). */
+  reasoning?: LLMReasoningItem[];
   stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
   usage?: {
     inputTokens: number;

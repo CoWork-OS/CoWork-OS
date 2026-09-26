@@ -1,3 +1,4 @@
+import { estimateTaskCost } from "../agent/llm/usage-telemetry";
 import {
   ipcMain,
   shell,
@@ -270,6 +271,7 @@ import {
   LLMProviderConfig,
   ModelKey,
   OpenAIOAuth,
+  recommendChatGPTModelForPlan,
   XAIOAuth,
 } from "../agent/llm";
 import {
@@ -7257,6 +7259,12 @@ export async function setupIpcHandlers(
     }));
   });
 
+  // Typical task cost for a model, from the user's own local history (read-only).
+  ipcMain.handle(IPC_CHANNELS.LLM_TASK_COST_ESTIMATE, async (_, modelId: unknown) => {
+    if (typeof modelId !== "string" || !modelId.trim() || modelId.length > 200) return null;
+    return estimateTaskCost(modelId.trim());
+  });
+
   ipcMain.handle(IPC_CHANNELS.LLM_GET_CONFIG_STATUS, async () => {
     return LLMProviderFactory.getConfigStatus();
   });
@@ -7594,6 +7602,7 @@ export async function setupIpcHandlers(
             accountId: tokens.accountId,
             email: tokens.email,
             authMethod: "oauth",
+            chatgptPlanType: tokens.planType,
             // Clear API key when using OAuth
             apiKey: undefined,
           };
@@ -7606,6 +7615,7 @@ export async function setupIpcHandlers(
         return {
           success: true,
           email: tokens.email,
+          recommendedModel: recommendChatGPTModelForPlan(tokens.planType),
           tokens: shouldPersist
             ? undefined
             : {
@@ -7614,6 +7624,7 @@ export async function setupIpcHandlers(
                 tokenExpiresAt: tokens.expires_at,
                 accountId: tokens.accountId,
                 email: tokens.email,
+                planType: tokens.planType,
               },
         };
       } catch (error: Any) {

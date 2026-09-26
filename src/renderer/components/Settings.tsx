@@ -12,6 +12,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
 import {
   Sparkles,
   Sun,
@@ -82,6 +83,7 @@ import {
 import { CUSTOM_PROVIDER_MAP } from "../../shared/llm-provider-catalog";
 import {
   getModelAccessDescriptor,
+  isFeaturedProvider,
   MODEL_ACCESS_GROUP_LABELS,
   MODEL_ACCESS_GROUP_ORDER,
 } from "../../shared/model-access";
@@ -1392,6 +1394,7 @@ export function Settings({
     Record<string, ModelOption[]>
   >({});
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [showAllProviders, setShowAllProviders] = useState(false);
   const [routingRuntime, setRoutingRuntime] = useState<LLMRoutingRuntimeState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2687,7 +2690,7 @@ export function Settings({
         // If authMethod is 'oauth', check if tokens are available
         if (loadedSettings.openai.authMethod === "oauth") {
           if (!loadedSettings.openai.model) {
-            setOpenaiModel("gpt-6-astra");
+            setOpenaiModel(recommendChatGPTModelForPlan(loadedSettings.openai.chatgptPlanType));
           }
           if (loadedSettings.openai.accessToken || loadedSettings.openai.refreshToken) {
             // Tokens available - fully connected
@@ -3390,7 +3393,7 @@ export function Settings({
         setOpenaiAuthMethod("oauth");
         setOpenaiApiKey(""); // Clear API key when using OAuth
         if (!openaiModel || openaiModel === "gpt-4o-mini") {
-          setOpenaiModel("gpt-6-astra");
+          setOpenaiModel(result.recommendedModel || "gpt-6-astra");
         }
         onSettingsChanged?.();
         // Load models after OAuth success
@@ -5718,7 +5721,11 @@ export function Settings({
         {MODEL_ACCESS_GROUP_ORDER.map((group) => {
           const groupedProviders = providers.filter(
             (provider) =>
-              getModelAccessDescriptor(provider.type as LLMProviderType).group === group,
+              getModelAccessDescriptor(provider.type as LLMProviderType).group === group &&
+              (showAllProviders ||
+                isFeaturedProvider(provider.type as LLMProviderType) ||
+                provider.configured ||
+                settings.providerType === provider.type),
           );
           if (groupedProviders.length === 0) return null;
 
@@ -5754,6 +5761,26 @@ export function Settings({
             </section>
           );
         })}
+        {(() => {
+          const hiddenCount = providers.filter(
+            (provider) =>
+              !isFeaturedProvider(provider.type as LLMProviderType) &&
+              !provider.configured &&
+              settings.providerType !== provider.type,
+          ).length;
+          if (hiddenCount === 0) return null;
+          return (
+            <button
+              type="button"
+              className="button-small button-secondary"
+              style={{ alignSelf: "flex-start", marginTop: "8px" }}
+              onClick={() => setShowAllProviders((value) => !value)}
+              aria-expanded={showAllProviders}
+            >
+              {showAllProviders ? "Show fewer providers" : `More providers (${hiddenCount})`}
+            </button>
+          );
+        })()}
       </div>
       <div className="llm-provider-content">
         {settings.providerType === "anthropic" && (
@@ -6052,7 +6079,7 @@ export function Settings({
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                     <circle cx="12" cy="7" r="4" />
                   </svg>
-                  Sign in with ChatGPT
+                  Sign in with ChatGPT (unofficial)
                 </button>
                 <button
                   className={`auth-method-tab ${openaiAuthMethod === "api_key" ? "active" : ""}`}
@@ -6096,6 +6123,10 @@ export function Settings({
                       Your ChatGPT account is connected. You can use Codex GPT models with your
                       subscription.
                     </p>
+                    <p className="settings-hint">
+                      Unofficial: OpenAI does not support ChatGPT sign-in in third-party apps, so it
+                      may stop working at any time. An OpenAI API key is the supported route.
+                    </p>
                     <button
                       className="button-small button-secondary"
                       onClick={handleOpenAIOAuthLogout}
@@ -6109,6 +6140,10 @@ export function Settings({
                     <p className="settings-description">
                       Sign in with your ChatGPT account to use Codex GPT models with your
                       subscription.
+                    </p>
+                    <p className="settings-hint">
+                      Unofficial: OpenAI does not support ChatGPT sign-in in third-party apps, so it
+                      may stop working at any time. An OpenAI API key is the supported route.
                     </p>
                     <button
                       className="button-primary oauth-login-btn"
@@ -8677,6 +8712,25 @@ export function Settings({
             )}
           </div>
         )}
+
+        <div className="settings-section" style={{ marginTop: "16px" }}>
+          <label className="settings-label" style={{ display: "flex", gap: "8px" }}>
+            <input
+              type="checkbox"
+              checked={settings.modelMetadataAutoRefresh === true}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setSettings((prev) => ({ ...prev, modelMetadataAutoRefresh: enabled }));
+              }}
+            />
+            Refresh model prices and context limits daily
+          </label>
+          <p className="settings-hint">
+            Off by default. CoWork ships with a price list that is updated with each release. When
+            on, CoWork downloads the public models.dev catalogue once a day (one anonymous request,
+            no prompts, usage or identifiers) so cost estimates stay current between releases.
+          </p>
+        </div>
 
         {renderModelSettingsActions({ includeProviderActions: true })}
       </div>

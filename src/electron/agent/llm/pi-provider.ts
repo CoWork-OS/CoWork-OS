@@ -1,3 +1,4 @@
+import { currentTurnStartIndex, piAiReplay, reasoningFromPiAiResponse } from "./reasoning-replay";
 import type {
   Model,
   AssistantMessage as PiAiAssistantMessage,
@@ -272,8 +273,9 @@ export class PiProvider implements LLMProvider {
     // Track tool call IDs to their names so we can populate toolName on results.
     // LLMToolResult doesn't carry tool_name, but pi-ai requires it.
     const toolCallNames = new Map<string, string>();
+    const turnStart = currentTurnStartIndex(messages);
 
-    for (const msg of messages) {
+    for (const [msgIndex, msg] of messages.entries()) {
       if (typeof msg.content === "string") {
         if (msg.role === "user") {
           result.push({
@@ -352,13 +354,17 @@ export class PiProvider implements LLMProvider {
               }
             }
 
+            const replay = msgIndex >= turnStart ? piAiReplay(msg, this.modelId) : null;
+            if (replay) content.unshift(...replay.blocks);
+
             if (content.length > 0) {
-              // Synthetic metadata — see comment above for string assistant messages
+              // Synthetic metadata — see comment above for string assistant messages. When
+              // replaying reasoning, use the original api/provider so pi-ai keeps it.
               result.push({
                 role: "assistant",
                 content,
-                api: "openai-completions",
-                provider: this.piProvider,
+                api: (replay?.api as Any) || "openai-completions",
+                provider: (replay?.provider as Any) || this.piProvider,
                 model: this.modelId,
                 usage: PLACEHOLDER_USAGE,
                 stopReason: "stop",
@@ -407,9 +413,10 @@ export class PiProvider implements LLMProvider {
             ...(parsedArguments.inputError ? { inputError: parsedArguments.inputError } : {}),
           });
         }
-        // Skip 'thinking' blocks - they're internal reasoning
+        // 'thinking' blocks are carried as opaque reasoning (below), not as content.
       }
     }
+    const reasoning = reasoningFromPiAiResponse(response);
 
     // Map stop reason
     let stopReason: LLMResponse["stopReason"] = "end_turn";
@@ -421,6 +428,7 @@ export class PiProvider implements LLMProvider {
 
     return {
       content,
+      ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason,
       usage: response.usage
         ? {

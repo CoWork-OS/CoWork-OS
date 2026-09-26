@@ -316,6 +316,8 @@ type CollaborativeAgentUsage = {
   inputTokens: number;
   outputTokens: number;
   cost: number;
+  /** False when a model had no known price, so `cost` is a lower bound. */
+  costKnown: boolean;
 };
 
 type CollaborativeAgentRow = {
@@ -342,6 +344,7 @@ type CollaborativeAgentTotals = {
   inputTokens: number;
   outputTokens: number;
   cost: number;
+  costKnown: boolean;
   wallDurationMs: number;
   rows: CollaborativeAgentRow[];
 };
@@ -368,7 +371,8 @@ function formatRightPanelDuration(ms: number): string {
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
-function formatCost(value: number): string {
+function formatCost(value: number, costKnown = true): string {
+  if (!costKnown) return value > 0 ? `${formatCost(value)}+` : "Unknown";
   if (!Number.isFinite(value) || value <= 0) return "$0";
   if (value < 0.01) return `$${value.toFixed(4)}`;
   if (value < 1) return `$${value.toFixed(3)}`;
@@ -419,8 +423,172 @@ function getLatestUsageTotals(events: TaskEvent[]): CollaborativeAgentUsage {
     inputTokens: toFiniteNumber(totals.inputTokens ?? totals.input_tokens),
     outputTokens: toFiniteNumber(totals.outputTokens ?? totals.output_tokens),
     cost: toFiniteNumber(totals.cost ?? totals.totalCost ?? payload.totalCost),
+    costKnown: totals.costKnown !== false,
   };
 }
+
+type TaskCostSummary = {
+  hasUsage: boolean;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  costKnown: boolean;
+  costLimit: number | null;
+  costLimitSource: "task" | "global" | "none";
+  modelId: string | null;
+};
+
+function getTaskCostSummary(events: TaskEvent[]): TaskCostSummary {
+  const latest = [...events]
+    .reverse()
+    .find((event) => getEffectiveTaskEventType(event) === "llm_usage");
+  const payload =
+    latest?.payload && typeof latest.payload === "object" && !Array.isArray(latest.payload)
+      ? (latest.payload as Record<string, unknown>)
+      : {};
+  const usage = getLatestUsageTotals(events);
+  const totals =
+    payload.totals && typeof payload.totals === "object" && !Array.isArray(payload.totals)
+      ? (payload.totals as Record<string, unknown>)
+      : {};
+  const source = totals.costLimitSource;
+  return {
+    ...usage,
+    hasUsage: Boolean(latest),
+    costLimit:
+      typeof totals.costLimit === "number" && Number.isFinite(totals.costLimit)
+        ? totals.costLimit
+        : null,
+    costLimitSource: source === "task" || source === "global" ? source : "none",
+    modelId: typeof payload.modelId === "string" ? payload.modelId : null,
+  };
+}
+
+type TaskCostEstimate = { sampleSize: number; medianCost: number; p90Cost: number };
+
+const CostSection = memo(function CostSection({
+  visible,
+  expanded,
+  summary,
+  estimate,
+  finished,
+  toggleSection,
+}: {
+  visible: boolean;
+  expanded: boolean;
+  summary: TaskCostSummary;
+  estimate: TaskCostEstimate | null;
+  finished: boolean;
+  toggleSection: () => void;
+}) {
+  if (!visible) return null;
+  const spent = formatCost(summary.cost, summary.costKnown);
+  const capText =
+    summary.costLimit !== null
+      ? `${formatCost(summary.costLimit)} ${summary.costLimitSource === "task" ? "task budget" : "cap"}`
+      : null;
+  const ratio =
+    summary.costLimit && summary.costLimit > 0 ? Math.min(1, summary.cost / summary.costLimit) : 0;
+  return (
+    <div className="right-panel-section cli-section">
+      <button
+        type="button"
+        className="cli-section-header"
+        onClick={toggleSection}
+        aria-expanded={expanded}
+      >
+        <span className="cli-section-prompt">&gt;</span>
+        <span className="cli-section-title">
+          <span className="terminal-only">COST</span>
+          <span className="modern-only">{finished ? "Cost receipt" : "Cost"}</span>
+        </span>
+        <span className="cli-active-context-badge">
+          {summary.hasUsage ? spent : estimate ? `~${formatCost(estimate.medianCost)}` : "—"}
+        </span>
+        <span className="cli-section-toggle">
+          <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
+          <span className="modern-only">{expanded ? "−" : "+"}</span>
+        </span>
+      </button>
+      {expanded && (
+        <div className="cli-section-content">
+          {summary.hasUsage ? (
+            <div className="collab-agents-stat-grid" aria-label="Task cost">
+              <div>
+                <span>{finished ? "Total" : "Spent so far"}</span>
+                <strong
+                  title={
+                    summary.costKnown
+                      ? "Estimated from the model price list."
+                      : "Some models used here have no known price, so the real cost is higher."
+                  }
+                >
+                  {spent}
+                </strong>
+              </div>
+              <div>
+                <span>Limit</span>
+                <strong
+                  title={
+                    summary.costLimitSource === "none"
+                      ? "No cost cap applies (turned off, or a subscription route)."
+                      : undefined
+                  }
+                >
+                  {capText ?? "None"}
+                </strong>
+              </div>
+              <div>
+                <span>Input</span>
+                <strong>{formatCompactNumber(summary.inputTokens)}</strong>
+              </div>
+              <div>
+                <span>Output</span>
+                <strong>{formatCompactNumber(summary.outputTokens)}</strong>
+              </div>
+            </div>
+          ) : null}
+          {summary.costLimit !== null && summary.hasUsage ? (
+            <div
+              role="meter"
+              aria-label="Share of cost cap used"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(ratio * 100)}
+              style={{
+                height: 4,
+                borderRadius: 2,
+                background: "var(--color-border-subtle)",
+                marginTop: 8,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: `${ratio * 100}%`,
+                  height: "100%",
+                  background:
+                    ratio >= 0.8 ? "var(--color-warning, #d97706)" : "var(--color-accent)",
+                }}
+              />
+            </div>
+          ) : null}
+          {estimate && !finished ? (
+            <p style={{ marginTop: 8, fontSize: 12, color: "var(--color-text-muted)" }}>
+              Typical task on this model: ~{formatCost(estimate.medianCost)} (90% under{" "}
+              {formatCost(estimate.p90Cost)}), based on your last {estimate.sampleSize} tasks.
+            </p>
+          ) : null}
+          {!summary.hasUsage && !estimate ? (
+            <p style={{ marginTop: 8, fontSize: 12, color: "var(--color-text-muted)" }}>
+              No usage yet.
+            </p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+});
 
 function getCollaborativeAgentTotals(
   childTasks: Task[],
@@ -470,6 +638,7 @@ function getCollaborativeAgentTotals(
       acc.inputTokens += row.usage.inputTokens;
       acc.outputTokens += row.usage.outputTokens;
       acc.cost += row.usage.cost;
+      acc.costKnown = acc.costKnown && row.usage.costKnown;
       return acc;
     },
     {
@@ -484,6 +653,7 @@ function getCollaborativeAgentTotals(
       inputTokens: 0,
       outputTokens: 0,
       cost: 0,
+      costKnown: true,
     },
   );
 
@@ -1617,7 +1787,15 @@ const CollaborativeAgentsSection = memo(
                 </div>
                 <div>
                   <span>Cost</span>
-                  <strong>{formatCost(totals.cost)}</strong>
+                  <strong
+                    title={
+                      totals.costKnown
+                        ? undefined
+                        : "Some models used here have no known price, so the real cost is higher."
+                    }
+                  >
+                    {formatCost(totals.cost, totals.costKnown)}
+                  </strong>
                 </div>
               </div>
             </div>
@@ -1714,6 +1892,7 @@ function RightPanelComponent({
     progress: true,
     checklist: true,
     collaborativeAgents: true,
+    cost: true,
     queue: true,
     folder: true,
     activeContext: true,
@@ -2151,6 +2330,36 @@ function RightPanelComponent({
       task?.agentConfig?.collaborativeMode ||
       task?.agentConfig?.multiLlmMode),
   );
+  const taskCostSummary = useMemo(() => getTaskCostSummary(events), [events]);
+  const [taskCostEstimate, setTaskCostEstimate] = useState<TaskCostEstimate | null>(null);
+  const taskIdForCost = task?.id;
+  const taskModelKeyForCost = task?.agentConfig?.modelKey;
+  useEffect(() => {
+    let cancelled = false;
+    setTaskCostEstimate(null);
+    if (
+      !taskIdForCost ||
+      typeof window === "undefined" ||
+      !window.electronAPI?.getTaskCostEstimate
+    ) {
+      return;
+    }
+    void (async () => {
+      try {
+        const modelKey =
+          taskModelKeyForCost || (await window.electronAPI.getLLMConfigStatus())?.currentModel;
+        if (!modelKey) return;
+        const estimate = await window.electronAPI.getTaskCostEstimate(modelKey);
+        if (!cancelled) setTaskCostEstimate(estimate);
+      } catch {
+        // No estimate is fine; the section still shows actual spend.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [taskIdForCost, taskModelKeyForCost]);
+  const showCostSection = Boolean(task) && (taskCostSummary.hasUsage || taskCostEstimate !== null);
   const showQueueSection = totalQueueActive > 0;
   const showFolderSection = stableFiles.length > 0;
   const showActiveContextSection =
@@ -2379,6 +2588,17 @@ function RightPanelComponent({
         toggleSection={() => toggleSection("collaborativeAgents")}
         onSelectTask={onSelectTask}
         rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+      />
+
+      <CostSection
+        visible={showCostSection}
+        expanded={expandedSections.cost}
+        summary={taskCostSummary}
+        estimate={taskCostEstimate}
+        finished={
+          task?.status === "completed" || task?.status === "failed" || task?.status === "cancelled"
+        }
+        toggleSection={() => toggleSection("cost")}
       />
 
       {/* Lineup Section */}

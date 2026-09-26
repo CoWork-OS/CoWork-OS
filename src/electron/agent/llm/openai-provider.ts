@@ -1,3 +1,10 @@
+import {
+  currentTurnStartIndex,
+  piAiReplay,
+  reasoningFromPiAiResponse,
+  reasoningFromResponsesOutput,
+  responsesReplayItems,
+} from "./reasoning-replay";
 import OpenAI from "openai";
 import type {
   Model,
@@ -351,6 +358,7 @@ export class OpenAIProvider implements LLMProvider {
     messages: LLMMessage[],
     system?: string,
     systemBlocks?: LLMSystemBlock[],
+    replayModel?: string,
   ): Any[] {
     const input: Any[] = [];
     const { volatileText } = splitSystemBlocksForOpenAIPrefix(system || "", systemBlocks);
@@ -363,7 +371,9 @@ export class OpenAIProvider implements LLMProvider {
       });
     }
 
-    for (const msg of messages) {
+    const turnStart = currentTurnStartIndex(messages);
+
+    for (const [msgIndex, msg] of messages.entries()) {
       if (typeof msg.content === "string") {
         input.push({
           type: "message",
@@ -381,6 +391,10 @@ export class OpenAIProvider implements LLMProvider {
 
       if (!Array.isArray(msg.content)) {
         continue;
+      }
+
+      if (replayModel && msg.role === "assistant" && msgIndex >= turnStart) {
+        input.push(...responsesReplayItems(msg, replayModel));
       }
 
       for (const item of msg.content) {
@@ -474,10 +488,22 @@ export class OpenAIProvider implements LLMProvider {
     const textVerbosity = this.getOpenAITextVerbosity(request);
     return {
       model: this.normalizeCodexModelId(request.model || this.model || DEFAULT_CODEX_MODEL),
-      input: this.buildResponsesInput(request.messages, request.system, request.systemBlocks),
+      input: this.buildResponsesInput(
+        request.messages,
+        request.system,
+        request.systemBlocks,
+        this.normalizeCodexModelId(request.model || this.model || DEFAULT_CODEX_MODEL),
+      ),
       ...(instructions ? { instructions } : {}),
       max_output_tokens: request.maxTokens,
-      ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
+      ...(reasoningEffort
+        ? {
+            reasoning: { effort: reasoningEffort },
+            // Return encrypted reasoning so it can be replayed on the next request in
+            // this turn (see reasoning-replay.ts); works with or without response storage.
+            include: ["reasoning.encrypted_content"],
+          }
+        : {}),
       ...(textVerbosity ? { text: { verbosity: textVerbosity } } : {}),
       ...(tools && tools.length > 0
         ? {
@@ -500,7 +526,7 @@ export class OpenAIProvider implements LLMProvider {
         body,
         request.signal ? { signal: request.signal } : undefined,
       );
-      return this.convertResponsesResponse(response);
+      return this.convertResponsesResponse(response, body.model);
     } catch (error: Any) {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         logger.info("Request aborted");
@@ -527,7 +553,7 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
-  private convertResponsesResponse(response: Any): LLMResponse {
+  private convertResponsesResponse(response: Any, requestModel?: string): LLMResponse {
     const content: LLMContent[] = [];
     for (const item of response?.output || []) {
       if (item?.type === "message") {
@@ -566,8 +592,15 @@ export class OpenAIProvider implements LLMProvider {
         : "end_turn";
 
     const usage = response?.usage;
+    // Tag with the id we requested (and replay against), not response.model, which the
+    // API may resolve to a dated snapshot id that would never match on replay.
+    const reasoning = reasoningFromResponsesOutput(
+      response?.output,
+      String(requestModel || response?.model || this.model || ""),
+    );
     return {
       content,
+      ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason,
       usage: usage
         ? {
@@ -1071,7 +1104,9 @@ export class OpenAIProvider implements LLMProvider {
     const result: PiAiMessage[] = [];
     const now = Date.now();
 
-    for (const msg of messages) {
+    const turnStart = currentTurnStartIndex(messages);
+
+    for (const [msgIndex, msg] of messages.entries()) {
       if (typeof msg.content === "string") {
         if (msg.role === "user") {
           result.push({
@@ -1173,12 +1208,15 @@ export class OpenAIProvider implements LLMProvider {
               }
             }
 
+            const replay = msgIndex >= turnStart ? piAiReplay(msg, this.model) : null;
+            if (replay) content.unshift(...replay.blocks);
+
             if (content.length > 0) {
               result.push({
                 role: "assistant",
                 content,
-                api: "openai-codex-responses",
-                provider: "openai-codex",
+                api: (replay?.api as Any) || "openai-codex-responses",
+                provider: (replay?.provider as Any) || "openai-codex",
                 model: this.model,
                 usage: {
                   input: 0,
@@ -1245,8 +1283,10 @@ export class OpenAIProvider implements LLMProvider {
       stopReason = "max_tokens";
     }
 
+    const reasoning = reasoningFromPiAiResponse(response);
     return {
       content,
+      ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason,
       usage: response.usage
         ? {

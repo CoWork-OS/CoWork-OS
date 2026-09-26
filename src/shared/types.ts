@@ -8977,6 +8977,7 @@ export const IPC_CHANNELS = {
   LLM_TEST_PROVIDER: "llm:testProvider",
   LLM_GET_MODELS: "llm:getModels",
   LLM_GET_CONFIG_STATUS: "llm:getConfigStatus",
+  LLM_TASK_COST_ESTIMATE: "llm:taskCostEstimate",
   LLM_SET_MODEL: "llm:setModel",
   LLM_GET_ANTHROPIC_MODELS: "llm:getAnthropicModels",
   LLM_GET_OLLAMA_MODELS: "llm:getOllamaModels",
@@ -9708,8 +9709,6 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "opencode",
   "opencode-go",
   "google-vertex",
-  "google-antigravity",
-  "google-gemini-cli",
   "zai",
   "glm",
   "vercel-ai-gateway",
@@ -9928,6 +9927,8 @@ export interface LLMSettingsData {
   fallbackProviders?: LLMProviderFallbackConfig[];
   failoverPrimaryRetryCooldownSeconds?: number;
   promptCaching?: PromptCachingSettings;
+  /** Opt-in daily refresh of model prices/limits from models.dev (one anonymous GET per day). */
+  modelMetadataAutoRefresh?: boolean;
   jev?: JevSettingsData;
   anthropic?: {
     apiKey?: string;
@@ -9975,6 +9976,8 @@ export interface LLMSettingsData {
     accountId?: string;
     email?: string;
     authMethod?: "api_key" | "oauth";
+    /** ChatGPT plan from the sign-in token ("free", "go", "plus", ...), used for default models. */
+    chatgptPlanType?: string;
   } & Omit<ProviderRoutingSettings, "reasoningEffort">;
   azure?: {
     apiKey?: string;

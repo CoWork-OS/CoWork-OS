@@ -148,6 +148,23 @@ describe("LLMProviderFactory model status", () => {
     expect(status.models.map((model) => model.key)).toContain("gpt-5.3-codex-spark");
   });
 
+  it("defaults ChatGPT Free and Go sign-ins to a model their plan includes", () => {
+    const settings: LLMSettings = {
+      providerType: "openai",
+      modelKey: "gpt-4o-mini",
+      openai: {
+        authMethod: "oauth",
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        chatgptPlanType: "go",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+    vi.spyOn(LLMProviderFactory, "getAvailableProviders").mockReturnValue([]);
+
+    expect(LLMProviderFactory.getConfigStatus().currentModel).toBe("gpt-6-luna");
+  });
+
   it("adds new GPT-6 choices to a stored OpenAI model cache without duplicating entries", () => {
     const settings: LLMSettings = {
       providerType: "openai",

@@ -22,6 +22,7 @@ import {
   parseOpenAICompatibleToolArguments,
 } from "./openai-compatible";
 import { createLogger } from "../../utils/logger";
+import { registerLiveModelMetadata, type ModelMetadataEntry } from "../../../shared/model-metadata";
 
 const logger = createLogger("OpenRouter");
 const SHARED_MODEL_IMAGE_SUPPORT = new Map<string, boolean>();
@@ -82,6 +83,35 @@ function isParetoCodeModel(model: string): boolean {
  * OpenRouter API provider implementation
  * OpenRouter provides access to multiple LLM providers through a unified API
  */
+/** OpenRouter reports USD per token as strings; "-1" marks router-dependent pricing. */
+function perMillion(value: unknown): number | undefined {
+  const n = typeof value === "string" || typeof value === "number" ? Number(value) : NaN;
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e6 * 1e6) / 1e6 : undefined;
+}
+
+/** Map OpenRouter's /models response to model-metadata entries (prices per 1M tokens). */
+export function toLiveModelMetadata(models: Any[]): Record<string, ModelMetadataEntry> {
+  const out: Record<string, ModelMetadataEntry> = {};
+  for (const model of models) {
+    const id = typeof model?.id === "string" ? model.id : "";
+    if (!id) continue;
+    const entry: ModelMetadataEntry = { provider: "openrouter-live" };
+    const input = perMillion(model.pricing?.prompt);
+    const output = perMillion(model.pricing?.completion);
+    if (input !== undefined && output !== undefined) {
+      entry.input = input;
+      entry.output = output;
+      const cacheRead = perMillion(model.pricing?.input_cache_read);
+      const cacheWrite = perMillion(model.pricing?.input_cache_write);
+      if (cacheRead !== undefined) entry.cacheRead = cacheRead;
+      if (cacheWrite !== undefined) entry.cacheWrite = cacheWrite;
+    }
+    if (Number(model.context_length) > 0) entry.context = Number(model.context_length);
+    if (entry.input !== undefined || entry.context !== undefined) out[id] = entry;
+  }
+  return out;
+}
+
 export class OpenRouterProvider implements LLMProvider {
   readonly type = "openrouter" as const;
   private apiKey: string;
@@ -656,6 +686,7 @@ export class OpenRouterProvider implements LLMProvider {
       }
 
       const data = (await response.json()) as { data?: Any[] };
+      registerLiveModelMetadata(toLiveModelMetadata(data.data || []));
       return (data.data || []).map((model: Any) => ({
         id: model.id,
         name: model.name || model.id,

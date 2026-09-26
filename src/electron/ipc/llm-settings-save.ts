@@ -206,6 +206,8 @@ export function buildSavedLLMSettings(
       ? validated.failoverPrimaryRetryCooldownSeconds
       : existingSettings.failoverPrimaryRetryCooldownSeconds,
     promptCaching: validated.promptCaching ?? existingSettings.promptCaching,
+    modelMetadataAutoRefresh:
+      validated.modelMetadataAutoRefresh ?? existingSettings.modelMetadataAutoRefresh,
     jev: normalizeJevSettings(validated.jev, existingSettings.jev),
     anthropic: cleanProviderSettings(
       mergeProviderSettings(validated.anthropic, existingSettings.anthropic),

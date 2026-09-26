@@ -147,7 +147,7 @@ import { loadPolicies } from "../admin/policies";
 import { resolveEffectiveAccessProfile } from "../security/access-profile-resolver";
 import { PersonalityManager } from "../settings/personality-manager";
 import { detectContextMode } from "./context-mode-detector";
-import { calculateCost, formatCost, getCacheTokenAccounting } from "./llm/pricing";
+import { calculateCost, formatCost, getCacheTokenAccounting, isModelPriced } from "./llm/pricing";
 import {
   getProviderImageCaps,
   loadImageFromFile,
@@ -6199,6 +6199,10 @@ ${transcript}
   private totalInputTokens: number = 0;
   private totalOutputTokens: number = 0;
   private totalCost: number = 0;
+  /** Models used by this task that have no known price, so totalCost is a lower bound. */
+  private unpricedModelIds = new Set<string>();
+  /** True when task.agentConfig.allowedTools was created by applied skills, not the caller. */
+  private allowedToolsFromSkills = false;
   private usageOffsetInputTokens: number = 0;
   private usageOffsetOutputTokens: number = 0;
   private usageOffsetCost: number = 0;
@@ -9196,20 +9200,31 @@ ${transcript}
 
     // Check token budget
     const totalTokens = this.getCumulativeInputTokens() + this.getCumulativeOutputTokens();
-    const tokenCheck = GuardrailManager.isTokenBudgetExceeded(totalTokens);
+    const tokenCheck = GuardrailManager.isTokenBudgetExceeded(totalTokens, {
+      taskBudget: this.task.budgetTokens,
+    });
     if (tokenCheck.exceeded) {
       throw new Error(
-        `Token budget exceeded: ${tokenCheck.used.toLocaleString()}/${tokenCheck.limit.toLocaleString()} tokens. ` +
+        `Token budget exceeded: ${tokenCheck.used.toLocaleString()}/${tokenCheck.limit.toLocaleString()} tokens ` +
+          `(${tokenCheck.source === "task" ? "this task's budget" : "Settings > Guardrails"}). ` +
           `Estimated cost: ${formatCost(this.getCumulativeCost())}`,
       );
     }
 
-    // Check cost budget
-    const costCheck = GuardrailManager.isCostBudgetExceeded(this.getCumulativeCost());
+    // Check cost budget: the task's own budgetCost, else the global guardrail.
+    const costCheck = GuardrailManager.isCostBudgetExceeded(this.getCumulativeCost(), {
+      taskBudget: this.task.budgetCost,
+      subscriptionBilled: LLMProviderFactory.isSubscriptionBilledRoute(this.provider?.type),
+    });
     if (costCheck.exceeded) {
+      const unpriced =
+        this.unpricedModelIds.size > 0
+          ? " Some models used have no known price, so actual cost is higher."
+          : "";
       throw new Error(
-        `Cost budget exceeded: ${formatCost(costCheck.cost)}/${formatCost(costCheck.limit)}. ` +
-          `Total tokens used: ${totalTokens.toLocaleString()}`,
+        `Cost budget exceeded: ${formatCost(costCheck.cost)}/${formatCost(costCheck.limit)} ` +
+          `(${costCheck.source === "task" ? "this task's budget" : "raise it in Settings > Guardrails"}). ` +
+          `Total tokens used: ${totalTokens.toLocaleString()}.${unpriced}`,
       );
     }
   }
@@ -10180,6 +10195,18 @@ ${transcript}
       },
     );
 
+    const costKnown = isModelPriced(this.modelId, this.provider?.type);
+    if (
+      !costKnown &&
+      (safeInput > 0 || safeOutput > 0) &&
+      !this.unpricedModelIds.has(this.modelId)
+    ) {
+      this.unpricedModelIds.add(this.modelId);
+      logger.warn(
+        `${this.logTag} No price for model "${this.modelId}"; its cost is unknown and cost budgets cannot account for it.`,
+      );
+    }
+
     this.totalInputTokens += safeInput;
     this.totalOutputTokens += safeOutput;
     this.totalCost += deltaCost;
@@ -10217,10 +10244,24 @@ ${transcript}
           outputTokens: cumulativeOutput,
           totalTokens: cumulativeInput + cumulativeOutput,
           cost: cumulativeCost,
+          costKnown: this.unpricedModelIds.size === 0,
+          ...this.describeCostCap(cumulativeCost),
         },
         updatedAt: Date.now(),
       });
     }
+  }
+
+  /** The cost cap that applies to this task, for display next to spend. */
+  private describeCostCap(cost: number): {
+    costLimit: number | null;
+    costLimitSource: "task" | "global" | "none";
+  } {
+    const cap = GuardrailManager.isCostBudgetExceeded(cost, {
+      taskBudget: this.task.budgetCost,
+      subscriptionBilled: LLMProviderFactory.isSubscriptionBilledRoute(this.provider?.type),
+    });
+    return { costLimit: cap.source === "none" ? null : cap.limit, costLimitSource: cap.source };
   }
 
   private getToolTimeoutMs(toolName: string, input: unknown): number {

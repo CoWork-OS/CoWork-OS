@@ -9,7 +9,7 @@ const XAI_OAUTH_SCOPE = "openid profile email offline_access grok-cli:access api
 const XAI_OAUTH_REDIRECT_HOST = "127.0.0.1";
 const XAI_OAUTH_REDIRECT_PORT = 56121;
 const XAI_OAUTH_REDIRECT_PATH = "/callback";
-const XAI_OAUTH_REFERRER = "hermes-agent";
+const XAI_OAUTH_REFERRER = "cowork-os";
 const XAI_ACCESS_TOKEN_REFRESH_SKEW_MS = 120_000;
 export const DEFAULT_XAI_OAUTH_BASE_URL = "https://api.x.ai/v1";
 

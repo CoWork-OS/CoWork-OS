@@ -679,7 +679,8 @@ describe("LLMProviderFactory custom provider config resolution", () => {
 
     expect(models.map((model) => model.key)).toEqual([
       "glm-4.7",
-      "GLM-5.1",
+      "glm-5.3",
+      "glm-5.1",
       "GLM-5-Turbo",
       "GLM-5V-Turbo",
       "glm-4.5-air",

@@ -3220,6 +3220,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.JEV_TEST_PROVIDER, config),
   getLLMModels: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_MODELS),
   getLLMConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_CONFIG_STATUS),
+  getTaskCostEstimate: (modelId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LLM_TASK_COST_ESTIMATE, modelId) as Promise<{
+      modelId: string;
+      sampleSize: number;
+      medianCost: number;
+      p90Cost: number;
+    } | null>,
   setLLMModel: (
     selection:
       | string
@@ -6191,6 +6198,12 @@ export interface ElectronAPI {
     config: JevTestProviderRequest,
   ) => Promise<{ success: boolean; error?: string }>;
   getLLMModels: () => Promise<Array<{ key: string; displayName: string; description: string }>>;
+  getTaskCostEstimate: (modelId: string) => Promise<{
+    modelId: string;
+    sampleSize: number;
+    medianCost: number;
+    p90Cost: number;
+  } | null>;
   getLLMConfigStatus: () => Promise<{
     currentProvider: LLMProviderType;
     currentModel: string;
@@ -6328,12 +6341,14 @@ export interface ElectronAPI {
     success: boolean;
     error?: string;
     email?: string;
+    recommendedModel?: string;
     tokens?: {
       accessToken: string;
       refreshToken: string;
       tokenExpiresAt: number;
       accountId?: string;
       email?: string;
+      planType?: string;
     };
   }>;
   openaiOAuthLogout: () => Promise<{ success: boolean }>;

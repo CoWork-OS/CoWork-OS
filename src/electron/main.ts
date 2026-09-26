@@ -98,6 +98,7 @@ import {
   WorkspaceRepository,
 } from "./database/repositories";
 import { LLMProviderFactory } from "./agent/llm";
+import { ModelMetadataRefresher } from "./agent/llm/model-metadata-refresh";
 import { SearchProviderFactory } from "./agent/search";
 import { ChannelGateway } from "./gateway";
 import { formatChatTranscriptForPrompt } from "./gateway/chat-transcript";
@@ -1873,6 +1874,9 @@ if (isMacSafeStorageMigrationWorker) {
 
       // Initialize provider factories (loads settings from disk, migrates legacy files)
       LLMProviderFactory.initialize();
+      new ModelMetadataRefresher(
+        () => LLMProviderFactory.loadSettings().modelMetadataAutoRefresh === true,
+      ).start();
       SearchProviderFactory.initialize();
       GuardrailManager.initialize();
       AppearanceManager.initialize();

@@ -205,7 +205,9 @@ export function GuardrailSettings() {
           </label>
         </div>
         <p className="settings-description">
-          Limit the estimated cost (USD) per task based on model pricing.
+          Stop a task when its estimated cost (USD) reaches this limit. A budget set on the task
+          itself always applies. Subscription routes (ChatGPT sign-in, Copilot, coding plans) are
+          not stopped by this limit, because their cost is only an API-price estimate.
         </p>
         <div className="settings-inline-input">
           <label>Max cost per task: $</label>
@@ -214,7 +216,7 @@ export function GuardrailSettings() {
             className="settings-input settings-input-number"
             value={settings.maxCostPerTask}
             onChange={(e) =>
-              setSettings({ ...settings, maxCostPerTask: parseFloat(e.target.value) || 1.0 })
+              setSettings({ ...settings, maxCostPerTask: parseFloat(e.target.value) || 10.0 })
             }
             min={0.01}
             max={100}
@@ -223,7 +225,8 @@ export function GuardrailSettings() {
           />
         </div>
         <p className="settings-hint">
-          Cost is estimated based on model pricing tables. Default: $1.00
+          Cost is estimated from the model price list. Models without a known price are not counted.
+          Default: on, $10.00
         </p>
       </div>
 

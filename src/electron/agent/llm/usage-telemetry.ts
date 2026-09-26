@@ -175,3 +175,55 @@ export function recordLlmCallError(input: LlmCallTelemetryInput, error: unknown)
     // Best-effort telemetry only.
   }
 }
+
+export interface TaskCostEstimate {
+  modelId: string;
+  /** Number of past tasks the estimate is based on. */
+  sampleSize: number;
+  medianCost: number;
+  /** Cost that 90% of past tasks stayed under. */
+  p90Cost: number;
+}
+
+function percentile(sorted: number[], fraction: number): number {
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1));
+  return sorted[index];
+}
+
+/**
+ * Typical cost of a task on this model, from the user's own recent tasks (last 30 with
+ * a known cost). Returns null when there is too little history to say anything useful.
+ * Nothing leaves the machine; this only reads the local llm_call_events table.
+ */
+export function estimateTaskCost(modelId: string, minSamples = 3): TaskCostEstimate | null {
+  const db = getDb();
+  const model = String(modelId || "").trim();
+  if (!db || !model) return null;
+  try {
+    const rows = db
+      .prepare(
+        `SELECT task_id, SUM(cost) AS total
+           FROM llm_call_events
+          WHERE (model_id = ? OR model_key = ?) AND task_id IS NOT NULL AND success = 1
+          GROUP BY task_id
+         HAVING SUM(cost) > 0
+          ORDER BY MAX(timestamp) DESC
+          LIMIT 30`,
+      )
+      .all(model, model) as Array<{ task_id: string; total: number }>;
+    const totals = rows
+      .map((row) => Number(row.total))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => a - b);
+    if (totals.length < minSamples) return null;
+    return {
+      modelId: model,
+      sampleSize: totals.length,
+      medianCost: percentile(totals, 0.5),
+      p90Cost: percentile(totals, 0.9),
+    };
+  } catch {
+    return null;
+  }
+}

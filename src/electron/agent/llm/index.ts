@@ -28,6 +28,6 @@ export {
   createUnknownModelCapabilityProfile,
   modelCapabilityKey,
 } from "./model-capability-profile";
-export { OpenAIOAuth, OpenAIOAuthTokens } from "./openai-oauth";
+export { OpenAIOAuth, OpenAIOAuthTokens, recommendChatGPTModelForPlan } from "./openai-oauth";
 export { XAIOAuth, XAIOAuthTokens } from "./xai-oauth";
 export { LLMProviderFactory, LLMSettings, CachedModelInfo } from "./provider-factory";

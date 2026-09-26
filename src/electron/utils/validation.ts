@@ -790,6 +790,7 @@ export const OpenAISettingsSchema = z
     accountId: z.string().max(500).optional(),
     email: z.string().max(500).optional(),
     authMethod: z.enum(["api_key", "oauth"]).optional(),
+    chatgptPlanType: z.string().max(50).optional(),
     ...ProviderRoutingSettingsSchema,
   })
   .optional();
@@ -1002,6 +1003,7 @@ export const LLMSettingsSchema = z.object({
     .optional(),
   failoverPrimaryRetryCooldownSeconds: z.number().int().min(0).max(3600).optional(),
   promptCaching: PromptCachingSettingsSchema,
+  modelMetadataAutoRefresh: z.boolean().optional(),
   jev: JevSettingsSchema,
   anthropic: AnthropicSettingsSchema,
   bedrock: BedrockSettingsSchema,

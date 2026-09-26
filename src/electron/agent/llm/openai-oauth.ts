@@ -1,3 +1,4 @@
+import { recommendChatGPTModelForPlan } from "../../../shared/chatgpt-plan";
 import type { OAuthAuthInfo, OAuthCredentials, OAuthPrompt } from "@earendil-works/pi-ai";
 import { loadPiAiOAuthModule } from "./pi-ai-loader";
 import { createLogger } from "../../utils/logger";
@@ -250,20 +251,31 @@ export interface OpenAIOAuthTokens {
   expires_at: number;
   email?: string;
   accountId?: string;
+  planType?: string;
 }
 
-export function extractChatGPTAccountId(token: string): string | undefined {
+function readChatGPTAuthClaim(token: string, claim: string): string | undefined {
   const parts = token.split(".");
   if (parts.length < 2) return undefined;
 
   try {
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Any;
-    const accountId = payload?.["https://api.openai.com/auth"]?.chatgpt_account_id;
-    return typeof accountId === "string" && accountId.trim() ? accountId.trim() : undefined;
+    const value = payload?.["https://api.openai.com/auth"]?.[claim];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
   } catch {
     return undefined;
   }
 }
+
+export function extractChatGPTAccountId(token: string): string | undefined {
+  return readChatGPTAuthClaim(token, "chatgpt_account_id");
+}
+
+export function extractChatGPTPlanType(token: string): string | undefined {
+  return readChatGPTAuthClaim(token, "chatgpt_plan_type")?.toLowerCase();
+}
+
+export { recommendChatGPTModelForPlan };
 
 /**
  * Convert pi-ai OAuthCredentials to our token format
@@ -276,6 +288,7 @@ function credentialsToTokens(credentials: OAuthCredentials): OpenAIOAuthTokens {
     expires_at: credentials.expires,
     email,
     accountId: extractChatGPTAccountId(credentials.access),
+    planType: extractChatGPTPlanType(credentials.access),
   };
 }
 

@@ -22,9 +22,13 @@ const DEFAULT_SETTINGS: GuardrailSettings = {
   maxTokensPerTask: 100000,
   tokenBudgetEnabled: true,
 
-  // Cost Budget
-  maxCostPerTask: 1.0,
-  costBudgetEnabled: false,
+  // Cost Budget — on by default so a runaway task cannot silently spend without bound.
+  // $10 leaves room for long tasks on frontier models (Opus-class tasks regularly
+  // exceed $1). Subscription routes are exempt from this default cap because their
+  // cost is an API-equivalent estimate, not a bill; an explicit per-task budgetCost
+  // is always enforced. Users who saved guardrail settings before keep their choice.
+  maxCostPerTask: 10.0,
+  costBudgetEnabled: true,
 
   // Dangerous Commands
   blockDangerousCommands: true,
@@ -377,42 +381,99 @@ export class GuardrailManager {
   /**
    * Check if token budget is exceeded
    */
-  static isTokenBudgetExceeded(tokensUsed: number): {
+  static isTokenBudgetExceeded(
+    tokensUsed: number,
+    options?: { taskBudget?: number },
+  ): {
     exceeded: boolean;
     used: number;
     limit: number;
+    source: "task" | "global" | "none";
   } {
     const settings = this.loadSettings();
+    const taskBudget = options?.taskBudget;
+    if (
+      typeof taskBudget === "number" &&
+      Number.isFinite(taskBudget) &&
+      taskBudget > 0 &&
+      (!settings.tokenBudgetEnabled || taskBudget <= settings.maxTokensPerTask)
+    ) {
+      // A budget set on the task itself (API, CLI, automations) is always enforced,
+      // but it can only tighten the global guardrail, never raise it.
+      return {
+        exceeded: tokensUsed >= taskBudget,
+        used: tokensUsed,
+        limit: taskBudget,
+        source: "task",
+      };
+    }
 
     if (!settings.tokenBudgetEnabled) {
-      return { exceeded: false, used: tokensUsed, limit: settings.maxTokensPerTask };
+      return {
+        exceeded: false,
+        used: tokensUsed,
+        limit: settings.maxTokensPerTask,
+        source: "none",
+      };
     }
 
     return {
       exceeded: tokensUsed >= settings.maxTokensPerTask,
       used: tokensUsed,
       limit: settings.maxTokensPerTask,
+      source: "global",
     };
   }
 
   /**
    * Check if cost budget is exceeded
    */
-  static isCostBudgetExceeded(costIncurred: number): {
+  static isCostBudgetExceeded(
+    costIncurred: number,
+    options?: {
+      /** Task.budgetCost: always enforced when set, capped by the global limit. */
+      taskBudget?: number;
+      /** Subscription routes (ChatGPT sign-in, Copilot, coding plans) skip the global cap. */
+      subscriptionBilled?: boolean;
+    },
+  ): {
     exceeded: boolean;
     cost: number;
     limit: number;
+    source: "task" | "global" | "none";
   } {
     const settings = this.loadSettings();
+    const taskBudget = options?.taskBudget;
+    const globalCapApplies = settings.costBudgetEnabled && !options?.subscriptionBilled;
+    if (
+      typeof taskBudget === "number" &&
+      Number.isFinite(taskBudget) &&
+      taskBudget > 0 &&
+      (!globalCapApplies || taskBudget <= settings.maxCostPerTask)
+    ) {
+      // A task budget can only tighten the global cap, never raise it.
+      return {
+        exceeded: costIncurred >= taskBudget,
+        cost: costIncurred,
+        limit: taskBudget,
+        source: "task",
+      };
+    }
 
-    if (!settings.costBudgetEnabled) {
-      return { exceeded: false, cost: costIncurred, limit: settings.maxCostPerTask };
+    if (!globalCapApplies) {
+      return {
+        exceeded: false,
+        cost: costIncurred,
+        limit: settings.maxCostPerTask,
+        source: "none",
+      };
     }
 
     return {
       exceeded: costIncurred >= settings.maxCostPerTask,
       cost: costIncurred,
       limit: settings.maxCostPerTask,
+      source: "global",
     };
   }
 

@@ -154,6 +154,7 @@ import {
   ChronicleSettingsManager,
 } from "./chronicle";
 import { revealWindow } from "./utils/window-visibility";
+import { StartupActionGate } from "./utils/startup-action-gate";
 import { KnowledgeGraphService } from "./knowledge-graph/KnowledgeGraphService";
 import { MailboxAutomationHub } from "./mailbox/MailboxAutomationHub";
 import { MailboxAutomationRegistry } from "./mailbox/MailboxAutomationRegistry";
@@ -1348,6 +1349,12 @@ if (isMacSafeStorageMigrationWorker) {
       app.quit();
     }
   } else {
+    const startupActionGate = new StartupActionGate();
+
+    function ensureMainWindowVisible(): void {
+      if (!revealWindow(mainWindow)) createWindow();
+    }
+
     function flushPendingTaskDeeplink(): void {
       const taskId = pendingTaskDeeplinkId;
       if (!taskId || !mainWindow || mainWindow.isDestroyed()) return;

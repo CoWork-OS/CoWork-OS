@@ -205,6 +205,7 @@ When sandboxing unavailable:
 - Output size limits
 - Environment variable filtering
 - Restricted agent shell/code execution fails closed rather than falling back to an unsandboxed process
+- Only when admin policy sets `allowUnsandboxedShell: true` (and not `requireSandboxForShell`) can the user approve an individual `run_command` to run unsandboxed; that approval is always explicit and never auto-approved
 
 ## Filesystem Protection
 

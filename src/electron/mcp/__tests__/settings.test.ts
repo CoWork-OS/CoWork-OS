@@ -129,6 +129,37 @@ describe("MCPSettingsManager batch mode", () => {
     expect(writeCount).toBe(1);
   });
 
+  it("reloads the saved settings after a write fails", () => {
+    mockStoredSettings = {
+      ...MCPSettingsManager.getDefaults(),
+      servers: [
+        {
+          id: "existing-server",
+          name: "Existing server",
+          transport: "stdio",
+          command: "node",
+          enabled: true,
+        },
+      ],
+    };
+    const savedSettings = MCPSettingsManager.loadSettings();
+    const unsavedSettings = {
+      ...savedSettings,
+      servers: [...savedSettings.servers, { ...savedSettings.servers[0], id: "unsaved-server" }],
+    };
+    mockRepositorySave.mockImplementationOnce(() => {
+      throw new Error("settings are unreadable");
+    });
+
+    expect(() => MCPSettingsManager.saveSettings(unsavedSettings)).toThrow(
+      "settings are unreadable",
+    );
+
+    expect(MCPSettingsManager.loadSettings().servers.map((server) => server.id)).toEqual([
+      "existing-server",
+    ]);
+  });
+
   it("should normalize local connector command paths to current runtime", () => {
     mockStoredSettings = {
       servers: [

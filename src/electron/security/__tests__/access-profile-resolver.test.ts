@@ -10,6 +10,7 @@ import { PermissionEngine } from "../../agent/runtime/PermissionEngine";
 import {
   applyDefaultAccessProfile,
   applyAccessProfileToWorkspace,
+  RELEASE_BRIEF_ACCESS_PROFILE_ID,
   resolveEffectiveAccessProfile,
 } from "../access-profile-resolver";
 
@@ -45,6 +46,27 @@ function withProfiles(profiles: AccessProfileDefinition[]): PermissionSettingsDa
 }
 
 describe("access profile resolver", () => {
+  it("keeps the internal sample in a workspace-only, offline boundary", () => {
+    const profile = resolveEffectiveAccessProfile({
+      task: { source: "sample", agentConfig: { accessProfileId: RELEASE_BRIEF_ACCESS_PROFILE_ID } },
+      workspace,
+      settings,
+    });
+    const effective = applyAccessProfileToWorkspace(workspace, profile);
+    expect(profile).toMatchObject({
+      profileUnavailable: false,
+      shellEnabled: false,
+      networkEnabled: false,
+      definition: { workspaceRoots: ["."] },
+      sandboxMode: "workspace-write",
+    });
+    expect(effective.permissions).toMatchObject({
+      unrestrictedFileAccess: false,
+      shell: false,
+      network: false,
+    });
+  });
+
   it("maps the built-in profiles to the expected approval and sandbox boundaries", () => {
     const ask = resolveEffectiveAccessProfile({
       task: { agentConfig: { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval } },

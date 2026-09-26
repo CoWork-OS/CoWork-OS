@@ -292,6 +292,41 @@ describe("MacOSSandbox", () => {
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("allows literal ancestors for workspaces under /private without opening /private/tmp", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+    const workspacePath = "/private/tmp/cowork-real-use-qa/developer";
+    const sandbox = new MacOSSandbox(
+      makeWorkspace({
+        path: workspacePath,
+        permissions: {
+          ...makeWorkspace().permissions,
+          accessProfileId: "scoped-profile",
+          accessProfileScoped: true,
+          accessFilesystemScoped: true,
+          accessWorkspaceRoots: [workspacePath],
+        },
+      }),
+    );
+
+    const resultPromise = sandbox.execute("pwd", [], {
+      cwd: workspacePath,
+      timeout: 1000,
+    });
+
+    const [, args] = spawnMock.mock.calls[0];
+    const profile = fs.readFileSync(args[1], "utf8");
+    expect(profile).toContain('(literal "/private")');
+    expect(profile).toContain('(literal "/private/tmp")');
+    expect(profile).not.toContain('(subpath "/private/tmp")');
+
+    proc.emit("close", 0, null);
+    await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
+  });
+
   it("isolates host temp access for finite profiles while allowing explicit script inputs", async () => {
     const scriptPath = path.join(os.tmpdir(), `cowork-scoped-script-${Date.now()}.js`);
     fs.writeFileSync(scriptPath, "console.log('ok')", "utf8");

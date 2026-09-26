@@ -9,7 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { MCPSettings, MCPServerConfig, MCPAuthConfig, DEFAULT_MCP_SETTINGS } from "./types";
 import { v4 as uuidv4 } from "uuid";
-import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
+import { SecureSettingsRepository, type LoadStatus } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
@@ -381,6 +381,8 @@ export class MCPSettingsManager {
       repository.save("mcp", settings);
       logger.debug(`Saved ${settings.servers.length} server(s) to encrypted database`);
     } catch (error) {
+      this.cachedSettings = null;
+      this.pendingSave = false;
       logger.error("Failed to save settings:", error);
       throw error;
     }
@@ -540,11 +542,15 @@ export class MCPSettingsManager {
   /**
    * Get settings for UI display (masks sensitive data)
    */
-  static getSettingsForDisplay(): MCPSettings {
+  static getSettingsForDisplay(): MCPSettings & { storageStatus: LoadStatus } {
     const settings = this.loadSettings();
+    const storageStatus = SecureSettingsRepository.isInitialized()
+      ? SecureSettingsRepository.getInstance().checkHealth("mcp", { logErrors: false })
+      : "not_found";
 
     return {
       ...settings,
+      storageStatus,
       servers: settings.servers.map((server) => ({
         ...server,
         auth: server.auth

@@ -699,6 +699,12 @@ interface MCPServerStatus {
 
 interface MCPSettings {
   servers: MCPServerConfig[];
+  storageStatus?:
+    | "success"
+    | "not_found"
+    | "decryption_failed"
+    | "checksum_mismatch"
+    | "os_encryption_unavailable";
   autoConnect: boolean;
   toolNamePrefix: string;
   maxReconnectAttempts: number;

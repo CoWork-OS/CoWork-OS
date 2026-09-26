@@ -307,6 +307,26 @@ export class MacOSSandbox implements ISandbox {
     return Array.from(aliases);
   }
 
+  /**
+   * Return literal directory entries needed to resolve a path under a
+   * macOS synthetic mount such as /private/tmp. Literal rules expose only
+   * the directory entry itself; they do not grant recursive access to the
+   * ancestor tree.
+   */
+  private getMacOSPathAncestors(targetPaths: readonly string[]): string[] {
+    const ancestors = new Set<string>();
+    for (const targetPath of targetPaths) {
+      let current = path.dirname(path.resolve(targetPath));
+      while (current !== "/") {
+        if (current === "/private" || current.startsWith("/private/")) {
+          ancestors.add(current);
+        }
+        current = path.dirname(current);
+      }
+    }
+    return Array.from(ancestors);
+  }
+
   private appendReadSubpathRules(profile: string, pathsToAllow: string[]): string {
     let next = profile;
     for (const pathToAllow of pathsToAllow) {
@@ -452,6 +472,9 @@ export class MacOSSandbox implements ISandbox {
     // Validate and escape workspace path
     validatePathForSandboxProfile(this.workspace.path);
     const workspaceAliases = this.getMacOSPathAliases(this.workspace.path);
+    const workspaceAncestorRules = this.getMacOSPathAncestors(workspaceAliases)
+      .map((ancestor) => `  (literal "${escapeSandboxProfileString(ancestor)}")`)
+      .join("\n");
     const tempAliases = this.getMacOSPathAliases(tempDir);
     const escapedWorkspace = escapeSandboxProfileString(this.workspace.path);
     const escapedTempDir = escapeSandboxProfileString(tempDir);
@@ -488,6 +511,7 @@ export class MacOSSandbox implements ISandbox {
   (subpath "/Applications/Xcode.app")
   (subpath "/private/var/db")
   (subpath "/private/var/select")
+${workspaceAncestorRules}
   (literal "/dev/null")
   (literal "/dev/urandom")
   (literal "/dev/random")

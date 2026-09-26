@@ -37,7 +37,11 @@ interface MigrationRepository {
     category: SettingsCategory,
     options?: { logErrors?: boolean },
   ): { status: string; data?: T };
-  save<T extends object>(category: SettingsCategory, settings: T): void;
+  save<T extends object>(
+    category: SettingsCategory,
+    settings: T,
+    options?: { allowUnreadableOverwrite?: boolean },
+  ): void;
 }
 
 interface MigrationLogger {
@@ -230,7 +234,9 @@ export async function migrateLegacyMacSafeStorageSettings(options: {
       if (result.status === "success" || result.status === "not_found") continue;
 
       try {
-        options.repository.save(category as SettingsCategory, settings);
+        options.repository.save(category as SettingsCategory, settings, {
+          allowUnreadableOverwrite: true,
+        });
         migratedCount += 1;
         migratedFromIdentity = true;
       } catch {

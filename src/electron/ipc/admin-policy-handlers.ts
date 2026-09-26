@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { BrowserWindow, dialog, ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
 import {
   loadPolicies,
@@ -10,6 +10,32 @@ import {
   isPackRequired,
 } from "../admin/policies";
 import type { AdminPolicies } from "../admin/policies";
+import { describePolicyRelaxations } from "../admin/policy-relaxations";
+
+/**
+ * Ask the user, in a main-process dialog the renderer cannot answer for them, before a
+ * policy update that weakens safety boundaries is saved.
+ */
+async function confirmPolicyRelaxation(
+  sender: Electron.WebContents | undefined,
+  changes: string[],
+): Promise<boolean> {
+  const parent = sender ? BrowserWindow.fromWebContents(sender) : null;
+  const options: Electron.MessageBoxOptions = {
+    type: "warning",
+    buttons: ["Cancel", "Apply changes"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: "Weaken safety policy?",
+    message: "This change weakens CoWork's safety policy.",
+    detail: `${changes.map((change) => `• ${change}`).join("\n")}\n\nOnly continue if you made this change.`,
+  };
+  const result = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  return result.response === 1;
+}
 
 let policyWatcherCleanup: (() => void) | null = null;
 let policyReconcileQueue: Promise<void> = Promise.resolve();
@@ -46,90 +72,100 @@ export function setupAdminPolicyHandlers(): void {
   });
 
   // Update admin policies (partial merge)
-  ipcMain.handle(IPC_CHANNELS.ADMIN_POLICIES_UPDATE, async (_, updates: Partial<AdminPolicies>) => {
-    const current = loadPolicies();
+  ipcMain.handle(
+    IPC_CHANNELS.ADMIN_POLICIES_UPDATE,
+    async (event, updates: Partial<AdminPolicies>) => {
+      const current = loadPolicies();
 
-    // Deep merge updates
-    const merged: AdminPolicies = {
-      ...current,
-      ...updates,
-      packs: {
-        ...current.packs,
-        ...updates.packs,
-      },
-      connectors: {
-        ...current.connectors,
-        ...updates.connectors,
-      },
-      agents: {
-        ...current.agents,
-        ...updates.agents,
-      },
-      everydayAgent: {
-        ...current.everydayAgent,
-        ...updates.everydayAgent,
-        activeHours: {
-          ...current.everydayAgent.activeHours,
-          ...updates.everydayAgent?.activeHours,
+      // Deep merge updates
+      const merged: AdminPolicies = {
+        ...current,
+        ...updates,
+        packs: {
+          ...current.packs,
+          ...updates.packs,
         },
-      },
-      runtime: {
-        ...current.runtime,
-        ...updates.runtime,
-        network: {
-          ...current.runtime.network,
-          ...updates.runtime?.network,
+        connectors: {
+          ...current.connectors,
+          ...updates.connectors,
         },
-        autoReview: {
-          ...current.runtime.autoReview,
-          ...updates.runtime?.autoReview,
+        agents: {
+          ...current.agents,
+          ...updates.agents,
         },
-        telemetry: {
-          ...current.runtime.telemetry,
-          ...updates.runtime?.telemetry,
-        },
-        agentSecurity: {
-          ...current.runtime.agentSecurity,
-          ...updates.runtime?.agentSecurity,
-          scheduledScan: {
-            ...current.runtime.agentSecurity.scheduledScan,
-            ...updates.runtime?.agentSecurity?.scheduledScan,
-          },
-          externalHooks: {
-            ...current.runtime.agentSecurity.externalHooks,
-            ...updates.runtime?.agentSecurity?.externalHooks,
+        everydayAgent: {
+          ...current.everydayAgent,
+          ...updates.everydayAgent,
+          activeHours: {
+            ...current.everydayAgent.activeHours,
+            ...updates.everydayAgent?.activeHours,
           },
         },
-      },
-      general: {
-        ...current.general,
-        ...updates.general,
-      },
-    };
+        runtime: {
+          ...current.runtime,
+          ...updates.runtime,
+          network: {
+            ...current.runtime.network,
+            ...updates.runtime?.network,
+          },
+          autoReview: {
+            ...current.runtime.autoReview,
+            ...updates.runtime?.autoReview,
+          },
+          telemetry: {
+            ...current.runtime.telemetry,
+            ...updates.runtime?.telemetry,
+          },
+          agentSecurity: {
+            ...current.runtime.agentSecurity,
+            ...updates.runtime?.agentSecurity,
+            scheduledScan: {
+              ...current.runtime.agentSecurity.scheduledScan,
+              ...updates.runtime?.agentSecurity?.scheduledScan,
+            },
+            externalHooks: {
+              ...current.runtime.agentSecurity.externalHooks,
+              ...updates.runtime?.agentSecurity?.externalHooks,
+            },
+          },
+        },
+        general: {
+          ...current.general,
+          ...updates.general,
+        },
+      };
 
-    const validationError = validatePolicies(merged);
-    if (validationError) {
-      throw new Error(`Invalid policies: ${validationError}`);
-    }
+      const validationError = validatePolicies(merged);
+      if (validationError) {
+        throw new Error(`Invalid policies: ${validationError}`);
+      }
 
-    savePolicies(merged);
-    try {
-      await reconcilePluginPackPolicies();
-    } catch (error) {
-      console.warn("[AdminPolicies] Failed to reconcile plugin pack runtime state:", error);
-      try {
-        savePolicies(current);
-        await reconcilePluginPackPolicies();
-      } catch (rollbackError) {
-        console.warn(
-          "[AdminPolicies] Failed to roll back plugin pack policy update:",
-          rollbackError,
+      const relaxations = describePolicyRelaxations(current, merged);
+      if (relaxations.length > 0 && !(await confirmPolicyRelaxation(event?.sender, relaxations))) {
+        throw new Error(
+          "Policy change cancelled: weakening safety settings needs your confirmation.",
         );
       }
-      throw error;
-    }
-    return merged;
-  });
+
+      savePolicies(merged);
+      try {
+        await reconcilePluginPackPolicies();
+      } catch (error) {
+        console.warn("[AdminPolicies] Failed to reconcile plugin pack runtime state:", error);
+        try {
+          savePolicies(current);
+          await reconcilePluginPackPolicies();
+        } catch (rollbackError) {
+          console.warn(
+            "[AdminPolicies] Failed to roll back plugin pack policy update:",
+            rollbackError,
+          );
+        }
+        throw error;
+      }
+      return merged;
+    },
+  );
 
   // Check if a specific pack is allowed/required
   ipcMain.handle(IPC_CHANNELS.ADMIN_POLICIES_CHECK_PACK, async (_, packId: string) => {

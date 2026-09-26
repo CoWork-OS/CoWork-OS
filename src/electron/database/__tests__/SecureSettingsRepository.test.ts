@@ -179,14 +179,20 @@ describe("SecureSettingsRepository", () => {
     });
 
     it("should update existing settings", () => {
+      const previousSettings = { provider: "openai" };
+      const previousJson = JSON.stringify(previousSettings);
+      const previousCiphertext = `os:${Buffer.from(`encrypted:${previousJson}`).toString("base64")}`;
+      // oxlint-disable-next-line typescript-eslint(no-require-imports)
+      const crypto = require("crypto");
       mockStmt.get.mockReturnValue({
         id: "existing-id",
         category: "voice",
-        encrypted_data: "os:old-data",
-        checksum: "old-checksum",
+        encrypted_data: previousCiphertext,
+        checksum: crypto.createHash("sha256").update(previousCiphertext).digest("hex"),
         created_at: 1000,
         updated_at: 1000,
       });
+      mockDecryptString.mockReturnValue(previousJson);
 
       const testSettings = { provider: "elevenlabs" };
       repository.save("voice", testSettings);
@@ -196,6 +202,62 @@ describe("SecureSettingsRepository", () => {
         expect.stringContaining("os:"), // encrypted data
         expect.any(String), // checksum
         expect.any(Number), // updated_at
+        "voice",
+      );
+    });
+
+    it("backs up an unreadable row's ciphertext before replacing it", () => {
+      mockStmt.get.mockReturnValue({
+        id: "existing-id",
+        category: "voice",
+        encrypted_data: "os:unreadable-ciphertext",
+        checksum: "stored-checksum",
+        created_at: 1000,
+        updated_at: 1000,
+      });
+      mockDecryptString.mockImplementation(() => {
+        throw new Error("Keychain identity unavailable");
+      });
+
+      repository.save("voice", { provider: "elevenlabs" });
+
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        expect.stringContaining("INSERT INTO secure_settings_unreadable_backup"),
+      );
+      expect(mockStmt.run).toHaveBeenCalledWith(
+        expect.any(String),
+        "voice",
+        "os:unreadable-ciphertext",
+        "stored-checksum",
+        "decryption_failed",
+        1000,
+        1000,
+        expect.any(Number),
+      );
+      expect(mockStmt.run).toHaveBeenLastCalledWith(
+        expect.stringContaining("os:"),
+        expect.any(String),
+        expect.any(Number),
+        "voice",
+      );
+    });
+
+    it("allows an explicit recovery path to replace an unreadable row", () => {
+      mockStmt.get.mockReturnValue({
+        id: "existing-id",
+        category: "voice",
+        encrypted_data: "os:unreadable-ciphertext",
+        checksum: "stored-checksum",
+        created_at: 1000,
+        updated_at: 1000,
+      });
+
+      repository.save("voice", { provider: "recovered" }, { allowUnreadableOverwrite: true });
+
+      expect(mockStmt.run).toHaveBeenCalledWith(
+        expect.stringContaining("os:"),
+        expect.any(String),
+        expect.any(Number),
         "voice",
       );
     });
@@ -902,26 +964,45 @@ describe("SecureSettingsRepository", () => {
 
     it("should delete settings when corrupted", () => {
       // Setup corrupted data
+      const corruptedSettings = { provider: "azure" };
+      const corruptedJson = JSON.stringify(corruptedSettings);
       mockStmt.get.mockReturnValue({
         id: "test-id",
         category: "voice",
-        encrypted_data: "os:invalid",
+        encrypted_data: `os:${Buffer.from(`encrypted:${corruptedJson}`).toString("base64")}`,
         checksum: "wrong",
         created_at: 1000,
         updated_at: 2000,
       });
-      mockDecryptString.mockImplementation(() => {
-        throw new Error("Decryption failed");
-      });
+      mockDecryptString.mockReturnValue(corruptedJson);
 
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const result = repository.deleteCorrupted("voice");
 
       expect(result).toBe(true);
       consoleSpy.mockRestore();
-      logSpy.mockRestore();
+    });
+
+    it("should preserve settings when decryption fails", () => {
+      mockStmt.get.mockReturnValue({
+        id: "test-id",
+        category: "voice",
+        encrypted_data: "os:unreadable-ciphertext",
+        checksum: "stored-checksum",
+        created_at: 1000,
+        updated_at: 1000,
+      });
+      mockDecryptString.mockImplementation(() => {
+        throw new Error("Keychain identity unavailable");
+      });
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const result = repository.deleteCorrupted("voice");
+
+      expect(result).toBe(false);
+      expect(mockStmt.run).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
 
     it("should not delete when settings are healthy", () => {

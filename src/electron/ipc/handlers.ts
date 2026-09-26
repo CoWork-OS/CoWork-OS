@@ -1503,6 +1503,7 @@ export async function setupIpcHandlers(
   options?: {
     getMainWindow?: () => BrowserWindow | null;
     getRoutineService?: () => RoutineService | null;
+    getPulseService?: () => import("../telemetry/pulse-service").PulseService | null;
   },
 ) {
   if (options?.getMainWindow) mainWindowGetter = options.getMainWindow;
@@ -10497,10 +10498,13 @@ export async function setupIpcHandlers(
 
   // CoWork Pulse. The service never receives renderer-provided identifiers or payloads;
   // all aggregates are derived in the trusted main process from the local database.
-  // Built once: the constructor runs ensureSchema() and the instance holds the
-  // preview memo, both of which are wasted if every IPC call gets a new service.
+  // Uses the lifecycle-owned instance from startup so the Settings decision and the
+  // timer-driven delivery share one fence. The local fallback only exists for hosts
+  // that register handlers without starting Pulse.
   let pulseService: import("../telemetry/pulse-service").PulseService | null = null;
   const getPulseService = async () => {
+    const shared = options?.getPulseService?.();
+    if (shared) return shared;
     if (pulseService) return pulseService;
     const { PulseService } = await import("../telemetry/pulse-service");
     const { app } = await import("electron");
@@ -10526,9 +10530,7 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.PULSE_FLUSH, async () => {
     checkRateLimit(IPC_CHANNELS.PULSE_FLUSH);
-    const service = await getPulseService();
-    await service.flush();
-    return service.getSettings();
+    return (await getPulseService()).flush();
   });
 
   // Daily Briefing

@@ -245,10 +245,11 @@ async function main(): Promise<void> {
   const dbManager = new DatabaseManager();
   new SecureSettingsRepository(dbManager.getDatabase());
   console.log("[Daemon] SecureSettingsRepository initialized");
-  new PulseService(dbManager.getDatabase(), {
+  const pulseService = new PulseService(dbManager.getDatabase(), {
     version: process.env.npm_package_version || "0.0.0",
     runtime: "daemon",
-  }).start();
+  });
+  pulseService.start();
 
   // Initialize provider factories (loads settings from disk, migrates legacy files).
   LLMProviderFactory.initialize();
@@ -730,6 +731,8 @@ async function main(): Promise<void> {
           requiresQuiescence: true,
           run: () => MemoryService.shutdown(),
         },
+        // Settle in-flight Pulse requests so no late callback writes to a closed database.
+        { name: "pulse", run: () => pulseService.shutdown() },
         {
           name: "database",
           requiresQuiescence: true,

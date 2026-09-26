@@ -440,7 +440,8 @@ async function latestVersion(request: Request, env: Env): Promise<Response> {
 const schema = {
   name: "CoWork Pulse",
   version: 1,
-  cadence: "At most one aggregate per installation per fully consented UTC day",
+  cadence:
+    "One daily aggregate record per installation per fully consented UTC day; retried deliveries of the same package are deduplicated",
   anonymousUpdateCheck: "Version, platform, architecture, and surface; no identifier",
   identity: "Random profile-scoped UUID; server stores only an HMAC pseudonym",
   includes: [

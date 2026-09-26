@@ -48,6 +48,7 @@ import { NumbatService } from "../electron/security/numbat";
 import type { AgentSecurityFindingStatus } from "../shared/agent-security";
 import { requiresAgentSecurityConfirmation } from "./agent-security-confirmation";
 import { PulseService } from "../electron/telemetry/pulse-service";
+import type { PulsePreviewState } from "../shared/pulse";
 import { shouldRunDirectRunEntrypoint } from "./direct-runtime";
 
 type Any = Record<string, any>;
@@ -868,32 +869,64 @@ async function runLocalMetadataCommand(
     case "pulse": {
       const pkg = await readPackageInfo();
       const service = new PulseService(db, { version: pkg.version, runtime: "cli" });
-      const action = args.pulseAction || "status";
-      if (action === "on") await service.setEnabled(true);
-      if (action === "off") await service.setEnabled(false);
-      if (action === "send") await service.flush();
-      if (action === "reset") await service.resetIdentity();
-      if (action === "delete") {
-        const result = await service.deleteRemoteData();
-        if (!result.success) throw new Error(result.error || "Pulse deletion failed");
+      try {
+        const action = args.pulseAction || "status";
+        let actionError: string | undefined;
+        let sendOutcome: string | undefined;
+        if (action === "on" || action === "off" || action === "reset") {
+          const result =
+            action === "reset"
+              ? await service.resetIdentity()
+              : await service.setEnabled(action === "on");
+          if (!result.success) actionError = result.error || "pulse_operation_failed";
+        }
+        if (action === "send") {
+          const result = await service.flush();
+          sendOutcome = result.outcome;
+          if (result.outcome === "error") actionError = result.error || "send_failed";
+        }
+        if (action === "delete") {
+          const result = await service.deleteRemoteData();
+          if (!result.success) {
+            throw new Error(
+              `Reporting is off; remote deletion is pending (${result.error || "deletion_failed"}). Run \`cowork telemetry delete\` again to retry.`,
+            );
+          }
+        }
+        const settings = service.getSettings();
+        writeEvent(
+          args,
+          { type: "pulse", action, ...(sendOutcome ? { sendOutcome } : {}), ...settings },
+          action === "show"
+            ? formatPulsePreview(settings.preview)
+            : [
+                `CoWork Pulse: ${
+                  settings.deletion.state === "pending"
+                    ? "off; deletion pending"
+                    : settings.enabled
+                      ? "on"
+                      : "off"
+                }`,
+                `Consent: ${settings.consentState}`,
+                `Installation: ${settings.installationId || "not created"}`,
+                `Last sent: ${settings.lastSentAt ? new Date(settings.lastSentAt).toISOString() : "never"}`,
+                `Last error: ${settings.lastErrorCode || "none"}`,
+                ...(settings.deletion.state === "pending"
+                  ? [
+                      `Deletion error: ${settings.deletion.lastErrorCode || "not yet attempted"}`,
+                      "Run `cowork telemetry delete` to retry deletion.",
+                    ]
+                  : []),
+                ...(sendOutcome ? [`Send result: ${sendOutcome}`] : []),
+                ...(actionError ? [`Action error: ${actionError}`] : []),
+                `Next payload: ${describePulsePreview(settings.preview)}`,
+                "Use `cowork telemetry show` to inspect it.",
+              ].join("\n"),
+        );
+        return actionError && action !== "send" ? 1 : 0;
+      } finally {
+        await service.shutdown();
       }
-      const settings = service.getSettings();
-      const output = action === "show" ? settings.pendingPackage : settings;
-      writeEvent(
-        args,
-        { type: "pulse", action, ...settings },
-        action === "show"
-          ? JSON.stringify(output, null, 2)
-          : [
-              `CoWork Pulse: ${settings.enabled ? "on" : "off"}`,
-              `Consent: ${settings.consentState}`,
-              `Installation: ${settings.installationId || "not created"}`,
-              `Last sent: ${settings.lastSentAt ? new Date(settings.lastSentAt).toISOString() : "never"}`,
-              `Last error: ${settings.lastErrorCode || "none"}`,
-              "Use `cowork telemetry show` to inspect the exact next payload.",
-            ].join("\n"),
-      );
-      return 0;
     }
     case "doctor": {
       const providerStatus = LLMProviderFactory.getConfigStatus();
@@ -2854,6 +2887,35 @@ function parseTimestampMs(raw: unknown): number | undefined {
   if (Number.isFinite(numeric) && numeric > 0) return Math.floor(numeric);
   const parsed = Date.parse(text);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function describePulsePreview(preview: PulsePreviewState): string {
+  switch (preview.state) {
+    case "queued":
+      return `queued for ${preview.package.period.start.slice(0, 10)} (exact bytes of the next attempt)`;
+    case "candidate":
+      return `estimate for ${preview.package.period.start.slice(0, 10)}; not queued yet`;
+    case "already_sent":
+      return `${preview.periodStart.slice(0, 10)} already acknowledged; nothing to resend`;
+    case "ineligible":
+      if (preview.reason === "deletion_pending") return "none; remote deletion is pending";
+      if (preview.reason === "disabled") return "none; Pulse is off";
+      return preview.eligibleFrom
+        ? `none yet; the first fully consented UTC day is ${preview.eligibleFrom.slice(0, 10)}`
+        : "none yet; no fully consented UTC day";
+  }
+}
+
+function formatPulsePreview(preview: PulsePreviewState): string {
+  if (preview.state === "queued" || preview.state === "candidate") {
+    return [
+      preview.state === "queued"
+        ? "# Queued: exact payload of the next send attempt"
+        : "# Candidate: estimate for the eligible day; nothing queued yet",
+      JSON.stringify(preview.package, null, 2),
+    ].join("\n");
+  }
+  return describePulsePreview(preview);
 }
 
 function formatDoctor(payload: Record<string, unknown>): string {

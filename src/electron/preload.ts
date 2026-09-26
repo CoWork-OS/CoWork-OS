@@ -8669,7 +8669,7 @@ export interface ElectronAPI {
   setPulseEnabled: (enabled: boolean) => Promise<import("../shared/pulse").PulseMutationResult>;
   resetPulseIdentity: () => Promise<import("../shared/pulse").PulseMutationResult>;
   deletePulseRemoteData: () => Promise<import("../shared/pulse").PulseMutationResult>;
-  flushPulse: () => Promise<import("../shared/pulse").PulsePublicSettings>;
+  flushPulse: () => Promise<import("../shared/pulse").PulseSendResult>;
 
   // Daily Briefing
   generateDailyBriefing: (workspaceId: string) => Promise<Any>;

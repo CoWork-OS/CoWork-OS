@@ -262,6 +262,7 @@ let dbManager: DatabaseManager;
 let agentDaemon: AgentDaemon;
 let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
+let pulseService: PulseService | null = null;
 let councilService: CouncilService | null = null;
 let dailyBriefingService: DailyBriefingService | null = null;
 let ambientMonitoringService: AmbientMonitoringService | null = null;
@@ -1823,10 +1824,13 @@ if (isMacSafeStorageMigrationWorker) {
         });
       }
       keychainIdentityMismatch = verifySecureSettingsKeychainIdentity();
-      new PulseService(dbManager.getDatabase(), {
+      // One lifecycle-owned instance serves the timer and the Settings IPC, so a
+      // user decision and an in-flight delivery share one fence and one shutdown.
+      pulseService = new PulseService(dbManager.getDatabase(), {
         version: app.getVersion(),
         runtime: "desktop",
-      }).start();
+      });
+      pulseService.start();
       healResettableSecureSettings();
       {
         const workspaceRepo = new WorkspaceRepository(dbManager.getDatabase());
@@ -2834,6 +2838,7 @@ if (isMacSafeStorageMigrationWorker) {
       await setupIpcHandlers(dbManager, agentDaemon, channelGateway, {
         getMainWindow: () => mainWindow,
         getRoutineService: () => routineService,
+        getPulseService: () => pulseService,
       });
       if (subconsciousLoopService) {
         setupSubconsciousHandlers(subconsciousLoopService);
@@ -4400,6 +4405,13 @@ if (isMacSafeStorageMigrationWorker) {
           run: () => MCPClientManager.getInstance().shutdown(),
         },
         { name: "memory", requiresQuiescence: true, run: () => MemoryService.shutdown() },
+        {
+          name: "pulse",
+          run: async () => {
+            await pulseService?.shutdown();
+            pulseService = null;
+          },
+        },
         { name: "local previews", run: () => getLocalPreviewProcessService().stopAll() },
         { name: "database", requiresQuiescence: true, run: () => dbManager?.close() },
       ],

@@ -168,7 +168,19 @@ npm run dev:log
 
 ## macOS Dev Electron Bundle
 
-On macOS, `npm run dev` brands the local `node_modules/electron/dist/Electron.app` display name and icon as CoWork OS by default. The branding script preserves `CFBundleName=Electron` and `CFBundleIdentifier=com.github.Electron` so development safeStorage continues to use the Electron identity.
+On macOS, `npm run dev` brands the local `node_modules/electron/dist/Electron.app` display name and icon as CoWork OS by default. The branding script preserves `CFBundleName=Electron` and `CFBundleIdentifier=com.github.Electron`; the app sets its name to `CoWork OS` before first using safeStorage, so dev and packaged builds share the `CoWork OS Safe Storage` Keychain identity.
+
+### Stable signing for Keychain access
+
+macOS ties Keychain access to the app's code signature. An ad-hoc signature changes with every rebuild, which can cost the app access to `CoWork OS Safe Storage`. Sign the dev app with a fixed identity from the same team as release builds by adding a gitignored `.cowork/dev-codesign.json`:
+
+```json
+{ "identity": "Developer ID Application: Name (TEAMID)" }
+```
+
+`npm run dev` then signs `Electron.app` with it on every launch (`COWORK_CODESIGN_IDENTITY` overrides the file). The first launch after switching identities asks once for Keychain access; choose **Always Allow**. Release builds are signed and notarized when `CSC_NAME` and notarization credentials are set in `.env.mac` (see `scripts/mac-notarize.env.example`).
+
+After earlier builds used other identities, `npm run keychain:cleanup` lists leftover CoWork-only Keychain items that no longer decrypt any setting; add `-- --yes` to remove them. It never touches `CoWork OS`, `Electron`, `com.github.Electron` or `Chromium` items.
 
 Use these overrides only when you explicitly need them:
 

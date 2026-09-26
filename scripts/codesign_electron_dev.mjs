@@ -5,8 +5,14 @@
  * By default this script does not sign. It can be invoked manually:
  *   COWORK_CODESIGN_ENABLE=1 node scripts/codesign_electron_dev.mjs
  *
- * Configure the signing identity explicitly with:
+ * Configure the signing identity explicitly with either:
  *   COWORK_CODESIGN_IDENTITY  env var  (full name or SHA-1 hash)
+ *   .cowork/dev-codesign.json          {"identity": "<full name or SHA-1 hash>"} (gitignored)
+ *
+ * Signing every dev launch with the same identity keeps macOS Keychain access to
+ * "CoWork OS Safe Storage" stable across rebuilds; an ad-hoc signature changes
+ * with every rebuild, which can cost the app access to its encrypted settings.
+ * Use the same team as release builds so dev and packaged apps share that access.
  *
  * If signing is explicitly enabled and no identity is configured, the script
  * applies an ad-hoc signature. It intentionally does not auto-select Apple
@@ -17,7 +23,7 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,15 +42,33 @@ function log(msg) {
   process.stdout.write(`[codesign-dev] ${msg}\n`);
 }
 
-export function detectIdentity(env = process.env) {
-  return env.COWORK_CODESIGN_IDENTITY?.trim() || null;
+export const LOCAL_CODESIGN_CONFIG = path.resolve(
+  import.meta.dirname,
+  "..",
+  ".cowork",
+  "dev-codesign.json",
+);
+
+export function readLocalIdentity(configPath = LOCAL_CODESIGN_CONFIG) {
+  try {
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    return typeof config?.identity === "string" && config.identity.trim()
+      ? config.identity.trim()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
-export function isSigningEnabled(env = process.env) {
+export function detectIdentity(env = process.env, configPath = LOCAL_CODESIGN_CONFIG) {
+  return env.COWORK_CODESIGN_IDENTITY?.trim() || readLocalIdentity(configPath);
+}
+
+export function isSigningEnabled(env = process.env, configPath = LOCAL_CODESIGN_CONFIG) {
   const raw = String(env.COWORK_CODESIGN_ENABLE || "")
     .trim()
     .toLowerCase();
-  return ["1", "true", "yes", "on"].includes(raw) || Boolean(detectIdentity(env));
+  return ["1", "true", "yes", "on"].includes(raw) || Boolean(detectIdentity(env, configPath));
 }
 
 function isSignatureValid() {
@@ -99,7 +123,7 @@ export function selectSigningPlan(currentSig, identity, signingEnabled = false) 
     return {
       action: "skip",
       message:
-        "Skipping Electron.app development signing. Set COWORK_CODESIGN_ENABLE=1 or COWORK_CODESIGN_IDENTITY to enable.",
+        "Skipping Electron.app development signing. Set COWORK_CODESIGN_IDENTITY or add .cowork/dev-codesign.json to sign with a stable identity.",
     };
   }
 

@@ -115,6 +115,21 @@ describe("dev-log-utils", () => {
     ).toBe(true);
     expect(
       isIgnorableDevLogLine(
+        "[electron] [6989:0926/143355.703865:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)",
+      ),
+    ).toBe(true);
+    expect(
+      isIgnorableDevLogLine(
+        "[6989:0926/143355.703886:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)",
+      ),
+    ).toBe(true);
+    expect(
+      isIgnorableDevLogLine(
+        "[electron] ERROR:base/process/process_mac.cc:53] task_policy_set failed: out of memory",
+      ),
+    ).toBe(false);
+    expect(
+      isIgnorableDevLogLine(
         "[electron] Uncaught ReferenceError: selectedTaskSwitchId is not defined",
       ),
     ).toBe(false);

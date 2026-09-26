@@ -109,6 +109,17 @@ interface SecureSettingsRow {
 
 /** Machine ID file name - persisted for stable key derivation */
 const MACHINE_ID_FILE = ".cowork-machine-id";
+/** Known plaintext encrypted once with the OS keychain key to detect a key change. */
+const KEYCHAIN_CANARY_VALUE = "cowork-os-keychain-canary-v1";
+
+/**
+ * - `verified`: the stored canary decrypts with the current OS keychain key.
+ * - `created`: first check on this profile; the current key was adopted.
+ * - `mismatch`: the current key cannot read the stored canary (or any existing
+ *   settings), so writes are refused to avoid encrypting under a new key.
+ * - `not_applicable`: OS keychain encryption is not in use.
+ */
+export type KeychainIdentityStatus = "verified" | "created" | "mismatch" | "not_applicable";
 const logger = createLogger("SecureSettingsRepository");
 
 /**
@@ -120,6 +131,8 @@ export class SecureSettingsRepository {
   private safeStorage: SafeStorageLike | null;
   private machineId: string | null = null;
   private unreadableCategories = new Map<string, LoadResult<never>>();
+  private keychainIdentityMismatch = false;
+  private refusedWriteCategories = new Set<string>();
 
   constructor(private db: Database.Database) {
     this.safeStorage = getSafeStorage();
@@ -199,6 +212,15 @@ export class SecureSettingsRepository {
     if (String(category) === "health") {
       throw new Error("The personal Health settings category has been retired");
     }
+    if (this.keychainIdentityMismatch && this.encryptionAvailable) {
+      if (!this.refusedWriteCategories.has(category)) {
+        this.refusedWriteCategories.add(category);
+        logger.warn(
+          `Not saving ${category}: the OS keychain key differs from the one that encrypted existing settings.`,
+        );
+      }
+      return;
+    }
     const existing = this.findByCategory(category);
     if (existing && !options.allowUnreadableOverwrite) {
       const health = this.loadWithStatus(category, { logErrors: false, skipMigration: true });
@@ -238,6 +260,98 @@ export class SecureSettingsRepository {
 
     this.unreadableCategories.delete(category);
     logger.debug(`Saved settings for category: ${category}`);
+  }
+
+  /**
+   * Check that safeStorage is using the same OS keychain key that encrypted the
+   * stored settings. A different key (for example after the app's keychain
+   * identity changed) would otherwise make every later save unreadable to the
+   * original identity. Call after legacy-identity migrations have run.
+   */
+  verifyKeychainIdentity(): KeychainIdentityStatus {
+    if (!this.encryptionAvailable || !this.safeStorage) return "not_applicable";
+
+    this.db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS secure_settings_keychain_canary (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          encrypted_data TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )`,
+      )
+      .run();
+    const canary = this.db
+      .prepare("SELECT encrypted_data FROM secure_settings_keychain_canary WHERE id = 1")
+      .get() as { encrypted_data: string } | undefined;
+
+    if (canary) {
+      this.keychainIdentityMismatch =
+        this.tryDecryptOs(canary.encrypted_data) !== KEYCHAIN_CANARY_VALUE;
+      return this.keychainIdentityMismatch ? "mismatch" : "verified";
+    }
+
+    // No canary yet: adopt the current key only if it can read existing
+    // keychain-encrypted settings, or if there are none.
+    const osRows = this.db
+      .prepare("SELECT encrypted_data FROM secure_settings WHERE encrypted_data LIKE 'os:%'")
+      .all() as Array<{ encrypted_data: string }>;
+    if (
+      osRows.length > 0 &&
+      !osRows.some((row) => this.tryDecryptOs(row.encrypted_data) !== null)
+    ) {
+      this.keychainIdentityMismatch = true;
+      return "mismatch";
+    }
+    this.writeKeychainCanary();
+    return "created";
+  }
+
+  isKeychainIdentityMismatch(): boolean {
+    return this.keychainIdentityMismatch;
+  }
+
+  /**
+   * Explicitly accept the current OS keychain key after a mismatch. Settings the
+   * current key cannot read are moved to the unreadable backup table (ciphertext
+   * only) and a new canary is written. Returns the archived categories.
+   */
+  adoptCurrentKeychainIdentity(): string[] {
+    if (!this.encryptionAvailable || !this.safeStorage) return [];
+    const rows = this.db
+      .prepare("SELECT * FROM secure_settings WHERE encrypted_data LIKE 'os:%'")
+      .all() as SecureSettingsRow[];
+    const archived: string[] = [];
+    this.db.transaction(() => {
+      for (const row of rows) {
+        if (this.tryDecryptOs(row.encrypted_data) !== null) continue;
+        this.backupUnreadableRow(row, "decryption_failed");
+        this.db.prepare("DELETE FROM secure_settings WHERE id = ?").run(row.id);
+        this.unreadableCategories.delete(row.category);
+        archived.push(row.category);
+      }
+      this.db.prepare("DELETE FROM secure_settings_keychain_canary WHERE id = 1").run();
+      this.writeKeychainCanary();
+    })();
+    this.keychainIdentityMismatch = false;
+    this.refusedWriteCategories.clear();
+    return archived;
+  }
+
+  private writeKeychainCanary(): void {
+    this.db
+      .prepare(
+        "INSERT INTO secure_settings_keychain_canary (id, encrypted_data, created_at) VALUES (1, ?, ?)",
+      )
+      .run(this.encrypt(KEYCHAIN_CANARY_VALUE), Date.now());
+  }
+
+  private tryDecryptOs(encryptedData: string): string | null {
+    if (!encryptedData.startsWith("os:") || !this.safeStorage) return null;
+    try {
+      return this.safeStorage.decryptString(Buffer.from(encryptedData.slice(3), "base64"));
+    } catch {
+      return null;
+    }
   }
 
   /** Copy an unreadable row's ciphertext (never plaintext) aside before it is replaced. */

@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   detectIdentity,
@@ -5,21 +8,39 @@ import {
   selectSigningPlan,
 } from "../scripts/codesign_electron_dev.mjs";
 
+const NO_CONFIG = path.join(os.tmpdir(), "cowork-missing-dev-codesign.json");
+
 describe("codesign_electron_dev", () => {
   it("does not infer a signing identity when the env var is absent", () => {
-    expect(detectIdentity({})).toBeNull();
+    expect(detectIdentity({}, NO_CONFIG)).toBeNull();
   });
 
   it("ignores blank configured signing identities", () => {
-    expect(detectIdentity({ COWORK_CODESIGN_IDENTITY: "   " })).toBeNull();
+    expect(detectIdentity({ COWORK_CODESIGN_IDENTITY: "   " }, NO_CONFIG)).toBeNull();
+  });
+
+  it("reads a stable identity from the local dev-codesign config", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-codesign-"));
+    const configPath = path.join(dir, "dev-codesign.json");
+    try {
+      fs.writeFileSync(configPath, JSON.stringify({ identity: "  ABCDEF0123  " }));
+      expect(detectIdentity({}, configPath)).toBe("ABCDEF0123");
+      expect(isSigningEnabled({}, configPath)).toBe(true);
+      expect(detectIdentity({ COWORK_CODESIGN_IDENTITY: "From env" }, configPath)).toBe("From env");
+
+      fs.writeFileSync(configPath, "{not json");
+      expect(detectIdentity({}, configPath)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("keeps development signing disabled by default", () => {
-    expect(isSigningEnabled({})).toBe(false);
+    expect(isSigningEnabled({}, NO_CONFIG)).toBe(false);
     expect(selectSigningPlan("signed", null)).toEqual({
       action: "skip",
       message:
-        "Skipping Electron.app development signing. Set COWORK_CODESIGN_ENABLE=1 or COWORK_CODESIGN_IDENTITY to enable.",
+        "Skipping Electron.app development signing. Set COWORK_CODESIGN_IDENTITY or add .cowork/dev-codesign.json to sign with a stable identity.",
     });
   });
 
@@ -34,11 +55,13 @@ describe("codesign_electron_dev", () => {
   });
 
   it("enables signing with an explicit toggle", () => {
-    expect(isSigningEnabled({ COWORK_CODESIGN_ENABLE: "1" })).toBe(true);
+    expect(isSigningEnabled({ COWORK_CODESIGN_ENABLE: "1" }, NO_CONFIG)).toBe(true);
   });
 
   it("enables signing with an explicit identity", () => {
-    expect(isSigningEnabled({ COWORK_CODESIGN_IDENTITY: "Apple Development: Example" })).toBe(true);
+    expect(
+      isSigningEnabled({ COWORK_CODESIGN_IDENTITY: "Apple Development: Example" }, NO_CONFIG),
+    ).toBe(true);
   });
 
   it("replaces a team signature with ad-hoc signing when explicitly enabled", () => {

@@ -4723,7 +4723,13 @@ export class DatabaseManager {
             : "custom";
         updateRoleMetadata.run(derivedRoleKind, sourceTemplateId, sourceTemplateVersion, roleId);
 
-        if (!existingPolicyRoleIds.has(roleId)) {
+        // Templated roles never own heartbeat policies; startup detaches them from core
+        // automation, so backfilling one here would be recreated and deleted every launch.
+        const isTemplatedRole =
+          role.role_kind === "persona_template" ||
+          derivedRoleKind === "persona_template" ||
+          (typeof role.source_template_id === "string" && role.source_template_id !== "");
+        if (!isTemplatedRole && !existingPolicyRoleIds.has(roleId)) {
           insertPolicy.run(
             typeof crypto?.randomUUID === "function"
               ? crypto.randomUUID()

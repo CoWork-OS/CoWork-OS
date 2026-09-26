@@ -12,6 +12,7 @@ import {
   type DecryptedSecureSetting,
   type EncryptedSecureSettingRow,
 } from "../mac-safe-storage-migration";
+import { LEGACY_MAC_SAFE_STORAGE_APP_NAMES } from "../mac-safe-storage-identity";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -150,7 +151,8 @@ describe("macOS safeStorage legacy migration", () => {
       spawnProcess: spawnProcess as never,
     });
 
-    expect(attemptedNames).toEqual(["cowork-os", "Electron"]);
+    expect(attemptedNames).toEqual([...LEGACY_MAC_SAFE_STORAGE_APP_NAMES]);
+    expect(attemptedNames).toEqual(expect.arrayContaining(["cowork-oss", "Chromium"]));
     expect(migratedCount).toBe(1);
     expect(save).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledWith(
@@ -158,6 +160,54 @@ describe("macOS safeStorage legacy migration", () => {
       { restored: true },
       { allowUnreadableOverwrite: true },
     );
+  });
+
+  it("does not launch legacy workers when every setting is readable", async () => {
+    const spawnProcess = vi.fn();
+
+    const migratedCount = await migrateLegacyMacSafeStorageSettings({
+      platform: "darwin",
+      database: { prepare: vi.fn(() => ({ all: () => [row("voice", "ciphertext")] })) },
+      repository: {
+        loadWithStatus: vi.fn(() => ({ status: "success", data: {} })),
+        save: vi.fn(),
+      },
+      executable: "electron",
+      appPath: ".",
+      logger: { info: vi.fn(), warn: vi.fn() },
+      spawnProcess: spawnProcess as never,
+    });
+
+    expect(migratedCount).toBe(0);
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it("does not launch legacy workers for channel configs the current identity can read", async () => {
+    const spawnProcess = vi.fn();
+
+    const migratedCount = await migrateLegacyMacSafeStorageChannels({
+      platform: "darwin",
+      database: {
+        prepare: vi.fn(() => ({
+          all: () => [
+            { id: "email-channel", config: `enc:${Buffer.from("x").toString("base64")}` },
+          ],
+          run: vi.fn(),
+        })),
+      },
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: vi.fn(),
+        decryptString: vi.fn(() => "{}"),
+      },
+      executable: "electron",
+      appPath: ".",
+      logger: { info: vi.fn(), warn: vi.fn() },
+      spawnProcess: spawnProcess as never,
+    });
+
+    expect(migratedCount).toBe(0);
+    expect(spawnProcess).not.toHaveBeenCalled();
   });
 
   it("does not run or touch the database outside macOS", async () => {
@@ -205,7 +255,10 @@ describe("macOS safeStorage legacy migration", () => {
     const safeStorage = {
       isEncryptionAvailable: () => true,
       encryptString: vi.fn((value: string) => Buffer.from(`current:${value}`)),
-      decryptString: vi.fn(),
+      // The current identity cannot read legacy configs.
+      decryptString: vi.fn(() => {
+        throw new Error("wrong keychain identity");
+      }),
     };
     const logger = { info: vi.fn(), warn: vi.fn() };
 
@@ -266,7 +319,9 @@ describe("macOS safeStorage legacy migration", () => {
       safeStorage: {
         isEncryptionAvailable: () => true,
         encryptString: (value: string) => Buffer.from(value),
-        decryptString: vi.fn(),
+        decryptString: vi.fn(() => {
+          throw new Error("wrong keychain identity");
+        }),
       },
       executable: "electron",
       appPath: ".",

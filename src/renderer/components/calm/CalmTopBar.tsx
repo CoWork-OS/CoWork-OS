@@ -43,7 +43,10 @@ export interface CalmTopBarProps {
   };
 }
 
-function ScopeMenu({ scope }: Pick<CalmTopBarProps, "scope">) {
+export type CalmFolderMenuProps = CalmTopBarProps["scope"];
+
+/** Folder picker (recent folders + "Work in another folder…"). */
+export function CalmFolderMenu({ scope }: { scope: CalmFolderMenuProps }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -198,25 +201,6 @@ export function CalmAccessMenu({
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * Slim header used by the calm theme: where the work happens and what the
- * agent is allowed to do. The model picker stays in the composer.
- */
-export function CalmTopBar({ leading, trailing, scope, access }: CalmTopBarProps) {
-  return (
-    <div className="calm-topbar">
-      <div className="calm-topbar-left">
-        {leading}
-        <ScopeMenu scope={scope} />
-      </div>
-      <div className="calm-topbar-right">
-        {trailing}
-        {access && <CalmAccessMenu access={access} />}
-      </div>
     </div>
   );
 }

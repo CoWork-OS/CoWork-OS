@@ -118,7 +118,7 @@ import { useVoiceInput } from "../../hooks/useVoiceInput";
 import { useVoiceTalkMode } from "../../hooks/useVoiceTalkMode";
 import { useAgentContext, type AgentContext } from "../../hooks/useAgentContext";
 import { useIsCalmTheme } from "../../hooks/useIsCalmTheme";
-import { CalmAccessMenu, CalmTopBar, type CalmAccessMenuProps } from "../calm/CalmTopBar";
+import { CalmAccessMenu, type CalmAccessMenuProps } from "../calm/CalmTopBar";
 import { CalmModeToggle } from "../calm/CalmModeToggle";
 import { CalmBriefingCard } from "../calm/CalmBriefingCard";
 import { CalmAgentAvatar } from "../calm/CalmAgentAvatar";
@@ -9213,19 +9213,6 @@ function MainContentComponent({
     onConfigure: () => onOpenSettings?.("system"),
   };
 
-  const renderCalmTopBar = () => (
-    <CalmTopBar
-      scope={{
-        label: getWorkspaceStatusFolderLabel(workspace),
-        workspaces: workspacesList,
-        activeWorkspaceId: workspace?.id,
-        onSelect: handleWorkspaceSelect,
-        onNewFolder: handleSelectNewFolder,
-        onOpen: () => void loadRecentWorkspaces(),
-      }}
-    />
-  );
-
   const calmGreeting = agentContext.userName
     ? `Hi ${agentContext.userName}, how can I help?`
     : agentContext.getMessage("welcomeSubtitle");
@@ -9267,7 +9254,6 @@ function MainContentComponent({
   if (!task) {
     return (
       <div className={`main-content${isCalm ? " calm-main calm-welcome" : ""}`}>
-        {isCalm && renderCalmTopBar()}
         <div className="main-body welcome-view">
           <div
             className={`welcome-content cli-style${uiDensity === "focused" ? " welcome-content-focused" : ""}`}
@@ -9765,62 +9751,51 @@ function MainContentComponent({
                   </div>
                   {uiDensity === "focused" && !isCalm ? null : (
                     <>
-                      <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
-                        <button className="folder-selector" onClick={handleWorkspaceDropdownToggle}>
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
+                      {!isCalm && (
+                        <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
+                          <button
+                            className="folder-selector"
+                            onClick={handleWorkspaceDropdownToggle}
                           >
-                            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                          </svg>
-                          <span>
-                            {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
-                              ? "Work in a folder"
-                              : workspace?.name || "Work in a folder"}
-                          </span>
-                          <svg
-                            width="12"
-                            height="12"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            className={showWorkspaceDropdown ? "chevron-up" : ""}
-                          >
-                            <path d="M6 9l6 6 6-6" />
-                          </svg>
-                        </button>
-                        {showWorkspaceDropdown && (
-                          <div className="workspace-dropdown">
-                            {workspacesList.length > 0 && (
-                              <>
-                                <div className="workspace-dropdown-header">Recent Folders</div>
-                                <div className="workspace-dropdown-list">
-                                  {workspacesList.slice(0, 10).map((w) => (
-                                    <button
-                                      key={w.id}
-                                      className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
-                                      onClick={() => handleWorkspaceSelect(w)}
-                                    >
-                                      <svg
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                            </svg>
+                            <span>
+                              {workspace?.isTemp || isTempWorkspaceId(workspace?.id)
+                                ? "Work in a folder"
+                                : workspace?.name || "Work in a folder"}
+                            </span>
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              className={showWorkspaceDropdown ? "chevron-up" : ""}
+                            >
+                              <path d="M6 9l6 6 6-6" />
+                            </svg>
+                          </button>
+                          {showWorkspaceDropdown && (
+                            <div className="workspace-dropdown">
+                              {workspacesList.length > 0 && (
+                                <>
+                                  <div className="workspace-dropdown-header">Recent Folders</div>
+                                  <div className="workspace-dropdown-list">
+                                    {workspacesList.slice(0, 10).map((w) => (
+                                      <button
+                                        key={w.id}
+                                        className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
+                                        onClick={() => handleWorkspaceSelect(w)}
                                       >
-                                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                                      </svg>
-                                      <div className="workspace-item-info">
-                                        <span className="workspace-item-name">{w.name}</span>
-                                        <span className="workspace-item-path">{w.path}</span>
-                                      </div>
-                                      {workspace?.id === w.id && (
                                         <svg
                                           width="14"
                                           height="14"
@@ -9828,36 +9803,52 @@ function MainContentComponent({
                                           fill="none"
                                           stroke="currentColor"
                                           strokeWidth="2"
-                                          className="check-icon"
                                         >
-                                          <path d="M20 6L9 17l-5-5" />
+                                          <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
                                         </svg>
-                                      )}
-                                    </button>
-                                  ))}
-                                </div>
-                                <div className="workspace-dropdown-divider" />
-                              </>
-                            )}
-                            <button
-                              className="workspace-dropdown-item new-folder"
-                              onClick={handleSelectNewFolder}
-                            >
-                              <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
+                                        <div className="workspace-item-info">
+                                          <span className="workspace-item-name">{w.name}</span>
+                                          <span className="workspace-item-path">{w.path}</span>
+                                        </div>
+                                        {workspace?.id === w.id && (
+                                          <svg
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            className="check-icon"
+                                          >
+                                            <path d="M20 6L9 17l-5-5" />
+                                          </svg>
+                                        )}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <div className="workspace-dropdown-divider" />
+                                </>
+                              )}
+                              <button
+                                className="workspace-dropdown-item new-folder"
+                                onClick={handleSelectNewFolder}
                               >
-                                <path d="M12 5v14M5 12h14" />
-                              </svg>
-                              <span>Work in another folder...</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M12 5v14M5 12h14" />
+                                </svg>
+                                <span>Work in another folder...</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="overflow-menu-container" ref={overflowMenuRef}>
                         <button
                           ref={overflowToggleBtnRef}
@@ -10305,7 +10296,7 @@ function MainContentComponent({
                 />
               )}
             </div>
-            {uiDensity === "focused" && !isCalm && (
+            {(uiDensity === "focused" || isCalm) && (
               <div className="input-status-text welcome-input-status">
                 <div className="input-status-left">
                   <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
@@ -10397,7 +10388,7 @@ function MainContentComponent({
                   </div>
                 </div>
                 <div className="input-status-right">
-                  <div className="input-status-mode-wrap" ref={modeDropdownRef}>
+                  <div className="input-status-mode-wrap" ref={modeDropdownRef} hidden={isCalm}>
                     <InteractionModePicker
                       selection={displayedInteractionMode}
                       open={showModeDropdown}
@@ -11075,7 +11066,6 @@ function MainContentComponent({
             </div>
           )}
         </div>
-        {isCalm && !isBotConversation && renderCalmTopBar()}
       </div>
       {isBotConversation && showBotHistory && (
         <BotConversationHistory
@@ -11902,7 +11892,7 @@ function MainContentComponent({
             </span>
           </div>
         </div>
-        <div className="input-status-text" hidden={isCalm}>
+        <div className="input-status-text">
           <div className="input-status-left">
             <button
               className="input-status-workspace"
@@ -11928,7 +11918,7 @@ function MainContentComponent({
             </button>
           </div>
           <div className="input-status-right">
-            <div className="input-status-mode-wrap" ref={modeDropdownRef}>
+            <div className="input-status-mode-wrap" ref={modeDropdownRef} hidden={isCalm}>
               <InteractionModePicker
                 selection={displayedInteractionMode}
                 open={showModeDropdown}

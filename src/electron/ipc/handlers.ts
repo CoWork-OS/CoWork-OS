@@ -9325,8 +9325,9 @@ export async function setupIpcHandlers(
     return updateManager.getVersionInfo();
   });
 
-  ipcMain.handle(IPC_CHANNELS.APP_CHECK_UPDATES, async () => {
-    return updateManager.checkForUpdates();
+  ipcMain.handle(IPC_CHANNELS.APP_CHECK_UPDATES, async (_, intent?: unknown) => {
+    // Renderer input: anything other than an explicit background request is manual.
+    return updateManager.checkForUpdates(intent === "background" ? "background" : "manual");
   });
 
   ipcMain.handle(IPC_CHANNELS.APP_DOWNLOAD_UPDATE, async (_, updateInfo: UpdateInfo) => {

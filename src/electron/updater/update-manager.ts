@@ -4,7 +4,14 @@ import { promisify } from "util";
 import * as os from "os";
 import * as _path from "path";
 import * as _fs from "fs";
-import { UpdateInfo, UpdateProgress, AppVersionInfo, IPC_CHANNELS } from "../../shared/types";
+import {
+  UpdateInfo,
+  UpdateProgress,
+  AppVersionInfo,
+  IPC_CHANNELS,
+  type UpdateCheckIntent,
+  type UpdateCheckProvenance,
+} from "../../shared/types";
 import { compareVersions, getUpdatePlatformCompatibility } from "../../shared/platform-support";
 import {
   fetchArtifactSignature,
@@ -35,6 +42,37 @@ interface GitUpdateTarget {
   version: string;
 }
 
+/** Last-known release metadata, kept only as an offline fallback. */
+interface CachedRelease {
+  release: GitHubRelease;
+  retrievedAt: number | null;
+  origin?: "github" | "cowork_endpoint";
+}
+
+type ReleaseResolution =
+  | { kind: "release"; release: GitHubRelease; provenance: UpdateCheckProvenance }
+  | { kind: "no_release"; provenance: UpdateCheckProvenance };
+
+/** Total deadline (connect, headers and body) for a manual GitHub check. */
+export const MANUAL_CHECK_DEADLINE_MS = 8_000;
+/** Optional CoWork endpoint deadline for background checks, before GitHub. */
+export const BACKGROUND_ENDPOINT_DEADLINE_MS = 2_000;
+const UPDATE_CACHE_FILE = "update-check-cache.json";
+const UPDATE_CACHE_VERSION = 2;
+
+class DeadlineExceededError extends Error {
+  constructor(label: string, ms: number) {
+    super(`${label} did not respond within ${Math.round(ms / 1000)}s`);
+    this.name = "DeadlineExceededError";
+  }
+}
+
+class HttpStatusError extends Error {
+  constructor(readonly status: number) {
+    super(`GitHub API error: ${status}`);
+  }
+}
+
 export class UpdateManager {
   private mainWindow: BrowserWindow | null = null;
   private repoOwner = "CoWork-OS";
@@ -48,6 +86,10 @@ export class UpdateManager {
   private pendingGitTarget: GitUpdateTarget | null = null;
   private lastCheckedUpdateInfo: UpdateInfo | null = null;
   private updateReadyToInstall = false;
+  /** In-flight checks, coalesced per intent. */
+  private readonly inflightChecks = new Map<UpdateCheckIntent, Promise<UpdateInfo>>();
+  /** Monotonic check generation; only the newest started check sets the install target. */
+  private checkGeneration = 0;
 
   constructor(
     private readonly runtimePlatform: NodeJS.Platform | string = process.platform,
@@ -169,44 +211,74 @@ export class UpdateManager {
     return verifyReleaseArtifact(artifactPath, signature);
   }
 
-  async checkForUpdates(): Promise<UpdateInfo> {
+  /**
+   * Check for an update.
+   *
+   * `manual` (the default, used by Settings) asks GitHub directly with an 8-second total
+   * deadline. `background` (app startup) may first ask CoWork's identifier-free endpoint
+   * for at most 2 seconds, then GitHub. Duplicate checks of the same intent share one
+   * request. A newer check supersedes an older one for install-target authority, so a
+   * late background result can never replace a newer manual answer.
+   */
+  checkForUpdates(intent: UpdateCheckIntent = "manual"): Promise<UpdateInfo> {
+    const existing = this.inflightChecks.get(intent);
+    if (existing) return existing;
+    const generation = ++this.checkGeneration;
+    const run = this.runUpdateCheck(intent, generation).finally(() => {
+      if (this.inflightChecks.get(intent) === run) this.inflightChecks.delete(intent);
+    });
+    this.inflightChecks.set(intent, run);
+    return run;
+  }
+
+  private async runUpdateCheck(intent: UpdateCheckIntent, generation: number): Promise<UpdateInfo> {
     const versionInfo = await this.getVersionInfo();
     const currentVersion = versionInfo.version;
-    this.lastCheckedUpdateInfo = null;
-    this.checkedGitTarget = null;
+    let checkedGitTarget: GitUpdateTarget | null = null;
+    const record = (updateInfo: UpdateInfo): UpdateInfo => {
+      if (generation === this.checkGeneration) {
+        this.lastCheckedUpdateInfo = updateInfo;
+        this.checkedGitTarget = checkedGitTarget;
+      }
+      return updateInfo;
+    };
 
-    this.sendProgress({ phase: "checking", message: "Checking for updates..." });
+    if (intent === "manual") {
+      this.sendProgress({ phase: "checking", message: "Checking for updates..." });
+    }
 
     try {
-      const release = await this.fetchLatestRelease(currentVersion);
+      const resolution = await this.fetchLatestRelease(currentVersion, intent);
 
       // Determine update mode based on installation type
       const updateMode = this.getUpdateMode(versionInfo);
 
-      if (!release) {
-        // The repository has no published release to compare against. Report
-        // "up to date" rather than an error — this is not a failed check.
-        return this.recordCheckedUpdate({
+      if (resolution.kind === "no_release") {
+        // The release endpoint says nothing is published. That is not a failed check,
+        // but it is not proof of being current either; the UI says so.
+        return record({
           available: false,
           currentVersion,
           latestVersion: currentVersion,
           updateMode,
           supported: true,
+          provenance: resolution.provenance,
         });
       }
 
+      const { release, provenance } = resolution;
       const latestVersion = release.tag_name.replace(/^v/, "");
       const available = this.isNewerVersion(latestVersion, currentVersion);
 
-      if (versionInfo.isGitRepo) {
+      if (versionInfo.isGitRepo && provenance.source === "live") {
         // A source checkout updates from origin/main, so validate that exact
         // commit instead of assuming it matches the latest release tag.
         const localIsNewer = this.isNewerVersion(currentVersion, latestVersion);
         if (!localIsNewer) {
           const gitTarget = await this.checkForNewCommits();
           if (gitTarget) {
-            this.checkedGitTarget = gitTarget;
-            return this.recordCheckedUpdate({
+            checkedGitTarget = gitTarget;
+            return record({
               available: true,
               currentVersion: `${currentVersion} (${versionInfo.gitCommit})`,
               latestVersion: `${gitTarget.version} (${gitTarget.commit.slice(0, 7)})`,
@@ -214,12 +286,13 @@ export class UpdateManager {
               releaseUrl: `https://github.com/${this.repoOwner}/${this.repoName}`,
               updateMode: "git",
               ...this.getCompatibility(gitTarget.version),
+              provenance,
             });
           }
         }
       }
 
-      return this.recordCheckedUpdate({
+      return record({
         // Git updates are offered only when an exact fetched commit was captured above.
         available: updateMode === "git" ? false : available,
         currentVersion,
@@ -229,49 +302,45 @@ export class UpdateManager {
         publishedAt: release.published_at,
         updateMode,
         ...this.getCompatibility(latestVersion),
+        provenance,
       });
     } catch (error: Any) {
-      this.sendError(error.message);
+      if (intent === "manual") this.sendError(error.message);
       throw error;
     }
   }
 
-  private recordCheckedUpdate(updateInfo: UpdateInfo): UpdateInfo {
-    this.lastCheckedUpdateInfo = updateInfo;
-    return updateInfo;
+  private updateCachePath(): string | null {
+    try {
+      return typeof app.getPath === "function"
+        ? _path.join(app.getPath("userData"), UPDATE_CACHE_FILE)
+        : null;
+    } catch {
+      // No profile directory available (e.g. before app ready): no offline fallback.
+      return null;
+    }
   }
 
   /**
-   * Resolve the latest published release.
+   * Resolve the latest published release with bounded waits.
    *
-   * Returns `null` when the release endpoint reports that there is no release
-   * to compare against (HTTP 404: repository has none published yet, or was
-   * renamed/made private). That is "you are up to date", not an error, and the
-   * caller must not surface it as a failed check.
+   * Only GitHub's own 404 means "no published release". A timed-out, failed or
+   * malformed response from CoWork's optional endpoint never prevents the GitHub
+   * fallback. If GitHub is unreachable, the last successfully retrieved release is
+   * returned as a `cached` result with its retrieval time; with no cache the error
+   * propagates so the UI can offer a retry.
    *
-   * The Pulse collector is consulted only when the user has explicitly opted
-   * into Pulse. It is an adoption-reporting side channel that carries version,
-   * platform, arch and surface, so it is subject to the same consent gate as
-   * the rest of Pulse — a user who declined must not be fingerprinted by the
-   * update check. GitHub is always the fallback, so update discovery never
-   * depends on Pulse being reachable or enabled.
-   *
-   * The on-disk copy is a *fallback for an unreachable network*, not a
-   * short-circuit: serving it ahead of the network made an explicit "Check for
-   * updates" unable to see a release published in the last 24 hours.
+   * The CoWork endpoint receives only version, platform, architecture and surface: no
+   * Pulse identity or token. It is skipped in CI and tests.
    */
-  private async fetchLatestRelease(currentVersion: string): Promise<GitHubRelease | null> {
-    const cachePath =
-      typeof app.getPath === "function"
-        ? _path.join(app.getPath("userData"), "update-check-cache.json")
-        : null;
+  private async fetchLatestRelease(
+    currentVersion: string,
+    intent: UpdateCheckIntent,
+  ): Promise<ReleaseResolution> {
+    const cachePath = this.updateCachePath();
+    const checkedAt = Date.now();
 
-    let release: GitHubRelease | null = null;
-    // The update check always happens (to GitHub otherwise). Asking CoWork's own endpoint
-    // first sends only version/platform/arch/surface: no ID, cookie or usage. It is what
-    // lets the project count active installs, so it does not depend on Pulse consent,
-    // as documented in docs/cowork-pulse.md. Skipped in CI and tests.
-    if (!process.env.CI && process.env.NODE_ENV !== "test") {
+    if (intent === "background" && !process.env.CI && process.env.NODE_ENV !== "test") {
       try {
         const params = new URLSearchParams({
           version: currentVersion,
@@ -286,74 +355,176 @@ export class UpdateManager {
           arch: process.arch === "arm64" || process.arch === "x64" ? process.arch : "other",
           surface: "desktop",
         });
-        const pulseResponse = await net.fetch(
+        const { ok, body } = await this.fetchJsonWithDeadline(
           `https://pulse.coworkosapp.com/v1/latest-version?${params.toString()}`,
           { headers: { Accept: "application/json" } },
+          BACKGROUND_ENDPOINT_DEADLINE_MS,
+          "CoWork update endpoint",
         );
-        if (pulseResponse.ok) {
-          const candidate = (await pulseResponse.json()) as GitHubRelease;
-          if (this.isReleaseShape(candidate)) release = candidate;
+        if (ok && this.isReleaseShape(body as GitHubRelease)) {
+          const release = body as GitHubRelease;
+          await this.writeCachedRelease(cachePath, release, checkedAt, "cowork_endpoint");
+          return {
+            kind: "release",
+            release,
+            provenance: {
+              source: "live",
+              origin: "cowork_endpoint",
+              checkedAt,
+              lastSuccessfulRetrievalAt: checkedAt,
+            },
+          };
         }
       } catch {
-        // The public collector is optional; use GitHub directly below.
+        // Optional endpoint: fall through to GitHub.
       }
     }
 
-    if (!release) {
-      let response: Awaited<ReturnType<typeof net.fetch>>;
-      try {
-        response = await net.fetch(
-          `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/releases/latest`,
-          {
-            headers: {
-              Accept: "application/vnd.github.v3+json",
-              "User-Agent": "CoWork-OS-Updater",
-            },
+    try {
+      const { ok, status, body } = await this.fetchJsonWithDeadline(
+        `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/releases/latest`,
+        {
+          headers: {
+            Accept: "application/vnd.github.v3+json",
+            "User-Agent": "CoWork-OS-Updater",
           },
-        );
-      } catch (error) {
-        // Offline or DNS failure: fall back to the last known release rather
-        // than failing the check outright.
-        const cached = await this.readCachedRelease(cachePath);
-        if (cached) return cached;
-        throw error;
-      }
-
-      // No published release is a valid answer, not a failure.
-      if (response.status === 404) return null;
-      if (!response.ok) {
-        const cached = await this.readCachedRelease(cachePath);
-        if (cached) return cached;
-        throw new Error(`GitHub API error: ${response.status}`);
-      }
-      release = (await response.json()) as GitHubRelease;
-    }
-
-    if (cachePath) {
-      try {
-        await _fs.promises.mkdir(_path.dirname(cachePath), { recursive: true });
-        await _fs.promises.writeFile(
-          cachePath,
-          JSON.stringify({ checkedAt: Date.now(), release }),
-          {
-            mode: 0o600,
+        },
+        MANUAL_CHECK_DEADLINE_MS,
+        "GitHub",
+        { skipBodyOn: [404] },
+      );
+      if (status === 404) {
+        return {
+          kind: "no_release",
+          provenance: {
+            source: "no_release",
+            origin: "github",
+            checkedAt,
+            lastSuccessfulRetrievalAt: checkedAt,
           },
-        );
-      } catch {
-        // Cache failures must not make updates fail.
+        };
       }
+      if (!ok) throw new HttpStatusError(status);
+      if (!this.isReleaseShape(body as GitHubRelease)) {
+        throw new Error("GitHub returned an unexpected release format");
+      }
+      const release = body as GitHubRelease;
+      await this.writeCachedRelease(cachePath, release, checkedAt, "github");
+      return {
+        kind: "release",
+        release,
+        provenance: {
+          source: "live",
+          origin: "github",
+          checkedAt,
+          lastSuccessfulRetrievalAt: checkedAt,
+        },
+      };
+    } catch (error) {
+      // Offline, stalled, or a server error: fall back to the last known release,
+      // labeled as cached with when it was retrieved.
+      const cached = await this.readCachedRelease(cachePath);
+      if (!cached) throw error;
+      return {
+        kind: "release",
+        release: cached.release,
+        provenance: {
+          source: "cached",
+          ...(cached.origin ? { origin: cached.origin } : {}),
+          checkedAt,
+          lastSuccessfulRetrievalAt: cached.retrievedAt,
+          networkError: error instanceof Error ? error.message : String(error),
+        },
+      };
     }
-    return release;
   }
 
-  private async readCachedRelease(cachePath: string | null): Promise<GitHubRelease | null> {
+  /**
+   * Fetch and parse JSON under one total deadline covering connection, headers and the
+   * body. Settles even if the underlying request ignores the abort signal.
+   */
+  private async fetchJsonWithDeadline(
+    url: string,
+    init: { headers: Record<string, string> },
+    deadlineMs: number,
+    label: string,
+    options: { skipBodyOn?: number[] } = {},
+  ): Promise<{ ok: boolean; status: number; body: unknown }> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new DeadlineExceededError(label, deadlineMs));
+      }, deadlineMs);
+      timer.unref?.();
+    });
+    const attempt = (async () => {
+      const response = await net.fetch(url, { ...init, signal: controller.signal });
+      if (!response.ok || options.skipBodyOn?.includes(response.status)) {
+        return { ok: response.ok, status: response.status, body: undefined };
+      }
+      return { ok: true, status: response.status, body: (await response.json()) as unknown };
+    })();
+    // Keep a late rejection from surfacing as unhandled after the deadline won.
+    void attempt.catch(() => undefined);
+    try {
+      return await Promise.race([attempt, deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /** Persist metadata with its retrieval time and source, atomically. */
+  private async writeCachedRelease(
+    cachePath: string | null,
+    release: GitHubRelease,
+    retrievedAt: number,
+    origin: "github" | "cowork_endpoint",
+  ): Promise<void> {
+    if (!cachePath) return;
+    const temporary = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await _fs.promises.mkdir(_path.dirname(cachePath), { recursive: true });
+      await _fs.promises.writeFile(
+        temporary,
+        JSON.stringify({ version: UPDATE_CACHE_VERSION, retrievedAt, origin, release }),
+        { mode: 0o600 },
+      );
+      await _fs.promises.rename(temporary, cachePath);
+    } catch {
+      // Cache failures must not make updates fail.
+      await _fs.promises.rm(temporary, { force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Read the offline fallback. The pre-v2 shape `{ checkedAt, release }` is still
+   * readable; its timestamp is reported as the retrieval time, and it is never
+   * treated as fresh.
+   */
+  private async readCachedRelease(cachePath: string | null): Promise<CachedRelease | null> {
     if (!cachePath) return null;
     try {
       const cached = JSON.parse(await _fs.promises.readFile(cachePath, "utf8")) as {
+        version?: number;
+        retrievedAt?: number;
         checkedAt?: number;
+        origin?: string;
         release?: GitHubRelease;
       };
-      if (cached.release && this.isReleaseShape(cached.release)) return cached.release;
+      if (!cached.release || !this.isReleaseShape(cached.release)) return null;
+      const retrievedAt =
+        typeof cached.retrievedAt === "number"
+          ? cached.retrievedAt
+          : typeof cached.checkedAt === "number"
+            ? cached.checkedAt
+            : null;
+      const origin =
+        cached.origin === "github" || cached.origin === "cowork_endpoint"
+          ? cached.origin
+          : undefined;
+      return { release: cached.release, retrievedAt, ...(origin ? { origin } : {}) };
     } catch {
       // No cache, or an interrupted write.
     }
@@ -453,6 +624,12 @@ export class UpdateManager {
       checkedUpdate.updateMode !== updateInfo.updateMode
     ) {
       throw new Error("Check for updates again before starting the update.");
+    }
+    // Cached metadata is informational only: installing requires a fresh resolution.
+    if (checkedUpdate.provenance?.source !== "live") {
+      throw new Error(
+        "This update was found in cached release information. Check for updates again while online before installing.",
+      );
     }
 
     const checkedTargetVersion =

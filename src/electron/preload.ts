@@ -3584,7 +3584,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // App Update APIs
   getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
-  checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_UPDATES),
+  checkForUpdates: (intent?: "manual" | "background") =>
+    ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_UPDATES, intent),
   downloadUpdate: (updateInfo: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_DOWNLOAD_UPDATE, updateInfo),
   installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_INSTALL_UPDATE),
@@ -6925,21 +6926,9 @@ export interface ElectronAPI {
     gitBranch?: string;
     gitCommit?: string;
   }>;
-  checkForUpdates: () => Promise<{
-    available: boolean;
-    currentVersion: string;
-    latestVersion: string;
-    releaseNotes?: string;
-    releaseUrl?: string;
-    publishedAt?: string;
-    updateMode: "git" | "npm" | "electron-updater";
-    supported: boolean;
-    minimumSystemVersion?: string;
-    minimumSystemLabel?: string;
-    lastCompatibleVersion?: string;
-    unsupportedReason?: string;
-    recoveryCommand?: string;
-  }>;
+  checkForUpdates: (
+    intent?: import("../shared/types").UpdateCheckIntent,
+  ) => Promise<import("../shared/types").UpdateInfo>;
   downloadUpdate: (updateInfo: Any) => Promise<{ success: boolean }>;
   installUpdate: () => Promise<{ success: boolean }>;
   onUpdateProgress: (

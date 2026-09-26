@@ -5,6 +5,7 @@
 import type { ChannelType } from "../gateway/channels/types";
 import type { AgentConfig } from "../../shared/types";
 import type { AccessProfileId } from "../../shared/access-profiles";
+import type { CronOutcomeCountMap, CronOutcomeCounts } from "../../shared/cron-outcomes";
 
 /**
  * Schedule type definitions:
@@ -26,7 +27,8 @@ export type CronJobStatus =
   | "needs_user_action"
   | "error"
   | "skipped"
-  | "timeout";
+  | "timeout"
+  | "cancelled";
 
 export type CronDeliveryMode = "direct" | "outbox";
 export type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
@@ -35,6 +37,8 @@ export type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
  * Single run history entry
  */
 export interface CronRunHistoryEntry {
+  /** Stable run identity (see cronRunKey). Absent on entries written by older builds. */
+  runKey?: string;
   runAtMs: number;
   durationMs: number;
   status: CronJobStatus;
@@ -74,6 +78,8 @@ export interface CronThreadAutomationConfig {
 export interface CronJobState {
   nextRunAtMs?: number;
   runningAtMs?: number;
+  /** Stable key of the active run, persisted with its lease and kept in its history entry. */
+  runningRunKey?: string;
   lastRunAtMs?: number;
   lastStatus?: CronJobStatus;
   lastError?: string;
@@ -81,10 +87,13 @@ export interface CronJobState {
   lastTaskId?: string;
   // Run history (most recent first, limited to maxHistoryEntries)
   runHistory?: CronRunHistoryEntry[];
-  // Execution stats
+  // Legacy execution stats. `successfulRuns` counts partial and needs-action runs
+  // too; new consumers must read `outcomeCounts` instead.
   totalRuns?: number;
   successfulRuns?: number;
   failedRuns?: number;
+  /** Versioned per-category outcome counts; only `ok` is a full run success. */
+  outcomeCounts?: CronOutcomeCounts;
 }
 
 /**
@@ -367,9 +376,13 @@ export interface CronRunHistoryResult {
   jobId: string;
   jobName: string;
   entries: CronRunHistoryEntry[];
+  /** Legacy aggregates, kept with their legacy semantics. */
   totalRuns: number;
   successfulRuns: number;
   failedRuns: number;
+  /** Per-category counts; the rate is ok / classified attempts. */
+  outcomeCounts: CronOutcomeCountMap;
+  outcomeCountsLimitation?: string;
 }
 
 /**

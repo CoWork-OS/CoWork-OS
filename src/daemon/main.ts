@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import os from "node:os";
 import { DatabaseManager } from "../electron/database/schema";
 import { SecureSettingsRepository } from "../electron/database/SecureSettingsRepository";
+import { describeCronRunStatus } from "../shared/cron-outcomes";
 import { PulseService } from "../electron/telemetry/pulse-service";
 import { AgentDaemon } from "../electron/agent/daemon";
 import { LLMProviderFactory } from "../electron/agent/llm";
@@ -515,19 +516,14 @@ async function main(): Promise<void> {
           !params.summaryOnly &&
           typeof params.resultText === "string" &&
           params.resultText.trim().length > 0;
-        const statusEmoji = params.status === "ok" ? "✅" : params.status === "error" ? "❌" : "⏱️";
+        const statusLabel = describeCronRunStatus(params.status);
+        const statusEmoji = statusLabel.emoji;
         const message = hasResult
           ? `**${params.jobName}**\n\n${params.resultText!.trim()}`
           : (() => {
               let msg = `${statusEmoji} **Scheduled Task: ${params.jobName}**\n\n`;
 
-              if (params.status === "ok") {
-                msg += `Task completed successfully.\n`;
-              } else if (params.status === "error") {
-                msg += `Task failed.\n`;
-              } else {
-                msg += `Task timed out.\n`;
-              }
+              msg += `${statusLabel.sentence}\n`;
 
               if (params.error) {
                 msg += `\n**Error:** ${params.error}\n`;

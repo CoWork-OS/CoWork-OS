@@ -851,7 +851,8 @@ type CronJobStatus =
   | "needs_user_action"
   | "error"
   | "skipped"
-  | "timeout";
+  | "timeout"
+  | "cancelled";
 type CronDeliveryMode = "direct" | "outbox";
 type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
 
@@ -878,6 +879,7 @@ interface CronJobState {
   totalRuns?: number;
   successfulRuns?: number;
   failedRuns?: number;
+  outcomeCounts?: import("../shared/cron-outcomes").CronOutcomeCounts;
 }
 
 interface CronDeliveryConfig {
@@ -971,6 +973,8 @@ interface CronRunHistoryResult {
   totalRuns: number;
   successfulRuns: number;
   failedRuns: number;
+  outcomeCounts: import("../shared/cron-outcomes").CronOutcomeCountMap;
+  outcomeCountsLimitation?: string;
 }
 
 interface CronWebhookStatus {

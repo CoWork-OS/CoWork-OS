@@ -1,4 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
+import {
+  addCronOutcomeCountMaps,
+  emptyCronOutcomeCountMap,
+  summarizeCronRunSuccess,
+  type CronOutcomeCountMap,
+  type CronOutcomeCounts,
+  type CronRunSuccessSummary,
+} from "../../shared/cron-outcomes";
 import { useAgentContext } from "../hooks/useAgentContext";
 import { createRendererLogger } from "../utils/logger";
 import {
@@ -41,7 +49,8 @@ interface CronJobState {
     | "resume_available"
     | "error"
     | "skipped"
-    | "timeout";
+    | "timeout"
+    | "cancelled";
   lastError?: string;
   lastDurationMs?: number;
   lastTaskId?: string;
@@ -49,6 +58,7 @@ interface CronJobState {
   totalRuns?: number;
   successfulRuns?: number;
   failedRuns?: number;
+  outcomeCounts?: CronOutcomeCounts;
 }
 
 type CronDeliveryMode = "direct" | "outbox";
@@ -78,6 +88,8 @@ interface CronRunHistoryResult {
   totalRuns: number;
   successfulRuns: number;
   failedRuns: number;
+  outcomeCounts?: CronOutcomeCountMap;
+  outcomeCountsLimitation?: string;
 }
 
 interface CronJob {
@@ -432,6 +444,8 @@ function formatStatusLabel(status?: CronJobState["lastStatus"]): string {
       return "Skipped";
     case "timeout":
       return "Timed out";
+    case "cancelled":
+      return "Cancelled";
     default:
       return "No runs yet";
   }
@@ -440,7 +454,7 @@ function formatStatusLabel(status?: CronJobState["lastStatus"]): string {
 function getStatusTone(
   status?: CronJobState["lastStatus"],
 ): "success" | "warning" | "error" | "muted" {
-  if (!status || status === "skipped") return "muted";
+  if (!status || status === "skipped" || status === "cancelled") return "muted";
   if (status === "ok") return "success";
   if (isWarningLikeLastStatus(status)) return "warning";
   return "error";
@@ -499,9 +513,30 @@ function getDeliveryTone(
   return "warning";
 }
 
-function calculateSuccessRate(totalRuns?: number, successfulRuns?: number): number | null {
-  if (!totalRuns) return null;
-  return Math.round(((successfulRuns ?? 0) / totalRuns) * 100);
+/**
+ * Versioned outcome counts for a job. A job written only by an older build has no
+ * classification, so every recorded run is unclassified rather than a guessed success.
+ */
+function jobOutcomeCounts(state: CronJobState): CronOutcomeCountMap {
+  return (
+    state.outcomeCounts?.counts ?? {
+      ...emptyCronOutcomeCountMap(),
+      legacyUnknown: state.totalRuns ?? 0,
+    }
+  );
+}
+
+/** Secondary line for a run-success figure: what the rate excludes and why. */
+function describeRunSuccess(summary: CronRunSuccessSummary): string {
+  const parts = [`${summary.ok} ok`];
+  if (summary.partial) parts.push(`${summary.partial} partial`);
+  if (summary.needsAttention) parts.push(`${summary.needsAttention} need attention`);
+  if (summary.failed) parts.push(`${summary.failed} failed`);
+  if (summary.cancelled) parts.push(`${summary.cancelled} cancelled`);
+  const excluded: string[] = [];
+  if (summary.skipped) excluded.push(`${summary.skipped} skipped`);
+  if (summary.unclassified) excluded.push(`${summary.unclassified} older unclassified`);
+  return `${parts.join(" · ")} among classified attempts${excluded.length ? `; excludes ${excluded.join(", ")}` : ""}`;
 }
 
 // Styles
@@ -834,6 +869,9 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
               totalRuns: job.state.totalRuns ?? next[job.id].totalRuns,
               successfulRuns: job.state.successfulRuns ?? next[job.id].successfulRuns,
               failedRuns: job.state.failedRuns ?? next[job.id].failedRuns,
+              outcomeCounts: job.state.outcomeCounts?.counts ?? next[job.id].outcomeCounts,
+              outcomeCountsLimitation:
+                job.state.outcomeCounts?.limitation ?? next[job.id].outcomeCountsLimitation,
             };
           }
         }
@@ -861,6 +899,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
             totalRuns: job.state.totalRuns ?? 0,
             successfulRuns: job.state.successfulRuns ?? 0,
             failedRuns: job.state.failedRuns ?? 0,
+            outcomeCounts: jobOutcomeCounts(job.state),
           },
         }));
       } catch (err: Any) {
@@ -964,6 +1003,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
           totalRuns: 0,
           successfulRuns: 0,
           failedRuns: 0,
+          outcomeCounts: emptyCronOutcomeCountMap(),
         };
         return next;
       });
@@ -990,9 +1030,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
   }, null);
   const runStats = jobs.reduce(
     (acc, job) => {
-      acc.totalRuns += job.state.totalRuns ?? 0;
-      acc.successfulRuns += job.state.successfulRuns ?? 0;
-      acc.failedRuns += job.state.failedRuns ?? 0;
+      acc.counts = addCronOutcomeCountMaps(acc.counts, jobOutcomeCounts(job.state));
       if (
         job.state.lastStatus === "error" ||
         job.state.lastStatus === "timeout" ||
@@ -1002,9 +1040,9 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
       }
       return acc;
     },
-    { totalRuns: 0, successfulRuns: 0, failedRuns: 0, needsAttention: 0 },
+    { counts: emptyCronOutcomeCountMap(), needsAttention: 0 },
   );
-  const aggregateSuccessRate = calculateSuccessRate(runStats.totalRuns, runStats.successfulRuns);
+  const aggregateSuccess = summarizeCronRunSuccess(runStats.counts);
 
   return (
     <div style={styles.container}>
@@ -1047,11 +1085,9 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
         <div style={styles.statCard}>
           <span style={styles.statLabel}>Run Success</span>
           <span style={{ ...styles.statValue, color: "var(--color-success)" }}>
-            {aggregateSuccessRate === null ? "-" : `${aggregateSuccessRate}%`}
+            {aggregateSuccess.ratePercent === null ? "-" : `${aggregateSuccess.ratePercent}%`}
           </span>
-          <span style={styles.statHint}>
-            {runStats.successfulRuns} ok / {runStats.failedRuns} failed
-          </span>
+          <span style={styles.statHint}>{describeRunSuccess(aggregateSuccess)}</span>
         </div>
         <div style={styles.statCard}>
           <span style={styles.statLabel}>Next Run</span>
@@ -1125,10 +1161,11 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
               failedRuns: job.state.failedRuns ?? 0,
             };
             const latestRun = runHistory.entries[0];
-            const successRate = calculateSuccessRate(
-              runHistory.totalRuns,
-              runHistory.successfulRuns,
+            const runSuccess = summarizeCronRunSuccess(
+              runHistory.outcomeCounts ?? jobOutcomeCounts(job.state),
             );
+            const outcomeLimitation =
+              runHistory.outcomeCountsLimitation ?? job.state.outcomeCounts?.limitation;
             const latestTone = getStatusTone(latestRun?.status ?? lastStatus);
             const latestToneColors = getToneColors(latestTone);
             const deliveryToneColors = getToneColors(getDeliveryTone(job, latestRun));
@@ -1322,9 +1359,14 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                           </div>
                           <div style={styles.resultMetric}>
                             <span style={styles.resultMetricValue}>
-                              {successRate === null ? "-" : `${successRate}%`}
+                              {runSuccess.ratePercent === null ? "-" : `${runSuccess.ratePercent}%`}
                             </span>
-                            <span style={styles.resultMetricLabel}>Success rate</span>
+                            <span
+                              style={styles.resultMetricLabel}
+                              title="Fully successful runs among classified attempts. Skipped and older unclassified runs are excluded. This is not a measure of whether the result was accepted."
+                            >
+                              Run success
+                            </span>
                           </div>
                           <div style={styles.resultMetric}>
                             <span style={styles.resultMetricValue}>
@@ -1416,7 +1458,8 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                                 fontSize: "12px",
                               }}
                             >
-                              {runHistory.successfulRuns} completed, {runHistory.failedRuns} failed
+                              {describeRunSuccess(runSuccess)}
+                              {outcomeLimitation ? ` · ${outcomeLimitation}` : ""}
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: "8px" }}>

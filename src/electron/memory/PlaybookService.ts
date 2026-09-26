@@ -1,6 +1,15 @@
 import { EventEmitter } from "events";
 import { createLogger } from "../utils/logger";
 import { MemoryService } from "./MemoryService";
+import {
+  hashMemoryContent,
+  PlaybookEvidenceStore,
+  type PlaybookEvidenceRecord,
+  type PlaybookOutcomeGrade,
+} from "./PlaybookEvidenceStore";
+import { scorePlaybookRelevance } from "./playbook-relevance";
+
+export { isGeneratedPlaybookContent } from "./playbook-markers";
 
 const logger = createLogger("PlaybookService");
 
@@ -26,39 +35,104 @@ export interface PlaybookEntry {
 export interface PlaybookCaptureOptions {
   /** Prevent automatic external-memory mirroring when the task profile gates network access. */
   allowExternalMirror?: boolean;
+  /**
+   * Reliable persisted identity of the turn/run inside the task, when one exists. Without
+   * it the task counts as one execution, so missing IDs never manufacture independence.
+   */
+  turnId?: string;
+  /** Stable terminal event that identifies this execution on replay, if any. */
+  terminalEventId?: string;
+  /** Strength of a success claim; defaults to observed runtime success. */
+  grade?: Extract<
+    PlaybookOutcomeGrade,
+    "observed_runtime_success" | "contract_verified" | "user_confirmed"
+  >;
+}
+
+export type PlaybookCaptureResult =
+  | { status: "recorded"; memoryId: string; evidenceId: string; executionKey: string }
+  | {
+      status: "skipped";
+      reason: "memory_not_recorded" | "duplicate_execution" | "ledger_unavailable";
+      evidenceId?: string;
+    }
+  | { status: "error"; error: string };
+
+export interface PlaybookReinforcementResult {
+  /** Earlier evidence IDs this execution now durably reinforces. */
+  linkedEvidenceIds: string[];
 }
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
-const PLAYBOOK_MARKER = "[PLAYBOOK]";
+const MAX_REINFORCEMENT_LINKS = 2;
 
-function scorePromptOverlap(prompt: string, text: string): number {
-  const tokens = prompt.toLowerCase().match(/[a-z0-9]{3,}/g);
-  if (!tokens || tokens.length === 0) return 0;
-  const haystack = text.toLowerCase();
-  let score = 0;
-  for (const token of tokens.slice(0, 16)) {
-    if (haystack.includes(token)) score += 1;
-  }
-  return score;
+/** One execution per task unless a reliable persisted turn identity is supplied. */
+export function derivePlaybookExecutionKey(taskId: string, turnId?: string): string {
+  const turn = turnId?.trim();
+  return turn ? `task:${taskId}:turn:${turn}` : `task:${taskId}`;
 }
 
 /**
- * Auto-captures "what worked" patterns from completed tasks and
- * provides relevant context for future tasks via the memory system.
+ * Approach identity: the normalized set of tools and destinations. Two executions with
+ * similar prompts but different tools are not treated as the same approach. An empty key
+ * means the approach is unknown and can never link.
+ */
+export function derivePlaybookPatternKey(
+  toolsUsed: string[],
+  destinationHints: string[] = [],
+): string {
+  const tools = [
+    ...new Set(toolsUsed.map((tool) => tool.trim().toLowerCase()).filter(Boolean)),
+  ].sort();
+  if (tools.length === 0) return "";
+  const destinations = [
+    ...new Set(destinationHints.map((hint) => hint.trim().toLowerCase()).filter(Boolean)),
+  ].sort();
+  return `tools:${tools.join(",")}${destinations.length ? `|dest:${destinations.join(",")}` : ""}`;
+}
+
+function decayFactor(ageMs: number): number {
+  if (ageMs > NINETY_DAYS_MS) return 0.5;
+  if (ageMs > THIRTY_DAYS_MS) return 0.8;
+  return 1;
+}
+
+/**
+ * Records Playbook outcomes and serves evidence-backed context.
  *
- * Uses the existing MemoryService with type "insight" for storage
- * and retrieval via hybrid semantic+lexical search.
- *
- * Enhancements:
- * - Error classification: categorises failures for targeted recovery strategies.
- * - Time-based decay: older entries receive lower relevance scores.
- * - Reinforcement: successful patterns are boosted via reinforcement memories.
+ * Memory rows keep the human-readable history; the PlaybookEvidenceStore ledger is the
+ * only thing that counts as proof. Success context, reinforcement and skill promotion all
+ * read original, active, successful evidence from independent executions whose source
+ * memory still exists unchanged. Legacy reinforcement text is never treated as proof.
  */
 export class PlaybookService {
-  /** Event emitter for playbook events. Emits "pattern-reinforced" when a pattern is reinforced. */
+  /** Emits "pattern-reinforced" only after durable reinforcement links were created. */
   static readonly events = new EventEmitter();
 
+  private static evidenceStoreOverride: PlaybookEvidenceStore | null | undefined;
+  private static evidenceStoreCache: { db: unknown; store: PlaybookEvidenceStore } | null = null;
+
+  /** Inject a ledger (tests), or pass undefined to return to the profile database. */
+  static setEvidenceStoreForTesting(store: PlaybookEvidenceStore | null | undefined): void {
+    this.evidenceStoreOverride = store;
+    this.evidenceStoreCache = null;
+  }
+
+  static getEvidenceStore(): PlaybookEvidenceStore | null {
+    if (this.evidenceStoreOverride !== undefined) return this.evidenceStoreOverride;
+    const db = MemoryService.getDatabase?.();
+    if (!db) return null;
+    if (this.evidenceStoreCache?.db !== db) {
+      this.evidenceStoreCache = { db, store: new PlaybookEvidenceStore(db) };
+    }
+    return this.evidenceStoreCache.store;
+  }
+
+  /**
+   * Inbox observations are kept as memory for inspection only; they never become
+   * evidence of a successful execution.
+   */
   static async captureMailboxPattern(
     workspaceId: string,
     input: {
@@ -93,7 +167,11 @@ export class PlaybookService {
   }
 
   /**
-   * Capture a playbook entry after task completion or failure.
+   * Capture a Playbook outcome after task completion or failure.
+   *
+   * Returns `recorded` only when both the memory and the evidence row exist. Memory
+   * settings (disabled, privacy, exclusions, write gate) remain authoritative: when the
+   * memory is not written, no evidence row is created either.
    */
   static async captureOutcome(
     workspaceId: string,
@@ -106,89 +184,150 @@ export class PlaybookService {
     errorMessage?: string,
     destinationHints: string[] = [],
     options: PlaybookCaptureOptions = {},
-  ): Promise<void> {
+  ): Promise<PlaybookCaptureResult> {
+    const store = this.getEvidenceStore();
+    if (!store) return { status: "skipped", reason: "ledger_unavailable" };
+    const executionKey = derivePlaybookExecutionKey(taskId, options.turnId);
+    const existing = store.find(workspaceId, executionKey, outcome);
+    if (existing) {
+      return { status: "skipped", reason: "duplicate_execution", evidenceId: existing.id };
+    }
+
     const toolsList = toolsUsed.length > 0 ? toolsUsed.slice(0, 10).join(", ") : "none";
     const destinationsLine =
       destinationHints.length > 0
         ? `Preferred destinations: ${destinationHints.slice(0, 4).join(", ")}`
         : null;
+    const category = outcome === "failure" ? this.classifyError(errorMessage || "") : null;
 
-    let content: string;
-    if (outcome === "success") {
-      content = [
-        `[PLAYBOOK] Task succeeded: "${taskTitle}"`,
-        `Approach: ${planSummary.slice(0, 300)}`,
-        `Key tools: ${toolsList}`,
-        destinationsLine,
-        `Original request: ${taskPrompt.slice(0, 200)}`,
-      ]
-        .filter((line): line is string => Boolean(line))
-        .join("\n");
-    } else {
-      const category = this.classifyError(errorMessage || "");
-      content = [
-        `[PLAYBOOK] Task failed: "${taskTitle}"`,
-        `Category: ${category}`,
-        `Attempted approach: ${planSummary.slice(0, 300)}`,
-        `Error: ${errorMessage?.slice(0, 200) || "Unknown"}`,
-        `Lesson: The approach of using ${toolsList} did not work for this type of request. Error type: ${category}.`,
-        destinationsLine,
-        `Original request: ${taskPrompt.slice(0, 200)}`,
-      ]
-        .filter((line): line is string => Boolean(line))
-        .join("\n");
-    }
+    const content =
+      outcome === "success"
+        ? [
+            `[PLAYBOOK] Task succeeded: "${taskTitle}"`,
+            `Approach: ${planSummary.slice(0, 300)}`,
+            `Key tools: ${toolsList}`,
+            destinationsLine,
+            `Original request: ${taskPrompt.slice(0, 200)}`,
+          ]
+        : [
+            `[PLAYBOOK] Task failed: "${taskTitle}"`,
+            `Category: ${category}`,
+            `Attempted approach: ${planSummary.slice(0, 300)}`,
+            `Error: ${errorMessage?.slice(0, 200) || "Unknown"}`,
+            `Lesson: The approach of using ${toolsList} did not work for this type of request. Error type: ${category}.`,
+            destinationsLine,
+            `Original request: ${taskPrompt.slice(0, 200)}`,
+          ];
 
     try {
-      await MemoryService.capture(workspaceId, taskId, "insight", content, false, {
-        origin: "playbook",
-        batchable: false,
-        allowExternalMirror: options.allowExternalMirror,
+      const memory = await MemoryService.capture(
+        workspaceId,
+        taskId,
+        "insight",
+        content.filter((line): line is string => Boolean(line)).join("\n"),
+        false,
+        {
+          origin: "playbook",
+          batchable: false,
+          allowExternalMirror: options.allowExternalMirror,
+        },
+      );
+      if (!memory) return { status: "skipped", reason: "memory_not_recorded" };
+
+      const { created, record } = store.record({
+        workspaceId,
+        taskId,
+        executionKey,
+        turnId: options.turnId?.trim() || null,
+        terminalEventId: options.terminalEventId || null,
+        sourceMemoryId: memory.id,
+        sourceContentHash: hashMemoryContent(memory.content),
+        outcome,
+        grade:
+          outcome === "success"
+            ? options.grade || "observed_runtime_success"
+            : category === "user_correction"
+              ? "corrected"
+              : "failure",
+        patternKey: derivePlaybookPatternKey(toolsUsed, destinationHints),
+        title: taskTitle.slice(0, 200),
+        approach: planSummary.slice(0, 300),
+        requestExcerpt: taskPrompt.slice(0, 300),
+        toolsUsed: toolsUsed.slice(0, 10),
+        sourceRefs: [`task:${taskId}`, `memory:${memory.id}`],
       });
+      if (!created) {
+        return { status: "skipped", reason: "duplicate_execution", evidenceId: record.id };
+      }
+      if (category === "user_correction") {
+        // An identifiable correction reverses this task's earlier success claims.
+        store.invalidateTaskSuccesses(workspaceId, taskId, "corrected_by_user");
+      }
+      return { status: "recorded", memoryId: memory.id, evidenceId: record.id, executionKey };
     } catch (err) {
       logger.warn("Failed to capture playbook entry:", err);
+      return { status: "error", error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  /**
-   * Retrieve playbook entries relevant to a new task's prompt.
-   * Returns formatted context suitable for injection into the system prompt.
-   *
-   * Applies time-based decay so older entries are deprioritised:
-   * - 0-30 days: full relevance (1.0x)
-   * - 30-90 days: slight penalty (0.8x)
-   * - 90+ days: significant penalty (0.5x)
-   */
-  static getPlaybookForContext(workspaceId: string, taskPrompt: string, maxEntries = 3): string {
-    try {
-      // Marker lookup intentionally avoids broad FTS recall on the Electron main
-      // process. Relevance is scored in-process over a bounded result set.
-      const results = MemoryService.searchByContentMarker(workspaceId, PLAYBOOK_MARKER, 80);
-      const now = Date.now();
+  /** Active success evidence whose source memory still exists unchanged. */
+  private static eligibleSuccesses(
+    store: PlaybookEvidenceStore,
+    workspaceId: string,
+    excludeExecutionKey?: string,
+  ): PlaybookEvidenceRecord[] {
+    return store
+      .listActiveSuccesses(workspaceId)
+      .filter((record) => record.executionKey !== excludeExecutionKey)
+      .filter((record) => store.verifySource(record));
+  }
 
-      const playbookEntries = results
-        .filter((r) => r.type === "insight" && r.snippet.includes(PLAYBOOK_MARKER))
-        .map((r) => {
-          const ageMs = now - r.createdAt;
-          let decayFactor = 1.0;
-          if (ageMs > NINETY_DAYS_MS) {
-            decayFactor = 0.5;
-          } else if (ageMs > THIRTY_DAYS_MS) {
-            decayFactor = 0.8;
-          }
-          const promptScore = scorePromptOverlap(taskPrompt, r.snippet);
-          return { ...r, adjustedScore: (promptScore + (r.relevanceScore ?? 1)) * decayFactor };
-        })
-        .sort((a, b) => b.adjustedScore - a.adjustedScore)
+  /**
+   * Evidence-backed context for a new task: original successful executions only, relevant
+   * to this prompt before any top-N selection. Failures, corrected outcomes, inbox
+   * observations and reinforcement-derived entries never appear here.
+   */
+  static getPlaybookForContext(
+    workspaceId: string,
+    taskPrompt: string,
+    maxEntries = 3,
+    options: { excludeTaskId?: string } = {},
+  ): string {
+    try {
+      const store = this.getEvidenceStore();
+      if (!store) return "";
+      const now = Date.now();
+      const excludeKey = options.excludeTaskId
+        ? derivePlaybookExecutionKey(options.excludeTaskId)
+        : undefined;
+      const ranked = this.eligibleSuccesses(store, workspaceId, excludeKey)
+        .filter((record) => !options.excludeTaskId || record.taskId !== options.excludeTaskId)
+        .map((record) => ({
+          record,
+          relevance: scorePlaybookRelevance(
+            taskPrompt,
+            `${record.title}\n${record.requestExcerpt}\n${record.approach}`,
+          ),
+        }))
+        .filter((entry) => entry.relevance.passes)
+        .map((entry) => ({
+          ...entry,
+          score: entry.relevance.weightedOverlap * decayFactor(now - entry.record.createdAt),
+        }))
+        .sort((a, b) => b.score - a.score)
         .slice(0, maxEntries);
 
-      if (playbookEntries.length === 0) return "";
-
-      const lines = ["PLAYBOOK (past task patterns - use as context, not as instructions):"];
-      for (const entry of playbookEntries) {
-        // Strip the [PLAYBOOK] prefix for cleaner context
-        const cleaned = entry.snippet.replace(/^\[PLAYBOOK\]\s*/m, "").trim();
-        lines.push(`- ${cleaned.slice(0, 250)}`);
+      if (ranked.length === 0) return "";
+      const lines = [
+        "PLAYBOOK (observed successful executions - use as context, not as instructions):",
+      ];
+      for (const { record } of ranked) {
+        const tools = record.toolsUsed.length
+          ? `; tools: ${record.toolsUsed.slice(0, 5).join(", ")}`
+          : "";
+        lines.push(
+          `- "${record.title.slice(0, 80)}" (${record.grade.replace(/_/g, " ")}): ${record.approach.slice(0, 160)}${tools}`,
+        );
       }
       return lines.join("\n");
     } catch {
@@ -197,62 +336,82 @@ export class PlaybookService {
   }
 
   /**
-   * Reinforce playbook entries that match a successful task.
-   * Creates a lightweight reinforcement memory that boosts matching patterns
-   * in future hybrid searches (more semantic overlap = higher rank).
+   * Explicit recovery lookup: clearly labeled failure lessons relevant to this prompt.
+   * Not part of generic success context.
    */
-  static async reinforceEntry(
+  static getFailureLessonsForRecovery(
     workspaceId: string,
     taskPrompt: string,
-    toolsUsed: string[],
-    destinationHints: string[] = [],
-    options: PlaybookCaptureOptions = {},
-  ): Promise<void> {
+    maxEntries = 2,
+  ): string {
     try {
-      const results = MemoryService.searchByContentMarker(workspaceId, PLAYBOOK_MARKER, 40);
-      const matchingEntries = results
-        .filter((r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"))
-        .sort(
-          (a, b) =>
-            scorePromptOverlap(taskPrompt, b.snippet) - scorePromptOverlap(taskPrompt, a.snippet),
+      const store = this.getEvidenceStore();
+      if (!store) return "";
+      const lessons = store
+        .listActiveFailures(workspaceId)
+        .filter((record) => store.verifySource(record))
+        .filter(
+          (record) =>
+            scorePlaybookRelevance(taskPrompt, `${record.title}\n${record.requestExcerpt}`).passes,
         )
-        .slice(0, 2);
+        .slice(0, maxEntries);
+      if (lessons.length === 0) return "";
+      return [
+        "PAST FAILURES (lessons from failed or corrected attempts - not proven approaches):",
+        ...lessons.map(
+          (record) =>
+            `- "${record.title.slice(0, 80)}" ${record.grade}: ${record.approach.slice(0, 160)}`,
+        ),
+      ].join("\n");
+    } catch {
+      return "";
+    }
+  }
 
-      if (matchingEntries.length === 0) return;
+  /**
+   * Link a newly recorded successful execution to earlier independent successes that used
+   * a compatible approach for a relevant request. A similar prompt alone is not enough: the
+   * pattern key must match. Emits "pattern-reinforced" only when links were created.
+   */
+  static reinforceFromEvidence(
+    workspaceId: string,
+    evidenceId: string,
+  ): PlaybookReinforcementResult {
+    const store = this.getEvidenceStore();
+    const current = store?.get(evidenceId);
+    if (
+      !store ||
+      !current ||
+      current.workspaceId !== workspaceId ||
+      current.outcome !== "success" ||
+      current.invalidatedAt ||
+      !current.patternKey
+    ) {
+      return { linkedEvidenceIds: [] };
+    }
+    const query = `${current.title}\n${current.requestExcerpt}`;
+    const candidates = this.eligibleSuccesses(store, workspaceId, current.executionKey)
+      .filter((record) => record.taskId !== current.taskId || record.turnId !== current.turnId)
+      .filter((record) => record.patternKey === current.patternKey)
+      .map((record) => ({
+        record,
+        relevance: scorePlaybookRelevance(query, `${record.title}\n${record.requestExcerpt}`),
+      }))
+      .filter((entry) => entry.relevance.passes)
+      .sort((a, b) => b.relevance.weightedOverlap - a.relevance.weightedOverlap)
+      .slice(0, MAX_REINFORCEMENT_LINKS);
 
-      const toolsList = toolsUsed.slice(0, 5).join(", ");
-      for (const entry of matchingEntries) {
-        const cleaned = entry.snippet
-          .replace(/^\[PLAYBOOK\]\s*/m, "")
-          .trim()
-          .slice(0, 150);
-        const reinforcement = [
-          `[PLAYBOOK] Reinforced pattern: "${cleaned}"`,
-          `This approach was confirmed successful again.`,
-          `Tools: ${toolsList}`,
-          destinationHints.length > 0
-            ? `Preferred destinations: ${destinationHints.slice(0, 4).join(", ")}`
-            : null,
-          `Original request: ${taskPrompt.slice(0, 150)}`,
-        ]
-          .filter((line): line is string => Boolean(line))
-          .join("\n");
-        await MemoryService.capture(workspaceId, undefined, "insight", reinforcement, false, {
-          origin: "playbook",
-          batchable: false,
-          allowExternalMirror: options.allowExternalMirror,
-        });
-      }
-      // Emit event for PlaybookSkillPromoter to pick up
+    const linkedEvidenceIds = candidates
+      .filter(({ record }) => store.link(current.id, record.id))
+      .map(({ record }) => record.id);
+    if (linkedEvidenceIds.length > 0) {
       this.events.emit("pattern-reinforced", {
         workspaceId,
-        taskPrompt,
-        toolsUsed,
-        matchCount: matchingEntries.length,
+        evidenceId: current.id,
+        linkedEvidenceIds,
       });
-    } catch {
-      // best-effort
     }
+    return { linkedEvidenceIds };
   }
 
   /**

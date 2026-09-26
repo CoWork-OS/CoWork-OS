@@ -172,7 +172,7 @@ import { getCustomSkillLoader } from "./custom-skill-loader";
 import { MemoryService } from "../memory/MemoryService";
 import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
 import { DurableContextService } from "../memory/DurableContextService";
-import { PlaybookService } from "../memory/PlaybookService";
+import { PlaybookService, type PlaybookCaptureResult } from "../memory/PlaybookService";
 import { SessionRecallService } from "../memory/SessionRecallService";
 import { RuntimeVisibilityService } from "./RuntimeVisibilityService";
 import { ExternalMemoryProviderRegistry } from "../memory/ExternalMemoryProvider";
@@ -14950,6 +14950,10 @@ ${transcript}
 
   /**
    * Capture a playbook entry recording what approach worked or didn't.
+   *
+   * Success is only captured from terminal-ok finalization (never from best-effort,
+   * companion or ACP completion). Nothing is reported as learned unless the memory and
+   * its evidence row were durably recorded.
    */
   private async capturePlaybookOutcome(
     outcome: "success" | "failure",
@@ -14961,7 +14965,10 @@ ${transcript}
       const planSummary = this.plan?.steps?.map((s) => s.description).join("; ") || "";
       const toolsUsed = [...new Set(this.toolResultMemory.map((t) => t.tool))].slice(0, 10);
       const destinationHints = this.deriveWorkflowDestinationHints(toolsUsed);
-      const captureResult = await PlaybookService.captureOutcome(
+      // Only an explicit verifier pass strengthens the grade; terminal ok alone is
+      // observed runtime success, not user-confirmed value.
+      const verifiedByContract = outcome === "success" && this.task.verificationVerdict === "PASS";
+      const capture = await PlaybookService.captureOutcome(
         this.workspace.id,
         this.task.id,
         this.task.title,
@@ -14971,13 +14978,22 @@ ${transcript}
         toolsUsed,
         errorMessage,
         destinationHints,
-        { allowExternalMirror: this.isExternalMemoryAccessAllowed() },
-      ).then(
-        () => true,
-        () => false,
-      );
+        {
+          allowExternalMirror: this.isExternalMemoryAccessAllowed(),
+          grade: verifiedByContract ? "contract_verified" : "observed_runtime_success",
+        },
+      ).catch((error): PlaybookCaptureResult => ({
+        status: "error",
+        error: String((error as Any)?.message || error),
+      }));
+      if (capture.status !== "recorded") {
+        this.emitEvent("log", {
+          message: `Playbook outcome not recorded (${capture.status === "skipped" ? capture.reason : capture.error}).`,
+        });
+        return;
+      }
 
-      // Reinforce matching playbook entries on success so proven patterns rank higher.
+      // Durable links to earlier independent successes with a compatible approach.
       let playbookReinforced = false;
       let skillProposal:
         | {
@@ -14988,26 +15004,20 @@ ${transcript}
           }
         | undefined;
       if (outcome === "success") {
-        await PlaybookService.reinforceEntry(
+        const reinforcement = PlaybookService.reinforceFromEvidence(
           this.workspace.id,
-          this.getExecutionTaskPrompt(),
-          toolsUsed,
-          destinationHints,
-          { allowExternalMirror: this.isExternalMemoryAccessAllowed() },
-        )
-          .then(() => {
-            playbookReinforced = true;
-          })
-          .catch(() => {
-            playbookReinforced = false;
-          });
+          capture.evidenceId,
+        );
+        playbookReinforced = reinforcement.linkedEvidenceIds.length > 0;
 
-        // Auto-propose skills from repeatedly reinforced playbook patterns.
-        skillProposal = await import("../memory/PlaybookSkillPromoter")
-          .then(({ PlaybookSkillPromoter }) =>
-            PlaybookSkillPromoter.maybePropose(this.workspace.id, this.workspace.path),
-          )
-          .catch(() => ({ proposed: false, reason: "error" }));
+        // Auto-propose skills only from durable evidence of repeated successes.
+        if (playbookReinforced) {
+          skillProposal = await import("../memory/PlaybookSkillPromoter")
+            .then(({ PlaybookSkillPromoter }) =>
+              PlaybookSkillPromoter.maybePropose(this.workspace.id, this.workspace.path),
+            )
+            .catch(() => ({ proposed: false, reason: "error" }));
+        }
 
         // Extract entities/relationships from task results into the knowledge graph.
         try {
@@ -15050,13 +15060,15 @@ ${transcript}
           outcome === "success"
             ? skillProposal?.proposed
               ? "pending_review"
-              : "reinforced"
+              : playbookReinforced
+                ? "reinforced"
+                : "success"
             : "failure",
         summary:
           outcome === "success"
             ? this.task.resultSummary || this.buildResultSummary() || "Task completed successfully."
             : errorMessage || this.task.error || this.buildResultSummary() || "Task failed.",
-        memoryCaptured: captureResult,
+        memoryCaptured: true,
         playbookReinforced,
         skillProposal: skillProposal?.proposed
           ? {
@@ -26719,10 +26731,8 @@ You are continuing a previous conversation. The context from the previous conver
       // minimal token budget, so strict guard checks designed for full
       // task execution (verification evidence, artifact evidence, etc.)
       // are impossible to satisfy. Use best-effort finalization.
+      // Companion best-effort completion is not evidence of a successful execution.
       this.finalizeTaskBestEffort(resultSummary);
-      if (this.getEffectiveExecutionMode() !== "chat") {
-        this.capturePlaybookOutcome("success");
-      }
     } catch (error: Any) {
       const assistantText = isThinkMode
         ? "I wasn't able to process that right now. Could you try rephrasing, or let me know what specific aspect you'd like to think through?"

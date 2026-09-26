@@ -15,6 +15,24 @@ export interface SkillProposalDraftSkill {
   enabled?: boolean;
 }
 
+/**
+ * Where an automatically generated proposal's evidence comes from. Proposals created from
+ * the Playbook evidence ledger carry the evidence IDs they cite.
+ */
+export interface SkillProposalProvenance {
+  source: "playbook_evidence";
+  evidenceIds: string[];
+  executionCount: number;
+}
+
+/**
+ * - evidence_backed: cites durable Playbook evidence.
+ * - unverified: auto-promoted from legacy reinforcement text without durable evidence;
+ *   pending ones must be revalidated before approval, approved ones are flagged for review.
+ * - not_applicable: authored proposals that make no automatic evidence claim.
+ */
+export type SkillProposalEvidenceStatus = "evidence_backed" | "unverified" | "not_applicable";
+
 export interface SkillProposalRecord {
   id: string;
   version: 1;
@@ -31,6 +49,8 @@ export interface SkillProposalRecord {
   rejectedAt?: number;
   rejectionReason?: string;
   approvedSkillId?: string;
+  provenance?: SkillProposalProvenance;
+  evidenceStatus: SkillProposalEvidenceStatus;
 }
 
 export interface SkillProposalCreateInput {
@@ -39,6 +59,7 @@ export interface SkillProposalCreateInput {
   requiredTools?: string[];
   riskNote?: string;
   draftSkill: SkillProposalDraftSkill;
+  provenance?: SkillProposalProvenance;
 }
 
 const PROPOSALS_ROOT = path.join(".cowork", "skills", "proposals");
@@ -70,6 +91,33 @@ function normalizeDraftSkill(input: SkillProposalDraftSkill): SkillProposalDraft
     parameters: Array.isArray(input.parameters) ? input.parameters : undefined,
     enabled: input.enabled !== false,
   };
+}
+
+function normalizeProvenance(value: unknown): SkillProposalProvenance | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.source !== "playbook_evidence") return undefined;
+  const evidenceIds = normalizeStringArray(record.evidenceIds);
+  if (evidenceIds.length === 0) return undefined;
+  return {
+    source: "playbook_evidence",
+    evidenceIds,
+    executionCount: Math.max(0, Math.trunc(Number(record.executionCount) || 0)),
+  };
+}
+
+/** Auto-promoted proposals written before the evidence ledger existed. */
+function isLegacyAutoPromoted(draftSkill: SkillProposalDraftSkill, riskNote: string): boolean {
+  return draftSkill.category === "auto-promoted" || /PlaybookSkillPromoter/.test(riskNote);
+}
+
+function resolveEvidenceStatus(
+  provenance: SkillProposalProvenance | undefined,
+  draftSkill: SkillProposalDraftSkill,
+  riskNote: string,
+): SkillProposalEvidenceStatus {
+  if (provenance) return "evidence_backed";
+  return isLegacyAutoPromoted(draftSkill, riskNote) ? "unverified" : "not_applicable";
 }
 
 function proposalSignature(input: {
@@ -127,6 +175,9 @@ export class SkillProposalService {
       }
       if (!parsed.draftSkill || typeof parsed.draftSkill !== "object") return null;
 
+      const draftSkill = normalizeDraftSkill(parsed.draftSkill as SkillProposalDraftSkill);
+      const riskNote = toNonEmptyString(parsed.riskNote);
+      const provenance = normalizeProvenance(parsed.provenance);
       return {
         id: parsed.id,
         version: PROPOSAL_VERSION,
@@ -134,8 +185,10 @@ export class SkillProposalService {
         problemStatement: toNonEmptyString(parsed.problemStatement),
         evidence: normalizeStringArray(parsed.evidence),
         requiredTools: normalizeStringArray(parsed.requiredTools),
-        riskNote: toNonEmptyString(parsed.riskNote),
-        draftSkill: normalizeDraftSkill(parsed.draftSkill as SkillProposalDraftSkill),
+        riskNote,
+        draftSkill,
+        ...(provenance ? { provenance } : {}),
+        evidenceStatus: resolveEvidenceStatus(provenance, draftSkill, riskNote),
         signature: toNonEmptyString(parsed.signature),
         createdAt: Number(parsed.createdAt || 0),
         updatedAt: Number(parsed.updatedAt || 0),
@@ -188,6 +241,7 @@ export class SkillProposalService {
     const evidence = normalizeStringArray(input.evidence);
     const requiredTools = normalizeStringArray(input.requiredTools);
     const draftSkill = normalizeDraftSkill(input.draftSkill);
+    const provenance = normalizeProvenance(input.provenance);
 
     if (!problemStatement) {
       return { blocked: "problem_statement is required" };
@@ -231,6 +285,8 @@ export class SkillProposalService {
       requiredTools,
       riskNote,
       draftSkill,
+      ...(provenance ? { provenance } : {}),
+      evidenceStatus: resolveEvidenceStatus(provenance, draftSkill, riskNote),
       signature,
       createdAt: now,
       updatedAt: now,
@@ -244,6 +300,8 @@ export class SkillProposalService {
   async approve(id: string, approvedSkillId: string): Promise<SkillProposalRecord | null> {
     const proposal = await this.get(id);
     if (!proposal || proposal.status !== "pending") return null;
+    // Legacy auto-proposals claim repeated success without durable evidence.
+    if (proposal.evidenceStatus === "unverified") return null;
 
     const now = nowMs();
     const updated: SkillProposalRecord = {

@@ -6,6 +6,7 @@
  */
 
 import { EventEmitter } from "events";
+import { isGeneratedPlaybookContent } from "./playbook-markers";
 import type { DatabaseManager } from "../database/schema";
 import {
   MemoryRepository,
@@ -228,6 +229,11 @@ export class MemoryService {
     this.cleanupIntervalHandle = setInterval(() => this.runCleanup(), CLEANUP_INTERVAL_MS);
 
     logger.info("[MemoryService] Initialized");
+  }
+
+  /** The profile database, for narrow indexes kept beside memories (Playbook evidence). */
+  static getDatabase(): import("better-sqlite3").Database | undefined {
+    return this.initialized ? this.db : undefined;
   }
 
   static initFtsWorker(worker: import("../database/FtsWorkerClient").FtsWorkerClient): void {
@@ -908,6 +914,7 @@ export class MemoryService {
       .filter(
         (memory) =>
           !this.isPromptRecallIgnoredContent(memory.content) &&
+          !isGeneratedPlaybookContent(memory.content) &&
           !MemoryObservationService.isPromptSuppressed(memory.id),
       );
   }
@@ -927,6 +934,7 @@ export class MemoryService {
         .filter(
           (memory) =>
             this.isPromptRecallIgnoredContent(memory.content) ||
+            isGeneratedPlaybookContent(memory.content) ||
             MemoryObservationService.isPromptSuppressed(memory.id),
         )
         .map((memory) => memory.id),
@@ -1029,6 +1037,7 @@ export class MemoryService {
       .filter(
         (r) =>
           !this.isPromptRecallIgnoredContent(r.content || r.snippet || "") &&
+          !isGeneratedPlaybookContent(r.content || r.snippet || "") &&
           !MemoryObservationService.isPromptSuppressed(r.id),
       )
       .slice(0, limit)

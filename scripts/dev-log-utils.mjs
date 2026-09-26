@@ -9,6 +9,8 @@ const KNOWN_PROCESS_LABELS = new Set(["react", "electron"]);
 const SECRET_VALUE = "[REDACTED]";
 const IGNORABLE_DEV_LOG_PATTERNS = [
   /\brepresentedObject is not a WeakPtrToElectronMenuModelAsNSObject\b/,
+  // Chromium logs these when macOS rejects a process QoS policy change; harmless in dev.
+  /ERROR:base\/process\/process_mac\.cc:\d+\] task_policy_set TASK_(?:CATEGORY|SUPPRESSION)_POLICY: \(os\/kern\) invalid argument/,
 ];
 
 function pad(value) {

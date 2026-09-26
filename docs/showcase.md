@@ -839,7 +839,7 @@ Turn this meeting transcript into action items. For each item:
 
 ### Web Scraping & Monitoring
 
-Scrape websites, monitor prices, map site structures, and extract structured data with anti-bot bypass.
+Scrape websites, monitor prices, map site structures, and extract structured data from pages that allow automated access.
 
 For normal-user website testing, JavaScript-heavy app checks, forms, screenshots, responsive breakpoints, or visual QA, CoWork opens the [Browser Workbench](browser-workbench.md): a visible right-sidebar/fullscreen Browser V2 surface where the agent and user share the same page, with cursor movement, desktop/tablet/mobile viewport control, snapshot refs, diagnostics, screenshot capture, downloads/uploads, and annotation.
 

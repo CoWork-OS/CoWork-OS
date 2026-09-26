@@ -7,13 +7,13 @@
 </p>
 
 <p align="center">
-  <strong>CoWork OS is the free, open-source AI super app and everything app for getting real work done.</strong><br>
-  Code, email, research, browser work, documents, spreadsheets, decks, agents, channels, and automations stay in one GUI-first, CLI-capable workspace. Its open multi-provider harness lets you bring supported provider accounts, API keys, compatible gateways, cloud credentials, or local models while keeping the same tools, memory, approvals, artifacts, and workflows.
+  <strong>An open desktop for getting work done with the AI you choose.</strong><br>
+  Code, browser work, documents, and automations in one workspace—with visible actions and approvals. Supported provider accounts, API keys, gateways, cloud credentials, and local models can power the same desktop tools.
 </p>
 
 <p align="center">
   <strong>One app for the work. Your choice of AI.</strong><br>
-  CoWork OS is MIT-licensed and does not require a CoWork subscription. Model eligibility, limits, and usage charges remain with each provider.
+  CoWork OS is free and open source. Model providers may charge for usage. Your workspace stays local; cloud models and connected services receive the data needed for tasks you run.
 </p>
 
 <p align="center">
@@ -43,21 +43,7 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-<!-- COWORK_PUBLIC_ADOPTION_STATS_START -->
-### Public Adoption Signals
 
-| Signal | Current | All time |
-|---|---:|---:|
-| GitHub stars | 457 | n/a |
-| GitHub forks | 80 | n/a |
-| Installer/server downloads | 1,406 | 1,406 |
-| Download delta | +16 | n/a |
-| npm downloads | 758 (last week) | 8,953 |
-| GitHub views, last 14-ish days | 1,496 total / 584 unique | n/a |
-| GitHub clones, last 14-ish days | 8,614 total / 571 unique | n/a |
-
-Generated 2026-09-26T08:33:35.242Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
-<!-- COWORK_PUBLIC_ADOPTION_STATS_END -->
 
 <p align="center">
   <img src="resources/branding/images/cowork-os-1.webp" alt="CoWork OS home interface" width="700">
@@ -190,6 +176,22 @@ npm run build && npm run package
 > `npm run setup` also installs local git hooks (`.githooks/`) including a pre-commit secret scan. If needed, reinstall hooks with `npm run hooks:install`.
 
 See the [Development Guide](docs/development.md) for prerequisites and details.
+
+<!-- COWORK_PUBLIC_ADOPTION_STATS_START -->
+### Public Adoption Signals
+
+| Signal | Current | All time |
+|---|---:|---:|
+| GitHub stars | 457 | n/a |
+| GitHub forks | 80 | n/a |
+| Installer/server downloads | 1,406 | 1,406 |
+| Download delta | +16 | n/a |
+| npm downloads | 758 (last week) | 8,953 |
+| GitHub views, last 14-ish days | 1,496 total / 584 unique | n/a |
+| GitHub clones, last 14-ish days | 8,614 total / 571 unique | n/a |
+
+Generated 2026-09-26T08:33:35.242Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
+<!-- COWORK_PUBLIC_ADOPTION_STATS_END -->
 
 ## How It Works
 
@@ -379,7 +381,7 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 ### Integrations
 
 - **Cloud Storage/Productivity**: 6 integrations, including Notion, Box, OneDrive, Google Workspace, Dropbox, and SharePoint
-- **47 MCP Connectors**: pre-built enterprise integrations for CRM, support, productivity, analytics, payments, and local creative tools (Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, Rhino, Blender, ComfyUI, and more), with connector notifications available as trigger inputs for automations
+- **MCP Connectors**: pre-built enterprise integrations for CRM, support, productivity, analytics, payments, and local creative tools (Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, Rhino, Blender, ComfyUI, and more), with connector notifications available as trigger inputs for automations
 - **Composer mentions**: type `@` in the message box to choose configured integrations. Google Workspace appears as service-specific options: Gmail, Google Drive, Google Calendar, Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat when native or MCP-backed tools are available. The Google Calendar chip can include both `calendar_action` and `google-workspace.calendar_*` tools for scheduling, availability, and event CRUD. Mentions render as icon+name chips and are passed as soft routing hints, not permission grants. [Learn more](docs/composer-mentions.md)
 - **Google Workspace**: one OAuth connection covers Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, and Chat. Existing users may need to reconnect when a release adds new required scopes.
 - **Developer Tools**: `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry

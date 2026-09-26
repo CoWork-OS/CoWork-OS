@@ -2,12 +2,10 @@ import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   AlignLeft,
-  BarChart2,
   BookOpen,
   Bug,
   Building2,
   Calculator,
-  Calendar,
   CheckSquare,
   Clipboard,
   ClipboardList,
@@ -18,7 +16,6 @@ import {
   FileSearch,
   FileText,
   Filter,
-  GitPullRequest,
   Globe,
   Home,
   Image,
@@ -38,7 +35,6 @@ import {
   RefreshCw,
   Replace,
   Rss,
-  Scale,
   Scroll,
   Search,
   Send,

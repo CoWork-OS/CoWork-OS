@@ -464,7 +464,7 @@ Role-specific and workflow bundles that group skills, agent roles, connectors, a
 - **Warning-only local detection**: unmanaged local pack folders remain discoverable in v1, but security findings can surface as warning badges and report details
 - **Remote Pack Registry**: Community-contributed packs catalog with search and category filtering
 - **Extensible**: Create custom packs with JSON manifests in `~/.cowork/extensions/`
-- **Active Context sidebar**: Always-visible right-panel section showing connected MCP connectors with branded Lucide icons (47 connectors supported) and enabled skills, with scrollable sub-sections and 30-second auto-refresh
+- **Active Context sidebar**: Always-visible right-panel section showing connected MCP connectors with branded Lucide icons for every shipped connector and enabled skills, with scrollable sub-sections and 30-second auto-refresh
 - **Skill conflict detection**: Warns when multiple packs register the same skill ID, preventing silent overwrites
 - **Admin Policies**: Organization-level controls for allowed/blocked/required packs, installation permissions, and agent limits
 
@@ -1161,7 +1161,7 @@ See [Live Canvas](live-canvas.md) for the full guide.
 
 ## Browser Automation
 
-Three-tier web interaction stack — from lightweight HTTP fetching to visible in-app Browser V2 automation to anti-bot scraping — all as native agent tools with no external CLI dependencies.
+Three-tier web interaction stack — from lightweight HTTP fetching to visible in-app Browser V2 automation to structured scraping — all as native agent tools with no external CLI dependencies.
 
 ### In-App Browser Workbench
 
@@ -1202,10 +1202,10 @@ Paid providers are tried first in configured order. DuckDuckGo is automatically 
 Tier 0: web_search                   (multi-provider search — always available)
 Tier 1: web_fetch / http_request     (no browser — fastest)
 Tier 2: browser_* tools              (visible in-app Browser V2 workbench by default, Playwright/external-CDP fallback)
-Tier 3: scrape_* tools               (Scrapling — anti-bot bypass)
+Tier 3: scrape_* tools               (Scrapling — structured extraction)
 ```
 
-The agent auto-selects the appropriate tier: `web_search` for discovering information, `web_fetch` for reading known URLs, `browser_*` when interaction, JS rendering, or visible app testing is needed, and `scrape_*` for anti-bot-protected sites.
+The agent auto-selects the appropriate tier: `web_search` for discovering information, `web_fetch` for reading known URLs, `browser_*` when interaction, JS rendering, or visible app testing is needed, and `scrape_*` for batch or selector-based structured extraction. None of the tiers bypass bot protection or CAPTCHAs.
 
 ### Browser Tools (34 tools — visible Browser V2 workbench + native Playwright/external-CDP fallback)
 
@@ -1315,7 +1315,6 @@ See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-
 | **Video recording**      | `record start/stop` to WebM                                       | Lightweight trace tooling; video capture is not a core Browser V2 tool                                   |
 | **Device emulation**     | Presets ("iPhone 14"), geolocation, viewport                      | Visible desktop/tablet/mobile viewport checks through `browser_emulate`                                  |
 | **Cookies/storage**      | Manual cookie and localStorage management                         | Workspace profile persistence plus redacted storage diagnostics                                          |
-| **Anti-bot bypass**      | None                                                              | Scrapling integration (TLS fingerprinting, Cloudflare bypass)                                            |
 | **Consent popups**       | None                                                              | Auto-dismissal with 40+ pattern detectors                                                                |
 | **Retry on failure**     | None (single attempt)                                             | 2-attempt retry with diagnostics                                                                         |
 | **Domain guardrails**    | None                                                              | Whitelist enforcement                                                                                    |

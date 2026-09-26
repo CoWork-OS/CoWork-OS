@@ -3,7 +3,6 @@
  * Provides type-safe validation to prevent malformed input attacks
  */
 
-import * as os from "os";
 import * as path from "path";
 import { z } from "zod";
 import {
@@ -23,7 +22,6 @@ import {
   TaskStatus,
 } from "../../shared/types";
 import { SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
-import { getUserDataDir } from "./user-data-dir";
 import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl } from "./loom";
 
 // Common validation patterns

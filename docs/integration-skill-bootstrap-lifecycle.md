@@ -403,21 +403,7 @@ Primary implementation now lives in:
 
 ---
 
-## 4) Legacy Twin Routine Cadence
-
-Older twin integrations used role-local proactive-task cadence metadata such as `frequencyMinutes`.
-
-Current architecture note:
-
-- Digital Twin templates are persona presets, not core automation owners
-- Always-on cadence now belongs to attached automation profiles
-- Heartbeat and Workflow Intelligence scheduling should be reasoned about through the core automation docs, not through twin-local routine metadata
-
-This section remains only as migration context for older integrations that still read legacy role-local routine hints.
-
----
-
-## 5) Manual Validation Matrix
+## 4) Manual Validation Matrix
 
 Use this matrix for release and support verification.
 
@@ -449,7 +435,7 @@ Use this matrix for release and support verification.
 
 ---
 
-## 6) Compatibility Notes
+## 5) Compatibility Notes
 
 - Existing Resend setup payloads remain supported.
 - Existing Settings/UI OAuth flows are unchanged and remain available.

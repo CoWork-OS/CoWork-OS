@@ -423,6 +423,17 @@ plaintext, into the `secure_settings_unreadable_backup` table and then writes th
 settings, so the original data stays recoverable if the old keychain identity returns.
 The MCP server list stays read-only while its saved settings are unreadable.
 
+**Keychain identity check**
+
+CoWork stores a small known value encrypted with the OS keychain key. If a later launch
+cannot decrypt it (the app is using a different keychain identity), secure settings are
+not saved and an in-app notification explains why, so new data is never encrypted under
+a key the original identity cannot read. Restore Keychain access to `CoWork OS Safe
+Storage` and relaunch, or relaunch with `COWORK_ACCEPT_NEW_KEYCHAIN_KEY=1` to move
+unreadable settings (ciphertext only) into `secure_settings_unreadable_backup` and continue
+with the current key. On macOS, settings still readable under a former CoWork identity are
+migrated automatically at startup.
+
 See the [Security Hardening Record](security-hardening.md#app-level-settings-encryption)
 for what changed and why.
 

@@ -1010,6 +1010,42 @@ const RESETTABLE_SECURE_SETTINGS_CATEGORIES: SettingsCategory[] = [
   "webaccess",
 ];
 
+const ACCEPT_NEW_KEYCHAIN_KEY_ENV = "COWORK_ACCEPT_NEW_KEYCHAIN_KEY";
+let keychainIdentityMismatch = false;
+
+/** Returns true when secure-settings writes are refused because the keychain key changed. */
+function verifySecureSettingsKeychainIdentity(): boolean {
+  const repository = SecureSettingsRepository.getInstance();
+  const status = repository.verifyKeychainIdentity();
+  if (status !== "mismatch") return false;
+
+  if (process.env[ACCEPT_NEW_KEYCHAIN_KEY_ENV] === "1") {
+    const archived = repository.adoptCurrentKeychainIdentity();
+    logger.warn("Adopted the current OS keychain key; unreadable settings were archived.", {
+      archived,
+    });
+    return false;
+  }
+  logger.error(
+    `The OS keychain key differs from the one that encrypted existing settings. Settings changes will not be saved until the original keychain access is restored, or relaunch with ${ACCEPT_NEW_KEYCHAIN_KEY_ENV}=1 to archive unreadable settings and continue with the current key.`,
+  );
+  return true;
+}
+
+async function notifyKeychainIdentityMismatch(): Promise<void> {
+  if (!keychainIdentityMismatch) return;
+  try {
+    await getNotificationService()?.add({
+      type: "error",
+      title: "Settings can't be saved",
+      message:
+        "CoWork OS can't use the Keychain key that encrypted your settings, so changes won't be saved to avoid losing them. Allow CoWork OS access to \"CoWork OS Safe Storage\" in Keychain Access and relaunch. To start over with the current key, relaunch with COWORK_ACCEPT_NEW_KEYCHAIN_KEY=1; unreadable settings are archived, not deleted.",
+    });
+  } catch (error) {
+    logger.warn("Could not show the keychain mismatch notification:", error);
+  }
+}
+
 function healResettableSecureSettings(): void {
   if (!SecureSettingsRepository.isInitialized()) {
     return;
@@ -1786,6 +1822,7 @@ if (isMacSafeStorageMigrationWorker) {
           logger,
         });
       }
+      keychainIdentityMismatch = verifySecureSettingsKeychainIdentity();
       new PulseService(dbManager.getDatabase(), {
         version: app.getVersion(),
         runtime: "desktop",
@@ -2802,6 +2839,7 @@ if (isMacSafeStorageMigrationWorker) {
         setupSubconsciousHandlers(subconsciousLoopService);
         setupImprovementHandlers(subconsciousLoopService);
       }
+      void notifyKeychainIdentityMismatch();
       const startXMentionBridge = () => {
         if (!xMentionBridgeService) {
           xMentionBridgeService = initializeXMentionBridgeService(agentDaemon, {

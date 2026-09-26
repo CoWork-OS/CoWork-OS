@@ -384,7 +384,8 @@ Settings stored through `SecureSettingsRepository` are encrypted inside the loca
 | Machine ID                        | `app.getPath('userData')/.cowork-machine-id`            | Stable identifier for encryption                                                             |
 | Pulse identity/token and settings | Secure settings category `pulse`                        | Encrypted settings; UUID is not derived from machine ID                                      |
 | Pulse consent windows/outbox      | Profile SQLite `pulse_consent_windows` / `pulse_outbox` | Ordinary SQLite rows; outbox contains aggregate payload and UUID, not deletion token         |
-| Update release cache              | Profile `pulse-update-check.json`                       | Plain release metadata and cache timestamp                                                   |
+| Pulse receipts and delivery lease | Profile SQLite `pulse_sent_days` / `pulse_delivery_lease` | Ordinary SQLite rows: acknowledged package IDs/days and the current delivering process     |
+| Update release cache              | Profile `update-check-cache.json`                       | Plain release metadata, retrieval time and source; offline fallback only, never "fresh"      |
 
 Typical `userData` locations:
 

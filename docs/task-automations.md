@@ -162,7 +162,11 @@ Automation-specific agent settings are applied as transient run overrides. They 
 When a task automation compiles to a scheduled task, `Settings > Automations > Scheduled Tasks` also shows the lower-level cron job. The panel summarizes:
 
 - total scheduled tasks and active tasks
-- aggregate run success rate
+- aggregate **run success**: fully successful (`ok`) runs among classified attempts. Partial,
+  needs-attention, failed, timed-out and cancelled runs are attempts that did not fully succeed;
+  skipped runs and older runs recorded before outcome classification are excluded and listed
+  separately, so the rate is shown as `-` when no classified attempt exists. It is a measure of
+  run completion, not of whether the result was accepted or used
 - the next scheduler wake-up and any currently running job
 - jobs needing attention because their latest run failed, timed out, or needs user action
 - whether a job creates a new task or continues an existing thread
@@ -170,13 +174,23 @@ When a task automation compiles to a scheduled task, `Settings > Automations > S
 Expanding a scheduled task shows:
 
 - the latest run status in plain language
-- total run count, success rate, and latest duration
+- total run count, run success among classified attempts (with partial, needs-attention,
+  failed, cancelled and unclassified counts beside it), and latest duration
 - delivery state for channel-backed scheduled outputs
 - latest error text when a run or delivery failed
 - a run-folder indicator when the scheduler created a dedicated run workspace
 - a direct `Open generated task` or thread link when available
 
 The run-history ledger keeps recent runs together with status, duration, delivery outcome, and an `Open` action for each generated task or target thread. `Refresh` reloads scheduler history from the cron service, while `Clear` removes the scheduler history counters for that job without deleting task sessions.
+
+Each run is recorded exactly once, keyed by a run key stored with the run lease, so a restart that
+reconciles an interrupted run or a repeated completion notification cannot count it twice. The
+counts are classified from the task's durable result (a completed task whose terminal status is
+`failed` is an error; a cancelled task is `cancelled`, not a failure). Delivery state is kept
+beside the execution outcome: a successful run whose channel delivery failed stays successful and
+shows the delivery failure separately. When upgrading, runs still in retained history are
+classified once; earlier runs whose outcome is no longer known are shown as unclassified rather
+than guessed from the old combined success counter.
 
 ## Current Limitations
 

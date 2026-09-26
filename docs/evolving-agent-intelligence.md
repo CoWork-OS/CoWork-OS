@@ -186,26 +186,45 @@ The **Behavior Adaptation** section in Guardrail Settings exposes these toggles 
 
 ### Solution
 
-When a playbook pattern is reinforced **3+ times** (configurable `threshold`), `PlaybookSkillPromoter.maybePropose()` auto-generates a skill proposal with:
+Promotion reads the **Playbook evidence ledger** (`PlaybookEvidenceStore`), not memory text:
 
-- **Problem statement** — "Recurring task pattern detected (reinforced N times): …"
-- **Evidence** — reinforcement count, common tools, example requests
-- **Draft skill** — ID, name, description, prompt template (generated from evidence), icon, category
-- **Required tools** list
+- Only terminal-ok executions record success evidence (graded `observed runtime success`, or
+  `contract verified` when the completion verifier passed). Best-effort, companion and ACP
+  completions never do, and nothing is recorded when memory capture is disabled or skipped.
+- One execution is one row: the task, unless a reliable persisted turn ID distinguishes turns.
+  Repeated callbacks and retries count once.
+- A new success is linked to earlier independent successes only when the requests pass a
+  deterministic relevance gate (at least two distinctive shared terms and 0.35 weighted overlap)
+  **and** the approach key (normalized tools and destinations) matches. A similar prompt alone
+  is not proof that the same approach was used.
+- When linked executions reach **3+ distinct executions** (configurable `threshold`),
+  `PlaybookSkillPromoter.maybePropose()` generates a proposal whose problem statement and evidence
+  describe "observed successful executions", each with its source references and outcome grade,
+  plus the provenance evidence IDs.
+- Corrections invalidate the corrected task's success evidence; deleting or editing a source
+  memory invalidates evidence that depends on it.
 
-The proposal enters the existing `SkillProposalService` governance workflow — an admin sees the evidence and approves or rejects with one click. No skill is created automatically.
+The proposal enters the existing `SkillProposalService` governance workflow — an admin reviews
+the evidence and approves or rejects it. No skill is created automatically.
 
 **Flow:**
 
 ```
-Task completes successfully
-  → PlaybookService.reinforceEntry() writes reinforcement memory
-  → PlaybookService.events.emit("pattern-reinforced")
-  → executor.ts calls PlaybookSkillPromoter.maybePropose() (async, fire-and-forget)
-    → findCandidates() groups reinforcement memories by normalized task description
+Task finalizes with terminal ok
+  → PlaybookService.captureOutcome() → recorded | skipped | error
+  → PlaybookService.reinforceFromEvidence() creates durable links (or none)
+  → "pattern-reinforced" is emitted only when links were created
+  → PlaybookSkillPromoter.maybePropose()
+    → findCandidates() counts distinct linked executions per approach
     → if count ≥ threshold: proposeSkill() via SkillProposalService.create()
-    → proposal enters admin review queue
 ```
+
+**Legacy data.** Older `[PLAYBOOK] Reinforced pattern` memories are kept for history but are
+never treated as proof, and generated Playbook rows are excluded from generic prompt recall and
+archive synthesis. Pending auto-proposals created from that text are marked `unverified` and
+cannot be approved until revalidated; already-approved skills stay installed and are flagged for
+review. Summaries derived before this change carry no source lineage and cannot be proven clean
+automatically; review them rather than purging.
 
 **Cooldown:** 10 minutes per workspace between promotion checks. Max 1 proposal per check.
 

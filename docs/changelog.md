@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tool list**: rarely used tools are deferred by default and found with `tool_search`.
 - **acpx** npx fallback is pinned to a reviewed version instead of `@latest`.
 
+### Fixed
+
+- **CoWork Pulse opt-out and deletion** can no longer be undone by a late network response. Every decision is saved first and fences in-flight delivery, including across processes sharing a profile. Remote deletion turns reporting off before it starts and keeps a retryable "deletion pending" state until the collector confirms it. Acknowledged days are never resent, and the Settings/CLI preview shows exactly what would be sent next (queued, estimate, not eligible, or already sent). See [CoWork Pulse](cowork-pulse.md).
+- **ACP (acpx) turns** are classified from their stop reason: an empty `end_turn` needs your attention instead of counting as success, token/request limits are partial results, refusals and unknown reasons fail, and an external cancellation is recorded as cancelled. A cancellation you make always wins over a late result.
+- **Scheduled task run success** counts only fully successful runs among classified attempts; partial and needs-attention runs are shown separately, cancelled runs are distinct, and older runs without a known outcome are shown as unclassified. A run is never counted twice. See [Task Automations](task-automations.md).
+- **Playbook learning** only cites independent, successful executions recorded in a durable evidence ledger. Failures are no longer "reinforced", unrelated prompts no longer match, legacy reinforcement text no longer re-enters prompts, and older auto-proposals without evidence must be revalidated before approval.
+- **Update checks** have bounded waits (8 seconds for manual checks; 2 seconds for the optional CoWork endpoint on automatic checks) and say how fresh their answer is. Offline results are labeled as cached with their retrieval time and cannot start an install, and "no published release" is no longer reported as "up to date".
+
 ### Removed
 
 - **Personal Health**: removed the dashboard, Apple Health integration, and the macOS HealthKit bridge. Upgrading deletes the retired Health data in the active CoWork profile; older settings backups cannot restore it. See the [decision record](personal-health-discontinuation.md).

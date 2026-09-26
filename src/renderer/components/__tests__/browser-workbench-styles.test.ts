@@ -13,6 +13,14 @@ describe("Browser workbench styles", () => {
     );
   });
 
+  it("shrinks the browser sidebar before it can crowd out the main column", () => {
+    const source = readFileSync(stylesPath, "utf8");
+
+    expect(source).toMatch(
+      /\.spreadsheet-resizable-sidebar\s*\{[^}]*min-width:\s*min\(420px,\s*max\(0px,\s*calc\(100% - 398px\)\)\);[^}]*max-width:\s*max\(0px,\s*calc\(100% - 398px\)\);/s,
+    );
+  });
+
   it("keeps fullscreen chrome below the app title bar", () => {
     const source = readFileSync(stylesPath, "utf8");
 

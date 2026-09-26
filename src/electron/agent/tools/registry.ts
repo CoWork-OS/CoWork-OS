@@ -6522,6 +6522,15 @@ ${skillDescriptions}`;
           proposal,
         };
       }
+      if (proposal.evidenceStatus === "unverified") {
+        return {
+          success: false,
+          action,
+          message:
+            "This proposal was auto-generated from legacy Playbook reinforcement text and has no durable evidence of repeated successful executions. Revalidate it (or create a new proposal) before approving.",
+          proposal,
+        };
+      }
 
       const availableToolNames = new Set(this.getTools().map((tool) => tool.name));
       const missingRequiredTools = proposal.requiredTools.filter(
@@ -13690,8 +13699,7 @@ ${skillDescriptions}`;
           properties: {
             agent_name: {
               type: "string",
-              description:
-                "The display name of the agent role (e.g. 'Engineering Manager')",
+              description: "The display name of the agent role (e.g. 'Engineering Manager')",
             },
             enabled: {
               type: "boolean",

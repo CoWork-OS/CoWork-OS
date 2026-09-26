@@ -22,6 +22,14 @@ Cowork now supports more than ACP discovery-only plumbing:
   runtime smoke, bounded ACP rejection, cancellation cleanup, and the known platform limits.
 - ACP task and inbox access is scope-aware so non-operator clients are limited to their own work by default
 - remote endpoints are validated and timed out before invocation to reduce bad registrations and unsafe outbound calls
+- acpx prompt results are classified once, for initial prompts and follow-ups alike. A stop
+  reason says why a turn ended, not that the task succeeded: `end_turn` completes only with a
+  final response or a file the agent reported editing that exists in the workspace (otherwise
+  the task needs user action); `max_tokens`/`max_turn_requests` become budget-exhausted partial
+  success, or a continuation decision without usable output; `refusal` and missing or unknown
+  reasons fail with `contract_error`; `cancelled` is persisted as a cancelled task. A local
+  cancellation that races a successful prompt wins. The raw stop reason is kept in the task log.
+  ACP completion keeps verification requirements and never records Playbook success learning.
 
 ## Context
 

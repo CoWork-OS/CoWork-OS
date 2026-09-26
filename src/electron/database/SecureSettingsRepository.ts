@@ -310,6 +310,16 @@ export class SecureSettingsRepository {
     return this.keychainIdentityMismatch;
   }
 
+  /** Whether this repository reads and writes through the given SQLite connection. */
+  usesConnection(db: Database.Database): boolean {
+    return this.db === db;
+  }
+
+  /** Whether save() currently refuses writes (keychain key changed while encryption is on). */
+  refusesWrites(): boolean {
+    return this.keychainIdentityMismatch && this.encryptionAvailable;
+  }
+
   /**
    * Explicitly accept the current OS keychain key after a mismatch. Settings the
    * current key cannot read are moved to the unreadable backup table (ciphertext

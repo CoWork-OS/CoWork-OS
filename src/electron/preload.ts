@@ -851,7 +851,9 @@ type CronJobStatus =
   | "needs_user_action"
   | "error"
   | "skipped"
-  | "timeout";
+  | "timeout"
+  | "cancelled"
+  | "unknown";
 type CronDeliveryMode = "direct" | "outbox";
 type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
 
@@ -878,6 +880,7 @@ interface CronJobState {
   totalRuns?: number;
   successfulRuns?: number;
   failedRuns?: number;
+  outcomeCounts?: import("../shared/cron-outcomes").CronOutcomeCounts;
 }
 
 interface CronDeliveryConfig {
@@ -971,6 +974,8 @@ interface CronRunHistoryResult {
   totalRuns: number;
   successfulRuns: number;
   failedRuns: number;
+  outcomeCounts: import("../shared/cron-outcomes").CronOutcomeCountMap;
+  outcomeCountsLimitation?: string;
 }
 
 interface CronWebhookStatus {
@@ -3580,7 +3585,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // App Update APIs
   getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
-  checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_UPDATES),
+  checkForUpdates: (intent?: "manual" | "background") =>
+    ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_UPDATES, intent),
   downloadUpdate: (updateInfo: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_DOWNLOAD_UPDATE, updateInfo),
   installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_INSTALL_UPDATE),
@@ -6921,21 +6927,9 @@ export interface ElectronAPI {
     gitBranch?: string;
     gitCommit?: string;
   }>;
-  checkForUpdates: () => Promise<{
-    available: boolean;
-    currentVersion: string;
-    latestVersion: string;
-    releaseNotes?: string;
-    releaseUrl?: string;
-    publishedAt?: string;
-    updateMode: "git" | "npm" | "electron-updater";
-    supported: boolean;
-    minimumSystemVersion?: string;
-    minimumSystemLabel?: string;
-    lastCompatibleVersion?: string;
-    unsupportedReason?: string;
-    recoveryCommand?: string;
-  }>;
+  checkForUpdates: (
+    intent?: import("../shared/types").UpdateCheckIntent,
+  ) => Promise<import("../shared/types").UpdateInfo>;
   downloadUpdate: (updateInfo: Any) => Promise<{ success: boolean }>;
   installUpdate: () => Promise<{ success: boolean }>;
   onUpdateProgress: (
@@ -8669,7 +8663,7 @@ export interface ElectronAPI {
   setPulseEnabled: (enabled: boolean) => Promise<import("../shared/pulse").PulseMutationResult>;
   resetPulseIdentity: () => Promise<import("../shared/pulse").PulseMutationResult>;
   deletePulseRemoteData: () => Promise<import("../shared/pulse").PulseMutationResult>;
-  flushPulse: () => Promise<import("../shared/pulse").PulsePublicSettings>;
+  flushPulse: () => Promise<import("../shared/pulse").PulseSendResult>;
 
   // Daily Briefing
   generateDailyBriefing: (workspaceId: string) => Promise<Any>;

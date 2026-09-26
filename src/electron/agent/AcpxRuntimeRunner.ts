@@ -42,8 +42,54 @@ export interface AcpxRuntimeEvent {
 
 export interface AcpxPromptResult {
   assistantText: string;
+  /** Raw stop reason. Only prompt results are expected to carry one. */
   stopReason?: string;
   sessionId?: string;
+  /**
+   * Paths the agent reported changing through completed `edit`-kind tool calls in this
+   * command. These are claims; callers must confirm the files exist before relying on them.
+   */
+  changedPaths?: string[];
+}
+
+/**
+ * Collect paths from ACP tool calls of kind `edit` that reached `completed`. Kind and
+ * locations may arrive on the initial `tool_call` or on later `tool_call_update`s.
+ */
+export class AcpxChangedPathTracker {
+  private readonly calls = new Map<
+    string,
+    { kind?: string; status?: string; paths: Set<string> }
+  >();
+
+  observe(update: Record<string, unknown>): void {
+    const sessionUpdate = String(update.sessionUpdate || "");
+    if (sessionUpdate !== "tool_call" && sessionUpdate !== "tool_call_update") return;
+    const id = String(update.toolCallId || "");
+    if (!id) return;
+    const entry = this.calls.get(id) || { paths: new Set<string>() };
+    if (typeof update.kind === "string" && update.kind) entry.kind = update.kind;
+    if (typeof update.status === "string" && update.status) entry.status = update.status;
+    if (Array.isArray(update.locations)) {
+      for (const location of update.locations) {
+        const candidate =
+          location && typeof location === "object"
+            ? (location as Record<string, unknown>).path
+            : undefined;
+        if (typeof candidate === "string" && candidate.trim()) entry.paths.add(candidate.trim());
+      }
+    }
+    this.calls.set(id, entry);
+  }
+
+  changedPaths(): string[] {
+    const paths = new Set<string>();
+    for (const entry of this.calls.values()) {
+      if (entry.kind !== "edit" || entry.status !== "completed") continue;
+      for (const item of entry.paths) paths.add(item);
+    }
+    return [...paths];
+  }
 }
 
 export class AcpxRuntimeUnavailableError extends Error {
@@ -542,6 +588,7 @@ export class AcpxRuntimeRunner {
       let stopReason: string | undefined;
       let sessionId: string | undefined;
       let lastProtocolError: string | undefined;
+      const changedPaths = new AcpxChangedPathTracker();
       let settled = false;
       let activeAttemptIndex = -1;
 
@@ -584,6 +631,7 @@ export class AcpxRuntimeRunner {
               ? (params.update as Record<string, unknown>)
               : {};
           const sessionUpdate = String(update.sessionUpdate || "");
+          changedPaths.observe(update);
           if (sessionUpdate === "agent_message_chunk") {
             const content =
               update.content && typeof update.content === "object" && !Array.isArray(update.content)
@@ -675,10 +723,12 @@ export class AcpxRuntimeRunner {
             this.input.emitEvent("assistant_message", { message: trimmedAssistantText });
           }
           settled = true;
+          const reportedChanges = changedPaths.changedPaths();
           resolve({
             assistantText: trimmedAssistantText,
             stopReason,
             sessionId,
+            ...(reportedChanges.length > 0 ? { changedPaths: reportedChanges } : {}),
           });
         });
 

@@ -45,6 +45,7 @@ import { ComparisonService } from "./git/ComparisonService";
 import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
 import { StandupReportService } from "./reports/StandupReportService";
 import { UsageInsightsProjector } from "./reports/UsageInsightsProjector";
+import { describeCronRunStatus } from "../shared/cron-outcomes";
 import { PulseService } from "./telemetry/pulse-service";
 import {
   HeartbeatService,
@@ -262,6 +263,7 @@ let dbManager: DatabaseManager;
 let agentDaemon: AgentDaemon;
 let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
+let pulseService: PulseService | null = null;
 let councilService: CouncilService | null = null;
 let dailyBriefingService: DailyBriefingService | null = null;
 let ambientMonitoringService: AmbientMonitoringService | null = null;
@@ -1823,10 +1825,21 @@ if (isMacSafeStorageMigrationWorker) {
         });
       }
       keychainIdentityMismatch = verifySecureSettingsKeychainIdentity();
-      new PulseService(dbManager.getDatabase(), {
-        version: app.getVersion(),
-        runtime: "desktop",
-      }).start();
+      // One lifecycle-owned instance serves the timer and the Settings IPC, so a
+      // user decision and an in-flight delivery share one fence and one shutdown.
+      // Opt-in telemetry must never block startup; Settings falls back to its own instance.
+      try {
+        pulseService = new PulseService(dbManager.getDatabase(), {
+          version: app.getVersion(),
+          runtime: "desktop",
+        });
+        pulseService.start();
+      } catch (error) {
+        pulseService = null;
+        logger.warn("CoWork Pulse could not start; reporting stays paused this session.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       healResettableSecureSettings();
       {
         const workspaceRepo = new WorkspaceRepository(dbManager.getDatabase());
@@ -2591,14 +2604,8 @@ if (isMacSafeStorageMigrationWorker) {
             );
 
             // Build the message
-            const statusEmoji =
-              params.status === "ok"
-                ? "✅"
-                : params.status === "partial_success" || params.status === "needs_user_action"
-                  ? "⚠️"
-                  : params.status === "error"
-                    ? "❌"
-                    : "⏱️";
+            const statusLabel = describeCronRunStatus(params.status);
+            const statusEmoji = statusLabel.emoji;
             let message: string;
 
             if (hasFullResult) {
@@ -2613,17 +2620,7 @@ if (isMacSafeStorageMigrationWorker) {
               // No result text or error/timeout — generic status message
               let msg = `${statusEmoji} **Scheduled Task: ${params.jobName}**\n\n`;
 
-              if (params.status === "ok") {
-                msg += `Task completed successfully.\n`;
-              } else if (params.status === "partial_success") {
-                msg += `Task completed with partial results.\n`;
-              } else if (params.status === "needs_user_action") {
-                msg += `Task completed - action required.\n`;
-              } else if (params.status === "error") {
-                msg += `Task failed.\n`;
-              } else {
-                msg += `Task timed out.\n`;
-              }
+              msg += `${statusLabel.sentence}\n`;
 
               if (params.error) {
                 msg += `\n**Error:** ${params.error}\n`;
@@ -2690,24 +2687,9 @@ if (isMacSafeStorageMigrationWorker) {
 
             // Show desktop notification when scheduled task finishes
             if (evt.action === "finished") {
-              const statusEmoji =
-                evt.status === "ok"
-                  ? "✅"
-                  : evt.status === "partial_success" || evt.status === "needs_user_action"
-                    ? "⚠️"
-                    : evt.status === "error"
-                      ? "❌"
-                      : "⏱️";
-              const statusText =
-                evt.status === "ok"
-                  ? "completed"
-                  : evt.status === "partial_success"
-                    ? "completed with partial results"
-                    : evt.status === "needs_user_action"
-                      ? "completed, action required"
-                      : evt.status === "error"
-                        ? "failed"
-                        : "timed out";
+              const statusLabel = describeCronRunStatus(evt.status);
+              const statusEmoji = statusLabel.emoji;
+              const statusText = statusLabel.short;
 
               // Add in-app notification
               const notificationService = getNotificationService();
@@ -2727,7 +2709,11 @@ if (isMacSafeStorageMigrationWorker) {
                     type:
                       evt.status === "ok"
                         ? "task_completed"
-                        : evt.status === "partial_success" || evt.status === "needs_user_action"
+                        : evt.status === "partial_success" ||
+                            evt.status === "needs_user_action" ||
+                            evt.status === "cancelled" ||
+                            evt.status === "skipped" ||
+                            evt.status === "unknown"
                           ? "warning"
                           : "task_failed",
                     title: `${statusEmoji} ${jobName} ${statusText}`,
@@ -2834,6 +2820,7 @@ if (isMacSafeStorageMigrationWorker) {
       await setupIpcHandlers(dbManager, agentDaemon, channelGateway, {
         getMainWindow: () => mainWindow,
         getRoutineService: () => routineService,
+        getPulseService: () => pulseService,
       });
       if (subconsciousLoopService) {
         setupSubconsciousHandlers(subconsciousLoopService);
@@ -4400,6 +4387,13 @@ if (isMacSafeStorageMigrationWorker) {
           run: () => MCPClientManager.getInstance().shutdown(),
         },
         { name: "memory", requiresQuiescence: true, run: () => MemoryService.shutdown() },
+        {
+          name: "pulse",
+          run: async () => {
+            await pulseService?.shutdown();
+            pulseService = null;
+          },
+        },
         { name: "local previews", run: () => getLocalPreviewProcessService().stopAll() },
         { name: "database", requiresQuiescence: true, run: () => dbManager?.close() },
       ],

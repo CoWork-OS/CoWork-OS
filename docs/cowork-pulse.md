@@ -18,14 +18,27 @@ cowork telemetry reset --yes
 cowork telemetry delete --yes
 ```
 
-`show` prints a queued package or a preview for the previous UTC day. A preview does not mean
-that day has sufficient consent to send. The collector stores at most one row per profile/day;
-the client can submit the same day more than once. See the delivery limitations below.
+`show` describes exactly what would happen next, using the same selector as sending:
 
-The separate `/v1/latest-version` update request is identifier-free and cached by the client for 24
-hours. It includes only version, platform, architecture, and surface. It is suppressed in CI and
-is reported as **Daily Update Checks**, never as unique users. If the Pulse service is unavailable,
-CoWork falls back to GitHub for update information without blocking updates.
+| State          | Meaning                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `queued`       | The exact payload the next send attempt submits, provided consent is still on             |
+| `candidate`    | An estimate for the eligible UTC day; nothing is queued yet                               |
+| `ineligible`   | Nothing can be sent: Pulse is off, deletion is pending, or no fully consented day exists  |
+| `already_sent` | The collector acknowledged this day; `send` will not resend it                            |
+
+Opening Settings or running `show` never creates an outbox row. Pulse keeps **one daily aggregate
+record** per fully consented UTC day; failed or unconfirmed requests may be retried with the same
+record and package ID, and the collector keeps the first row. This is idempotent delivery, not
+exactly-once networking. `send` reports `sent`, `busy`, `already_sent`, `no_eligible_day`,
+`cancelled_by_state_change`, or `error`.
+
+The separate `/v1/latest-version` update request is identifier-free. It includes only version,
+platform, architecture, and surface, and is used only by **automatic** (startup) checks, with a
+2-second limit before falling back to GitHub. Checking manually in Settings goes directly to
+GitHub. It is suppressed in CI and tests and is reported as **Daily Update Checks**, never as
+unique users. The client keeps no request cache; the last release it retrieved is kept only as an
+offline fallback and is labeled with its retrieval time.
 
 Example request shape:
 
@@ -37,16 +50,25 @@ Example request shape:
   CoWork profile and is not derived from hardware, hostname, account, or `.cowork-machine-id`.
   Explicit identity reset also creates an ID, even while collection is off.
 - The server immediately converts the UUID to an HMAC pseudonym and never stores the raw UUID.
-- Turning Pulse off closes the consent window and discards queued packages. Future flushes check
-  consent; an already running request is not aborted by the current implementation.
-  Re-enabling retains the UUID.
-- Rotating the ID starts a new measurement identity and discards the old local deletion token;
-  it does **not** delete old server records. Delete remote data before rotating if you want the
-  previous identity removed. Keep an identity stable for retention measurement.
-- Deleting remote data authenticates with the separate local deletion token. On success it removes
-  that identity and its daily rows, clears local Pulse state, and disables collection. On failure
-  local identity/consent remain intact so deletion can be retried. A non-identifying daily deletion
-  counter remains on the server.
+- Every decision (on, off, reset, delete) is persisted first, in one short database transaction,
+  and increments a local revision. Turning Pulse off closes the consent window, discards queued
+  packages and aborts this process's in-flight request. Any request that was already admitted
+  may still complete, but its result is discarded: a late response can never turn consent back
+  on, restore an identity, or record a sent day. Re-enabling retains the UUID.
+- Rotating the ID starts a new measurement identity with its own consent window (days consented
+  under the old identity are never reported under the new one) and discards the old local
+  deletion token; it does **not** delete old server records. Delete remote data before rotating
+  if you want the previous identity removed. Rotation is blocked while a deletion is pending.
+- Deleting remote data turns reporting off **before** any request, then asks the collector to
+  delete that identity, using the deletion token and the endpoint the identity enrolled with.
+  Deletion is reported as complete only when the collector acknowledges it. If the request fails
+  or times out, Pulse stays off and shows **Reporting off; deletion pending**; the target and
+  token are kept (including across restarts) so you can retry, and opting in again is blocked
+  until deletion is confirmed. A retry is maintenance you request, not an opt-in; restart never
+  resumes usage delivery. A non-identifying daily deletion counter remains on the server.
+- Limit: the client fence cannot retract a request the server already accepted. A delayed
+  enrollment accepted after deletion would recreate a server identity; closing that gap needs a
+  server-side deletion barrier, which this client does not claim.
 
 ## Included
 
@@ -79,11 +101,13 @@ stores, exports, or exposes that IP, and there is no IP column in D1.
 | CoWork Pulse     | `https://pulse.coworkosapp.com/v1/installations` and `/v1/daily` | Dedicated `cowork-pulse` Cloudflare Worker and D1 database                                     |
 | Operator OTLP    | Operator-configured `runtime.telemetry.otlpEndpoint`             | Separate opt-in admin policy; retention belongs to that endpoint's operator                    |
 
-Local `SecureSettingsRepository` category `pulse` encrypts the UUID, deletion token, consent, and
-delivery status. `pulse_consent_windows` and `pulse_outbox` are ordinary tables in the profile's
+Local `SecureSettingsRepository` category `pulse` encrypts the UUID, deletion token, consent,
+revision, identity start and endpoint, any pending deletion target, and delivery status.
+`pulse_consent_windows`, `pulse_outbox`, `pulse_sent_days` (acknowledged package IDs and days)
+and `pulse_delivery_lease` (which process is delivering) are ordinary tables in the profile's
 SQLite database, not whole-file encrypted storage. The outbox contains the UUID and aggregate
-payload but not the deletion token. `pulse-update-check.json` contains a release cache and check
-timestamp, not task content.
+payload but not the deletion token. `update-check-cache.json` holds the last retrieved release
+metadata with its retrieval time and source, not task content.
 
 D1 stores an HMAC of the profile UUID, a SHA-256 deletion-token hash, consent version, daily
 aggregates, package IDs, first-active/value dates, and server receipt/update timestamps. The
@@ -142,28 +166,41 @@ event currently measures how often consent was offered or declined.
 ## Delivery behavior and known limitations
 
 - Desktop/daemon service checks after 30–300 seconds and every six hours; enabling requests a
-  flush too. CLI `send` makes an explicit flush. A continuous consent window must cover the whole
-  previous UTC day; first enrollment can therefore be delayed by more than a day.
-- Each flush creates the previous-day package if absent and tries the oldest queued package.
-  Requests time out after 10 seconds. Failed packages retain an attempt count for later retry.
+  flush too. CLI `send` makes an explicit flush. A continuous consent window for the current
+  identity must cover the whole previous UTC day; first enrollment can therefore be delayed by
+  more than a day. After upgrading from a build without revisions, eligibility for the existing
+  identity starts conservatively at upgrade time.
+- The encrypted settings record, consent windows and outbox are changed in one SQLite
+  transaction, so the settings store must use the same connection as the Pulse service. This is
+  checked before every transaction; if it ever differs, decisions and sends fail with
+  `settings_connection_mismatch` and nothing is changed.
+- Desktop timer and Settings share one service instance. Concurrent flushes in one process share
+  one attempt; across processes sharing a profile, a 30-second delivery lease allows one sender
+  and the other reports `busy`. The lease and the captured revision are re-checked before each
+  network stage and before any result is saved; an expired owner cannot save or proceed.
+- Each flush queues the previous-day package if it is eligible and not yet acknowledged, then
+  sends the oldest queued package. Requests time out after 10 seconds. The queued bytes are
+  immutable, so a retry resubmits the identical package. An acknowledged upload records a
+  receipt and removes the outbox row in one transaction; that day is never resent. A timeout
+  after the server committed is ambiguous and may be retried; the collector deduplicates it.
   There is no historical backfill for days when no flush ran, nor a queue age/size cap.
-- Success deletes the outbox row. A later flush can recreate and resend that day; D1 keeps the
-  first row. There is no durable sent-day latch. Preview selects the newest queued row while
-  transmission selects the oldest, so they can differ with a backlog.
-- Consent changes and asynchronous delivery do not currently have a shared transaction or
-  cancellation fence. Concurrent instances and disable/delete during delivery need regression
-  coverage before claiming race-free immediate opt-out.
+- On upgrade there is no reliable historic sent-day ledger (`lastSentAt` may describe a backlog
+  upload), so one previously sent day may be submitted again once; the server's idempotent
+  acknowledgement absorbs it and the local receipt prevents repeats afterwards.
 - First-active/value dates use first arrival, not the earliest date across late packages.
   Duplicate daily submissions still update installation metadata. Do not treat cohorts as
   audit-grade measurements until replay and out-of-order handling are hardened.
 - LLM error counts query the whole profile's `llm_call_events`; they do not apply the root/eval
   task filter used for task counts. Tool classification is heuristic and uses closed categories.
-- Update discovery skips Pulse in CI/tests and caches release metadata for 24 hours, with GitHub
-  fallback after failure. The current update fetch has no explicit timeout. The Pulse aggregate
-  service itself has no CI/test guard; keep test profiles opted out or use a local collector.
-- `COWORK_PULSE_ENDPOINT` overrides enrollment/daily/deletion destinations, not the updater URL.
-  It can send the profile identity and token to the configured destination; use only trusted
-  collectors and disposable profiles for local tests.
+- Update discovery skips the CoWork endpoint in CI/tests. Manual checks use GitHub with an
+  8-second total deadline; automatic checks allow the CoWork endpoint 2 seconds, then GitHub
+  8 seconds. Offline results are shown as cached with their retrieval time and cannot start an
+  install. The Pulse aggregate service itself has no CI/test guard; keep test profiles opted out
+  or use a local collector.
+- `COWORK_PULSE_ENDPOINT` overrides the destination for identities created while it is set, not
+  the updater URL. An identity stays pinned to the endpoint it was created with, so changing the
+  override later never redirects its deletion token. Use only trusted collectors and disposable
+  profiles for local tests.
 
 Operator OTLP still sends allowlisted event names, exact event timestamps, and hashed task/event
 correlation IDs. It excludes raw IDs, payload values, and payload keys. Those OTLP timestamps

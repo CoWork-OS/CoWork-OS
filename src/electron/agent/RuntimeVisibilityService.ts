@@ -129,15 +129,15 @@ export class RuntimeVisibilityService {
         stage: "playbook_reinforced",
         status: input.playbookReinforced
           ? "done"
-          : input.outcome === "failure"
+          : input.outcome === "failure" || input.outcome === "success"
             ? "skipped"
             : "pending",
         title: "Playbook reinforced",
         summary: input.playbookReinforced
-          ? "Successful pattern was reinforced for future reuse."
+          ? "Linked to earlier observed successful executions that used the same approach."
           : input.outcome === "failure"
             ? "No reinforcement because the task did not succeed."
-            : "Playbook reinforcement is pending confirmation.",
+            : "Recorded as an observed successful execution; no earlier execution with a compatible approach was found.",
         evidenceRefs: input.evidenceRefs || [],
         createdAt: now,
         details: { playbookReinforced: input.playbookReinforced },

@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import os from "node:os";
 import { DatabaseManager } from "../electron/database/schema";
 import { SecureSettingsRepository } from "../electron/database/SecureSettingsRepository";
+import { describeCronRunStatus } from "../shared/cron-outcomes";
 import { PulseService } from "../electron/telemetry/pulse-service";
 import { AgentDaemon } from "../electron/agent/daemon";
 import { LLMProviderFactory } from "../electron/agent/llm";
@@ -245,10 +246,19 @@ async function main(): Promise<void> {
   const dbManager = new DatabaseManager();
   new SecureSettingsRepository(dbManager.getDatabase());
   console.log("[Daemon] SecureSettingsRepository initialized");
-  new PulseService(dbManager.getDatabase(), {
-    version: process.env.npm_package_version || "0.0.0",
-    runtime: "daemon",
-  }).start();
+  // Opt-in telemetry must never block daemon startup.
+  let pulseService: PulseService | null = null;
+  try {
+    pulseService = new PulseService(dbManager.getDatabase(), {
+      version: process.env.npm_package_version || "0.0.0",
+      runtime: "daemon",
+    });
+    pulseService.start();
+  } catch (error) {
+    console.warn(
+      `[Daemon] CoWork Pulse could not start: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   // Initialize provider factories (loads settings from disk, migrates legacy files).
   LLMProviderFactory.initialize();
@@ -514,19 +524,14 @@ async function main(): Promise<void> {
           !params.summaryOnly &&
           typeof params.resultText === "string" &&
           params.resultText.trim().length > 0;
-        const statusEmoji = params.status === "ok" ? "✅" : params.status === "error" ? "❌" : "⏱️";
+        const statusLabel = describeCronRunStatus(params.status);
+        const statusEmoji = statusLabel.emoji;
         const message = hasResult
           ? `**${params.jobName}**\n\n${params.resultText!.trim()}`
           : (() => {
               let msg = `${statusEmoji} **Scheduled Task: ${params.jobName}**\n\n`;
 
-              if (params.status === "ok") {
-                msg += `Task completed successfully.\n`;
-              } else if (params.status === "error") {
-                msg += `Task failed.\n`;
-              } else {
-                msg += `Task timed out.\n`;
-              }
+              msg += `${statusLabel.sentence}\n`;
 
               if (params.error) {
                 msg += `\n**Error:** ${params.error}\n`;
@@ -730,6 +735,8 @@ async function main(): Promise<void> {
           requiresQuiescence: true,
           run: () => MemoryService.shutdown(),
         },
+        // Settle in-flight Pulse requests so no late callback writes to a closed database.
+        { name: "pulse", run: () => pulseService?.shutdown() },
         {
           name: "database",
           requiresQuiescence: true,

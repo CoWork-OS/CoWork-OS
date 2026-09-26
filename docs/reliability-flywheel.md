@@ -273,6 +273,28 @@ Defaults:
 - fallback instruction to use `skill_list`
 - hard cap on injected skill text
 
+## Outcome Honesty
+
+Reliability numbers only count what actually happened:
+
+- **ACP turns**: `src/electron/agent/runtime/acp-prompt-outcome.ts` classifies each prompt stop
+  reason once. `end_turn` without a response or verifiable output needs user action; token or
+  request limits are budget-exhausted partial success; refusals and missing/unknown reasons fail
+  with `contract_error`; externally reported cancellation persists as `cancelled`.
+- **Scheduled tasks**: run success is `ok / classified attempts` from versioned per-category
+  counts (`src/shared/cron-outcomes.ts`). Partial and needs-attention runs are never counted as
+  full success, and unclassified legacy runs are reported instead of guessed.
+- **Learning**: Playbook promotion counts distinct independent executions from the evidence
+  ledger; best-effort and ACP completion are excluded.
+- **Pulse**: the `usefulTasks` network field keeps its name for compatibility and remains a
+  completion proxy (completed with terminal `ok`, `partial_success` or none), not user-accepted
+  value.
+
+Regression suites: `pulse-lifecycle.test.ts`, `pulse-worker-dedup.test.ts`,
+`acp-prompt-outcome.test.ts`, `cron/__tests__/outcome-counts.test.ts`,
+`memory/__tests__/PlaybookService.test.ts`, `MemoryService.playbook-recall.test.ts`,
+`SkillProposalService.evidence.test.ts`, and `update-manager-freshness.test.ts`.
+
 ## CI, Nightly, and Release Gates
 
 ### PR Regression Policy Gate

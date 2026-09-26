@@ -1,38 +1,39 @@
 /**
- * PlaybookSkillPromoter — Auto-proposes skills from repeated playbook patterns
+ * PlaybookSkillPromoter — proposes skills from repeated, evidence-backed successes
  *
- * Bridges PlaybookService (which detects repeated successful patterns) with
- * SkillProposalService (which has a full approval workflow). When a playbook
- * pattern is reinforced N times (configurable, default 3), this service
- * auto-generates a skill proposal with evidence and a draft prompt template.
+ * Bridges the Playbook evidence ledger with SkillProposalService (which has the approval
+ * workflow). A pattern qualifies when durable reinforcement links connect at least N
+ * distinct, independent successful executions (default 3) that used a compatible
+ * approach. Memory rows, reinforcement chains and legacy free-text claims never count.
  *
- * The proposal goes through the existing governance approval workflow —
- * the admin sees the evidence and can approve or reject with one click.
- *
- * Enterprise value:
- *  - Transforms repeated manual workflows into governed, version-controlled skills
- *  - Reduces mean-time-to-automation from weeks of manual skill authoring to
- *    automatic proposal with one-click approval
+ * Proposals still require review; they describe "observed successful executions" and
+ * list each source reference with its outcome grade.
  */
 
-import { MemoryService } from "./MemoryService";
 import {
   SkillProposalService,
   type SkillProposalStatus,
   type SkillProposalCreateInput,
 } from "../agent/skills/SkillProposalService";
+import { PlaybookService } from "./PlaybookService";
+import type { PlaybookEvidenceRecord } from "./PlaybookEvidenceStore";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
 export interface PromotionCandidate {
-  /** The playbook pattern text. */
+  /** Human label for the pattern (most common task title in the cluster). */
   pattern: string;
-  /** Number of times this pattern has been reinforced. */
-  reinforcementCount: number;
-  /** Tools used across the reinforced instances. */
+  /** Approach identity shared by every execution in the cluster. */
+  patternKey: string;
+  /** Distinct independent successful executions in the cluster. */
+  executionCount: number;
+  /** Tools used across the executions. */
   toolsUsed: string[];
-  /** Original request excerpts from the playbook entries. */
+  /** Original request excerpts. */
   requestExcerpts: string[];
+  /** One line per execution: source references and outcome grade. */
+  sourceEvidence: string[];
+  evidenceIds: string[];
 }
 
 export interface PromotionResult {
@@ -44,7 +45,7 @@ export interface PromotionResult {
 
 // ─── Constants ────────────────────────────────────────────────────────
 
-/** Minimum reinforcement count before proposing a skill. */
+/** Minimum distinct successful executions before proposing a skill. */
 const DEFAULT_PROMOTION_THRESHOLD = 3;
 
 /** Max proposals to create in a single check (prevent spam). */
@@ -57,46 +58,6 @@ const PROMOTION_COOLDOWN_MS = 10 * 60 * 1000;
 const lastCheckByWorkspace = new Map<string, number>();
 
 // ─── Helpers ──────────────────────────────────────────────────────────
-
-/**
- * Extract a clean task description from a playbook snippet.
- */
-function extractTaskDescription(snippet: string): string {
-  // Try to extract the task title from various playbook formats
-  const titleMatch = snippet.match(/Task succeeded:\s*"([^"]+)"/);
-  if (titleMatch) return titleMatch[1];
-
-  const reinforcedMatch = snippet.match(/Reinforced pattern:\s*"([^"]+)"/);
-  if (reinforcedMatch) return reinforcedMatch[1];
-
-  // Fallback: first meaningful line
-  const firstLine = snippet
-    .replace(/^\[PLAYBOOK\]\s*/m, "")
-    .split("\n")[0]
-    .trim();
-  return firstLine.slice(0, 120);
-}
-
-/**
- * Extract tools from a playbook snippet.
- */
-function extractTools(snippet: string): string[] {
-  const toolsMatch = snippet.match(/(?:Key tools|Tools):\s*(.+)/i);
-  if (!toolsMatch) return [];
-  return toolsMatch[1]
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-}
-
-/**
- * Extract the original request from a playbook snippet.
- */
-function extractRequest(snippet: string): string {
-  const requestMatch = snippet.match(/Original request:\s*(.+)/i);
-  if (!requestMatch) return "";
-  return requestMatch[1].trim().slice(0, 200);
-}
 
 /**
  * Generate a slug-style skill ID from a task description.
@@ -113,18 +74,17 @@ function generateSkillId(description: string): string {
 }
 
 /**
- * Generate a prompt template from the playbook evidence.
+ * Generate a prompt template from the evidence.
  */
 function generatePromptTemplate(candidate: PromotionCandidate): string {
   const lines = [
-    `You are performing a task that has been successfully completed multiple times before.`,
+    `You are performing a task pattern that CoWork observed completing successfully ${candidate.executionCount} times.`,
     ``,
     `Task pattern: ${candidate.pattern}`,
     ``,
-    `Recommended tools: ${candidate.toolsUsed.join(", ") || "determined by context"}`,
+    `Tools used in those executions: ${candidate.toolsUsed.join(", ") || "determined by context"}`,
     ``,
-    `Follow the proven approach from previous successful completions.`,
-    `Use the tools listed above as your primary toolkit for this task.`,
+    `Treat the earlier approach as a starting point, not a guarantee; verify the result for this request.`,
   ];
 
   if (candidate.requestExcerpts.length > 0) {
@@ -136,6 +96,12 @@ function generatePromptTemplate(candidate: PromotionCandidate): string {
   }
 
   return lines.join("\n");
+}
+
+function mostCommon(values: string[]): string {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
 }
 
 // ─── Main Service ─────────────────────────────────────────────────────
@@ -165,8 +131,8 @@ export class PlaybookSkillPromoter {
         return { proposed: false, reason: "no_candidates" };
       }
 
-      // Sort by reinforcement count (most reinforced first)
-      candidates.sort((a, b) => b.reinforcementCount - a.reinforcementCount);
+      // Most observed executions first
+      candidates.sort((a, b) => b.executionCount - a.executionCount);
 
       // Propose up to MAX_PROPOSALS_PER_CHECK
       const proposalService = new SkillProposalService(workspacePath);
@@ -184,65 +150,69 @@ export class PlaybookSkillPromoter {
   }
 
   /**
-   * Find playbook patterns that have been reinforced at least THRESHOLD times.
+   * Clusters of active success evidence joined by durable reinforcement links, counting
+   * distinct independent executions (not memory rows or chains) per cluster.
    */
   static findCandidates(
     workspaceId: string,
     threshold = DEFAULT_PROMOTION_THRESHOLD,
   ): PromotionCandidate[] {
     try {
-      // Search for all reinforcement entries
-      const results = MemoryService.searchByContentMarker(
-        workspaceId,
-        "[PLAYBOOK] Reinforced pattern",
-        100,
-      );
-      const reinforcements = results.filter(
-        (r) => r.type === "insight" && r.snippet.includes("Reinforced pattern"),
-      );
+      const store = PlaybookService.getEvidenceStore();
+      if (!store) return [];
+      const eligible = new Map<string, PlaybookEvidenceRecord>();
+      for (const record of store.listActiveSuccesses(workspaceId)) {
+        if (record.patternKey && store.verifySource(record)) eligible.set(record.id, record);
+      }
+      if (eligible.size === 0) return [];
 
-      if (reinforcements.length === 0) return [];
-
-      // Group by pattern similarity (using task description as key)
-      const patternGroups = new Map<
-        string,
-        { count: number; tools: Set<string>; requests: Set<string> }
-      >();
-
-      for (const entry of reinforcements) {
-        const desc = extractTaskDescription(entry.snippet);
-        const key = desc.toLowerCase().replace(/\s+/g, " ").trim();
-        if (!key) continue;
-
-        const existing = patternGroups.get(key) ?? {
-          count: 0,
-          tools: new Set<string>(),
-          requests: new Set<string>(),
-        };
-
-        existing.count++;
-        for (const tool of extractTools(entry.snippet)) {
-          existing.tools.add(tool);
-        }
-        const request = extractRequest(entry.snippet);
-        if (request) existing.requests.add(request);
-
-        patternGroups.set(key, existing);
+      // Union-find over links whose both ends are eligible and share a pattern key.
+      const parent = new Map<string, string>();
+      const find = (id: string): string => {
+        let root = id;
+        while (parent.get(root) && parent.get(root) !== root) root = parent.get(root)!;
+        parent.set(id, root);
+        return root;
+      };
+      for (const id of eligible.keys()) parent.set(id, id);
+      for (const link of store.listActiveLinks(workspaceId)) {
+        const from = eligible.get(link.from);
+        const to = eligible.get(link.to);
+        if (!from || !to || from.patternKey !== to.patternKey) continue;
+        parent.set(find(from.id), find(to.id));
       }
 
-      // Filter to candidates that meet the threshold
+      const clusters = new Map<string, PlaybookEvidenceRecord[]>();
+      for (const record of eligible.values()) {
+        const root = find(record.id);
+        clusters.set(root, [...(clusters.get(root) ?? []), record]);
+      }
+
       const candidates: PromotionCandidate[] = [];
-      for (const [pattern, data] of patternGroups) {
-        if (data.count >= threshold) {
-          candidates.push({
-            pattern,
-            reinforcementCount: data.count,
-            toolsUsed: Array.from(data.tools),
-            requestExcerpts: Array.from(data.requests).slice(0, 5),
-          });
+      for (const records of clusters.values()) {
+        const byExecution = new Map<string, PlaybookEvidenceRecord>();
+        for (const record of records) {
+          if (!byExecution.has(record.executionKey)) byExecution.set(record.executionKey, record);
         }
+        if (byExecution.size < threshold) continue;
+        const executions = [...byExecution.values()];
+        candidates.push({
+          pattern: mostCommon(executions.map((record) => record.title)).slice(0, 120),
+          patternKey: executions[0].patternKey,
+          executionCount: executions.length,
+          toolsUsed: [...new Set(executions.flatMap((record) => record.toolsUsed))],
+          requestExcerpts: [
+            ...new Set(executions.map((record) => record.requestExcerpt.slice(0, 200))),
+          ]
+            .filter(Boolean)
+            .slice(0, 5),
+          sourceEvidence: executions.map(
+            (record) =>
+              `Observed successful execution ${record.executionKey} (${record.grade.replace(/_/g, " ")}); sources: ${record.sourceRefs.join(", ")}`,
+          ),
+          evidenceIds: executions.map((record) => record.id),
+        });
       }
-
       return candidates;
     } catch {
       return [];
@@ -260,18 +230,25 @@ export class PlaybookSkillPromoter {
     const skillName = candidate.pattern.slice(0, 60);
 
     const input: SkillProposalCreateInput = {
-      problemStatement: `Recurring task pattern detected (reinforced ${candidate.reinforcementCount} times): "${candidate.pattern}"`,
+      problemStatement: `Recurring task pattern with ${candidate.executionCount} observed successful executions: "${candidate.pattern}"`,
       evidence: [
-        `Pattern reinforced ${candidate.reinforcementCount} times across different tasks`,
+        `${candidate.executionCount} distinct observed successful executions linked by a compatible approach`,
         `Common tools: ${candidate.toolsUsed.join(", ") || "various"}`,
+        ...candidate.sourceEvidence,
         ...candidate.requestExcerpts.map((r) => `Example request: ${r}`),
       ],
       requiredTools: candidate.toolsUsed,
-      riskNote: "Auto-generated from PlaybookSkillPromoter based on repeated successful patterns.",
+      riskNote:
+        "Auto-generated by PlaybookSkillPromoter from the Playbook evidence ledger. Observed runtime success is not proof the results were accepted; review before approving.",
+      provenance: {
+        source: "playbook_evidence",
+        evidenceIds: candidate.evidenceIds,
+        executionCount: candidate.executionCount,
+      },
       draftSkill: {
         id: skillId,
         name: skillName,
-        description: `Auto-detected skill for: ${candidate.pattern}. Based on ${candidate.reinforcementCount} successful completions.`,
+        description: `Auto-detected skill for: ${candidate.pattern}. Based on ${candidate.executionCount} observed successful executions.`,
         prompt: generatePromptTemplate(candidate),
         icon: "zap",
         category: "auto-promoted",

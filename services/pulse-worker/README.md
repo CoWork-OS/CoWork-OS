@@ -170,7 +170,15 @@ For future code changes, run the focused collector/client tests from the reposit
 npx vitest run src/electron/telemetry/__tests__/pulse-service.test.ts src/electron/telemetry/__tests__/pulse-worker-schema.test.ts src/electron/telemetry/__tests__/task-event-exporter.test.ts src/electron/updater/__tests__/update-manager-platform.test.ts
 ```
 
-The existing 11-test focused pass covers schema/category/export/updater behavior; it does not
-establish crash-safe daily latching, concurrency-safe consent, offline backfill, or complete
-retention correctness. See the [known limitations](../../docs/cowork-pulse.md#delivery-behavior-and-known-limitations)
+Client lifecycle, delivery and collector deduplication are covered by
+`src/electron/telemetry/__tests__/pulse-lifecycle.test.ts` and `pulse-worker-dedup.test.ts`:
+
+```sh
+npx vitest run src/electron/telemetry/__tests__ src/electron/updater/__tests__
+```
+
+Delivery is idempotent, not exactly-once: the client keeps one immutable package per fully
+consented UTC day and may retry it after a failed or unconfirmed request; `POST /v1/daily` keeps
+the first row per installation and day and acknowledges the duplicate. These tests do not
+establish offline backfill or complete retention correctness. See the [known limitations](../../docs/cowork-pulse.md#delivery-behavior-and-known-limitations)
 before treating these numbers as investor-grade evidence.

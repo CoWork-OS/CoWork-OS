@@ -1,0 +1,73 @@
+name: Model Metadata Sync
+
+# Weekly refresh of src/shared/model-metadata.json (model prices and context limits)
+# from https://models.dev/api.json. Opens or updates a pull request when anything
+# changed, so price updates are reviewed as a diff instead of maintained by hand.
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: model-metadata-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync model prices and limits
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: chore/model-metadata-sync
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Regenerate snapshot
+        run: npm run models:sync
+
+      - name: Stop when nothing changed
+        id: diff
+        run: |
+          if git diff --quiet -- src/shared/model-metadata.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Model metadata is already up to date."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add src/shared/model-metadata.json
+          git commit -m "chore: sync model prices and limits from models.dev"
+          git push --force origin "$BRANCH"
+
+          summary="$(git diff --stat HEAD~1 -- src/shared/model-metadata.json | tail -1)"
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "Automated weekly refresh of \`src/shared/model-metadata.json\` from https://models.dev/api.json." \
+            "Changes: ${summary}" \
+            "Review the price diff before merging. Pull requests opened by GitHub Actions do not trigger CI, so run \`npm test\` locally or push a commit to this branch first.")
+
+          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$BRANCH" --body "$body"
+          else
+            gh pr create --head "$BRANCH" --base "${{ github.event.repository.default_branch }}" \
+              --title "chore: sync model prices and limits" --body "$body"
+          fi

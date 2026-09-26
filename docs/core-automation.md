@@ -19,7 +19,6 @@ Everything else is a surrounding surface:
 - `Mission Control` is the cockpit for observing and configuring the core
 - `Triggers` are ingress and signal normalization only
 - `Devices` are execution routing only
-- `Digital Twins` are optional persona presets and are not part of core ownership
 
 Structured Studio flows and prompt-based Routines sit above several lower-level engines:
 
@@ -35,7 +34,7 @@ Use main-sidebar **Automations → Activity** for structured workflow run and st
 
 ## Ownership Model
 
-Core automation is owned by `AutomationProfile`, not by persona templates and not by raw role editing.
+Core automation is owned by `AutomationProfile`, not by raw role editing.
 
 An automation profile is attached to a generic operator agent role and stores:
 
@@ -46,8 +45,6 @@ An automation profile is attached to a generic operator agent role and stores:
 - dispatch budget
 - active hours
 - heartbeat profile
-
-Digital Twin roles do not own automation profiles and do not create heartbeat or workflow-intelligence state when activated.
 
 ## Cognition Path
 

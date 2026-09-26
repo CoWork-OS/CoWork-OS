@@ -257,7 +257,6 @@ Ownership model:
 - `Scheduled Tasks`, `Webhooks`, and `Event Triggers` remain low-level or generated infrastructure
 - `Triggers` are ingress and normalized evidence only
 - `Devices` are execution routing only
-- `Digital Twins` are optional persona presets and are not direct cognition owners
 
 The home dashboard also surfaces recent automation runs. Use main-sidebar **Automations → Activity** for structured step-level evidence, or the advanced Settings pages for prompt-based routines and compiled backends. See [Core Automation](core-automation.md).
 
@@ -294,28 +293,22 @@ Current product stance:
 - use `Scheduled Tasks`, `Webhooks`, or `Event Triggers` directly only when you intentionally want the lower-level surface
 - treat `Workflow Intelligence` as the always-on cognitive runtime, not as a routine trigger
 
-### Zero-Human Company Ops
+### Company Ops
 
 CoWork OS can also be configured as a founder-directed autonomous company shell by composing several existing systems into one operating loop:
 
 - **Venture operator workspace kit**: initializes `.cowork/` with `COMPANY.md`, `OPERATIONS.md`, `KPIS.md`, `PRIORITIES.md`, and `HEARTBEAT.md`
-- **Companies control surface**: `Settings > Companies` centralizes company creation, company-graph editing, linked operators, and direct handoff into Digital Twins or Mission Control
-- **Operator personas**: venture-oriented templates such as `Founder Office Operator`, `Company Planner`, `Growth Operator`, and `Customer Ops Lead`
 - **Automation profiles**: always-on ownership for the chosen operator roles
 - **Heartbeat v3 follow-up**: automation-profile-backed operators can proactively review recurring checks defined in `HEARTBEAT.md`, while cheap Pulse cycles stay non-LLM until escalation is justified
 - **Strategic planner**: turns company goals, projects, and stalled work into planner-managed issues and optionally auto-dispatches them into tasks
 - **Mission Control ops view**: exposes planner config, planner runs, goals, projects, issues, linked tasks, issue comments, and run events
 - **Autonomy policy integration**: operator roles can carry reusable autonomy presets instead of relying on one global all-or-nothing mode
-- **Persisted company-linked operators**: venture/operator twins can be assigned to a company so the same operator set stays visible across Companies, Digital Twins, and Mission Control
-- **Companies tab as the source of truth**: `Settings > Companies` centralizes company metadata, goals, projects, issues, linked operators, planner state, and handoff into company-scoped Mission Control views
 
 This workflow is designed for "human-directed, agent-operated" execution:
 
 - humans define business goals, guardrails, and irreversible approval policy
 - agents continuously create, route, and execute operational work
 - Mission Control becomes the monitoring and intervention cockpit
-
-See [Zero-Human Company Operations](zero-human-company.md) for architecture, setup recipe, monitoring flow, and example operating models.
 
 ### Workflow Intelligence
 
@@ -450,25 +443,9 @@ The runtime now includes a set of decision and recovery contracts aimed at keepi
 
 ---
 
-## Digital Twin Personas
-
-Pre-built AI agent templates that create role-specific digital twins for team members. Each twin absorbs cognitively draining work so the human can stay in deep focus.
-
-- **Built-in templates across engineering, management, product, data, operations, and venture/operator roles**: including Software Engineer, Engineering Manager, Product Manager, Company Planner, Founder Office Operator, Growth Operator, and Customer Ops Lead
-- **Persona-only by default**: activation creates a role preset, not a core runtime participant
-- **Optional automation pairing**: always-on behavior is attached separately through automation profiles in Mission Control
-- **10 cognitive offload categories**: context-switching, status-reporting, information-triage, decision-preparation, documentation, review-preparation, dependency-tracking, compliance-checks, knowledge-curation, routine-automation
-- **4 bundled skills**: `twin-status-report`, `twin-pr-triage`, `twin-meeting-prep`, `twin-decision-prep`
-- **One-click activation**: Browse gallery, customize name, prompt, skills, and company context, then create
-- **Enterprise scaling**: Activate one twin per team member across the organization
-
-Access from **Mission Control** > **Add Digital Twin**. See [Digital Twins](digital-twins.md) and [Heartbeat v3](heartbeat-v3.md) for the current runtime model.
-
----
-
 ## Plugin Packs & Customize
 
-Role-specific and workflow bundles that group skills, agent roles, connectors, and slash commands into installable packs. Each pack targets a job function or workflow area and can optionally link to a Digital Twin Persona as an optional role preset.
+Role-specific and workflow bundles that group skills, agent roles, connectors, and slash commands into installable packs. Each pack targets a job function or workflow area.
 
 - **35 bundled packs**: Engineering, Engineering Management, Product Management, DevOps, Mobile Development, Game Development, Data Analysis, QA & Testing, Sales CRM, Customer Support, Content & Marketing, Technical Writing, finance packs, Claude-for-Legal practice packs, Geo SEO, and CoWork Shortcuts
 - **100+ pack skills and shortcuts**: Code review prep, sprint health, feature triage, incident response, prospect research, DCF modeling, LBO analysis, `/strategy`, `/batch-rename`, `/gmail-summary-drive`, `/multi-source-report`, and more
@@ -476,7 +453,6 @@ Role-specific and workflow bundles that group skills, agent roles, connectors, a
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill toggles**: Enable or disable individual skills within a pack without toggling the entire pack
 - **Persistent state**: Pack and skill toggle states survive app restarts (stored in `pack-states.json`)
-- **Digital Twin integration**: selected packs link to persona templates as optional role presets; always-on automation remains a separate core setup step
 - **Recommended connectors**: Packs display clickable connector chips that navigate to connector settings
 - **Update detection**: Background check against the remote registry with orange dot indicators on packs with newer versions
 - **"Try asking" in chat**: Empty chat state shows randomized prompt suggestions from enabled packs for one-click task creation
@@ -856,41 +832,6 @@ All panels update in real-time via event subscriptions — no manual refresh nee
 Cancelling a parent task automatically cascades to all dispatched child tasks.
 
 See [Mission Control](mission-control.md) for the full guide.
-
----
-
-## Digital Twins (Persona Templates)
-
-Create role-specific AI digital twins from pre-built persona templates. Each twin absorbs cognitively draining tasks so the human stays in flow. Twins are optional persona presets, not direct owners of the always-on runtime. Accessible via the **"Add Digital Twin"** button in Mission Control's agents panel.
-
-### Templates (10 roles, 5 categories)
-
-| Category             | Templates                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------ |
-| **Engineering**      | Software Engineer, Hardware Engineer, QA/Test Engineer, DevOps/SRE, Technical Writer |
-| **Management**       | Engineering Manager, Technical Director, VP Engineering                              |
-| **Product**          | Product Manager                                                                      |
-| **Data & Analytics** | Data Scientist / Analyst                                                             |
-
-### What Each Template Includes
-
-| Component              | Description                                                                                                                                |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **System Prompt**      | Role-tailored persona with behavior guidelines                                                                                             |
-| **Capabilities**       | Skill tags (code, review, test, analyze, document, etc.)                                                                                   |
-| **Cognitive Offload**  | Categorized by mental burden relieved: context switching, status reporting, review prep, decision prep, documentation, dependency tracking |
-| **Recommended Skills** | Pre-mapped skills with required/optional flags                                                                                             |
-| **Autonomy Level**     | `specialist` (IC roles) or `lead` (management roles)                                                                                       |
-
-### Activation Flow
-
-1. Click **"Add Digital Twin"** in Mission Control agents panel
-2. Browse the **template gallery** — filter by category or search by name/tags
-3. Click a template card to open the **activation dialog**
-4. Customize: twin name, prompt/persona settings, and recommended skills
-5. Click **"Create Digital Twin"** — creates a new AgentRole with persona defaults
-
-The twin appears in the agents panel as a normal role. If you want it to participate in always-on automation, attach a separate automation profile afterwards.
 
 ---
 

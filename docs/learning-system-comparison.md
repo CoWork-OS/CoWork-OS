@@ -47,5 +47,4 @@ That product shape is what lets background automation compound instead of repeat
 - [Workflow Intelligence](workflow-intelligence.md)
 - [Dreaming](dreaming.md)
 - [Features](features.md)
-- [Zero-Human Company Ops](zero-human-company.md)
 - [Reliability Flywheel](reliability-flywheel.md)

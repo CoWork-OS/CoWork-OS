@@ -35,13 +35,11 @@ import {
   setHookTriggerEmitter,
 } from "./ipc/handlers";
 import { setupMissionControlHandlers } from "./ipc/mission-control-handlers";
-import { setupPersonaTemplateHandlers } from "./ipc/persona-template-handlers";
 import { setupPluginPackHandlers } from "./ipc/plugin-pack-handlers";
 import { setupPluginDistributionHandlers } from "./ipc/plugin-distribution-handlers";
 import { setupAdminPolicyHandlers } from "./ipc/admin-policy-handlers";
 import { setupAgentSecurityHandlers } from "./ipc/agent-security-handlers";
 import { NumbatService } from "./security/numbat";
-import { getPersonaTemplateService } from "./agents/PersonaTemplateService";
 import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
 import { ComparisonService } from "./git/ComparisonService";
 import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
@@ -127,7 +125,6 @@ import {
   StrategicPlannerService,
   setStrategicPlannerService,
 } from "./control-plane/StrategicPlannerService";
-import { SymphonyService, setSymphonyService } from "./control-plane/SymphonyService";
 import { attachControlPlaneTaskLifecycleSync } from "./control-plane/task-run-sync";
 import {
   buildManagedScheduledWorkspacePath,
@@ -274,7 +271,6 @@ let feedbackService: FeedbackService | null = null;
 let loreService: LoreService | null = null;
 let xMentionBridgeService: XMentionBridgeService | null = null;
 let strategicPlannerService: StrategicPlannerService | null = null;
-let symphonyService: SymphonyService | null = null;
 let automationOutcomeService: AutomationOutcomeService | null = null;
 let recurringApprovalService: RecurringApprovalService | null = null;
 let eventTriggerService: EventTriggerService | null = null;
@@ -2003,18 +1999,6 @@ if (isMacSafeStorageMigrationWorker) {
         db: dbManager.getDatabase(),
         log: (...args) => logger.warn(...args),
       });
-      try {
-        symphonyService = new SymphonyService({
-          db: dbManager.getDatabase(),
-          agentDaemon,
-          log: (...args) => logger.info(...args),
-        });
-        setSymphonyService(symphonyService);
-        symphonyService.start();
-        logger.info("Symphony issue orchestration initialized");
-      } catch (error) {
-        logger.error("Failed to initialize Symphony issue orchestration:", error);
-      }
 
       // Optional: bootstrap a default workspace on startup for headless/server deployments.
       // This makes a fresh VPS instance usable without first opening the desktop UI.
@@ -3128,7 +3112,6 @@ if (isMacSafeStorageMigrationWorker) {
             standupService,
             heartbeatService,
             getPlannerService: () => strategicPlannerService,
-            getSymphonyService: () => symphonyService,
             getMainWindow: () => mainWindow,
             coreTraceService,
             coreMemoryDistiller,
@@ -3189,18 +3172,6 @@ if (isMacSafeStorageMigrationWorker) {
         logger.info("Strategic Planner initialized");
       } catch (error) {
         logger.error("Failed to initialize Strategic Planner:", error);
-      }
-
-      // Register Persona Template handlers; templates are loaded lazily when the
-      // Digital Twins UI requests them.
-      try {
-        const db = dbManager.getDatabase();
-        const agentRoleRepo = new AgentRoleRepository(db);
-        const personaTemplateService = getPersonaTemplateService(agentRoleRepo);
-        setupPersonaTemplateHandlers({ personaTemplateService });
-        logger.debug("Persona Template handlers initialized");
-      } catch (error) {
-        logger.error("Failed to initialize Persona Template handlers:", error);
       }
 
       // Initialize Plugin Pack handlers (Customize panel)
@@ -4300,14 +4271,6 @@ if (isMacSafeStorageMigrationWorker) {
             strategicPlannerService?.stop();
             strategicPlannerService = null;
             setStrategicPlannerService(null);
-          },
-        },
-        {
-          name: "symphony",
-          run: () => {
-            symphonyService?.stop();
-            symphonyService = null;
-            setSymphonyService(null);
           },
         },
         {

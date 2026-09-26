@@ -45,10 +45,6 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
     plannerRunning,
     plannerSaving,
     plannerLoading,
-    symphonyConfig,
-    symphonyStatus,
-    symphonySaving,
-    symphonyRunning,
     selectedPlannerRunId,
     setSelectedPlannerRunId,
     selectedPlannerRun,
@@ -59,13 +55,11 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
     agents,
     handlePlannerConfigChange,
     handleRunPlanner,
-    handleSymphonyConfigChange,
-    handleRunSymphony,
     formatRelativeTime,
   } = data;
 
   if (!selectedCompany && opsSubTab !== "harness") {
-    return <div className="mc-v2-empty">Select a company to view operations.</div>;
+    return <div className="mc-v2-empty">Loading operations...</div>;
   }
 
   return (
@@ -83,7 +77,7 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
       </nav>
       <div className="mc-v2-ops-content">
         {selectedCompany && opsSubTab === "overview" && (
-          <OpsOverview company={selectedCompany} summary={commandCenterSummary} />
+          <OpsOverview summary={commandCenterSummary} />
         )}
         {opsSubTab === "harness" && (
           <OpsHarness
@@ -109,12 +103,6 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
             setDetailPanel={setDetailPanel}
             formatRelativeTime={formatRelativeTime}
             selectedIssueId={data.selectedIssueId}
-            symphonyConfig={symphonyConfig}
-            symphonyStatus={symphonyStatus}
-            symphonySaving={symphonySaving}
-            symphonyRunning={symphonyRunning}
-            onSymphonyConfigChange={handleSymphonyConfigChange}
-            onRunSymphony={handleRunSymphony}
           />
         )}
         {selectedCompany && opsSubTab === "execution" && (
@@ -291,14 +279,10 @@ function OpsHarness({
 }
 
 // ── Ops Overview ──
-function OpsOverview({ company, summary }: { company: any; summary: any }) {
+function OpsOverview({ summary }: { summary: any }) {
   if (!summary) return <div className="mc-v2-empty">Loading operations data...</div>;
   return (
     <div className="mc-v2-ops-kpis">
-      <div>
-        <p className="mc-v2-ops-company-name">{company.name}</p>
-        {company.description && <p className="mc-v2-ops-company-desc">{company.description}</p>}
-      </div>
       <div className="mc-v2-ops-stats">
         {[
           { label: "Active goals", value: summary.overview.activeGoalCount },
@@ -442,8 +426,7 @@ function OpsOperators({
   operators: any[];
   formatRelativeTime: (t?: number) => string;
 }) {
-  if (operators.length === 0)
-    return <div className="mc-v2-empty">No operators linked to this company yet.</div>;
+  if (operators.length === 0) return <div className="mc-v2-empty">No operator agents yet.</div>;
   return (
     <div className="mc-v2-ops-operators">
       {operators.map((op: any) => (
@@ -667,134 +650,9 @@ function OpsPlanner({
   setDetailPanel,
   formatRelativeTime,
   selectedIssueId,
-  symphonyConfig,
-  symphonyStatus,
-  symphonySaving,
-  symphonyRunning,
-  onSymphonyConfigChange,
-  onRunSymphony,
 }: any) {
   return (
     <div className="mc-v2-planner-config">
-      <div className="mc-v2-detail-section">
-        <div className="mc-v2-planner-status-row">
-          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Symphony</h3>
-          <span
-            className={`mc-v2-planner-status-badge ${symphonyConfig?.enabled ? "enabled" : "disabled"}`}
-          >
-            {symphonyConfig?.enabled ? "Enabled" : "Disabled"}
-          </span>
-          {symphonySaving && (
-            <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Saving...</span>
-          )}
-          {symphonyRunning && (
-            <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>Running...</span>
-          )}
-        </div>
-        {symphonyConfig && (
-          <div className="mc-v2-planner-fields">
-            <label className="mc-v2-planner-field checkbox">
-              <input
-                type="checkbox"
-                checked={symphonyConfig.enabled}
-                onChange={(e) => void onSymphonyConfigChange({ enabled: e.target.checked })}
-              />
-              <span>Watch issues</span>
-            </label>
-            <label className="mc-v2-planner-field">
-              <span>Workspace</span>
-              <select
-                value={symphonyConfig.workspaceId || ""}
-                onChange={(e) =>
-                  void onSymphonyConfigChange({ workspaceId: e.target.value || null })
-                }
-              >
-                <option value="">First workspace</option>
-                {workspaces.map((w: any) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="mc-v2-planner-field">
-              <span>Runtime</span>
-              <select
-                value={symphonyConfig.runtimeMode}
-                onChange={(e) => void onSymphonyConfigChange({ runtimeMode: e.target.value })}
-              >
-                <option value="native">Native</option>
-                <option value="acpx">acpx</option>
-              </select>
-            </label>
-            <label className="mc-v2-planner-field">
-              <span>Parallel</span>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={symphonyConfig.maxConcurrentIssueRuns}
-                onChange={(e) =>
-                  void onSymphonyConfigChange({
-                    maxConcurrentIssueRuns: Math.max(1, Number(e.target.value) || 1),
-                  })
-                }
-              />
-            </label>
-            <button
-              className="mc-v2-icon-btn"
-              onClick={() => void onRunSymphony()}
-              disabled={symphonyRunning}
-            >
-              {symphonyRunning ? "Running..." : "Run Symphony"}
-            </button>
-          </div>
-        )}
-        {symphonyStatus && (
-          <div className="mc-v2-planner-run-detail">
-            <div className="mc-v2-planner-run-metrics">
-              <span>{symphonyStatus.activeRuns.length} active</span>
-              <span>{symphonyStatus.retryQueue.length} retrying</span>
-              <span>{symphonyStatus.workflow.error ? "workflow blocked" : "workflow ready"}</span>
-            </div>
-            {(symphonyStatus.workflow.error || symphonyStatus.lastError) && (
-              <div className="mc-v2-empty" style={{ padding: "8px 0" }}>
-                {symphonyStatus.workflow.error || symphonyStatus.lastError}
-              </div>
-            )}
-            <div className="mc-v2-ops-list">
-              {symphonyStatus.latestDispatches.length === 0 ? (
-                <div className="mc-v2-empty" style={{ padding: "8px 0" }}>
-                  No Symphony dispatches yet.
-                </div>
-              ) : (
-                symphonyStatus.latestDispatches.map((issue: any) => (
-                  <button
-                    key={issue.issueId}
-                    type="button"
-                    className={`mc-v2-ops-row mc-v2-ops-row-btn ${selectedIssueId === issue.issueId ? "selected" : ""}`}
-                    onClick={() => {
-                      setSelectedIssueId(issue.issueId);
-                      setDetailPanel({ kind: "issue", issueId: issue.issueId });
-                    }}
-                  >
-                    <div>
-                      <div className="mc-v2-ops-row-title">{issue.title}</div>
-                      <div className="mc-v2-ops-row-subtitle">
-                        {issue.lastDispatchAt
-                          ? formatRelativeTime(issue.lastDispatchAt)
-                          : "dispatched"}
-                      </div>
-                    </div>
-                    <span className={`mc-v2-ops-pill status-${issue.status}`}>{issue.status}</span>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
       <div className="mc-v2-planner-status-row">
         <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Strategic Planner</h3>
         <span className={`mc-v2-planner-status-badge ${config?.enabled ? "enabled" : "disabled"}`}>

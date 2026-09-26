@@ -919,32 +919,6 @@ Suggest 3-4 discussion topics including career growth.
 
 ---
 
-### Digital Twin Automation
-
-Activate role-specific AI twins that proactively handle cognitive overhead in the background — PR triage, sprint health reports, dependency scans, and more.
-
-**What it handles:**
-
-- 10 pre-built persona templates across engineering, management, product, data, and operations
-- Heartbeat-driven background tasks on configurable schedules
-- Proactive insights — flagging issues, preparing reports, surfacing patterns
-- Cognitive offload categories per role
-- Persistent across sessions
-
-**Available twins:**
-
-- Software Engineer — PR triage, dependency checks, test coverage monitoring
-- Engineering Manager — Sprint health, standup summaries, blocker detection
-- Product Manager — Feature request triage, roadmap risk flagging
-- DevOps/SRE — Deployment health, uptime monitoring, incident summaries
-- QA/Test Engineer — Coverage reports, regression risk, flaky test detection
-- Data Scientist — Pipeline health, data quality scans, anomaly detection
-- Technical Writer — Doc freshness scans, style consistency checks
-
-**Powered by:** Digital Twin system, Mission Control, plugin pack integration
-
----
-
 ## Security & Compliance
 
 ### Security Auditing
@@ -2001,7 +1975,7 @@ Rate the attractiveness of entering with a [specific angle].
 | **Data & Analytics**       | CSV analysis, SQL, financial modeling, market screening                                             | Data Analysis pack, 8+ financial skills                      |
 | **Content & Marketing**    | Blog, social, email campaigns, SEO, copywriting                                                     | Marketing pack, marketing strategist skill                   |
 | **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 17 channels, scheduling, 10+ productivity skills             |
-| **Team & Management**      | Sprints, 1-on-1 prep, status reports, digital twins                                                 | EM pack, PM pack, 10 persona templates                       |
+| **Team & Management**      | Sprints, 1-on-1 prep, status reports                                                                | EM pack, PM pack                                             |
 | **Security**               | Vulnerability scanning, compliance, dependency auditing, authorized data-broker privacy cleanup     | Security audit skill, dependency check skill, Unbroker skill |
 | **Remote Ops**             | Chat-driven deployment, headless mode, WebSocket API                                                | Gateway, headless daemon, remote access                      |
 | **Voice & Audio**          | Calls, TTS, STT, dictation, music/speaker control                                                   | ElevenLabs MCP, Whisper, Spotify/Sonos/BluOS MCP             |
@@ -2022,5 +1996,4 @@ Rate the attractiveness of entering with a [specific angle].
 - [Plugin Packs](plugin-packs.md) — Browse and configure plugin packs
 - [Channels](channels.md) — Messaging channel setup
 - [Enterprise Connectors](enterprise-connectors.md) — MCP connector development
-- [Digital Twins](digital-twins.md) — Role-based AI twin personas
 - [Test Prompts](use-cases.md) — Copy-paste prompts for end-to-end validation

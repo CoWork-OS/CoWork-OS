@@ -99,7 +99,7 @@ Avoid:
 
 - "replace employees" or "reorg"
 - "AI firm replacing teams"
-- Framing Digital Twins as labor replacement (prefer "offload", "governance", "orchestration")
+- Framing agents as labor replacement (prefer "offload", "governance", "orchestration")
 - Claiming full replacement for every advanced Word, Excel, PowerPoint, Keynote, Pages, Numbers, or browser development feature
 
 ---

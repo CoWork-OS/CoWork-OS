@@ -194,9 +194,6 @@ import type {
   BoxBrainSettings,
   BoxBrainStatus,
   BoxBrainSyncResult,
-  SymphonyConfig,
-  SymphonyConfigUpdate,
-  SymphonyStatus,
   IntegrationMentionOption,
   IntegrationMentionSelection,
   EverydayActionPreview,
@@ -4439,59 +4436,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
       request,
     ) as Promise<BotNotificationPolicy>,
 
-  // Persona Templates (Digital Twins) APIs
-  listPersonaTemplates: (filter?: { category?: string; tag?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_LIST, filter),
-  getPersonaTemplate: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_GET, id),
-  activatePersonaTemplate: (request: {
-    templateId: string;
-    customization?: {
-      companyId?: string;
-      displayName?: string;
-      icon?: string;
-      color?: string;
-      modelKey?: string;
-      providerType?: string;
-    };
-  }) => ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_ACTIVATE, request),
-  previewPersonaTemplate: (templateId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_PREVIEW, templateId),
-  getPersonaTemplateCategories: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.PERSONA_TEMPLATE_GET_CATEGORIES),
-
   // Mission Control - Company Ops / Planner
   listCompanies: () => ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_LIST),
   getCompany: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_GET, companyId),
-  createCompany: (input: import("../shared/types").CompanyCreateInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_CREATE, input),
-  updateCompany: (request: { companyId: string } & import("../shared/types").CompanyUpdate) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_UPDATE, request),
-  listCompanyPackageSources: (companyId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_PACKAGE_SOURCE_LIST, companyId),
-  previewCompanyPackageImport: (request: import("../shared/types").CompanyPackageImportRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_PACKAGE_PREVIEW_IMPORT, request) as Promise<
-      import("../shared/types").CompanyImportPreview
-    >,
-  importCompanyPackage: (request: import("../shared/types").CompanyPackageImportRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_PACKAGE_IMPORT, request) as Promise<
-      import("../shared/types").CompanyPackageImportResult
-    >,
-  getCompanyGraph: (companyId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_GRAPH_GET, companyId) as Promise<
-      import("../shared/types").ResolvedCompanyGraph
-    >,
-  listCompanySyncStates: (companyId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_SYNC_LIST, companyId) as Promise<
-      import("../shared/types").CompanySyncState[]
-    >,
-  linkCompanyOrgNodeToRole: (request: {
-    companyId: string;
-    orgNodeId: string;
-    agentRoleId: string | null;
-  }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_COMPANY_ORG_LINK_ROLE, request) as Promise<
-      import("../shared/types").CompanySyncState | null
-    >,
   getCommandCenterSummary: (companyId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, companyId) as Promise<
       import("../shared/types").CompanyCommandCenterSummary
@@ -4558,15 +4505,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runPlanner: (companyId: string) => ipcRenderer.invoke(IPC_CHANNELS.MC_PLANNER_RUN, companyId),
   listPlannerRuns: (companyId: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MC_PLANNER_LIST_RUNS, { companyId, limit }),
-  getSymphonyConfig: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_GET_CONFIG) as Promise<SymphonyConfig>,
-  updateSymphonyConfig: (updates: SymphonyConfigUpdate) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_UPDATE_CONFIG, updates) as Promise<SymphonyConfig>,
-  getSymphonyStatus: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_STATUS) as Promise<SymphonyStatus>,
-  runSymphony: () => ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_RUN) as Promise<SymphonyStatus>,
-  pauseSymphony: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.MC_SYMPHONY_PAUSE) as Promise<SymphonyConfig>,
 
   // Plugin Packs (Customize panel) APIs
   listPluginPacks: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PACK_LIST),
@@ -7888,75 +7826,9 @@ export interface ElectronAPI {
     request: UpdateBotNotificationPolicyRequest,
   ) => Promise<BotNotificationPolicy>;
 
-  // Persona Templates (Digital Twins)
-  listPersonaTemplates: (filter?: { category?: string; tag?: string }) => Promise<unknown[]>;
-  getPersonaTemplate: (id: string) => Promise<unknown | undefined>;
-  activatePersonaTemplate: (request: {
-    templateId: string;
-    customization?: {
-      companyId?: string;
-      displayName?: string;
-      icon?: string;
-      color?: string;
-      modelKey?: string;
-      providerType?: string;
-    };
-  }) => Promise<{
-    agentRole: AgentRoleData;
-    installedSkillIds: string[];
-    proactiveTaskCount: number;
-    warnings: string[];
-  }>;
-  previewPersonaTemplate: (templateId: string) => Promise<{
-    roleName: string;
-    displayName: string;
-    skills: Array<{ skillId: string; reason: string; required: boolean }>;
-    proactiveTasks: Array<{
-      id: string;
-      name: string;
-      description: string;
-      category: string;
-      promptTemplate: string;
-      frequencyMinutes: number;
-      priority: number;
-      enabled: boolean;
-    }>;
-  } | null>;
-  getPersonaTemplateCategories: () => Promise<
-    Array<{
-      id: string;
-      label: string;
-      count: number;
-    }>
-  >;
-
   // Mission Control - Company Ops / Planner
   listCompanies: () => Promise<import("../shared/types").Company[]>;
   getCompany: (companyId: string) => Promise<import("../shared/types").Company | undefined>;
-  createCompany: (
-    input: import("../shared/types").CompanyCreateInput,
-  ) => Promise<import("../shared/types").Company>;
-  updateCompany: (
-    request: { companyId: string } & import("../shared/types").CompanyUpdate,
-  ) => Promise<import("../shared/types").Company | undefined>;
-  listCompanyPackageSources: (
-    companyId?: string,
-  ) => Promise<import("../shared/types").CompanyPackageSource[]>;
-  previewCompanyPackageImport: (
-    request: import("../shared/types").CompanyPackageImportRequest,
-  ) => Promise<import("../shared/types").CompanyImportPreview>;
-  importCompanyPackage: (
-    request: import("../shared/types").CompanyPackageImportRequest,
-  ) => Promise<import("../shared/types").CompanyPackageImportResult>;
-  getCompanyGraph: (companyId: string) => Promise<import("../shared/types").ResolvedCompanyGraph>;
-  listCompanySyncStates: (
-    companyId: string,
-  ) => Promise<import("../shared/types").CompanySyncState[]>;
-  linkCompanyOrgNodeToRole: (request: {
-    companyId: string;
-    orgNodeId: string;
-    agentRoleId: string | null;
-  }) => Promise<import("../shared/types").CompanySyncState | null>;
   getCommandCenterSummary: (
     companyId: string,
   ) => Promise<import("../shared/types").CompanyCommandCenterSummary>;
@@ -8026,11 +7898,6 @@ export interface ElectronAPI {
     companyId: string,
     limit?: number,
   ) => Promise<import("../shared/types").StrategicPlannerRun[]>;
-  getSymphonyConfig: () => Promise<SymphonyConfig>;
-  updateSymphonyConfig: (updates: SymphonyConfigUpdate) => Promise<SymphonyConfig>;
-  getSymphonyStatus: () => Promise<SymphonyStatus>;
-  runSymphony: () => Promise<SymphonyStatus>;
-  pauseSymphony: () => Promise<SymphonyConfig>;
 
   // Plugin Packs (Customize panel)
   listPluginPacks: () => Promise<

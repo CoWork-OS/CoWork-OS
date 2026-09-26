@@ -216,15 +216,10 @@ const WebAccessSettingsPanel = lazySettingsPanel(
   "WebAccessSettingsPanel",
 );
 const InfraSettings = lazySettingsPanel(() => import("./InfraSettings"), "InfraSettings");
-const DigitalTwinsPanel = lazySettingsPanel(
-  () => import("./DigitalTwinsPanel"),
-  "DigitalTwinsPanel",
-);
 const SubconsciousSettingsPanel = lazySettingsPanel(
   () => import("./SubconsciousSettingsPanel"),
   "SubconsciousSettingsPanel",
 );
-const CompaniesPanel = lazySettingsPanel(() => import("./CompaniesPanel"), "CompaniesPanel");
 const CouncilSettings = lazySettingsPanel(() => import("./CouncilSettings"), "CouncilSettings");
 const RoutineSettingsPanel = lazySettingsPanel(
   () => import("./RoutineSettingsPanel"),
@@ -246,7 +241,6 @@ const EverydayAgentSettingsPanel = lazySettingsPanel(
 type SettingsTab =
   | "appearance"
   | "personality"
-  | "companies"
   | "system"
   | "tray"
   | "guardrails"
@@ -285,7 +279,6 @@ type SettingsTab =
   | "suggestions"
   | "traces"
   | "customize"
-  | "digitaltwins"
   | "everydayAgent"
   | "triggers"
   | "briefing"
@@ -337,8 +330,6 @@ interface SettingsProps {
   workspaceId?: string;
   onCreateTask?: (title: string, prompt: string) => void;
   onOpenTask?: (taskId: string) => void;
-  onNavigateToMissionControl?: (companyId: string) => void;
-  onNavigateToAgents?: () => void;
 }
 
 interface ModelOption {
@@ -728,24 +719,12 @@ const sidebarItems: SidebarItem[] = [
     icon: <User {...I} />,
   },
   {
-    tab: "companies",
-    label: "Companies",
-    group: "General",
-    icon: <Building2 {...I} />,
-  },
-  {
     tab: "system",
     label: "System & Security",
     group: "General",
     icon: <Shield {...I} />,
   },
   { tab: "voice", label: "Voice Mode", group: "General", icon: <Mic {...I} /> },
-  {
-    tab: "digitaltwins",
-    label: "Agent Personas",
-    group: "General",
-    icon: <User {...I} />,
-  },
   {
     tab: "everydayAgent",
     label: "Everyday Agent",
@@ -936,7 +915,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
     },
   ],
   personality: [{ terms: ["personality", "assistant behavior", "system prompt"] }],
-  companies: [{ terms: ["companies", "company", "mission control", "organization"] }],
   system: [
     {
       terms: [
@@ -952,7 +930,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
     },
   ],
   voice: [{ terms: ["voice", "voice mode", "speech", "microphone", "audio"] }],
-  digitaltwins: [{ terms: ["agent personas", "personas", "digital twins", "agents"] }],
   aimodels: [
     {
       terms: [
@@ -1346,8 +1323,6 @@ export function Settings({
   workspaceId,
   onCreateTask,
   onOpenTask,
-  onNavigateToMissionControl,
-  onNavigateToAgents,
 }: SettingsProps) {
   const normalizedInitialTab: SettingsTab =
     initialTab === "tray" || initialTab === "guardrails" || initialTab === "policies"
@@ -1366,7 +1341,6 @@ export function Settings({
                 ? "access"
                 : (initialTab ?? "appearance");
   const [activeTab, setActiveTab] = useState<SettingsTab>(normalizedInitialTab);
-  const [digitalTwinsCompanyId, setDigitalTwinsCompanyId] = useState<string | null>(null);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
     initialTab === "skillhub" ? "store" : "custom",
@@ -8746,21 +8720,6 @@ export function Settings({
                 />
               ) : activeTab === "personality" ? (
                 <PersonalitySettings onSettingsChanged={onSettingsChanged} />
-              ) : activeTab === "companies" ? (
-                <CompaniesPanel
-                  onOpenMissionControl={(companyId: string) =>
-                    onNavigateToMissionControl?.(companyId)
-                  }
-                  onOpenDigitalTwins={(companyId: string) => {
-                    setDigitalTwinsCompanyId(companyId);
-                    setActiveTab("digitaltwins");
-                  }}
-                />
-              ) : activeTab === "digitaltwins" ? (
-                <DigitalTwinsPanel
-                  initialCompanyId={digitalTwinsCompanyId}
-                  onOpenAgents={onNavigateToAgents}
-                />
               ) : activeTab === "everydayAgent" ? (
                 <EverydayAgentSettingsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
               ) : activeTab === "system" ? (

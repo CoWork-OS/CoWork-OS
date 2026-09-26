@@ -1,6 +1,6 @@
 # Plugin Packs & Customize
 
-Plugin packs are composable bundles that group skills, agent roles, connectors, and slash commands into a single installable unit. Most packs target a job function — engineering, sales, product management, legal practice areas — while workflow packs such as **CoWork Shortcuts** add reusable message-box shortcuts. Packs can optionally link to a [Digital Twin Persona](digital-twins.md) as an optional role preset.
+Plugin packs are composable bundles that group skills, agent roles, connectors, and slash commands into a single installable unit. Most packs target a job function — engineering, sales, product management, legal practice areas — while workflow packs such as **CoWork Shortcuts** add reusable message-box shortcuts.
 
 Access from **Settings** > **Customize**.
 
@@ -27,7 +27,6 @@ A JSON manifest (`cowork.plugin.json`) that bundles related capabilities:
 | **Slash Commands**     | Shortcut mappings that trigger skills via `/command` syntax in the message box                                             |
 | **Connectors**         | Declarative tool definitions (HTTP, shell, script) for external services                                                   |
 | **Try Asking**         | Natural language prompt suggestions for discoverability                                                                    |
-| **Digital Twin Link**  | Optional `personaTemplateId` connecting the pack to a proactive persona                                                    |
 | **Best-Fit Workflows** | Optional `bestFitWorkflows` array tagging the pack to one or more operational lanes (`support_ops`, `it_ops`, `sales_ops`) |
 | **Outcome Examples**   | Optional `outcomeExamples` array of short strings describing what users achieve with the pack                              |
 
@@ -47,7 +46,6 @@ Individual skills are standalone prompt templates. A pack is a **curated collect
 - A dedicated agent role with a tailored system prompt
 - Recommended external connectors (MCP servers)
 - Discoverable prompt suggestions via "Try asking"
-- Optional digital twin integration for proactive automation
 
 ### Slash Commands and Message Box Shortcuts
 
@@ -85,8 +83,7 @@ The Customize panel is the unified entry point for browsing, enabling, and confi
 │ [🔍 Search...]   │                                           │
 │                  │  Pack Name              [Toggle ON/OFF]  │
 │  ⚡ Connectors   │  Description text                        │
-│  ⚡ Skills       │  🧬 Includes Digital Twin                 │
-│                  │  🔗 Recommended: hubspot-mcp              │
+│  ⚡ Skills       │  🔗 Recommended: hubspot-mcp              │
 │  ──────────────  │  🟠 Update available: v1.1.0              │
 │  PACKS           │                                           │
 │                  │  [Commands] [Skills] [Agents]             │
@@ -128,7 +125,6 @@ When a pack is selected, the right panel shows:
 
 - Pack name and description
 - Toggle switch to enable/disable the pack (state persists across restarts)
-- Digital Twin badge (if the pack links to a persona template)
 - Recommended connectors chips (clickable — navigates to connector settings)
 - Update available badge (shown when a newer version exists in the registry)
 
@@ -138,7 +134,7 @@ When a pack is selected, the right panel shows:
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Commands** | Card grid of slash commands derived from skills. Each card shows the `/command-name` and description.                                                                                      |
 | **Skills**   | List of all skills in the pack with icon, name, description, and **per-skill toggle switch**. Individual skills can be enabled or disabled independently without toggling the entire pack. |
-| **Agents**   | Agent roles defined by the pack, plus a Digital Twin entry if `personaTemplateId` is set.                                                                                                  |
+| **Agents**   | Agent roles defined by the pack.                                                                                                                                                           |
 
 When `bestFitWorkflows` is set, the pack header shows colored **Best for** lane badges (Support Ops, IT Ops, Sales Ops). When `outcomeExamples` is set, a short bulleted list of outcomes appears below the badges.
 
@@ -279,7 +275,6 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 | ---------------- | --------------------- |
 | **Icon**         | 👨‍💻                    |
 | **Category**     | Engineering           |
-| **Digital Twin** | Software Engineer     |
 | **Agent Role**   | Engineering Assistant |
 
 **Skills:**
@@ -305,7 +300,6 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 | ---------------- | ------------------- |
 | **Icon**         | 👥                  |
 | **Category**     | Management          |
-| **Digital Twin** | Engineering Manager |
 | **Agent Role**   | EM Assistant        |
 
 **Skills:**
@@ -330,7 +324,6 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 | ---------------- | --------------- |
 | **Icon**         | 🎯              |
 | **Category**     | Product         |
-| **Digital Twin** | Product Manager |
 | **Agent Role**   | PM Assistant    |
 
 **Skills:**
@@ -355,7 +348,6 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 | ---------------- | ------------------- |
 | **Icon**         | ⚙️                  |
 | **Category**     | Engineering         |
-| **Digital Twin** | DevOps/SRE Engineer |
 | **Agent Role**   | DevOps Engineer     |
 
 **Skills:**
@@ -439,7 +431,6 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 | ---------------- | -------------- |
 | **Icon**         | 📊             |
 | **Category**     | Data           |
-| **Digital Twin** | Data Scientist |
 | **Agent Role**   | Data Analyst   |
 
 **Skills:**
@@ -464,7 +455,6 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 | ---------------- | ---------------- |
 | **Icon**         | 🧪               |
 | **Category**     | Engineering      |
-| **Digital Twin** | QA/Test Engineer |
 | **Agent Role**   | QA Assistant     |
 
 **Skills:**
@@ -565,7 +555,6 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 | ---------------- | -------------------------- |
 | **Icon**         | ✍️                         |
 | **Category**     | Operations                 |
-| **Digital Twin** | Technical Writer           |
 | **Agent Role**   | Technical Writer Assistant |
 
 **Skills:**
@@ -711,33 +700,6 @@ See [Claude-for-Legal Workflows](claude-for-legal.md) for examples, safety behav
 - "Prepare quarterly performance review for Henderson family account"
 - "Run comprehensive risk analysis including VaR and drawdown metrics"
 - "Identify tax-loss harvesting opportunities across equity positions"
-
----
-
-## Digital Twin Integration
-
-Seven of the seventeen bundled packs link to [Digital Twin Personas](digital-twins.md):
-
-| Pack                   | Persona Template    | Example Role Fit                                                  |
-| ---------------------- | ------------------- | ----------------------------------------------------------------- |
-| Engineering            | Software Engineer   | PR triage, dependency checks, test coverage review                |
-| Engineering Management | Engineering Manager | Sprint health reporting, standup prep, blocker detection          |
-| Product Management     | Product Manager     | Feature triage, roadmap prep, stakeholder briefs                  |
-| DevOps                 | DevOps/SRE Engineer | Uptime review, deployment verification, incident summaries        |
-| Data Analysis          | Data Scientist      | Pipeline review, data quality scans, anomaly detection            |
-| QA & Testing           | QA/Test Engineer    | Test coverage reporting, regression review, flaky-test detection  |
-| Technical Writing      | Technical Writer    | Doc freshness review, style consistency checks, link verification |
-
-Pack activation exposes the linked twin as an optional persona preset. It does not auto-enroll that role into heartbeat, Workflow Intelligence, or memory ownership.
-
-### Activation Flow
-
-1. Enable the pack in the Customize panel
-2. The Digital Twin badge appears in the pack detail header
-3. Go to **Mission Control** > **Add Digital Twin**
-4. Select the linked persona template
-5. Activate the role preset
-6. Optionally attach a separate automation profile if that role should become always-on
 
 ---
 
@@ -1177,7 +1139,6 @@ window.electronAPI.scaffoldPluginPack({
   "keywords": ["tag1", "tag2"],
   "icon": "🔧",
   "category": "Engineering",
-  "personaTemplateId": "software-engineer",
   "recommendedConnectors": ["hubspot-mcp"],
   "bestFitWorkflows": ["sales_ops"],
   "outcomeExamples": [
@@ -1262,12 +1223,6 @@ window.electronAPI.scaffoldPluginPack({
 - Per-skill enable/disable state is persisted for both inline `skills` and directory-backed `skillDirectories`.
 - Packaged builds include `resources/plugin-packs/**`, so future non-reference files under a bundled pack are preserved.
 
-### Linking a Digital Twin
-
-Set `personaTemplateId` to any existing persona template ID (e.g., `"software-engineer"`, `"product-manager"`). The pack will show a Digital Twin badge in the Customize panel, and users can activate the linked persona from Mission Control.
-
-See [Digital Twin Personas Guide](digital-twin-personas-guide.md) for the full list of available templates and their capabilities.
-
 ---
 
 ## Use Cases
@@ -1278,7 +1233,6 @@ See [Digital Twin Personas Guide](digital-twin-personas-guide.md) for the full l
 2. Use "Triage open PRs and build a prioritized review queue" to manage code reviews
 3. Run **Dependency Audit** before each release to catch vulnerabilities
 4. Generate **Standup Updates** from your git history each morning
-5. Activate the **Software Engineer** digital twin for automatic PR triage and test coverage monitoring
 
 ### Team Lead — Engineering Manager
 
@@ -1286,7 +1240,6 @@ See [Digital Twin Personas Guide](digital-twin-personas-guide.md) for the full l
 2. Before each 1-on-1, use **1-on-1 Prep** to gather context on your report's recent work
 3. Check **Sprint Health Review** mid-sprint to catch at-risk items early
 4. Generate **Team Status Reports** for leadership with one click
-5. Activate the **Engineering Manager** twin for daily sprint health summaries
 
 ### Product Manager
 
@@ -1294,7 +1247,6 @@ See [Digital Twin Personas Guide](digital-twin-personas-guide.md) for the full l
 2. Paste a batch of feature requests into **Feature Request Triage** to categorize and prioritize
 3. Use **User Story Generator** to create well-structured stories with acceptance criteria
 4. Generate **Roadmap Updates** for stakeholder communication
-5. The **Product Manager** twin proactively flags roadmap risks and prepares decision briefs
 
 ### Sales Team
 
@@ -1310,7 +1262,6 @@ See [Digital Twin Personas Guide](digital-twin-personas-guide.md) for the full l
 2. During incidents, use **Incident Response** for structured triage and communication templates
 3. Before releases, generate a **Deployment Checklist** tailored to your environment
 4. After incidents, write **Post-mortem Reports** in blameless format
-5. The **DevOps/SRE** twin monitors deployment health and surfaces alerts proactively
 
 ### Mobile Developer
 
@@ -1332,12 +1283,12 @@ See [Digital Twin Personas Guide](digital-twin-personas-guide.md) for the full l
 
 Enable multiple packs simultaneously. A team of 5 might have:
 
-- 2 engineers with the **Engineering** pack + twin
-- 1 PM with **Product Management** pack + twin
-- 1 EM with **Engineering Management** pack + twin
-- 1 QA with **QA & Testing** pack + twin
+- 2 engineers with the **Engineering** pack
+- 1 PM with **Product Management** pack
+- 1 EM with **Engineering Management** pack
+- 1 QA with **QA & Testing** pack
 
-Each person gets role-specific skills and proactive digital twins that work in the background — the PM twin triages feature requests while the engineer twins monitor PRs and dependencies, all running concurrently.
+Each person gets role-specific skills, agent roles, and slash commands for their job function.
 
 ---
 
@@ -1347,11 +1298,10 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 
 | Feature                      | CoWork OS                                                                                                                  | Typical AI Plugins                     |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| **Digital Twin integration** | Packs link to proactive personas that work in the background                                                               | Reactive only — waits for user prompts |
 | **Multi-model**              | Skills work across supported account, API, gateway, cloud, local-model, and Mixture of Agents routes                       | Commonly tied to one provider          |
 | **Local-first**              | Pack definitions and runtime state stay local by default; invoked providers and integrations receive required request data | Commonly cloud-dependent               |
 | **MCP standard**             | Connectors use open Model Context Protocol                                                                                 | Proprietary integrations               |
-| **Heartbeat tasks**          | Twins proactively surface insights on a schedule                                                                           | No background processing               |
+| **Heartbeat tasks**          | Heartbeat-enabled agents proactively surface insights on a schedule                                                        | No background processing               |
 | **Agent Teams**              | Packs include team configurations for multi-agent orchestration                                                            | Single agent only                      |
 | **Declarative**              | Create packs with JSON only — no code required                                                                             | Often requires code                    |
 
@@ -1372,12 +1322,6 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 - Check that the pack is toggled ON (enabled)
 - Verify skill parameters match the `{{placeholder}}` names in the prompt
 - Check the `"enabled": true` flag on each skill
-
-### Digital Twin badge not showing
-
-- Confirm `personaTemplateId` is set in the manifest
-- Verify the referenced template ID exists in `resources/persona-templates/`
-- The badge appears in the Agents tab and the pack header
 
 ### Toggle doesn't persist after restart
 
@@ -1440,6 +1384,4 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 ## Further Reading
 
 - [Admin Policies](admin-policies.md) — Enterprise admin policy configuration
-- [Digital Twin Personas](digital-twins.md) — Proactive AI twin personas
-- [Digital Twin Personas Guide](digital-twin-personas-guide.md) — Comprehensive guide with scenarios
 - [Features](features.md) — Complete feature reference

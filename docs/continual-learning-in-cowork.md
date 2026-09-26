@@ -103,7 +103,6 @@ Everything else is a surrounding surface:
 - Mission Control is the cockpit
 - Triggers are ingress
 - Devices are routing
-- Digital Twins are optional persona presets
 
 That hard boundary matters because it gives CoWork OS one narrow place where learning is allowed to accumulate and improve the system.
 
@@ -157,7 +156,7 @@ That is the difference between “history” and “learning.”
 
 ### 1. Core traces are captured at the automation-profile level
 
-Learning in the always-on runtime is owned by `AutomationProfile`, not by raw roles and not by Digital Twins.
+Learning in the always-on runtime is owned by `AutomationProfile`, not by raw roles.
 
 That means the learning loop is attached to:
 
@@ -166,8 +165,6 @@ That means the learning loop is attached to:
 - a real always-on runtime participant
 
 This avoids a common product mistake where every surface tries to own cognition at once.
-
-Digital Twins stay opt-in and visible, but they do not own Heartbeat, Workflow Intelligence, or Memory state.
 
 ### 2. Memory is updated on both the hot path and the offline path
 
@@ -294,7 +291,6 @@ That is why CoWork OS made the hard cut:
 - Mission Control observes and configures that runtime
 - Triggers only normalize ingress
 - Devices only route execution
-- Digital Twins are only persona presets
 
 This makes the learning loop composable.
 

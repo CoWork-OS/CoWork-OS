@@ -77,7 +77,7 @@ Generated 2026-09-26T08:33:35.242Z. These are public GitHub/npm adoption signals
 - **Box Brain for source-backed company knowledge** — Opt-in background indexing from one Box folder through Hosted MCP, incremental private local recall with preserved Box URLs, and reviewable Dreaming candidates. Box remains canonical and the background index never writes back to Box. [Box Brain](docs/box-brain.md)
 - **Integrations, model routes, and skills** — Dozens of provider routes, configurable fallback chains, Mixture of Agents presets, provider-aware prompt caching, MCP connectors, bundled packs, built-in skills, Composer `@` mentions, message-box `/` shortcuts, Plugin Store, Skill Store, and external skill directories make the app extensible without giving up local control. [Models & Access](docs/providers.md) · [Mixture of Agents](docs/mixture-of-agents.md) · [Plugin Packs](docs/plugin-packs.md)
 - **Governed access profiles** — Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles combine sandbox, approval, reviewer, network, filesystem, and domain policy. Command tools follow the selected profile; new tasks have no separate shell enable/disable switch. [Access Profiles](docs/access-profiles.md)
-- **Ops and portability** — Zero-Human Company Ops, Digital Twin personas, managed devices, remote access, app profiles, profile import/export, and best-fit workflow packs support both personal work and founder/operator-style autonomous company loops.
+- **Ops and portability** — Managed devices, remote access, app profiles, profile import/export, and best-fit workflow packs support both personal work and founder/operator-style autonomous company loops.
 - **Local-first security** — Workspace state and encrypted credentials are stored locally. Credentials are sent only to the configured provider or gateway for authentication, and cloud-model prompts necessarily leave the device. Access profiles, approval workflows, sandboxed execution, configurable guardrails, session-scoped location prompts, private-memory filtering, and a verified automated test suite keep high-agency work bounded and reviewable.
 
 Recent high-impact additions change the day-to-day product shape: Automation Studio, the `cowork` CLI, Mixture of Agents model presets, Browser Use Cloud routing, Codex Security workflows, automation outcome reporting, real terminal tabs, visible Browser Workbench, Side Chat, message-box shortcuts, Everything Workbench artifacts, and Secure MCP Tunnels. Detailed feature inventory remains below for deeper evaluation.
@@ -292,7 +292,7 @@ The top of this README is intentionally opinionated about what matters first. Th
 | **Inbox and communications**       | Inbox Agent, Classic and Today inbox modes, Ask Inbox, hybrid mailbox search, editable AI drafts, manual reply/reply-all/forward, sender cleanup, commitments, Gmail forwarding automations, `@Inbox` routing, voice mode, outbound calls, and 17 messaging channels                                                                                                                                                                                                                 |
 | **Automation and memory**          | Main-screen Automation Studio with versioned structured flows, dry runs, variables, branches, approvals, cancellation, recovery, and activity; plus prompt-based Routines, scheduled tasks, webhooks, event triggers, Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, adaptive style learning, Usage Insights, persistent memory, Knowledge Graph, ChatGPT history import, durable runtime context, context compaction, Supermemory, and Chronicle |
 | **Integrations and extensibility** | Dozens of model routes, Mixture of Agents presets, ordered LLM/search fallback chains, provider-aware prompt caching, MCP connectors, native and MCP-backed Google Workspace coverage, bundled plugin packs and skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support                                                                                                                                                                  |
-| **Operations and deployment**      | Profiles, profile import/export, Devices, remote workspaces, remote task dispatch, remote file picking, Control Plane, Linux server package, self-hosting, Tailscale/SSH remote access, Zero-Human Company Ops, Digital Twin personas, company-linked operator agents, and best-fit Support/IT/Sales workflow packs                                                                                                                                                                  |
+| **Operations and deployment**      | Profiles, profile import/export, Devices, remote workspaces, remote task dispatch, remote file picking, Control Plane, Linux server package, self-hosting, Tailscale/SSH remote access, company-linked operator agents, and best-fit Support/IT/Sales workflow packs                                                                                                                                                                  |
 | **Safety and reliability**         | Approval workflows, sandboxed execution, workspace/profile permission rules, network/sandbox policy controls, private-memory filtering, session-scoped location approvals, command/path containment, import scanning and quarantine, encrypted storage, local-first data handling, renderer event caps, off-main-thread memory recall, and long-session cleanup                                                                                                                      |
 
 ### Mission Control
@@ -326,24 +326,6 @@ Everyday Agent turns personal priorities into a reviewable operating plan: goals
 <p align="center">
   <img src="resources/branding/images/cowork-os-13.webp" alt="Everyday Agent settings" width="700">
   <br><em>Capability settings make each Everyday Agent lane explicit and adjustable.</em>
-</p>
-
-### Zero-Human Company Ops
-
-CoWork OS can be configured as a founder-operated autonomous company shell: venture workspace kit context, a dedicated `Settings > Companies` control surface, company-linked operator agents, automation profiles, strategic planner issue generation, and Mission Control ops monitoring. Create the company in `Companies`, activate operator personas such as `Company Planner` and `Founder Office Operator`, then attach automation where needed and monitor the company loop from Mission Control. [Learn more](docs/zero-human-company.md) | [Core Automation](docs/core-automation.md)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-2.webp" alt="Company operations dashboard" width="700">
-  <br><em>Company workspaces can track goals, operators, and autonomous company loops.</em>
-</p>
-
-### Digital Twin Personas
-
-Role-specific AI twins that handle cognitive overhead as optional persona presets. Pick a template (Software Engineer, Engineering Manager, Product Manager, VP, Founder Office Operator, Company Planner, and more), customize it, and activate it as a role preset with recommended skills and prompt/personality defaults. Twins can be linked to a company for company-aware operations, but they no longer own heartbeat or Workflow Intelligence policy directly. [Learn more](docs/digital-twins.md)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-14.webp" alt="Agent personas" width="700">
-  <br><em>Persona presets give managed agents role-specific defaults and tools.</em>
 </p>
 
 ### Live Canvas & Build Mode
@@ -428,7 +410,7 @@ Dozens of routes across built-in, compatible/gateway, local, account-based, and 
 
 ### Plugin Platform & Customize
 
-Unified plugin platform with 36 bundled packs (Engineering, DevOps, Product, Sales, QA, Finance, Claude-for-Legal practice packs, CoWork Shortcuts, and more), each bundling skills, agent roles, connectors, slash command aliases, and "Try asking" prompts. Packs can link to Digital Twin personas as optional role presets.
+Unified plugin platform with 36 bundled packs (Engineering, DevOps, Product, Sales, QA, Finance, Claude-for-Legal practice packs, CoWork Shortcuts, and more), each bundling skills, agent roles, connectors, slash command aliases, and "Try asking" prompts.
 
 - **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
 - **Per-skill control**: Enable or disable individual skills within a pack without toggling the whole pack
@@ -461,7 +443,7 @@ These are the workflows where approval gates, local data control, and measurable
 
 - **151 built-in skills** across developer, productivity, communication, documents, frontend, game development, mobile development, financial analysis, infrastructure-as-code, architecture design, privacy/security cleanup, and more
 - **Custom skills** in `~/Library/Application Support/cowork-os/skills/` (macOS) or `%APPDATA%\cowork-os\skills\` (Windows)
-- **36 bundled plugin packs** with 338 pack skills, 263 pack shortcuts, 42 pack agent roles, message-box slash aliases, Claude-for-Legal workflow cards, and Digital Twin integration where applicable
+- **36 bundled plugin packs** with 338 pack skills, 263 pack shortcuts, 42 pack agent roles, message-box slash aliases, and Claude-for-Legal workflow cards
 - **Plugin Store** — browse, install from Git/URL, scaffold custom packs, and review quarantine/report state for imported packs
 - **Skill Store** — browse CoWork Registry skills, search ClawHub, import external skills from Git, raw JSON, or raw `SKILL.md`, and review quarantine/report state for imported skills
 - **MCP support** — client, host, and registry
@@ -619,13 +601,10 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Context Compaction](docs/context-compaction.md)                         | Proactive session compaction with structured summaries and chat-history summarization                                                              |
 | [Mission Control](docs/mission-control.md)                               | Agent orchestration dashboard                                                                                                                      |
 | [Subconscious Loop](docs/subconscious-loop.md)                           | Compatibility redirect for the former name of Workflow Intelligence                                                                                |
-| [Zero-Human Company Ops](docs/zero-human-company.md)                     | Founder-directed company planning, operators, and Mission Control ops workflows                                                                    |
 | [Plugin Packs](docs/plugin-packs.md)                                     | Plugin platform, Customize panel, and Plugin Store                                                                                                 |
 | [Skill Store & External Skills](docs/skill-store-and-external-skills.md) | ClawHub support, external skill imports, and managed-skill install flows                                                                           |
 | [Best-Fit Workflows](docs/best-fit-workflows.md)                         | Support Ops, IT Ops, and Sales Ops — where CoWork OS delivers the strongest ROI                                                                    |
 | [Admin Policies](docs/admin-policies.md)                                 | Enterprise admin policies and organization pack management                                                                                         |
-| [Digital Twins](docs/digital-twins.md)                                   | Optional role-based persona presets and cognitive offload without core-runtime ownership                                                           |
-| [Digital Twins Guide](docs/digital-twin-personas-guide.md)               | Comprehensive guide with scenarios and expanded job areas                                                                                          |
 | [Windows npm Smoke Test](docs/windows-npm-smoke-test.md)                 | Clean Windows install/launch validation checklist for npm releases                                                                                 |
 | [Troubleshooting](docs/troubleshooting.md)                               | Common issues and fixes                                                                                                                            |
 | [Uninstall](docs/uninstall.md)                                           | Uninstall instructions                                                                                                                             |

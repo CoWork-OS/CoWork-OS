@@ -4135,7 +4135,7 @@ Channel Message Log (Local Gateway):
 	- set_quirks: Set personality quirks (catchphrase, sign_off, analogy_domain).
 - set_vibes: Update the workspace's current energy/mode (crunch, explore, deep-focus, maintenance, playful, low-energy, default). Call when you detect a shift in the user's working energy.
 - update_lore: Record a notable shared moment or reference in the workspace lore. Use after significant accomplishments, breakthroughs, or discoveries.
-- manage_heartbeat: Enable or disable the heartbeat (periodic wake-up) for a digital twin / agent role. Use when asked to start or stop a twin.
+- manage_heartbeat: Enable or disable the heartbeat (periodic wake-up) for an agent role. Use when asked to start or stop an agent's scheduled check-ins.
 - set_agent_name: Set or change the assistant's name when the user wants to give you a name.
 - set_user_name: Store the user's name when they introduce themselves (e.g., "I'm Alice", "My name is Bob").`;
 
@@ -13648,8 +13648,8 @@ ${skillDescriptions}`;
       {
         name: "manage_heartbeat",
         description:
-          "Enable or disable the heartbeat (periodic wake-up) for a digital twin / agent role. " +
-          "Use this when the user asks to start or stop a twin. Disabling the heartbeat prevents " +
+          "Enable or disable the heartbeat (periodic wake-up) for an agent role. " +
+          "Use this when the user asks to start or stop an agent. Disabling the heartbeat prevents " +
           "the agent from waking up on its own schedule.",
         input_schema: {
           type: "object",
@@ -13657,7 +13657,7 @@ ${skillDescriptions}`;
             agent_name: {
               type: "string",
               description:
-                "The display name of the agent role / digital twin (e.g. 'Engineering Manager Twin')",
+                "The display name of the agent role (e.g. 'Engineering Manager')",
             },
             enabled: {
               type: "boolean",

@@ -22,7 +22,6 @@ const REQUIRED_FILES = [
   "docs/vps-linux.md",
   "resources/branding/cowork-os-app-logo-dark.png",
   "resources/branding/cowork-os-app-logo-light.png",
-  "resources/persona-templates/software-engineer.json",
   "resources/numbat/manifest.json",
   "resources/numbat/NOTICE.md",
   "resources/numbat/LICENSE.Numbat.txt",

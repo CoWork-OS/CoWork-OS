@@ -72,7 +72,7 @@ Manual `wake now` is still an override path and can bypass defer rules.
 
 ## Automation Profiles
 
-Heartbeat ownership now lives on `AutomationProfile`, not directly on persona templates.
+Heartbeat ownership now lives on `AutomationProfile`.
 
 An automation profile is attached to a generic operator role and stores:
 
@@ -83,8 +83,6 @@ An automation profile is attached to a generic operator role and stores:
 - dispatch budget
 - active hours
 - heartbeat profile
-
-Digital Twin activation does not create an automation profile automatically. Twins remain optional persona presets and can later be paired with a separate automation profile if you want an always-on operator.
 
 ## Heartbeat Profiles
 

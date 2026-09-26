@@ -20,9 +20,7 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
     workspaces,
     selectedWorkspaceId,
     setSelectedWorkspaceId,
-    companies,
     selectedCompanyId,
-    setSelectedCompanyId,
     activeAgentsCount,
     totalTasksInQueue,
     pendingMentionsCount,
@@ -78,21 +76,6 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
               ))}
             </select>
           </div>
-          {companies.length > 0 && (
-            <div className="mc-v2-selector">
-              <span className="mc-v2-selector-label">Company</span>
-              <select
-                value={selectedCompanyId || ""}
-                onChange={(e) => setSelectedCompanyId(e.target.value)}
-              >
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
         </div>
         <div className="mc-v2-stats">
           <span

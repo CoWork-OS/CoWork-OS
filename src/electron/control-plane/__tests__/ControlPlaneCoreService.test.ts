@@ -168,37 +168,6 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(importedIssues[0].title).toBe(issue.title);
   });
 
-  it("moves completed Symphony tasks to review instead of done", () => {
-    const workspace = insertWorkspace();
-    const company = service.getDefaultCompany();
-    const issue = service.createIssue({
-      companyId: company.id,
-      workspaceId: workspace.id,
-      title: "Implement Symphony handoff",
-      status: "todo",
-    });
-    const checkout = service.checkoutIssue({
-      issueId: issue.id,
-      workspaceId: workspace.id,
-    });
-    const task = taskRepo.create({
-      title: issue.title,
-      prompt: "Implement",
-      status: "completed",
-      workspaceId: workspace.id,
-      source: "symphony",
-      issueId: issue.id,
-      heartbeatRunId: checkout.run.id,
-    });
-    service.attachTaskToRun(checkout.run.id, task.id);
-
-    taskRepo.update(task.id, { status: "completed", resultSummary: "Ready for review." });
-    service.syncTaskLifecycle(task.id);
-
-    expect(service.getIssue(issue.id)?.status).toBe("review");
-    expect(service.getRun(checkout.run.id)?.status).toBe("completed");
-  });
-
   it("provisions a default workspace for companies and auto-links projects to it", () => {
     const company = service.createCompany({
       name: "Workspace Co",

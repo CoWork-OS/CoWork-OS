@@ -2149,12 +2149,10 @@ export function App() {
     | "skills"
     | "scheduled"
     | "voice"
-    | "companies"
-    | "digitaltwins"
     | "mcp"
     | "triggers"
     | "subconscious"
-    | "suggestions"
+      | "suggestions"
     | "insights"
     | "pulse"
     | "traces"
@@ -7963,10 +7961,6 @@ export function App() {
                       setMissionControlEverydayAgentFocus(false);
                       setCurrentView("missionControl");
                     }}
-                    onOpenAgentPersonas={() => {
-                      setSettingsTab("digitaltwins");
-                      setCurrentView("settings");
-                    }}
                     onOpenSlackSettings={() => {
                       setSettingsTab("slack");
                       setCurrentView("settings");
@@ -8203,15 +8197,6 @@ export function App() {
               setCurrentView("main");
               void selectTaskAfterDraftFlush(taskId);
               setRightSidebarCollapsed(false);
-            }}
-            onNavigateToMissionControl={(companyId) => {
-              setMissionControlInitialCompanyId(companyId);
-              setMissionControlInitialIssueId(null);
-              setMissionControlEverydayAgentFocus(false);
-              setCurrentView("missionControl");
-            }}
-            onNavigateToAgents={() => {
-              setCurrentView("agents");
             }}
           />
         </Suspense>

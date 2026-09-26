@@ -31,9 +31,6 @@ import type {
   QueueStatus,
   StrategicPlannerConfig,
   StrategicPlannerRun,
-  SymphonyConfig,
-  SymphonyConfigUpdate,
-  SymphonyStatus,
   Task,
   Workspace,
 } from "../../../shared/types";
@@ -306,10 +303,6 @@ export function useMissionControlData(
   // ── Planner ──
   const [plannerConfig, setPlannerConfig] = useState<StrategicPlannerConfig | null>(null);
   const [plannerRuns, setPlannerRuns] = useState<StrategicPlannerRun[]>([]);
-  const [symphonyConfig, setSymphonyConfig] = useState<SymphonyConfig | null>(null);
-  const [symphonyStatus, setSymphonyStatus] = useState<SymphonyStatus | null>(null);
-  const [symphonySaving, setSymphonySaving] = useState(false);
-  const [symphonyRunning, setSymphonyRunning] = useState(false);
   const [selectedPlannerRunId, setSelectedPlannerRunId] = useState<string | null>(null);
   const [commandCenterSummary, setCommandCenterSummary] =
     useState<CompanyCommandCenterSummary | null>(null);
@@ -472,21 +465,6 @@ export function useMissionControlData(
       setSelectedPlannerRunId(null);
     } finally {
       setPlannerLoading(false);
-    }
-  }, []);
-
-  const loadSymphonyData = useCallback(async () => {
-    try {
-      const [config, status] = await Promise.all([
-        window.electronAPI.getSymphonyConfig(),
-        window.electronAPI.getSymphonyStatus(),
-      ]);
-      setSymphonyConfig(config);
-      setSymphonyStatus(status);
-    } catch (err) {
-      logger.error("Failed to load Symphony data:", err);
-      setSymphonyConfig(null);
-      setSymphonyStatus(null);
     }
   }, []);
 
@@ -762,7 +740,6 @@ export function useMissionControlData(
         await loadCommandCenterSummary(selectedCompanyId);
         await loadMissionControlIntelligence(selectedWorkspaceId);
       }
-      await loadSymphonyData();
     } catch (err) {
       logger.error("Failed to refresh:", err);
     } finally {
@@ -774,7 +751,6 @@ export function useMissionControlData(
     loadCoreHarnessData,
     loadMissionControlIntelligence,
     loadPlannerData,
-    loadSymphonyData,
     loadWorkspaceScopedData,
     selectedCompanyId,
     selectedWorkspaceId,
@@ -808,9 +784,6 @@ export function useMissionControlData(
   useEffect(() => {
     loadCompanies();
   }, [loadCompanies]);
-  useEffect(() => {
-    void loadSymphonyData();
-  }, [loadSymphonyData]);
   useEffect(() => {
     if (selectedWorkspaceId) loadData(selectedWorkspaceId);
   }, [selectedWorkspaceId, loadData]);
@@ -1428,34 +1401,6 @@ export function useMissionControlData(
     selectedWorkspaceId,
   ]);
 
-  const handleSymphonyConfigChange = useCallback(async (updates: SymphonyConfigUpdate) => {
-    try {
-      setSymphonySaving(true);
-      const next = await window.electronAPI.updateSymphonyConfig(updates);
-      setSymphonyConfig(next);
-      setSymphonyStatus(await window.electronAPI.getSymphonyStatus());
-    } catch (err) {
-      logger.error("Failed to update Symphony config:", err);
-    } finally {
-      setSymphonySaving(false);
-    }
-  }, []);
-
-  const handleRunSymphony = useCallback(async () => {
-    try {
-      setSymphonyRunning(true);
-      const status = await window.electronAPI.runSymphony();
-      setSymphonyStatus(status);
-      setSymphonyConfig(status.config);
-      if (selectedCompanyId) await loadCompanyOps(selectedCompanyId);
-      if (selectedWorkspaceId) await handleManualRefresh();
-    } catch (err) {
-      logger.error("Failed to run Symphony:", err);
-    } finally {
-      setSymphonyRunning(false);
-    }
-  }, [handleManualRefresh, loadCompanyOps, selectedCompanyId, selectedWorkspaceId]);
-
   // ── Comment action ──
   const handlePostComment = useCallback(async () => {
     if (!detailPanel || detailPanel.kind !== "task") return;
@@ -1745,10 +1690,6 @@ export function useMissionControlData(
     plannerRuns,
     selectedPlannerRunId,
     setSelectedPlannerRunId,
-    symphonyConfig,
-    symphonyStatus,
-    symphonySaving,
-    symphonyRunning,
     commandCenterSummary,
     plannerLoading,
     plannerSaving,
@@ -1862,8 +1803,6 @@ export function useMissionControlData(
     handlePlannerConfigChange,
     handleRunPlanner,
     handlePostComment,
-    handleSymphonyConfigChange,
-    handleRunSymphony,
     handleCreateAgent,
     handleEditAgent,
     handleSaveAgent,

@@ -230,7 +230,6 @@ Once the app opens, the most important places to know are:
 - **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
 - **Settings > Automations**: advanced prompt-based Routines, Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing controls
 - **Settings > Profiles**: create, switch, export, and import isolated app profiles
-- **Settings > Companies**: company shell setup, goals, projects, issues, planner state, and linked operators
 - **Mission Control**: company and operator monitoring, Heartbeat-agent state, global runtime queue status, workspace Mission Board, feed, and Ops view
 - **Settings > Skills**: Skill Store imports plus optional external read-only skill directories
 - **Settings > Channels**: Slack multi-workspace setup, Telegram group routing, Discord guild allowlists, channel/chat/thread specialization, and enterprise channels such as Feishu/Lark and WeCom
@@ -241,7 +240,7 @@ Once the app opens, the most important places to know are:
 - **Presentation artifacts**: when a task creates a PowerPoint deck, the output card appears in the task feed. PPTX opens in the right-sidebar presentation viewer with thumbnails, slide navigation, zoom, speaker notes, and fast text-first loading while slide images render or load from cache. Fullscreen mode keeps the follow-up composer so you can request deck edits and see the preview refresh after the file is updated. See [Presentation Artifacts and PPTX Preview](pptx-generation-and-preview.md).
 - **Web page artifacts**: when a task creates `.html` / `.htm` or built React output such as `dist/index.html`, the output card appears in the task feed. The main **Open** action opens a sandboxed web preview in the right sidebar; fullscreen mode keeps the follow-up composer so you can request page edits and see the preview refresh after the file or build output is updated. React-style projects without built output show a build-output-needed state instead of starting a dev server. See [Web Page Artifacts](web-page-artifacts.md).
 
-If you are just getting started, do not configure everything at once. Set up an LLM provider, run one local task, then add Devices, Automations, or Companies as needed.
+If you are just getting started, do not configure everything at once. Set up an LLM provider, run one local task, then add Devices or Automations as needed.
 
 ## Optional: Try Chronicle
 
@@ -319,28 +318,6 @@ Rule of thumb:
 - use prompt-based `Routines` for one saved instruction block with target, policy, outputs, and run history
 - use `Scheduled Tasks`, `Webhooks`, or `Event Triggers` directly only when you specifically need the advanced underlying engine
 - use a task's three-dot menu and `Add automation...` when a task you just ran should become a recurring automation; this creates a task-sourced routine, continues the same thread by default, and preserves a source task/deeplink reference
-
-## Zero-Human Company Quick Start
-
-If you want to use CoWork OS as a founder-operated autonomous company shell:
-
-1. Choose a real git-backed workspace.
-2. Open **Settings** > **Memory Hub**.
-3. Initialize **Venture operator kit**.
-4. Fill in the generated `.cowork/` company files (`COMPANY.md`, `OPERATIONS.md`, `KPIS.md`, `PRIORITIES.md`, `HEARTBEAT.md`).
-5. Open **Settings** > **Companies**.
-6. Create or select the company shell you want to operate.
-7. Click **Open Digital Twins** from that company.
-8. Activate:
-   - `Company Planner`
-   - `Founder Office Operator`
-9. Enable heartbeat for both operators.
-10. Return to **Settings** > **Companies** and confirm the operators are linked to the intended company.
-11. Open **Mission Control** from that company.
-12. In the planner strip, enable scheduling, set the planner agent, and click **Run Planner**.
-13. Use the `Ops` tab to monitor goals, projects, planner-managed issues, and linked execution runs.
-
-See [Zero-Human Company Operations](zero-human-company.md) for the full architecture, recipe, use cases, and operating model.
 
 ## Example Tasks to Try
 

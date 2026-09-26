@@ -94,10 +94,6 @@ npm run package:mac:unsigned
 npm run package:mac:smoke -- --allow-unsigned
 ```
 
-Packaging smoke failures involving missing persona-template resources are packaging
-manifest issues and should be investigated in Electron Builder `extraResources`; they
-are not evidence of a Vite renderer failure.
-
 ## Vite 8 config loading
 
 The Vite and Vitest configs use the `.mts` extension so the native config loader treats

@@ -514,5 +514,4 @@ Enforcement:
 ## Further Reading
 
 - [Plugin Packs](plugin-packs.md) — Complete plugin pack system documentation
-- [Digital Twin Personas](digital-twins.md) — Proactive AI twin personas
 - [Features](features.md) — Complete feature reference

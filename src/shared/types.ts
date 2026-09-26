@@ -7176,10 +7176,10 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, "id" | "createdAt" | "updatedA
   },
 ];
 
-// ============ Persona Templates (Digital Twins) ============
+// ============ Heartbeat cognitive offload ============
 
 /**
- * Cognitive offload category - types of mental work a digital twin absorbs
+ * Cognitive offload category - types of mental work a proactive agent absorbs
  * so the human can stay in flow.
  */
 export type CognitiveOffloadCategory =
@@ -7208,97 +7208,6 @@ export interface ProactiveTaskDefinition {
   minSignalStrength?: number;
   priority: number; // Lower = higher priority (1-10)
   enabled: boolean;
-}
-
-/**
- * Skill reference within a persona template
- */
-export interface PersonaTemplateSkillRef {
-  skillId: string;
-  reason: string;
-  required: boolean;
-}
-
-export interface PersonaTemplateHeartbeatConfig {
-  enabled: boolean;
-  intervalMinutes: number;
-  staggerOffset?: number;
-  dispatchCooldownMinutes?: number;
-  maxDispatchesPerDay?: number;
-  profile?: HeartbeatProfile;
-  activeHours?: HeartbeatActiveHours | null;
-}
-
-export interface PersonaTemplateCognitiveOffloadConfig {
-  primaryCategories: CognitiveOffloadCategory[];
-  proactiveTasks: ProactiveTaskDefinition[];
-}
-
-/**
- * Category for persona template gallery grouping
- */
-export type PersonaTemplateCategory =
-  | "engineering"
-  | "management"
-  | "product"
-  | "data"
-  | "operations";
-
-/**
- * A persona template defines a pre-built digital twin configuration.
- * Templates are instantiated into AgentRoles when activated.
- */
-export interface PersonaTemplate {
-  id: string;
-  version: string;
-  name: string;
-  description: string;
-  icon: string;
-  color: string;
-  category: PersonaTemplateCategory;
-
-  role: {
-    capabilities: AgentCapability[];
-    autonomyLevel: AgentAutonomyLevel;
-    personalityId: PersonalityId;
-    toolRestrictions?: AgentToolRestrictions;
-    systemPrompt: string;
-    soul: string; // JSON string for role-persona
-  };
-
-  heartbeat?: PersonaTemplateHeartbeatConfig;
-  cognitiveOffload?: PersonaTemplateCognitiveOffloadConfig;
-
-  skills: PersonaTemplateSkillRef[];
-
-  tags: string[];
-  seniorityRange: string[];
-  industryAgnostic: boolean;
-}
-
-/**
- * Result from activating (instantiating) a persona template
- */
-export interface PersonaTemplateActivationResult {
-  agentRole: AgentRole;
-  installedSkillIds: string[];
-  proactiveTaskCount: number;
-  warnings: string[];
-}
-
-/**
- * Request to activate a persona template
- */
-export interface ActivatePersonaTemplateRequest {
-  templateId: string;
-  customization?: {
-    companyId?: string;
-    displayName?: string;
-    icon?: string;
-    color?: string;
-    modelKey?: string;
-    providerType?: LLMProviderType;
-  };
 }
 
 // ============ Mission Control Types ============
@@ -8812,14 +8721,6 @@ export const IPC_CHANNELS = {
   // Mission Control - Company Ops / Planner
   MC_COMPANY_LIST: "missionControl:companyList",
   MC_COMPANY_GET: "missionControl:companyGet",
-  MC_COMPANY_CREATE: "missionControl:companyCreate",
-  MC_COMPANY_UPDATE: "missionControl:companyUpdate",
-  MC_COMPANY_PACKAGE_SOURCE_LIST: "missionControl:companyPackageSourceList",
-  MC_COMPANY_PACKAGE_PREVIEW_IMPORT: "missionControl:companyPackagePreviewImport",
-  MC_COMPANY_PACKAGE_IMPORT: "missionControl:companyPackageImport",
-  MC_COMPANY_GRAPH_GET: "missionControl:companyGraphGet",
-  MC_COMPANY_SYNC_LIST: "missionControl:companySyncList",
-  MC_COMPANY_ORG_LINK_ROLE: "missionControl:companyOrgLinkRole",
   MC_COMMAND_CENTER_SUMMARY: "missionControl:commandCenterSummary",
   MC_GOAL_LIST: "missionControl:goalList",
   MC_GOAL_GET: "missionControl:goalGet",
@@ -8840,11 +8741,6 @@ export const IPC_CHANNELS = {
   MC_PLANNER_UPDATE_CONFIG: "missionControl:plannerUpdateConfig",
   MC_PLANNER_RUN: "missionControl:plannerRun",
   MC_PLANNER_LIST_RUNS: "missionControl:plannerListRuns",
-  MC_SYMPHONY_GET_CONFIG: "missionControl:symphonyGetConfig",
-  MC_SYMPHONY_UPDATE_CONFIG: "missionControl:symphonyUpdateConfig",
-  MC_SYMPHONY_STATUS: "missionControl:symphonyStatus",
-  MC_SYMPHONY_RUN: "missionControl:symphonyRun",
-  MC_SYMPHONY_PAUSE: "missionControl:symphonyPause",
   MC_AUTOMATION_OUTCOME_RETRY: "missionControl:automationOutcomeRetry",
 
   // Mission Control - Agent Performance Reviews
@@ -8889,11 +8785,6 @@ export const IPC_CHANNELS = {
   TEAM_RUN_FIND_BY_ROOT_TASK: "teamRun:findByRootTask",
 
   // Mission Control - Persona Templates (Digital Twins)
-  PERSONA_TEMPLATE_LIST: "personaTemplate:list",
-  PERSONA_TEMPLATE_GET: "personaTemplate:get",
-  PERSONA_TEMPLATE_ACTIVATE: "personaTemplate:activate",
-  PERSONA_TEMPLATE_PREVIEW: "personaTemplate:preview",
-  PERSONA_TEMPLATE_GET_CATEGORIES: "personaTemplate:getCategories",
 
   // Plugin Packs (Customize panel)
   PLUGIN_PACK_LIST: "pluginPack:list",
@@ -13850,163 +13741,6 @@ export interface CompanyImportResult {
   issueCount: number;
 }
 
-export type CompanyPackageSourceKind = "local" | "git" | "github";
-export type CompanyPackageTrustLevel = "local" | "trusted" | "untrusted";
-export type CompanyPackageSourceStatus = "ready" | "needs_attention" | "imported";
-export type CompanyPackageManifestKind =
-  | "company"
-  | "team"
-  | "agent"
-  | "project"
-  | "task"
-  | "skill";
-export type CompanyGraphNodeKind = CompanyPackageManifestKind;
-export type CompanyGraphEdgeKind =
-  | "contains"
-  | "belongs_to"
-  | "reports_to"
-  | "manages_team"
-  | "includes"
-  | "attaches_skill"
-  | "assigned_to"
-  | "related_to_project";
-export type CompanySyncStatus = "in_sync" | "diverged" | "local_override" | "unlinked";
-export type CompanyImportAction = "create" | "update" | "link" | "skip" | "conflict" | "warning";
-export type CompanyRuntimeEntityKind = "company" | "goal" | "project" | "issue" | "agent_role";
-
-export interface CompanyPackageSource {
-  id: string;
-  companyId?: string;
-  sourceKind: CompanyPackageSourceKind;
-  name: string;
-  rootUri: string;
-  localPath?: string;
-  ref?: string;
-  pin?: string;
-  trustLevel: CompanyPackageTrustLevel;
-  status: CompanyPackageSourceStatus;
-  notes?: string;
-  lastSyncedAt?: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CompanyPackageSourceInput {
-  companyId?: string | null;
-  sourceKind: CompanyPackageSourceKind;
-  name?: string;
-  rootUri: string;
-  localPath?: string | null;
-  ref?: string | null;
-  pin?: string | null;
-  trustLevel?: CompanyPackageTrustLevel;
-  status?: CompanyPackageSourceStatus;
-  notes?: string | null;
-}
-
-export interface CompanyPackageManifest {
-  id: string;
-  sourceId: string;
-  kind: CompanyPackageManifestKind;
-  slug: string;
-  name: string;
-  description?: string;
-  relativePath: string;
-  body: string;
-  bodyHash: string;
-  frontmatter: Record<string, unknown>;
-  provenance: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CompanyGraphNode {
-  id: string;
-  companyId?: string;
-  sourceId?: string;
-  manifestId?: string;
-  kind: CompanyGraphNodeKind;
-  slug: string;
-  name: string;
-  description?: string;
-  relativePath?: string;
-  parentNodeId?: string;
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CompanyGraphEdge {
-  id: string;
-  companyId?: string;
-  sourceId?: string;
-  fromNodeId: string;
-  toNodeId: string;
-  kind: CompanyGraphEdgeKind;
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CompanySyncState {
-  id: string;
-  companyId: string;
-  sourceId?: string;
-  manifestId?: string;
-  orgNodeId?: string;
-  runtimeEntityKind: CompanyRuntimeEntityKind;
-  runtimeEntityId: string;
-  syncStatus: CompanySyncStatus;
-  lastSyncedAt?: number;
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface ResolvedCompanyGraph {
-  packageName: string;
-  companyManifest: CompanyPackageManifest | null;
-  manifests: CompanyPackageManifest[];
-  nodes: CompanyGraphNode[];
-  edges: CompanyGraphEdge[];
-  warnings: string[];
-}
-
-export interface CompanyImportPreviewItem {
-  id: string;
-  manifestKind: CompanyPackageManifestKind;
-  action: CompanyImportAction;
-  label: string;
-  details?: string;
-  manifestId?: string;
-  orgNodeId?: string;
-  runtimeEntityKind?: CompanyRuntimeEntityKind;
-  runtimeEntityId?: string;
-}
-
-export interface CompanyImportPreview {
-  source: CompanyPackageSourceInput;
-  graph: ResolvedCompanyGraph;
-  targetCompany?: Company;
-  items: CompanyImportPreviewItem[];
-  warnings: string[];
-}
-
-export interface CompanyPackageImportRequest {
-  companyId?: string | null;
-  source: CompanyPackageSourceInput;
-}
-
-export interface CompanyPackageImportResult {
-  source: CompanyPackageSource;
-  company: Company;
-  graph: ResolvedCompanyGraph;
-  createdCount: number;
-  updatedCount: number;
-  linkedCount: number;
-  warningCount: number;
-}
-
 export type AutonomyPolicyPreset = "manual" | "safe_autonomy" | "founder_edge";
 export type HumanInputPolicy = "none" | "hard_blockers" | "structured_plan" | "legacy_interactive";
 
@@ -14045,75 +13779,6 @@ export interface StrategicPlannerConfigUpdate {
   maxIssuesPerRun?: number;
   staleIssueDays?: number;
   lastRunAt?: number | null;
-}
-
-export type SymphonyRuntimeMode = "native" | "acpx";
-
-export type SymphonyRunStatus = "idle" | "running" | "blocked" | "error";
-
-export interface SymphonyWorkflowDefinition {
-  path: string;
-  config: Record<string, unknown>;
-  promptTemplate: string;
-  loadedAt: number;
-  error?: string;
-}
-
-export interface SymphonyConfig {
-  enabled: boolean;
-  workspaceId?: string;
-  workflowPath?: string;
-  activeStatuses: Issue["status"][];
-  terminalStatuses: Issue["status"][];
-  maxConcurrentIssueRuns: number;
-  approvalPreset: AutonomyPolicyPreset;
-  runtimeMode: SymphonyRuntimeMode;
-  runtimeAgent?: ExternalRuntimeAgent;
-  handoffStatus: Issue["status"];
-  maxRetries: number;
-  retryBaseDelayMs: number;
-  pollIntervalMs: number;
-  createdAt: number;
-  updatedAt: number;
-  lastRunAt?: number;
-}
-
-export interface SymphonyConfigUpdate {
-  enabled?: boolean;
-  workspaceId?: string | null;
-  workflowPath?: string | null;
-  activeStatuses?: Issue["status"][];
-  terminalStatuses?: Issue["status"][];
-  maxConcurrentIssueRuns?: number;
-  approvalPreset?: AutonomyPolicyPreset;
-  runtimeMode?: SymphonyRuntimeMode;
-  runtimeAgent?: ExternalRuntimeAgent | null;
-  handoffStatus?: Issue["status"];
-  maxRetries?: number;
-  retryBaseDelayMs?: number;
-  pollIntervalMs?: number;
-  lastRunAt?: number | null;
-}
-
-export interface SymphonyStatusIssueRef {
-  issueId: string;
-  title: string;
-  status: Issue["status"];
-  taskId?: string;
-  runId?: string;
-  retryCount?: number;
-  retryDueAt?: number;
-  lastDispatchAt?: number;
-}
-
-export interface SymphonyStatus {
-  state: SymphonyRunStatus;
-  config: SymphonyConfig;
-  workflow: SymphonyWorkflowDefinition;
-  activeRuns: SymphonyStatusIssueRef[];
-  retryQueue: SymphonyStatusIssueRef[];
-  latestDispatches: SymphonyStatusIssueRef[];
-  lastError?: string;
 }
 
 export interface StrategicPlannerRun {

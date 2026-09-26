@@ -1537,8 +1537,8 @@ a,
 .spreadsheet-resizable-sidebar {
   display: flex;
   flex: 0 0 auto;
-  min-width: 420px;
-  max-width: calc(100% - 390px);
+  min-width: min(420px, max(0px, calc(100% - 398px)));
+  max-width: max(0px, calc(100% - 398px));
   min-height: 0;
   height: 100%;
 }

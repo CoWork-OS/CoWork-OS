@@ -90,6 +90,11 @@ import type { ComposerDraft, DraftAttachmentRef } from "../shared/composer-draft
 import { TASK_EVENT_STATUS_MAP } from "../shared/task-event-status-map";
 import { getEffectiveTaskEventType } from "./utils/task-event-compat";
 import {
+  clampResizableSidebarWidth,
+  getResizableSidebarWidthConstraints,
+  RESIZABLE_SIDEBAR_MIN_WIDTH,
+} from "./utils/resizable-sidebar-layout";
+import {
   getLatestTaskSnapshotAfterCreate,
   shouldApplyReconciledTaskSnapshot,
 } from "./utils/task-create-reconciliation";
@@ -271,8 +276,7 @@ const MissionControlPanel = lazy(() =>
 );
 
 const SPREADSHEET_SIDEBAR_DEFAULT_WIDTH = 720;
-const SPREADSHEET_SIDEBAR_MIN_WIDTH = 420;
-const SPREADSHEET_MAIN_MIN_WIDTH = 390;
+const SPREADSHEET_SIDEBAR_MIN_WIDTH = RESIZABLE_SIDEBAR_MIN_WIDTH;
 /** Conversation column width beside an open artifact in the calm theme. */
 const CALM_CHAT_COLUMN_WIDTH = 400;
 const SPREADSHEET_SIDEBAR_WIDTH_STORAGE_KEY = "cowork:spreadsheetSidebarWidth";
@@ -999,15 +1003,8 @@ const SelectedTaskWorkspaceView = memo(
       }
       const containerWidth =
         splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
-      const maxWidth = Math.max(
-        SPREADSHEET_SIDEBAR_MIN_WIDTH,
-        containerWidth - SPREADSHEET_MAIN_MIN_WIDTH,
-      );
       setSpreadsheetSidebarWidth(
-        Math.min(
-          Math.max(containerWidth - CALM_CHAT_COLUMN_WIDTH, SPREADSHEET_SIDEBAR_MIN_WIDTH),
-          maxWidth,
-        ),
+        clampResizableSidebarWidth(containerWidth - CALM_CHAT_COLUMN_WIDTH, containerWidth),
       );
     }, [onRevealRightSidebar]);
     const openSpreadsheetArtifact = useCallback(
@@ -1091,16 +1088,12 @@ const SelectedTaskWorkspaceView = memo(
         onRevealRightSidebar?.();
         const containerWidth =
           splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
-        const maxWidth = Math.max(
-          SPREADSHEET_SIDEBAR_MIN_WIDTH,
-          containerWidth - SPREADSHEET_MAIN_MIN_WIDTH,
-        );
         const preferredBrowserWidth = Math.max(
           SPREADSHEET_SIDEBAR_DEFAULT_WIDTH,
           containerWidth - 460,
         );
         setSpreadsheetSidebarWidth(
-          Math.min(Math.max(preferredBrowserWidth, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth),
+          clampResizableSidebarWidth(preferredBrowserWidth, containerWidth),
         );
         setBrowserWorkbench({
           sessionId: request.sessionId || "default",
@@ -1170,12 +1163,11 @@ const SelectedTaskWorkspaceView = memo(
     const clampSpreadsheetSidebarWidth = useCallback((width: number) => {
       const containerWidth =
         splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth;
-      const maxWidth = Math.max(
-        SPREADSHEET_SIDEBAR_MIN_WIDTH,
-        containerWidth - SPREADSHEET_MAIN_MIN_WIDTH,
-      );
-      return Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
+      return clampResizableSidebarWidth(width, containerWidth);
     }, []);
+    const sidebarWidthConstraints = getResizableSidebarWidthConstraints(
+      splitLayoutRef.current?.getBoundingClientRect().width || window.innerWidth,
+    );
     useLayoutEffect(() => {
       if (
         !(
@@ -1207,12 +1199,7 @@ const SelectedTaskWorkspaceView = memo(
         event.currentTarget.setPointerCapture?.(event.pointerId);
         const resizeHandle = event.currentTarget;
         const pointerId = event.pointerId;
-        const maxWidth = Math.max(
-          SPREADSHEET_SIDEBAR_MIN_WIDTH,
-          rect.width - SPREADSHEET_MAIN_MIN_WIDTH,
-        );
-        const clampWidth = (width: number) =>
-          Math.min(Math.max(width, SPREADSHEET_SIDEBAR_MIN_WIDTH), maxWidth);
+        const clampWidth = (width: number) => clampResizableSidebarWidth(width, rect.width);
         setIsSpreadsheetResizing(true);
         setSpreadsheetSidebarWidth(clampWidth(rect.right - event.clientX));
 
@@ -1683,7 +1670,7 @@ const SelectedTaskWorkspaceView = memo(
                 role="separator"
                 orientation="vertical"
                 aria-label="Resize workbench sidebar"
-                aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
+                aria-valuemin={sidebarWidthConstraints.minWidth}
                 aria-valuenow={Math.round(spreadsheetSidebarWidth)}
                 tabIndex={0}
                 onPointerDown={handleSpreadsheetResizePointerDown}

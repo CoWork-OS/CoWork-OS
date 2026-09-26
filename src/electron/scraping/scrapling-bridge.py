@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 # Ensure Scrapling is importable
 try:
     import scrapling
-    from scrapling import Fetcher, StealthFetcher, PlayWrightFetcher
+    from scrapling import Fetcher, PlayWrightFetcher
     SCRAPLING_AVAILABLE = True
     SCRAPLING_VERSION = getattr(scrapling, "__version__", "unknown")
 except ImportError:
@@ -129,6 +129,14 @@ def wait_between_requests(last_request_at: float | None, delay_seconds: float) -
         time.sleep(remaining)
 
 
+def create_fetcher(fetcher_type: str) -> Any:
+    """Build a Scrapling fetcher. The stealth (anti-bot bypass) fetcher is intentionally
+    unsupported; legacy "stealth" requests use the regular Playwright browser."""
+    if fetcher_type in ("playwright", "stealth"):
+        return PlayWrightFetcher(auto_match=True)
+    return Fetcher(auto_match=True)
+
+
 # ──────────────────────────────────────────────
 # Command Handlers
 # ──────────────────────────────────────────────
@@ -144,7 +152,7 @@ def handle_status(_input: dict) -> None:
 
 
 def handle_scrape_page(params: dict) -> None:
-    """Scrape a single URL with anti-bot bypass."""
+    """Scrape a single URL."""
     if not check_available():
         return
 
@@ -165,12 +173,7 @@ def handle_scrape_page(params: dict) -> None:
 
     try:
         # Select fetcher based on type
-        if fetcher_type == "stealth":
-            fetcher = StealthFetcher(auto_match=True)
-        elif fetcher_type == "playwright":
-            fetcher = PlayWrightFetcher(auto_match=True)
-        else:
-            fetcher = Fetcher(auto_match=True)
+        fetcher = create_fetcher(fetcher_type)
 
         # Build fetch kwargs
         fetch_kwargs: dict[str, Any] = {"timeout": timeout / 1000}
@@ -178,7 +181,7 @@ def handle_scrape_page(params: dict) -> None:
             fetch_kwargs["proxies"] = {"http": proxy, "https": proxy}
 
         # For browser-based fetchers
-        if fetcher_type in ("stealth", "playwright"):
+        if fetcher_type == "playwright":
             fetch_kwargs["headless"] = headless
             if wait_for:
                 fetch_kwargs["wait_selector"] = wait_for
@@ -283,12 +286,7 @@ def handle_scrape_multiple(params: dict) -> None:
     delay_seconds = request_delay_seconds(params)
 
     try:
-        if fetcher_type == "stealth":
-            fetcher = StealthFetcher(auto_match=True)
-        elif fetcher_type == "playwright":
-            fetcher = PlayWrightFetcher(auto_match=True)
-        else:
-            fetcher = Fetcher(auto_match=True)
+        fetcher = create_fetcher(fetcher_type)
 
         last_request_at = None
         for url in urls[:20]:  # Cap at 20 URLs per batch
@@ -360,12 +358,7 @@ def handle_extract_structured(params: dict) -> None:
     proxy = params.get("proxy")
 
     try:
-        if fetcher_type == "stealth":
-            fetcher = StealthFetcher(auto_match=True)
-        elif fetcher_type == "playwright":
-            fetcher = PlayWrightFetcher(auto_match=True)
-        else:
-            fetcher = Fetcher(auto_match=True)
+        fetcher = create_fetcher(fetcher_type)
 
         fetch_kwargs: dict[str, Any] = {"timeout": timeout / 1000}
         if proxy:

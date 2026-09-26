@@ -3,9 +3,21 @@ import * as path from "path";
 import { createLogger } from "../utils/logger";
 import { getUserDataDir } from "../utils/user-data-dir";
 
+// The Scrapling StealthFetcher was removed: CoWork does not ship anti-bot or
+// Cloudflare-bypass tooling. Legacy "stealth" values fall back to Playwright.
+export const SCRAPING_FETCHERS = ["default", "playwright"] as const;
+export type ScrapingFetcher = (typeof SCRAPING_FETCHERS)[number];
+
+export function normalizeScrapingFetcher(value: unknown): ScrapingFetcher {
+  if (value === "stealth") return "playwright";
+  return SCRAPING_FETCHERS.includes(value as ScrapingFetcher)
+    ? (value as ScrapingFetcher)
+    : "default";
+}
+
 export interface ScrapingSettings {
   enabled: boolean;
-  defaultFetcher: "default" | "stealth" | "playwright";
+  defaultFetcher: ScrapingFetcher;
   headless: boolean;
   timeout: number;
   maxContentLength: number;
@@ -89,6 +101,7 @@ export class ScrapingSettingsManager {
             ...DEFAULT_SCRAPING_SETTINGS.rateLimiting,
             ...stored.rateLimiting,
           },
+          defaultFetcher: normalizeScrapingFetcher(stored.defaultFetcher),
           pythonPath: resolveSafePythonPath(stored.pythonPath),
         } as ScrapingSettings;
         return { ...this.cachedSettings };
@@ -106,6 +119,7 @@ export class ScrapingSettingsManager {
       const filePath = path.join(getUserDataDir(), SETTINGS_FILE);
       const normalized = {
         ...settings,
+        defaultFetcher: normalizeScrapingFetcher(settings.defaultFetcher),
         pythonPath: resolveSafePythonPath(settings.pythonPath),
       };
       fs.writeFileSync(filePath, JSON.stringify(normalized, null, 2), "utf-8");

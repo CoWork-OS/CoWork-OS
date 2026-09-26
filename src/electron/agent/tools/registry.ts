@@ -1441,7 +1441,7 @@ export class ToolRegistry {
       allTools.push(...SupermemoryTools.getToolDefinitions());
     }
 
-    // Scraping tools (Scrapling integration - anti-bot, stealth, structured extraction)
+    // Scraping tools (Scrapling integration - JS rendering, structured extraction)
     // Only add when scraping is enabled in settings
     if (ScrapingTools.isEnabled()) {
       allTools.push(...ScrapingTools.getToolDefinitions());

@@ -1,6 +1,6 @@
 ---
 name: web-scraper
-description: "Scrape web pages with anti-bot bypass and structured data extraction using Scrapling."
+description: "Scrape web pages and extract structured data using Scrapling."
 version: "1.0.0"
 metadata:
   author: CoWork OS Contributors <info@coworkosapp.com>
@@ -10,11 +10,11 @@ metadata:
 
 ## Purpose
 
-Scrape web pages with anti-bot bypass and structured data extraction using Scrapling.
+Scrape web pages and extract structured data using Scrapling.
 
 ## Routing
 
-- Use when: Use when the user wants to scrape content from websites, especially sites with anti-bot protection, dynamic content, or structured data that needs extraction.
+- Use when: Use when the user wants to scrape content from websites, especially pages with dynamic content or structured data that needs extraction.
 - Do not use when: Don't use for simple URL fetching where web_fetch works fine. Don't use for internal files or local content.
 - Outputs: Extracted web content including text, tables, links, images, and metadata.
 - Success criteria: Successfully extracts the requested content from the target URL with clean formatting.
@@ -25,7 +25,7 @@ Scrape web pages with anti-bot bypass and structured data extraction using Scrap
 
 - Use the web-scraper skill for this request.
 - Help me with web scraper.
-- Use when the user wants to scrape content from websites, especially sites with anti-bot protection, dynamic content, or structured data that needs extraction.
+- Use when the user wants to scrape content from websites, especially pages with dynamic content or structured data that needs extraction.
 - Web Scraper: provide an actionable result.
 
 ### Negative

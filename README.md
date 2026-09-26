@@ -374,7 +374,7 @@ All infrastructure operations that involve spending (domain registration, x402 p
 
 ### Web Scraping
 
-Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scrapling) with anti-bot bypass, stealth browsing, and structured data extraction. Three fetcher modes — fast HTTP with TLS fingerprinting, stealth with Cloudflare bypass, and full Playwright browser. Includes batch scraping, persistent sessions, proxy support, and five built-in skills (web scraper, price tracker, site mapper, lead scraper, content monitor). Configure in **Settings** > **Web Scraping**. [Learn more](docs/features.md#web-scraping-scrapling)
+Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scrapling) with JavaScript rendering and structured data extraction. Two fetcher modes — fast HTTP and full Playwright browser. It does not bypass bot protection or CAPTCHAs. Includes batch scraping, persistent sessions, proxy support, and five built-in skills (web scraper, price tracker, site mapper, lead scraper, content monitor). Configure in **Settings** > **Web Scraping**. [Learn more](docs/features.md#web-scraping-scrapling)
 
 ### Integrations
 

@@ -71,3 +71,14 @@ print(module.classify_response_status(200))
     expect(output).toBe("{'target_blocked': False, 'retryable': False}");
   });
 });
+
+describe("scrapling bridge fetcher selection", () => {
+  it("never constructs the stealth fetcher", () => {
+    const output = runBridgeHelperSnippet(`
+import inspect
+source = inspect.getsource(module)
+print("StealthFetcher(" in source)
+`);
+    expect(output).toBe("False");
+  });
+});

@@ -1329,12 +1329,10 @@ See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-
 
 ## Web Scraping (Scrapling)
 
-Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scrapling) — anti-bot bypass, stealth browsing, adaptive element tracking, and structured data extraction.
+Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scrapling) — JavaScript rendering, adaptive element tracking, and structured data extraction. CoWork does not ship anti-bot, CAPTCHA, or Cloudflare-bypass tooling; if a site blocks automated access, the agent reports it.
 
 | Feature                   | Description                                                               |
 | ------------------------- | ------------------------------------------------------------------------- |
-| **Anti-Bot Bypass**       | TLS fingerprinting impersonates real browsers at the network level        |
-| **Stealth Mode**          | Cloudflare Turnstile bypass, stealth headers, browser fingerprint masking |
 | **Playwright Fetcher**    | Full browser rendering for JavaScript-heavy sites                         |
 | **Structured Extraction** | Auto-detect and extract tables, lists, headings, and metadata             |
 | **Batch Scraping**        | Scrape up to 20 URLs in a single operation                                |
@@ -1356,8 +1354,7 @@ Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scraplin
 
 | Mode           | Best For                                       | Speed  |
 | -------------- | ---------------------------------------------- | ------ |
-| **Default**    | Most sites — fast HTTP with TLS fingerprinting | Fast   |
-| **Stealth**    | Cloudflare-protected sites, anti-bot detection | Medium |
+| **Default**    | Most sites — fast HTTP                         | Fast   |
 | **Playwright** | JavaScript-rendered SPAs, dynamic content      | Slow   |
 
 ### Skills
@@ -1368,7 +1365,7 @@ Five scraping-specific skills are included: **Web Scraper** (general-purpose), *
 
 ```bash
 pip install scrapling
-scrapling install   # downloads stealth browsers
+scrapling install   # downloads the Playwright browser
 ```
 
 Configure in **Settings** > **Web Scraping**. Disabled by default — enable to make scraping tools available to agents.

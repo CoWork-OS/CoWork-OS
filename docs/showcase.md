@@ -848,8 +848,7 @@ For normal-user website testing, JavaScript-heavy app checks, forms, screenshots
 - Visible browser-use testing for live websites and local apps, including responsive viewport checks
 - Shared right-sidebar/fullscreen browser sessions with persistent workspace profile
 - Screenshots and screenshot annotation for visual feedback
-- Single and batch URL scraping with TLS fingerprinting
-- Stealth mode with Cloudflare bypass
+- Single and batch URL scraping, with a full browser for JavaScript-rendered pages
 - Structured data extraction (tables, lists, metadata)
 - Persistent sessions for login→navigate→extract workflows
 - Price tracking and change detection

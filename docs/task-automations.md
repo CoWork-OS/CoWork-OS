@@ -183,8 +183,7 @@ Expanding a scheduled task shows:
 
 The run-history ledger keeps recent runs together with status, duration, delivery outcome, and an `Open` action for each generated task or target thread. `Refresh` reloads scheduler history from the cron service, while `Clear` removes the scheduler history counters for that job without deleting task sessions.
 
-Each run is recorded exactly once, keyed by a run key stored with the run lease, so a restart that
-reconciles an interrupted run or a repeated completion notification cannot count it twice. The
+Each run is recorded once, together with its history entry. The
 counts are classified from the task's durable result (a completed task whose terminal status is
 `failed` is an error; a cancelled task is `cancelled`, not a failure). Delivery state is kept
 beside the execution outcome: a successful run whose channel delivery failed stays successful and

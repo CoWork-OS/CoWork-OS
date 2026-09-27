@@ -222,6 +222,16 @@ counterpart to the Everything Workbench and Browser Workbench: direct CLI work n
 leave CoWork OS. Product behavior and QA guidance are documented in [Terminal Tabs](terminal-tabs.md)
 and [Access Profiles](access-profiles.md#network-and-command-behavior).
 
+## File edit integrity
+
+`edit_file` holds the target descriptor, revalidates authority and rebases exact replacements onto
+current content before writing. Within a user-data profile, device/inode keyed recovery records
+coordinate cooperating processes, including hard-link aliases. A private journal retains before
+and after bytes for failed or interrupted writes. Reconciliation never overwrites ambiguous current
+content automatically. This preserves existing inode metadata but does not provide arbitrary-writer
+compare-and-swap or power-loss atomicity. Limits and recovery behavior are documented in
+[File edit integrity and recovery](file-edit-integrity.md).
+
 ## CoWork CLI
 
 The standalone `cowork` CLI is implemented separately from in-app terminal tabs:

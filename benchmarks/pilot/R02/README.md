@@ -2,7 +2,7 @@
 
 **Attribution: cowork-os.** Use only the fictional offline source packet in `packet.json`.
 
-Return two artifacts: `result.json` and `explanation.md`. The JSON object must contain exactly `period`, `metric`, `value_usd_millions`, `controlling_source_id`, and `conflict_acknowledged`. Read `requested_output` for the requested period, metric, and unit. Determine the controlling and superseded source from the source dates, approval language, revision precedence, and exact span text. Derive the value and source IDs from those spans; this instruction contains no answer values or source IDs.
+Return two artifacts: `result.json` and `explanation.md`. The JSON object must contain exactly `period`, `metric`, `value_usd_millions`, `controlling_source_id`, and `conflict_acknowledged`. `period`, `metric`, `value_usd_millions`, and `controlling_source_id` are JSON strings (write the value as a decimal string such as `"1.5"`, not a JSON number); `conflict_acknowledged` is a JSON boolean. Read `requested_output` for the requested period, metric, and unit. Determine the controlling and superseded source from the source dates, approval language, revision precedence, and exact span text. Derive the value and source IDs from those spans; this instruction contains no answer values or source IDs.
 
 The grader does not interpret free-form prose. To make the explanation deterministic and auditable, write exactly these three lines in this order, replacing every placeholder with a value derived from `packet.json`. Do not include extra prose or leave placeholders in the submitted artifact:
 

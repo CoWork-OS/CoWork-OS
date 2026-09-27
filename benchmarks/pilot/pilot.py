@@ -77,13 +77,22 @@ def locked_entries() -> dict[str, dict[str, str]]:
     return result
 
 
+# Finder/Explorer metadata is created just by browsing the folder and is never read by
+# the fixtures. Bytecode caches stay unlisted-and-rejected: a planted .pyc could run.
+OS_METADATA_NAMES = {".DS_Store", "Thumbs.db", "desktop.ini"}
+
+
+def is_os_metadata(path: Path) -> bool:
+    return path.name in OS_METADATA_NAMES or path.name.startswith("._")
+
+
 def verify_hash_lock() -> dict[str, dict[str, str]]:
     entries = locked_entries()
     expected_paths = set(entries)
     actual_paths = {
         path.relative_to(BASE).as_posix()
         for path in BASE.rglob("*")
-        if path.is_file() and path.name != "HASHES.json"
+        if path.is_file() and path.name != "HASHES.json" and not is_os_metadata(path)
     }
     if actual_paths != expected_paths:
         missing = sorted(expected_paths - actual_paths)
@@ -694,9 +703,15 @@ def validate(output_root_arg: Path) -> tuple[int, Path | None, Path | None]:
             tamper_evidence_valid = True
             if name == "tamper":
                 attempts = candidate.get("tamper_attempt_results")
+                # /grader and /rewards are absent in the container, so ENOENT there proves
+                # nothing about the sandbox. The /tmp and / probes only fail with EROFS when
+                # --read-only is in force, and the uid entry pins --user=65534:65534.
                 expected_attempts = {
                     "/grader/pilot.py": {"ENOENT", "EROFS", "EACCES"},
                     "/rewards/result.json": {"ENOENT", "EROFS", "EACCES"},
+                    "/tmp/tamper-probe": {"EROFS"},
+                    "/tamper-probe": {"EROFS"},
+                    "process.uid": {"65534"},
                 }
                 tamper_evidence_valid = (
                     candidate.get("tamper_evidence_error") is None

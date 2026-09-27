@@ -134,12 +134,14 @@ const BUILTIN_WORKER_ROLES: Record<WorkerRoleKind, WorkerRoleSpec> = {
   researcher: {
     kind: "researcher",
     displayName: "Researcher",
-    description: "Read-only exploration, evidence collection, and issue finding.",
+    description: "Read-only local exploration, evidence collection, and issue finding.",
     systemPrompt: [
       "You are a research worker.",
       "Collect evidence, inspect files, search code, and summarize findings.",
+      "Use local workspace evidence only; this role cannot use browser, network, connector, MCP, or system actions.",
+      "Assign web or external-service research to a separately authorized task.",
       "Do not modify files.",
-      "Return concise, self-contained findings with paths, commands, and risks.",
+      "Return concise, self-contained findings with paths, evidence checked, and risks.",
     ].join("\n"),
     conversationMode: "task",
     allowUserInput: false,
@@ -298,6 +300,32 @@ export function resolveDelegationWorkerRole(params: {
   return inferWorkerRoleKindFromPrompt(params.prompt);
 }
 
+/**
+ * Whether a worker role carries the role-level read-only execution boundary.
+ * Verifiers always do. Researchers do unless the task is an orchestrator-owned
+ * team work item lane (`teamWorkItemLane`), which keeps the pre-existing
+ * researcher denylist (no writes/spawning) instead of the delegated-helper
+ * plan/no-network/no-shell boundary.
+ */
+export function isReadOnlyWorkerRole(
+  workerRole: string | null | undefined,
+  agentConfig?: Pick<AgentConfig, "teamWorkItemLane">,
+): boolean {
+  const kind = resolveWorkerRoleKind(workerRole);
+  if (kind === "verifier") return true;
+  return kind === "researcher" && agentConfig?.teamWorkItemLane !== true;
+}
+
+/**
+ * Follow-up/queued agentConfig overrides must never grant the team lane
+ * exemption; only the team orchestrator sets it when creating the task.
+ */
+export function stripTeamWorkItemLaneOverride<T extends AgentConfig | undefined>(config: T): T {
+  if (!config || !Object.prototype.hasOwnProperty.call(config, "teamWorkItemLane")) return config;
+  const { teamWorkItemLane: _ignored, ...rest } = config;
+  return rest as T;
+}
+
 export function resolveWorkerRoleAgentConfig(
   workerRole: WorkerRoleKind,
   agentConfig?: AgentConfig,
@@ -322,10 +350,10 @@ export function resolveWorkerRoleAgentConfig(
 
   // A role-level read-only contract must survive caller-supplied overrides.
   // The daemon also enforces this while merging parent permissions so a
-  // bypassed parent cannot turn a verifier/helper back into an executing
-  // worker. `readOnlyExecution` is an internal child-helper boundary and may
-  // be combined with a researcher prompt without changing that role.
-  const readOnlyExecution = workerRole === "verifier" || next.readOnlyExecution === true;
+  // bypassed parent cannot turn a researcher, verifier, or read-only helper
+  // back into an executing worker.
+  const readOnlyExecution =
+    isReadOnlyWorkerRole(workerRole, next) || next.readOnlyExecution === true;
   if (readOnlyExecution) {
     next.readOnlyExecution = true;
     next.permissionMode = "plan";
@@ -344,6 +372,26 @@ export function resolveWorkerRoleAgentConfig(
   }
   next.toolRestrictions = Array.from(restrictions);
   return next;
+}
+
+export function normalizeWorkerRoleTaskConfig<
+  T extends {
+    workerRole?: string | null;
+    agentConfig?: AgentConfig;
+  },
+>(task: T): { task: T; changed: boolean } {
+  const workerRole = resolveWorkerRoleKind(task.workerRole);
+  if (workerRole !== "researcher") return { task, changed: false };
+
+  const agentConfig = resolveWorkerRoleAgentConfig(workerRole, task.agentConfig);
+  if (JSON.stringify(agentConfig) === JSON.stringify(task.agentConfig || {})) {
+    return { task, changed: false };
+  }
+
+  return {
+    task: { ...task, agentConfig },
+    changed: true,
+  };
 }
 
 export function buildWorkerRolePrompt(

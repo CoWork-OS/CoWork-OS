@@ -2346,6 +2346,13 @@ export interface AgentConfig {
   shellAccess?: boolean;
   /** Internal daemon-only contract for child helpers that must remain read-only. */
   readOnlyExecution?: boolean;
+  /**
+   * Internal orchestrator-only marker for team work item lanes that reuse the
+   * researcher worker label. These lanes keep the researcher tool denylist but
+   * not the delegated-helper read-only execution boundary. Never honored from
+   * follow-up overrides.
+   */
+  teamWorkItemLane?: boolean;
   /** Require git worktree isolation for this task and fail fast if unavailable. */
   requireWorktree?: boolean;
   /**

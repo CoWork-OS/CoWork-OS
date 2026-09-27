@@ -69,9 +69,52 @@ describe("AgentDaemon.createChildTask", () => {
     expect(daemonLike.ensureCollaborativeRunForParentTask).not.toHaveBeenCalled();
   });
 
-  it("keeps read-only worker roles shell-capable while denying file mutation", async () => {
+  it("keeps team work item researcher lanes shell-capable while denying file mutation", async () => {
     const taskRepo = {
       findById: vi.fn().mockReturnValue(undefined),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({
+        id: "child-task-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...task,
+      })),
+    };
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+
+    const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+      title: "Team lane",
+      prompt: "Research the market.",
+      workspaceId: "ws-1",
+      parentTaskId: "parent-1",
+      agentType: "sub",
+      workerRole: "researcher",
+      teamRunId: "team-run-1",
+      teamItemId: "team-item-1",
+      agentConfig: { teamWorkItemLane: true },
+    });
+
+    expect(child.agentConfig?.readOnlyExecution).toBeUndefined();
+    expect(child.agentConfig?.permissionMode).not.toBe("plan");
+    expect(child.agentConfig?.toolRestrictions).toContain("delete_file");
+    expect(child.agentConfig?.toolRestrictions).toContain("group:write");
+    expect(child.agentConfig?.toolRestrictions).not.toContain("group:destructive");
+  });
+
+  it("keeps a researcher read-only when its parent and caller request bypass", async () => {
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue({
+        id: "parent-1",
+        agentConfig: {
+          accessProfileId: "full_access",
+          permissionMode: "bypass_permissions",
+          shellAccess: true,
+        },
+      }),
       update: vi.fn(),
       create: vi.fn((task: Any) => ({
         id: "child-task-1",
@@ -93,11 +136,41 @@ describe("AgentDaemon.createChildTask", () => {
       parentTaskId: "parent-1",
       agentType: "sub",
       workerRole: "researcher",
+      agentConfig: {
+        accessProfileId: "full_access",
+        permissionMode: "bypass_permissions",
+        shellAccess: true,
+        readOnlyExecution: false,
+        toolRestrictions: [],
+        externalRuntime: {
+          kind: "acpx",
+          agent: "codex",
+          sessionMode: "persistent",
+          outputMode: "json",
+          permissionMode: "approve-all",
+        },
+      },
     });
 
-    expect(child.agentConfig?.toolRestrictions).toContain("delete_file");
-    expect(child.agentConfig?.toolRestrictions).toContain("group:write");
-    expect(child.agentConfig?.toolRestrictions).not.toContain("group:destructive");
+    expect(child.agentConfig).toEqual(
+      expect.objectContaining({
+        readOnlyExecution: true,
+        permissionMode: "plan",
+        shellAccess: false,
+      }),
+    );
+    expect(child.agentConfig?.accessProfileId).toBeUndefined();
+    expect(child.agentConfig?.externalRuntime).toBeUndefined();
+    expect(child.agentConfig?.toolRestrictions).toEqual(
+      expect.arrayContaining([
+        "group:write",
+        "group:destructive",
+        "group:system",
+        "group:memory",
+        "browser_click",
+        "gmail_send_email",
+      ]),
+    );
   });
 
   it("inherits full-access shell permission for child tasks", async () => {

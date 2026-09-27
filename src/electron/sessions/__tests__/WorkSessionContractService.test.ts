@@ -552,6 +552,37 @@ describeWithSqlite("WorkSessionContractService", () => {
     });
   });
 
+  it("does not re-apply an older task-level FAIL to a requirement corrected after that verdict", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["report.txt"] },
+    });
+    service.ensureForTask(task);
+    taskRepo.update(task.id, {
+      status: "failed",
+      terminalStatus: "failed",
+      failureClass: "required_verification",
+      verificationVerdict: "FAIL",
+      completedAt: Date.now() - 60_000,
+    });
+    const failed = service.recordTaskTerminal(task.id).contract!;
+    expect(failed.requirements[0]).toMatchObject({ status: "failed" });
+
+    const corrected = service.recordUserRequirementCorrection(task.id, {
+      requirementId: failed.requirements[0].id,
+      statement: "The report must contain the approved totals",
+      criterion: { type: "unsupported" },
+      idempotencyKey: "correction:after-fail",
+    })!;
+    expect(corrected).toMatchObject({ version: 2 });
+
+    const reread = service.getForTask(task.id)!.contract!;
+    expect(reread.version).toBe(2);
+    expect(reread.requirements[0]).toMatchObject({
+      status: "pending",
+      description: "The report must contain the approved totals",
+    });
+  });
+
   it("rejects linked evidence for the wrong target and stales it", () => {
     const task = createTask({
       successCriteria: { type: "file_exists", filePaths: ["required.txt"] },

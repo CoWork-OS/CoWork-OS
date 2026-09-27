@@ -50,6 +50,40 @@ export interface VerificationRuntimeResult {
 const OPTIONAL_VERIFICATION_EVIDENCE_PREVIEW_LIMIT = 20;
 const OPTIONAL_VERIFICATION_EVIDENCE_DETAIL_LIMIT = 1_000;
 const MAX_VERIFICATION_INPUT_BYTES = 64 * 1024;
+// Variable-size prompt inputs are bounded so ordinary large tasks still fit under the
+// input cap; the cap itself remains only as a last resort.
+const VERIFICATION_TASK_PROMPT_CHAR_LIMIT = 8_000;
+const VERIFICATION_PARENT_SUMMARY_CHAR_LIMIT = 8_000;
+const VERIFICATION_OUTPUT_SUMMARY_CHAR_LIMIT = 6_000;
+const VERIFICATION_REQUIREMENT_DESCRIPTION_CHAR_LIMIT = 400;
+const VERIFICATION_EVIDENCE_CLAIM_CHAR_LIMIT = 200;
+
+function truncateForVerification(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit)}\n[truncated: ${value.length - limit} of ${value.length} characters omitted]`;
+}
+
+/**
+ * Compacts the manifest for the verifier prompt. Every requirement and evidence entry is kept
+ * with its identifiers, paths, status, and hashes intact; only free-text descriptions and
+ * claims are shortened, with an explicit truncation marker.
+ */
+function compactRequirementEvidenceManifest(manifest: RequirementEvidenceManifest): string {
+  return JSON.stringify({
+    ...manifest,
+    requirements: manifest.requirements.map((requirement) => ({
+      ...requirement,
+      description: truncateForVerification(
+        requirement.description,
+        VERIFICATION_REQUIREMENT_DESCRIPTION_CHAR_LIMIT,
+      ),
+      evidence: requirement.evidence.map((entry) => ({
+        ...entry,
+        claim: truncateForVerification(entry.claim, VERIFICATION_EVIDENCE_CLAIM_CHAR_LIMIT),
+      })),
+    })),
+  });
+}
 
 export class VerificationRuntime {
   constructor(private readonly deps: VerificationRuntimeDeps) {}
@@ -199,17 +233,25 @@ export class VerificationRuntime {
         )
       : "(no optional structured execution evidence — rely on files, summary, and the selected manifest)";
     const requirementEvidenceBlock = request.requirementEvidenceManifest
-      ? JSON.stringify(request.requirementEvidenceManifest, null, 2)
+      ? compactRequirementEvidenceManifest(request.requirementEvidenceManifest)
       : "(no requirement-selected evidence manifest)";
     return [
       buildWorkerRolePrompt("verifier", {
         taskTitle: task.title,
-        taskPrompt: task.rawPrompt || task.userPrompt || task.prompt,
+        taskPrompt: truncateForVerification(
+          String(task.rawPrompt || task.userPrompt || task.prompt || ""),
+          VERIFICATION_TASK_PROMPT_CHAR_LIMIT,
+        ),
         workspacePath: task.workspaceId,
-        parentSummary: request.parentSummary,
+        parentSummary: request.parentSummary
+          ? truncateForVerification(request.parentSummary, VERIFICATION_PARENT_SUMMARY_CHAR_LIMIT)
+          : undefined,
         evidenceBundle: evidenceBlock,
         outputSummary: request.outputSummary
-          ? JSON.stringify(request.outputSummary, null, 2)
+          ? truncateForVerification(
+              JSON.stringify(request.outputSummary),
+              VERIFICATION_OUTPUT_SUMMARY_CHAR_LIMIT,
+            )
           : undefined,
       }),
       "",

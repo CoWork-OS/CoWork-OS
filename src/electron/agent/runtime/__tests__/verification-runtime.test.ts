@@ -130,6 +130,50 @@ describe("VerificationRuntime", () => {
     expect(prompt).not.toContain("generic 50");
   });
 
+  it("bounds large prompts, summaries, and manifest text so verification still runs with every requirement", async () => {
+    const runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "child-large",
+      status: "completed" as const,
+      summary: "VERDICT: PASS",
+    });
+    const runtime = new VerificationRuntime({ runReadOnlyChildTaskAndWait });
+    const requirements = Array.from({ length: 60 }, (_, index) => ({
+      requirementId: `large-requirement-${index}`,
+      description: `Check ${"d".repeat(3_000)}`,
+      targetPath: `/workspace/large-output-${index}.txt`,
+      verifier: "file_exists",
+      required: true,
+      status: "pending" as const,
+      evidence: [],
+    }));
+
+    const result = await runtime.run({
+      parentTask: makeTask({ rawPrompt: "p".repeat(40_000) } as Partial<Task>),
+      explicit: true,
+      parentSummary: "s".repeat(40_000),
+      outputSummary: {
+        created: Array.from({ length: 2_000 }, (_, index) => `/workspace/generated-${index}.txt`),
+        outputCount: 2_000,
+      } as never,
+      requirementEvidenceManifest: {
+        contractId: "large-contract",
+        contractVersion: 1,
+        capturedAt: 10,
+        requirements,
+      },
+    });
+
+    expect(runReadOnlyChildTaskAndWait).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ran: true, verdict: "PASS", shouldBlock: false });
+    const prompt = runReadOnlyChildTaskAndWait.mock.calls[0]?.[0]?.prompt || "";
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(64 * 1024);
+    expect(prompt).toContain("[truncated:");
+    for (const requirement of requirements) {
+      expect(prompt).toContain(requirement.requirementId);
+      expect(prompt).toContain(requirement.targetPath);
+    }
+  });
+
   it("blocks an oversized selected manifest before starting a verifier without dropping requirements", async () => {
     const runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
       childTaskId: "unexpected-child",

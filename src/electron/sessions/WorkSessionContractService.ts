@@ -851,10 +851,19 @@ export class WorkSessionContractService {
           }
         }
 
+        // The task-level verdict describes the verification run that finished the task. A user
+        // correction recorded after that run reopens the requirement, so the older FAIL must not
+        // be re-applied to it on later reads.
+        const verdictRecordedAt = task.completedAt ?? task.updatedAt;
+        const correctedAfterVerdict =
+          !!correction &&
+          typeof verdictRecordedAt === "number" &&
+          correction.createdAt > verdictRecordedAt;
         if (
           task.verificationVerdict === "FAIL" &&
           task.failureClass === "required_verification" &&
-          requirement.required
+          requirement.required &&
+          !correctedAfterVerdict
         ) {
           const sourceRef = `task:${task.id}:verification-verdict`;
           const previous = this.repository

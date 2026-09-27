@@ -67,6 +67,7 @@ import {
   PermissionRule,
   SessionActionAttribution,
   TaskVerificationEvidenceBundle,
+  RequirementEvidenceManifest,
   TaskStatus,
   TaskEvent,
   TaskTimelinePageCursor,
@@ -12396,13 +12397,23 @@ export class AgentDaemon extends EventEmitter {
           workerRole: "verifier",
         }),
     });
+    let requirementEvidenceManifest: RequirementEvidenceManifest | undefined;
+    try {
+      // Additive projection: a manifest failure must not fail verification itself.
+      requirementEvidenceManifest = this.workSessionContractService?.getRequirementEvidenceManifest(
+        parentTask.id,
+      );
+    } catch (error) {
+      log.warn(
+        `[work-session-contracts] Failed to build requirement evidence manifest for task ${parentTask.id}:`,
+        error,
+      );
+    }
     const result = await verificationRuntime.run({
       parentTask,
       parentSummary,
       verificationEvidenceBundle,
-      requirementEvidenceManifest: this.workSessionContractService?.getRequirementEvidenceManifest(
-        parentTask.id,
-      ),
+      requirementEvidenceManifest,
       timeoutMs,
       ...gateContext,
     });

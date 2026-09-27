@@ -1,0 +1,56 @@
+{
+  "id": "p02-edit-content-version-and-recovery-2026-09-27",
+  "title": "Edit file content-version conflicts and interrupted-write recovery",
+  "source": {
+    "incident": "internal-harness-audit-2026-09-27",
+    "taskId": "P02-file-edit-integrity"
+  },
+  "categories": [
+    {
+      "id": "same-inode-edits-preserve-independent-content",
+      "prompt": "Two edits use the same original inode and content version while a mutation hook allows one edit to finish first.",
+      "assertions": {
+        "bothIndependentChangesSurviveOrReturnActionableConflict": true,
+        "replacementMatchSetDoesNotBroadenAfterRebase": true,
+        "executableTest": "src/electron/agent/tools/__tests__/edit-tools.test.ts",
+        "executableTestNames": [
+          "preserves independent edits from two same-inode writers",
+          "returns an actionable conflict when an external edit removes the requested text",
+          "does not broaden replace_all when the same-inode match count changes"
+        ]
+      }
+    },
+    {
+      "id": "edit-authority-and-recovery-preserve-unknown-content",
+      "prompt": "Replace the path, symlink, parent directory, or access grant during an edit, and interrupt an in-place write before retrying.",
+      "assertions": {
+        "inodeSymlinkParentAndPermissionChangesFailSafely": true,
+        "partialAndProcessKilledWritesHaveRecoverableBytes": true,
+        "postCrashExternalContentIsNeverBlindlyRestored": true,
+        "liveReceiptOwnerIsNotMistakenForAnInterruptedWriter": true,
+        "executableTest": "src/electron/agent/tools/__tests__/edit-tools.test.ts",
+        "executableTestNames": [
+          "rejects a regular inode replacement while the edit is awaiting its baseline hook",
+          "rejects a symlink swap before writing through the original descriptor",
+          "preserves recovery evidence without touching the replacement when a symlink swaps at commit",
+          "rejects a parent-directory rebind even when the replacement entry is a hard link to the same inode",
+          "honors access-profile revocation while the edit is awaiting its baseline hook",
+          "updates hard links in place and preserves inode and mode",
+          "retains before and after bytes without overwriting a partial descriptor write failure",
+          "does not write during recovery when the parent binding changes",
+          "preserves a process-killed write until explicit reconciliation then permits the next edit",
+          "preserves external post-kill bytes %j and retains the recovery record",
+          "rejects a forged private receipt without changing the target",
+          "does not recover a partial target while its receipt owner process is still live",
+          "preserves ambiguous recovery bytes %j instead of restoring a snapshot",
+          "preserves an external writer's ambiguous bytes %j during failure handling",
+          "blocks another process editing a hardlink alias of an active transaction",
+          "reconciles exact completed bytes through a hardlink without restoring older content",
+          "applies the file size guardrail to each version when enabled=%s",
+          "rejects the independent recovery cap before allocating or mutating a disabled-guardrail file"
+        ]
+      }
+    }
+  ],
+  "notes": "Executable Vitest coverage uses temporary real files, descriptors, hard links, separate processes, SIGKILL, and a private user-data directory with no Electron app. Recovery never restores ambiguous bytes automatically; exact known states reconcile without rewriting the file. Cross-process coordination is confined to one active user-data profile. The JSON links to runtime tests; it is not itself graded by run_eval_suite.cjs."
+}

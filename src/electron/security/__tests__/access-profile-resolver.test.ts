@@ -550,6 +550,30 @@ describe("access profile resolver", () => {
     });
   });
 
+  it("does not apply the delegated researcher boundary to team work item lanes", () => {
+    const broad: AccessProfileDefinition = {
+      id: "broad_team_lane_custom",
+      label: "Broad team lane profile",
+      description: "A profile used by an ordinary team work item lane.",
+      sandbox: "workspace-write",
+      approval: "on-request",
+      reviewer: "user",
+      network: "enabled",
+      shellAccess: true,
+    };
+    const profile = resolveEffectiveAccessProfile({
+      task: {
+        workerRole: "researcher",
+        agentConfig: { accessProfileId: broad.id, teamWorkItemLane: true },
+      },
+      workspace,
+      settings: withProfiles([broad]),
+    });
+
+    expect(profile.networkEnabled).toBe(true);
+    expect(profile.definition).toMatchObject({ network: "enabled", approval: "on-request" });
+  });
+
   it("forces scoped danger-full profiles through a sandbox and honors shell denial", () => {
     const custom: AccessProfileDefinition = {
       id: "scoped_full",

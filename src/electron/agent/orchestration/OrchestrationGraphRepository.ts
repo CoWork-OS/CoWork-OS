@@ -441,6 +441,23 @@ export class OrchestrationGraphRepository {
     return row ? rowToNode(row) : undefined;
   }
 
+  /**
+   * Whether the task was dispatched by the team orchestrator as a team work
+   * item lane. `team_work_item` nodes are only created by AgentTeamOrchestrator
+   * and `task_id` is written by the graph engine on dispatch, so neither can be
+   * set by a renderer/control-plane caller. Uses idx_orchestration_graph_nodes_task.
+   */
+  isTeamWorkItemTask(taskId: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM orchestration_graph_nodes
+         WHERE task_id = ? AND kind = 'team_work_item' AND team_item_id IS NOT NULL
+         LIMIT 1`,
+      )
+      .get(taskId);
+    return Boolean(row);
+  }
+
   findNodeByTeamItemId(teamItemId: string): OrchestrationGraphNode | undefined {
     const row = this.db
       .prepare("SELECT * FROM orchestration_graph_nodes WHERE team_item_id = ? LIMIT 1")

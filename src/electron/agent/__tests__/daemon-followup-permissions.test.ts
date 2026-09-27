@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
+import { resolveEffectiveAccessProfile } from "../../security/access-profile-resolver";
 
 describe("AgentDaemon follow-up permission overrides", () => {
   it.each(["idle", "busy", "durable-requeue"])(
@@ -325,5 +326,129 @@ describe("AgentDaemon follow-up permission overrides", () => {
       undefined,
       undefined,
     );
+  });
+
+  describe("legacy team work item lanes", () => {
+    const workspace = {
+      id: "workspace-1",
+      name: "Workspace",
+      path: "/tmp/workspace",
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+      createdAt: Date.now(),
+    };
+
+    const runIdleFollowUp = async (params: {
+      teamWorkItemTaskIds: string[];
+      override?: Record<string, unknown>;
+      lookupError?: boolean;
+    }) => {
+      const task = {
+        id: "850e8400-e29b-41d4-a716-446655440000",
+        title: "Saved researcher lane",
+        workspaceId: "workspace-1",
+        workerRole: "researcher",
+        // Saved before teamWorkItemLane existed: no marker, no read-only fields.
+        agentConfig: { retainMemory: false, llmProfile: "strong", shellAccess: true },
+      };
+      const executor = {
+        isRunning: false,
+        updateTaskAgentConfig: vi.fn(),
+        updateWorkspace: vi.fn(),
+        queueFollowUp: vi.fn(),
+        sendMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      const isTeamWorkItemTask = vi.fn((taskId: string) => {
+        if (params.lookupError) throw new Error("database is locked");
+        return params.teamWorkItemTaskIds.includes(taskId);
+      });
+      const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+        activeTasks: new Map([[task.id, { executor, lastAccessed: 0, status: "active" }]]),
+        taskRepo: { findById: vi.fn().mockReturnValue(task), update: vi.fn(), touch: vi.fn() },
+        workspaceRepo: { findById: vi.fn().mockReturnValue(workspace) },
+        annotationRepo: { listOpenByTask: vi.fn().mockReturnValue([]) },
+        getOrchestrationGraphRepository: vi.fn().mockReturnValue({ isTeamWorkItemTask }),
+        setTransientTaskAgentConfig: vi.fn(),
+        clearTransientTaskAgentConfig: vi.fn(),
+        getEffectiveWorkspaceForTask: vi.fn().mockReturnValue(workspace),
+        processOrphanedFollowUps: vi.fn(),
+        logEvent: vi.fn(),
+      });
+      await AgentDaemon.prototype.sendMessage.call(
+        daemon,
+        task.id,
+        "Keep going",
+        undefined,
+        undefined,
+        (params.override ? { agentConfigOverride: params.override } : undefined) as Any,
+      );
+      const persisted = daemon.taskRepo.update.mock.calls.map(
+        ([, update]: [string, Any]) => update.agentConfig,
+      );
+      return { task, executor, isTeamWorkItemTask, persisted };
+    };
+
+    it("backfills the marker for a legacy team item task and keeps network/shell", async () => {
+      const { task, executor, isTeamWorkItemTask, persisted } = await runIdleFollowUp({
+        teamWorkItemTaskIds: ["850e8400-e29b-41d4-a716-446655440000"],
+      });
+
+      expect(isTeamWorkItemTask).toHaveBeenCalledWith(task.id);
+      expect(persisted[0]).toMatchObject({ teamWorkItemLane: true, retainMemory: false });
+      for (const config of persisted) {
+        expect(config.readOnlyExecution).toBeUndefined();
+        expect(config.permissionMode).not.toBe("plan");
+      }
+      const executorTask = executor.updateTaskAgentConfig.mock.calls.at(-1)?.[0];
+      expect(executorTask).toMatchObject({ teamWorkItemLane: true, shellAccess: true });
+      expect(executorTask.readOnlyExecution).toBeUndefined();
+
+      const profile = resolveEffectiveAccessProfile({
+        task: { workerRole: task.workerRole, agentConfig: persisted[0] },
+        workspace: workspace as Any,
+        settings: {} as Any,
+      });
+      expect(profile.networkEnabled).toBe(true);
+      expect(profile.definition.shellAccess).not.toBe(false);
+    });
+
+    it("keeps a delegated researcher that is not linked to a team item strict", async () => {
+      const { executor, isTeamWorkItemTask, persisted } = await runIdleFollowUp({
+        teamWorkItemTaskIds: [],
+      });
+
+      expect(isTeamWorkItemTask).toHaveBeenCalledTimes(1);
+      for (const config of persisted) expect(config.teamWorkItemLane).toBeUndefined();
+      expect(persisted.at(-1)).toMatchObject({
+        readOnlyExecution: true,
+        permissionMode: "plan",
+        shellAccess: false,
+      });
+      const executorTask = executor.updateTaskAgentConfig.mock.calls.at(-1)?.[0];
+      expect(executorTask).toMatchObject({ readOnlyExecution: true, shellAccess: false });
+      expect(executorTask.teamWorkItemLane).toBeUndefined();
+    });
+
+    it("fails closed when the team lane lookup errors", async () => {
+      const { persisted } = await runIdleFollowUp({ teamWorkItemTaskIds: [], lookupError: true });
+
+      for (const config of persisted) expect(config.teamWorkItemLane).toBeUndefined();
+      expect(persisted.at(-1)).toMatchObject({ readOnlyExecution: true, shellAccess: false });
+    });
+
+    it("does not let a caller override set the marker on a delegated researcher", async () => {
+      const { executor, persisted } = await runIdleFollowUp({
+        teamWorkItemTaskIds: [],
+        override: { teamWorkItemLane: true, shellAccess: true, permissionMode: "default" },
+      });
+
+      for (const config of persisted) expect(config.teamWorkItemLane).toBeUndefined();
+      const forwarded = executor.sendMessage.mock.calls[0][3].agentConfigOverride;
+      expect(forwarded.teamWorkItemLane).toBeUndefined();
+      expect(forwarded).toMatchObject({
+        readOnlyExecution: true,
+        permissionMode: "plan",
+        shellAccess: false,
+      });
+    });
   });
 });

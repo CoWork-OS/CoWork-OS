@@ -207,10 +207,12 @@ import { IntentRoute, IntentRouter } from "./strategy/IntentRouter";
 import { DerivedTaskStrategy, TaskStrategyService } from "./strategy/TaskStrategyService";
 import {
   getReadOnlyExecutionToolRestrictions,
+  isReadOnlyWorkerRole,
   normalizeWorkerRoleTaskConfig,
   resolveDefaultWorkerRoleKind,
   resolveWorkerRoleAgentConfig,
   resolveWorkerRoleKind,
+  stripTeamWorkItemLaneOverride,
 } from "./runtime/worker-role-registry";
 import {
   createVerificationRuntime,
@@ -863,6 +865,40 @@ export class AgentDaemon extends EventEmitter {
 
   getOrchestrationGraphRepository(): OrchestrationGraphRepository {
     return this.orchestrationGraphEngine.getRepository();
+  }
+
+  /**
+   * Team work item tasks created before `teamWorkItemLane` existed carry
+   * workerRole "researcher" without the marker, so they would be resumed as
+   * strict read-only delegated researchers and lose network/shell. Recognize
+   * them from the orchestration graph (a `team_work_item` node dispatched to
+   * this task id), which only the team orchestrator and graph engine write,
+   * and persist the marker once so later reads agree. Team item rows are not
+   * used: renderer IPC can set their sourceTaskId and spawn_agent children in
+   * collaborative child-agent runs also get one. Any lookup failure keeps the
+   * strict researcher boundary.
+   */
+  private withLegacyTeamWorkItemLane<T extends Task>(task: T): T {
+    if (resolveWorkerRoleKind(task.workerRole) !== "researcher") return task;
+    if (task.agentConfig?.teamWorkItemLane === true) return task;
+    try {
+      if (!this.getOrchestrationGraphRepository().isTeamWorkItemTask(task.id)) return task;
+    } catch (error) {
+      log.warn(
+        `Team lane lookup failed for researcher task ${task.id}; keeping read-only boundary`,
+        error,
+      );
+      return task;
+    }
+    const persistedAgentConfig = this.taskRepo.findById(task.id)?.agentConfig ?? task.agentConfig;
+    try {
+      this.taskRepo.update(task.id, {
+        agentConfig: { ...persistedAgentConfig, teamWorkItemLane: true },
+      });
+    } catch (error) {
+      log.warn(`Failed to persist team lane marker for task ${task.id}`, error);
+    }
+    return { ...task, agentConfig: { ...task.agentConfig, teamWorkItemLane: true } };
   }
 
   private isTransientRetryErrorMessage(message: unknown): boolean {
@@ -2326,6 +2362,7 @@ export class AgentDaemon extends EventEmitter {
         }
       }
 
+      executionTask = this.withLegacyTeamWorkItemLane(executionTask);
       const workerRoleBoundary = normalizeWorkerRoleTaskConfig(executionTask);
       executionTask = workerRoleBoundary.task;
       if (workerRoleBoundary.changed) {
@@ -2714,7 +2751,9 @@ export class AgentDaemon extends EventEmitter {
     // Apply agent role and worker security overrides before restoring any
     // persisted runtime configuration. Older researcher tasks may still have
     // an ACP runtime, which executes outside the native policy-wrapped tools.
-    const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(task);
+    const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(
+      this.withLegacyTeamWorkItemLane(task),
+    );
     const workerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
     const effectiveTask = workerRoleBoundary.task;
     if (workerRoleBoundary.changed) {
@@ -3020,7 +3059,9 @@ export class AgentDaemon extends EventEmitter {
       );
     }
 
-    const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(task);
+    const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(
+      this.withLegacyTeamWorkItemLane(task),
+    );
     const workerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
     const effectiveTask = workerRoleBoundary.task;
     if (workerRoleBoundary.changed) {
@@ -4545,13 +4586,15 @@ export class AgentDaemon extends EventEmitter {
     const parent = this.taskRepo.findById(params.parentTaskId);
     const requestedWorkerRole = resolveWorkerRoleKind(params.workerRole);
     const workerRole = requestedWorkerRole || resolveDefaultWorkerRoleKind();
-    const isReadOnlyRoleChild = workerRole === "researcher" || workerRole === "verifier";
+    // Team work item lanes (teamWorkItemLane, set only by the team
+    // orchestrator) reuse the researcher label without the delegated-helper
+    // read-only boundary; see isReadOnlyWorkerRole.
+    const isReadOnlyRoleChild = isReadOnlyWorkerRole(workerRole, params.agentConfig);
     const isReadOnlyExecutionChild =
       isReadOnlyRoleChild ||
       params.agentConfig?.readOnlyExecution === true ||
       parent?.agentConfig?.readOnlyExecution === true ||
-      parent?.workerRole === "researcher" ||
-      parent?.workerRole === "verifier";
+      isReadOnlyWorkerRole(parent?.workerRole, parent?.agentConfig);
     const parentGatewayContext = parent?.agentConfig?.gatewayContext;
     const childGatewayContext = params.agentConfig?.gatewayContext;
     const parentAutonomousMode = parent?.agentConfig?.autonomousMode === true;
@@ -13858,10 +13901,11 @@ export class AgentDaemon extends EventEmitter {
     let executor: TaskExecutor;
 
     // Always get fresh task and workspace from DB to pick up permission changes
-    const task = this.taskRepo.findById(taskId);
-    if (!task) {
+    const storedTask = this.taskRepo.findById(taskId);
+    if (!storedTask) {
       throw new Error(`Task ${taskId} not found`);
     }
+    const task = this.withLegacyTeamWorkItemLane(storedTask);
     // Bot conversations are created dormant and their first user turn enters
     // through sendMessage rather than startTaskImmediate. Attach the
     // workspace-scoped persistent team here as well so the initial executor
@@ -13892,6 +13936,25 @@ export class AgentDaemon extends EventEmitter {
       this.refreshSideChatParentSnapshot(task);
       this.activeTasks.delete(taskId);
       cached = undefined;
+    }
+    // Only the team orchestrator may mark a task as a team lane; drop the
+    // marker from caller-supplied overrides so a delegated researcher cannot
+    // be widened through a follow-up.
+    if (options?.agentConfigOverride || options?.queuedFollowUp?.agentConfigOverride) {
+      options = {
+        ...options,
+        agentConfigOverride: stripTeamWorkItemLaneOverride(options.agentConfigOverride),
+        ...(options.queuedFollowUp
+          ? {
+              queuedFollowUp: {
+                ...options.queuedFollowUp,
+                agentConfigOverride: stripTeamWorkItemLaneOverride(
+                  options.queuedFollowUp.agentConfigOverride,
+                ),
+              },
+            }
+          : {}),
+      };
     }
     const sideChatAgentConfigOverride = this.buildSideChatTurnAgentConfigOverride(task, message);
     let effectiveOptions = sideChatAgentConfigOverride

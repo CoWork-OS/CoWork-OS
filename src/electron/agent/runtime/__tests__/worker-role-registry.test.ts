@@ -9,6 +9,7 @@ import {
   resolveDelegationWorkerRole,
   resolveDefaultWorkerRoleKind,
   resolveWorkerRoleAgentConfig,
+  stripTeamWorkItemLaneOverride,
 } from "../worker-role-registry";
 
 describe("worker-role-registry", () => {
@@ -141,6 +142,23 @@ describe("worker-role-registry", () => {
     expect(normalized.task.agentConfig.readOnlyExecution).toBe(true);
     expect(normalized.task.agentConfig.externalRuntime).toBeUndefined();
     expect(normalizeWorkerRoleTaskConfig(normalized.task).changed).toBe(false);
+  });
+
+  it("keeps team work item lanes on the researcher denylist without the read-only boundary", () => {
+    const lane = resolveWorkerRoleAgentConfig("researcher", { teamWorkItemLane: true });
+    expect(lane.readOnlyExecution).toBeUndefined();
+    expect(lane.permissionMode).toBeUndefined();
+    expect(lane.toolRestrictions).toEqual(expect.arrayContaining(["group:write", "spawn_agent"]));
+    expect(lane.toolRestrictions).not.toContain("group:destructive");
+
+    expect(stripTeamWorkItemLaneOverride({ teamWorkItemLane: true, maxTurns: 3 })).toEqual({
+      maxTurns: 3,
+    });
+    const normalized = normalizeWorkerRoleTaskConfig({
+      workerRole: "researcher",
+      agentConfig: stripTeamWorkItemLaneOverride({ teamWorkItemLane: true }),
+    });
+    expect(normalized.task.agentConfig?.readOnlyExecution).toBe(true);
   });
 
   it("infers worker roles from delegation prompts and honors explicit overrides", () => {

@@ -119,6 +119,7 @@ import {
   buildWorkerRolePrompt,
   normalizeWorkerRoleTaskConfig,
   resolveWorkerRoleKind,
+  stripTeamWorkItemLaneOverride,
 } from "./runtime/worker-role-registry";
 import { enrichToolEventPayload } from "./runtime/tool-event-enrichment";
 import { resolveSkillSlashAlias } from "./skill-slash-aliases";
@@ -17918,6 +17919,8 @@ You are continuing a previous conversation. The context from the previous conver
       this.clearQueuedAgentConfigOverride();
       return;
     }
+    // Queued overrides must not grant the orchestrator-only team lane marker.
+    agentConfigOverride = stripTeamWorkItemLaneOverride(agentConfigOverride);
     const persistedAgentConfig =
       this.daemon.getTask(this.task.id)?.agentConfig || this.task.agentConfig;
     const boundedTask = normalizeWorkerRoleTaskConfig({

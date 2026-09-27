@@ -69,6 +69,42 @@ describe("AgentDaemon.createChildTask", () => {
     expect(daemonLike.ensureCollaborativeRunForParentTask).not.toHaveBeenCalled();
   });
 
+  it("keeps team work item researcher lanes shell-capable while denying file mutation", async () => {
+    const taskRepo = {
+      findById: vi.fn().mockReturnValue(undefined),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({
+        id: "child-task-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...task,
+      })),
+    };
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+
+    const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+      title: "Team lane",
+      prompt: "Research the market.",
+      workspaceId: "ws-1",
+      parentTaskId: "parent-1",
+      agentType: "sub",
+      workerRole: "researcher",
+      teamRunId: "team-run-1",
+      teamItemId: "team-item-1",
+      agentConfig: { teamWorkItemLane: true },
+    });
+
+    expect(child.agentConfig?.readOnlyExecution).toBeUndefined();
+    expect(child.agentConfig?.permissionMode).not.toBe("plan");
+    expect(child.agentConfig?.toolRestrictions).toContain("delete_file");
+    expect(child.agentConfig?.toolRestrictions).toContain("group:write");
+    expect(child.agentConfig?.toolRestrictions).not.toContain("group:destructive");
+  });
+
   it("keeps a researcher read-only when its parent and caller request bypass", async () => {
     const taskRepo = {
       findById: vi.fn().mockReturnValue({

@@ -24,6 +24,7 @@ import type {
 } from "../../shared/types";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import type { AdminPolicies } from "../admin/policies";
+import { isReadOnlyWorkerRole } from "../agent/runtime/worker-role-registry";
 
 export interface EffectiveAccessProfile {
   id: AccessProfileId;
@@ -278,8 +279,10 @@ export function resolveEffectiveAccessProfile(
   // caller's explicit filesystem/domain scope; widening that scope would make
   // the role boundary unsafe for custom profiles.
   if (
-    input.task?.workerRole === "researcher" ||
-    input.task?.workerRole === "verifier" ||
+    // Team work item lanes reuse the researcher label but are not delegated
+    // helpers; isReadOnlyWorkerRole exempts them so they keep their pre-existing
+    // profile (network/shell/approvals) with the researcher tool denylist.
+    isReadOnlyWorkerRole(input.task?.workerRole, input.task?.agentConfig) ||
     input.task?.agentConfig?.readOnlyExecution === true
   ) {
     const readOnlyProfile: AccessProfileDefinition = {

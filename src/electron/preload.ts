@@ -125,6 +125,7 @@ import type {
   ManagedSession,
   ManagedSessionCreateInput,
   ManagedSessionEvent,
+  ManagedSessionRequirementCorrectionRequest,
   ManagedSessionUserMessageRequest,
   ManagedSessionWorkpaper,
   WorkContext,
@@ -3141,6 +3142,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_CREATE_IPC, request) as Promise<ManagedSession>,
   sendManagedSessionUserMessage: (request: ManagedSessionUserMessageRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_SEND_USER_MESSAGE_IPC, request) as Promise<
+      ManagedSession | undefined
+    >,
+  correctManagedSessionRequirement: (request: ManagedSessionRequirementCorrectionRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_CORRECT_REQUIREMENT_IPC, request) as Promise<
       ManagedSession | undefined
     >,
   resumeManagedSession: (sessionId: string) =>
@@ -6253,6 +6258,9 @@ export interface ElectronAPI {
   createManagedSession: (request: ManagedSessionCreateInput) => Promise<ManagedSession>;
   sendManagedSessionUserMessage: (
     request: ManagedSessionUserMessageRequest,
+  ) => Promise<ManagedSession | undefined>;
+  correctManagedSessionRequirement: (
+    request: ManagedSessionRequirementCorrectionRequest,
   ) => Promise<ManagedSession | undefined>;
   resumeManagedSession: (
     sessionId: string,

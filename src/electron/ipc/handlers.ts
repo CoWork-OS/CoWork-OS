@@ -58,6 +58,7 @@ import { MailboxService } from "../mailbox/MailboxService";
 import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { AgentMailRealtimeService } from "../agentmail/AgentMailRealtimeService";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
+import { ManagedSessionRequirementCorrectionRequestSchema } from "../../shared/managed-session-schemas";
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
@@ -6565,6 +6566,17 @@ export async function setupIpcHandlers(
       typeof request.expectedTurnId === "string" ? request.expectedTurnId : undefined,
     );
   });
+  ipcMain.handle(
+    IPC_CHANNELS.MANAGED_SESSION_CORRECT_REQUIREMENT_IPC,
+    async (_, request: unknown) => {
+      const validated = validateInput(
+        ManagedSessionRequirementCorrectionRequestSchema,
+        request,
+        "managed session requirement correction",
+      );
+      return managedSessionService.sendEvent(validated.sessionId, validated.event);
+    },
+  );
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_RESUME_IPC, async (_, sessionId: string) => {
     return managedSessionService.resumeSession(sessionId);
   });

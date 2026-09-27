@@ -282,10 +282,17 @@ describe("AgentDaemon.recordExternalTaskCancellation", () => {
   it("persists cancelled status, releases the queue slot, and is not a user cancel", async () => {
     const task = { id: "task-ext", status: "executing", workspaceId: "w" };
     const executorCancel = vi.fn();
+    const cancelRunForRootTask = vi.fn(async () => ({
+      runIds: ["graph-run-ext"],
+      acknowledgedNodeIds: [],
+      terminalNodeIds: [],
+      unresolvedNodeIds: [],
+    }));
     const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
       pendingContinuationTaskIds: new Set(["task-ext"]),
       pendingTaskImages: new Map(),
       activeTasks: new Map([["task-ext", { executor: { cancel: executorCancel } }]]),
+      orchestrationGraphEngine: { cancelRunForRootTask },
       taskRepo: { findByParent: vi.fn(() => []) },
       cancelTaskRecord: vi.fn(),
       logEvent: vi.fn(),
@@ -303,6 +310,7 @@ describe("AgentDaemon.recordExternalTaskCancellation", () => {
       expect.objectContaining({ actor: "external_runtime", status: "cancelled" }),
     );
     expect(daemonLike.finishQueueSlot).toHaveBeenCalledWith("task-ext");
+    expect(cancelRunForRootTask).toHaveBeenCalledWith("task-ext");
     expect(daemonLike.pendingContinuationTaskIds.has("task-ext")).toBe(false);
     expect(executorCancel).not.toHaveBeenCalled();
   });

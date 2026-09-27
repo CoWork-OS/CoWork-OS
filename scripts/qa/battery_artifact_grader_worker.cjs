@@ -2,7 +2,12 @@ const { verifyArtifact } = require("./battery_artifact_graders.cjs");
 
 async function main() {
   const request = JSON.parse(process.argv[2] || "{}");
-  const result = await verifyArtifact(request.kind, request.path, request.runId);
+  const result = await verifyArtifact(
+    request.kind,
+    request.path,
+    request.runId,
+    request.options || {},
+  );
   process.stdout.write(JSON.stringify(result));
 }
 

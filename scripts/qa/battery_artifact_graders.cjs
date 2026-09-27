@@ -9,7 +9,10 @@ const { DOMParser } = require("@xmldom/xmldom");
 const MAX_ARTIFACT_BYTES = 20 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 2048;
 const MAX_ZIP_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+const MAX_XLSX_ZIP_UNCOMPRESSED_BYTES = 32 * 1024 * 1024;
+const MAX_XLSX_ZIP_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_XML_BYTES = 2 * 1024 * 1024;
+const MAX_LIVE_PDF_CGROUP_MEMORY_BYTES = 512 * 1024 * 1024;
 const PRESENTATION_NS = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -31,7 +34,23 @@ function ensureFile(absPath) {
   return { ok: true, size: stat.size };
 }
 
-async function verifyPdf(absPath, runId) {
+function hasQualifyingPdfMemoryBound(memoryLimitBytes) {
+  return (
+    Number.isSafeInteger(memoryLimitBytes) &&
+    memoryLimitBytes > 0 &&
+    memoryLimitBytes <= MAX_LIVE_PDF_CGROUP_MEMORY_BYTES
+  );
+}
+
+async function verifyPdf(absPath, runId, options = {}) {
+  if (options.mode !== "fixtures" && !hasQualifyingPdfMemoryBound(options.pdfMemoryLimitBytes)) {
+    return {
+      ok: false,
+      error: "pdf_memory_bound_unavailable",
+      required:
+        "live PDF parsing requires a finite Linux cgroup v2 memory limit of 512 MiB or less",
+    };
+  }
   const file = ensureFile(absPath);
   if (!file.ok) return file;
   const input = new Uint8Array(fs.readFileSync(absPath));
@@ -64,7 +83,15 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function preflightZip(buffer) {
+function preflightZip(buffer, options = {}) {
+  const maxUncompressedBytes =
+    Number.isSafeInteger(options.maxUncompressedBytes) && options.maxUncompressedBytes > 0
+      ? options.maxUncompressedBytes
+      : MAX_ZIP_UNCOMPRESSED_BYTES;
+  const maxEntryBytes =
+    Number.isSafeInteger(options.maxEntryBytes) && options.maxEntryBytes > 0
+      ? options.maxEntryBytes
+      : Number.MAX_SAFE_INTEGER;
   const minimumEocdSize = 22;
   const searchStart = Math.max(0, buffer.length - 22 - 0xffff);
   let eocd = -1;
@@ -148,9 +175,12 @@ function preflightZip(buffer) {
       throw new Error("Unsafe ZIP entry path");
     }
     if (entries.has(name)) throw new Error(`Duplicate ZIP entry ${name}`);
+    if (uncompressedSize > maxEntryBytes) {
+      throw new Error(`ZIP entry expanded size exceeds ${maxEntryBytes} bytes: ${name}`);
+    }
     totalUncompressed += uncompressedSize;
-    if (totalUncompressed > MAX_ZIP_UNCOMPRESSED_BYTES) {
-      throw new Error(`ZIP expanded size exceeds ${MAX_ZIP_UNCOMPRESSED_BYTES} bytes`);
+    if (totalUncompressed > maxUncompressedBytes) {
+      throw new Error(`ZIP expanded size exceeds ${maxUncompressedBytes} bytes`);
     }
     if (uncompressedSize > 0 && compressedSize === 0)
       throw new Error("ZIP entry has an impossible compression size");
@@ -202,6 +232,28 @@ function extractZipEntry(buffer, entries, name) {
     throw new Error(`ZIP expanded size mismatch: ${name}`);
   if (crc32(data) !== entry.crc) throw new Error(`ZIP CRC mismatch: ${name}`);
   return data.toString("utf8");
+}
+
+function validateAllZipEntriesBounded(buffer, entries) {
+  let totalUncompressed = 0;
+  for (const entry of entries.values()) {
+    const compressed = buffer.subarray(entry.dataOffset, entry.dataOffset + entry.compressedSize);
+    const data =
+      entry.method === 0
+        ? Buffer.from(compressed)
+        : inflateRawSync(compressed, { maxOutputLength: Math.max(entry.uncompressedSize, 1) });
+    if (data.length !== entry.uncompressedSize) {
+      throw new Error(`ZIP expanded size mismatch: ${entry.name}`);
+    }
+    if (crc32(data) !== entry.crc) {
+      throw new Error(`ZIP CRC mismatch: ${entry.name}`);
+    }
+    totalUncompressed += data.length;
+    if (totalUncompressed > MAX_XLSX_ZIP_UNCOMPRESSED_BYTES) {
+      throw new Error(`XLSX expanded size exceeds ${MAX_XLSX_ZIP_UNCOMPRESSED_BYTES} bytes`);
+    }
+  }
+  return { entries: entries.size, expandedBytes: totalUncompressed };
 }
 
 function parseXml(source, partName) {
@@ -400,6 +452,21 @@ function numericCell(value) {
 async function verifySpreadsheet(absPath) {
   const file = ensureFile(absPath);
   if (!file.ok) return file;
+  let zipSummary;
+  try {
+    const buffer = fs.readFileSync(absPath);
+    const entries = preflightZip(buffer, {
+      maxUncompressedBytes: MAX_XLSX_ZIP_UNCOMPRESSED_BYTES,
+      maxEntryBytes: MAX_XLSX_ZIP_ENTRY_BYTES,
+    });
+    zipSummary = validateAllZipEntriesBounded(buffer, entries);
+  } catch (error) {
+    return {
+      ok: false,
+      error: "spreadsheet_zip_preflight_failed",
+      detail: String(error.message || error),
+    };
+  }
   try {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(absPath);
@@ -434,15 +501,17 @@ async function verifySpreadsheet(absPath) {
       ok: true,
       formula: sum.formula,
       result: numericCell(sum),
-      semanticCheck: "ExcelJS values, formula, and cached result=5",
+      semanticCheck:
+        "bounded OOXML ZIP validation plus ExcelJS values, formula, and cached result=5",
+      zip: zipSummary,
     };
   } catch (error) {
     return { ok: false, error: "spreadsheet_parse_failed", detail: String(error.message || error) };
   }
 }
 
-async function verifyArtifact(kind, absPath, runId) {
-  if (kind === "pdf") return verifyPdf(absPath, runId);
+async function verifyArtifact(kind, absPath, runId, options = {}) {
+  if (kind === "pdf") return verifyPdf(absPath, runId, options);
   if (kind === "pptx") return verifyPptx(absPath, runId);
   if (kind === "xlsx") return verifySpreadsheet(absPath);
   throw new Error(`Unsupported artifact kind: ${kind}`);
@@ -465,7 +534,9 @@ function graderPrerequisites({ fixtures = false } = {}) {
 module.exports = {
   ensureFile,
   graderPrerequisites,
+  hasQualifyingPdfMemoryBound,
   preflightZip,
+  validateAllZipEntriesBounded,
   verifyArtifact,
   verifyPdf,
   verifyPptx,

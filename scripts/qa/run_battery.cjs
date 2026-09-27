@@ -11,6 +11,7 @@ const {
   graderPrerequisites,
   verifyArtifact,
   ensureFile,
+  hasQualifyingPdfMemoryBound,
 } = require("./battery_artifact_graders.cjs");
 const { startFixtureControlPlane } = require("./battery_fixture_control_plane.cjs");
 
@@ -206,6 +207,147 @@ function checkModulePrerequisites(fixtures) {
   return prerequisites;
 }
 
+function unescapeMountInfoPath(value) {
+  return value.replace(/\\([0-7]{3})/g, (_match, octal) =>
+    String.fromCharCode(Number.parseInt(octal, 8)),
+  );
+}
+
+function detectCgroupV2MemoryLimit(options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== "linux") return { available: false, reason: "linux_required" };
+  const readFileSync = options.readFileSync || fs.readFileSync;
+  let cgroupText;
+  let mountInfoText;
+  try {
+    cgroupText = readFileSync(options.procCgroupPath || "/proc/self/cgroup", "utf8");
+    mountInfoText = readFileSync(options.procMountInfoPath || "/proc/self/mountinfo", "utf8");
+  } catch {
+    return { available: false, reason: "cgroup_metadata_unavailable" };
+  }
+  const membershipLine = String(cgroupText)
+    .split(/\r?\n/)
+    .find((line) => line.startsWith("0::"));
+  if (!membershipLine) return { available: false, reason: "cgroup_v2_membership_missing" };
+  const membershipPath = path.posix.normalize(membershipLine.slice(3));
+  if (!membershipPath.startsWith("/")) {
+    return { available: false, reason: "cgroup_v2_membership_invalid" };
+  }
+
+  const mounts = [];
+  for (const line of String(mountInfoText).split(/\r?\n/)) {
+    const [beforeSeparator, afterSeparator] = line.split(" - ", 2);
+    if (!beforeSeparator || !afterSeparator) continue;
+    const before = beforeSeparator.split(" ");
+    const after = afterSeparator.split(" ");
+    if (after[0] !== "cgroup2" || !before[3] || !before[4]) continue;
+    mounts.push({
+      root: path.posix.normalize(unescapeMountInfoPath(before[3])),
+      mountPoint: path.posix.normalize(unescapeMountInfoPath(before[4])),
+    });
+  }
+  for (const mount of mounts) {
+    const relative = path.posix.relative(mount.root, membershipPath);
+    if (relative === ".." || relative.startsWith("../") || path.posix.isAbsolute(relative))
+      continue;
+    const leaf = path.posix.resolve(mount.mountPoint, relative);
+    const relativeToMount = path.posix.relative(mount.mountPoint, leaf);
+    if (relativeToMount === ".." || relativeToMount.startsWith("../")) continue;
+
+    let current = leaf;
+    let minimumBytes = Number.POSITIVE_INFINITY;
+    let sawMemoryLimit = false;
+    while (true) {
+      let rawLimit;
+      try {
+        rawLimit = String(readFileSync(path.posix.join(current, "memory.max"), "utf8")).trim();
+      } catch {
+        // An unreadable ancestor could impose a smaller limit, so fail closed.
+        minimumBytes = Number.POSITIVE_INFINITY;
+        break;
+      }
+      if (rawLimit !== "max") {
+        if (!/^\d+$/.test(rawLimit)) {
+          minimumBytes = Number.POSITIVE_INFINITY;
+          break;
+        }
+        const bytes = Number(rawLimit);
+        if (!Number.isSafeInteger(bytes) || bytes <= 0) {
+          minimumBytes = Number.POSITIVE_INFINITY;
+          break;
+        }
+        sawMemoryLimit = true;
+        minimumBytes = Math.min(minimumBytes, bytes);
+      }
+      if (current === mount.mountPoint) break;
+      const parent = path.posix.dirname(current);
+      if (parent === current || !isInsidePosix(mount.mountPoint, parent)) {
+        minimumBytes = Number.POSITIVE_INFINITY;
+        break;
+      }
+      current = parent;
+    }
+    if (sawMemoryLimit && Number.isSafeInteger(minimumBytes)) {
+      return {
+        available: true,
+        memoryLimitBytes: minimumBytes,
+        source: "Linux cgroup v2 memory.max (minimum finite limit across inherited ancestors)",
+      };
+    }
+  }
+  return { available: false, reason: "finite_cgroup_v2_memory_limit_unavailable" };
+}
+
+function isInsidePosix(root, candidate) {
+  const relative = path.posix.relative(root, candidate);
+  return (
+    relative === "" ||
+    (!relative.startsWith("../") && relative !== ".." && !path.posix.isAbsolute(relative))
+  );
+}
+
+function requireLivePdfMemoryBound(bound) {
+  if (bound && bound.available && hasQualifyingPdfMemoryBound(bound.memoryLimitBytes)) return bound;
+  throw new Error(
+    "Full live mode is unavailable: live PDF parsing requires an inherited finite Linux cgroup v2 memory.max limit of 512 MiB or less. Run the battery in a bounded Linux container; synthetic PDF fixtures remain available on this platform.",
+  );
+}
+
+function disposeProfileDir(profileDir, options = {}) {
+  if (options.keepProfile) {
+    return { attempted: false, failed: false, path: profileDir, disposition: "kept" };
+  }
+  if (!options.cleanupAllowed) {
+    return {
+      attempted: false,
+      failed: false,
+      path: profileDir,
+      disposition: "retained because owned work remains unresolved",
+    };
+  }
+  const remove = options.remove || fs.rmSync;
+  const exists = options.exists || fs.existsSync;
+  try {
+    remove(profileDir, { recursive: true, force: true });
+    if (exists(profileDir)) throw new Error("profile directory still exists after cleanup");
+    return { attempted: true, failed: false, path: null, disposition: "cleaned after run" };
+  } catch (error) {
+    return {
+      attempted: true,
+      failed: true,
+      path: profileDir,
+      disposition: "retained because profile cleanup failed",
+      error: errorText(error),
+    };
+  }
+}
+
+function withProfileCleanupError(error, profileDir, options = {}) {
+  const wrapped = new Error(errorText(error));
+  wrapped.profileCleanup = disposeProfileDir(profileDir, options);
+  return wrapped;
+}
+
 function detectRenderers() {
   const find = (name) => {
     try {
@@ -298,6 +440,7 @@ function createScenarios(runId) {
         runId +
         "_example_title.txt.",
       fixture: { kind: "browser" },
+      liveToolEvidence: { tool: "browser_navigate", targetUrl: "https://example.com/" },
       verify: verifyBrowserTitle,
     },
     {
@@ -308,6 +451,7 @@ function createScenarios(runId) {
         runId +
         "_ts57_web_search.md.",
       fixture: { kind: "search" },
+      liveToolEvidence: { tool: "web_search", query: "TypeScript 5.7 new features" },
       verify: verifySearchSummary,
     },
     {
@@ -355,6 +499,7 @@ function createScenarios(runId) {
         runId +
         "_node_version.txt and then stop.",
       fixture: { kind: "text", content: process.version },
+      liveToolEvidence: { tool: "run_command", command: "node -v" },
       verify: (abs) => {
         const file = ensureFile(abs);
         if (!file.ok) return file;
@@ -494,13 +639,24 @@ function isApprovalInScope(approval, { taskId, workspacePath, approvalScopes }) 
   return false;
 }
 
-async function runBoundedGrader(kind, artifactPath, runId, deadlineAt) {
+async function runBoundedGrader(kind, artifactPath, runId, deadlineAt, options = {}) {
+  if (
+    kind === "pdf" &&
+    options.mode === "live" &&
+    !hasQualifyingPdfMemoryBound(options.pdfMemoryLimitBytes)
+  ) {
+    return { ok: false, error: "pdf_memory_bound_unavailable" };
+  }
   const remaining = Math.min(GRADER_TIMEOUT_MS, deadlineAt - Date.now());
   if (remaining <= 0) return { ok: false, error: "grader_deadline_exceeded" };
   const workerPath = path.join(__dirname, "battery_artifact_grader_worker.cjs");
+  const workerOptions = {
+    mode: options.mode === "fixtures" ? "fixtures" : "live",
+    pdfMemoryLimitBytes: options.pdfMemoryLimitBytes,
+  };
   const child = spawn(
     process.execPath,
-    [workerPath, JSON.stringify({ kind, path: artifactPath, runId })],
+    [workerPath, JSON.stringify({ kind, path: artifactPath, runId, options: workerOptions })],
     {
       cwd: os.tmpdir(),
       env: Object.fromEntries(
@@ -513,34 +669,55 @@ async function runBoundedGrader(kind, artifactPath, runId, deadlineAt) {
       windowsHide: true,
     },
   );
+  child.qaKnownLeafProcess = true;
   activeOwnedChildren.add(child);
-  let stdout = "";
+  const stdoutChunks = [];
+  let stdoutBytes = 0;
   let stderr = "";
   let tooMuchOutput = false;
+  let resolveOutputLimit;
+  const outputLimitExceeded = new Promise((resolve) => {
+    resolveOutputLimit = resolve;
+  });
+  const maxStdoutBytes = 128 * 1024;
   child.stdout.on("data", (chunk) => {
-    stdout += String(chunk);
-    if (stdout.length > 128 * 1024) tooMuchOutput = true;
+    if (tooMuchOutput) return;
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const remainingBytes = Math.max(0, maxStdoutBytes - stdoutBytes);
+    if (remainingBytes > 0) stdoutChunks.push(Buffer.from(bytes.subarray(0, remainingBytes)));
+    stdoutBytes += bytes.length;
+    if (stdoutBytes > maxStdoutBytes) {
+      tooMuchOutput = true;
+      signalOwnedProcessTree(child, "SIGTERM");
+      resolveOutputLimit({ outputLimitExceeded: true });
+    }
   });
   child.stderr.on("data", (chunk) => {
-    stderr += String(chunk);
-    if (stderr.length > 4096) stderr = stderr.slice(-4096);
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    stderr = Buffer.concat([Buffer.from(stderr), bytes])
+      .subarray(-4096)
+      .toString("utf8");
   });
   const exited = new Promise((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (code, signal) => resolve({ code, signal }));
+    child.once("close", (code, signal) => resolve({ code, signal }));
   });
   let timer;
   const timedOut = new Promise((resolve) => {
     timer = setTimeout(() => resolve({ timedOut: true }), remaining);
   });
   try {
-    const outcome = await Promise.race([exited, timedOut]);
+    const outcome = await Promise.race([exited, timedOut, outputLimitExceeded]);
     if (outcome.timedOut || tooMuchOutput) {
       const graceful = signalOwnedProcessTree(child, "SIGTERM");
-      let processStopped = await waitProcessTreeExit(child, 750);
+      let processStopped = await waitProcessTreeExit(child, 750, {
+        windowsTreeKillAcknowledged: process.platform === "win32" && graceful,
+      });
       if (!processStopped) {
-        signalOwnedProcessTree(child, "SIGKILL");
-        processStopped = await waitProcessTreeExit(child, 1000);
+        const forced = signalOwnedProcessTree(child, "SIGKILL");
+        processStopped = await waitProcessTreeExit(child, 1000, {
+          windowsTreeKillAcknowledged: process.platform === "win32" && forced,
+        });
       }
       return {
         ok: false,
@@ -561,6 +738,7 @@ async function runBoundedGrader(kind, artifactPath, runId, deadlineAt) {
         detail: stderr.slice(-1000),
       };
     }
+    const stdout = Buffer.concat(stdoutChunks).toString("utf8");
     try {
       return JSON.parse(stdout);
     } catch {
@@ -573,7 +751,7 @@ async function runBoundedGrader(kind, artifactPath, runId, deadlineAt) {
     }
   } finally {
     clearTimeout(timer);
-    if (await waitProcessTreeExit(child, 1)) activeOwnedChildren.delete(child);
+    if (await waitProcessTreeExit(child, 1, { knownLeaf: true })) activeOwnedChildren.delete(child);
   }
 }
 
@@ -858,6 +1036,148 @@ async function waitForFollowUp(client, taskId, priorEventIds, deadlineAt, pollMs
   return { ok: false, reason: "timeout" };
 }
 
+function normalizedQuery(value) {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLowerCase() : "";
+}
+
+function normalizedHttpUrl(value) {
+  try {
+    const url = new URL(String(value));
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function toolCallMatchesEvidence(requirement, input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return false;
+  if (requirement.tool === "browser_navigate") {
+    return normalizedHttpUrl(input.url) === normalizedHttpUrl(requirement.targetUrl);
+  }
+  if (requirement.tool === "web_search") {
+    return normalizedQuery(input.query) === normalizedQuery(requirement.query);
+  }
+  if (requirement.tool === "run_command") {
+    return typeof input.command === "string" && input.command.trim() === requirement.command;
+  }
+  return false;
+}
+
+function normalizeToolEvent(event) {
+  if (!event || typeof event !== "object" || !event.payload || typeof event.payload !== "object") {
+    return null;
+  }
+  if (["tool_call", "tool_result", "tool_error"].includes(event.type)) {
+    return { type: event.type, payload: event.payload };
+  }
+  if (typeof event.type === "string" && event.type.startsWith("timeline_")) {
+    const legacyType = event.payload.legacyType;
+    if (["tool_call", "tool_result", "tool_error"].includes(legacyType)) {
+      return { type: legacyType, payload: event.payload };
+    }
+  }
+  return null;
+}
+
+function successfulToolResult(requirement, result, envelope) {
+  if (!result || typeof result !== "object") return false;
+  if (result.success === false || (envelope && envelope.status && envelope.status !== "success")) {
+    return false;
+  }
+  const succeeded = result.success === true || (envelope && envelope.status === "success");
+  if (!succeeded) return false;
+  if (requirement.tool === "browser_navigate") {
+    return (
+      normalizedHttpUrl(result.url) === normalizedHttpUrl(requirement.targetUrl) &&
+      typeof result.title === "string" &&
+      result.title.trim().length > 0
+    );
+  }
+  if (requirement.tool === "web_search") {
+    const hasUsableHit =
+      Array.isArray(result.results) &&
+      result.results.some(
+        (hit) =>
+          hit &&
+          typeof hit === "object" &&
+          typeof hit.title === "string" &&
+          hit.title.trim().length > 0 &&
+          normalizedHttpUrl(hit.url) &&
+          typeof (hit.snippet || hit.content) === "string" &&
+          String(hit.snippet || hit.content).trim().length > 0,
+      );
+    return normalizedQuery(result.query) === normalizedQuery(requirement.query) && hasUsableHit;
+  }
+  if (requirement.tool === "run_command") {
+    return (
+      result.exitCode === 0 &&
+      result.terminationReason === "normal" &&
+      typeof result.stdout === "string" &&
+      /^v\d+\.\d+\.\d+(?:[-+][^\s]+)?\s*$/.test(result.stdout)
+    );
+  }
+  return false;
+}
+
+function verifyToolEvidenceFromEvents(events, requirement) {
+  if (!Array.isArray(events) || !requirement || typeof requirement.tool !== "string") {
+    return { ok: false, error: "tool_event_trace_invalid" };
+  }
+  const normalized = events.map(normalizeToolEvent).filter(Boolean);
+  const calls = normalized.filter(
+    (event) =>
+      event.type === "tool_call" &&
+      event.payload.tool === requirement.tool &&
+      toolCallMatchesEvidence(requirement, event.payload.input),
+  );
+  if (calls.length === 0) return { ok: false, error: "required_tool_call_missing_or_mismatched" };
+  for (const call of calls) {
+    const useId = call.payload.toolUseId;
+    if (typeof useId !== "string" || !useId) continue;
+    const failed = normalized.some(
+      (event) => event.type === "tool_error" && event.payload.toolUseId === useId,
+    );
+    if (failed) continue;
+    const resultEvent = normalized.find(
+      (event) =>
+        event.type === "tool_result" &&
+        event.payload.tool === requirement.tool &&
+        event.payload.toolUseId === useId,
+    );
+    if (
+      !resultEvent ||
+      !successfulToolResult(requirement, resultEvent.payload.result, resultEvent.payload.envelope)
+    ) {
+      continue;
+    }
+    const result = resultEvent.payload.result;
+    return {
+      ok: true,
+      tool: requirement.tool,
+      toolUseId: useId,
+      ...(requirement.tool === "browser_navigate" || requirement.tool === "run_command"
+        ? {
+            expectedArtifactContent: String(
+              requirement.tool === "browser_navigate" ? result.title : result.stdout,
+            ).trim(),
+          }
+        : {}),
+    };
+  }
+  return { ok: false, error: "required_tool_result_missing_or_failed" };
+}
+
+async function verifyLiveToolEvidence(client, taskId, requirement, deadlineAt) {
+  let response;
+  try {
+    response = await client.request("task.events", { taskId, limit: 2000 }, deadlineAt);
+  } catch (error) {
+    return { ok: false, error: "tool_event_trace_unavailable", detail: errorText(error) };
+  }
+  return verifyToolEvidenceFromEvents(response && response.events, requirement);
+}
+
 async function runScenario(client, scenario, options) {
   const startedAt = Date.now();
   const totalDeadlineAt = Number.isFinite(options.totalDeadlineAt)
@@ -984,14 +1304,51 @@ async function runScenario(client, scenario, options) {
     };
   }
 
+  let liveToolEvidence;
+  if (options.mode === "live" && scenario.liveToolEvidence) {
+    liveToolEvidence = await verifyLiveToolEvidence(
+      client,
+      taskId,
+      scenario.liveToolEvidence,
+      deadlineAt,
+    );
+    if (!liveToolEvidence.ok) {
+      return {
+        name: scenario.name,
+        ok: false,
+        phase: "tool_evidence",
+        taskId,
+        status: wait.task.status,
+        verify: liveToolEvidence,
+        durationMs: Date.now() - startedAt,
+      };
+    }
+  }
+
   const output = resolveWorkspaceOutput(options.workspacePath, scenario.outRel);
   let verify;
   if (!output.absPath) verify = { ok: false, error: output.error, detail: output.detail };
   else {
     try {
       verify = ["pdf", "pptx", "xlsx"].includes(scenario.artifactKind)
-        ? await runBoundedGrader(scenario.artifactKind, output.absPath, options.runId, deadlineAt)
+        ? await runBoundedGrader(scenario.artifactKind, output.absPath, options.runId, deadlineAt, {
+            mode: options.mode,
+            pdfMemoryLimitBytes: options.pdfMemoryLimitBytes,
+          })
         : await scenario.verify(output.absPath);
+      if (
+        verify.ok &&
+        liveToolEvidence &&
+        typeof liveToolEvidence.expectedArtifactContent === "string"
+      ) {
+        const actual = readText(output.absPath);
+        if (
+          typeof actual !== "string" ||
+          actual.trim() !== liveToolEvidence.expectedArtifactContent.trim()
+        ) {
+          verify = { ok: false, error: "artifact_does_not_match_tool_result" };
+        }
+      }
     } catch (error) {
       verify = { ok: false, error: "grader_failed", detail: errorText(error) };
     }
@@ -1055,7 +1412,16 @@ async function runScenario(client, scenario, options) {
     if (output.absPath) {
       try {
         verify = ["pdf", "pptx", "xlsx"].includes(scenario.artifactKind)
-          ? await runBoundedGrader(scenario.artifactKind, output.absPath, options.runId, deadlineAt)
+          ? await runBoundedGrader(
+              scenario.artifactKind,
+              output.absPath,
+              options.runId,
+              deadlineAt,
+              {
+                mode: options.mode,
+                pdfMemoryLimitBytes: options.pdfMemoryLimitBytes,
+              },
+            )
           : await scenario.verify(output.absPath);
       } catch (error) {
         verify = { ok: false, error: "grader_failed_after_followup", detail: errorText(error) };
@@ -1071,6 +1437,18 @@ async function runScenario(client, scenario, options) {
     output: scenario.outRel,
     artifactKind: scenario.artifactKind || "text",
     verify,
+    ...(liveToolEvidence
+      ? {
+          toolEvidence: {
+            tool: liveToolEvidence.tool,
+            toolUseId: liveToolEvidence.toolUseId,
+            matchedSuccessfulResult: true,
+            ...(typeof liveToolEvidence.expectedArtifactContent === "string"
+              ? { artifactMatchesToolResult: true }
+              : {}),
+          },
+        }
+      : {}),
     ...(verify && verify.unresolvedOwnedProcess
       ? {
           unresolvedOwnedWork: {
@@ -1311,18 +1689,25 @@ function spawnOwnedDaemon(profileDir, port, providerEnv, startupTimeoutMs) {
   };
 }
 
-function signalOwnedProcessTree(child, signal) {
+function signalOwnedProcessTree(child, signal, options = {}) {
   if (!child || !child.pid) return false;
-  try {
-    if (process.platform === "win32") {
-      const result = spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+  const platform = options.platform || process.platform;
+  if (platform === "win32") {
+    try {
+      const run = options.spawnSyncImpl || spawnSync;
+      const result = run("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
         encoding: "utf8",
         timeout: 5000,
         windowsHide: true,
       });
-      return result.status === 0;
+      return Boolean(result && !result.error && result.status === 0);
+    } catch {
+      return false;
     }
-    process.kill(-child.pid, signal);
+  }
+  const kill = options.killImpl || process.kill;
+  try {
+    kill(-child.pid, signal);
     return true;
   } catch {
     try {
@@ -1334,75 +1719,144 @@ function signalOwnedProcessTree(child, signal) {
   }
 }
 
-function processGroupExists(processGroupId) {
-  if (!processGroupId || process.platform === "win32") return false;
+function processGroupExists(processGroupId, options = {}) {
+  const platform = options.platform || process.platform;
+  if (!processGroupId || platform === "win32") return false;
+  const kill = options.killImpl || process.kill;
   try {
-    process.kill(-processGroupId, 0);
+    kill(-processGroupId, 0);
     return true;
   } catch (error) {
     return error.code === "EPERM";
   }
 }
 
-async function waitProcessTreeExit(child, timeoutMs) {
+async function waitProcessTreeExit(child, timeoutMs, options = {}) {
   if (!child || !child.pid) return true;
+  const platform = options.platform || process.platform;
   const deadlineAt = Date.now() + timeoutMs;
+  const isLeaderExited = () => child.exitCode !== null || child.signalCode !== null;
+  const isTreeGone = () => {
+    if (platform === "win32") {
+      return options.knownLeaf === true || options.windowsTreeKillAcknowledged === true;
+    }
+    const exists = options.processGroupExistsImpl || processGroupExists;
+    return !exists(child.pid, options);
+  };
   while (Date.now() < deadlineAt) {
-    const leaderExited = child.exitCode !== null || child.signalCode !== null;
-    const treeExists = process.platform === "win32" ? !leaderExited : processGroupExists(child.pid);
-    if (leaderExited && !treeExists) return true;
+    if (isLeaderExited() && isTreeGone()) return true;
     await sleep(Math.min(40, Math.max(1, deadlineAt - Date.now())));
   }
-  return (
-    (child.exitCode !== null || child.signalCode !== null) &&
-    (process.platform === "win32" || !processGroupExists(child.pid))
-  );
+  return isLeaderExited() && isTreeGone();
 }
 
-async function stopOwnedChildren(children, timeoutMs = CLEANUP_TIMEOUT_MS) {
+async function stopOwnedChildren(children, timeoutMs = CLEANUP_TIMEOUT_MS, options = {}) {
+  const platform = options.platform || process.platform;
   const unresolved = [];
+  const signals = new Map();
+  const alreadyStoppedChildren = new Set();
   for (const child of children) {
-    if (await waitProcessTreeExit(child, 1)) {
+    const alreadyStopped = await waitProcessTreeExit(child, 1, {
+      ...options,
+      ...(platform === "win32" && child.qaKnownLeafProcess ? { knownLeaf: true } : {}),
+    });
+    if (alreadyStopped) {
       activeOwnedChildren.delete(child);
+      alreadyStoppedChildren.add(child);
       continue;
     }
-    signalOwnedProcessTree(child, "SIGTERM");
+    const signaled = signalOwnedProcessTree(child, "SIGTERM", options);
+    signals.set(child, signaled);
   }
+  let forcedTermination = platform === "win32" && signals.size > 0;
   for (const child of children) {
-    let stopped = await waitProcessTreeExit(child, Math.min(timeoutMs, 750));
-    if (!stopped) {
-      signalOwnedProcessTree(child, "SIGKILL");
-      stopped = await waitProcessTreeExit(child, 1000);
+    if (alreadyStoppedChildren.has(child)) continue;
+    const signalAck = signals.get(child);
+    let stopped;
+    if (platform === "win32") {
+      stopped = await waitProcessTreeExit(child, timeoutMs, {
+        ...options,
+        windowsTreeKillAcknowledged: signalAck === true,
+      });
+    } else {
+      stopped = await waitProcessTreeExit(child, Math.min(timeoutMs, 750), options);
+      if (!stopped) {
+        const forced = signalOwnedProcessTree(child, "SIGKILL", options);
+        forcedTermination ||= forced;
+        stopped = await waitProcessTreeExit(child, 1000, options);
+      }
     }
     if (stopped) activeOwnedChildren.delete(child);
     else
       unresolved.push({
         pid: child.pid,
-        processGroupId: process.platform === "win32" ? null : child.pid,
+        processGroupId: platform === "win32" ? null : child.pid,
+        ...(platform === "win32"
+          ? { termination: "forced; taskkill tree confirmation unavailable" }
+          : {}),
       });
   }
-  return { stopped: unresolved.length === 0, unresolved };
+  return {
+    stopped: unresolved.length === 0,
+    unresolved,
+    termination: forcedTermination ? "forced" : "graceful_or_not_needed",
+  };
 }
 
-async function stopOwnedDaemon(child, timeoutMs = 5000, profileDir = null) {
-  if (!child || !child.pid) return { stopped: true, pid: child && child.pid };
-  const termSignaled = signalOwnedProcessTree(child, "SIGTERM");
-  if (await waitProcessTreeExit(child, timeoutMs)) {
-    return { stopped: true, pid: child.pid, signal: "SIGTERM", processTreeSignaled: termSignaled };
+async function stopOwnedDaemon(child, timeoutMs = 5000, profileDir = null, options = {}) {
+  if (!child || !child.pid)
+    return { stopped: true, pid: child && child.pid, termination: "not_needed" };
+  const platform = options.platform || process.platform;
+  if (platform === "win32") {
+    const acknowledged = signalOwnedProcessTree(child, "SIGKILL", options);
+    const stopped = await waitProcessTreeExit(child, timeoutMs, {
+      ...options,
+      windowsTreeKillAcknowledged: acknowledged,
+    });
+    return {
+      stopped,
+      pid: child.pid,
+      signal: "taskkill /T /F",
+      termination: "forced",
+      processTreeSignaled: acknowledged,
+      ...(!stopped
+        ? {
+            unresolvedOwnedProcess: {
+              pid: child.pid,
+              processGroupId: null,
+              profileDir,
+              reason: acknowledged
+                ? "taskkill acknowledged but daemon leader exit was not observed"
+                : "taskkill /T /F did not confirm termination; descendants are unknown",
+            },
+          }
+        : {}),
+    };
   }
-  const killSignaled = signalOwnedProcessTree(child, "SIGKILL");
-  const stopped = await waitProcessTreeExit(child, 1500);
+  const termSignaled = signalOwnedProcessTree(child, "SIGTERM", options);
+  if (await waitProcessTreeExit(child, timeoutMs, options)) {
+    return {
+      stopped: true,
+      pid: child.pid,
+      signal: "SIGTERM",
+      termination: "graceful",
+      processTreeSignaled: termSignaled,
+    };
+  }
+  const killSignaled = signalOwnedProcessTree(child, "SIGKILL", options);
+  const stopped = await waitProcessTreeExit(child, 1500, options);
   return {
     stopped,
     pid: child.pid,
     signal: "SIGKILL",
+    termination: "forced",
     processTreeSignaled: killSignaled,
     ...(stopped
       ? {}
       : {
           unresolvedOwnedProcess: {
             pid: child.pid,
-            processGroupId: process.platform === "win32" ? null : child.pid,
+            processGroupId: child.pid,
             profileDir,
           },
         }),
@@ -1449,6 +1903,7 @@ async function runBattery(client, options) {
     console.log("[battery] task: " + scenario.name);
     const result = await runScenario(client, scenario, {
       mode: options.mode,
+      pdfMemoryLimitBytes: options.pdfMemoryLimitBytes,
       workspaceId: options.workspaceId,
       workspacePath: options.workspacePath,
       profileDir: options.profileDir,
@@ -1629,10 +2084,7 @@ async function runFixtureMode(options) {
     fs.mkdirSync(workspacePath, { recursive: true });
     fs.mkdirSync(path.join(workspacePath, ".tmp", "qa-workspace"), { recursive: true });
   } catch (error) {
-    try {
-      fs.rmSync(profileDir, { recursive: true, force: true });
-    } catch {}
-    throw error;
+    throw withProfileCleanupError(error, profileDir, { cleanupAllowed: true });
   }
   let fixtureService;
   let client;
@@ -1660,10 +2112,8 @@ async function runFixtureMode(options) {
     if (fixtureService) await fixtureService.close().catch(() => {});
     if (onFixtureSigint) process.off("SIGINT", onFixtureSigint);
     if (onFixtureSigterm) process.off("SIGTERM", onFixtureSigterm);
-    try {
-      fs.rmSync(profileDir, { recursive: true, force: true });
-    } catch {}
-    throw error;
+    const serviceStopped = !fixtureService || fixtureService.getOwnedProcesses().length === 0;
+    throw withProfileCleanupError(error, profileDir, { cleanupAllowed: serviceStopped });
   }
   client = new BoundedControlPlaneClient({ url: fixtureService.url, token: fixtureService.token });
   let workspace;
@@ -1741,6 +2191,10 @@ async function runFixtureMode(options) {
   const allResults = (runResult && runResult.results) || [];
   const scenarioFailures = allResults.filter((result) => !result.ok);
   const controlFailures = controlChecks.filter((result) => !result.ok);
+  const profileCleanup = disposeProfileDir(profileDir, {
+    keepProfile: options.keepProfile,
+    cleanupAllowed: ownedProcessCleanup.stopped,
+  });
   const summary = {
     mode: "fixtures",
     scope:
@@ -1748,15 +2202,12 @@ async function runFixtureMode(options) {
     profile: {
       disposable: true,
       isolation: "fresh temporary user-data profile; OS sandbox behavior depends on the runtime",
-      path: options.keepProfile || !ownedProcessCleanup.stopped ? profileDir : null,
-      disposition: options.keepProfile
-        ? "kept"
-        : ownedProcessCleanup.stopped
-          ? "cleaned after run"
-          : "retained because owned workers remain",
+      path: profileCleanup.path,
+      disposition: profileCleanup.disposition,
+      ...(profileCleanup.error ? { cleanupError: profileCleanup.error } : {}),
     },
     workspace: {
-      path: options.keepProfile ? workspacePath : null,
+      path: profileCleanup.path ? workspacePath : null,
       createdByControlPlane: !!workspace,
     },
     deadlines: {
@@ -1774,28 +2225,28 @@ async function runFixtureMode(options) {
     artifactGraders: {
       pdf: "PDF.js text extraction and one-page structure",
       pptx: "bounded OOXML ZIP preflight, namespace-aware XML parsing, resolved slide relationships, required text, and bullet paragraphs",
-      xlsx: "ExcelJS read-back of worksheet, headers, inputs, formula, and cached result=5",
+      xlsx: "bounded ZIP preflight with inflation and CRC checks for every part, then ExcelJS read-back of worksheet, headers, inputs, formula, and cached result=5",
       rendering: detectRenderers(),
     },
     runId: runResult && runResult.runId,
     results: allResults,
     controlChecks,
     ownedProcessCleanup,
+    profileCleanup: {
+      attempted: profileCleanup.attempted,
+      failed: profileCleanup.failed,
+    },
     ...(receivedSignal ? { interruptedBy: receivedSignal } : {}),
     status:
       fatalError ||
       scenarioFailures.length ||
       controlFailures.length ||
-      !ownedProcessCleanup.stopped
+      !ownedProcessCleanup.stopped ||
+      profileCleanup.failed
         ? "failed"
         : "completed",
     ...(fatalError ? { error: fatalError } : {}),
   };
-  if (!options.keepProfile && ownedProcessCleanup.stopped) {
-    try {
-      fs.rmSync(profileDir, { recursive: true, force: true });
-    } catch {}
-  }
   return summary;
 }
 
@@ -1803,6 +2254,7 @@ async function runLiveMode(options) {
   const totalDeadlineAt = Date.now() + options.totalTimeoutMs;
   checkModulePrerequisites(false);
   const providerEnv = allowedProviderEnvironment();
+  const pdfMemoryBound = requireLivePdfMemoryBound(detectCgroupV2MemoryLimit());
   const profileDir = createProfileDir(options.profileDir, "cowork-battery-live-");
   const workspacePath = path.join(profileDir, "workspace");
   let port;
@@ -1814,10 +2266,7 @@ async function runLiveMode(options) {
       throw new Error("Total battery deadline expired before owned daemon startup");
     owned = spawnOwnedDaemon(profileDir, port, providerEnv, startupRemaining);
   } catch (error) {
-    try {
-      fs.rmSync(profileDir, { recursive: true, force: true });
-    } catch {}
-    throw error;
+    throw withProfileCleanupError(error, profileDir, { cleanupAllowed: !owned });
   }
   let client;
   let workspace;
@@ -1882,6 +2331,7 @@ async function runLiveMode(options) {
       workspacePath: workspace.path,
       profileDir,
       runtimePid: owned.child.pid,
+      pdfMemoryLimitBytes: pdfMemoryBound.memoryLimitBytes,
       totalDeadlineAt,
       shouldStop: () => Boolean(receivedSignal),
     });
@@ -1908,6 +2358,10 @@ async function runLiveMode(options) {
   const results = (battery && battery.results) || [];
   const scenarioFailures = results.filter((result) => !result.ok);
   const unresolved = results.filter((result) => result.unresolvedOwnedWork);
+  const profileCleanup = disposeProfileDir(profileDir, {
+    keepProfile: options.keepProfile,
+    cleanupAllowed: shutdown.stopped && unresolved.length === 0,
+  });
   const summary = {
     mode: "live",
     scope:
@@ -1915,15 +2369,16 @@ async function runLiveMode(options) {
     profile: {
       disposable: true,
       isolation: "fresh temporary user-data profile; OS sandbox behavior depends on the runtime",
-      path: options.keepProfile || !shutdown.stopped || unresolved.length ? profileDir : null,
-      disposition: options.keepProfile
-        ? "kept"
-        : !shutdown.stopped || unresolved.length
-          ? "retained because owned work remains unresolved"
-          : "cleaned after run",
+      path: profileCleanup.path,
+      disposition: profileCleanup.disposition,
+      ...(profileCleanup.error ? { cleanupError: profileCleanup.error } : {}),
+    },
+    profileCleanup: {
+      attempted: profileCleanup.attempted,
+      failed: profileCleanup.failed,
     },
     workspace: {
-      path: options.keepProfile ? workspacePath : null,
+      path: profileCleanup.path ? workspacePath : null,
       createdByControlPlane: !!workspace,
     },
     runtime: {
@@ -1931,6 +2386,10 @@ async function runLiveMode(options) {
       userDataDirObservedFromOwnedProcess: true,
       provider: prerequisites && prerequisites.provider,
       search: prerequisites && prerequisites.search,
+      pdfMemoryBound: {
+        source: pdfMemoryBound.source,
+        limitBytes: pdfMemoryBound.memoryLimitBytes,
+      },
     },
     deadlines: {
       perTaskMs: options.timeoutMs,
@@ -1947,7 +2406,7 @@ async function runLiveMode(options) {
     artifactGraders: {
       pdf: "PDF.js text extraction and one-page structure",
       pptx: "bounded OOXML ZIP preflight, namespace-aware XML parsing, resolved slide relationships, required text, and bullet paragraphs",
-      xlsx: "ExcelJS read-back of worksheet, headers, inputs, formula, and cached result=5",
+      xlsx: "bounded ZIP preflight with inflation and CRC checks for every part, then ExcelJS read-back of worksheet, headers, inputs, formula, and cached result=5",
       rendering: detectRenderers(),
     },
     runId: battery && battery.runId,
@@ -1955,16 +2414,24 @@ async function runLiveMode(options) {
     daemonCleanup: { ...shutdown, unresolvedOwnedWork: unresolved.length > 0 ? unresolved : null },
     ...(receivedSignal ? { interruptedBy: receivedSignal } : {}),
     status:
-      fatalError || scenarioFailures.length || unresolved.length || !shutdown.stopped
+      fatalError ||
+      scenarioFailures.length ||
+      unresolved.length ||
+      !shutdown.stopped ||
+      profileCleanup.failed
         ? "failed"
         : "completed",
-    ...(fatalError ? { error: fatalError } : {}),
+    ...(fatalError || profileCleanup.failed
+      ? {
+          error: [
+            fatalError,
+            profileCleanup.failed ? "Profile cleanup failed: " + profileCleanup.error : "",
+          ]
+            .filter(Boolean)
+            .join("; "),
+        }
+      : {}),
   };
-  if (!options.keepProfile && shutdown.stopped && unresolved.length === 0) {
-    try {
-      fs.rmSync(profileDir, { recursive: true, force: true });
-    } catch {}
-  }
   return summary;
 }
 
@@ -1989,6 +2456,20 @@ async function main(argv = process.argv.slice(2)) {
       mode: options.mode,
       status: "failed",
       error: errorText(error),
+      ...(error && error.profileCleanup
+        ? {
+            profile: {
+              disposable: true,
+              path: error.profileCleanup.path,
+              disposition: error.profileCleanup.disposition,
+              ...(error.profileCleanup.error ? { cleanupError: error.profileCleanup.error } : {}),
+            },
+            profileCleanup: {
+              attempted: error.profileCleanup.attempted,
+              failed: error.profileCleanup.failed,
+            },
+          }
+        : {}),
       approvals: {
         mode: options.approvalMode,
         allowedTypes: [...options.approveTypes],
@@ -2038,6 +2519,8 @@ if (require.main === module) {
 module.exports = {
   BoundedControlPlaneClient,
   createScenarios,
+  detectCgroupV2MemoryLimit,
+  disposeProfileDir,
   isApprovalInScope,
   isApprovalInWorkspace,
   main,
@@ -2045,6 +2528,11 @@ module.exports = {
   parseArgs,
   runBoundedGrader,
   runScenario,
+  signalOwnedProcessTree,
+  stopOwnedChildren,
   stopOwnedDaemon,
+  verifyToolEvidenceFromEvents,
   waitForTerminalStatus,
+  withProfileCleanupError,
+  waitProcessTreeExit,
 };

@@ -205,11 +205,11 @@ export function resolveEffectiveAccessProfile(
   const profileUnavailable =
     !legacyTaskWithoutProfile &&
     (explicitProfile || Boolean(hasConfiguredDefaultProfile)) &&
-    profileResolution.status !== "resolved" && !isReleaseBriefSample;
-  let definition =
-    isReleaseBriefSample
-      ? RELEASE_BRIEF_ACCESS_PROFILE
-      : profileUnavailable && profileResolution.status !== "resolved"
+    profileResolution.status !== "resolved" &&
+    !isReleaseBriefSample;
+  let definition = isReleaseBriefSample
+    ? RELEASE_BRIEF_ACCESS_PROFILE
+    : profileUnavailable && profileResolution.status !== "resolved"
       ? unavailableProfileForId(profileResolution.profileId, profileResolution.status)
       : profileResolution.definition || resolveAccessProfileDefinition(requestedId);
   const legacyMode = getLegacyMode(input.task);
@@ -269,18 +269,27 @@ export function resolveEffectiveAccessProfile(
     };
   }
 
-  // A verifier or internal read-only helper is a separate trust boundary from
-  // the task that requested it.
+  // Researcher/verifier roles and internal read-only helpers are a separate
+  // trust boundary from the task that requested them. Check the persisted role
+  // directly because older saved researcher tasks do not have readOnlyExecution.
   // Apply the read-only profile after ordinary profile/admin resolution so an
   // inherited full-access or custom approval profile cannot re-enable writes,
   // shell, network, or dynamically-discovered MCP tools. Preserve only the
   // caller's explicit filesystem/domain scope; widening that scope would make
   // the role boundary unsafe for custom profiles.
   if (
+    input.task?.workerRole === "researcher" ||
     input.task?.workerRole === "verifier" ||
     input.task?.agentConfig?.readOnlyExecution === true
   ) {
-    const readOnlyProfile = profileForMode("plan");
+    const readOnlyProfile: AccessProfileDefinition = {
+      ...profileForMode("plan"),
+      // Worker roles cannot approve their way into browser, computer-use, or
+      // other non-workspace effects. This remains true for saved tasks whose
+      // older toolRestrictions omit the role-level system denylist.
+      approval: "never",
+      reviewer: "none",
+    };
     definition = {
       ...readOnlyProfile,
       ...(definition.workspaceRoots ? { workspaceRoots: definition.workspaceRoots } : {}),

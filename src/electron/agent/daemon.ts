@@ -207,6 +207,7 @@ import { IntentRoute, IntentRouter } from "./strategy/IntentRouter";
 import { DerivedTaskStrategy, TaskStrategyService } from "./strategy/TaskStrategyService";
 import {
   getReadOnlyExecutionToolRestrictions,
+  normalizeWorkerRoleTaskConfig,
   resolveDefaultWorkerRoleKind,
   resolveWorkerRoleAgentConfig,
   resolveWorkerRoleKind,
@@ -2325,6 +2326,16 @@ export class AgentDaemon extends EventEmitter {
         }
       }
 
+      const workerRoleBoundary = normalizeWorkerRoleTaskConfig(executionTask);
+      executionTask = workerRoleBoundary.task;
+      if (workerRoleBoundary.changed) {
+        try {
+          this.taskRepo.update(executionTask.id, { agentConfig: executionTask.agentConfig });
+        } catch (error) {
+          console.warn("[AgentDaemon] Failed to persist worker role boundary:", error);
+        }
+      }
+
       if (await this.maybeLaunchCollaborativeTask(executionTask)) {
         this.finishQueueSlot(executionTask.id);
         return;
@@ -2700,8 +2711,19 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    // Apply agent role overrides (same as startTaskImmediate)
-    const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
+    // Apply agent role and worker security overrides before restoring any
+    // persisted runtime configuration. Older researcher tasks may still have
+    // an ACP runtime, which executes outside the native policy-wrapped tools.
+    const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(task);
+    const workerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
+    const effectiveTask = workerRoleBoundary.task;
+    if (workerRoleBoundary.changed) {
+      try {
+        this.taskRepo.update(effectiveTask.id, { agentConfig: effectiveTask.agentConfig });
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist worker role boundary:", error);
+      }
+    }
 
     if (this.shutdownRequested) return;
 
@@ -2998,7 +3020,16 @@ export class AgentDaemon extends EventEmitter {
       );
     }
 
-    const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
+    const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(task);
+    const workerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
+    const effectiveTask = workerRoleBoundary.task;
+    if (workerRoleBoundary.changed) {
+      try {
+        this.taskRepo.update(effectiveTask.id, { agentConfig: effectiveTask.agentConfig });
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist worker role boundary:", error);
+      }
+    }
 
     let effectiveWorkspace = this.applyTaskWorkspaceOverrides(effectiveTask, workspace);
     if (task.worktreePath && task.worktreeStatus === "active" && fs.existsSync(task.worktreePath)) {
@@ -4514,11 +4545,12 @@ export class AgentDaemon extends EventEmitter {
     const parent = this.taskRepo.findById(params.parentTaskId);
     const requestedWorkerRole = resolveWorkerRoleKind(params.workerRole);
     const workerRole = requestedWorkerRole || resolveDefaultWorkerRoleKind();
-    const isVerifierChild = workerRole === "verifier";
+    const isReadOnlyRoleChild = workerRole === "researcher" || workerRole === "verifier";
     const isReadOnlyExecutionChild =
-      isVerifierChild ||
+      isReadOnlyRoleChild ||
       params.agentConfig?.readOnlyExecution === true ||
       parent?.agentConfig?.readOnlyExecution === true ||
+      parent?.workerRole === "researcher" ||
       parent?.workerRole === "verifier";
     const parentGatewayContext = parent?.agentConfig?.gatewayContext;
     const childGatewayContext = params.agentConfig?.gatewayContext;
@@ -4528,9 +4560,10 @@ export class AgentDaemon extends EventEmitter {
     const mergedAllowUserInput = mergedAutonomousMode
       ? false
       : (params.agentConfig?.allowUserInput ?? parent?.agentConfig?.allowUserInput);
-    // Verifiers and internal read-only helpers are a trust boundary. A parent
-    // may intentionally bypass approvals for its own work, but that privilege
-    // must not flow into a child that is supposed to inspect the result only.
+    // Researcher/verifier roles and internal read-only helpers are a trust
+    // boundary. A parent may intentionally bypass approvals for its own work,
+    // but that privilege must not flow into a child that is supposed to inspect
+    // the result only.
     const mergedPermissionMode = isReadOnlyExecutionChild
       ? "plan"
       : parent?.agentConfig?.permissionMode === "bypass_permissions"
@@ -13861,7 +13894,7 @@ export class AgentDaemon extends EventEmitter {
       cached = undefined;
     }
     const sideChatAgentConfigOverride = this.buildSideChatTurnAgentConfigOverride(task, message);
-    const effectiveOptions = sideChatAgentConfigOverride
+    let effectiveOptions = sideChatAgentConfigOverride
       ? {
           ...options,
           agentConfigOverride: {
@@ -13875,15 +13908,53 @@ export class AgentDaemon extends EventEmitter {
       this.taskRepo.update(taskId, { agentConfig: overrideResult.task.agentConfig });
     }
     const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(overrideResult.task);
-    const effectiveTask = effectiveOptions?.agentConfigOverride
+    const persistentWorkerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
+    const taskWithFollowUpOverride = effectiveOptions?.agentConfigOverride
       ? {
-          ...roleAdjustedTask,
+          ...persistentWorkerRoleBoundary.task,
           agentConfig: {
-            ...roleAdjustedTask.agentConfig,
+            ...persistentWorkerRoleBoundary.task.agentConfig,
             ...effectiveOptions.agentConfigOverride,
           },
         }
-      : roleAdjustedTask;
+      : persistentWorkerRoleBoundary.task;
+    const workerRoleBoundary = normalizeWorkerRoleTaskConfig(taskWithFollowUpOverride);
+    const effectiveTask = workerRoleBoundary.task;
+    if (effectiveTask.workerRole === "researcher" && effectiveOptions?.agentConfigOverride) {
+      // The executor merges this override again, including when queued. Forward
+      // the bounded config so that second merge cannot restore ACP or write access.
+      effectiveOptions = { ...effectiveOptions, agentConfigOverride: effectiveTask.agentConfig };
+    }
+    if (
+      effectiveTask.workerRole === "researcher" &&
+      effectiveOptions?.queuedFollowUp?.agentConfigOverride
+    ) {
+      const boundedQueuedTask = normalizeWorkerRoleTaskConfig({
+        ...effectiveTask,
+        agentConfig: {
+          ...effectiveTask.agentConfig,
+          ...effectiveOptions.queuedFollowUp.agentConfigOverride,
+        },
+      }).task;
+      effectiveOptions = {
+        ...effectiveOptions,
+        queuedFollowUp: {
+          ...effectiveOptions.queuedFollowUp,
+          agentConfigOverride: boundedQueuedTask.agentConfig,
+        },
+      };
+    }
+    if (persistentWorkerRoleBoundary.changed) {
+      try {
+        // Turn-only model/tool overrides stay transient; persist only the saved
+        // task's role boundary, which is re-applied on every execution entrypoint.
+        this.taskRepo.update(effectiveTask.id, {
+          agentConfig: persistentWorkerRoleBoundary.task.agentConfig,
+        });
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist worker role boundary:", error);
+      }
+    }
 
     const workspace = this.workspaceRepo.findById(effectiveTask.workspaceId);
     if (!workspace) {

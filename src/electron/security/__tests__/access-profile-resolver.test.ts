@@ -364,6 +364,8 @@ describe("access profile resolver", () => {
         sandbox: "read-only",
         network: "disabled",
         shellAccess: false,
+        approval: "never",
+        reviewer: "none",
         workspaceRoots: ["../shared-docs"],
         filesystemRules: [{ path: "../shared-docs", access: "read" }],
         domainRules: [{ pattern: "example.com", access: "allow" }],
@@ -433,6 +435,8 @@ describe("access profile resolver", () => {
         sandbox: "read-only",
         network: "disabled",
         shellAccess: false,
+        approval: "never",
+        reviewer: "none",
       },
     });
     expect(applied.permissions).toMatchObject({
@@ -479,6 +483,70 @@ describe("access profile resolver", () => {
     expect(mcpEvaluation.reason).toMatchObject({
       type: "workspace_capability",
       capability: "network",
+    });
+  });
+
+  it("enforces read-only access for saved researcher tasks without the helper flag", () => {
+    const broad: AccessProfileDefinition = {
+      id: "broad_saved_researcher_custom",
+      label: "Broad saved researcher profile",
+      description: "A broad profile retained by an older researcher task.",
+      sandbox: "danger-full-access",
+      approval: "never",
+      reviewer: "none",
+      network: "enabled",
+      shellAccess: true,
+    };
+    const profile = resolveEffectiveAccessProfile({
+      task: {
+        workerRole: "researcher",
+        agentConfig: {
+          accessProfileId: broad.id,
+          permissionMode: "bypass_permissions",
+          shellAccess: true,
+        },
+      },
+      workspace,
+      settings: withProfiles([broad]),
+    });
+    const applied = applyAccessProfileToWorkspace(workspace, profile);
+
+    expect(profile).toMatchObject({
+      permissionMode: "plan",
+      sandboxMode: "read-only",
+      shellEnabled: false,
+      networkEnabled: false,
+      definition: {
+        sandbox: "read-only",
+        network: "disabled",
+        shellAccess: false,
+        approval: "never",
+        reviewer: "none",
+      },
+    });
+    expect(applied.permissions).toMatchObject({
+      write: false,
+      delete: false,
+      network: false,
+      shell: false,
+      unrestrictedFileAccess: false,
+    });
+    expect(
+      PermissionEngine.evaluate({
+        workspace: applied,
+        toolName: "mcp_external_mutator",
+        mode: profile.permissionMode,
+        rules: [
+          {
+            source: "session",
+            effect: "allow",
+            scope: { kind: "tool", toolName: "mcp_external_mutator" },
+          },
+        ],
+      }),
+    ).toMatchObject({
+      decision: "deny",
+      reason: { type: "workspace_capability", capability: "network" },
     });
   });
 

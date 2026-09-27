@@ -115,7 +115,11 @@ import type {
   TurnKernelPreparedResponse,
 } from "./runtime/turn-kernel";
 import { createVerificationRuntime } from "./runtime/VerificationRuntime";
-import { buildWorkerRolePrompt, resolveWorkerRoleKind } from "./runtime/worker-role-registry";
+import {
+  buildWorkerRolePrompt,
+  normalizeWorkerRoleTaskConfig,
+  resolveWorkerRoleKind,
+} from "./runtime/worker-role-registry";
 import { enrichToolEventPayload } from "./runtime/tool-event-enrichment";
 import { resolveSkillSlashAlias } from "./skill-slash-aliases";
 import { SandboxRunner } from "./sandbox/runner";
@@ -17900,10 +17904,10 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   updateTaskAgentConfig(agentConfig: AgentConfig | undefined): void {
-    this.task = {
+    this.task = normalizeWorkerRoleTaskConfig({
       ...this.task,
       agentConfig,
-    };
+    }).task;
     if (this._runtime) {
       this._runtime.setPermissionMode(this.getDefaultPermissionMode());
     }
@@ -17914,14 +17918,20 @@ You are continuing a previous conversation. The context from the previous conver
       this.clearQueuedAgentConfigOverride();
       return;
     }
-    this.daemon.setTransientTaskAgentConfig(this.task.id, agentConfigOverride);
-    this.transientQueuedConfigActive = true;
     const persistedAgentConfig =
       this.daemon.getTask(this.task.id)?.agentConfig || this.task.agentConfig;
-    this.updateTaskAgentConfig({
-      ...(persistedAgentConfig || {}),
-      ...agentConfigOverride,
-    });
+    const boundedTask = normalizeWorkerRoleTaskConfig({
+      ...this.task,
+      agentConfig: { ...(persistedAgentConfig || {}), ...agentConfigOverride },
+    }).task;
+    this.daemon.setTransientTaskAgentConfig(
+      this.task.id,
+      resolveWorkerRoleKind(this.task.workerRole) === "researcher"
+        ? boundedTask.agentConfig
+        : agentConfigOverride,
+    );
+    this.transientQueuedConfigActive = true;
+    this.updateTaskAgentConfig(boundedTask.agentConfig);
     const effectiveWorkspace = this.daemon.getEffectiveWorkspaceForTask(this.task.id);
     if (effectiveWorkspace) this.updateWorkspace(effectiveWorkspace);
   }

@@ -12400,6 +12400,9 @@ export class AgentDaemon extends EventEmitter {
       parentTask,
       parentSummary,
       verificationEvidenceBundle,
+      requirementEvidenceManifest: this.workSessionContractService?.getRequirementEvidenceManifest(
+        parentTask.id,
+      ),
       timeoutMs,
       ...gateContext,
     });

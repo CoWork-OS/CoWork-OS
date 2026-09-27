@@ -67,6 +67,69 @@ describe("VerificationRuntime", () => {
     expect(prompt).toContain("speculative abstractions");
   });
 
+  it("keeps the 41st mandatory requirement and a directly selected proof beyond 1,000 while bounding optional preview entries", async () => {
+    const runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "child-evidence",
+      status: "completed" as const,
+      summary: "VERDICT: PASS",
+    });
+    const runtime = new VerificationRuntime({ runReadOnlyChildTaskAndWait });
+    const requirements = Array.from({ length: 41 }, (_, index) => {
+      const selectedId = index === 40 ? 1_205 : index + 1;
+      return {
+        requirementId: `requirement-${index + 1}`,
+        description: `Check required output ${index + 1}`,
+        required: true,
+        status: "satisfied" as const,
+        verifier: "file_exists",
+        targetPath: `/workspace/output-${selectedId}.txt`,
+        evidence: [
+          {
+            id: `evidence-${selectedId}`,
+            claim: `Selected proof ${index + 1}`,
+            status: "supporting" as const,
+            sourceType: "artifact_revision" as const,
+            sourceRef: `/workspace/output-${selectedId}.txt`,
+            capturedAt: 10_000 + index,
+            validatedAt: 20_000 + index,
+            artifactRevisionId: `revision-${selectedId}`,
+            sha256: `${selectedId}`.padStart(64, "0"),
+            artifactStatus: "committed" as const,
+          },
+        ],
+      };
+    });
+
+    await runtime.run({
+      parentTask: makeTask(),
+      explicit: true,
+      verificationEvidenceBundle: {
+        entries: Array.from({ length: 50 }, (_, index) => ({
+          kind: "file_exists" as const,
+          ok: true,
+          detail: `generic ${index + 1}`,
+          capturedAt: index,
+        })),
+      },
+      requirementEvidenceManifest: {
+        contractId: "contract-1",
+        contractVersion: 2,
+        capturedAt: 30_000,
+        requirements,
+      },
+    });
+
+    const prompt = runReadOnlyChildTaskAndWait.mock.calls[0]?.[0]?.prompt || "";
+    expect(prompt).toContain("Selected proof 41");
+    expect(prompt).toContain("requirement-41");
+    expect(prompt).toContain("evidence-1205");
+    expect(prompt).toContain("validatedAt");
+    expect(prompt).toContain('"omittedCount": 30');
+    expect(prompt).toContain("does not establish file contents");
+    expect(prompt).toContain("generic 20");
+    expect(prompt).not.toContain("generic 50");
+  });
+
   it("blocks high-risk partial verification results", async () => {
     const runtime = new VerificationRuntime({
       runReadOnlyChildTaskAndWait: vi.fn().mockResolvedValue({

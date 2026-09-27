@@ -3685,7 +3685,39 @@ export interface OutcomeContractRequirement {
   required: boolean;
   status: OutcomeContractRequirementStatus;
   verifier?: string;
+  /** Exact target for the server-supported file_exists verifier. */
+  targetPath?: string;
   evidenceIds?: string[];
+}
+
+/** Requirement-selected evidence sent to the independent post-completion verifier. */
+export interface RequirementEvidenceManifest {
+  contractId: string;
+  contractVersion: number;
+  /** When the service refreshed physical proof and assembled this selected manifest. */
+  capturedAt: number;
+  requirements: Array<{
+    requirementId: string;
+    description: string;
+    required: boolean;
+    status: OutcomeContractRequirementStatus;
+    verifier?: string;
+    targetPath?: string;
+    evidence: Array<{
+      id: string;
+      claim: string;
+      status: EvidenceManifestEntryStatus;
+      sourceType: EvidenceManifestSourceType;
+      sourceRef: string;
+      capturedAt: number;
+      /** Time this evidence was revalidated for the current manifest. */
+      validatedAt: number;
+      freshnessExpiresAt?: number;
+      artifactRevisionId?: string;
+      sha256?: string;
+      artifactStatus?: ArtifactRevisionStatus;
+    }>;
+  }>;
 }
 
 export interface OutcomeContract {
@@ -6563,6 +6595,8 @@ export interface ManagedSessionCreateInput {
   environmentId: string;
   title: string;
   surface?: ManagedSessionSurface;
+  /** Explicit user-authored verification criteria; omitted tasks remain unverified. */
+  successCriteria?: SuccessCriteria;
   initialEvent?: {
     type: "user.message";
     content: ManagedSessionInputContent[];
@@ -6576,9 +6610,42 @@ export interface ManagedSessionUserMessageRequest {
   expectedTurnId?: string;
 }
 
+export type ManagedSessionRequirementCriterion =
+  | { type: "file_exists"; targetPath: string }
+  | { type: "unsupported" };
+
+/** A client correction revises a requirement; verification remains server-owned. */
+export interface ManagedSessionRequirementCorrectionEvent {
+  type: "requirement.corrected";
+  requirementId: string;
+  statement: string;
+  criterion: ManagedSessionRequirementCriterion;
+  idempotencyKey: string;
+}
+
+export interface ManagedSessionRequirementCorrectionRequest {
+  sessionId: string;
+  event: ManagedSessionRequirementCorrectionEvent;
+}
+
+export type ManagedSessionSendEvent =
+  | {
+      type: "user.message";
+      content: ManagedSessionInputContent[];
+      expectedTurnId?: string;
+    }
+  | {
+      type: "input.received";
+      requestId: string;
+      answers?: InputRequestResponse["answers"];
+      status?: InputRequestResponse["status"];
+    }
+  | ManagedSessionRequirementCorrectionEvent;
+
 export type ManagedSessionEventType =
   | "session.created"
   | "user.message"
+  | "requirement.corrected"
   | "assistant.message"
   | "tool.call"
   | "tool.result"
@@ -9413,6 +9480,7 @@ export const IPC_CHANNELS = {
   MANAGED_SESSION_GET_IPC: "managedSession:getIpc",
   MANAGED_SESSION_CREATE_IPC: "managedSession:createIpc",
   MANAGED_SESSION_SEND_USER_MESSAGE_IPC: "managedSession:sendUserMessageIpc",
+  MANAGED_SESSION_CORRECT_REQUIREMENT_IPC: "managedSession:correctRequirementIpc",
   MANAGED_SESSION_RESUME_IPC: "managedSession:resumeIpc",
   MANAGED_SESSION_CANCEL_IPC: "managedSession:cancelIpc",
   MANAGED_SESSION_EVENTS_LIST_IPC: "managedSession:eventsListIpc",

@@ -3,6 +3,7 @@ import type {
   Task,
   TaskOutputSummary,
   TaskVerificationEvidenceBundle,
+  RequirementEvidenceManifest,
 } from "../../../shared/types";
 import { buildWorkerRolePrompt, parseVerificationVerdict } from "./worker-role-registry";
 import type { WorkerRoleKind, VerificationVerdict } from "../../../shared/types";
@@ -29,6 +30,7 @@ export interface VerificationRuntimeRequest {
   parentTask: Task;
   parentSummary?: string;
   verificationEvidenceBundle?: TaskVerificationEvidenceBundle;
+  requirementEvidenceManifest?: RequirementEvidenceManifest;
   outputSummary?: TaskOutputSummary;
   timeoutMs?: number;
   explicit?: boolean;
@@ -44,6 +46,9 @@ export interface VerificationRuntimeResult {
   report: string;
   shouldBlock: boolean;
 }
+
+const OPTIONAL_VERIFICATION_EVIDENCE_PREVIEW_LIMIT = 20;
+const OPTIONAL_VERIFICATION_EVIDENCE_DETAIL_LIMIT = 1_000;
 
 export class VerificationRuntime {
   constructor(private readonly deps: VerificationRuntimeDeps) {}
@@ -148,10 +153,40 @@ export class VerificationRuntime {
 
   private buildVerificationPrompt(request: VerificationRuntimeRequest): string {
     const task = request.parentTask;
-    const evidenceBlock =
-      request.verificationEvidenceBundle && request.verificationEvidenceBundle.entries.length > 0
-        ? JSON.stringify(request.verificationEvidenceBundle.entries.slice(0, 40), null, 2)
-        : "(no structured verification evidence — rely on files and summary)";
+    const optionalEntries = request.verificationEvidenceBundle?.entries || [];
+    const evidenceBlock = optionalEntries.length
+      ? JSON.stringify(
+          {
+            semantics:
+              "Optional execution observations only. The requirement-selected manifest below contains mandatory proof; omitted preview entries are not dropped mandatory requirements.",
+            totalCount: optionalEntries.length,
+            includedCount: Math.min(
+              optionalEntries.length,
+              OPTIONAL_VERIFICATION_EVIDENCE_PREVIEW_LIMIT,
+            ),
+            omittedCount: Math.max(
+              0,
+              optionalEntries.length - OPTIONAL_VERIFICATION_EVIDENCE_PREVIEW_LIMIT,
+            ),
+            entries: optionalEntries
+              .slice(0, OPTIONAL_VERIFICATION_EVIDENCE_PREVIEW_LIMIT)
+              .map((entry) => ({
+                kind: entry.kind,
+                ok: entry.ok,
+                detail: String(entry.detail || "").slice(
+                  0,
+                  OPTIONAL_VERIFICATION_EVIDENCE_DETAIL_LIMIT,
+                ),
+                capturedAt: entry.capturedAt,
+              })),
+          },
+          null,
+          2,
+        )
+      : "(no optional structured execution evidence — rely on files, summary, and the selected manifest)";
+    const requirementEvidenceBlock = request.requirementEvidenceManifest
+      ? JSON.stringify(request.requirementEvidenceManifest, null, 2)
+      : "(no requirement-selected evidence manifest)";
     return [
       buildWorkerRolePrompt("verifier", {
         taskTitle: task.title,
@@ -165,6 +200,10 @@ export class VerificationRuntime {
       }),
       "",
       "## Instructions",
+      "## Requirement-selected evidence",
+      requirementEvidenceBlock,
+      "A file_exists proof establishes only that the exact file existed when the server inspected and hashed it; it does not establish file contents or semantic correctness.",
+      "Do not treat generic PASS prose or unlinked evidence as proof that an outcome requirement is satisfied.",
       "1. Use read/search/browser/test/build/run tools only.",
       "2. Be adversarial: try to falsify the claim that the task is complete.",
       "3. Inspect files and outputs using command/file evidence, not just prose.",

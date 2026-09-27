@@ -178,6 +178,9 @@ function writePreparedRecoveryReceipt(options: {
   before: Buffer;
   after: Buffer;
   ownerPid?: number;
+  ownerBootTimeMs?: number;
+  transactionId?: string;
+  state?: "prepared" | "committed";
 }): string {
   const realPath = fs.realpathSync(options.target);
   const identity = fs.statSync(realPath);
@@ -187,7 +190,10 @@ function writePreparedRecoveryReceipt(options: {
     fileDev: identity.dev,
     fileIno: identity.ino,
     ownerPid: options.ownerPid ?? process.pid,
-    state: "prepared",
+    ...(options.transactionId !== undefined
+      ? { ownerBootTimeMs: options.ownerBootTimeMs, transactionId: options.transactionId }
+      : {}),
+    state: options.state ?? "prepared",
     beforeBase64: options.before.toString("base64"),
     afterBase64: options.after.toString("base64"),
     beforeSha256: createHash("sha256").update(options.before).digest("hex"),
@@ -1130,6 +1136,213 @@ describe("edit recovery and conflict handling", () => {
       );
       expect(fs.readFileSync(target, "utf8")).toBe("alp");
       expect(fs.existsSync(recordPath)).toBe(true);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not discard a live record that replaced the orphan it inspected", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-orphan-race-"));
+    const target = path.join(directory, "shared.txt");
+    fs.writeFileSync(target, "alpha=1\n");
+    const recordPath = writePreparedRecoveryReceipt({
+      target,
+      before: Buffer.from("alpha=1\n"),
+      after: Buffer.from("alpha=2\n"),
+      transactionId: "00000000-0000-4000-8000-000000000001",
+      ownerBootTimeMs: Date.now() - os.uptime() * 1000,
+    });
+    let replacement = "";
+    class RacingEditTools extends EditTools {
+      protected override beforeOrphanRecoveryRecordRemoval(orphanPath: string): void {
+        // Simulate another process discarding the same orphan and starting its own edit.
+        fs.unlinkSync(orphanPath);
+        writePreparedRecoveryReceipt({
+          target,
+          before: Buffer.from("alpha=1\n"),
+          after: Buffer.from("alpha=2\n"),
+          ownerPid: process.ppid,
+          transactionId: "00000000-0000-4000-8000-000000000002",
+          ownerBootTimeMs: Date.now() - os.uptime() * 1000,
+        });
+        replacement = fs.readFileSync(orphanPath, "utf8");
+      }
+    }
+    const editor = new RacingEditTools(
+      { ...mockWorkspace, path: directory },
+      mockDaemon as Any,
+      "task",
+    );
+
+    try {
+      const result = await editor.editFile({
+        file_path: "shared.txt",
+        old_string: "alpha=1",
+        new_string: "alpha=3",
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/replaced the recovery record/i);
+      expect(fs.readFileSync(target, "utf8")).toBe("alpha=1\n");
+      expect(fs.readFileSync(recordPath, "utf8")).toBe(replacement);
+      expect(fs.readdirSync(path.dirname(recordPath))).toEqual([path.basename(recordPath)]);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reclaims a finished live-owner record restored by a concurrent reconciler", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-restored-commit-"));
+    const target = path.join(directory, "shared.txt");
+    fs.writeFileSync(target, "alpha=1\n");
+    const bootTimeMs = Date.now() - os.uptime() * 1000;
+    const recordPath = writePreparedRecoveryReceipt({
+      target,
+      before: Buffer.from("alpha=1\n"),
+      after: Buffer.from("alpha=2\n"),
+      transactionId: "00000000-0000-4000-8000-000000000005",
+      ownerBootTimeMs: bootTimeMs,
+    });
+    class RacingEditTools extends EditTools {
+      protected override beforeOrphanRecoveryRecordRemoval(orphanPath: string): void {
+        // Live owner B (a long-lived PID) replaced the orphan with its own record and finished
+        // its write. This reconciler (C) then tombstones B's committed record; B's by-path
+        // unlink in that window hits ENOENT and is ignored, and C restores the finished record.
+        fs.unlinkSync(orphanPath);
+        writePreparedRecoveryReceipt({
+          target,
+          before: Buffer.from("alpha=1\n"),
+          after: Buffer.from("alpha=4\n"),
+          ownerPid: process.ppid,
+          transactionId: "00000000-0000-4000-8000-000000000006",
+          ownerBootTimeMs: bootTimeMs,
+          state: "committed",
+        });
+        fs.writeFileSync(target, "alpha=4\n");
+      }
+    }
+    const workspace = { ...mockWorkspace, path: directory };
+
+    try {
+      const raced = await new RacingEditTools(workspace, mockDaemon as Any, "task").editFile({
+        file_path: "shared.txt",
+        old_string: "alpha=1",
+        new_string: "alpha=3",
+      });
+      expect(raced.success).toBe(false);
+      expect(raced.error).toMatch(/replaced the recovery record/i);
+      // The stuck state: B's finished record is back at recordPath and B is still alive.
+      expect(JSON.parse(fs.readFileSync(recordPath, "utf8")).state).toBe("committed");
+      expect(fs.readFileSync(target, "utf8")).toBe("alpha=4\n");
+
+      const retried = await new EditTools(workspace, mockDaemon as Any, "task").editFile({
+        file_path: "shared.txt",
+        old_string: "alpha=4",
+        new_string: "alpha=5",
+      });
+      expect(retried.success).toBe(true);
+      expect(fs.readFileSync(target, "utf8")).toBe("alpha=5\n");
+      expect(fs.readdirSync(path.dirname(recordPath))).toEqual([]);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps blocking on a live owner's prepared record even when the target shows after-bytes", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-live-prepared-"));
+    const target = path.join(directory, "shared.txt");
+    fs.writeFileSync(target, "alpha=2\n");
+    const recordPath = writePreparedRecoveryReceipt({
+      target,
+      before: Buffer.from("alpha=1\n"),
+      after: Buffer.from("alpha=2\n"),
+      ownerPid: process.ppid,
+      transactionId: "00000000-0000-4000-8000-000000000007",
+      ownerBootTimeMs: Date.now() - os.uptime() * 1000,
+    });
+    const editor = new EditTools({ ...mockWorkspace, path: directory }, mockDaemon as Any, "task");
+
+    try {
+      const result = await editor.editFile({
+        file_path: "shared.txt",
+        old_string: "alpha=2",
+        new_string: "alpha=3",
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/another live CoWork process owns this edit transaction/i);
+      expect(fs.readFileSync(target, "utf8")).toBe("alpha=2\n");
+      expect(fs.existsSync(recordPath)).toBe(true);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a record from a previous boot as orphaned even if its PID is alive", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-reboot-owner-"));
+    const target = path.join(directory, "shared.txt");
+    fs.writeFileSync(target, "alpha=1\n");
+    const recordPath = writePreparedRecoveryReceipt({
+      target,
+      before: Buffer.from("alpha=1\n"),
+      after: Buffer.from("alpha=2\n"),
+      ownerPid: process.ppid,
+      transactionId: "00000000-0000-4000-8000-000000000003",
+      ownerBootTimeMs: Date.now() - os.uptime() * 1000 - 24 * 60 * 60 * 1000,
+    });
+    const editor = new EditTools({ ...mockWorkspace, path: directory }, mockDaemon as Any, "task");
+
+    try {
+      const result = await editor.editFile({
+        file_path: "shared.txt",
+        old_string: "alpha=1",
+        new_string: "alpha=3",
+      });
+      expect(result.success).toBe(true);
+      expect(fs.readFileSync(target, "utf8")).toBe("alpha=3\n");
+      expect(fs.existsSync(recordPath)).toBe(false);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("treats an EPERM owner as alive only within the current boot", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-eperm-owner-"));
+    const target = path.join(directory, "shared.txt");
+    fs.writeFileSync(target, "alpha=1\n");
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+    });
+    const editor = new EditTools({ ...mockWorkspace, path: directory }, mockDaemon as Any, "task");
+    const receipt = (ownerBootTimeMs: number) =>
+      writePreparedRecoveryReceipt({
+        target,
+        before: Buffer.from("alpha=1\n"),
+        after: Buffer.from("alpha=2\n"),
+        ownerPid: 424242,
+        transactionId: "00000000-0000-4000-8000-000000000004",
+        ownerBootTimeMs,
+      });
+
+    try {
+      const sameBoot = receipt(Date.now() - os.uptime() * 1000);
+      const blocked = await editor.editFile({
+        file_path: "shared.txt",
+        old_string: "alpha=1",
+        new_string: "alpha=3",
+      });
+      expect(blocked.success).toBe(false);
+      expect(blocked.error).toMatch(/another live CoWork process owns this edit transaction/i);
+      expect(fs.existsSync(sameBoot)).toBe(true);
+      fs.unlinkSync(sameBoot);
+
+      const previousBoot = receipt(Date.now() - os.uptime() * 1000 - 24 * 60 * 60 * 1000);
+      const recovered = await editor.editFile({
+        file_path: "shared.txt",
+        old_string: "alpha=1",
+        new_string: "alpha=3",
+      });
+      expect(recovered.success).toBe(true);
+      expect(fs.readFileSync(target, "utf8")).toBe("alpha=3\n");
+      expect(fs.existsSync(previousBoot)).toBe(false);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

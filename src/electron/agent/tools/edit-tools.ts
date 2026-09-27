@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { createHash, randomUUID } from "crypto";
 import { Workspace } from "../../../shared/types";
@@ -28,12 +29,24 @@ interface EditRecoveryRecord {
   fileDev: number;
   fileIno: number;
   ownerPid: number;
+  // Optional for backward compatibility with records written before these fields existed.
+  // ownerBootTimeMs lets a reboot (and therefore PID reuse) prove the owner is gone;
+  // transactionId makes every record's checksum unique so cleanup can verify identity.
+  ownerBootTimeMs?: number;
+  transactionId?: string;
   state: "prepared" | "committed";
   beforeBase64: string;
   afterBase64: string;
   beforeSha256: string;
   afterSha256: string;
   checksum: string;
+}
+
+interface LoadedEditRecoveryRecord {
+  record: EditRecoveryRecord;
+  /** Identity of the record file itself, used to confirm cleanup removes the record it read. */
+  recordDev: number;
+  recordIno: number;
 }
 
 const editPathLocks = new Map<string, Promise<void>>();
@@ -112,6 +125,31 @@ function isProcessAlive(pid: number): boolean {
   } catch (error: Any) {
     return error.code !== "ESRCH";
   }
+}
+
+// Boot time derived from wall clock minus uptime drifts with clock adjustments, so allow a
+// generous margin. A false "same boot" only falls back to the PID probe; a false "different
+// boot" would discard a live record, so the tolerance errs toward treating the owner as alive.
+const BOOT_TIME_TOLERANCE_MS = 10 * 60 * 1000;
+
+function getCurrentBootTimeMs(): number {
+  return Math.round(Date.now() - os.uptime() * 1000);
+}
+
+/** Liveness of a record owned by another PID (same-PID ownership is tracked in-process). */
+function isOtherRecoveryRecordOwnerAlive(record: EditRecoveryRecord): boolean {
+  const hasBootTime = typeof record.ownerBootTimeMs === "number";
+  if (
+    hasBootTime &&
+    Math.abs((record.ownerBootTimeMs as number) - getCurrentBootTimeMs()) > BOOT_TIME_TOLERANCE_MS
+  ) {
+    // The owner ran before the last reboot; its PID may now belong to an unrelated process.
+    return false;
+  }
+  // Legacy records (no boot time) keep the previous conservative behavior: any error other
+  // than ESRCH, including EPERM, means alive. With a matching boot time, EPERM still means a
+  // process exists under that PID in this boot, so it is treated as alive too.
+  return isProcessAlive(record.ownerPid);
 }
 
 function cleanupStaleRecoveryTemps(directory: string): void {
@@ -768,7 +806,10 @@ export class EditTools {
     );
   }
 
-  private readRecoveryRecord(recordPath: string, realPath: string): EditRecoveryRecord | null {
+  private readRecoveryRecord(
+    recordPath: string,
+    realPath: string,
+  ): LoadedEditRecoveryRecord | null {
     let fd: number;
     const noFollow = (fs.constants as Any).O_NOFOLLOW;
     try {
@@ -802,7 +843,7 @@ export class EditTools {
       }
       const parsed = JSON.parse(fs.readFileSync(fd, "utf8")) as Any;
       const keys = Object.keys(parsed ?? {}).sort();
-      const expectedKeys = [
+      const baseKeys = [
         "afterBase64",
         "afterSha256",
         "beforeBase64",
@@ -814,7 +855,12 @@ export class EditTools {
         "path",
         "state",
         "version",
-      ].sort();
+      ];
+      // Records written before ownerBootTimeMs/transactionId existed remain valid.
+      const hasOwnerIdentity = Object.prototype.hasOwnProperty.call(parsed ?? {}, "transactionId");
+      const expectedKeys = (
+        hasOwnerIdentity ? [...baseKeys, "ownerBootTimeMs", "transactionId"] : baseKeys
+      ).sort();
       if (
         !parsed ||
         typeof parsed !== "object" ||
@@ -827,6 +873,10 @@ export class EditTools {
         !Number.isFinite(parsed.fileDev) ||
         !Number.isFinite(parsed.fileIno) ||
         !Number.isSafeInteger(parsed.ownerPid) ||
+        (hasOwnerIdentity &&
+          (!Number.isFinite(parsed.ownerBootTimeMs) ||
+            typeof parsed.transactionId !== "string" ||
+            !/^[a-f0-9-]{36}$/.test(parsed.transactionId))) ||
         (parsed.state !== "prepared" && parsed.state !== "committed") ||
         typeof parsed.beforeBase64 !== "string" ||
         typeof parsed.afterBase64 !== "string" ||
@@ -861,7 +911,7 @@ export class EditTools {
           "the private recovery record contents failed validation",
         );
       }
-      return record;
+      return { record, recordDev: stats.dev, recordIno: stats.ino };
     } catch (error: Any) {
       if (
         typeof error?.message === "string" &&
@@ -886,6 +936,86 @@ export class EditTools {
     }
   }
 
+  /** Test seam: runs after a record is judged orphaned and before it is discarded. */
+  protected beforeOrphanRecoveryRecordRemoval(_recordPath: string): void {}
+
+  /**
+   * Discard an orphaned record only if the file at recordPath is still the record that was read.
+   * Another process sharing the profile may have already discarded that orphan and created its own
+   * live record at the same path; unlinking by path would silently delete the live record. POSIX
+   * has no unlink-if-inode, so move the entry to a unique tombstone, verify the moved file's
+   * identity and checksum (transactionId makes checksums unique), and restore it on mismatch.
+   */
+  private removeOrphanRecoveryRecord(
+    recordPath: string,
+    realPath: string,
+    loaded: LoadedEditRecoveryRecord,
+  ): void {
+    const isSameRecord = (candidate: LoadedEditRecoveryRecord | null): boolean =>
+      candidate !== null &&
+      candidate.record.checksum === loaded.record.checksum &&
+      (loaded.recordIno === 0 ||
+        candidate.recordIno === 0 ||
+        (candidate.recordDev === loaded.recordDev && candidate.recordIno === loaded.recordIno));
+    const replacedError = () =>
+      this.activeEditConflictError(
+        recordPath,
+        "another CoWork process replaced the recovery record while it was being reconciled",
+      );
+
+    try {
+      const onDisk = fs.lstatSync(recordPath);
+      if (
+        loaded.recordIno !== 0 &&
+        onDisk.ino !== 0 &&
+        (onDisk.dev !== loaded.recordDev || onDisk.ino !== loaded.recordIno)
+      ) {
+        throw replacedError();
+      }
+    } catch (error: Any) {
+      // Another reconciler already discarded this orphan; record creation is exclusive, so a
+      // concurrent new edit will still be detected when this request creates its own record.
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+
+    const tombstonePath = `${recordPath}.${process.pid}.${randomUUID()}.reap`;
+    try {
+      fs.renameSync(recordPath, tombstonePath);
+    } catch (error: Any) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+
+    let moved: LoadedEditRecoveryRecord | null = null;
+    try {
+      moved = this.readRecoveryRecord(tombstonePath, realPath);
+    } catch {
+      moved = null;
+    }
+    if (isSameRecord(moved)) {
+      this.removeRecoveryRecord(tombstonePath);
+      return;
+    }
+
+    // Not the orphan we inspected: put the other process's record back without overwriting
+    // anything created meanwhile (link fails with EEXIST), then report the live conflict.
+    try {
+      fs.linkSync(tombstonePath, recordPath);
+    } catch {
+      throw this.recoveryRequiredError(
+        tombstonePath,
+        "a concurrent edit replaced the recovery record during reconciliation and it could not be restored",
+      );
+    }
+    try {
+      fs.unlinkSync(tombstonePath);
+    } catch {
+      // The restored record is intact; a leftover tombstone link is harmless evidence.
+    }
+    throw replacedError();
+  }
+
   /**
    * Reconciliation runs on the next edit of this inode within the same profile, not during
    * startup or read-only access. Fsynced before/after bytes make process-killed writes manually
@@ -907,8 +1037,9 @@ export class EditTools {
     const { realPath, targetFd, expectedIdentity } = options;
     const directory = this.getRecoveryDirectory();
     const recordPath = getEditRecoveryRecordPath(directory, expectedIdentity, realPath);
-    const record = this.readRecoveryRecord(recordPath, realPath);
-    if (!record) return;
+    const loaded = this.readRecoveryRecord(recordPath, realPath);
+    if (!loaded) return;
+    const { record } = loaded;
     if (
       record.fileDev !== expectedIdentity.dev ||
       record.fileIno !== expectedIdentity.ino ||
@@ -919,9 +1050,20 @@ export class EditTools {
         "the target inode no longer matches the interrupted edit",
       );
     }
+    const before = Buffer.from(record.beforeBase64, "base64");
+    const after = Buffer.from(record.afterBase64, "base64");
+    const current = readDescriptorBuffer(targetFd);
+    // A committed record whose target already holds the after-bytes describes a finished write:
+    // the owner's only remaining step is an ENOENT-tolerant unlink by path, so it is reclaimable
+    // even while the owner lives. Without this, a record that a concurrent reconciler tombstoned
+    // and restored after the owner's unlink would block other processes for as long as a
+    // long-lived owner (the daemon) runs. Prepared records never qualify: their owner may be
+    // mid-write.
+    const finishedCommit = record.state === "committed" && current.equals(after);
     if (
-      (record.ownerPid === process.pid && activeEditTransactions.has(recordPath)) ||
-      (record.ownerPid !== process.pid && isProcessAlive(record.ownerPid))
+      !finishedCommit &&
+      ((record.ownerPid === process.pid && activeEditTransactions.has(recordPath)) ||
+        (record.ownerPid !== process.pid && isOtherRecoveryRecordOwnerAlive(record)))
     ) {
       throw this.activeEditConflictError(
         recordPath,
@@ -929,9 +1071,7 @@ export class EditTools {
       );
     }
 
-    const before = Buffer.from(record.beforeBase64, "base64");
-    const after = Buffer.from(record.afterBase64, "base64");
-    const current = readDescriptorBuffer(targetFd);
+    this.beforeOrphanRecoveryRecordRemoval(recordPath);
     if (record.state === "committed") {
       if (!current.equals(after)) {
         throw this.recoveryRequiredError(
@@ -939,16 +1079,16 @@ export class EditTools {
           "the file changed after the edit was committed; current user content was preserved",
         );
       }
-      this.removeRecoveryRecord(recordPath);
+      this.removeOrphanRecoveryRecord(recordPath, realPath, loaded);
       return;
     }
 
     if (current.equals(before)) {
-      this.removeRecoveryRecord(recordPath);
+      this.removeOrphanRecoveryRecord(recordPath, realPath, loaded);
       return;
     }
     if (current.equals(after)) {
-      this.removeRecoveryRecord(recordPath);
+      this.removeOrphanRecoveryRecord(recordPath, realPath, loaded);
       return;
     }
     throw this.recoveryRequiredError(
@@ -991,6 +1131,8 @@ export class EditTools {
       fileDev: expectedIdentity.dev,
       fileIno: expectedIdentity.ino,
       ownerPid: process.pid,
+      ownerBootTimeMs: getCurrentBootTimeMs(),
+      transactionId: randomUUID(),
       state: "prepared",
       beforeBase64: contentBefore.toString("base64"),
       afterBase64: contentAfter.toString("base64"),

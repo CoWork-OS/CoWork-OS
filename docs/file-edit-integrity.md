@@ -24,6 +24,21 @@ Save the current file first; inspect the record's path, identity and before/afte
 restore or merge only the version the user intends. A changed inode or malformed record also needs
 manual inspection. Reads and startup do not perform recovery.
 
+Records carry the owner PID plus optional `ownerBootTimeMs` and `transactionId`; records written
+without both fields remain valid and fall back to the PID probe. An owner whose boot time differs
+from the current boot by more than 10 minutes ran before a reboot and is treated as gone, so a
+reused PID cannot pin its record. Within the same boot, and for legacy records, `EPERM` from the
+probe still counts as alive. A committed record whose target already holds its after-bytes is
+reclaimable even while its owner lives, because only the owner's ENOENT-tolerant unlink remains;
+prepared records of a live owner always conflict.
+
+Orphan cleanup never unlinks by path: another process may already have replaced the orphan with its
+own live record. The reconciler renames the record to a unique `.reap` tombstone, verifies the
+tombstone's checksum (unique per `transactionId`) and record-file dev/inode, and deletes it only on
+a match. Otherwise it links the tombstone back without overwriting a newer record and reports a
+conflict. If that owner finished and unlinked in the meantime, the restored committed record is
+reclaimed on the next edit by the rule above.
+
 The configurable file-size guardrail applies to each version, not their combined snapshot. Recovery
 storage separately limits each version to 128 MiB, even when the ordinary guardrail is disabled;
 the journal permits both versions plus encoding overhead. Oversized targets fail before mutation.

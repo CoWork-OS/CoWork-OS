@@ -12457,9 +12457,10 @@ ${transcript}
     const directFileMutationIntent =
       !isReadOnlyConstraintOnlyStep(descriptionRaw) &&
       descriptionHasWriteIntent(positiveMutationDescription) &&
-      /\b(?:file|files|document|documents|workspace|folder|directory)\b/.test(
+      (/\b(?:file|files|document|documents|workspace|folder|directory)\b/.test(
         positiveMutationDescription,
-      ) &&
+      ) ||
+        hasArtifactExtensionMention(positiveMutationDescription)) &&
       /\b(?:edit|update|delete|remove|rename|move|modify|replace|fix|refactor)\b/.test(
         positiveMutationDescription,
       );

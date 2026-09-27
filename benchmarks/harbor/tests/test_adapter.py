@@ -541,6 +541,71 @@ class AgentRunPathTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(harbor["wheelIntegrityStatus"], "unverified")
             self.assertNotIn("wheelSha256", harbor)
 
+    async def test_npm_mode_host_identity_matches_without_cache_hash_in_package(self) -> None:
+        import hashlib
+        import io
+        import os
+
+        def write_tar(path: Path, entries: dict[str, str]) -> str:
+            with tarfile.open(path, "w:gz") as archive:
+                for name, content in entries.items():
+                    payload = content.encode()
+                    info = tarfile.TarInfo(name)
+                    info.size = len(payload)
+                    archive.addfile(info, io.BytesIO(payload))
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+
+        class ReachedUpload(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = root / "cowork-os-1.2.3.tgz"
+            app_sha = write_tar(app, {
+                "package/package.json": json.dumps({"name": "cowork-os", "version": "1.2.3", "dependencies": {}}),
+                "package/bin/coworkd-node.js": "#!/usr/bin/env node\n",
+                "package/bin/coworkctl.js": "#!/usr/bin/env node\n",
+            })
+            cache = root / "npm-cache.tar.gz"
+            cache_sha = write_tar(cache, {"_cacache/index-v5/placeholder": "x"})
+            node_image = "node:24.14.1-bookworm-slim@sha256:" + "a" * 64
+            package = inspect_app_artifact(app, "npm", app_sha)
+            identity = run_smoke.make_run_identity(
+                "npm-run-1",
+                harbor_version=HARBOR_VERSION,
+                package_mode="npm",
+                package=package,
+                provider_mode="fixture-zero-cost",
+                node_image=node_image,
+                verifier_image={"image": "verifier"},
+                cache_sha256=cache_sha,
+            )
+            logs = root / "agent-logs"
+            logs.mkdir()
+            agent = CoWorkOSNativeAgent(logs)
+
+            async def exec_as_root(*args: object, **kwargs: object) -> object:
+                raise ReachedUpload()
+
+            agent.exec_as_root = exec_as_root  # type: ignore[method-assign]
+            env = {
+                "COWORK_P04_PROVIDER_MODE": "fixture-zero-cost",
+                "COWORK_P04_NODE_IMAGE": node_image,
+                "COWORK_P04_APP_ARTIFACT": str(app),
+                "COWORK_P04_PACKAGE_MODE": "npm",
+                "COWORK_P04_APP_SHA256": app_sha,
+                "COWORK_P04_NPM_CACHE_ARCHIVE": str(cache),
+                "COWORK_P04_NPM_CACHE_SHA256": cache_sha,
+                "COWORK_P04_RUN_IDENTITY": json.dumps(identity),
+                "COWORK_P04_MAX_TURNS": str(POLICY_CAPS["maxModelTurns"]),
+            }
+            with patch.dict(os.environ, env), patch("importlib.metadata.version", return_value=HARBOR_VERSION):
+                with self.assertRaises(ReachedUpload):
+                    await agent.install(object())  # type: ignore[arg-type]
+            self.assertEqual(agent._manifest["runIdentity"], identity)
+            self.assertEqual(agent._manifest["package"]["offlineCacheSha256"], cache_sha)
+            self.assertNotIn("offlineCacheSha256", identity["package"])
+
     async def test_task_creation_places_hard_model_turn_cap_in_agent_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             logs = Path(tmp) / "agent-logs"

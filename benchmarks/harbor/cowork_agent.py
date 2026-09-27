@@ -129,7 +129,7 @@ class CoWorkOSNativeAgent(BaseInstalledAgent):
                 raise AdapterPreflightError("missing_config", "host run identity is invalid") from error
             if not isinstance(run_identity, dict):
                 raise AdapterPreflightError("missing_config", "host run identity is invalid")
-            self._manifest["package"] = package
+            self._manifest["package"] = dict(package)
             self._manifest["nodeImage"] = config["nodeImage"]
             self._manifest["runtimeArchitecture"] = "linux/amd64"
             self._manifest["preflight"] = {"status": "passed", "providerMode": config["providerMode"], "networkPolicy": config["networkPolicy"]}

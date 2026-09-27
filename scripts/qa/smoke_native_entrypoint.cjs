@@ -92,10 +92,12 @@ async function rpc(ws, method, params) {
     COWORK_CONTROL_PLANE_HOST: "127.0.0.1",
     COWORK_CONTROL_PLANE_PORT: String(port),
   };
+  // cwd must be the disposable dir: daemon startup (migrateEnvToSettings) imports and renames
+  // process.cwd()/.env, which would consume the developer's real .env if cwd were the repo root.
   child = spawn(
     process.execPath,
     [daemonEntry, "--headless", "--enable-control-plane", "--user-data-dir", profile],
-    { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: ownedDir, env, stdio: ["ignore", "pipe", "pipe"] },
   );
   child.once("error", (error) => {
     childError = error;

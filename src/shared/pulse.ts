@@ -65,8 +65,6 @@ export type PulsePreviewState =
 export interface PulseDeletionStatus {
   /** `pending`: reporting is off and the server has not yet acknowledged deletion. */
   state: "none" | "pending";
-  requestedAt: number | null;
-  lastAttemptAt: number | null;
   lastErrorCode: string | null;
 }
 
@@ -81,8 +79,6 @@ export interface PulsePublicSettings {
   lastSentAt: number | null;
   lastAttemptAt: number | null;
   lastErrorCode: string | null;
-  /** Monotonic consent/identity revision. Increments on every user decision. */
-  revision: number;
   deletion: PulseDeletionStatus;
   preview: PulsePreviewState;
   /**
@@ -100,7 +96,6 @@ export interface PulseMutationResult {
 
 export type PulseSendOutcome =
   | "sent"
-  | "busy"
   | "already_sent"
   | "no_eligible_day"
   | "cancelled_by_state_change"

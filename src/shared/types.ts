@@ -1042,7 +1042,7 @@ export interface OrchestrationNodeNotification {
   taskId?: string;
   remoteTaskId?: string;
   publicHandle?: string;
-  status: "running" | "completed" | "failed" | "cancelled";
+  status: "running" | "completed" | "failed" | "cancelled" | "blocked";
   summary: string;
   result?: string;
   usage?: Record<string, unknown>;

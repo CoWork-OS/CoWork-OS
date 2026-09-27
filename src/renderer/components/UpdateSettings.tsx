@@ -32,21 +32,6 @@ function ReleaseNotesLink({ href, children, ...props }: React.ComponentPropsWith
   );
 }
 
-/** One line describing how fresh an update answer is. Absent provenance is unknown. */
-function describeUpdateFreshness(info: UpdateInfo): string {
-  const provenance = info.provenance;
-  if (!provenance) return "Freshness unknown.";
-  const checked = new Date(provenance.checkedAt).toLocaleString();
-  const retrieved = provenance.lastSuccessfulRetrievalAt
-    ? new Date(provenance.lastSuccessfulRetrievalAt).toLocaleString()
-    : null;
-  if (provenance.source === "cached") {
-    return `Couldn't reach the release server at ${checked}${provenance.networkError ? ` (${provenance.networkError})` : ""}. Showing the last release information${retrieved ? ` retrieved ${retrieved}` : ""}; check again when online before installing.`;
-  }
-  if (provenance.source === "no_release") return `Checked ${checked}.`;
-  return `Checked ${checked}${provenance.origin === "cowork_endpoint" ? " via CoWork's update endpoint" : " on GitHub"}.`;
-}
-
 export function UpdateSettings() {
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -285,23 +270,20 @@ export function UpdateSettings() {
                   </strong>
                 </div>
               </>
-            ) : updateInfo.provenance?.source === "live" ? (
-              <div className="update-header up-to-date">
-                <CheckCircle size={20} strokeWidth={2} />
-                <span>You're up to date!</span>
-              </div>
-            ) : updateInfo.provenance?.source === "no_release" ? (
+            ) : updateInfo.provenance.source === "no_release" ? (
               <div className="update-header up-to-date">
                 <CheckCircle size={20} strokeWidth={2} />
                 <span>No published release found.</span>
               </div>
             ) : (
-              <div className="update-header">
-                <XCircle size={20} strokeWidth={2} />
-                <span>Could not confirm you're up to date.</span>
+              <div className="update-header up-to-date">
+                <CheckCircle size={20} strokeWidth={2} />
+                <span>You're up to date!</span>
               </div>
             )}
-            <div className="update-date">{describeUpdateFreshness(updateInfo)}</div>
+            <div className="update-date">
+              Checked {new Date(updateInfo.provenance.checkedAt).toLocaleString()}.
+            </div>
           </div>
         )}
 
@@ -323,23 +305,19 @@ export function UpdateSettings() {
           </div>
         )}
 
-        {updateInfo?.available &&
-          updateInfo.supported !== false &&
-          updateInfo.provenance?.source === "live" &&
-          !updating &&
-          !updateReady && (
-            <button
-              className="button-primary update-button"
-              onClick={handleDownloadUpdate}
-              disabled={updating}
-            >
-              {versionInfo?.isNpmGlobal
-                ? "Update Now (npm install)"
-                : versionInfo?.isGitRepo
-                  ? "Update Now (Git Pull + Rebuild)"
-                  : "Download & Install Update"}
-            </button>
-          )}
+        {updateInfo?.available && updateInfo.supported !== false && !updating && !updateReady && (
+          <button
+            className="button-primary update-button"
+            onClick={handleDownloadUpdate}
+            disabled={updating}
+          >
+            {versionInfo?.isNpmGlobal
+              ? "Update Now (npm install)"
+              : versionInfo?.isGitRepo
+                ? "Update Now (Git Pull + Rebuild)"
+                : "Download & Install Update"}
+          </button>
+        )}
 
         {updateReady && updateInfo?.supported !== false && (
           <button className="button-primary update-button restart" onClick={handleInstallUpdate}>

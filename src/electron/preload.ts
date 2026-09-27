@@ -976,7 +976,6 @@ interface CronRunHistoryResult {
   successfulRuns: number;
   failedRuns: number;
   outcomeCounts: import("../shared/cron-outcomes").CronOutcomeCountMap;
-  outcomeCountsLimitation?: string;
 }
 
 interface CronWebhookStatus {

@@ -561,14 +561,40 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     ).run(node.id);
     const deps = makeDeps();
     const recovered = new OrchestrationGraphEngine(db, deps.deps);
+    const notifications: Array<{ nodeId: string; status: string }> = [];
+    recovered.on("node_notification", (notification) => notifications.push(notification));
 
     await recovered.resumeRunningRuns();
+
+    expect(notifications).toEqual([expect.objectContaining({ nodeId: node.id, status: "blocked" })]);
 
     const after = recovered.getRepository().findSnapshotByRunId(snapshot.run.id);
     expect(deps.deps.createChildTask).not.toHaveBeenCalled();
     expect(after?.nodes[0]).toMatchObject({ status: "blocked" });
     expect(after?.nodes[0].metadata).toMatchObject({ dispatchOutcome: "unknown" });
     expect(after?.nodes[0].error).toMatch(/identity|outcome is unknown/i);
+  });
+
+  it("notifies node listeners once when a dispatch error after the effect boundary blocks a node", async () => {
+    const { deps } = makeDeps({
+      createChildTask: vi.fn(() => Promise.reject(new Error("socket hang up"))),
+    });
+    const engine = new OrchestrationGraphEngine(db, deps);
+    const notifications: Array<{ nodeId: string; status: string }> = [];
+    engine.on("node_notification", (notification) => notifications.push(notification));
+
+    const snapshot = await engine.createRun({
+      rootTaskId: "root-dispatch-error",
+      workspaceId: "workspace-1",
+      kind: "delegation",
+      maxParallel: 1,
+      nodes: [makeNode("boom")],
+    });
+
+    expect(snapshot.nodes[0]).toMatchObject({ status: "blocked" });
+    expect(notifications).toEqual([
+      expect.objectContaining({ nodeId: snapshot.nodes[0].id, status: "blocked" }),
+    ]);
   });
 
   it("preserves completed dependency behavior after persisted task recovery", async () => {

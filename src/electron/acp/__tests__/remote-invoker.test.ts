@@ -105,6 +105,43 @@ describe("RemoteAgentInvoker dispatch fallback", () => {
     },
   );
 
+  it.each([
+    ["HTTP 404", { http: 404 }],
+    ["HTTP 405", { http: 405 }],
+    ["HTTP 501", { http: 501 }],
+    ["JSON-RPC -32600", { code: -32600 }],
+  ] as const)(
+    "falls back to tasks/create when tasks/send is definitively rejected (%s)",
+    async (_label, rejection) => {
+      const methods: string[] = [];
+      const endpoint = await startServer(async (_request, response, payload) => {
+        methods.push(payload.method);
+        if (payload.method === "tasks/send") {
+          if ("http" in rejection) {
+            response.writeHead(rejection.http, { "content-type": "text/plain" });
+            response.end("not supported");
+            return;
+          }
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: payload.id,
+              error: { code: rejection.code, message: "Invalid Request" },
+            }),
+          );
+          return;
+        }
+        writeResult(response, payload.id, { status: "running", taskId: "remote-created-2" });
+      });
+
+      const result = await new RemoteAgentInvoker().invoke(makeAgent(endpoint), makeTask());
+
+      expect(result).toMatchObject({ status: "running", remoteTaskId: "remote-created-2" });
+      expect(methods).toEqual(["tasks/send", "tasks/create"]);
+    },
+  );
+
   async function startServer(
     handler: (
       request: import("node:http").IncomingMessage,

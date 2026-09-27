@@ -9459,7 +9459,7 @@ export class AgentDaemon extends EventEmitter {
         ? "done"
         : notification.status === "failed"
           ? "failed"
-          : notification.status === "cancelled"
+          : notification.status === "cancelled" || notification.status === "blocked"
             ? "blocked"
             : "in_progress";
 

@@ -345,6 +345,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
         };
         this.repo.createNodeEvent(snapshot.run.id, node.id, "orchestration_node_blocked", payload);
         this.emitRootEvent(snapshot.run.rootTaskId, "orchestration_node_blocked", payload);
+        this.emitBlockedNodeNotification(snapshot.run.id, updated);
       }
     }
   }
@@ -665,6 +666,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       error: updated.error,
       cancellation,
     });
+    this.emitBlockedNodeNotification(node.runId, updated);
     return outcome === "acknowledged" || outcome === "already_terminal";
   }
 
@@ -690,12 +692,13 @@ export class OrchestrationGraphEngine extends EventEmitter {
       if (node.status !== "pending") return false;
       const incoming = incomingByTarget.get(node.id) || [];
       if (incoming.some((from) => blockedNodeIds.has(from))) {
-        this.repo.updateNode(node.id, {
+        const blocked = this.repo.updateNode(node.id, {
           status: "blocked",
           error: "Dependency failed or was cancelled",
           completedAt: Date.now(),
           summary: "Blocked by failed dependency",
         });
+        if (blocked) this.emitBlockedNodeNotification(snapshot.run.id, blocked);
         return false;
       }
       return incoming.every((from) => terminalNodeIds.has(from));
@@ -817,6 +820,10 @@ export class OrchestrationGraphEngine extends EventEmitter {
     };
     this.repo.createNodeEvent(run.id, node.id, eventType, payload);
     this.emitRootEvent(run.rootTaskId, eventType, payload);
+    // Only notify on a transition this call made; a preserved terminal status was already notified.
+    if (!preserveStatus && (status === "failed" || status === "blocked")) {
+      this.emit("node_notification", this.buildNotification(run.id, updated, status));
+    }
   }
 
   private async persistLocalDispatchResult(
@@ -965,6 +972,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
           error: updated.error,
           dispatchClaim: metadata.dispatchClaim,
         });
+        this.emitBlockedNodeNotification(run.id, updated);
       }
       return;
     }
@@ -1142,6 +1150,16 @@ export class OrchestrationGraphEngine extends EventEmitter {
     };
     this.repo.createNodeEvent(run.id, node.id, "orchestration_node_blocked", payload);
     this.emitRootEvent(run.rootTaskId, "orchestration_node_blocked", payload);
+    this.emitBlockedNodeNotification(run.id, updated);
+  }
+
+  /**
+   * Graph-backed team items only advance through node_notification, so every
+   * transition into "blocked" must be announced or the item stays in_progress.
+   */
+  private emitBlockedNodeNotification(runId: string, node: OrchestrationGraphNode): void {
+    if (node.status !== "blocked") return;
+    this.emit("node_notification", this.buildNotification(runId, node, "blocked"));
   }
 
   private async finalizeRunIfTerminal(snapshot: OrchestrationGraphSnapshot): Promise<void> {

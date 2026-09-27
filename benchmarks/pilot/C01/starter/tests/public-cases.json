@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "public-standard-discount-refund",
+      "lines": [
+        { "quantity": 2, "unitPrice": "12.34" },
+        { "quantity": 1, "unitPrice": "0.99" }
+      ],
+      "discountPercent": "10.00",
+      "refund": "1.00"
+    },
+    {
+      "id": "public-line-rounding-before-sum",
+      "lines": [
+        { "quantity": 1, "unitPrice": "0.0050" },
+        { "quantity": 1, "unitPrice": "0.0050" }
+      ],
+      "discountPercent": "0.00",
+      "refund": "0.0000"
+    },
+    {
+      "id": "public-half-cent-discount-and-refund",
+      "lines": [
+        { "quantity": 3, "unitPrice": "0.20" }
+      ],
+      "discountPercent": "12.50",
+      "refund": "0.1050"
+    }
+  ]
+}

@@ -5458,6 +5458,11 @@ export class AgentDaemon extends EventEmitter {
     ) {
       return;
     }
+    const graphCancellation = this.orchestrationGraphEngine
+      .cancelRunForRootTask(taskId)
+      .catch((error) => {
+        log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
+      });
     this.pendingContinuationTaskIds.delete(taskId);
     const interruptRequestedAt = Date.now();
     this.logEvent(taskId, "agent_interrupt_requested", {
@@ -5490,6 +5495,7 @@ export class AgentDaemon extends EventEmitter {
           await this.cancelTask(child.id);
         }
       }
+      await graphCancellation;
       return;
     }
 
@@ -5500,11 +5506,15 @@ export class AgentDaemon extends EventEmitter {
       this.activeTasks.delete(taskId);
     }
 
-    await this.settleRunningTaskCancellation(taskId, {
-      message: "Task was stopped by user",
-      actor: "user",
-      requestedAt: interruptRequestedAt,
-    });
+    await this.settleRunningTaskCancellation(
+      taskId,
+      {
+        message: "Task was stopped by user",
+        actor: "user",
+        requestedAt: interruptRequestedAt,
+      },
+      graphCancellation,
+    );
   }
 
   /**
@@ -5528,7 +5538,13 @@ export class AgentDaemon extends EventEmitter {
   private async settleRunningTaskCancellation(
     taskId: string,
     input: { message: string; actor: "user" | "external_runtime"; requestedAt: number },
+    existingGraphCancellation?: Promise<unknown>,
   ): Promise<void> {
+    const graphCancellation = (
+      existingGraphCancellation || this.orchestrationGraphEngine.cancelRunForRootTask(taskId)
+    ).catch((error) => {
+      log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
+    });
     // Persist cancellation for running tasks too (important for remote clients querying task status).
     this.cancelTaskRecord(taskId, input.message);
     this.logEvent(taskId, "agent_interrupt_confirmed", {
@@ -5558,6 +5574,7 @@ export class AgentDaemon extends EventEmitter {
         await this.cancelTask(child.id);
       }
     }
+    await graphCancellation;
   }
 
   /**

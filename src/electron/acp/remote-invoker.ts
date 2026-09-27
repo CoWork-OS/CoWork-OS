@@ -18,6 +18,13 @@ export interface RemoteInvocationResult {
 
 const REMOTE_REQUEST_TIMEOUT_MS = 15_000;
 
+class RemoteMethodNotFoundError extends Error {
+  constructor(method: A2AJsonRpcRequest["method"], message: string) {
+    super(`Remote agent does not support ${method}: ${message}`);
+    this.name = "RemoteMethodNotFoundError";
+  }
+}
+
 function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname.trim().toLowerCase();
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
@@ -137,59 +144,57 @@ export class RemoteAgentInvoker {
     };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REMOTE_REQUEST_TIMEOUT_MS);
-    let response: Response;
     try {
-      response = await fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: buildHeaders(agent),
         body: JSON.stringify(request),
         signal: controller.signal,
       });
+      if (!response.ok) {
+        throw new Error(`Remote agent responded with HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as
+        | A2AJsonRpcSuccessResponse<T>
+        | A2AJsonRpcErrorResponse;
+      if (!payload || typeof payload !== "object" || payload.id !== request.id) {
+        throw new Error("Remote agent response ID did not match the request");
+      }
+      if ("error" in payload) {
+        if (payload.error.code === -32601) {
+          throw new RemoteMethodNotFoundError(method, payload.error.message || "Method not found");
+        }
+        throw new Error(payload.error.message || "Remote agent invocation failed");
+      }
+      return payload.result;
     } catch (error: Any) {
-      if (error?.name === "AbortError") {
+      if (controller.signal.aborted || error?.name === "AbortError") {
         throw new Error(`Remote agent request timed out after ${REMOTE_REQUEST_TIMEOUT_MS}ms`);
       }
       throw error;
     } finally {
       clearTimeout(timeout);
     }
-    if (!response.ok) {
-      throw new Error(`Remote agent responded with HTTP ${response.status}`);
-    }
-    const payload = (await response.json()) as
-      | A2AJsonRpcSuccessResponse<T>
-      | A2AJsonRpcErrorResponse;
-    if ("error" in payload) {
-      throw new Error(payload.error.message || "Remote agent invocation failed");
-    }
-    return payload.result;
   }
 
   async invoke(agent: ACPAgentCard, task: ACPTaskCreateParams): Promise<RemoteInvocationResult> {
+    let syncResult: A2ARemoteTaskResult;
     try {
-      const syncResult = await this.sendRequest<A2ARemoteTaskResult>(agent, "tasks/send", {
+      syncResult = await this.sendRequest<A2ARemoteTaskResult>(agent, "tasks/send", {
         title: task.title,
         prompt: task.prompt,
         workspaceId: task.workspaceId,
       });
-      const normalized = normalizeRemoteResult(syncResult);
-      if (normalized.status !== "pending") {
-        return normalized;
-      }
-    } catch {
-      // Some agents only support the async create/get flow.
+    } catch (error) {
+      if (!(error instanceof RemoteMethodNotFoundError)) throw error;
+      const asyncResult = await this.sendRequest<A2ARemoteTaskResult>(agent, "tasks/create", {
+        title: task.title,
+        prompt: task.prompt,
+        workspaceId: task.workspaceId,
+      });
+      return normalizeRemoteResult(asyncResult);
     }
-
-    const asyncResult = await this.sendRequest<A2ARemoteTaskResult>(agent, "tasks/create", {
-      title: task.title,
-      prompt: task.prompt,
-      workspaceId: task.workspaceId,
-    });
-    const normalized = normalizeRemoteResult(asyncResult);
-    return {
-      ...normalized,
-      status: normalized.status === "completed" ? "completed" : "running",
-    };
+    return normalizeRemoteResult(syncResult);
   }
 
   async pollStatus(agent: ACPAgentCard, remoteTaskId: string): Promise<RemoteInvocationResult> {

@@ -255,6 +255,18 @@ Chronicle is implemented as a dedicated desktop screen-context subsystem under `
 
 Chronicle shares the Screen Recording prerequisite with computer use, but it is a different lane: local screen understanding rather than direct GUI control. Product-level behavior, testing, and privacy boundaries are documented in [Chronicle](chronicle.md).
 
+## Evaluation battery
+
+`scripts/qa/run_battery.cjs` defaults to synthetic fixtures in a disposable profile and workspace.
+Its authenticated local fixture service exercises task lifecycle, bounded cancellation, explicit
+approval scopes and independent artifact parsing. These results are labeled as fixture evidence.
+Explicit live mode starts an owned Node daemon in a fresh profile and uses its local Control Plane;
+legacy hook/database configuration is rejected by CI rather than counted as live coverage.
+Artifact graders run in bounded subprocesses, and unresolved cleanup retains the profile for
+inspection. This is application-profile isolation, not an operating-system sandbox. The optional
+scripted-provider smoke exercises native file tools without measuring model quality. Commands,
+prerequisites and rendering limits are documented in [Disposable evaluation battery](harness-eval-battery.md).
+
 ## Update Rule
 
 If defaults, behavior, or architecture change, update this file in the same PR.

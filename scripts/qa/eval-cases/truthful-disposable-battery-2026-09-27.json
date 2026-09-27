@@ -1,0 +1,31 @@
+{
+  "id": "truthful-disposable-battery-2026-09-27",
+  "title": "Disposable battery rejects malformed and wrong-content artifacts",
+  "source": {
+    "incident": "qa-battery-truthful-evidence"
+  },
+  "scenarios": [
+    "Run the default fixture battery with a temporary profile and workspace; identify its result as synthetic fixture evidence.",
+    "Reject nonempty corrupt PDF and PPTX files, valid-format wrong-content artifacts, malformed slide XML, and broken slide relationships.",
+    "Reject a valid spreadsheet whose formula result is wrong; accept known-correct PDF, PPTX, and XLSX read-backs.",
+    "Bound Control Plane HTTP-over-WebSocket requests and artifact parsing by deadlines.",
+    "Cancel timed-out owned workers, stop detached process trees, and retain the temporary profile when cleanup is unresolved.",
+    "Stop by default on approvals; allow only explicit types scoped to the exact owned task and workspace resource."
+  ],
+  "assertions": {
+    "defaultMode": "fixtures",
+    "fixtureModeIsCapabilityEvidence": false,
+    "corruptAndWrongContentArtifactsRejected": true,
+    "wrongFormulaResultRejected": true,
+    "providerCallsRequireExplicitLiveOptIn": true,
+    "defaultProductionDatabaseUsed": false,
+    "blanketApprovalEnabled": false,
+    "unresolvedOwnedProcessesAreReported": true
+  },
+  "executableCoverage": [
+    "tests/qa-run-battery.test.cjs",
+    "scripts/qa/run_battery.cjs",
+    "scripts/qa/battery_artifact_graders.cjs"
+  ],
+  "notes": "This JSON links the regression contract to executable tests; it is not itself an executed live capability eval. Run npm run qa:battery:test and node scripts/qa/run_battery.cjs for local fixture evidence."
+}

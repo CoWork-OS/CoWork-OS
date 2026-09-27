@@ -57,7 +57,7 @@ jobs:
         continue-on-error: true
         run: npm run qa:harness
 
-      - name: Run optional live battery when hooks are configured
+      - name: Run disposable battery fixtures and report live coverage
         id: run_battery
         continue-on-error: true
         env:
@@ -67,16 +67,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "coverage=failed" >> "$GITHUB_OUTPUT"
-          if [ -z "${COWORK_HOOKS_ORIGIN}" ] && [ -z "${COWORK_HOOKS_TOKEN}" ] && [ -z "${COWORK_DB_PATH}" ]; then
-            echo "coverage=not_configured" >> "$GITHUB_OUTPUT"
-            echo "Optional live battery not configured; no live battery coverage claimed."
-          elif [ -n "${COWORK_HOOKS_ORIGIN}" ] && [ -n "${COWORK_HOOKS_TOKEN}" ] && [ -n "${COWORK_DB_PATH}" ]; then
-            node scripts/qa/run_battery.cjs
-            echo "coverage=completed" >> "$GITHUB_OUTPUT"
-          else
-            echo "Incomplete live battery configuration: all three hook/database secrets are required."
+          if [ -n "${COWORK_HOOKS_ORIGIN}" ] || [ -n "${COWORK_HOOKS_TOKEN}" ] || [ -n "${COWORK_DB_PATH}" ]; then
+            echo "Legacy hook/database battery configuration is unsupported by the owned-runtime runner. Remove these legacy secrets and migrate live runs using docs/harness-eval-battery.md; fixture success cannot count as live coverage."
             exit 1
           fi
+          node scripts/qa/run_battery.cjs --fixtures-only
+          echo "coverage=not_configured" >> "$GITHUB_OUTPUT"
+          echo "Disposable fixture checks passed; no live provider battery coverage claimed."
 
       - name: Enforce release hardening gate
         env:

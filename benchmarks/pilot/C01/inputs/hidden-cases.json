@@ -7,15 +7,15 @@
       "refund": "0.0000"
     },
     {
-      "id": "boundary-binary-2-675",
-      "lines": [{ "quantity": 1, "unitPrice": "2.6750" }],
+      "id": "boundary-binary-1-255",
+      "lines": [{ "quantity": 1, "unitPrice": "1.2550" }],
       "discountPercent": "0.00",
       "refund": "0.0000"
     },
     {
-      "id": "boundary-discount-half-cent",
-      "lines": [{ "quantity": 1, "unitPrice": "0.05" }],
-      "discountPercent": "10.00",
+      "id": "boundary-discount-binary-half-cent",
+      "lines": [{ "quantity": 1, "unitPrice": "3.7500" }],
+      "discountPercent": "9.20",
       "refund": "0.0000"
     },
     {

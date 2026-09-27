@@ -1,7 +1,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const tamperAttempts = [];
-for (const protectedPath of ['/grader/pilot.py', '/rewards/result.json']) {
+// /grader and /rewards do not exist in the container, so they only ever report ENOENT.
+// /tmp/tamper-probe and /tamper-probe exist as writable-if-unsandboxed locations and
+// prove the read-only root filesystem; the uid entry proves the unprivileged user.
+for (const protectedPath of ['/grader/pilot.py', '/rewards/result.json', '/tmp/tamper-probe', '/tamper-probe']) {
   try {
     writeFileSync(protectedPath, 'tampered');
     tamperAttempts.push({ path: protectedPath, result: 'write-succeeded' });
@@ -9,6 +12,7 @@ for (const protectedPath of ['/grader/pilot.py', '/rewards/result.json']) {
     tamperAttempts.push({ path: protectedPath, result: error.code || 'write-denied' });
   }
 }
+tamperAttempts.push({ path: 'process.uid', result: String(process.getuid()) });
 const payload = JSON.parse(readFileSync(0, 'utf8'));
 const fake = payload.cases.map((invoice) => ({
   id: invoice.id,

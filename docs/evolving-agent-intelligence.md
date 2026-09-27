@@ -188,19 +188,21 @@ The **Behavior Adaptation** section in Guardrail Settings exposes these toggles 
 
 Promotion reads the **Playbook evidence ledger** (`PlaybookEvidenceStore`), not memory text:
 
-- Only terminal-ok executions record success evidence (graded `observed runtime success`, or
-  `contract verified` when the completion verifier passed). Best-effort, companion and ACP
-  completions never do, and nothing is recorded when memory capture is disabled or skipped.
-- One execution is one row: the task, unless a reliable persisted turn ID distinguishes turns.
-  Repeated callbacks and retries count once.
+- Only terminal-ok executions record success evidence (observed runtime success, not proof the
+  result was accepted). Best-effort, companion and ACP completions never do, and nothing is
+  recorded when memory capture is disabled or skipped. Failures are kept as memory only.
+- One execution is one row per task. Repeated callbacks, retries and follow-ups count once.
+- The ledger stores identities and the approach key, not text. Titles, approaches and request
+  excerpts are read from the source memory as stored, so memory privacy applies: evidence whose
+  memory is private or suppressed in Memory Hub is never served.
 - A new success is linked to earlier independent successes only when the requests pass a
   deterministic relevance gate (at least two distinctive shared terms and 0.35 weighted overlap)
   **and** the approach key (normalized tools and destinations) matches. A similar prompt alone
   is not proof that the same approach was used.
 - When linked executions reach **3+ distinct executions** (configurable `threshold`),
   `PlaybookSkillPromoter.maybePropose()` generates a proposal whose problem statement and evidence
-  describe "observed successful executions", each with its source references and outcome grade,
-  plus the provenance evidence IDs.
+  describe "observed successful executions", each with its task and source memory, plus the
+  provenance evidence IDs.
 - Corrections invalidate the corrected task's success evidence; deleting or editing a source
   memory invalidates evidence that depends on it.
 
@@ -213,8 +215,7 @@ the evidence and approves or rejects it. No skill is created automatically.
 Task finalizes with terminal ok
   → PlaybookService.captureOutcome() → recorded | skipped | error
   → PlaybookService.reinforceFromEvidence() creates durable links (or none)
-  → "pattern-reinforced" is emitted only when links were created
-  → PlaybookSkillPromoter.maybePropose()
+  → only when links were created: PlaybookSkillPromoter.maybePropose()
     → findCandidates() counts distinct linked executions per approach
     → if count ≥ threshold: proposeSkill() via SkillProposalService.create()
 ```

@@ -36,10 +36,6 @@ export interface CronOutcomeCounts {
    * that increments `totalRuns` without updating these counts is detected by the gap.
    */
   coveredTotalRuns: number;
-  /** Recent run keys already counted, so a repeated completion is ignored. */
-  recordedRunKeys: string[];
-  /** Why the counts cannot fully explain the recorded history, if they cannot. */
-  limitation?: string;
 }
 
 export function emptyCronOutcomeCountMap(): CronOutcomeCountMap {

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeCronRunSuccess } from "../../../shared/cron-outcomes";
 import {
-  cronRunKey,
   reconcileCronOutcomeCounts,
   recordCronRunCompletion,
   resetCronOutcomeCounts,
@@ -13,11 +12,7 @@ function entry(status: CronJobStatus | string, runAtMs: number): CronRunHistoryE
 }
 
 function record(state: CronJobState, status: CronJobStatus, runAtMs: number, max = 10) {
-  return recordCronRunCompletion(
-    state,
-    { ...entry(status, runAtMs), runKey: cronRunKey(runAtMs) },
-    max,
-  );
+  recordCronRunCompletion(state, entry(status, runAtMs), max);
 }
 
 describe("versioned cron outcome counts", () => {
@@ -68,15 +63,6 @@ describe("versioned cron outcome counts", () => {
     expect(summary.skipped).toBe(2);
   });
 
-  it("ignores a repeated completion for the same run", () => {
-    const state: CronJobState = {};
-    expect(record(state, "ok", 5)).toBe(true);
-    expect(record(state, "error", 5)).toBe(false);
-    expect(state.totalRuns).toBe(1);
-    expect(state.runHistory).toHaveLength(1);
-    expect(state.outcomeCounts!.counts.error).toBe(0);
-  });
-
   it("migrates old totals with ten retained rows without fabricating a lifetime rate", () => {
     const history = Array.from({ length: 10 }, (_, i) => entry(i < 7 ? "ok" : "error", 100 - i));
     const state: CronJobState = {
@@ -121,9 +107,27 @@ describe("versioned cron outcome counts", () => {
     expect(counts.counts).toMatchObject({ ok: 1, needs_user_action: 1, partial_success: 1 });
     expect(counts.counts.legacyUnknown).toBe(0);
     expect(counts.coveredTotalRuns).toBe(3);
-    // Unrecoverable gap (history trimmed by the legacy writer) becomes unknown.
-    state.totalRuns = 6;
-    expect(reconcileCronOutcomeCounts(state).counts.legacyUnknown).toBe(3);
+    // Four more legacy runs, but the legacy writer kept only three history rows:
+    // the run history no longer holds becomes unknown.
+    state.totalRuns = 7;
+    state.runHistory = [entry("ok", 7), entry("ok", 6), entry("error", 5)];
+    expect(reconcileCronOutcomeCounts(state).counts).toMatchObject({
+      ok: 3,
+      error: 1,
+      legacyUnknown: 1,
+    });
+  });
+
+  it("re-derives the counts when a legacy writer cleared the history", () => {
+    const state: CronJobState = {};
+    record(state, "ok", 1);
+    record(state, "ok", 2);
+    // An older build clears the history, then records one failed run.
+    state.totalRuns = 1;
+    state.runHistory = [entry("error", 3)];
+    const counts = reconcileCronOutcomeCounts(state);
+    expect(counts.counts).toMatchObject({ ok: 0, error: 1, legacyUnknown: 0 });
+    expect(counts.coveredTotalRuns).toBe(1);
   });
 
   it("clearing history resets both representations and later runs count normally", () => {

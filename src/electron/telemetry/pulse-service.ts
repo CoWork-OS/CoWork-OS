@@ -27,8 +27,6 @@ interface PulsePendingDeletion {
   installationId: string;
   deletionToken: string;
   endpoint: string;
-  requestedAt: number;
-  lastAttemptAt?: number;
   lastErrorCode?: string;
 }
 
@@ -62,13 +60,8 @@ export interface PulseSettingsStore {
   load(): PulsePrivateSettings | null | undefined;
   /** Throws PulseSettingsWriteRefusedError when the write cannot be persisted. */
   save(settings: PulsePrivateSettings): void;
-  /** Whether saves are currently refused, so decisions can fail before any change. */
+  /** Whether saves are currently refused, so a send is not attempted it cannot record. */
   refusesWrites?(): boolean;
-  /**
-   * Whether writes go through `db`, the connection whose transactions fence decisions.
-   * Checked before every transaction; a store that cannot answer is assumed to share it.
-   */
-  sharesConnection?(db: Database.Database): boolean;
 }
 
 interface PulseServiceOptions {
@@ -77,15 +70,10 @@ interface PulseServiceOptions {
   fetch?: typeof fetch;
   now?: () => number;
   settingsStore?: PulseSettingsStore;
-  /** Delivery-lease owner identity; one per service instance by default. */
-  ownerId?: string;
-  leaseMs?: number;
-  requestTimeoutMs?: number;
 }
 
 /** Everything one delivery attempt captured, and must still match, before it writes. */
 interface DeliveryContext {
-  owner: string;
   revision: number;
   installationId: string;
   deletionToken: string;
@@ -97,9 +85,9 @@ interface DeliveryContext {
 }
 
 const MAX_COUNT = 100_000;
+const SETTINGS_WRITE_REFUSED = "settings_write_refused";
 const DAY_MS = 86_400_000;
-const DEFAULT_LEASE_MS = 30_000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_SHUTDOWN_SETTLE_MS = 2_000;
 
 class PulseClosedError extends Error {
@@ -114,19 +102,8 @@ class PulseClosedError extends Error {
  * transaction and is reported to the caller instead.
  */
 export class PulseSettingsWriteRefusedError extends Error {
-  constructor(readonly code: string = "settings_write_refused") {
-    super(code);
-  }
-}
-
-/**
- * The settings store writes through a different SQLite connection than this service.
- * Its writes would then fall outside the service's transactions, so a decision could no
- * longer be applied atomically with the consent windows and outbox. Fail closed.
- */
-export class PulseSettingsConnectionMismatchError extends PulseSettingsWriteRefusedError {
   constructor() {
-    super("settings_connection_mismatch");
+    super(SETTINGS_WRITE_REFUSED);
   }
 }
 
@@ -144,30 +121,7 @@ const secureSettingsStore: PulseSettingsStore = {
       return false;
     }
   },
-  sharesConnection: (db) => {
-    try {
-      return SecureSettingsRepository.getInstance().usesConnection(db);
-    } catch {
-      // Not initialized: nothing can be loaded or saved, so nothing to split.
-      return true;
-    }
-  },
 };
-
-const SETTINGS_WRITE_REFUSED = "settings_write_refused";
-
-/** A decision that could not run because settings cannot be written safely. */
-interface SettingsFailure {
-  settingsFailure: string;
-}
-
-function isSettingsFailure(value: unknown): value is SettingsFailure {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as SettingsFailure).settingsFailure === "string"
-  );
-}
 
 function clampCount(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value || 0);
@@ -247,12 +201,10 @@ export function categorizePulseTool(name: string): keyof PulseToolCounts {
  * - Every user decision (enable, disable, delete, reset) runs in one short IMMEDIATE
  *   transaction over the encrypted settings, consent windows and outbox, and increments
  *   `revision`. It never waits for network work.
- * - A delivery attempt captures revision, identity, endpoint and a delivery lease, and
- *   re-checks all of them in a fresh transaction before each network stage and before
- *   persisting any result. It writes individual fields onto the latest record; it never
- *   saves a pre-request snapshot.
- * - The `pulse_delivery_lease` row keeps two processes sharing one profile database
- *   from delivering concurrently. Expired owners can neither persist nor proceed.
+ * - A delivery attempt captures revision, identity and endpoint, and re-checks them in a
+ *   fresh transaction before persisting any result, including a decision made in another
+ *   process sharing the profile. It writes individual fields onto the latest record; it
+ *   never saves a pre-request snapshot.
  * - No database transaction is ever held across an HTTP request.
  *
  * Remote deletion is reported as the collector's acknowledgement. A request the server
@@ -263,9 +215,6 @@ export class PulseService {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private readonly store: PulseSettingsStore;
-  private readonly ownerId: string;
-  private readonly leaseMs: number;
-  private readonly requestTimeoutMs: number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private firstFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private activeFlush: Promise<PulseSendResult> | null = null;
@@ -296,9 +245,6 @@ export class PulseService {
     this.fetchImpl = options.fetch || fetch;
     this.now = options.now || Date.now;
     this.store = options.settingsStore || secureSettingsStore;
-    this.ownerId = options.ownerId || randomUUID();
-    this.leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
-    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.ensureSchema();
   }
 
@@ -355,14 +301,7 @@ export class PulseService {
     return this.toPublic(this.readState());
   }
 
-  getPreview(): PulseDailyPackage | null {
-    const preview = this.computePreview(this.readState());
-    return preview.state === "queued" || preview.state === "candidate" ? preview.package : null;
-  }
-
   async setEnabled(enabled: boolean): Promise<PulseMutationResult> {
-    const refused = this.refusedMutation();
-    if (refused) return refused;
     const outcome = this.transactDecision(() => {
       const settings = this.loadState();
       if (enabled && settings.pendingDeletion) return "deletion_pending" as const;
@@ -388,11 +327,10 @@ export class PulseService {
       this.commitDecision(settings);
       return "changed" as const;
     });
-    if (isSettingsFailure(outcome)) {
-      return { success: false, settings: this.safePublic(), error: outcome.settingsFailure };
+    if (outcome === SETTINGS_WRITE_REFUSED) {
+      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
     }
     if (!enabled) this.abortActiveDelivery();
-    this.previewCache = null;
     if (outcome === "deletion_pending") {
       return { success: false, settings: this.getSettings(), error: "deletion_pending" };
     }
@@ -401,8 +339,6 @@ export class PulseService {
   }
 
   async resetIdentity(): Promise<PulseMutationResult> {
-    const refused = this.refusedMutation();
-    if (refused) return refused;
     const outcome = this.transactDecision(() => {
       const settings = this.loadState();
       if (settings.pendingDeletion) return "deletion_pending" as const;
@@ -421,11 +357,10 @@ export class PulseService {
       this.commitDecision(settings);
       return "changed" as const;
     });
-    if (isSettingsFailure(outcome)) {
-      return { success: false, settings: this.safePublic(), error: outcome.settingsFailure };
+    if (outcome === SETTINGS_WRITE_REFUSED) {
+      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
     }
     this.abortActiveDelivery();
-    this.previewCache = null;
     if (outcome === "deletion_pending") {
       return { success: false, settings: this.getSettings(), error: "deletion_pending" };
     }
@@ -464,7 +399,8 @@ export class PulseService {
 
   /**
    * Attempt to deliver the oldest queued eligible day. Concurrent calls in one process
-   * share one attempt; another process holding the delivery lease yields `busy`.
+   * share one attempt. Another process sharing the profile may send the same queued
+   * bytes; the collector keeps one record per package ID.
    */
   flush(): Promise<PulseSendResult> {
     if (this.activeFlush) return this.activeFlush;
@@ -486,14 +422,13 @@ export class PulseService {
     let context: DeliveryContext | null = null;
     try {
       const prepared = this.transactDecision(() => this.prepareDelivery());
-      if (isSettingsFailure(prepared)) {
-        return this.sendResult("error", prepared.settingsFailure);
+      if (prepared === SETTINGS_WRITE_REFUSED) {
+        return this.sendResult("error", SETTINGS_WRITE_REFUSED);
       }
       if (typeof prepared === "string") return this.sendResult(prepared);
       context = prepared;
 
       if (!context.enrolled) {
-        if (!this.authorizeStage(context)) return this.sendResult("cancelled_by_state_change");
         const enrolled = await this.request(
           `${context.endpoint}/v1/installations`,
           {
@@ -515,7 +450,6 @@ export class PulseService {
         if (!recorded) return this.sendResult("cancelled_by_state_change");
       }
 
-      if (!this.authorizeStage(context)) return this.sendResult("cancelled_by_state_change");
       const response = await this.request(
         `${context.endpoint}/v1/daily`,
         {
@@ -566,11 +500,10 @@ export class PulseService {
         : this.sendResult("cancelled_by_state_change");
     } finally {
       if (this.activeAbort === controller) this.activeAbort = null;
-      if (context) this.releaseLease();
     }
   }
 
-  /** Runs inside a transaction. Queues the eligible day and claims the delivery lease. */
+  /** Runs inside a transaction. Queues the eligible day and captures what to send. */
   private prepareDelivery(): DeliveryContext | PulseSendOutcome {
     const settings = this.loadState();
     if (
@@ -612,21 +545,7 @@ export class PulseService {
     const head = this.queueHead(installationId);
     if (!head) return this.receiptFor(dayPackageId) ? "already_sent" : "no_eligible_day";
 
-    const now = this.now();
-    const lease = this.db
-      .prepare("SELECT owner, expires_at FROM pulse_delivery_lease WHERE id = 1")
-      .get() as { owner: string; expires_at: number } | undefined;
-    if (lease && lease.owner !== this.ownerId && lease.expires_at > now) return "busy";
-    this.db
-      .prepare(
-        `INSERT INTO pulse_delivery_lease (id, owner, revision, expires_at) VALUES (1, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, revision = excluded.revision,
-         expires_at = excluded.expires_at`,
-      )
-      .run(this.ownerId, settings.revision ?? 0, now + this.leaseMs);
-
     return {
-      owner: this.ownerId,
       revision: settings.revision ?? 0,
       installationId,
       deletionToken: settings.deletionToken,
@@ -638,29 +557,10 @@ export class PulseService {
     };
   }
 
-  /** Whether the latest state still authorizes this delivery; renews the lease if so. */
-  private authorizeStage(context: DeliveryContext): boolean {
-    if (this.stopping || this.closed) return false;
-    try {
-      return this.transact(() => {
-        if (!this.stillAuthorized(context)) return false;
-        this.db
-          .prepare("UPDATE pulse_delivery_lease SET expires_at = ? WHERE id = 1 AND owner = ?")
-          .run(this.now() + this.leaseMs, context.owner);
-        return true;
-      });
-    } catch (error) {
-      if (error instanceof PulseClosedError || error instanceof PulseSettingsWriteRefusedError) {
-        return false;
-      }
-      throw error;
-    }
-  }
-
   /**
    * Apply a delivery result to the latest settings, but only while the captured state
-   * still holds and this owner's lease is live. Returns false (writing nothing) when the
-   * user changed their decision, the identity rotated, or the service closed.
+   * still holds. Returns false (writing nothing) when the user changed their decision,
+   * the identity rotated, or the service closed.
    */
   private commitIfCurrent(
     context: DeliveryContext,
@@ -686,37 +586,20 @@ export class PulseService {
   /** Runs inside a transaction. */
   private stillAuthorized(context: DeliveryContext): boolean {
     const settings = this.loadState();
-    if (
-      settings.consentState !== "enabled" ||
-      settings.pendingDeletion ||
-      (settings.revision ?? 0) !== context.revision ||
-      settings.installationId !== context.installationId ||
-      settings.deletionToken !== context.deletionToken ||
-      this.identityEndpoint(settings) !== context.endpoint
-    ) {
-      return false;
-    }
-    const lease = this.db
-      .prepare("SELECT owner, expires_at FROM pulse_delivery_lease WHERE id = 1")
-      .get() as { owner: string; expires_at: number } | undefined;
-    return Boolean(lease && lease.owner === context.owner && lease.expires_at > this.now());
-  }
-
-  private releaseLease(): void {
-    if (this.closed) return;
-    try {
-      this.db.prepare("DELETE FROM pulse_delivery_lease WHERE owner = ?").run(this.ownerId);
-    } catch (error) {
-      log.debug(`Could not release Pulse delivery lease: ${this.errorCode(error)}`);
-    }
+    return (
+      settings.consentState === "enabled" &&
+      !settings.pendingDeletion &&
+      (settings.revision ?? 0) === context.revision &&
+      settings.installationId === context.installationId &&
+      settings.deletionToken === context.deletionToken &&
+      this.identityEndpoint(settings) === context.endpoint
+    );
   }
 
   private async runDeletion(): Promise<PulseMutationResult> {
     if (this.stopping || this.closed) {
       return { success: false, settings: this.safePublic(), error: "shutting_down" };
     }
-    const refused = this.refusedMutation();
-    if (refused) return refused;
     const target = this.transactDecision(() => {
       const settings = this.loadState();
       const now = this.now();
@@ -727,7 +610,6 @@ export class PulseService {
               installationId: settings.installationId,
               deletionToken: settings.deletionToken,
               endpoint: this.identityEndpoint(settings),
-              requestedAt: now,
             }
           : null);
       if (settings.consentState === "enabled" || settings.consentState === "unset") {
@@ -736,21 +618,17 @@ export class PulseService {
       settings.consentState = "disabled";
       this.closeConsentWindows(now);
       this.db.prepare("DELETE FROM pulse_outbox").run();
+      // Without an identity there is nothing remote to delete, only local consent history.
       if (captured) settings.pendingDeletion = captured;
+      else this.db.prepare("DELETE FROM pulse_consent_windows").run();
       this.commitDecision(settings);
       return captured;
     });
-    if (isSettingsFailure(target)) {
-      return { success: false, settings: this.safePublic(), error: target.settingsFailure };
+    if (target === SETTINGS_WRITE_REFUSED) {
+      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
     }
     this.abortActiveDelivery();
-    this.previewCache = null;
-    if (!target) {
-      this.transact(() => {
-        this.db.prepare("DELETE FROM pulse_consent_windows").run();
-      });
-      return { success: true, settings: this.getSettings() };
-    }
+    if (!target) return { success: true, settings: this.getSettings() };
 
     try {
       const response = await this.request(`${target.endpoint}/v1/installations`, {
@@ -768,7 +646,6 @@ export class PulseService {
       this.transactDecision(() => {
         const settings = this.loadState();
         if (settings.pendingDeletion?.installationId !== target.installationId) return;
-        settings.pendingDeletion.lastAttemptAt = this.now();
         settings.pendingDeletion.lastErrorCode = code;
         this.store.save(settings);
       });
@@ -799,10 +676,10 @@ export class PulseService {
         .run(target.installationId);
       this.commitDecision(settings);
     });
-    if (isSettingsFailure(finalized)) {
+    if (finalized === SETTINGS_WRITE_REFUSED) {
       // The server deleted the data, but the local record could not be updated; keep
       // reporting off and deletion pending so a retry (404/200) completes it later.
-      return { success: false, settings: this.safePublic(), error: finalized.settingsFailure };
+      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
     }
     return { success: true, settings: this.getSettings() };
   }
@@ -838,38 +715,28 @@ export class PulseService {
   }
 
   private async request(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
-    const timeout = AbortSignal.timeout(this.requestTimeoutMs);
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     return this.fetchImpl(url, {
       ...init,
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
   }
 
-  /** Like transact, but a refused settings write becomes a value instead of a throw. */
-  private transactDecision<T>(fn: () => T): T | SettingsFailure {
+  /**
+   * Like transact, but a refused settings write becomes a value instead of a throw. The
+   * whole transaction rolls back, so a refused decision changes nothing.
+   */
+  private transactDecision<T>(fn: () => T): T | typeof SETTINGS_WRITE_REFUSED {
     try {
       return this.transact(fn);
     } catch (error) {
-      if (error instanceof PulseSettingsWriteRefusedError) {
-        return { settingsFailure: error.code };
-      }
+      if (error instanceof PulseSettingsWriteRefusedError) return SETTINGS_WRITE_REFUSED;
       throw error;
     }
   }
 
-  /** Fail a decision up front when the store is known to refuse writes. */
-  private refusedMutation(): PulseMutationResult | null {
-    if (!this.store.refusesWrites?.()) return null;
-    return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
-  }
-
   private transact<T>(fn: () => T): T {
     if (this.closed) throw new PulseClosedError();
-    // The settings save must join this transaction; re-checked every time because the
-    // secure-settings singleton can be replaced after this service was created.
-    if (this.store.sharesConnection && !this.store.sharesConnection(this.db)) {
-      throw new PulseSettingsConnectionMismatchError();
-    }
     return this.db.transaction(fn).immediate();
   }
 
@@ -886,7 +753,7 @@ export class PulseService {
     } catch (error) {
       if (!(error instanceof PulseSettingsWriteRefusedError)) throw error;
       // Cannot persist the upgrade: describe the record without pretending it changed.
-      return { ...settings, revision: settings.revision ?? 0 };
+      return settings;
     }
   }
 
@@ -997,15 +864,9 @@ export class PulseService {
       lastSentAt: settings.lastSentAt || null,
       lastAttemptAt: settings.lastAttemptAt || null,
       lastErrorCode: settings.lastErrorCode || null,
-      revision: settings.revision ?? 0,
       deletion: deletion
-        ? {
-            state: "pending",
-            requestedAt: deletion.requestedAt,
-            lastAttemptAt: deletion.lastAttemptAt ?? null,
-            lastErrorCode: deletion.lastErrorCode ?? null,
-          }
-        : { state: "none", requestedAt: null, lastAttemptAt: null, lastErrorCode: null },
+        ? { state: "pending", lastErrorCode: deletion.lastErrorCode ?? null }
+        : { state: "none", lastErrorCode: null },
       preview,
       pendingPackage:
         preview.state === "queued" || preview.state === "candidate" ? preview.package : null,
@@ -1035,8 +896,7 @@ export class PulseService {
         lastSentAt: null,
         lastAttemptAt: null,
         lastErrorCode: null,
-        revision: 0,
-        deletion: { state: "none", requestedAt: null, lastAttemptAt: null, lastErrorCode: null },
+        deletion: { state: "none", lastErrorCode: null },
         preview: { state: "ineligible", reason: "disabled" },
         pendingPackage: null,
       }
@@ -1204,12 +1064,6 @@ export class PulseService {
         installation_id TEXT NOT NULL,
         period_start TEXT NOT NULL,
         acknowledged_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS pulse_delivery_lease (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        owner TEXT NOT NULL,
-        revision INTEGER NOT NULL,
-        expires_at INTEGER NOT NULL
       );
     `);
     const outboxColumns = new Set(

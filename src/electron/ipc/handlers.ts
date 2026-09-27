@@ -10512,17 +10512,11 @@ export async function setupIpcHandlers(
   // CoWork Pulse. The service never receives renderer-provided identifiers or payloads;
   // all aggregates are derived in the trusted main process from the local database.
   // Uses the lifecycle-owned instance from startup so the Settings decision and the
-  // timer-driven delivery share one fence. The local fallback only exists for hosts
-  // that register handlers without starting Pulse.
-  let pulseService: import("../telemetry/pulse-service").PulseService | null = null;
+  // timer-driven delivery share one fence and one shutdown.
   const getPulseService = async () => {
-    const shared = options?.getPulseService?.();
-    if (shared) return shared;
-    if (pulseService) return pulseService;
-    const { PulseService } = await import("../telemetry/pulse-service");
-    const { app } = await import("electron");
-    pulseService = new PulseService(db, { version: app.getVersion(), runtime: "desktop" });
-    return pulseService;
+    const service = options?.getPulseService?.();
+    if (!service) throw new Error("CoWork Pulse is unavailable in this session.");
+    return service;
   };
   ipcMain.handle(IPC_CHANNELS.PULSE_GET_SETTINGS, async () => {
     checkRateLimit(IPC_CHANNELS.PULSE_GET_SETTINGS);

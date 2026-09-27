@@ -116,10 +116,9 @@ describe("update check release resolution", () => {
     });
   });
 
-  it("returns live provenance with check and retrieval times", async () => {
+  it("labels a successful check as live with its check time", async () => {
     const info = await newManager().checkForUpdates();
-    expect(info.provenance).toMatchObject({ source: "live", origin: "github" });
-    expect(info.provenance?.lastSuccessfulRetrievalAt).toBe(info.provenance?.checkedAt);
+    expect(info.provenance).toEqual({ source: "live", checkedAt: expect.any(Number) });
   });
 
   it("still surfaces a genuine API failure", async () => {

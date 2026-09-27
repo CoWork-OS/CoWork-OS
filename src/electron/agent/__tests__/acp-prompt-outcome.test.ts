@@ -12,14 +12,8 @@ describe("classifyAcpPromptResult", () => {
     classifyAcpPromptResult({ stopReason, assistantText, verifiedArtifactPaths: artifacts });
 
   it("completes end_turn with a response or with only a verified artifact", () => {
-    expect(classify("end_turn", "Done.")).toMatchObject({
-      kind: "completed",
-      evidence: "response",
-    });
-    expect(classify("end_turn", "", ["out.md"])).toMatchObject({
-      kind: "completed",
-      evidence: "artifact",
-    });
+    expect(classify("end_turn", "Done.")).toEqual({ kind: "completed" });
+    expect(classify("end_turn", "", ["out.md"])).toEqual({ kind: "completed" });
   });
 
   it("does not treat an empty end_turn as success", () => {
@@ -41,17 +35,17 @@ describe("classifyAcpPromptResult", () => {
   it("fails refusals and missing or unknown stop reasons", () => {
     expect(classify("refusal", "I can't do that")).toMatchObject({
       kind: "failed",
-      stopReason: "refusal",
+      reason: expect.stringContaining("refused"),
     });
     expect(classify(undefined, "text")).toMatchObject({
       kind: "failed",
       failureClass: "contract_error",
-      stopReason: null,
+      reason: expect.stringContaining("without reporting a stop reason"),
     });
     expect(classify("made_up_reason", "text")).toMatchObject({
       kind: "failed",
       failureClass: "contract_error",
-      stopReason: "made_up_reason",
+      reason: expect.stringContaining("(made_up_reason)"),
     });
   });
 
@@ -243,11 +237,30 @@ describe("TaskExecutor.applyAcpPromptResult", () => {
         "task-acp",
         expect.stringContaining("cancelled"),
       );
-      expect(executor.daemon.updateTask).toHaveBeenCalledWith("task-acp", {
-        bestKnownOutcome: { resultSummary: "partial" },
-      });
+      expect(executor.persistBestKnownOutcome).toHaveBeenCalledWith(
+        "partial",
+        undefined,
+        undefined,
+        expect.stringContaining("cancelled"),
+      );
     },
   );
+
+  it("a turn's outcome does not leak into the next follow-up's finalization", () => {
+    const { executor } = acpExecutor();
+    executor.terminalStatus = "ok";
+    executor.failureClass = undefined;
+    executor.applyAcpPromptResult(
+      { assistantText: "Part one.", stopReason: "max_tokens" },
+      "initial",
+    );
+    executor.applyAcpPromptResult({ assistantText: "", stopReason: "end_turn" }, "follow_up");
+    executor.applyAcpPromptResult({ assistantText: "No.", stopReason: "refusal" }, "follow_up");
+    // finalizeTaskBestEffort treats these as the implicit status of the next completion
+    // and skips verification when they are set; each ACP outcome is passed explicitly.
+    expect(executor.terminalStatus).toBe("ok");
+    expect(executor.failureClass).toBeUndefined();
+  });
 
   it("a local cancellation racing a zero-exit result wins", () => {
     const { executor } = acpExecutor();
@@ -264,17 +277,16 @@ describe("TaskExecutor.applyAcpPromptResult", () => {
       // Session commands legitimately carry no stop reason.
       createSession: vi.fn(async () => ({ assistantText: "" })),
       ensureSession: vi.fn(),
-      prompt: vi.fn(async () => {
-        executor.cancelled = true; // user cancels while the prompt is running
-        return { assistantText: "late", stopReason: "end_turn" };
-      }),
+      prompt: vi.fn(async () => ({ assistantText: "Done.", stopReason: "end_turn" })),
     };
     executor.getAcpxRuntimeRunner = () => runner;
     executor.daemon.updateTaskStatus = vi.fn();
     executor.getContractPrompt = () => "do it";
     await executor.executeWithAcpxRuntime("do it");
-    expect(runner.prompt).toHaveBeenCalledTimes(1);
-    expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+    // Classifying the create result (no stop reason) would have failed the task.
+    expect(executor.finalizeTaskBestEffort).toHaveBeenCalledTimes(1);
+    expect(executor.finalizeTaskBestEffort.mock.calls[0][0]).toBe("Done.");
+    expect(executor.daemon.updateTask).not.toHaveBeenCalled();
   });
 });
 

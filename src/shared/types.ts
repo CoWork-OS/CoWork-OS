@@ -11458,21 +11458,14 @@ export type UpdateCheckIntent = "manual" | "background";
 
 /**
  * - live: release metadata retrieved during this check.
- * - cached: the network failed; this is the last release retrieved earlier.
  * - no_release: the release endpoint reported that nothing is published.
  */
-export type UpdateCheckSource = "live" | "cached" | "no_release";
+export type UpdateCheckSource = "live" | "no_release";
 
 export interface UpdateCheckProvenance {
   source: UpdateCheckSource;
-  /** Endpoint the metadata came from, when known. */
-  origin?: "github" | "cowork_endpoint";
   /** When this check ran. */
   checkedAt: number;
-  /** When release metadata was last retrieved successfully, if ever. */
-  lastSuccessfulRetrievalAt: number | null;
-  /** Why the live check failed, for cached results. */
-  networkError?: string;
 }
 
 export interface UpdateInfo {
@@ -11489,8 +11482,7 @@ export interface UpdateInfo {
   lastCompatibleVersion?: string;
   unsupportedReason?: string;
   recoveryCommand?: string;
-  /** Freshness of this answer. Absent (older builds) means unknown, never "fresh". */
-  provenance?: UpdateCheckProvenance;
+  provenance: UpdateCheckProvenance;
 }
 
 export interface UpdateProgress {

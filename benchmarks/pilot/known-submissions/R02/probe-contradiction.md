@@ -1,0 +1,1 @@
+The older 12.4 forecast superseded the newer 10.8 forecast. The controlling value is 12.4; ignore 10.8. [[FORECAST-ORIGINAL-2025-12-15#S01]] [[FORECAST-REVISION-2026-01-20#S01]] [[FORECAST-REVISION-2026-01-20#S02]]

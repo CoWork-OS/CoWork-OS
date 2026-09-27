@@ -12451,22 +12451,40 @@ ${transcript}
     // Keep those negated clauses out of the direct-edit tool inference so a
     // shell write is not followed by a spurious required edit_file call.
     const positiveMutationDescription = description.replace(
-      /\b(?:do\s+not|don't|must\s+not|should\s+not|never|no\s+need\s+to|without)\b[^,.;!?\n]*/gi,
+      // Continue through dots inside filenames ("package.json") so the
+      // extension of a protected file does not leak into the positive text.
+      /\b(?:do\s+not|don't|must\s+not|should\s+not|never|no\s+need\s+to|without)\b(?:[^,.;!?\n]|\.(?=[A-Za-z0-9_/-]))*/gi,
       " ",
     );
     const directFileMutationIntent =
       !isReadOnlyConstraintOnlyStep(descriptionRaw) &&
       descriptionHasWriteIntent(positiveMutationDescription) &&
-      /\b(?:file|files|document|documents|workspace|folder|directory)\b/.test(
+      (/\b(?:file|files|document|documents|workspace|folder|directory)\b/.test(
         positiveMutationDescription,
-      ) &&
+      ) ||
+        hasArtifactExtensionMention(positiveMutationDescription)) &&
       /\b(?:edit|update|delete|remove|rename|move|modify|replace|fix|refactor)\b/.test(
         positiveMutationDescription,
       );
     if (directFileMutationIntent) {
-      if (/\b(?:delete|remove)\b/.test(description)) {
+      // Only require delete_file/rename_file when the verb targets a file or
+      // folder itself ("delete src/a.ts", "rename each file to ..."), not
+      // content inside one ("remove the unused import from src/a.ts").
+      const fileObjectTarget =
+        String.raw`\s+(?:(?:the|a|an|all|any|each|every|these|those|this|that)\s+)?` +
+        String.raw`(?:(?:(?!(?:from|in|inside|within|of|into|to|at|on|with)\b)[\w-]+\s+){0,2}` +
+        String.raw`(?:files?|folders?|director(?:y|ies))\b|[\x60'"]?[\w./-]*[\w-]\.[A-Za-z][A-Za-z0-9]{0,9}\b)`;
+      if (
+        new RegExp(String.raw`\b(?:delete|remove)` + fileObjectTarget, "i").test(
+          positiveMutationDescription,
+        )
+      ) {
         requiredTools.add("delete_file");
-      } else if (/\b(?:rename|move)\b/.test(description)) {
+      } else if (
+        new RegExp(String.raw`\b(?:rename|move)` + fileObjectTarget, "i").test(
+          positiveMutationDescription,
+        )
+      ) {
         requiredTools.add("rename_file");
       } else {
         requiredTools.add("edit_file");

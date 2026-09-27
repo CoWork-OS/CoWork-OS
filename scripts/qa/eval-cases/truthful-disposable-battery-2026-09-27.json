@@ -1,0 +1,44 @@
+{
+  "id": "truthful-disposable-battery-2026-09-27",
+  "title": "Disposable battery proves routes and rejects malformed or wrong-content artifacts",
+  "source": {
+    "incident": "qa-battery-truthful-evidence"
+  },
+  "scenarios": [
+    "Run the default fixture battery with a temporary profile and workspace; identify its result as synthetic fixture evidence.",
+    "Reject nonempty corrupt PDF and PPTX files, valid-format wrong-content artifacts, malformed slide XML, and broken slide relationships.",
+    "Reject a valid spreadsheet whose formula result is wrong; accept known-correct PDF, PPTX, and XLSX read-backs.",
+    "Bound Control Plane HTTP-over-WebSocket requests and artifact parsing by deadlines.",
+    "Cancel timed-out owned workers, stop detached process trees, and retain the temporary profile when cleanup is unresolved.",
+    "Stop by default on approvals; allow only explicit types scoped to the exact owned task and workspace resource.",
+    "Require live browser, web-search, and run-command evidence from a tool call paired to its successful result by toolUseId; reject wrong, missing, failed, or contradictory canonical timeline events and require browser/command artifacts to match the paired result.",
+    "Reject XLSX ZIP bombs, false expanded lengths, and CRC mismatches before ExcelJS reads any package entry.",
+    "Fail full live mode before profile creation unless the grader child inherits a finite Linux cgroup v2 memory.max limit of 512 MiB or less; keep trusted synthetic fixture PDFs available without claiming live isolation.",
+    "On Windows, confirm process-tree cleanup only after taskkill /T /F succeeds and the daemon leader exits; otherwise report unresolved cleanup and retain the profile.",
+    "Attempt profile deletion before reporting final disposition; fail and expose the retained path when deletion returns EACCES."
+  ],
+  "assertions": {
+    "defaultMode": "fixtures",
+    "fixtureModeIsCapabilityEvidence": false,
+    "corruptAndWrongContentArtifactsRejected": true,
+    "wrongFormulaResultRejected": true,
+    "providerCallsRequireExplicitLiveOptIn": true,
+    "defaultProductionDatabaseUsed": false,
+    "blanketApprovalEnabled": false,
+    "unresolvedOwnedProcessesAreReported": true,
+    "liveRoutesRequireCorrelatedSuccessfulToolEvidence": true,
+    "canonicalTimelineLegacyTypesAreRecognized": true,
+    "wrongFailedOrContradictoryToolEvidenceRejected": true,
+    "artifactMatchesPairedBrowserAndCommandResults": true,
+    "xlsxExpansionInflationAndCrcAreBoundedBeforeExcelJs": true,
+    "livePdfRequiresInheritedCgroupV2MemoryLimit": true,
+    "windowsTreeCleanupRequiresTaskkillAckAndLeaderExit": true,
+    "profileCleanupFailureRetainsPathAndFails": true
+  },
+  "executableCoverage": [
+    "tests/qa-run-battery.test.cjs",
+    "scripts/qa/run_battery.cjs",
+    "scripts/qa/battery_artifact_graders.cjs"
+  ],
+  "notes": "This JSON links the regression contract to executable tests; it is not itself an executed live capability eval. Run npm run qa:battery:test and node scripts/qa/run_battery.cjs for local fixture evidence. A full live run additionally needs a bounded Linux cgroup v2 memory.max of 512 MiB or less for safe PDF parsing."
+}

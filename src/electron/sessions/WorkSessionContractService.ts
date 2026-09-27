@@ -258,10 +258,7 @@ export class WorkSessionContractService {
     }
     this.seedTaskConstraints(task, session);
     this.reconcilePersistedWaits(task.id, session.id);
-    if (
-      contract &&
-      (TERMINAL_TASK_STATUSES.has(task.status) || task.terminalStatus === "awaiting_verification")
-    ) {
+    if (contract) {
       contract = this.reconcileOutcomeContract(task as Task, session.id, contract);
     }
     return {

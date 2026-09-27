@@ -443,6 +443,35 @@ describeWithSqlite("WorkSessionContractService", () => {
     ]);
   });
 
+  it("invalidates prior proof when a completed task resumes before publishing a fresh manifest", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["resumed-report.txt"] },
+    });
+    const output = path.join(tempDir, "workspace", "resumed-report.txt");
+    fs.writeFileSync(output, "initial result");
+    service.ensureForTask(task);
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+    const completed = service.recordTaskTerminal(task.id).contract!;
+    const oldEvidenceIds = completed.requirements[0].evidenceIds!;
+    expect(completed.status).toBe("satisfied");
+
+    taskRepo.update(task.id, { status: "executing" });
+    fs.rmSync(output);
+    const manifest = service.getRequirementEvidenceManifest(task.id)!;
+
+    expect(manifest.requirements[0]).toMatchObject({ status: "pending", evidence: [] });
+    expect(service.getForSession(completed.sessionId).contract?.status).toBe("pending");
+    expect(service.getRepository().listEvidenceByIds(completed.sessionId, oldEvidenceIds)).toEqual([
+      expect.objectContaining({ status: "stale" }),
+    ]);
+
+    fs.writeFileSync(output, "revised result");
+    taskRepo.update(task.id, { status: "completed" });
+    const refreshed = service.getRequirementEvidenceManifest(task.id)!;
+    expect(refreshed.requirements[0].status).toBe("satisfied");
+    expect(refreshed.requirements[0].evidence[0].id).not.toBe(oldEvidenceIds[0]);
+  });
+
   it("revalidates physical targets on session reads", () => {
     const task = createTask({
       successCriteria: { type: "file_exists", filePaths: ["session-read.txt"] },

@@ -49,6 +49,7 @@ export interface VerificationRuntimeResult {
 
 const OPTIONAL_VERIFICATION_EVIDENCE_PREVIEW_LIMIT = 20;
 const OPTIONAL_VERIFICATION_EVIDENCE_DETAIL_LIMIT = 1_000;
+const MAX_VERIFICATION_INPUT_BYTES = 64 * 1024;
 
 export class VerificationRuntime {
   constructor(private readonly deps: VerificationRuntimeDeps) {}
@@ -82,10 +83,23 @@ export class VerificationRuntime {
       };
     }
 
+    const prompt = this.buildVerificationPrompt(request);
+    const inputBytes = Buffer.byteLength(prompt, "utf8");
+    if (inputBytes > MAX_VERIFICATION_INPUT_BYTES) {
+      return {
+        gated: true,
+        ran: false,
+        status: "skipped",
+        verdict: "PARTIAL",
+        report: `Independent verification was not started: its ${inputBytes}-byte prompt exceeds the ${MAX_VERIFICATION_INPUT_BYTES}-byte input limit. Narrow or split the requested review. Mandatory requirements and evidence were not discarded.`,
+        shouldBlock: true,
+      };
+    }
+
     const result = await this.deps.runReadOnlyChildTaskAndWait({
       parentTask: request.parentTask,
       title: `Verify: ${request.parentTask.title}`.slice(0, 200),
-      prompt: this.buildVerificationPrompt(request),
+      prompt,
       timeoutMs: request.timeoutMs ?? 120_000,
       workerRole: "verifier",
       agentConfig: {

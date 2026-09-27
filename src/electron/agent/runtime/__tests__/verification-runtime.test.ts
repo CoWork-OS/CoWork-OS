@@ -130,6 +130,47 @@ describe("VerificationRuntime", () => {
     expect(prompt).not.toContain("generic 50");
   });
 
+  it("blocks an oversized selected manifest before starting a verifier without dropping requirements", async () => {
+    const runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "unexpected-child",
+      status: "completed" as const,
+      summary: "VERDICT: PASS",
+    });
+    const runtime = new VerificationRuntime({ runReadOnlyChildTaskAndWait });
+    const requirements = Array.from({ length: 100 }, (_, index) => ({
+      requirementId: `required-${index}`,
+      description: `File exists: ${"x".repeat(4_000)}`,
+      targetPath: "x".repeat(4_000),
+      verifier: "file_exists",
+      required: true,
+      status: "pending" as const,
+      evidence: [],
+    }));
+
+    const result = await runtime.run({
+      parentTask: makeTask({ title: "Review text", prompt: "Check the result" }),
+      explicit: true,
+      requirementEvidenceManifest: {
+        contractId: "oversized-contract",
+        contractVersion: 1,
+        capturedAt: 10,
+        requirements,
+      },
+    });
+
+    expect(runReadOnlyChildTaskAndWait).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      gated: true,
+      ran: false,
+      status: "skipped",
+      verdict: "PARTIAL",
+      shouldBlock: true,
+    });
+    expect(result.report).toContain("input limit");
+    expect(requirements).toHaveLength(100);
+    expect(requirements[99].targetPath).toHaveLength(4_000);
+  });
+
   it("blocks high-risk partial verification results", async () => {
     const runtime = new VerificationRuntime({
       runReadOnlyChildTaskAndWait: vi.fn().mockResolvedValue({

@@ -23,6 +23,7 @@ const {
   verifyArtifact,
   verifyToolEvidenceFromEvents,
   waitProcessTreeExit,
+  waitForFollowUp,
   waitForTerminalStatus,
   withProfileCleanupError,
   writeFixture,
@@ -282,6 +283,65 @@ test("live tool evidence accepts canonical timeline transport only with paired s
     false,
     "empty search placeholders are not successful route evidence",
   );
+  const truncated = "[... truncated ...]";
+  const withSearchResult = (result) => ({
+    ...searchResult,
+    payload: { ...searchResult.payload, result },
+  });
+  assert.equal(
+    verifyToolEvidenceFromEvents(
+      [
+        searchCall,
+        withSearchResult({
+          success: true,
+          query: searchRequirement.query,
+          // Shape produced by task.events sanitizeForBroadcast (depth-4 fields truncated).
+          results: [{ title: truncated, url: truncated, snippet: truncated }],
+        }),
+      ],
+      searchRequirement,
+    ).ok,
+    true,
+    "broadcast-truncated hit fields are accepted as live search evidence",
+  );
+  assert.equal(
+    verifyToolEvidenceFromEvents(
+      [searchCall, withSearchResult({ success: true, query: searchRequirement.query, results: [] })],
+      searchRequirement,
+    ).ok,
+    false,
+    "an empty results array is not search evidence",
+  );
+  assert.equal(
+    verifyToolEvidenceFromEvents(
+      [
+        searchCall,
+        withSearchResult({
+          success: true,
+          query: searchRequirement.query,
+          results: [{ title: "T", url: "not a url", snippet: "S" }],
+        }),
+      ],
+      searchRequirement,
+    ).ok,
+    false,
+    "a hit whose url is neither http(s) nor the truncation marker is rejected",
+  );
+  assert.equal(
+    verifyToolEvidenceFromEvents(
+      [
+        searchCall,
+        withSearchResult({
+          success: false,
+          query: searchRequirement.query,
+          results: [{ title: truncated, url: truncated, snippet: truncated }],
+        }),
+      ],
+      searchRequirement,
+    ).ok,
+    false,
+    "an error search result is rejected even with truncated hits",
+  );
 
   const commandRequirement = { tool: "run_command", command: "node -v" };
   const commandCall = {
@@ -328,6 +388,41 @@ test("live tool evidence accepts canonical timeline transport only with paired s
   );
 });
 
+test("follow-up wait accepts timeline-v2 rows carrying legacyType follow_up_completed", async () => {
+  const deadlineAt = Date.now() + 5000;
+  const clientFor = (events) => ({
+    request: async (method) =>
+      method === "task.events" ? { events } : { task: { status: "executing" } },
+  });
+  const v2Row = {
+    id: "fu-1",
+    type: "timeline_step_updated",
+    payload: { legacyType: "follow_up_completed" },
+  };
+  const found = await waitForFollowUp(clientFor([v2Row]), "task-1", new Set(), deadlineAt, 1);
+  assert.equal(found.ok, true);
+  assert.equal(found.event.id, "fu-1");
+
+  const legacy = await waitForFollowUp(
+    clientFor([{ id: "fu-2", type: "follow_up_completed", payload: {} }]),
+    "task-1",
+    new Set(),
+    deadlineAt,
+    1,
+  );
+  assert.equal(legacy.ok, true);
+
+  const prior = await waitForFollowUp(
+    clientFor([v2Row, { id: "x", type: "unrelated", payload: { legacyType: "follow_up_completed" } }]),
+    "task-1",
+    new Set(["fu-1"]),
+    Date.now() + 50,
+    5,
+  );
+  assert.equal(prior.ok, false, "prior events and non-timeline legacyType are ignored");
+  assert.equal(prior.reason, "timeout");
+});
+
 test("cgroup v2 PDF prerequisite finds the minimum finite inherited ancestor limit", () => {
   const files = new Map([
     ["/proc/self/cgroup", "0::/qa/jobs/run-1\n"],
@@ -335,12 +430,16 @@ test("cgroup v2 PDF prerequisite finds the minimum finite inherited ancestor lim
     ["/sys/fs/cgroup/qa/jobs/run-1/memory.max", "max\n"],
     ["/sys/fs/cgroup/qa/jobs/memory.max", "536870912\n"],
     ["/sys/fs/cgroup/qa/memory.max", "1073741824\n"],
-    ["/sys/fs/cgroup/memory.max", "max\n"],
+    // The kernel root cgroup (the cgroup2 mount root here) has no memory.max file.
   ]);
+  const enoent = (file) =>
+    Object.assign(new Error("ENOENT: no such file or directory, open '" + file + "'"), {
+      code: "ENOENT",
+    });
   const detected = detectCgroupV2MemoryLimit({
     platform: "linux",
     readFileSync: (file) => {
-      if (!files.has(file)) throw new Error("ENOENT");
+      if (!files.has(file)) throw enoent(file);
       return files.get(file);
     },
   });
@@ -354,12 +453,37 @@ test("cgroup v2 PDF prerequisite finds the minimum finite inherited ancestor lim
         if (file === "/proc/self/cgroup") return "0::/\n";
         if (file === "/proc/self/mountinfo")
           return "31 22 0:29 / /sys/fs/cgroup rw - cgroup2 cgroup rw\n";
-        if (file === "/sys/fs/cgroup/memory.max") return "max\n";
-        throw new Error("ENOENT");
+        throw enoent(file);
       },
     }).available,
     false,
     "unlimited cgroups fail closed",
+  );
+  assert.equal(
+    detectCgroupV2MemoryLimit({
+      platform: "linux",
+      readFileSync: (file) => {
+        if (file === "/sys/fs/cgroup/qa/memory.max") {
+          throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+        }
+        if (!files.has(file)) throw enoent(file);
+        return files.get(file);
+      },
+    }).available,
+    false,
+    "an unreadable non-root ancestor still fails closed",
+  );
+  assert.equal(
+    detectCgroupV2MemoryLimit({
+      platform: "linux",
+      readFileSync: (file) => {
+        if (file === "/sys/fs/cgroup/qa/memory.max") throw enoent(file);
+        if (!files.has(file)) throw enoent(file);
+        return files.get(file);
+      },
+    }).available,
+    false,
+    "a missing memory.max below the mount root still fails closed",
   );
 });
 

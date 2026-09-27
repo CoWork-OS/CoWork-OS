@@ -261,8 +261,12 @@ function detectCgroupV2MemoryLimit(options = {}) {
       let rawLimit;
       try {
         rawLimit = String(readFileSync(path.posix.join(current, "memory.max"), "utf8")).trim();
-      } catch {
-        // An unreadable ancestor could impose a smaller limit, so fail closed.
+      } catch (error) {
+        // The kernel root cgroup has no memory.max, so ENOENT at the cgroup2 mount root means
+        // this level contributes no limit. (In a cgroup namespace the mount root is a non-root
+        // cgroup whose memory.max exists and is read normally.)
+        if (current === mount.mountPoint && error && error.code === "ENOENT") break;
+        // Any other unreadable ancestor could impose a smaller limit, so fail closed.
         minimumBytes = Number.POSITIVE_INFINITY;
         break;
       }
@@ -1018,12 +1022,26 @@ async function recoverTimedOutCreate(
   };
 }
 
+// task.events returns timeline-v2 rows: legacy follow_up_completed is stored as a timeline_*
+// type (timeline_step_updated) with the legacy name in payload.legacyType.
+function isFollowUpCompletedEvent(item) {
+  if (!item || typeof item !== "object") return false;
+  if (item.type === "follow_up_completed") return true;
+  return (
+    typeof item.type === "string" &&
+    item.type.startsWith("timeline_") &&
+    !!item.payload &&
+    typeof item.payload === "object" &&
+    item.payload.legacyType === "follow_up_completed"
+  );
+}
+
 async function waitForFollowUp(client, taskId, priorEventIds, deadlineAt, pollMs) {
   while (Date.now() < deadlineAt) {
     const payload = await client.request("task.events", { taskId, limit: 500 }, deadlineAt);
     const events = payload && Array.isArray(payload.events) ? payload.events : [];
     const event = events.find(
-      (item) => item && item.type === "follow_up_completed" && !priorEventIds.has(item.id),
+      (item) => isFollowUpCompletedEvent(item) && !priorEventIds.has(item.id),
     );
     if (event) return { ok: true, event };
     const taskPayload = await client.request("task.get", { taskId }, deadlineAt);
@@ -1039,6 +1057,8 @@ async function waitForFollowUp(client, taskId, priorEventIds, deadlineAt, pollMs
 function normalizedQuery(value) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLowerCase() : "";
 }
+
+const BROADCAST_TRUNCATION_MARKER = "[... truncated ...]";
 
 function normalizedHttpUrl(value) {
   try {
@@ -1103,7 +1123,10 @@ function successfulToolResult(requirement, result, envelope) {
           typeof hit === "object" &&
           typeof hit.title === "string" &&
           hit.title.trim().length > 0 &&
-          normalizedHttpUrl(hit.url) &&
+          // task.events passes payloads through sanitizeForBroadcast (MAX_BROADCAST_DEPTH = 3),
+          // which replaces payload.result.results[i].url (depth 4) with this marker, so the
+          // marker is accepted alongside a real http(s) URL.
+          (normalizedHttpUrl(hit.url) || hit.url === BROADCAST_TRUNCATION_MARKER) &&
           typeof (hit.snippet || hit.content) === "string" &&
           String(hit.snippet || hit.content).trim().length > 0,
       );
@@ -2532,6 +2555,7 @@ module.exports = {
   stopOwnedChildren,
   stopOwnedDaemon,
   verifyToolEvidenceFromEvents,
+  waitForFollowUp,
   waitForTerminalStatus,
   withProfileCleanupError,
   waitProcessTreeExit,

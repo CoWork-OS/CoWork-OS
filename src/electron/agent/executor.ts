@@ -3704,15 +3704,11 @@ export class TaskExecutor {
         return;
       }
       case "needs_user_action": {
-        this.terminalStatus = "needs_user_action";
-        this.failureClass = undefined;
         const terminalState = createTerminalState("needs_user_action", { reason: outcome.reason });
         this.finalizeTaskBestEffort(assistantText || outcome.reason, outcome.reason, terminalState);
         return;
       }
       case "partial_success": {
-        this.terminalStatus = "partial_success";
-        this.failureClass = outcome.failureClass;
         this.emitEvent("log", { metric: "agent_budget_exhausted_total", value: 1 });
         const terminalState = createTerminalState("partial_success", {
           reason: outcome.reason,
@@ -3763,8 +3759,6 @@ export class TaskExecutor {
     this.stopProgressJournal();
     this.saveConversationSnapshot();
     this.taskCompleted = true;
-    this.terminalStatus = "failed";
-    this.failureClass = outcome.failureClass;
     this.persistBestKnownOutcome(
       assistantText || this.buildResultSummary() || "",
       "failed",
@@ -3784,7 +3778,6 @@ export class TaskExecutor {
     this.emitTerminalFailureOnce({
       message: outcome.reason,
       failureClass: outcome.failureClass,
-      acpStopReason: outcome.stopReason,
     });
     void this.closeAcpxRuntimeSession("failed turn");
   }
@@ -3801,7 +3794,6 @@ export class TaskExecutor {
     if (assistantText) {
       // Keep the partial answer reachable from the cancelled task.
       this.persistBestKnownOutcome(assistantText, undefined, undefined, reason);
-      this.daemon.updateTask(this.task.id, { bestKnownOutcome: this.bestKnownOutcome });
     }
     this.daemon.recordExternalTaskCancellation(this.task.id, reason);
     void this.closeAcpxRuntimeSession("external cancellation");

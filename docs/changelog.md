@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Automation Library**: **Automations → Library** lists every routine, flow, schedule, event trigger, webhook rule and Council once, and **View** opens the editor that owns it. See [Automation Studio](automation-studio.md#library).
+- **Add Tools**: **Settings → Add tools** searches Feature Packs, skills, connectors, MCP servers and built-in tools in one place and opens the screen where you finish setup. It never installs or connects anything by itself. See [Add tools discovery](add-tools-discovery.md).
 - **WhatsApp Business (Cloud API) channel**: signed webhooks, a durable inbound spool with retries, delivery receipts, and held replies with a fallback template outside the 24-hour window. See [Channels](channels.md#whatsapp-business-cloud-api).
 - **Twilio SMS channel**: SMS/MMS with signed inbound and status webhooks, delivery receipts, and carrier keywords (STOP, HELP, …) recorded without routing.
 - **Teams meeting transcripts**: saved as local meeting artifacts (**Settings > Integrations**) and readable by the agent with `meeting_artifacts_list` / `meeting_artifact_get`. See [Meeting Artifacts](meeting-artifacts.md).
@@ -20,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Database work runs in background threads**: saving task events, reports, settings and background services no longer blocks the app, so the window stays responsive with several tasks running or while another CoWork process holds the database. Upgrading needs no manual step. If you suspect a problem, start with `COWORK_DB_WORKER=0` to use the previous in-process path on the same database. See [Troubleshooting](troubleshooting.md#database-worker-errors).
+- **Scheduled Tasks and Routines show where a schedule runs**: which process hosts the scheduler (desktop app or daemon), its time zone and why it wakes next. Cron expressions and time zones are checked when you save. See [Core Automation](core-automation.md#scheduler-availability-contract).
 - **Work-choice labels**: the standard and Calm composers now use Ask/Do consistently; advanced execution overrides remain separate and retain their existing runtime values. The first-task guide leads to a reviewable result before optional setup. See [Work Modes](interaction-modes.md) and the [release surface reference](release-surface-reference.md).
 - **Cost budget guardrail** is on by default at $10 per task. Subscription-billed routes (ChatGPT sign-in, Copilot, coding plans) skip the global cap. A task's own token/cost budget is always enforced but can only lower the global limit.
 - **Shell without an OS sandbox** (Windows, Linux without Docker): when admin policy sets `allowUnsandboxedShell`, the user can approve individual commands to run unsandboxed; otherwise they fail closed.
@@ -29,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scheduled tasks after a restart** no longer start a second copy of a run that is still working, and a run that ended while the app was closed (completed, failed, cancelled, paused, blocked or interrupted) is recorded with its real outcome and delivered. See [Troubleshooting](troubleshooting.md#a-scheduled-task-didnt-run-or-ran-late-after-a-restart).
+- **Protected credential requests** that are not tied to a task are accepted only from the local owner.
 - **CoWork Pulse opt-out and deletion** can no longer be undone by a late network response. Every decision is saved first and fences in-flight delivery, including delivery by another process sharing the profile. Remote deletion turns reporting off before it starts and keeps a retryable "deletion pending" state until the collector confirms it. Acknowledged days are never resent, and the Settings/CLI preview shows exactly what would be sent next (queued, estimate, not eligible, or already sent). See [CoWork Pulse](cowork-pulse.md).
 - **ACP (acpx) turns** are classified from their stop reason: an empty `end_turn` needs your attention instead of counting as success, token/request limits are partial results, refusals and unknown reasons fail, and an external cancellation is recorded as cancelled. A cancellation you make always wins over a late result.
 - **Scheduled task run success** counts only fully successful runs among classified attempts; partial and needs-attention runs are shown separately, cancelled runs are distinct, and older runs without a known outcome are shown as unclassified. See [Task Automations](task-automations.md).

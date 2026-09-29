@@ -8,6 +8,7 @@ export function isHistorical(path) {
   return (
     /(^|\/)changelog\.md$/i.test(path) ||
     /^docs\/release-notes-[^/]+\.md$/.test(path) ||
+    path === "docs/release-surface-reference.md" ||
     path === "docs/public-adoption-stats.md"
   );
 }

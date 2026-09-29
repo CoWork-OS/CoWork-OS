@@ -5,10 +5,10 @@ import { EXECUTION_MODE_LABEL, EXECUTION_MODE_HINT, EXECUTION_MODE_ORDER } from 
 
 export function interactionModeLabel(selection: InteractionModeSelection): string {
   return selection.mode === "chat"
-    ? "Chat"
+    ? "Ask"
     : selection.executionOverride
-      ? `Smart · ${EXECUTION_MODE_LABEL[selection.executionOverride]}`
-      : "Smart";
+      ? `Do · ${EXECUTION_MODE_LABEL[selection.executionOverride]}`
+      : "Do";
 }
 
 export function InteractionModePicker({
@@ -38,28 +38,28 @@ export function InteractionModePicker({
         {interactionModeLabel(selection)}
       </button>
       {open && (
-        <div className="input-status-mode-dropdown" role="menu" aria-label="Interaction mode">
+        <div className="input-status-mode-dropdown" role="menu" aria-label="Work mode">
           <button
             type="button"
             role="menuitemradio"
             aria-checked={selection.mode === "smart" && !selection.executionOverride}
             className={`input-status-mode-option ${selection.mode === "smart" && !selection.executionOverride ? "active" : ""}`}
-            title="Adapts to your request under the current permissions"
+            title="Work on the task using the tools allowed by your access and approval settings"
             onClick={() => onChange({ mode: "smart" })}
           >
             <Sparkles size={14} aria-hidden />
-            Smart
+            Do
           </button>
           <button
             type="button"
             role="menuitemradio"
             aria-checked={selection.mode === "chat"}
             className={`input-status-mode-option ${selection.mode === "chat" ? "active" : ""}`}
-            title="Discuss and draft using your conversation and attachments; no external actions"
+            title="Discuss or draft using your conversation and supplied content; no external actions"
             onClick={() => onChange({ mode: "chat" })}
           >
             <MessageCircle size={14} aria-hidden />
-            Chat
+            Ask
           </button>
           <button
             type="button"

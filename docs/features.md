@@ -359,26 +359,25 @@ Reliability is built as a continuous loop: capture failures -> replay determinis
 
 See [Reliability Flywheel](reliability-flywheel.md) for architecture, schema, scripts, IPC endpoints, CI workflows, and operational commands.
 
-### Mode Picker
+### Work Choice and Runtime Overrides
 
-The UI exposes a small set of execution modes. Chat mode is separate from task execution and uses the direct conversation path.
+The composer presents two work choices. **Ask** handles conversation and supplied content without external actions. **Do** lets CoWork select a task strategy. In the current runtime contract, Ask maps to the `chat` interaction value and Do maps to `smart`. **Advanced…** exposes the execution overrides below; these are runtime options beneath Do, not additional first-level work choices.
 
-| Mode         | Behavior                                                                                                                                                    |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat**     | Direct assistant conversation, no tools, no step timeline, same-session follow-ups, and chat-only streaming for supported providers.                        |
-| **Execute**  | Full task execution path with tools, planning, and artifacts.                                                                                               |
-| **Plan**     | Structured planning path; can pause for `request_user_input` when structured human input is enabled and is intended for non-mutating planning/coordination. |
-| **Analyze**  | Read-only analysis path that stays evidence-focused and blocks mutating tools.                                                                              |
-| **Verified** | Execute-like path that adds external verification checks after steps before completion.                                                                     |
+| Advanced override | Runtime behavior                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Execute**       | Full task execution path with tools, planning, and artifacts.                                                                                                |
+| **Plan**          | Structured planning path; can pause for `request_user_input` when structured human input is enabled and is intended for non-mutating planning/coordination. |
+| **Analyze**       | Read-only analysis path that stays evidence-focused and blocks mutating tools.                                                                               |
+| **Debug**         | Focused debugging path for diagnosis and repair.                                                                                                              |
+| **Verified**      | Execute-like path that adds external verification checks after steps before completion.                                                                      |
 
-These modes are mutually exclusive. Chat is the conversational path; the others are task execution modes.
+Runtime behavior is separate from [access profiles](access-profiles.md). The
+work choice selects conversation or task handling; an advanced override pins a
+runtime strategy; the profile selects the sandbox, approvals, reviewer,
+command-tool, filesystem, network, and domain boundary. A choice or orchestration
+control cannot widen the selected profile.
 
-Execution modes are separate from [access profiles](access-profiles.md). The
-mode selects the task interaction/execution path; the profile selects the
-sandbox, approvals, reviewer, command-tool, filesystem, network, and domain
-boundary. A mode or orchestration toggle cannot widen the selected profile.
-
-> **Note:** Verified mode is strongest when you want execution plus an explicit verification gate. Plan mode shows a confirmation dialog only for structured input requests, not because it bypasses approvals.
+> **Note:** Verified is useful when execution should include an explicit verification gate. Plan can request structured user input; it does not bypass approvals.
 
 ### Task Toggles
 
@@ -803,7 +802,7 @@ Configure in **Mission Control** > **Teams**.
 
 ## Mission Control
 
-Centralized agent orchestration and monitoring dashboard. Access from **Settings** > **Mission Control**. The surface now separates Heartbeat-enabled agents, the global runtime queue, and workspace-scoped Mission Board work so users can tell whether an item is monitoring, waiting to execute, or tracked on the board.
+Centralized agent orchestration and monitoring dashboard. In the standard interface, open **Mission Control** from the main sidebar; in the Calm interface, open **More**. Availability and exact routes vary by release; see the [release surface reference](release-surface-reference.md). The surface separates Heartbeat-enabled agents, the global runtime queue, and workspace-scoped Mission Board work so users can tell whether an item is monitoring, waiting to execute, or tracked on the board.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-8.webp" alt="Mission Control board" width="700">
@@ -1407,7 +1406,7 @@ See [Remote Access](remote-access.md) for details.
 
 ## Enterprise MCP Connectors
 
-Pre-built connectors for enterprise integrations, local services, and creative workflows. Install from **Settings > Connectors > Browse Registry**. The [Connector Inventory](connector-inventory.md) lists every shipped connector, channel and skill with its actions and requirements.
+Pre-built connectors for enterprise integrations, local services, and creative workflows. Install from **Settings > Connectors > Browse Registry**. The [Connector Inventory](connector-inventory.md) lists every shipped connector, channel and skill with its actions and requirements. **Settings > Add tools** searches available and installed packs, skills, native integrations, channels, and MCP servers before opening their setup surfaces; see [Add tools discovery](add-tools-discovery.md) for what its readiness states establish.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-11.webp" alt="Connector catalog" width="700">

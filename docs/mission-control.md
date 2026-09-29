@@ -4,7 +4,7 @@ Mission Control is a centralized, GUI-first agent orchestration and monitoring d
 
 Heartbeat v3 is the default background automation model exposed here. Mission Control should be read as pulse/defer/dispatch truth, not as a wake-queue monitor. Mission Control also surfaces the `Core Harness` and should eventually surface Dreaming runs/candidates as the reviewable memory-curation lane. See [Heartbeat v3](heartbeat-v3.md), [Dreaming](dreaming.md), and [Core Automation](core-automation.md) for the runtime model.
 
-Access it from **Settings** > **Mission Control**.
+Open **Mission Control** from the main sidebar in the standard interface, or from **More** in the Calm interface. The exact path depends on the app release and selected interface; see the [release surface reference](release-surface-reference.md) before following a version-specific navigation path.
 
 Mission Control observes and configures tasks; it is not a second permission
 plane. When creating or editing an agent or automation, review the attached
@@ -307,7 +307,7 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 
 | Action                              | How                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------- |
-| Open Mission Control                | Settings > Mission Control                                                 |
+| Open Mission Control                | Main sidebar (standard) or More (Calm); see the [release surface reference](release-surface-reference.md) |
 | Add a new agent                     | Click "Add Agent" in the agents panel                                      |
 | Review core automation learning     | Open the `Core Harness` view                                               |
 | Configure the company planner       | Open the `Ops` tab, then its `Planner` sub-tab                             |

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   RoutineWorkflowDefinition,
   RoutineWorkflowNode,
@@ -12,6 +12,17 @@ import type {
   WorkflowValidationResult,
 } from "../../shared/routine-workflow";
 import { ROUTINE_WORKFLOW_VERSION } from "../../shared/routine-workflow";
+import type { CronJob, CronRunHistoryEntry } from "../../electron/cron/types";
+import type { EventTrigger, TriggerHistoryEntry } from "../../electron/triggers/types";
+import type { Routine, RoutineRun } from "../../electron/routines/types";
+import type { CouncilConfig, CouncilRun, HookMappingData } from "../../shared/types";
+import {
+  buildAutomationActivity,
+  buildAutomationLibrary,
+  hookMappingRevision,
+  type AutomationLibraryItem,
+  type AutomationOwner,
+} from "./automation-library";
 import {
   AlertTriangleIcon,
   BotIcon,
@@ -56,6 +67,11 @@ type TestResult = {
   steps: RoutineWorkflowStepRecord[];
 };
 
+type SelectedRoutineDetail = {
+  id: string;
+  routine: Routine;
+} | null;
+
 const STARTER_OUTPUT_HINTS: Record<string, string[]> = {
   "starter.manual": ["timestamp", "source"],
   "starter.schedule": ["timestamp", "scheduledAt", "jobId"],
@@ -98,20 +114,68 @@ const CATEGORY_ICON: Record<string, typeof ZapIcon> = {
   Integrations: CodeIcon,
 };
 
+function automationKindLabel(kind: AutomationLibraryItem["kind"]): string {
+  return {
+    prompt: "Prompt Routine",
+    structured: "Structured flow",
+    cron: "Scheduled task",
+    event: "Event trigger",
+    webhook: "Webhook rule",
+    council: "R&D Council",
+  }[kind];
+}
+
+function taskIdFromSavedDeepLink(value: string): string | null {
+  try {
+    const link = new URL(value);
+    if (link.protocol !== "cowork:" || !["tasks", "task"].includes(link.hostname)) return null;
+    return link.pathname.split("/").filter(Boolean)[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function AutomationStudioPanel({
   workspaceId,
   onOpenTask,
+  focusRoutineId,
+  onOpenAdvanced,
 }: {
   workspaceId?: string;
   onOpenTask?: (taskId: string) => void;
+  focusRoutineId?: string | null;
+  onOpenAdvanced?: (owner: AutomationOwner, id?: string) => void;
 }) {
-  const [view, setView] = useState<StudioView>("discover");
+  const [view, setView] = useState<StudioView>("library");
   const [capabilities, setCapabilities] = useState<WorkflowCapabilities | null>(null);
   const [routines, setRoutines] = useState<RoutineSummary[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [googleAccounts, setGoogleAccounts] = useState<string[]>([]);
   const [workflowSecrets, setWorkflowSecrets] = useState<WorkflowSecretSummary[]>([]);
   const [runs, setRuns] = useState<RoutineWorkflowRunRecord[]>([]);
+  const [routineRuns, setRoutineRuns] = useState<RoutineRun[]>([]);
+  const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
+  const [eventTriggers, setEventTriggers] = useState<EventTrigger[]>([]);
+  const [hookMappings, setHookMappings] = useState<HookMappingData[]>([]);
+  const [councils, setCouncils] = useState<CouncilConfig[]>([]);
+  const [cronHistory, setCronHistory] = useState<Record<string, CronRunHistoryEntry[]>>({});
+  const [eventHistory, setEventHistory] = useState<Record<string, TriggerHistoryEntry[]>>({});
+  const [councilRuns, setCouncilRuns] = useState<CouncilRun[]>([]);
+  const [profileScope, setProfileScope] = useState("unknown");
+  const [profileLabel, setProfileLabel] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState<string[]>([]);
+  const [selectedLibraryKey, setSelectedLibraryKey] = useState<string | null>(null);
+  const [selectedRoutineDetail, setSelectedRoutineDetail] = useState<SelectedRoutineDetail>(null);
+  const [routineDetailLoading, setRoutineDetailLoading] = useState(false);
+  const [routineDetailError, setRoutineDetailError] = useState<string | null>(null);
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const [selectedActivityKey, setSelectedActivityKey] = useState<string | null>(null);
+  const [selectedActivityOwnerKey, setSelectedActivityOwnerKey] = useState<string | null>(null);
+  const [activityHistoryOwnerKey, setActivityHistoryOwnerKey] = useState<string | null>(null);
+  const [activityHistoryLoading, setActivityHistoryLoading] = useState(false);
+  const [activityHistoryError, setActivityHistoryError] = useState<string | null>(null);
+  const [pendingActivityOwnerKey, setPendingActivityOwnerKey] = useState<string | null>(null);
+  const [activityNeedsAttention, setActivityNeedsAttention] = useState(false);
   const [steps, setSteps] = useState<RoutineWorkflowStepRecord[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
@@ -135,6 +199,7 @@ export default function AutomationStudioPanel({
   const [newSecretName, setNewSecretName] = useState("");
   const [newSecretValue, setNewSecretValue] = useState("");
   const [pendingConnection, setPendingConnection] = useState<PendingConnection | null>(null);
+  const activityHistoryQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
@@ -147,6 +212,7 @@ export default function AutomationStudioPanel({
         nextRuns,
         googleSettings,
         nextSecrets,
+        profiles,
       ] = await Promise.all([
         window.electronAPI.getRoutineWorkflowCapabilities(),
         window.electronAPI.listRoutines(),
@@ -154,12 +220,17 @@ export default function AutomationStudioPanel({
         window.electronAPI.listRoutineWorkflowRuns(undefined, 60),
         window.electronAPI.getGoogleWorkspaceSettings().catch(() => null),
         window.electronAPI.listRoutineWorkflowSecrets().catch(() => []),
+        window.electronAPI.listProfiles().catch(() => []),
       ]);
       setCapabilities(nextCapabilities as WorkflowCapabilities);
       setRoutines(nextRoutines as RoutineSummary[]);
       setWorkspaces(nextWorkspaces as WorkspaceSummary[]);
       setRuns(nextRuns as RoutineWorkflowRunRecord[]);
       setWorkflowSecrets(nextSecrets as WorkflowSecretSummary[]);
+      const activeProfiles = profiles.filter((profile) => profile.isActive);
+      const activeProfile = activeProfiles.length === 1 ? activeProfiles[0] : null;
+      setProfileScope(activeProfile?.id || "unknown");
+      setProfileLabel(activeProfile?.label || null);
       setGoogleAccounts(
         Array.from(
           new Set(
@@ -170,6 +241,50 @@ export default function AutomationStudioPanel({
         ),
       );
       setSelectedWorkspaceId((current) => current || workspaceId || nextWorkspaces[0]?.id || "");
+      const eventTriggerApi = window.electronAPI as typeof window.electronAPI & {
+        listTriggers: (workspaceId: string) => Promise<EventTrigger[]>;
+        getTriggerHistory: (triggerId: string) => Promise<TriggerHistoryEntry[]>;
+      };
+      const ownerResults = await Promise.allSettled([
+        window.electronAPI.listRoutineRuns(undefined, 200),
+        window.electronAPI.listCronJobs({ includeDisabled: true }),
+        eventTriggerApi.listTriggers(""),
+        window.electronAPI.getHooksSettings(),
+        Promise.all(
+          (nextWorkspaces as WorkspaceSummary[]).map((space) =>
+            window.electronAPI.listCouncils(space.id),
+          ),
+        ),
+      ]);
+      const labels = [
+        "Routine activity",
+        "Scheduled tasks",
+        "Event triggers",
+        "Webhooks",
+        "Councils",
+      ];
+      setUnavailable([
+        ...ownerResults.flatMap((result, index) =>
+          result.status === "rejected" ? [labels[index]] : [],
+        ),
+        ...(activeProfile ? [] : ["Active profile identity"]),
+      ]);
+      const value = <T,>(index: number, fallback: T): T =>
+        ownerResults[index].status === "fulfilled"
+          ? (ownerResults[index] as PromiseFulfilledResult<T>).value
+          : fallback;
+      setRoutineRuns(value<RoutineRun[]>(0, []));
+      const jobs = value<CronJob[]>(1, []);
+      const triggers = value<EventTrigger[]>(2, []);
+      const hooks = value<{ mappings?: HookMappingData[] }>(3, { mappings: [] });
+      const councilList = value<CouncilConfig[][]>(4, []).flat();
+      setCronJobs(jobs);
+      setEventTriggers(triggers);
+      setHookMappings(hooks.mappings || []);
+      setCouncils(councilList);
+      setCronHistory({});
+      setEventHistory({});
+      setCouncilRuns([]);
     } catch (loadError) {
       setError(
         loadError instanceof Error ? loadError.message : "Automation Studio could not load.",
@@ -178,6 +293,195 @@ export default function AutomationStudioPanel({
       setLoading(false);
     }
   }, [workspaceId]);
+
+  const libraryItems = useMemo(
+    () =>
+      buildAutomationLibrary({
+        profileScope,
+        routines: routines as Routine[],
+        cronJobs,
+        eventTriggers,
+        hookMappings,
+        councils,
+        hookRevision: hookMappingRevision(hookMappings),
+      }),
+    [profileScope, routines, cronJobs, eventTriggers, hookMappings, councils],
+  );
+  const activityItems = useMemo(
+    () =>
+      buildAutomationActivity({
+        items: libraryItems,
+        routineRuns,
+        workflowRuns: runs,
+        cronHistory,
+        eventHistory,
+        councilRuns,
+      }),
+    [libraryItems, routineRuns, runs, cronHistory, eventHistory, councilRuns],
+  );
+  const visibleActivityItems = useMemo(
+    () =>
+      activityItems.filter((item) =>
+        selectedActivityOwnerKey
+          ? item.ownerKey === selectedActivityOwnerKey
+          : item.owner === "routines",
+      ),
+    [activityItems, selectedActivityOwnerKey],
+  );
+  const selectedLibraryItem = libraryItems.find((item) => item.key === selectedLibraryKey) || null;
+  const selectedActivityItem =
+    visibleActivityItems.find((item) => item.key === selectedActivityKey) || null;
+  const selectedActivityOwner = libraryItems.find((item) => item.key === selectedActivityOwnerKey);
+  const visibleLibraryItems = libraryItems.filter((item) =>
+    `${item.name} ${item.description} ${item.kind} ${item.triggerSummary}`
+      .toLocaleLowerCase()
+      .includes(libraryQuery.trim().toLocaleLowerCase()),
+  );
+
+  useEffect(() => {
+    if (!focusRoutineId || loading) return;
+    const item = libraryItems.find(
+      (entry) => entry.owner === "routines" && entry.id === focusRoutineId,
+    );
+    setView("library");
+    setSelectedLibraryKey(item?.key || null);
+    if (!item) setError(`Routine ${focusRoutineId} is not available in this Library.`);
+  }, [focusRoutineId, loading, libraryItems]);
+
+  useEffect(() => {
+    if (!selectedLibraryItem || selectedLibraryItem.owner !== "routines") {
+      setSelectedRoutineDetail(null);
+      setRoutineDetailError(null);
+      setRoutineDetailLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRoutineDetailLoading(true);
+    setRoutineDetailError(null);
+    void window.electronAPI
+      .getRoutine(selectedLibraryItem.id)
+      .then((routine) => {
+        if (cancelled) return;
+        if (!routine) {
+          setSelectedRoutineDetail(null);
+          setRoutineDetailError("Routine details are no longer available. Refresh the Library.");
+          return;
+        }
+        setSelectedRoutineDetail({ id: selectedLibraryItem.id, routine: routine as Routine });
+      })
+      .catch((detailError: unknown) => {
+        if (!cancelled) {
+          setSelectedRoutineDetail(null);
+          setRoutineDetailError(
+            detailError instanceof Error ? detailError.message : "Routine details could not load.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRoutineDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLibraryItem?.id, selectedLibraryItem?.owner]);
+
+  useEffect(() => {
+    if (view !== "activity" || !selectedActivityOwnerKey) {
+      setActivityHistoryLoading(false);
+      return;
+    }
+    const ownerItem = libraryItems.find((item) => item.key === selectedActivityOwnerKey);
+    if (!ownerItem) return;
+
+    let cancelled = false;
+    setActivityHistoryLoading(true);
+    setActivityHistoryError(null);
+    setActivityHistoryOwnerKey(null);
+    setCronHistory({});
+    setEventHistory({});
+    setCouncilRuns([]);
+
+    const request = activityHistoryQueueRef.current.then(async () => {
+      if (cancelled) return;
+      try {
+        if (ownerItem.kind === "cron") {
+          const result = await window.electronAPI.getCronRunHistory(ownerItem.id);
+          const fallback = cronJobs.find((job) => job.id === ownerItem.id)?.state.runHistory || [];
+          if (!cancelled) setCronHistory({ [ownerItem.id]: result?.entries || fallback });
+        } else if (ownerItem.kind === "event") {
+          const eventTriggerApi = window.electronAPI as typeof window.electronAPI & {
+            getTriggerHistory: (triggerId: string) => Promise<TriggerHistoryEntry[]>;
+          };
+          const history = await eventTriggerApi.getTriggerHistory(ownerItem.id);
+          if (!cancelled) setEventHistory({ [ownerItem.id]: history || [] });
+        } else if (ownerItem.kind === "council") {
+          const history = await window.electronAPI.listCouncilRuns({
+            councilConfigId: ownerItem.id,
+            limit: 20,
+          });
+          if (!cancelled) setCouncilRuns(history || []);
+        }
+        if (!cancelled) setActivityHistoryOwnerKey(ownerItem.key);
+      } catch (historyError) {
+        if (!cancelled) {
+          if (ownerItem.kind === "cron") {
+            const fallback =
+              cronJobs.find((job) => job.id === ownerItem.id)?.state.runHistory || [];
+            setCronHistory({ [ownerItem.id]: fallback });
+          }
+          setActivityHistoryError(
+            historyError instanceof Error
+              ? historyError.message
+              : `History for ${ownerItem.name} could not load.`,
+          );
+        }
+      } finally {
+        if (!cancelled) setActivityHistoryLoading(false);
+      }
+    });
+    activityHistoryQueueRef.current = request.catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [view, selectedActivityOwnerKey, libraryItems, cronJobs]);
+
+  useEffect(() => {
+    if (
+      selectedActivityOwnerKey &&
+      !libraryItems.some((item) => item.key === selectedActivityOwnerKey)
+    ) {
+      setSelectedActivityOwnerKey(null);
+      setSelectedActivityKey(null);
+      setSelectedRunId(null);
+    }
+  }, [selectedActivityOwnerKey, libraryItems]);
+
+  useEffect(() => {
+    if (!pendingActivityOwnerKey) return;
+    const latest = visibleActivityItems.find((item) => item.ownerKey === pendingActivityOwnerKey);
+    if (
+      !latest &&
+      !activityHistoryLoading &&
+      (activityHistoryOwnerKey === pendingActivityOwnerKey ||
+        (activityHistoryError && selectedActivityOwnerKey === pendingActivityOwnerKey))
+    ) {
+      setPendingActivityOwnerKey(null);
+      setSelectedActivityKey(null);
+      return;
+    }
+    if (!latest) return;
+    setSelectedActivityKey(latest.key);
+    setSelectedRunId(latest.workflowRunId || null);
+    setPendingActivityOwnerKey(null);
+  }, [
+    pendingActivityOwnerKey,
+    visibleActivityItems,
+    activityHistoryLoading,
+    activityHistoryOwnerKey,
+    activityHistoryError,
+    selectedActivityOwnerKey,
+  ]);
 
   useEffect(() => {
     void loadOverview();
@@ -214,10 +518,6 @@ export default function AutomationStudioPanel({
     [capabilities?.operations, selectedNode?.operation],
   );
   const orderedNodes = useMemo(() => orderWorkflowNodes(workflow), [workflow]);
-  const workflowRoutines = useMemo(
-    () => routines.filter((routine) => routine.workflow),
-    [routines],
-  );
   const filteredOperations = useMemo(() => {
     const query = catalogQuery.trim().toLocaleLowerCase();
     const actions =
@@ -261,6 +561,100 @@ export default function AutomationStudioPanel({
     setTestResult(null);
     setPendingConnection(null);
     setView("builder");
+  }
+
+  async function openAdvanced(item: AutomationLibraryItem) {
+    if (item.legacyHookRevision) {
+      const latest = await window.electronAPI.getHooksSettings();
+      if (hookMappingRevision(latest.mappings || []) !== item.legacyHookRevision) {
+        setError("Webhook rules changed. Refresh the Library before opening this legacy rule.");
+        await loadOverview();
+        return;
+      }
+    }
+    if (!onOpenAdvanced) {
+      setNotice(`Open Settings → Automations → ${item.owner} to manage this item.`);
+      return;
+    }
+    onOpenAdvanced(item.owner, item.id);
+  }
+
+  async function runLibraryItem(item: AutomationLibraryItem) {
+    if (!item.actions.run.supported) return;
+    setBusy(`run:${item.key}`);
+    setError(null);
+    try {
+      if (item.kind === "prompt" || item.kind === "structured") {
+        const latest = (await window.electronAPI.getRoutine(item.id)) as Routine | null;
+        if (!latest) throw new Error("This Routine no longer exists. Refresh the Library.");
+        if (item.kind === "structured" && !latest.activeWorkflowVersionId)
+          throw new Error("This structured flow has no active version.");
+        await window.electronAPI.runRoutineNow(item.id);
+      } else if (item.kind === "cron") {
+        const result = await window.electronAPI.runCronJob(item.id, "force");
+        if (!result.ok || !result.ran)
+          throw new Error("The scheduled task did not start. Review it in Scheduled Tasks.");
+      } else if (item.kind === "council") {
+        const result = await window.electronAPI.runCouncilNow(item.id);
+        if (!result) throw new Error("The Council did not start. Review it in R&D Council.");
+      }
+      setNotice(`Run requested for ${item.name}. Review Activity for the native result.`);
+      await loadOverview();
+      setSelectedActivityOwnerKey(item.key);
+      setPendingActivityOwnerKey(item.key);
+      setSelectedActivityKey(null);
+      setView("activity");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Run request failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function setLibraryEnabled(item: AutomationLibraryItem, enabled: boolean) {
+    if (!item.actions.pause.supported) return;
+    setBusy(`toggle:${item.key}`);
+    setError(null);
+    try {
+      if (item.kind === "prompt" || item.kind === "structured") {
+        const latest = (await window.electronAPI.getRoutine(item.id)) as Routine | null;
+        if (!latest || latest.updatedAt !== item.updatedAt)
+          throw new Error(
+            "This Routine changed in another editor. Refresh before changing its triggers.",
+          );
+        await window.electronAPI.updateRoutine(item.id, { enabled });
+        const confirmed = (await window.electronAPI.getRoutine(item.id)) as Routine | null;
+        if (!confirmed || confirmed.enabled !== enabled)
+          throw new Error(
+            "Trigger change is incomplete. Review the Routine and its compiled triggers.",
+          );
+      } else if (item.kind === "cron") {
+        const latest = await window.electronAPI.getCronJob(item.id);
+        if (!latest || latest.updatedAtMs !== item.updatedAt)
+          throw new Error(
+            "This scheduled task changed in another editor. Refresh before changing it.",
+          );
+        const result = await window.electronAPI.updateCronJob(item.id, { enabled });
+        if (!result.ok || result.job.enabled !== enabled)
+          throw new Error("Scheduled-task trigger change is incomplete.");
+      } else if (item.kind === "council") {
+        const latest = await window.electronAPI.getCouncil(item.id);
+        if (!latest || latest.updatedAt !== item.updatedAt)
+          throw new Error("This Council changed in another editor. Refresh before changing it.");
+        const result = await window.electronAPI.setCouncilEnabled(item.id, enabled);
+        if (!result || result.enabled !== enabled)
+          throw new Error("Council trigger change is incomplete.");
+      }
+      setNotice(
+        `${item.name}: ${enabled ? "triggers on" : "triggers off"}. Running work is unaffected.`,
+      );
+      await loadOverview();
+      setSelectedLibraryKey(item.key);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Trigger change failed.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   function openTemplate(template: RoutineWorkflowTemplate) {
@@ -519,6 +913,13 @@ export default function AutomationStudioPanel({
       const run = await window.electronAPI.runRoutineNow(selectedRoutineId);
       setNotice(run ? "Workflow run started." : "Turn on the flow before running it.");
       await loadOverview();
+      const ownerKey = libraryItems.find(
+        (item) => item.owner === "routines" && item.id === selectedRoutineId,
+      )?.key;
+      if (ownerKey) {
+        setSelectedActivityOwnerKey(ownerKey);
+        setPendingActivityOwnerKey(ownerKey);
+      }
       setView("activity");
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "The workflow could not start.");
@@ -729,47 +1130,389 @@ export default function AutomationStudioPanel({
         <div className="studio-library">
           <div className="studio-library-summary">
             <div>
-              <strong>{workflowRoutines.length}</strong>
-              <span>structured flows</span>
+              <strong>{libraryItems.length}</strong>
+              <span>automations</span>
             </div>
             <div>
-              <strong>{workflowRoutines.filter((routine) => routine.enabled).length}</strong>
-              <span>currently on</span>
+              <strong>{libraryItems.filter((item) => item.enabled).length}</strong>
+              <span>triggers on</span>
             </div>
             <button className="studio-primary" onClick={newBlankWorkflow}>
               New flow
             </button>
           </div>
-          {workflowRoutines.length === 0 ? (
+          {unavailable.some((source) => source !== "Active profile identity") && (
+            <div className="studio-source-warning" role="status">
+              Some sources could not load:{" "}
+              {unavailable.filter((source) => source !== "Active profile identity").join(", ")}.
+              Their automations may be missing from this view.
+            </div>
+          )}
+          {profileScope === "unknown" && (
+            <div className="studio-source-warning" role="status">
+              The active profile ID is unavailable. This Library cannot guarantee cross-profile
+              identity.
+            </div>
+          )}
+          <div className="studio-library-search">
+            <input
+              value={libraryQuery}
+              onChange={(event) => setLibraryQuery(event.target.value)}
+              placeholder="Find an automation"
+              aria-label="Find an automation"
+            />
+            <span>Prompt Routines, flows, schedules, events, webhooks, and Councils</span>
+          </div>
+          {libraryItems.length === 0 ? (
             <StudioEmpty
-              title="No structured flows yet"
-              body="Create a blank flow or begin with a template."
+              title="No automations yet"
+              body="Create a flow, use the task menu, or configure a native automation."
               action="Browse templates"
               onAction={() => setView("discover")}
             />
           ) : (
-            <div className="studio-flow-list">
-              {workflowRoutines.map((routine) => {
-                const recent = runs.find((run) => run.routineId === routine.id);
-                return (
-                  <button
-                    key={routine.id}
-                    className="studio-flow-row"
-                    onClick={() => openWorkflow(routine)}
-                  >
-                    <span className={`studio-status-dot ${routine.enabled ? "on" : "draft"}`} />
-                    <div>
-                      <strong>{routine.name}</strong>
-                      <p>{routine.description || "No description"}</p>
-                    </div>
-                    <span>{routine.workflow?.nodes.length || 0} steps</span>
-                    <span className={`studio-run-state state-${recent?.status || "idle"}`}>
-                      {recent?.status?.replace(/_/g, " ") || "Not run"}
+            <div className="studio-library-layout">
+              <div className="studio-flow-list">
+                {visibleLibraryItems.map((item) => {
+                  const recent = activityItems.find((run) => run.ownerKey === item.key);
+                  return (
+                    <button
+                      key={item.key}
+                      className={`studio-flow-row ${selectedLibraryKey === item.key ? "selected" : ""}`}
+                      onClick={() => setSelectedLibraryKey(item.key)}
+                    >
+                      <span className={`studio-status-dot ${item.enabled ? "on" : "draft"}`} />
+                      <div>
+                        <strong>{item.name}</strong>
+                        <p>{item.description}</p>
+                      </div>
+                      <span className="studio-kind-label">{automationKindLabel(item.kind)}</span>
+                      <span className={`studio-run-state state-${recent?.execution || "idle"}`}>
+                        {recent?.execution?.replace(/_/g, " ") || "No recent run"}
+                      </span>
+                      <time>{item.updatedAt ? formatRelativeTime(item.updatedAt) : ""}</time>
+                    </button>
+                  );
+                })}
+                {visibleLibraryItems.length === 0 && (
+                  <p className="studio-muted">No automations match this search.</p>
+                )}
+              </div>
+              <aside className="studio-library-detail">
+                {!selectedLibraryItem ? (
+                  <StudioEmpty
+                    title="Select an automation"
+                    body="See its owner, triggers, work target, and available actions."
+                  />
+                ) : (
+                  <>
+                    <span className="studio-eyebrow">
+                      {automationKindLabel(selectedLibraryItem.kind)}
                     </span>
-                    <time>{formatRelativeTime(routine.updatedAt)}</time>
-                  </button>
-                );
-              })}
+                    <h3>{selectedLibraryItem.name}</h3>
+                    <p>{selectedLibraryItem.description}</p>
+                    {selectedLibraryItem.owner === "routines" && (
+                      <section
+                        className="studio-routine-source-details"
+                        aria-label="Routine details"
+                      >
+                        {routineDetailLoading && (
+                          <p className="studio-muted">Loading saved Routine details…</p>
+                        )}
+                        {routineDetailError && (
+                          <p className="studio-source-warning">{routineDetailError}</p>
+                        )}
+                        {selectedRoutineDetail?.id === selectedLibraryItem.id &&
+                          (() => {
+                            const detail = selectedRoutineDetail.routine;
+                            const metadata = detail.contextBindings?.metadata || {};
+                            const sourceTaskId = metadata.sourceTaskId;
+                            const sourceTaskTitle = metadata.sourceTaskTitle;
+                            const sourceSessionId = metadata.sourceSessionId;
+                            const sourceLink = metadata.sourceLink;
+                            const knownBindings = [
+                              ["Source", metadata.source],
+                              ["Run mode", metadata.automationRunMode || metadata.runMode],
+                              ["Thread follow-up", metadata.threadAutomation],
+                              ["Assigned agent role", metadata.assignedAgentRoleId],
+                              ["Target task", metadata.targetTaskId],
+                            ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+                            return (
+                              <>
+                                <details className="studio-routine-instructions">
+                                  <summary>Saved instructions</summary>
+                                  <pre>
+                                    {detail.instructions ||
+                                      detail.prompt ||
+                                      "No saved instructions."}
+                                  </pre>
+                                </details>
+                                <div className="studio-routine-context">
+                                  <strong>Context bindings</strong>
+                                  {detail.contextBindings?.chatContext ? (
+                                    <div>
+                                      <span>Chat</span>
+                                      <code>
+                                        {detail.contextBindings.chatContext.channelType} ·{" "}
+                                        {detail.contextBindings.chatContext.channelId}
+                                      </code>
+                                    </div>
+                                  ) : (
+                                    <p>No chat context binding.</p>
+                                  )}
+                                  {knownBindings.map(([label, value]) => (
+                                    <div key={label}>
+                                      <span>{label}</span>
+                                      <code>{value}</code>
+                                    </div>
+                                  ))}
+                                  {Object.keys(metadata).length >
+                                    knownBindings.length +
+                                      Number(Boolean(sourceTaskId)) +
+                                      Number(Boolean(sourceSessionId)) +
+                                      Number(Boolean(sourceLink)) && (
+                                    <small>
+                                      Additional saved metadata is available in the Routine editor.
+                                    </small>
+                                  )}
+                                </div>
+                                <div className="studio-routine-provenance">
+                                  <strong>Source provenance</strong>
+                                  {sourceTaskId ? (
+                                    <div>
+                                      <span>Source task</span>
+                                      <code>{sourceTaskId}</code>
+                                      {sourceTaskTitle && <small>{sourceTaskTitle}</small>}
+                                      {onOpenTask && (
+                                        <button
+                                          className="studio-secondary"
+                                          onClick={() => onOpenTask(sourceTaskId)}
+                                        >
+                                          Open source task
+                                        </button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <span>Source task</span>
+                                      <small>No source task ID is recorded.</small>
+                                    </div>
+                                  )}
+                                  {sourceSessionId ? (
+                                    <div>
+                                      <span>Source session</span>
+                                      <code>{sourceSessionId}</code>
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <span>Source session</span>
+                                      <small>No source session ID is recorded.</small>
+                                    </div>
+                                  )}
+                                  {sourceLink ? (
+                                    <div>
+                                      <span>Saved deep link</span>
+                                      <code>{sourceLink}</code>
+                                      {(() => {
+                                        const linkedTaskId = taskIdFromSavedDeepLink(sourceLink);
+                                        const isWebLink = /^https?:\/\//i.test(sourceLink);
+                                        const canOpen = Boolean(
+                                          (linkedTaskId && onOpenTask) || isWebLink,
+                                        );
+                                        return (
+                                          <button
+                                            className="studio-secondary"
+                                            disabled={!canOpen}
+                                            title={
+                                              canOpen
+                                                ? undefined
+                                                : "This deep-link scheme cannot be opened from the Library."
+                                            }
+                                            onClick={() => {
+                                              if (linkedTaskId && onOpenTask) {
+                                                onOpenTask(linkedTaskId);
+                                              } else if (isWebLink) {
+                                                void window.electronAPI
+                                                  .openExternal(sourceLink)
+                                                  .catch((linkError: unknown) =>
+                                                    setError(
+                                                      linkError instanceof Error
+                                                        ? linkError.message
+                                                        : "The saved deep link could not be opened.",
+                                                    ),
+                                                  );
+                                              }
+                                            }}
+                                          >
+                                            Open saved deep link
+                                          </button>
+                                        );
+                                      })()}
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <span>Saved deep link</span>
+                                      <small>No source deep link is recorded.</small>
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            );
+                          })()}
+                      </section>
+                    )}
+                    <dl>
+                      <div>
+                        <dt>Owner</dt>
+                        <dd>{selectedLibraryItem.owner}</dd>
+                      </div>
+                      <div>
+                        <dt>Owner ID</dt>
+                        <dd>
+                          <code>{selectedLibraryItem.id}</code>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Current profile</dt>
+                        <dd>
+                          {profileLabel ||
+                            (profileScope === "unknown" ? "Unavailable" : "Current profile")}
+                          {profileScope !== "unknown" && <code> {profileScope}</code>}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Triggers</dt>
+                        <dd>{selectedLibraryItem.triggerSummary}</dd>
+                      </div>
+                      <div>
+                        <dt>State</dt>
+                        <dd>
+                          {selectedLibraryItem.enabled === null
+                            ? "Depends on shared listener"
+                            : selectedLibraryItem.enabled
+                              ? "Triggers on"
+                              : "Triggers off"}
+                        </dd>
+                      </div>
+                      {selectedLibraryItem.activeVersionId && (
+                        <div>
+                          <dt>Active version</dt>
+                          <dd>
+                            <code>{selectedLibraryItem.activeVersionId}</code>
+                          </dd>
+                        </div>
+                      )}
+                      {selectedLibraryItem.workTarget && (
+                        <div>
+                          <dt>Work target</dt>
+                          <dd>{selectedLibraryItem.workTarget}</dd>
+                        </div>
+                      )}
+                      {selectedLibraryItem.schedulerOwner && (
+                        <div>
+                          <dt>Scheduler</dt>
+                          <dd>{selectedLibraryItem.schedulerOwner}</dd>
+                        </div>
+                      )}
+                      {selectedLibraryItem.timezone && (
+                        <div>
+                          <dt>Timezone</dt>
+                          <dd>{selectedLibraryItem.timezone}</dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt>Behavior</dt>
+                        <dd>{selectedLibraryItem.detail}</dd>
+                      </div>
+                    </dl>
+                    {selectedLibraryItem.linkedChildren.length > 0 && (
+                      <div className="studio-linked-children">
+                        <strong>Compiled engine resources</strong>
+                        {selectedLibraryItem.linkedChildren.map((child) => (
+                          <code key={child}>{child}</code>
+                        ))}
+                      </div>
+                    )}
+                    {selectedLibraryItem.linkageWarning && (
+                      <p className="studio-source-warning">{selectedLibraryItem.linkageWarning}</p>
+                    )}
+                    {selectedLibraryItem.legacyHookRevision && (
+                      <p className="studio-source-warning">
+                        Legacy rule #{(selectedLibraryItem.legacyHookIndex || 0) + 1} is read-only
+                        in this Library. The reference is valid only for the current webhook
+                        configuration revision.
+                      </p>
+                    )}
+                    <div className="studio-library-actions">
+                      <button
+                        className="studio-primary"
+                        disabled={!selectedLibraryItem.actions.run.supported || !!busy}
+                        title={selectedLibraryItem.actions.run.reason}
+                        onClick={() => void runLibraryItem(selectedLibraryItem)}
+                      >
+                        Run now
+                      </button>
+                      {selectedLibraryItem.enabled !== null && (
+                        <button
+                          className="studio-secondary"
+                          disabled={!selectedLibraryItem.actions.pause.supported || !!busy}
+                          title={selectedLibraryItem.actions.pause.reason}
+                          onClick={() =>
+                            void setLibraryEnabled(
+                              selectedLibraryItem,
+                              !selectedLibraryItem.enabled,
+                            )
+                          }
+                        >
+                          {selectedLibraryItem.enabled ? "Turn triggers off" : "Turn triggers on"}
+                        </button>
+                      )}
+                      {selectedLibraryItem.kind === "structured" && (
+                        <button
+                          className="studio-secondary"
+                          onClick={() => {
+                            const routine = routines.find(
+                              (entry) => entry.id === selectedLibraryItem.id,
+                            );
+                            if (routine) openWorkflow(routine);
+                          }}
+                        >
+                          Open Builder
+                        </button>
+                      )}
+                      <button
+                        className="studio-secondary"
+                        onClick={() => void openAdvanced(selectedLibraryItem)}
+                      >
+                        {selectedLibraryItem.actions.edit.supported
+                          ? "Edit in owner"
+                          : "Open owner"}
+                      </button>
+                      <button
+                        className="studio-secondary"
+                        onClick={() => {
+                          setSelectedActivityOwnerKey(selectedLibraryItem.key);
+                          setPendingActivityOwnerKey(selectedLibraryItem.key);
+                          setSelectedActivityKey(null);
+                          setSelectedRunId(null);
+                          setView("activity");
+                        }}
+                      >
+                        Review activity
+                      </button>
+                    </div>
+                    {!selectedLibraryItem.actions.run.supported && (
+                      <small>{selectedLibraryItem.actions.run.reason}</small>
+                    )}
+                    {!selectedLibraryItem.actions.pause.supported && (
+                      <small>{selectedLibraryItem.actions.pause.reason}</small>
+                    )}
+                    {!selectedLibraryItem.actions.edit.supported && (
+                      <small>{selectedLibraryItem.actions.edit.reason}</small>
+                    )}
+                  </>
+                )}
+              </aside>
             </div>
           )}
         </div>
@@ -1247,53 +1990,135 @@ export default function AutomationStudioPanel({
         <div className="studio-activity">
           <aside>
             <div className="studio-pane-heading">
-              <span>Runs</span>
-              <small>{runs.length}</small>
+              <span>Activity</span>
+              <small>
+                {
+                  visibleActivityItems.filter(
+                    (item) => !activityNeedsAttention || item.needsAttention,
+                  ).length
+                }
+              </small>
             </div>
-            {runs.length === 0 ? (
-              <StudioEmpty title="No runs yet" body="Test or turn on a flow to create activity." />
+            <label className="studio-activity-owner-filter">
+              <span>Automation history</span>
+              <select
+                value={selectedActivityOwnerKey || ""}
+                onChange={(event) => {
+                  setSelectedActivityOwnerKey(event.target.value || null);
+                  setSelectedActivityKey(null);
+                  setSelectedRunId(null);
+                }}
+              >
+                <option value="">Prompt and workflow runs</option>
+                {libraryItems.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.name} · {automationKindLabel(item.kind)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {activityHistoryLoading && (
+              <p className="studio-muted">Loading selected automation history…</p>
+            )}
+            {activityHistoryError && (
+              <p className="studio-source-warning" role="status">
+                {activityHistoryError}
+              </p>
+            )}
+            {!selectedActivityOwnerKey && (
+              <p className="studio-muted">
+                Select an automation above to load its native history. Routine and workflow runs are
+                listed below.
+              </p>
+            )}
+            <label className="studio-activity-filter">
+              <input
+                type="checkbox"
+                checked={activityNeedsAttention}
+                onChange={(event) => setActivityNeedsAttention(event.target.checked)}
+              />
+              Needs attention
+            </label>
+            {visibleActivityItems.length === 0 ? (
+              <StudioEmpty
+                title={
+                  !selectedActivityOwnerKey
+                    ? "No activity yet"
+                    : selectedActivityOwner?.kind === "webhook"
+                      ? "Rule history unavailable"
+                      : activityHistoryError
+                        ? "History could not be loaded"
+                        : "No recorded activity"
+                }
+                body={
+                  !selectedActivityOwnerKey
+                    ? "Run an automation or select an owner to load its retained history."
+                    : selectedActivityOwner?.kind === "webhook"
+                      ? "The Library cannot load rule-level webhook history. Open Webhooks to inspect the shared receiver configuration."
+                      : activityHistoryError
+                        ? "The Library could not confirm whether this owner has retained activity. Review the error above and try again."
+                        : "This owner has no retained activity in its native history."
+                }
+              />
             ) : (
-              runs.map((run) => (
-                <button
-                  key={run.id}
-                  className={selectedRunId === run.id ? "selected" : ""}
-                  onClick={() => setSelectedRunId(run.id)}
-                >
-                  <span className={`studio-status-dot ${run.status}`} />
-                  <span>
-                    <strong>
-                      {routines.find((routine) => routine.id === run.routineId)?.name || "Workflow"}
-                    </strong>
-                    <small>{formatRelativeTime(run.createdAt)}</small>
-                  </span>
-                  <em>{run.status.replace(/_/g, " ")}</em>
-                </button>
-              ))
+              visibleActivityItems
+                .filter((item) => !activityNeedsAttention || item.needsAttention)
+                .map((item) => (
+                  <button
+                    key={item.key}
+                    className={selectedActivityKey === item.key ? "selected" : ""}
+                    onClick={() => {
+                      setSelectedActivityKey(item.key);
+                      setSelectedRunId(item.workflowRunId || null);
+                    }}
+                  >
+                    <span
+                      className={`studio-status-dot ${item.needsAttention ? "failed" : item.execution}`}
+                    />
+                    <span>
+                      <strong>{item.name}</strong>
+                      <small>
+                        {item.source} · {formatRelativeTime(item.at)}
+                      </small>
+                    </span>
+                    <em>{item.approval || item.execution.replace(/_/g, " ")}</em>
+                  </button>
+                ))
             )}
           </aside>
           <main>
-            {!selectedRunId ? (
+            {unavailable.some((source) => source !== "Active profile identity") && (
+              <div className="studio-source-warning" role="status">
+                Some activity sources or histories could not load:{" "}
+                {unavailable.filter((source) => source !== "Active profile identity").join(", ")}.
+              </div>
+            )}
+            {!selectedActivityItem ? (
               <StudioEmpty
-                title="Select a run"
-                body="Inspect step inputs, outputs, retries, failures, and approvals."
+                title="Select an activity item"
+                body="Review its native execution, delivery, approval, and linked evidence."
               />
-            ) : (
+            ) : selectedActivityItem.workflowRunId && selectedRunId ? (
               <>
                 <div className="studio-activity-header">
                   <div>
-                    <span>Run</span>
-                    <code>{selectedRunId}</code>
+                    <span>{selectedActivityItem.source}</span>
+                    <code>{selectedActivityItem.workflowRunId}</code>
                   </div>
-                  <button
-                    className="studio-secondary"
-                    onClick={() =>
-                      void window.electronAPI
-                        .cancelRoutineWorkflowRun(selectedRunId)
-                        .then(loadOverview)
-                    }
-                  >
-                    Cancel run
-                  </button>
+                  {["queued", "running", "waiting_for_approval"].includes(
+                    selectedActivityItem.execution,
+                  ) && (
+                    <button
+                      className="studio-secondary"
+                      onClick={() =>
+                        void window.electronAPI
+                          .cancelRoutineWorkflowRun(selectedActivityItem.workflowRunId!)
+                          .then(loadOverview)
+                      }
+                    >
+                      Cancel run
+                    </button>
+                  )}
                 </div>
                 <div className="studio-step-timeline">
                   {steps.map((step) => (
@@ -1345,6 +2170,94 @@ export default function AutomationStudioPanel({
                   >
                     Open backing task
                   </button>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="studio-activity-header">
+                  <div>
+                    <span>{selectedActivityItem.source}</span>
+                    <code>{selectedActivityItem.runId}</code>
+                  </div>
+                </div>
+                <dl className="studio-activity-facts">
+                  <div>
+                    <dt>Execution</dt>
+                    <dd>{selectedActivityItem.execution.replace(/_/g, " ")}</dd>
+                  </div>
+                  {selectedActivityItem.delivery && (
+                    <div>
+                      <dt>Delivery</dt>
+                      <dd>{selectedActivityItem.delivery.replace(/_/g, " ")}</dd>
+                    </div>
+                  )}
+                  {selectedActivityItem.approval && (
+                    <div>
+                      <dt>Approval</dt>
+                      <dd>{selectedActivityItem.approval}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>Recorded</dt>
+                    <dd>{new Date(selectedActivityItem.at).toLocaleString()}</dd>
+                  </div>
+                  {selectedActivityItem.detail && (
+                    <div>
+                      <dt>Native detail</dt>
+                      <dd>{selectedActivityItem.detail}</dd>
+                    </div>
+                  )}
+                  {selectedActivityItem.retention && (
+                    <div>
+                      <dt>History</dt>
+                      <dd>{selectedActivityItem.retention}</dd>
+                    </div>
+                  )}
+                  {selectedActivityItem.workflowVersionId && (
+                    <div>
+                      <dt>Workflow version</dt>
+                      <dd>
+                        <code>{selectedActivityItem.workflowVersionId}</code>
+                      </dd>
+                    </div>
+                  )}
+                  {!selectedActivityItem.workflowRunId &&
+                    selectedActivityItem.owner === "routines" && (
+                      <div>
+                        <dt>Linkage</dt>
+                        <dd>
+                          Routine history has no recorded workflow-run link; workflow history is
+                          shown separately.
+                        </dd>
+                      </div>
+                    )}
+                </dl>
+                {selectedActivityItem.taskId && onOpenTask && (
+                  <button
+                    className="studio-secondary"
+                    onClick={() => onOpenTask(selectedActivityItem.taskId!)}
+                  >
+                    Open backing task
+                  </button>
+                )}
+                {libraryItems.find((item) => item.key === selectedActivityItem.ownerKey) && (
+                  <button
+                    className="studio-secondary"
+                    onClick={() => {
+                      const ownerItem = libraryItems.find(
+                        (item) => item.key === selectedActivityItem.ownerKey,
+                      );
+                      if (ownerItem) void openAdvanced(ownerItem);
+                    }}
+                  >
+                    {selectedActivityItem.needsAttention ? "Review in owner" : "Open owner record"}
+                  </button>
+                )}
+                {selectedActivityItem.needsAttention && !selectedActivityItem.approval && (
+                  <p className="studio-source-warning">
+                    This item needs review in its owning service. Opening it does not approve or
+                    retry the work.
+                  </p>
                 )}
               </>
             )}

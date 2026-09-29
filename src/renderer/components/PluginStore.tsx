@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { InstallSecurityOutcome } from "../../shared/types";
 import { isGitPluginUrl } from "../utils/plugin-store-install";
 
@@ -22,6 +22,8 @@ interface PackRegistryEntry {
 interface PluginStoreProps {
   onClose: () => void;
   onInstalled?: () => void;
+  initialQuery?: string;
+  initialPackId?: string;
 }
 
 function installMessage(outcome: InstallSecurityOutcome | undefined, fallback: string): string {
@@ -32,8 +34,13 @@ function installMessage(outcome: InstallSecurityOutcome | undefined, fallback: s
   return outcome.summary || fallback;
 }
 
-export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
-  const [query, setQuery] = useState("");
+export function PluginStore({
+  onClose,
+  onInstalled,
+  initialQuery = "",
+  initialPackId,
+}: PluginStoreProps) {
+  const [query, setQuery] = useState(initialQuery);
   const [category, setCategory] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [results, setResults] = useState<PackRegistryEntry[]>([]);
@@ -58,6 +65,7 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
   const [scaffoldDisplayName, setScaffoldDisplayName] = useState("");
   const [scaffoldCategory, setScaffoldCategory] = useState("Custom");
   const [scaffoldIcon, setScaffoldIcon] = useState("📦");
+  const focusedPackId = useRef<string | null>(null);
 
   // Load categories on mount
   useEffect(() => {
@@ -103,6 +111,17 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
       clearTimeout(debounce);
     };
   }, [query, category, page]);
+
+  useEffect(() => {
+    if (!initialPackId || focusedPackId.current === initialPackId) return;
+    if (!results.some((entry) => entry.id === initialPackId)) return;
+    focusedPackId.current = initialPackId;
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-pack-id="${CSS.escape(initialPackId)}"]`)
+        ?.scrollIntoView({ block: "center" });
+    });
+  }, [initialPackId, results]);
 
   const handleInstall = async (entry: PackRegistryEntry) => {
     setInstalling(entry.id);
@@ -436,7 +455,7 @@ export function PluginStore({ onClose, onInstalled }: PluginStoreProps) {
 
           <div className="ps-grid">
             {results.map((entry) => (
-              <div key={entry.id} className="ps-card">
+              <div key={entry.id} className="ps-card" data-pack-id={entry.id}>
                 <div className="ps-card-header">
                   <span className="ps-card-icon">{entry.icon || "📦"}</span>
                   <div className="ps-card-meta">

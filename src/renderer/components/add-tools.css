@@ -1,0 +1,152 @@
+.add-tools-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 26px;
+  color: var(--color-text-primary);
+}
+
+.add-tools-header,
+.add-tools-results-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.add-tools-header h2,
+.add-tools-results-heading h3 {
+  margin: 0 0 6px;
+}
+
+.add-tools-header p,
+.add-tools-results-heading p,
+.add-tools-more,
+.add-tools-empty {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.add-tools-refresh,
+.add-tools-permissions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.add-tools-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+
+.add-tools-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.add-tools-paths,
+.add-tools-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.add-tools-path,
+.add-tools-result {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-tools-path:hover,
+.add-tools-result:hover {
+  border-color: var(--color-accent);
+}
+
+.add-tools-path > svg {
+  position: absolute;
+  top: 16px;
+  right: 15px;
+}
+
+.add-tools-path strong {
+  padding-right: 24px;
+}
+
+.add-tools-path span,
+.add-tools-result-description,
+.add-tools-permissions {
+  color: var(--color-text-secondary);
+}
+
+.add-tools-path small,
+.add-tools-result small,
+.add-tools-result-top > span {
+  color: var(--color-text-tertiary);
+}
+
+.add-tools-notice {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+.add-tools-result-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+
+.add-tools-state {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.add-tools-state-attention {
+  color: var(--color-warning);
+}
+
+.add-tools-result-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: auto;
+  color: var(--color-accent);
+  font-size: 12px;
+}
+
+.add-tools-permissions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 15px;
+  border-top: 1px solid var(--color-border);
+  font-size: 13px;
+}

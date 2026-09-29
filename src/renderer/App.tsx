@@ -29,6 +29,7 @@ import {
   shouldReopenBotConversationInWorkspace,
 } from "./utils/bot-conversations";
 import type { SpreadsheetTurnContext } from "./components/SpreadsheetArtifactViewer";
+import type { AutomationOwner } from "./components/automation-library";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { Onboarding } from "./components/Onboarding";
@@ -820,6 +821,7 @@ type SelectedTaskWorkspaceViewProps = {
   onChangeWorkspace: () => void;
   onSelectWorkspace: (workspace: Workspace) => void;
   onOpenSettings: (tab?: string) => void;
+  onViewRoutine: (routineId: string) => void;
   onStopTask: () => Promise<void>;
   onContinueWithoutCommandsForPausedTask: () => Promise<void>;
   onWrapUpTask: () => Promise<void>;
@@ -948,6 +950,7 @@ const SelectedTaskWorkspaceView = memo(
     onChangeWorkspace,
     onSelectWorkspace,
     onOpenSettings,
+    onViewRoutine,
     onStopTask,
     onContinueWithoutCommandsForPausedTask,
     onWrapUpTask,
@@ -1577,6 +1580,7 @@ const SelectedTaskWorkspaceView = memo(
               onChangeWorkspace={onChangeWorkspace}
               onSelectWorkspace={onSelectWorkspace}
               onOpenSettings={onOpenSettings as Any}
+              onViewRoutine={onViewRoutine}
               onStopTask={onStopTask}
               onContinueWithoutCommandsForPausedTask={onContinueWithoutCommandsForPausedTask}
               onWrapUpTask={onWrapUpTask}
@@ -2136,7 +2140,12 @@ export function App() {
     | "x"
     | "morechannels"
     | "integrations"
+    | "automations"
+    | "routines"
+    | "council"
+    | "hooks"
     | "tools"
+    | "addtools"
     | "updates"
     | "system"
     | "queue"
@@ -2146,7 +2155,7 @@ export function App() {
     | "mcp"
     | "triggers"
     | "subconscious"
-      | "suggestions"
+    | "suggestions"
     | "insights"
     | "pulse"
     | "traces"
@@ -2154,6 +2163,11 @@ export function App() {
     | "customize"
   >("appearance");
   const [homeAutomationFocusTick, setHomeAutomationFocusTick] = useState(0);
+  const [focusAutomationRoutineId, setFocusAutomationRoutineId] = useState<string | null>(null);
+  const [focusAutomationOwner, setFocusAutomationOwner] = useState<{
+    owner: AutomationOwner;
+    id: string;
+  } | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [childEvents, setChildEvents] = useState<TaskEvent[]>([]);
   const botConversationTasksRef = useRef<Task[]>([]);
@@ -6035,18 +6049,36 @@ export function App() {
   };
 
   useEffect(() => {
-    if (!pendingOnboardingPrompt || !onboardingCompleted || !disclaimerAccepted || firstOnboardingPromptStartedRef.current) return;
+    if (
+      !pendingOnboardingPrompt ||
+      !onboardingCompleted ||
+      !disclaimerAccepted ||
+      firstOnboardingPromptStartedRef.current
+    )
+      return;
     firstOnboardingPromptStartedRef.current = true;
     const prompt = pendingOnboardingPrompt;
     setPendingOnboardingPrompt(null);
     void (async () => {
       try {
-        const workspace = currentWorkspace ?? await window.electronAPI.getTempWorkspace({ createNew: true });
+        const workspace =
+          currentWorkspace ?? (await window.electronAPI.getTempWorkspace({ createNew: true }));
         if (!workspace) throw new Error("Could not create a workspace for the first task.");
         if (!currentWorkspace) setCurrentWorkspace(workspace);
-        await handleCreateTask(prompt.slice(0, 80), prompt, { generateTitle: true }, undefined, workspace);
+        await handleCreateTask(
+          prompt.slice(0, 80),
+          prompt,
+          { generateTitle: true },
+          undefined,
+          workspace,
+        );
       } catch (error) {
-        addToast({ type: "error", title: "First task could not start", message: error instanceof Error ? error.message : "Try the prompt again in the workspace." });
+        addToast({
+          type: "error",
+          title: "First task could not start",
+          message:
+            error instanceof Error ? error.message : "Try the prompt again in the workspace.",
+        });
       }
     })();
   }, [pendingOnboardingPrompt, onboardingCompleted, disclaimerAccepted, currentWorkspace]);
@@ -7794,14 +7826,17 @@ export function App() {
                 onOpenBuild={() => setCurrentView("build")}
                 onOpenLibrary={() => setCurrentView("library")}
                 onOpenPlugins={() => {
-                  setSettingsTab("customize");
+                  setSettingsTab("addtools");
                   setCurrentView("settings");
                 }}
                 isLoadingSessions={isInitialTaskListLoading}
                 isLoadingMoreTasks={isLoadingMoreTasks}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
                 onSelectTask={handleSelectTaskFromShell}
-                onOpenAutomations={() => setCurrentView("automations")}
+                onOpenAutomations={() => {
+                  setFocusAutomationRoutineId(null);
+                  setCurrentView("automations");
+                }}
                 onOpenIdeas={() => setCurrentView("ideas")}
                 onOpenInboxAgent={() => setCurrentView("inboxAgent")}
                 onOpenAgents={() => setCurrentView("agents")}
@@ -7835,6 +7870,19 @@ export function App() {
                 <main className="main-content automation-studio-main">
                   <AutomationStudioPanel
                     workspaceId={currentWorkspace?.id}
+                    focusRoutineId={focusAutomationRoutineId}
+                    onOpenAdvanced={(owner, id) => {
+                      const tabByOwner = {
+                        routines: "routines",
+                        scheduled: "scheduled",
+                        hooks: "hooks",
+                        triggers: "triggers",
+                        council: "council",
+                      } as const;
+                      setFocusAutomationOwner(id ? { owner, id } : null);
+                      setSettingsTab(tabByOwner[owner]);
+                      setCurrentView("settings");
+                    }}
                     onOpenTask={(taskId) => {
                       void selectTaskAfterDraftFlush(taskId);
                       setCurrentView("main");
@@ -8072,6 +8120,10 @@ export function App() {
                   task={selectedTask}
                   selectedTaskId={selectedTaskId}
                   workspace={currentWorkspace}
+                  onViewRoutine={(routineId) => {
+                    setFocusAutomationRoutineId(routineId);
+                    setCurrentView("automations");
+                  }}
                   replayControls={replayControls}
                   sharedTaskEventUi={sharedTaskEventUi}
                   remoteTaskView={remoteTaskView}
@@ -8130,8 +8182,12 @@ export function App() {
                   onStartFreshSession={handleClearTaskView}
                   onCreateTask={handleCreateTask}
                   onFirstTaskReady={(task, workspace) => {
-                    setTasks((previous) => upsertTaskPreservingIdentity(previous, task, { prependIfMissing: true }));
-                    tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, task, { prependIfMissing: true });
+                    setTasks((previous) =>
+                      upsertTaskPreservingIdentity(previous, task, { prependIfMissing: true }),
+                    );
+                    tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, task, {
+                      prependIfMissing: true,
+                    });
                     setCurrentWorkspace(workspace);
                     clearRemoteTaskView();
                     setCurrentView("main");
@@ -8223,7 +8279,10 @@ export function App() {
       {currentView === "settings" && (
         <Suspense fallback={<LazyViewFallback />}>
           <Settings
-            onBack={() => setCurrentView("main")}
+            onBack={() => {
+              setFocusAutomationOwner(null);
+              setCurrentView("main");
+            }}
             onSettingsChanged={loadLLMConfig}
             themeMode={themeMode}
             visualTheme={visualTheme}
@@ -8244,6 +8303,7 @@ export function App() {
             onHomeResearchVaultEnabledChange={handleHomeResearchVaultEnabledChange}
             onHomeNextActionsEnabledChange={handleHomeNextActionsEnabledChange}
             initialTab={settingsTab}
+            focusAutomation={focusAutomationOwner}
             onShowOnboarding={handleShowOnboarding}
             onboardingCompletedAt={onboardingCompletedAt}
             workspaceId={currentWorkspace?.id}

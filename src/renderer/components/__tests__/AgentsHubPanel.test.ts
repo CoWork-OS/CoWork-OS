@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AgentTestActionButton,
   applyBuilderSelectionRequirement,
   buildDraftFromAgent,
   buildDraftFromBuilderPlan,
@@ -18,8 +19,39 @@ import {
   suggestTemplateFromWorkflowBrief,
 } from "../AgentsHubPanel";
 import { BUILTIN_AGENT_TEMPLATES } from "../../../electron/managed/agent-templates";
+import { renderToStaticMarkup } from "react-dom/server";
 
 describe("AgentsHubPanel draft helpers", () => {
+  it("keeps the real agent-test action and removes unavailable suggestions", () => {
+    const calls: string[] = [];
+    const action = AgentTestActionButton({
+      variant: "preview",
+      onTest: () => {
+        calls.push("test");
+      },
+      disabled: false,
+    });
+    const html = renderToStaticMarkup(action);
+
+    expect(html).toContain("Test this agent");
+    expect(html).not.toContain("Add advanced logic");
+    expect(html).not.toContain("Optimize this agent");
+    action.props.onClick?.({} as never);
+    expect(calls).toEqual(["test"]);
+  });
+
+  it("disables the saved-agent test action when the caller cannot run it", () => {
+    const action = AgentTestActionButton({
+      variant: "detail",
+      onTest: () => {},
+      disabled: true,
+    });
+    const html = renderToStaticMarkup(action);
+
+    expect(html).toContain('disabled=""');
+    expect(html).toContain("Test this agent");
+  });
+
   it("renders managed-session content arrays as chat text", () => {
     expect(
       getManagedSessionEventText({

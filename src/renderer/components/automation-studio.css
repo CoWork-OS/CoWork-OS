@@ -352,6 +352,58 @@
   justify-self: end;
 }
 
+.studio-routine-source-details {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--studio-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--studio-surface) 70%, transparent);
+}
+
+.studio-routine-instructions summary {
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.studio-routine-instructions pre {
+  max-height: 240px;
+  margin: 10px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+  font: 12px/1.55 var(--font-mono);
+}
+
+.studio-routine-context,
+.studio-routine-provenance {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.studio-routine-context > div,
+.studio-routine-provenance > div {
+  display: grid;
+  grid-template-columns: minmax(100px, 145px) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.studio-routine-source-details code {
+  min-width: 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.studio-routine-source-details small,
+.studio-routine-context p {
+  color: var(--color-text-muted);
+}
+
 .studio-flow-list {
   display: grid;
 }
@@ -1090,6 +1142,37 @@
   background: var(--studio-surface-solid);
 }
 
+.studio-activity-owner-filter {
+  display: grid;
+  gap: 6px;
+  padding: 10px 4px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.studio-activity-owner-filter select {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--studio-line);
+  border-radius: 7px;
+  background: var(--studio-surface);
+  color: var(--color-text-primary);
+}
+
+.studio-activity-filter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 4px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.studio-activity-filter input {
+  accent-color: var(--studio-accent);
+}
+
 .studio-activity > aside > button {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1149,6 +1232,32 @@
 .studio-activity-header code {
   color: var(--color-text-secondary);
   font-size: 11px;
+}
+
+.studio-activity-facts {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.studio-activity-facts > div {
+  display: grid;
+  grid-template-columns: minmax(100px, 150px) minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--studio-line);
+}
+
+.studio-activity-facts dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.studio-activity-facts dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .studio-step-timeline {

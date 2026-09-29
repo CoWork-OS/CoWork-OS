@@ -113,7 +113,7 @@ The supported action model is:
 - **Test this agent** creates a managed session with `surface: "runtime"` and opens the session's backing task in the main task window
 - **Preview** follows the same runtime task path
 - starter prompt cards follow the same runtime task path
-- **Add advanced logic** and **Optimize this agent** open the agent draft/editor surface instead of starting a local conversation
+- **Edit agent** opens the agent draft/editor surface to change its configuration
 - any follow-up questions, approvals, responses, files, and final outputs belong to the opened task, not to the Agents Hub detail screen
 
 This keeps all agent execution observable through the same task timeline, right-panel artifacts, approvals, notifications, and completion behavior as ordinary user-created tasks.

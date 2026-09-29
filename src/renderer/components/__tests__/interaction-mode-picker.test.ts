@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { InteractionModePicker, interactionModeLabel } from "../MainContent/InteractionModePicker";
 
 describe("InteractionModePicker", () => {
-  it("shows only the two primary choices and an advanced disclosure", () => {
+  it("shows Ask and Do as the primary choices and keeps runtime overrides advanced", () => {
     const html = renderToStaticMarkup(
       createElement(InteractionModePicker, {
         selection: { mode: "smart" },
@@ -13,13 +13,19 @@ describe("InteractionModePicker", () => {
         onChange: () => {},
       }),
     );
-    expect(html).toContain("Smart");
-    expect(html).toContain("Chat");
+    expect(html).toContain(">Do</button>");
+    expect(html).toContain(">Ask</button>");
+    expect(html).toContain("Work mode");
     expect(html).toContain("Advanced…");
     expect(html).not.toContain(">Execute<");
     expect(html).not.toContain(">Verified<");
   });
   it("makes the current advanced override visible even when closed", () => {
-    expect(interactionModeLabel({ mode: "smart", executionOverride: "plan" })).toBe("Smart · Plan");
+    expect(interactionModeLabel({ mode: "smart", executionOverride: "plan" })).toBe("Do · Plan");
+  });
+
+  it("maps the user-facing labels without changing the runtime selection", () => {
+    expect(interactionModeLabel({ mode: "chat" })).toBe("Ask");
+    expect(interactionModeLabel({ mode: "smart" })).toBe("Do");
   });
 });

@@ -1,6 +1,6 @@
 # Automation Studio
 
-Automation Studio is CoWork OS's visual builder and deterministic runtime for structured flows. Open it from **Automations** in the main sidebar. It is a main-screen product surface, not a Settings page.
+Automation Studio is CoWork OS's unified automation Library, visual builder, and deterministic runtime for structured flows. Open it from **Automations** in the main sidebar. It is a main-screen product surface, not a Settings page.
 
 Advanced and compatibility controls remain under **Settings → Automations**. Those pages expose legacy prompt-based Routines, the task queue, Scheduled Tasks, Webhooks, Event Triggers, Workflow Intelligence, and Daily Briefing. They are useful when inspecting a compiled backend or managing older automations, but they are not the place to author a structured flow.
 
@@ -10,7 +10,8 @@ Advanced and compatibility controls remain under **Settings → Automations**. T
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | Build a multi-step flow with typed fields, variables, branches, testing, approvals, and versioned activation | Main sidebar **Automations**                                             |
 | Turn the current task into a recurring same-thread or new-task automation                                    | Task menu **… → Add automation…**                                        |
-| Create or inspect a prompt-based routine                                                                     | **Settings → Automations → Routines**                                    |
+| Find prompt routines, flows, schedules, events, webhooks, and Councils                                       | Main sidebar **Automations → Library**                                   |
+| Create or inspect a prompt-based routine                                                                     | Task menu **… → Add automation…** or the advanced Routines editor        |
 | Manage the cron, inbound hook, or event-trigger engine directly                                              | **Settings → Automations → Scheduled Tasks / Webhooks / Event Triggers** |
 | Configure the always-on cognitive loop                                                                       | Mission Control and **Settings → Automations → Workflow Intelligence**   |
 
@@ -41,7 +42,11 @@ The bundled patterns cover unread email recaps, saving Gmail attachments to Driv
 
 ### Library
 
-Library lists structured flows only. It shows whether each flow is on or still a draft, its recent run state, step count, and last update. Select a row to reopen it in Builder. Prompt-based legacy Routines remain in the advanced Settings surface.
+Library projects existing owners into one searchable view. Prompt Routines and structured flows appear once as Routine owners; schedules, event triggers, action-bearing webhook rules, and Councils appear when they are standalone. A managed child is grouped only when its exact managed resource ID points back to its owner. A same-name job stays visible. Ambiguous ID ownership is shown as a warning.
+
+Library identities include the active CoWork profile ID returned by the profile API. If the active profile cannot be identified, the Library labels that scope as unknown and does not claim cross-profile uniqueness.
+
+Select an item to see its owner, configured triggers, target, timezone, linked engine resources, and available native actions. Unsupported actions explain the current limit and keep the native editor available. For example, Event Triggers have no manual run action, and their legacy queue can retain events received while disabled; the Library does not promise those events will be discarded.
 
 ### Builder
 
@@ -56,7 +61,7 @@ The main Automations page owns vertical scrolling. The catalog and activity list
 
 ### Activity
 
-Activity lists structured workflow runs. Select a run to inspect its step timeline, attempt counts, errors, redacted output, backing task, and any pending approval. From this view you can:
+Activity combines source-labelled history from each owner where the current APIs expose it. It keeps execution, delivery, and approval as separate facts. Routine runs link to workflow detail only when the Routine record contains that exact workflow run ID; otherwise the two histories remain separate, with the linkage limit shown. Each row states the available history-retention window. The Library cannot load rule-level webhook history and says so rather than presenting an empty list as proof that no requests occurred. Select a linked workflow run to inspect its step timeline, attempt counts, errors, redacted output, backing task, and any pending approval. From this view you can:
 
 - **Approve once** or **Reject** a waiting step;
 - cancel a non-terminal run;

@@ -13,6 +13,8 @@ import {
   type SetStateAction,
 } from "react";
 import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
+import type { AddToolsRoute, AddToolsSelection } from "./AddToolsPanel";
+import type { AutomationOwner } from "./automation-library";
 import {
   Sparkles,
   Sun,
@@ -207,6 +209,7 @@ const PulseSettingsPanel = lazySettingsPanel(
 );
 const SuggestionsPanel = lazySettingsPanel(() => import("./SuggestionsPanel"), "SuggestionsPanel");
 const CustomizePanel = lazySettingsPanel(() => import("./CustomizePanel"), "CustomizePanel");
+const AddToolsPanel = lazySettingsPanel(() => import("./AddToolsPanel"), "AddToolsPanel");
 const ProfileSettings = lazySettingsPanel(() => import("./ProfileSettings"), "ProfileSettings");
 const AdminPoliciesPanel = lazySettingsPanel(
   () => import("./AdminPoliciesPanel"),
@@ -270,6 +273,8 @@ type SettingsTab =
   | "integrations"
   | "updates"
   | "automations"
+  | "routines"
+  | "council"
   | "queue"
   | "skills"
   | "skillhub"
@@ -289,6 +294,7 @@ type SettingsTab =
   | "suggestions"
   | "traces"
   | "customize"
+  | "addtools"
   | "everydayAgent"
   | "triggers"
   | "briefing"
@@ -337,6 +343,7 @@ interface SettingsProps {
   onHomeResearchVaultEnabledChange: (enabled: boolean) => void;
   onHomeNextActionsEnabledChange: (enabled: boolean) => void;
   initialTab?: SettingsTab;
+  focusAutomation?: { owner: AutomationOwner; id: string } | null;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
   workspaceId?: string;
@@ -719,6 +726,12 @@ type SidebarSearchEntry = {
 
 const sidebarItems: SidebarItem[] = [
   {
+    tab: "addtools",
+    label: "Add tools",
+    group: "Skills & Tools",
+    icon: <Puzzle {...I} />,
+  },
+  {
     tab: "appearance",
     label: "Appearance",
     group: "General",
@@ -916,6 +929,7 @@ const secondaryChannelSearchTerms: Partial<Record<SecondaryChannel, string[]>> =
 };
 
 const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> = {
+  addtools: [{ terms: ["add tools", "discover tools", "plugins", "connectors", "skills", "mcp"] }],
   appearance: [
     {
       terms: [
@@ -1334,6 +1348,7 @@ export function Settings({
   onHomeResearchVaultEnabledChange,
   onHomeNextActionsEnabledChange,
   initialTab = "appearance",
+  focusAutomation,
   onShowOnboarding,
   onboardingCompletedAt,
   workspaceId,
@@ -1347,9 +1362,16 @@ export function Settings({
         ? "skills"
         : initialTab === "llm" || initialTab === "image" || initialTab === "search"
           ? "aimodels"
-          : ["queue", "subconscious", "scheduled", "hooks", "triggers", "council"].includes(
-                initialTab as string,
-              )
+          : [
+                "automations",
+                "routines",
+                "queue",
+                "subconscious",
+                "scheduled",
+                "hooks",
+                "triggers",
+                "council",
+              ].includes(initialTab as string)
             ? "automations"
             : ["git", "connectors", "infrastructure"].includes(initialTab as string)
               ? "integrations"
@@ -1357,6 +1379,7 @@ export function Settings({
                 ? "access"
                 : (initialTab ?? "appearance");
   const [activeTab, setActiveTab] = useState<SettingsTab>(normalizedInitialTab);
+  const [addToolsSelection, setAddToolsSelection] = useState<AddToolsSelection | null>(null);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
     initialTab === "skillhub" ? "store" : "custom",
@@ -9015,11 +9038,22 @@ export function Settings({
                   </div>
                   <div className="more-channels-content">
                     {activeAutomationsSubTab === "routines" && (
-                      <RoutineSettingsPanel onOpenTask={onOpenTask} />
+                      <RoutineSettingsPanel
+                        onOpenTask={onOpenTask}
+                        focusRoutineId={
+                          focusAutomation?.owner === "routines" ? focusAutomation.id : undefined
+                        }
+                      />
                     )}
                     {activeAutomationsSubTab === "queue" && <QueueSettings />}
                     {activeAutomationsSubTab === "council" && (
-                      <CouncilSettings workspaceId={workspaceId} onOpenTask={onOpenTask} />
+                      <CouncilSettings
+                        workspaceId={workspaceId}
+                        onOpenTask={onOpenTask}
+                        focusCouncilId={
+                          focusAutomation?.owner === "council" ? focusAutomation.id : undefined
+                        }
+                      />
                     )}
                     {activeAutomationsSubTab === "subconscious" && (
                       <SubconsciousSettingsPanel
@@ -9028,14 +9062,40 @@ export function Settings({
                       />
                     )}
                     {activeAutomationsSubTab === "scheduled" && (
-                      <ScheduledTasksSettings onOpenTask={onOpenTask} />
+                      <ScheduledTasksSettings
+                        onOpenTask={onOpenTask}
+                        focusJobId={
+                          focusAutomation?.owner === "scheduled" ? focusAutomation.id : undefined
+                        }
+                      />
                     )}
-                    {activeAutomationsSubTab === "hooks" && <HooksSettings />}
+                    {activeAutomationsSubTab === "hooks" && (
+                      <HooksSettings
+                        focusHookId={
+                          focusAutomation?.owner === "hooks" ? focusAutomation.id : undefined
+                        }
+                      />
+                    )}
                     {activeAutomationsSubTab === "triggers" && (
-                      <EventTriggersPanel workspaceId={workspaceId} />
+                      <EventTriggersPanel
+                        workspaceId={workspaceId}
+                        focusTriggerId={
+                          focusAutomation?.owner === "triggers" ? focusAutomation.id : undefined
+                        }
+                      />
                     )}
                   </div>
                 </div>
+              ) : activeTab === "addtools" ? (
+                <AddToolsPanel
+                  onNavigate={(route: AddToolsRoute, selection?: AddToolsSelection) => {
+                    setAddToolsSelection(selection ?? null);
+                    setActiveTab(route.tab);
+                    if (route.tab === "skills") setActiveSkillsSubTab("store");
+                    if (route.tab === "integrations") setActiveIntegrationsSubTab("connectors");
+                    if (route.secondaryChannel) setActiveSecondaryChannel(route.secondaryChannel);
+                  }}
+                />
               ) : activeTab === "skills" ? (
                 <div className="more-channels-panel">
                   <div className="more-channels-header">
@@ -9062,7 +9122,13 @@ export function Settings({
                   </div>
                   <div className="more-channels-content">
                     {activeSkillsSubTab === "custom" && <SkillsSettings />}
-                    {activeSkillsSubTab === "store" && <SkillHubBrowser />}
+                    {activeSkillsSubTab === "store" && (
+                      <SkillHubBrowser
+                        initialSelection={
+                          addToolsSelection?.kind === "skill" ? addToolsSelection : undefined
+                        }
+                      />
+                    )}
                   </div>
                 </div>
               ) : activeTab === "integrations" ? (
@@ -9103,7 +9169,13 @@ export function Settings({
                   </div>
                   <div className="more-channels-content">
                     {activeIntegrationsSubTab === "git" && <WorktreeSettings />}
-                    {activeIntegrationsSubTab === "connectors" && <ConnectorsSettings />}
+                    {activeIntegrationsSubTab === "connectors" && (
+                      <ConnectorsSettings
+                        initialSelection={
+                          addToolsSelection?.kind === "native" ? addToolsSelection : undefined
+                        }
+                      />
+                    )}
                     {activeIntegrationsSubTab === "identity" && (
                       <ContactIdentitySettings workspaceId={workspaceId} />
                     )}
@@ -9111,7 +9183,11 @@ export function Settings({
                   </div>
                 </div>
               ) : activeTab === "mcp" ? (
-                <MCPSettings />
+                <MCPSettings
+                  initialSelection={
+                    addToolsSelection?.kind === "mcp" ? addToolsSelection : undefined
+                  }
+                />
               ) : activeTab === "tools" ? (
                 <div className="settings-tools-stack">
                   <BuiltinToolsSettings />
@@ -9162,6 +9238,9 @@ export function Settings({
                 <TaskTraceDebuggerPanel workspaceId={workspaceId} onOpenTask={onOpenTask} />
               ) : activeTab === "customize" ? (
                 <CustomizePanel
+                  initialSelection={
+                    addToolsSelection?.kind === "pack" ? addToolsSelection : undefined
+                  }
                   onNavigateToConnectors={() => {
                     setActiveTab("integrations");
                     setActiveIntegrationsSubTab("connectors");

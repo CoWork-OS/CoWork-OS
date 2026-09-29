@@ -108,7 +108,7 @@ export function CalmSidebarNav(props: CalmSidebarNavProps) {
       active: props.isLibraryActive,
       onClick: props.onOpenLibrary,
     },
-    { id: "plugins", label: "Plugins", icon: Puzzle, onClick: props.onOpenPlugins },
+    { id: "plugins", label: "Add tools", icon: Puzzle, onClick: props.onOpenPlugins },
     {
       id: "automations",
       label: "Automations",

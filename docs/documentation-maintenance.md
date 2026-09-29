@@ -9,6 +9,13 @@ Run `npm run qa:docs-versions` when changing documentation or release metadata.
 CI, the release gate, and `npm run build` run this check automatically. Run
 `node --test scripts/qa/validate-doc-versions.test.mjs` when changing the validator.
 
+Navigation and primary work-choice labels are captured in
+`docs/release-surfaces/<version>.json`. When cutting a release, copy the
+development manifest to a versioned stable manifest and verify every path
+against that release tag. Update `docs/release-surfaces/unreleased.json` for the
+new development UI, then run `npm run docs:surfaces:generate`. The generated
+`docs/release-surface-reference.md` is checked by `npm run qa:docs-versions`.
+
 The check scans Markdown files throughout the checkout, including new unignored
 files. It rejects numeric versions under supported-version/release policy headings
 and explicit “current version” or “latest release” claims that disagree with

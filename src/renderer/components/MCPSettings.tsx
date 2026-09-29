@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import { MCPRegistryBrowser } from "./MCPRegistryBrowser";
 import { ConnectorSetupModal, ConnectorProvider } from "./ConnectorSetupModal";
 import { useAgentContext } from "../hooks/useAgentContext";
+import type { AddToolsSelection } from "./AddToolsPanel";
 
 // Types (matching preload types)
 type MCPTransportType = "stdio" | "sse" | "websocket" | "streamable-http";
@@ -133,7 +134,11 @@ interface SecureMcpTunnelAuditEvent {
   error?: string;
 }
 
-export function MCPSettings() {
+export function MCPSettings({
+  initialSelection,
+}: {
+  initialSelection?: AddToolsSelection;
+} = {}) {
   const [settings, setSettings] = useState<MCPSettingsData | null>(null);
   const [serverStatuses, setServerStatuses] = useState<MCPServerStatus[]>([]);
   const [secureTunnels, setSecureTunnels] = useState<SecureMcpTunnelConfig[]>([]);
@@ -181,6 +186,7 @@ export function MCPSettings() {
 
   // Connection error state (shows errors inline instead of alerts)
   const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({});
+  const focusedSelection = useRef<string | null>(null);
 
   // Update state
   const [availableUpdates, setAvailableUpdates] = useState<MCPUpdateInfo[]>([]);
@@ -245,6 +251,24 @@ export function MCPSettings() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!initialSelection || focusedSelection.current === initialSelection.id) return;
+    if (initialSelection.source === "MCP registry") {
+      setActiveView("registry");
+      focusedSelection.current = initialSelection.id;
+      return;
+    }
+    setActiveView("servers");
+    const serverId = initialSelection.targetId;
+    if (!serverId || !serverStatuses.some((server) => server.id === serverId)) return;
+    focusedSelection.current = initialSelection.id;
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-mcp-server-id="${CSS.escape(serverId)}"]`)
+        ?.scrollIntoView({ block: "center" });
+    });
+  }, [initialSelection, serverStatuses]);
 
   const handleAddServer = async () => {
     if (!newServerName || !newServerCommand) return;
@@ -822,7 +846,11 @@ export function MCPSettings() {
                   const connectorProvider = getConnectorProvider(serverStatus.name);
 
                   return (
-                    <div key={serverStatus.id} className="mcp-server-card">
+                    <div
+                      key={serverStatus.id}
+                      className="mcp-server-card"
+                      data-mcp-server-id={serverStatus.id}
+                    >
                       <div className="mcp-server-header">
                         <div className="mcp-server-info">
                           <div className="mcp-server-name-row">
@@ -1003,6 +1031,12 @@ export function MCPSettings() {
             details and install with one click.
           </p>
           <MCPRegistryBrowser
+            initialServerId={
+              initialSelection?.source === "MCP registry" ? initialSelection.targetId : undefined
+            }
+            initialServerName={
+              initialSelection?.source === "MCP registry" ? initialSelection.name : undefined
+            }
             installDisabled={mcpSettingsUnreadable}
             onInstall={() => {
               loadData();

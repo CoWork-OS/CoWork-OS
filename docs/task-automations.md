@@ -61,6 +61,8 @@ The modal includes:
 
 `Save` is disabled until the name, prompt, workspace, target, and schedule are valid. If routine creation fails, the modal shows the returned error inline and stays open.
 
+After creation, **View** opens the Automation Library focused on that Routine by its saved ID. The Library shows the prompt Routine once alongside its configured triggers; its compiled schedule, hook, or event record is presented as an owner detail rather than a duplicate automation.
+
 ## Target Modes
 
 `Continue thread` is the default. Scheduled, API, and event-triggered runs append a follow-up message to the source task, preserving the conversation context and timeline. This is the closest equivalent to Codex-style thread wakeups.

@@ -7,9 +7,9 @@ interface CalmModeToggleProps {
 }
 
 /**
- * Two-way switch between a quick conversational answer ("Ask") and a task the
- * agent carries out end to end ("Do"). "Do" keeps any execution override the
- * user already picked through the advanced mode menu.
+ * Two-way switch between conversation-only help ("Ask") and task work ("Do").
+ * "Do" keeps any execution override the user already picked through the
+ * advanced mode menu.
  */
 export function CalmModeToggle({ selection, onChange, disabled }: CalmModeToggleProps) {
   const isAsk = selection.mode === "chat";
@@ -22,7 +22,7 @@ export function CalmModeToggle({ selection, onChange, disabled }: CalmModeToggle
         className={isAsk ? "active" : ""}
         disabled={disabled}
         onClick={() => onChange({ mode: "chat" })}
-        title="Quick answers, lookups and drafts"
+        title="Discuss or draft using supplied content; no external actions"
       >
         Ask
       </button>
@@ -35,7 +35,7 @@ export function CalmModeToggle({ selection, onChange, disabled }: CalmModeToggle
         onClick={() => {
           if (isAsk) onChange({ mode: "smart" });
         }}
-        title="Hand off a task and get a finished result"
+        title="Work on a task using the tools allowed by your access and approval settings"
       >
         Do
       </button>

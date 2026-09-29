@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Work-choice labels**: the standard and Calm composers now use Ask/Do consistently; advanced execution overrides remain separate and retain their existing runtime values. The first-task guide leads to a reviewable result before optional setup. See [Work Modes](interaction-modes.md) and the [release surface reference](release-surface-reference.md).
 - **Cost budget guardrail** is on by default at $10 per task. Subscription-billed routes (ChatGPT sign-in, Copilot, coding plans) skip the global cap. A task's own token/cost budget is always enforced but can only lower the global limit.
 - **Shell without an OS sandbox** (Windows, Linux without Docker): when admin policy sets `allowUnsandboxedShell`, the user can approve individual commands to run unsandboxed; otherwise they fail closed.
 - **Unreadable secure settings** (for example after a keychain change) are backed up as ciphertext and replaced on the next save instead of blocking it.
@@ -1456,8 +1457,8 @@ for the defect, fix, and enforcement point of each item.
 
 | Version | Date       | Highlights                                                                                                                                                                                                        |
 | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0.5.54  | 2026-09-20 | Registry publication recovery, exact package/checksum validation, corrected GitHub Packages access behavior, portable recovery CI, and refreshed public adoption reporting                                      |
-| 0.5.53  | 2026-09-20 | Profile-first approvals, MLX/Atomic Chat/Jev execution, durable WorkSessions, bot collaboration, Box Brain, CoWork Pulse, security hardening, and release tooling                   |
+| 0.5.54  | 2026-09-20 | Registry publication recovery, exact package/checksum validation, corrected GitHub Packages access behavior, portable recovery CI, and refreshed public adoption reporting                                        |
+| 0.5.53  | 2026-09-20 | Profile-first approvals, MLX/Atomic Chat/Jev execution, durable WorkSessions, bot collaboration, Box Brain, CoWork Pulse, security hardening, and release tooling                                                 |
 | 0.5.52  | 2026-08-27 | OpenRouter image generation, OpenCode Zen/Go, SearXNG/Web Search Plus, Atlas Cloud, Electron 44, macOS 13 minimum, and reliability hardening                                                                      |
 | 0.5.51  | 2026-08-17 | Opt-in Numbat agent security, bounded document analysis, long-session timeline stability, native System Voice TTS, WSL framing, persistent UI density, and browser/runtime recovery                               |
 | 0.5.50  | 2026-07-20 | GPT-5.6 subscription controls, Mixture of Agents, browser annotations, inline mail review, video analysis, governed memory writes, safer visible automation, session retention, and new connector/skill workflows |

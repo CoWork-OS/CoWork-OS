@@ -591,6 +591,7 @@ interface MainContentProps {
   onChangeWorkspace?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
+  onViewRoutine?: (routineId: string) => void;
   onStopTask?: () => void;
   onContinueWithoutCommandsForPausedTask?: () => void | Promise<void>;
   onWrapUpTask?: () => void;
@@ -3595,6 +3596,7 @@ function MainContentComponent({
   onChangeWorkspace,
   onSelectWorkspace,
   onOpenSettings,
+  onViewRoutine,
   onStopTask,
   onContinueWithoutCommandsForPausedTask,
   onWrapUpTask,
@@ -9307,13 +9309,16 @@ function MainContentComponent({
               </p>
             )}
 
-            {import.meta.env.VITE_FIRST_TASK_BETA === "1" && onFirstTaskReady && onOpenWebArtifact && onOpenSettings && (
-              <FirstTaskCard
-                onTaskReady={onFirstTaskReady}
-                onOpenBrief={onOpenWebArtifact}
-                onOpenSettings={() => onOpenSettings("llm")}
-              />
-            )}
+            {import.meta.env.VITE_FIRST_TASK_BETA === "1" &&
+              onFirstTaskReady &&
+              onOpenWebArtifact &&
+              onOpenSettings && (
+                <FirstTaskCard
+                  onTaskReady={onFirstTaskReady}
+                  onOpenBrief={onOpenWebArtifact}
+                  onOpenSettings={() => onOpenSettings("llm")}
+                />
+              )}
 
             <div className="terminal-only">
               <div className="welcome-logo">
@@ -10682,19 +10687,33 @@ function MainContentComponent({
         isCalm ? " calm-main calm-task" : ""
       }`}
     >
-      {import.meta.env.VITE_FIRST_TASK_BETA === "1" && task?.source === "sample" && onFirstTaskReady && onOpenWebArtifact && onOpenSettings && (
-        <FirstTaskCard
-          taskId={task.id}
-          onTaskReady={onFirstTaskReady}
-          onOpenBrief={onOpenWebArtifact}
-          onOpenSettings={() => onOpenSettings("llm")}
-          onRevise={(prompt) => onSendMessage(prompt)}
-          onUseOwnFiles={onChangeWorkspace}
-        />
-      )}
-      {import.meta.env.VITE_FIRST_TASK_BETA === "1" && task?.status === "completed" && task.source !== "sample" && !task.parentTaskId && !task.evalCaseId && hasTaskOutputs(taskOutputSummary) && onViewTaskOutputs && (
-        <RealWorkFeedback taskId={task.id} primaryOutputPath={taskOutputSummary.primaryOutputPath} onViewOutputs={onViewTaskOutputs} />
-      )}
+      {import.meta.env.VITE_FIRST_TASK_BETA === "1" &&
+        task?.source === "sample" &&
+        onFirstTaskReady &&
+        onOpenWebArtifact &&
+        onOpenSettings && (
+          <FirstTaskCard
+            taskId={task.id}
+            onTaskReady={onFirstTaskReady}
+            onOpenBrief={onOpenWebArtifact}
+            onOpenSettings={() => onOpenSettings("llm")}
+            onRevise={(prompt) => onSendMessage(prompt)}
+            onUseOwnFiles={onChangeWorkspace}
+          />
+        )}
+      {import.meta.env.VITE_FIRST_TASK_BETA === "1" &&
+        task?.status === "completed" &&
+        task.source !== "sample" &&
+        !task.parentTaskId &&
+        !task.evalCaseId &&
+        hasTaskOutputs(taskOutputSummary) &&
+        onViewTaskOutputs && (
+          <RealWorkFeedback
+            taskId={task.id}
+            primaryOutputPath={taskOutputSummary.primaryOutputPath}
+            onViewOutputs={onViewTaskOutputs}
+          />
+        )}
       {/* Header */}
       <div className="main-header">
         {!isBotConversation && (task?.parentTaskId || task?.branchFromTaskId) && onSelectTask && (
@@ -11398,12 +11417,20 @@ function MainContentComponent({
           {routineCreationNotice?.taskId === task.id && (
             <div className="task-automation-created-response" role="status">
               <div>
-                <strong>Routine created</strong>
+                <strong>Automation created</strong>
                 <span>
                   {routineCreationNotice.name} is saved with {routineCreationNotice.triggerSummary}.
                 </span>
               </div>
-              <button type="button" onClick={() => onOpenSettings?.("scheduled")}>
+              <button
+                type="button"
+                disabled={!onViewRoutine || !routineCreationNotice.routineId}
+                title={!onViewRoutine ? "Automation Library navigation is unavailable." : undefined}
+                onClick={() => {
+                  if (routineCreationNotice.routineId)
+                    onViewRoutine?.(routineCreationNotice.routineId);
+                }}
+              >
                 View
               </button>
             </div>

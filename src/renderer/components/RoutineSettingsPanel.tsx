@@ -1,5 +1,6 @@
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import { Cable, Clock3, Link2, Pencil, Play, Plus, Save, Trash2, Workflow } from "lucide-react";
+import { validateCronExpression } from "../../electron/cron/schedule";
 
 type CronSchedule =
   | { kind: "cron"; expr: string; tz?: string }
@@ -370,6 +371,9 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
   const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
   const [hooksStatus, setHooksStatus] = useState<HookStatus | null>(null);
   const [hooksSettings, setHooksSettings] = useState<HookSettings | null>(null);
+  const [cronStatus, setCronStatus] = useState<Awaited<
+    ReturnType<typeof window.electronAPI.getCronStatus>
+  > | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
@@ -407,7 +411,7 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
     setLoading(true);
     setError(null);
     try {
-      const [routineList, routineRuns, workspaceList, status, settings, servers] =
+      const [routineList, routineRuns, workspaceList, status, settings, servers, schedulerStatus] =
         await Promise.all([
           window.electronAPI.listRoutines(),
           window.electronAPI.listRoutineRuns?.(undefined, 200) || Promise.resolve([]),
@@ -415,6 +419,7 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
           window.electronAPI.getHooksStatus(),
           window.electronAPI.getHooksSettings(),
           window.electronAPI.getMCPStatus?.() || Promise.resolve([]),
+          window.electronAPI.getCronStatus().catch(() => null),
         ]);
 
       setRoutines((routineList || []) as Routine[]);
@@ -423,6 +428,7 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
       setHooksStatus(status);
       setHooksSettings(settings);
       setMcpServers(Array.isArray(servers) ? servers : []);
+      setCronStatus(schedulerStatus);
 
       if (!form.workspaceId && workspaceList?.length) {
         setForm((current) => ({ ...current, workspaceId: workspaceList[0].id }));
@@ -433,6 +439,7 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
       setLoading(false);
     }
   }
+
 
   function resetForm() {
     setEditingRoutineId(null);
@@ -584,6 +591,22 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
     if (form.scheduleEnabled && form.scheduleKind === "cron" && !form.scheduleExpr.trim()) {
       setError("Cron expression is required when the schedule trigger is enabled");
       return;
+    }
+    if (
+      form.scheduleEnabled &&
+      form.scheduleKind === "cron" &&
+      !validateCronExpression(form.scheduleExpr)
+    ) {
+      setError("Use a valid five-field cron expression, such as 0 9 * * 1-5.");
+      return;
+    }
+    if (form.scheduleEnabled && form.scheduleKind === "cron" && form.scheduleTz.trim()) {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: form.scheduleTz.trim() }).format(new Date());
+      } catch {
+        setError("Use a valid IANA timezone, such as Europe/Lisbon, or leave it blank.");
+        return;
+      }
     }
     if (form.scheduleEnabled && form.scheduleKind === "at" && !form.scheduleAt) {
       setError("Choose a run time for one-shot schedules");
@@ -1296,6 +1319,52 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
             </div>
           </div>
 
+          <div
+            role="note"
+            style={{
+              display: "grid",
+              gap: 8,
+              padding: 14,
+              border: "1px solid var(--color-border, rgba(127, 127, 127, 0.2))",
+              borderRadius: 12,
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>Where and when this routine runs</strong>
+            <span>
+              The routine definition stays in this CoWork profile. The selected execution target (
+              {form.executionTargetKind.replace(/_/g, " ")}) controls where work is sent; it does
+              not move the scheduler.
+            </span>
+            <span>
+              {cronStatus?.scheduler
+                ? `This ${cronStatus.scheduler.runnerKind === "daemon" ? "daemon" : cronStatus.scheduler.runnerKind === "desktop" ? "desktop app" : "CoWork process"}${cronStatus.scheduler.runnerHost ? ` on ${cronStatus.scheduler.runnerHost}` : ""} currently reports the scheduler as ${cronStatus.scheduler.state === "running" ? "running" : cronStatus.scheduler.state === "disabled" ? "disabled" : cronStatus.scheduler.state === "not_started" ? "not started" : "unavailable"} (observed ${new Date(cronStatus.scheduler.observedAtMs).toLocaleTimeString()} ${cronStatus.scheduler.timeZone}).`
+                : "The current process could not report scheduler availability."}{" "}
+              Another desktop or daemon using this profile is not detected here, and this status
+              cannot promise future uptime. The scheduler host must remain awake and its process
+              running.
+            </span>
+            {form.scheduleEnabled && (
+              <span>
+                {form.scheduleKind === "cron"
+                  ? `Calendar schedule: ${form.scheduleExpr || "cron expression not set"}; ${form.scheduleTz.trim() ? `timezone ${form.scheduleTz.trim()}` : `scheduler process timezone ${cronStatus?.scheduler?.timeZone || "unknown"}`}.`
+                  : form.scheduleKind === "every"
+                    ? `Interval schedule: every ${form.scheduleEveryMinutes} minutes; saving it stores an anchor for interval boundaries.`
+                    : form.scheduleAt
+                      ? `One-shot schedule: ${new Date(form.scheduleAt).toLocaleString()}; a newly saved time in the past has no next run.`
+                      : "Choose a future time for a one-shot schedule."}{" "}
+                Saved overdue schedules may run once after the scheduler resumes; individual missed
+                slots are not replayed.
+              </span>
+            )}
+            <span>
+              Approval policy: {form.approvalMode.replace(/_/g, " ")}. Review pending requests in
+              the native task or workflow record; this settings page does not enforce an approval
+              expiry. Repairing a connection does not approve a pending external action.
+            </span>
+          </div>
+
           <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
             <button
               style={routineButtonStyle("primary", saving)}
@@ -1569,9 +1638,17 @@ function buildTriggers(form: RoutineFormState, existing: Routine | null): Routin
   const manualExisting = findExisting("manual");
 
   if (form.scheduleEnabled) {
+    const previousSchedule = scheduleExisting?.schedule;
     const schedule: CronSchedule =
       form.scheduleKind === "every"
-        ? { kind: "every", everyMs: form.scheduleEveryMinutes * 60_000 }
+        ? {
+            kind: "every",
+            everyMs: form.scheduleEveryMinutes * 60_000,
+            anchorMs:
+              previousSchedule?.kind === "every" && previousSchedule.anchorMs !== undefined
+                ? previousSchedule.anchorMs
+                : Date.now(),
+          }
         : form.scheduleKind === "at"
           ? { kind: "at", atMs: new Date(form.scheduleAt).getTime() }
           : {

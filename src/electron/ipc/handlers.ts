@@ -12093,7 +12093,17 @@ function setupCronHandlers(): void {
         storePath: "",
         jobCount: 0,
         enabledJobCount: 0,
+        runningJobCount: 0,
+        maxConcurrentRuns: 0,
         nextWakeAtMs: null,
+        scheduler: {
+          profileScope: "unknown",
+          runnerKind: "unknown",
+          state: "unavailable",
+          observedAtMs: Date.now(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+          runnerExclusivity: "unknown",
+        },
       };
     }
     return service.status();

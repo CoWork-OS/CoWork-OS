@@ -992,7 +992,21 @@ interface CronStatusSummary {
   runningJobCount: number;
   maxConcurrentRuns: number;
   nextWakeAtMs: number | null;
+  nextWakeReason?: "scheduled_job" | "task_recovery_check" | "run_timeout_check";
+  nextWakeScheduleKind?: "at" | "every" | "cron";
+  nextWakeTimeZone?: string;
+  scheduler: CronSchedulerObservation;
   webhook?: CronWebhookStatus;
+}
+
+interface CronSchedulerObservation {
+  profileScope: "current_profile" | "unknown";
+  runnerKind: "desktop" | "daemon" | "unknown";
+  runnerHost?: string;
+  state: "running" | "disabled" | "not_started" | "unavailable";
+  observedAtMs: number;
+  timeZone: string;
+  runnerExclusivity: "not_verified" | "unknown";
 }
 
 interface CronEvent {

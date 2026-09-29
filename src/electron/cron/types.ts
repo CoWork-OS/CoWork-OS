@@ -80,6 +80,8 @@ export interface CronThreadAutomationConfig {
 export interface CronJobState {
   nextRunAtMs?: number;
   runningAtMs?: number;
+  /** Captures the execution mode when a run lease starts, even if its job is edited later. */
+  runningRunMode?: CronJobRunMode;
   lastRunAtMs?: number;
   lastStatus?: CronJobStatus;
   lastError?: string;
@@ -178,6 +180,8 @@ export interface CronOutboxEntry {
   nextAttemptAtMs: number;
   attempts: number;
   maxAttempts: number;
+  /** Attempts made before enqueueing; recovered outcomes queue without a direct attempt. */
+  initialAttemptCount?: number;
   status: CronJobStatus;
   channelType: ChannelType;
   channelDbId?: string;
@@ -228,6 +232,8 @@ export interface CronServiceDeps {
   nowMs?: () => number;
   storePath: string;
   cronEnabled: boolean;
+  /** Identifies the process hosting this scheduler; it does not imply exclusive ownership. */
+  runnerKind?: "desktop" | "daemon" | "unknown";
   maxConcurrentRuns?: number; // Max jobs that can run at once (default: 1)
   defaultTimeoutMs?: number; // Default job timeout (default: 30 minutes)
   maxHistoryEntries?: number; // Default max history entries per job (default: 10)
@@ -362,11 +368,27 @@ export interface CronStatusSummary {
   runningJobCount: number;
   maxConcurrentRuns: number;
   nextWakeAtMs: number | null;
+  nextWakeReason?: "scheduled_job" | "task_recovery_check" | "run_timeout_check";
+  nextWakeScheduleKind?: CronSchedule["kind"];
+  nextWakeTimeZone?: string;
+  /** Current-process snapshot only; this does not establish future uptime or a single runner. */
+  scheduler: CronSchedulerObservation;
   webhook?: {
     enabled: boolean;
     host: string;
     port: number;
   };
+}
+
+export interface CronSchedulerObservation {
+  profileScope: "current_profile" | "unknown";
+  runnerKind: "desktop" | "daemon" | "unknown";
+  runnerHost?: string;
+  state: "running" | "disabled" | "not_started" | "unavailable";
+  observedAtMs: number;
+  timeZone: string;
+  /** Concurrent desktop/daemon processes sharing a profile are not detected here. */
+  runnerExclusivity: "not_verified" | "unknown";
 }
 
 /**

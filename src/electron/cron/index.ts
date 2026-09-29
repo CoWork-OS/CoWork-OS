@@ -5,5 +5,5 @@
 export * from "./types";
 export * from "./store";
 export * from "./schedule";
-export { CronService, getCronService, setCronService } from "./service";
+export { CRON_ACTIVE_TASK_STATUSES, CronService, getCronService, setCronService } from "./service";
 export { CronWebhookServer, generateWebhookSecret } from "./webhook";

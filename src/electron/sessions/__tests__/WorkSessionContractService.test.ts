@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +13,7 @@ import {
 import { DatabaseManager } from "../../database/schema";
 import { WorkSessionContractService } from "../WorkSessionContractService";
 import { WorkSessionProtocolService } from "../WorkSessionProtocolService";
+import type { OutcomeContract } from "../../../shared/types";
 
 const nativeSqliteAvailable = (() => {
   try {
@@ -49,10 +51,18 @@ describeWithSqlite("WorkSessionContractService", () => {
     inputRequestRepo = new InputRequestStore(db);
     protocol = new WorkSessionProtocolService(db);
     service = new WorkSessionContractService(db, protocol);
+    const workspacePath = path.join(tempDir, "workspace");
+    fs.mkdirSync(workspacePath, { recursive: true });
     db.prepare(
       `INSERT INTO workspaces (id, name, path, created_at, permissions)
        VALUES (?, ?, ?, ?, ?)`,
-    ).run("workspace-1", "Workspace", path.join(tempDir, "workspace"), Date.now(), "{}");
+    ).run(
+      "workspace-1",
+      "Workspace",
+      workspacePath,
+      Date.now(),
+      JSON.stringify({ read: true, write: true, delete: false, shell: false, network: false }),
+    );
   });
 
   afterEach(() => {
@@ -298,7 +308,7 @@ describeWithSqlite("WorkSessionContractService", () => {
     );
   });
 
-  it("marks terminal tasks truthfully and records verification evidence", () => {
+  it("does not treat generic PASS prose or task completion as requirement proof", () => {
     const task = createTask({
       successCriteria: { type: "file_exists", filePaths: ["dist/report.pdf"] },
     });
@@ -313,14 +323,509 @@ describeWithSqlite("WorkSessionContractService", () => {
     });
     const terminal = service.recordTaskTerminal(task.id, completed);
 
-    expect(terminal.contract?.status).toBe("satisfied");
-    expect(terminal.contract?.requirements[0].status).toBe("satisfied");
-    expect(service.getForTask(task.id)!.aggregate.evidence).toEqual([
+    expect(terminal.contract?.status).toBe("unmet");
+    expect(terminal.contract?.requirements[0].status).toBe("failed");
+    expect(terminal.contract?.requirements[0].evidenceIds).toHaveLength(1);
+    const linked = service
+      .getRepository()
+      .listEvidenceByIds(
+        terminal.contract!.sessionId,
+        terminal.contract!.requirements[0].evidenceIds!,
+      );
+    expect(linked[0]).toMatchObject({
+      claim: "Workspace file is missing (existence check only)",
+      status: "contradicting",
+      sourceType: "task_event",
+    });
+    expect(service.getForTask(task.id)!.aggregate.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ claim: "Task verification report", status: "supporting" }),
+      ]),
+    );
+  });
+
+  it("satisfies file_exists only from a fresh server-inspected exact target", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["dist/report.pdf"] },
+    });
+    const output = path.join(tempDir, "workspace", "dist", "report.pdf");
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    fs.writeFileSync(output, "report bytes");
+    service.ensureForTask(task);
+    taskRepo.update(task.id, {
+      status: "completed",
+      resultSummary: "Report delivered",
+      verificationVerdict: "PASS",
+    });
+
+    const terminal = service.recordTaskTerminal(task.id);
+    expect(terminal.contract).toMatchObject({ status: "satisfied" });
+    const requirement = terminal.contract!.requirements[0];
+    expect(requirement).toMatchObject({
+      status: "satisfied",
+      verifier: "file_exists",
+      targetPath: "dist/report.pdf",
+    });
+    const [proof] = service
+      .getRepository()
+      .listEvidenceByIds(terminal.contract!.sessionId, requirement.evidenceIds!);
+    expect(proof).toMatchObject({
+      claim: "Workspace file is present (existence only)",
+      sourceType: "artifact_revision",
+      status: "supporting",
+    });
+    expect(proof.artifactRevisionId).toBeTruthy();
+    const revision = service.getRepository().getArtifactRevisionById(proof.artifactRevisionId!);
+    expect(revision).toMatchObject({
+      status: "committed",
+      createdBy: "system",
+      sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      metadata: { evidenceKind: "workspace_file_exists" },
+    });
+    expect(
+      service.getRequirementEvidenceManifest(task.id)?.requirements[0].evidence[0],
+    ).toMatchObject({
+      id: proof.id,
+      sourceRef: fs.realpathSync(output),
+      sha256: revision!.sha256,
+      capturedAt: expect.any(Number),
+      validatedAt: expect.any(Number),
+    });
+    expect(service.getRequirementEvidenceManifest(task.id)?.capturedAt).toEqual(expect.any(Number));
+  });
+
+  it("includes the 41st required target even when its linked proof is beyond the aggregate evidence window", () => {
+    const filePaths = Array.from({ length: 41 }, (_, index) => `required-${index + 1}.txt`);
+    const task = createTask({ successCriteria: { type: "file_exists", filePaths } });
+    const initial = service.ensureForTask(task);
+    for (let index = 0; index < 1_005; index += 1) {
+      service.getRepository().appendEvidence({
+        sessionId: initial.session.id,
+        claim: `Unrelated evidence ${index + 1}`,
+        sourceType: "task_event",
+        sourceRef: `unrelated:${index + 1}`,
+      });
+    }
+    for (const filePath of filePaths) {
+      fs.writeFileSync(path.join(tempDir, "workspace", filePath), `proof for ${filePath}`);
+    }
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+    const terminal = service.recordTaskTerminal(task.id).contract!;
+    const requirement41 = terminal.requirements[40];
+    const manifest = service.getRequirementEvidenceManifest(task.id)!;
+    const manifestRequirement41 = manifest.requirements[40];
+    const proof = manifestRequirement41.evidence[0];
+
+    expect(terminal.requirements).toHaveLength(41);
+    expect(requirement41).toMatchObject({
+      id: "successCriteria:file_exists:40",
+      status: "satisfied",
+      targetPath: "required-41.txt",
+    });
+    expect(manifestRequirement41).toMatchObject({
+      requirementId: requirement41.id,
+      required: true,
+      status: "satisfied",
+      targetPath: "required-41.txt",
+    });
+    expect(proof).toMatchObject({
+      claim: "Workspace file is present (existence only)",
+      sourceRef: fs.realpathSync(path.join(tempDir, "workspace", "required-41.txt")),
+    });
+    expect(
+      service
+        .getRepository()
+        .getEvidenceManifest(terminal.sessionId)
+        .entries.some((entry) => entry.id === proof.id),
+    ).toBe(false);
+    expect(service.getRepository().listEvidenceByIds(terminal.sessionId, [proof.id])).toEqual([
+      expect.objectContaining({ id: proof.id }),
+    ]);
+  });
+
+  it("invalidates prior proof when a completed task resumes before publishing a fresh manifest", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["resumed-report.txt"] },
+    });
+    const output = path.join(tempDir, "workspace", "resumed-report.txt");
+    fs.writeFileSync(output, "initial result");
+    service.ensureForTask(task);
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+    const completed = service.recordTaskTerminal(task.id).contract!;
+    const oldEvidenceIds = completed.requirements[0].evidenceIds!;
+    expect(completed.status).toBe("satisfied");
+
+    taskRepo.update(task.id, { status: "executing" });
+    fs.rmSync(output);
+    const manifest = service.getRequirementEvidenceManifest(task.id)!;
+
+    expect(manifest.requirements[0]).toMatchObject({ status: "pending", evidence: [] });
+    expect(service.getForSession(completed.sessionId).contract?.status).toBe("pending");
+    expect(service.getRepository().listEvidenceByIds(completed.sessionId, oldEvidenceIds)).toEqual([
+      expect.objectContaining({ status: "stale" }),
+    ]);
+
+    fs.writeFileSync(output, "revised result");
+    taskRepo.update(task.id, { status: "completed" });
+    const refreshed = service.getRequirementEvidenceManifest(task.id)!;
+    expect(refreshed.requirements[0].status).toBe("satisfied");
+    expect(refreshed.requirements[0].evidence[0].id).not.toBe(oldEvidenceIds[0]);
+  });
+
+  it("revalidates physical targets on session reads", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["session-read.txt"] },
+    });
+    const output = path.join(tempDir, "workspace", "session-read.txt");
+    fs.writeFileSync(output, "present");
+    service.ensureForTask(task);
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+    const satisfied = service.recordTaskTerminal(task.id).contract!;
+    fs.rmSync(output);
+
+    const aggregate = service.getForSession(satisfied.sessionId);
+
+    expect(aggregate.contract?.requirements[0]).toMatchObject({ status: "failed" });
+    expect(
+      service
+        .getRepository()
+        .listEvidenceByIds(satisfied.sessionId, aggregate.contract!.requirements[0].evidenceIds!),
+    ).toEqual([
       expect.objectContaining({
-        claim: "Task verification report",
-        status: "supporting",
+        claim: "Workspace file is missing (existence check only)",
+        status: "contradicting",
       }),
     ]);
+  });
+
+  it("does not execute unsupported shell criteria or accept generic evidence for them", () => {
+    const task = createTask({ successCriteria: { type: "shell_command", command: "npm test" } });
+    service.ensureForTask(task);
+    taskRepo.update(task.id, {
+      status: "completed",
+      verificationVerdict: "PASS",
+    });
+    const terminal = service.recordTaskTerminal(task.id);
+
+    expect(terminal.contract).toMatchObject({ status: "pending" });
+    expect(terminal.contract?.requirements[0]).toMatchObject({
+      verifier: "shell_command",
+      status: "pending",
+    });
+  });
+
+  it("keeps contracts with no criteria pending after task completion", () => {
+    const task = createTask();
+    service.ensureForTask(task);
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+
+    const terminal = service.recordTaskTerminal(task.id);
+    expect(terminal.contract).toMatchObject({ status: "pending", requirements: [] });
+  });
+
+  it("lets an explicit FAIL verdict contradict a physically present output", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["report.txt"] },
+    });
+    fs.writeFileSync(path.join(tempDir, "workspace", "report.txt"), "present");
+    service.ensureForTask(task);
+    taskRepo.update(task.id, {
+      status: "failed",
+      terminalStatus: "failed",
+      failureClass: "required_verification",
+      verificationVerdict: "FAIL",
+    });
+
+    const terminal = service.recordTaskTerminal(task.id);
+    expect(terminal.contract).toMatchObject({ status: "unmet" });
+    expect(terminal.contract?.requirements[0]).toMatchObject({ status: "failed" });
+    const [evidence] = service
+      .getRepository()
+      .listEvidenceByIds(
+        terminal.contract!.sessionId,
+        terminal.contract!.requirements[0].evidenceIds!,
+      );
+    expect(evidence).toMatchObject({
+      claim: "Server recorded a verification failure",
+      status: "contradicting",
+      sourceRef: `task:${task.id}:verification-verdict`,
+    });
+  });
+
+  it("does not re-apply an older task-level FAIL to a requirement corrected after that verdict", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["report.txt"] },
+    });
+    service.ensureForTask(task);
+    taskRepo.update(task.id, {
+      status: "failed",
+      terminalStatus: "failed",
+      failureClass: "required_verification",
+      verificationVerdict: "FAIL",
+      completedAt: Date.now() - 60_000,
+    });
+    const failed = service.recordTaskTerminal(task.id).contract!;
+    expect(failed.requirements[0]).toMatchObject({ status: "failed" });
+
+    const corrected = service.recordUserRequirementCorrection(task.id, {
+      requirementId: failed.requirements[0].id,
+      statement: "The report must contain the approved totals",
+      criterion: { type: "unsupported" },
+      idempotencyKey: "correction:after-fail",
+    })!;
+    expect(corrected).toMatchObject({ version: 2 });
+
+    const reread = service.getForTask(task.id)!.contract!;
+    expect(reread.version).toBe(2);
+    expect(reread.requirements[0]).toMatchObject({
+      status: "pending",
+      description: "The report must contain the approved totals",
+    });
+  });
+
+  it("rejects linked evidence for the wrong target and stales it", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["required.txt"] },
+    });
+    const result = service.ensureForTask(task);
+    const contract = result.contract!;
+    const wrongRevision = service.getRepository().createArtifactRevision({
+      sessionId: result.session.id,
+      taskId: task.id,
+      path: path.join(tempDir, "workspace", "wrong.txt"),
+      mimeType: "text/plain",
+      sha256: "a".repeat(64),
+      createdBy: "system",
+      metadata: { evidenceKind: "workspace_file_exists" },
+    });
+    const wrongEvidence = service.getRepository().appendEvidence({
+      sessionId: result.session.id,
+      contractId: contract.id,
+      claim: "Workspace file is present (existence only)",
+      sourceType: "artifact_revision",
+      sourceRef: wrongRevision.path,
+      artifactRevisionId: wrongRevision.id,
+      status: "supporting",
+    });
+    const linkedContract = service.getRepository().updateOutcomeContract(contract.id, {
+      requirements: contract.requirements.map((requirement) => ({
+        ...requirement,
+        evidenceIds: [wrongEvidence.id],
+      })) as OutcomeContract["requirements"],
+      status: "satisfied",
+    });
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+
+    const terminal = service.recordTaskTerminal(task.id);
+    const wrong = service
+      .getRepository()
+      .listEvidenceByIds(contract.sessionId, [wrongEvidence.id])[0];
+    expect(linkedContract.status).toBe("satisfied");
+    expect(terminal.contract).toMatchObject({ status: "unmet" });
+    expect(wrong.status).toBe("stale");
+  });
+
+  it("rejects an outdated revision for the exact target even when that revision is committed", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["report.txt"] },
+    });
+    const output = path.join(tempDir, "workspace", "report.txt");
+    fs.writeFileSync(output, "current bytes");
+    const result = service.ensureForTask(task);
+    const contract = result.contract!;
+    const outdatedRevision = service.getRepository().createArtifactRevision({
+      sessionId: result.session.id,
+      taskId: task.id,
+      path: fs.realpathSync(output),
+      mimeType: "text/plain",
+      sha256: "a".repeat(64),
+      size: 12,
+      createdBy: "agent",
+    });
+    const outdatedEvidence = service.getRepository().appendEvidence({
+      sessionId: result.session.id,
+      contractId: contract.id,
+      claim: "Workspace file is present (existence only)",
+      sourceType: "artifact_revision",
+      sourceRef: fs.realpathSync(output),
+      artifactRevisionId: outdatedRevision.id,
+      status: "supporting",
+    });
+    service.getRepository().updateOutcomeContract(contract.id, {
+      status: "satisfied",
+      requirements: contract.requirements.map((requirement) => ({
+        ...requirement,
+        evidenceIds: [outdatedEvidence.id],
+      })),
+    });
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+
+    const refreshed = service.recordTaskTerminal(task.id).contract!;
+    expect(refreshed).toMatchObject({ status: "satisfied" });
+    expect(
+      service.getRepository().listEvidenceByIds(result.session.id, [outdatedEvidence.id])[0].status,
+    ).toBe("stale");
+    expect(service.getRepository().getArtifactRevisionById(outdatedRevision.id)?.status).toBe(
+      "superseded",
+    );
+    const [proof] = service
+      .getRepository()
+      .listEvidenceByIds(result.session.id, refreshed.requirements[0].evidenceIds!);
+    expect(service.getRepository().getArtifactRevisionById(proof.artifactRevisionId!)?.sha256).toBe(
+      createHash("sha256").update("current bytes").digest("hex"),
+    );
+  });
+
+  it("re-evaluates legacy satisfied file requirements without trusting their stored status", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["legacy.txt"] },
+    });
+    const initial = service.ensureForTask(task);
+    const legacyContract = service.getRepository().updateOutcomeContract(initial.contract!.id, {
+      status: "satisfied",
+      requirements: initial.contract!.requirements.map((requirement) => ({
+        ...requirement,
+        targetPath: undefined,
+        status: "satisfied",
+      })),
+      satisfiedAt: Date.now(),
+    });
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+
+    const refreshed = service.getForTask(task.id)!.contract!;
+    expect(legacyContract.status).toBe("satisfied");
+    expect(refreshed).toMatchObject({ status: "unmet" });
+    expect(refreshed.requirements[0]).toMatchObject({
+      status: "failed",
+      targetPath: "legacy.txt",
+    });
+  });
+
+  it("invalidates an old artifact revision after an out-of-band file edit", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["report.txt"] },
+    });
+    const output = path.join(tempDir, "workspace", "report.txt");
+    fs.writeFileSync(output, "before");
+    service.ensureForTask(task);
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+    const first = service.recordTaskTerminal(task.id).contract!;
+    const oldProofId = first.requirements[0].evidenceIds![0];
+    const oldProof = service.getRepository().listEvidenceByIds(first.sessionId, [oldProofId])[0];
+    const oldRevision = service
+      .getRepository()
+      .getArtifactRevisionById(oldProof.artifactRevisionId!)!;
+
+    fs.writeFileSync(output, "after with different bytes");
+    const refreshed = service.getForTask(task.id)!.contract!;
+    const newProof = service
+      .getRepository()
+      .listEvidenceByIds(refreshed.sessionId, refreshed.requirements[0].evidenceIds!)[0];
+    const newRevision = service
+      .getRepository()
+      .getArtifactRevisionById(newProof.artifactRevisionId!)!;
+    expect(refreshed.requirements[0].status).toBe("satisfied");
+    expect(newRevision.sha256).not.toBe(oldRevision.sha256);
+    expect(newRevision.id).not.toBe(oldRevision.id);
+    expect(newRevision.status).toBe("committed");
+    expect(
+      service.getRepository().listEvidenceByIds(refreshed.sessionId, [oldProofId])[0].status,
+    ).toBe("stale");
+    expect(service.getRepository().getArtifactRevisionById(oldRevision.id)?.status).toBe(
+      "superseded",
+    );
+  });
+
+  it("reopens corrected requirements in the constraint ledger and keeps them pending after restart", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["report.txt"] },
+    });
+    fs.writeFileSync(path.join(tempDir, "workspace", "report.txt"), "present");
+    service.ensureForTask(task);
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+    const satisfied = service.recordTaskTerminal(task.id).contract!;
+    const requirement = satisfied.requirements[0];
+
+    const correction = {
+      requirementId: requirement.id,
+      statement: "The report must contain the approved totals",
+      criterion: { type: "unsupported" } as const,
+      idempotencyKey: "correction:report-totals",
+    };
+    const reopened = service.recordUserRequirementCorrection(task.id, correction)!;
+    expect(reopened).toMatchObject({ version: 2, status: "pending" });
+    expect(reopened.requirements[0]).toMatchObject({
+      status: "pending",
+      description: "The report must contain the approved totals",
+    });
+    expect(reopened.requirements[0].evidenceIds).toBeUndefined();
+    expect(
+      service
+        .getRepository()
+        .listEvidenceByIds(reopened.sessionId, requirement.evidenceIds!)
+        .map((entry) => entry.status),
+    ).toEqual(["stale"]);
+    expect(service.getRepository().listConstraints(reopened.sessionId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "requirement",
+          owner: "user",
+          status: "active",
+          metadata: { requirementId: requirement.id, verifier: "unsupported" },
+        }),
+      ]),
+    );
+
+    const repeated = service.recordUserRequirementCorrection(task.id, correction)!;
+    expect(repeated.id).toBe(reopened.id);
+    expect(service.getRepository().listConstraints(reopened.sessionId)).toHaveLength(1);
+
+    manager.close();
+    manager = new DatabaseManager();
+    db = manager.getDatabase();
+    service = new WorkSessionContractService(db, new WorkSessionProtocolService(db));
+    const afterRestart = service.getForTask(task.id)!.contract!;
+    expect(afterRestart).toMatchObject({ version: 2, status: "pending" });
+    expect(afterRestart.requirements[0]).toMatchObject({
+      status: "pending",
+      description: "The report must contain the approved totals",
+    });
+  });
+
+  it("restores corrected target semantics from the ledger after legacy requirement normalization", () => {
+    const task = createTask({
+      successCriteria: { type: "file_exists", filePaths: ["original-report.txt"] },
+    });
+    fs.writeFileSync(path.join(tempDir, "workspace", "original-report.txt"), "old output");
+    service.ensureForTask(task);
+    taskRepo.update(task.id, { status: "completed", verificationVerdict: "PASS" });
+    const initial = service.recordTaskTerminal(task.id).contract!;
+    const corrected = service.recordUserRequirementCorrection(task.id, {
+      requirementId: initial.requirements[0].id,
+      statement: "The approved report must exist",
+      criterion: { type: "file_exists", targetPath: "approved-report.txt" },
+      idempotencyKey: "correction:approved-report",
+    })!;
+
+    db.prepare("UPDATE work_session_outcome_contracts SET requirements_json = ? WHERE id = ?").run(
+      JSON.stringify(
+        corrected.requirements.map(
+          ({ verifier: _verifier, targetPath: _targetPath, ...rest }) => rest,
+        ),
+      ),
+      corrected.id,
+    );
+
+    const refreshed = service.getForTask(task.id)!.contract!;
+
+    expect(refreshed.version).toBe(2);
+    expect(refreshed.requirements[0]).toMatchObject({
+      status: "failed",
+      verifier: "file_exists",
+      targetPath: "approved-report.txt",
+      description: "The approved report must exist",
+    });
+    expect(refreshed.requirements[0].targetPath).not.toBe("original-report.txt");
   });
 
   it("gives child tasks isolated canonical sessions with inherited policy", () => {

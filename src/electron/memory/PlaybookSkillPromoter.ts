@@ -7,7 +7,7 @@
  * approach. Memory rows, reinforcement chains and legacy free-text claims never count.
  *
  * Proposals still require review; they describe "observed successful executions" and
- * list each source reference with its outcome grade.
+ * list each execution's task and source memory.
  */
 
 import {
@@ -15,8 +15,7 @@ import {
   type SkillProposalStatus,
   type SkillProposalCreateInput,
 } from "../agent/skills/SkillProposalService";
-import { PlaybookService } from "./PlaybookService";
-import type { PlaybookEvidenceRecord } from "./PlaybookEvidenceStore";
+import { PlaybookService, type PlaybookSuccess } from "./PlaybookService";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -31,7 +30,7 @@ export interface PromotionCandidate {
   toolsUsed: string[];
   /** Original request excerpts. */
   requestExcerpts: string[];
-  /** One line per execution: source references and outcome grade. */
+  /** One line per execution: its task and source memory. */
   sourceEvidence: string[];
   evidenceIds: string[];
 }
@@ -160,9 +159,9 @@ export class PlaybookSkillPromoter {
     try {
       const store = PlaybookService.getEvidenceStore();
       if (!store) return [];
-      const eligible = new Map<string, PlaybookEvidenceRecord>();
-      for (const record of await store.verifiedSuccesses(workspaceId)) {
-        if (record.patternKey) eligible.set(record.id, record);
+      const eligible = new Map<string, PlaybookSuccess>();
+      for (const success of await PlaybookService.eligibleSuccesses(store, workspaceId)) {
+        if (success.record.patternKey) eligible.set(success.record.id, success);
       }
       if (eligible.size === 0) return [];
 
@@ -178,39 +177,33 @@ export class PlaybookSkillPromoter {
       for (const link of await store.listActiveLinks(workspaceId)) {
         const from = eligible.get(link.from);
         const to = eligible.get(link.to);
-        if (!from || !to || from.patternKey !== to.patternKey) continue;
-        parent.set(find(from.id), find(to.id));
+        if (!from || !to || from.record.patternKey !== to.record.patternKey) continue;
+        parent.set(find(from.record.id), find(to.record.id));
       }
 
-      const clusters = new Map<string, PlaybookEvidenceRecord[]>();
-      for (const record of eligible.values()) {
-        const root = find(record.id);
-        clusters.set(root, [...(clusters.get(root) ?? []), record]);
+      const clusters = new Map<string, PlaybookSuccess[]>();
+      for (const success of eligible.values()) {
+        const root = find(success.record.id);
+        clusters.set(root, [...(clusters.get(root) ?? []), success]);
       }
 
+      // Evidence is unique per task, so each cluster member is a distinct execution.
       const candidates: PromotionCandidate[] = [];
-      for (const records of clusters.values()) {
-        const byExecution = new Map<string, PlaybookEvidenceRecord>();
-        for (const record of records) {
-          if (!byExecution.has(record.executionKey)) byExecution.set(record.executionKey, record);
-        }
-        if (byExecution.size < threshold) continue;
-        const executions = [...byExecution.values()];
+      for (const executions of clusters.values()) {
+        if (executions.length < threshold) continue;
         candidates.push({
-          pattern: mostCommon(executions.map((record) => record.title)).slice(0, 120),
-          patternKey: executions[0].patternKey,
+          pattern: mostCommon(executions.map((success) => success.title)).slice(0, 120),
+          patternKey: executions[0].record.patternKey,
           executionCount: executions.length,
-          toolsUsed: [...new Set(executions.flatMap((record) => record.toolsUsed))],
-          requestExcerpts: [
-            ...new Set(executions.map((record) => record.requestExcerpt.slice(0, 200))),
-          ]
+          toolsUsed: [...new Set(executions.flatMap((success) => success.toolsUsed))],
+          requestExcerpts: [...new Set(executions.map((success) => success.request.slice(0, 200)))]
             .filter(Boolean)
             .slice(0, 5),
           sourceEvidence: executions.map(
-            (record) =>
-              `Observed successful execution ${record.executionKey} (${record.grade.replace(/_/g, " ")}); sources: ${record.sourceRefs.join(", ")}`,
+            ({ record }) =>
+              `Observed successful execution of task ${record.taskId} (memory ${record.sourceMemoryId})`,
           ),
-          evidenceIds: executions.map((record) => record.id),
+          evidenceIds: executions.map(({ record }) => record.id),
         });
       }
       return candidates;

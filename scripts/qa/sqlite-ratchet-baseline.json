@@ -6,7 +6,7 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1498,
+    "prepare": 1507,
     "getDatabase": 130,
     "runtimeImport": 50
   },
@@ -44,7 +44,7 @@
       "getDatabase": 1
     },
     "src/electron/agent/orchestration/OrchestrationGraphRepository.ts": {
-      "prepare": 23
+      "prepare": 36
     },
     "src/electron/agent/OrchestrationRepository.ts": {
       "prepare": 6
@@ -226,7 +226,7 @@
       "runtimeImport": 1
     },
     "src/electron/database/WorkSessionContractRepository.ts": {
-      "prepare": 40,
+      "prepare": 42,
       "runtimeImport": 1
     },
     "src/electron/database/WorkSessionOperationalMetricsRepository.ts": {
@@ -336,7 +336,7 @@
       "runtimeImport": 1
     },
     "src/electron/memory/PlaybookEvidenceStore.ts": {
-      "prepare": 13
+      "prepare": 9
     },
     "src/electron/memory/TranscriptStore.ts": {
       "getDatabase": 3,
@@ -411,7 +411,7 @@
       "prepare": 9
     },
     "src/electron/telemetry/pulse-store-sql.ts": {
-      "prepare": 18
+      "prepare": 13
     },
     "src/electron/tray/TrayManager.ts": {
       "getDatabase": 2
@@ -423,7 +423,7 @@
       "prepare": 3
     },
     "src/electron/utils/temp-workspace-sql.ts": {
-      "prepare": 13
+      "prepare": 16
     },
     "src/electron/workspaces/SessionMembershipService.ts": {
       "prepare": 23,

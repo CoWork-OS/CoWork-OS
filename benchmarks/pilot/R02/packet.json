@@ -1,0 +1,52 @@
+{
+  "packet_id": "synthetic-forecast-packet-01",
+  "requested_output": {
+    "period": "FY2027",
+    "metric": "EBITDA",
+    "unit": "USD millions",
+    "artifacts": ["result.json", "explanation.md"]
+  },
+  "sources": [
+    {
+      "source_id": "FORECAST-ORIGINAL-2025-12-15",
+      "title": "Preliminary FY2027 planning forecast",
+      "published_at": "2025-12-15",
+      "spans": [
+        {
+          "span_id": "S01",
+          "text": "Preliminary forecast: FY2027 EBITDA is USD 12.4 million. This is the original planning estimate."
+        },
+        {
+          "span_id": "S02",
+          "text": "Planning caveat: this estimate is preliminary and may be revised after the January operating review."
+        }
+      ]
+    },
+    {
+      "source_id": "FORECAST-REVISION-2026-01-20",
+      "title": "Approved January operating review revision",
+      "published_at": "2026-01-20",
+      "spans": [
+        {
+          "span_id": "S01",
+          "text": "Approved revision issued 2026-01-20 for the FY2027 planning period."
+        },
+        {
+          "span_id": "S02",
+          "text": "Use FY2027 EBITDA of USD 10.8 million. This approved revision supersedes the preliminary 2025-12-15 forecast."
+        }
+      ]
+    },
+    {
+      "source_id": "MARKET-COLOR-2026-01-22",
+      "title": "Unrelated market color",
+      "published_at": "2026-01-22",
+      "spans": [
+        {
+          "span_id": "S01",
+          "text": "The synthetic sector note discusses FY2027 revenue growth, not the company's EBITDA forecast."
+        }
+      ]
+    }
+  ]
+}

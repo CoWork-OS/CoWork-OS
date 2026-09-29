@@ -20,6 +20,18 @@ const ORCHESTRATIONGRAPHREPOSITORY_METHODS = [
   "updateNode",
   "createNodeEvent",
   "listNodeNotifications",
+  "markNodeReady",
+  "claimReadyNode",
+  "updateNodeForDispatchClaim",
+  "markRunCancelled",
+  "cancelRunningRunsForRootTask",
+  "finishRunIfRunning",
+  "cancelUnstartedNode",
+  "resolveInterruptedCancellation",
+  "beginNodeCancellation",
+  "updateNodeForCancellation",
+  "listCancelledSnapshots",
+  "isTeamWorkItemTask",
 ] as const;
 
 /**

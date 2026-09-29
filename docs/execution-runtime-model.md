@@ -374,6 +374,15 @@ The resolved role is applied through the worker-role registry so the child inher
 - tool restrictions
 - verifier-specific or researcher-specific behavior where applicable
 
+Researcher work is limited to local workspace inspection. Shell, browser, computer-use,
+connector, MCP, and other system actions are denied by the read-only contract. Assign
+web or external-service research to a separately authorized task.
+
+The researcher boundary is re-applied at daemon entrypoints and when the executor
+merges or restores task configuration. Turn-only overrides and recovered queued
+messages cannot restore shell, write, or external ACP runtime access. The boundary
+does not depend on an older saved task already having `readOnlyExecution` set.
+
 Extraction-mode guardrails, fanout limits, and depth limits still apply on top of the role contract.
 
 ## Verification Guidance

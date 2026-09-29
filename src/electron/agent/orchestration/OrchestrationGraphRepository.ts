@@ -140,6 +140,27 @@ export interface OrchestrationGraphSnapshot {
   edges: OrchestrationGraphEdge[];
 }
 
+export interface OrchestrationDispatchClaim {
+  id: string;
+  claimedAt: number;
+  ownerPid: number;
+  phase: "claimed" | "identity_persisted" | "unknown";
+  taskId?: string;
+  remoteTaskId?: string;
+  error?: string;
+}
+
+export interface OrchestrationNodeCancellationAttempt {
+  requestId: string;
+  requestedAt: number;
+  dispatchClaimId?: string;
+  ownership: "local" | "remote" | "unknown";
+  outcome: "in_flight" | "acknowledged" | "already_terminal" | "unresolved";
+  resultStatus?: string;
+  error?: string;
+  recoveredAt?: number;
+}
+
 type OrchestrationGraphEdgeInsert = Omit<OrchestrationGraphEdge, "id" | "runId"> & {
   id?: string;
 };
@@ -153,6 +174,281 @@ type OrchestrationGraphEdgeInsert = Omit<OrchestrationGraphEdge, "id" | "runId">
  */
 export class OrchestrationGraphStore {
   constructor(private readonly db: Database.Database) {}
+
+  markNodeReady(nodeId: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE orchestration_graph_nodes
+         SET status = 'ready', updated_at = ?
+         WHERE id = ? AND status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM orchestration_graph_runs r
+             WHERE r.id = orchestration_graph_nodes.run_id AND r.status = 'running'
+           )`,
+      )
+      .run(Date.now(), nodeId);
+    return result.changes === 1;
+  }
+
+  claimReadyNode(
+    nodeId: string,
+    claim: OrchestrationDispatchClaim,
+  ): OrchestrationGraphNode | undefined {
+    const claimTransaction = this.db.transaction(() => {
+      const row = this.db
+        .prepare(
+          `SELECT n.*, r.status AS run_status, r.max_parallel AS run_max_parallel
+           FROM orchestration_graph_nodes n
+           INNER JOIN orchestration_graph_runs r ON r.id = n.run_id
+           WHERE n.id = ?`,
+        )
+        .get(nodeId) as
+        | (NodeRow & { run_status: OrchestrationGraphRun["status"]; run_max_parallel: number })
+        | undefined;
+      if (!row || row.status !== "ready" || row.run_status !== "running") return undefined;
+
+      const activeCount = this.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM orchestration_graph_nodes WHERE run_id = ? AND status = 'running'",
+        )
+        .get(row.run_id) as { count: number };
+      if (activeCount.count >= row.run_max_parallel) return undefined;
+
+      const metadata = safeJsonParse<Record<string, unknown>>(row.metadata, {});
+      const nextMetadata = { ...metadata, dispatchClaim: claim };
+      const now = Date.now();
+      const result = this.db
+        .prepare(
+          `UPDATE orchestration_graph_nodes
+           SET status = 'running', metadata = ?, started_at = ?, summary = ?, updated_at = ?
+           WHERE id = ? AND status = 'ready'
+             AND EXISTS (
+               SELECT 1 FROM orchestration_graph_runs r
+               WHERE r.id = orchestration_graph_nodes.run_id AND r.status = 'running'
+             )
+             AND (
+               SELECT COUNT(*) FROM orchestration_graph_nodes active
+               WHERE active.run_id = orchestration_graph_nodes.run_id AND active.status = 'running'
+             ) < (
+               SELECT max_parallel FROM orchestration_graph_runs
+               WHERE id = orchestration_graph_nodes.run_id
+             )`,
+        )
+        .run(
+          JSON.stringify(nextMetadata),
+          claim.claimedAt,
+          "Dispatch claimed; waiting for a persisted task identity",
+          now,
+          nodeId,
+        );
+      if (result.changes !== 1) return undefined;
+      return this.findNodeById(nodeId);
+    });
+    return claimTransaction.immediate();
+  }
+
+  updateNodeForDispatchClaim(
+    nodeId: string,
+    claimId: string,
+    updates: Partial<
+      Pick<
+        OrchestrationGraphNode,
+        | "status"
+        | "taskId"
+        | "remoteTaskId"
+        | "publicHandle"
+        | "summary"
+        | "output"
+        | "error"
+        | "startedAt"
+        | "completedAt"
+        | "metadata"
+      >
+    >,
+  ): OrchestrationGraphNode | undefined {
+    const updateTransaction = this.db.transaction(() => {
+      const node = this.findNodeById(nodeId);
+      const claim = node?.metadata?.dispatchClaim as OrchestrationDispatchClaim | undefined;
+      if (!node || claim?.id !== claimId) return undefined;
+      return this.updateNode(nodeId, updates);
+    });
+    return updateTransaction.immediate();
+  }
+
+  markRunCancelled(runId: string): OrchestrationGraphRun | undefined {
+    const now = Date.now();
+    this.db
+      .prepare(
+        `UPDATE orchestration_graph_runs
+         SET status = 'cancelled', completed_at = COALESCE(completed_at, ?), updated_at = ?
+         WHERE id = ? AND status = 'running'`,
+      )
+      .run(now, now, runId);
+    return this.findSnapshotByRunId(runId)?.run;
+  }
+
+  cancelRunningRunsForRootTask(rootTaskId: string): string[] {
+    const now = Date.now();
+    const transaction = this.db.transaction(() => {
+      const rows = this.db
+        .prepare(
+          "SELECT id FROM orchestration_graph_runs WHERE root_task_id = ? AND status = 'running'",
+        )
+        .all(rootTaskId) as Array<{ id: string }>;
+      if (rows.length === 0) return [];
+      this.db
+        .prepare(
+          `UPDATE orchestration_graph_runs
+           SET status = 'cancelled', completed_at = COALESCE(completed_at, ?), updated_at = ?
+           WHERE root_task_id = ? AND status = 'running'`,
+        )
+        .run(now, now, rootTaskId);
+      return rows.map((row) => row.id);
+    });
+    return transaction.immediate();
+  }
+
+  finishRunIfRunning(
+    runId: string,
+    status: Extract<OrchestrationGraphRun["status"], "completed" | "failed">,
+  ): OrchestrationGraphRun | undefined {
+    const now = Date.now();
+    const result = this.db
+      .prepare(
+        `UPDATE orchestration_graph_runs
+         SET status = ?, completed_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'running'`,
+      )
+      .run(status, now, now, runId);
+    return result.changes === 1 ? this.findSnapshotByRunId(runId)?.run : undefined;
+  }
+
+  cancelUnstartedNode(nodeId: string, error: string): OrchestrationGraphNode | undefined {
+    const now = Date.now();
+    const transaction = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE orchestration_graph_nodes
+           SET status = 'cancelled', error = ?, summary = ?, completed_at = ?, updated_at = ?
+           WHERE id = ? AND status IN ('pending', 'ready')`,
+        )
+        .run(error, error, now, now, nodeId);
+      return this.findNodeById(nodeId);
+    });
+    return transaction.immediate();
+  }
+
+  resolveInterruptedCancellation(
+    nodeId: string,
+    expectedDispatchClaimId: string | undefined,
+    expectedCancellationRequestId: string | undefined,
+    error: string,
+  ): OrchestrationGraphNode | undefined {
+    const now = Date.now();
+    const transaction = this.db.transaction(() => {
+      const row = this.db
+        .prepare(
+          `SELECT n.*, r.status AS run_status
+           FROM orchestration_graph_nodes n
+           INNER JOIN orchestration_graph_runs r ON r.id = n.run_id
+           WHERE n.id = ?`,
+        )
+        .get(nodeId) as (NodeRow & { run_status: OrchestrationGraphRun["status"] }) | undefined;
+      if (!row || row.run_status !== "cancelled" || row.status !== "running") return undefined;
+
+      const node = rowToNode(row);
+      const metadata = node.metadata || {};
+      const claim = metadata.dispatchClaim as OrchestrationDispatchClaim | undefined;
+      const cancellation = metadata.cancellation as
+        | OrchestrationNodeCancellationAttempt
+        | undefined;
+      if (
+        (claim?.id || undefined) !== expectedDispatchClaimId ||
+        (cancellation?.requestId || undefined) !== expectedCancellationRequestId
+      ) {
+        return undefined;
+      }
+
+      const recoveredCancellation: OrchestrationNodeCancellationAttempt = {
+        requestId: cancellation?.requestId || uuidv4(),
+        requestedAt: cancellation?.requestedAt ?? now,
+        dispatchClaimId: claim?.id,
+        ownership: node.taskId ? "local" : node.remoteTaskId ? "remote" : "unknown",
+        outcome: "unresolved",
+        error,
+        recoveredAt: now,
+      };
+      return this.updateNode(nodeId, {
+        status: "blocked",
+        error,
+        summary: "Blocked because cancellation outcome is unresolved",
+        completedAt: now,
+        metadata: { ...metadata, cancellation: recoveredCancellation },
+      });
+    });
+    return transaction.immediate();
+  }
+
+  beginNodeCancellation(
+    nodeId: string,
+    attempt: OrchestrationNodeCancellationAttempt,
+  ): OrchestrationGraphNode | undefined {
+    const transaction = this.db.transaction(() => {
+      const node = this.findNodeById(nodeId);
+      if (!node) return undefined;
+      const metadata = node.metadata || {};
+      const claim = metadata.dispatchClaim as OrchestrationDispatchClaim | undefined;
+      return this.updateNode(nodeId, {
+        metadata: {
+          ...metadata,
+          cancellation: {
+            ...attempt,
+            dispatchClaimId: claim?.id,
+          },
+        },
+      });
+    });
+    return transaction.immediate();
+  }
+
+  updateNodeForCancellation(
+    nodeId: string,
+    attemptId: string,
+    dispatchClaimId: string | undefined,
+    updates: Partial<
+      Pick<
+        OrchestrationGraphNode,
+        | "status"
+        | "taskId"
+        | "remoteTaskId"
+        | "publicHandle"
+        | "summary"
+        | "output"
+        | "error"
+        | "startedAt"
+        | "completedAt"
+        | "metadata"
+      >
+    >,
+  ): OrchestrationGraphNode | undefined {
+    const transaction = this.db.transaction(() => {
+      const node = this.findNodeById(nodeId);
+      const cancellation = node?.metadata?.cancellation as
+        | OrchestrationNodeCancellationAttempt
+        | undefined;
+      const claim = node?.metadata?.dispatchClaim as OrchestrationDispatchClaim | undefined;
+      if (
+        !node ||
+        cancellation?.requestId !== attemptId ||
+        (claim?.id || undefined) !== dispatchClaimId ||
+        cancellation.dispatchClaimId !== dispatchClaimId
+      ) {
+        return undefined;
+      }
+      return this.updateNode(nodeId, updates);
+    });
+    return transaction.immediate();
+  }
 
   createRun(input: {
     run: Omit<OrchestrationGraphRun, "createdAt" | "updatedAt"> & {
@@ -287,7 +583,7 @@ export class OrchestrationGraphStore {
     edges?: OrchestrationGraphEdgeInsert[];
   }): OrchestrationGraphSnapshot | undefined {
     const existing = this.findSnapshotByRunId(input.runId);
-    if (!existing) return undefined;
+    if (!existing || existing.run.status !== "running") return existing;
     const now = Date.now();
     const nodes: OrchestrationGraphNode[] = input.nodes.map((node, index) => ({
       ...node,
@@ -303,6 +599,10 @@ export class OrchestrationGraphStore {
     }));
 
     const tx = this.db.transaction(() => {
+      const run = this.db
+        .prepare("SELECT status FROM orchestration_graph_runs WHERE id = ?")
+        .get(input.runId) as { status: OrchestrationGraphRun["status"] } | undefined;
+      if (!run || run.status !== "running") return;
       const insertNode = this.db.prepare(
         `INSERT INTO orchestration_graph_nodes (
           id, run_id, node_key, title, prompt, kind, status, dispatch_target, worker_role,
@@ -363,7 +663,7 @@ export class OrchestrationGraphStore {
         .run(now, input.runId);
     });
 
-    tx();
+    tx.immediate();
     return this.findSnapshotByRunId(input.runId);
   }
 
@@ -409,6 +709,23 @@ export class OrchestrationGraphStore {
       .filter((value): value is OrchestrationGraphSnapshot => Boolean(value));
   }
 
+  listCancelledSnapshots(): OrchestrationGraphSnapshot[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.* FROM orchestration_graph_runs r
+         WHERE r.status = 'cancelled'
+           AND EXISTS (
+             SELECT 1 FROM orchestration_graph_nodes n
+             WHERE n.run_id = r.id AND n.status IN ('pending', 'ready', 'running')
+           )
+         ORDER BY r.updated_at DESC`,
+      )
+      .all() as RunRow[];
+    return rows
+      .map((row) => this.findSnapshotByRunId(row.id))
+      .filter((value): value is OrchestrationGraphSnapshot => Boolean(value));
+  }
+
   listNodesByRun(runId: string): OrchestrationGraphNode[] {
     const rows = this.db
       .prepare(
@@ -446,6 +763,23 @@ export class OrchestrationGraphStore {
       .prepare("SELECT * FROM orchestration_graph_nodes WHERE id = ?")
       .get(nodeId) as NodeRow | undefined;
     return row ? rowToNode(row) : undefined;
+  }
+
+  /**
+   * Whether the task was dispatched by the team orchestrator as a team work
+   * item lane. `team_work_item` nodes are only created by AgentTeamOrchestrator
+   * and `task_id` is written by the graph engine on dispatch, so neither can be
+   * set by a renderer/control-plane caller. Uses idx_orchestration_graph_nodes_task.
+   */
+  isTeamWorkItemTask(taskId: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM orchestration_graph_nodes
+         WHERE task_id = ? AND kind = 'team_work_item' AND team_item_id IS NOT NULL
+         LIMIT 1`,
+      )
+      .get(taskId);
+    return Boolean(row);
   }
 
   findNodeByTeamItemId(teamItemId: string): OrchestrationGraphNode | undefined {

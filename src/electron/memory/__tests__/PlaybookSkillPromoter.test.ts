@@ -28,35 +28,21 @@ vi.mock("../../agent/skills/SkillProposalService", () => ({
 let db: Database.Database;
 let store: PlaybookEvidenceStore;
 
-function addSuccess(
-  workspaceId: string,
-  taskId: string,
-  title: string,
-  tools: string[],
-  overrides: {
-    executionKey?: string;
-    grade?: "observed_runtime_success" | "contract_verified";
-  } = {},
-) {
-  const content = `[PLAYBOOK] Task succeeded: "${title}" (${taskId})`;
-  const memoryId = `mem-${taskId}-${overrides.executionKey || ""}`;
+function addSuccess(workspaceId: string, taskId: string, title: string, tools: string[]) {
+  const content = [
+    `[PLAYBOOK] Task succeeded: "${title}"`,
+    `Approach: approach ${title}`,
+    `Key tools: ${tools.join(", ")}`,
+    `Original request: ${title} (${taskId})`,
+  ].join("\n");
+  const memoryId = `mem-${taskId}`;
   db.prepare("INSERT INTO memories (id, content) VALUES (?, ?)").run(memoryId, content);
   return store.record({
     workspaceId,
     taskId,
-    executionKey: overrides.executionKey || `task:${taskId}`,
-    turnId: null,
-    terminalEventId: null,
     sourceMemoryId: memoryId,
     sourceContentHash: hashMemoryContent(content),
-    outcome: "success",
-    grade: overrides.grade || "observed_runtime_success",
     patternKey: `tools:${[...tools].sort().join(",")}`,
-    title,
-    approach: `approach ${title}`,
-    requestExcerpt: title,
-    toolsUsed: tools,
-    sourceRefs: [`task:${taskId}`, `memory:${memoryId}`],
   }).record;
 }
 
@@ -69,7 +55,9 @@ describe("PlaybookSkillPromoter", () => {
     vi.clearAllMocks();
     mockCreate.mockResolvedValue({ proposal: { id: "sp_test_123", status: "pending" } });
     db = new Database(":memory:");
-    db.exec("CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT)");
+    db.exec(
+      "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT, is_private INTEGER NOT NULL DEFAULT 0)",
+    );
     store = new PlaybookEvidenceStore(db);
     PlaybookService.setEvidenceStoreForTesting(PlaybookEvidenceLedger.open(db));
   });
@@ -94,7 +82,10 @@ describe("PlaybookSkillPromoter", () => {
       expect(candidate.pattern).toBe("Generate weekly report");
       expect(candidate.toolsUsed).toEqual(expect.arrayContaining(["web_search", "write_file"]));
       expect(candidate.sourceEvidence).toHaveLength(3);
-      expect(candidate.sourceEvidence[0]).toMatch(/\(observed runtime success\); sources: task:/);
+      expect(candidate.sourceEvidence[0]).toMatch(
+        /^Observed successful execution of task [abc] \(memory mem-[abc]\)$/,
+      );
+      expect(candidate.requestExcerpts).toHaveLength(3);
     });
 
     it("does not count unlinked successes, even with similar titles", async () => {
@@ -131,9 +122,7 @@ describe("PlaybookSkillPromoter", () => {
   describe("maybePropose", () => {
     it("proposes from evidence with observed-execution wording and provenance", async () => {
       const records = ["a", "b", "c"].map((id) =>
-        addSuccess("ws_new_1", id, "Run tests", ["shell"], {
-          grade: id === "b" ? "contract_verified" : undefined,
-        }),
+        addSuccess("ws_new_1", id, "Run tests", ["shell"]),
       );
       chain(records.map((record) => record.id));
 
@@ -143,7 +132,6 @@ describe("PlaybookSkillPromoter", () => {
       expect(result.proposalId).toBe("sp_test_123");
       const createArg = mockCreate.mock.calls[0][0];
       expect(createArg.problemStatement).toContain("3 observed successful executions");
-      expect(createArg.evidence.join("\n")).toContain("contract verified");
       expect(createArg.provenance).toEqual({
         source: "playbook_evidence",
         evidenceIds: expect.arrayContaining(records.map((record) => record.id)),

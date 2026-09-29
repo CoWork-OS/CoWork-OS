@@ -27,11 +27,11 @@ CoWork OS is a free, open-source, GUI-first, CLI-capable local AI super app, eve
 - **Mixture of Agents LLM layer**: the provider factory can expose MoA presets as virtual model routes. A preset resolves tool-free advisor slots first, appends bounded advisory context as a separate user message, and then runs the aggregator slot with the original tools and tool choice. Slot providers can use their own fallback chains, while whole-preset MoA fallback remains explicit. See [Mixture of Agents](mixture-of-agents.md).
 - **Additive skill runtime**: canonical task text remains immutable for skill routing purposes, while `use_skill` attaches structured `SkillApplication` context plus scoped runtime directives instead of rewriting the task prompt
 - **Delegation graph**: delegated work now runs through a normalized orchestration graph engine so spawned agents, `/multitask` lane runs, team work, workflow phases, and ACP tasks share one run/node/event model
-- **Worker roles and verification**: built-in worker roles (`researcher`, `implementer`, `verifier`, `synthesizer`) carry hard tool scopes, delegated work receives a structured brief instead of raw prompt passthrough, and verification runs use both early nudges and a dedicated verdict/report contract
+- **Worker roles and verification**: built-in worker roles (`researcher`, `implementer`, `verifier`, `synthesizer`) carry hard tool scopes, delegated work receives a structured brief instead of raw prompt passthrough, and verification runs use both early nudges and a dedicated verdict/report contract. Researchers are restricted to local read-only inspection; saved-task starts, resumes and follow-up overrides reapply the boundary before native/external runtime selection. Web and external-service research require a separately authorized task. See [Execution runtime model](execution-runtime-model.md).
 - **Adaptive model routing**: the executor can switch into a workflow-pipeline path where decomposed phases run as child tasks with per-phase model overrides or capability-based auto-selection
 - **Jev structured-decision and harness layer**: an optional typed TypeSafe/OpenRouter route makes bounded model-profile, task-strategy, team/lane, browser-action, loop-control, context-retention, eligible skill/tool, output-guardrail, and semantic tool-review decisions. Deterministic eligibility, access profiles, hard policy, Numbat security, approvals, execution, and verification remain authoritative; Jev calls and provider-reported usage are persisted separately in `jev_call_events`. See [Jev Decision Support and Harness](jev.md).
 - **Federated agent orchestration**: ACP registry + remote invocation let orchestrators target local roles or remote A2A-compatible agents under shared approval and policy controls
-- **Local persistence**: SQLite, local files, curated hot-memory entries, archive memory rows and summaries, transcript spans/checkpoints with structured summaries + verbatim evidence packets, Dreaming runs/candidates for reviewable memory curation, knowledge graph state including temporal edge validity, run records, structured workflow versions/runs/steps/event inbox/event samples/starter cursors, orchestration graph nodes/events, ACP agent registrations and ACP task state, Playbook evidence and reinforcement links (`playbook_evidence`, `playbook_evidence_links`), Pulse consent windows/outbox/sent-day receipts/delivery lease, usage telemetry, feedback events, `session_runtime_v2` task snapshots, managed-agent tables (`managed_agents`, `managed_agent_versions`, `managed_environments`, `managed_sessions`, `managed_session_events`), `.cowork/memory/topics`, and workspace-kit contracts in `.cowork/`
+- **Local persistence**: SQLite, local files, curated hot-memory entries, archive memory rows and summaries, transcript spans/checkpoints with structured summaries + verbatim evidence packets, Dreaming runs/candidates for reviewable memory curation, knowledge graph state including temporal edge validity, run records, structured workflow versions/runs/steps/event inbox/event samples/starter cursors, orchestration graph nodes/events, ACP agent registrations and ACP task state, Playbook evidence and reinforcement links (`playbook_success_evidence`, `playbook_success_links`), Pulse consent windows/outbox/sent-day receipts, usage telemetry, feedback events, `session_runtime_v2` task snapshots, managed-agent tables (`managed_agents`, `managed_agent_versions`, `managed_environments`, `managed_sessions`, `managed_session_events`), `.cowork/memory/topics`, and workspace-kit contracts in `.cowork/`
 - **Artifact preview layer**: file preview IPC resolves workspace-contained outputs, extracts document content, and enriches artifacts with renderer-ready previews. Spreadsheet previews are extracted in Electron into shared sheet structures (`spreadsheetPreview`) for sheet names, used bounds, display values, formulas, styles, and column widths; workbook formats use `exceljs`, while CSV/TSV use a delimited parser and save back with the original delimiter. Native/app-owned spreadsheet formats such as Numbers and Google Sheets shortcuts are recognized as artifacts but open externally. Word-style document previews are extracted into `documentPreview`; DOCX-like files use Mammoth plus editable block metadata, RTF and ODT/OTT use best-effort local text extraction, legacy DOC attempts local converter fallback, and Pages is recognized for external handling. Web page previews are extracted into `webPreview`; HTML/HTM files and built React output entrypoints return sandbox-ready iframe HTML with local assets inlined where possible, while React-style projects without build output return a structured preview-unavailable state. Existing `content` and `htmlContent` fallbacks remain for compatibility. PPTX previews use `presentationPreview` with fast text/notes extraction, cached `imageUrl` slide PNGs, background full rendering through Codex `@oai/artifact-tool`, local `soffice` + `pdftoppm` fallback, in-flight render dedupe, and text-only fallback when image rendering is unavailable.
 - **Browser V2 workbench layer**: interactive browser-use tools target a renderer-owned Electron webview by default, with main-process automation owned by `BrowserSessionManager` and routed through Electron `webContents.debugger` / CDP. The main process maps `{ taskId, sessionId }` to the webview's `webContentsId`; browser tools route navigation, accessibility snapshots, ref-aware click/fill/type/read/hover/drag/upload actions, dialogs, downloads, diagnostics, emulation, tracing, and screenshots to that visible session. The renderer opens the resizable right-sidebar/fullscreen Browser Workbench on demand and carries status, screenshot capture, annotation handoff, diagnostics UI, snapshot overlay state, cursor events, and viewport events so users can see agent movement and responsive breakpoint changes over the page. The embedded session uses a persistent per-workspace partition isolated from system Chrome; explicit forced-headless, profile, browser-channel, Chrome DevTools attach, and Browser Use Cloud provider options keep Playwright/local, external-CDP, and remote stealth-browser fallback paths available when explicitly needed. Real-browser profile control requires explicit consent, and Browser Use Cloud is explicit opt-in for public HTTP(S) targets with private/local target blocking and remote-session stop handling. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
 - **Permission engine**: access profiles are resolved first and then layered tool approval decisions combine workspace capabilities, explicit rules, hard guardrails, session grants, workspace-local policy files, legacy modes, and mode defaults including `dangerous_only`, with workspace rule browsing/removal in Settings. New tasks derive command-tool availability from the profile rather than a separate shell toggle.
@@ -40,17 +40,16 @@ CoWork OS is a free, open-source, GUI-first, CLI-capable local AI super app, eve
 - **Lifecycle reconciliation**: completion persists terminal task state before emitting terminal events, and resume paths re-derive canonical persisted status before writing `executing`, so late approval or follow-up resumes cannot reopen completed tasks
 - **Completion hardening**: verified-mode evidence bundles, step-intent alignment/decomposition heuristics, read-only entropy sweeps, and verifier verdict/report projection make completion checks more explicit without mutating the task's final result
 - **Outcome classification**: ACP (acpx) prompt results pass through one classifier (`src/electron/agent/runtime/acp-prompt-outcome.ts`) shared by initial prompts and follow-ups. A stop reason is not success: `end_turn` completes only with a final response or a reported file that exists in the workspace, limits become budget-exhausted partial success, refusals and missing/unknown reasons fail, and externally reported cancellation is persisted through the daemon's shared cancellation cleanup. A local cancellation always wins, and ACP completion never records learning success
-- **Scheduled-run accounting**: each cron job keeps versioned per-category outcome counts (`src/shared/cron-outcomes.ts`, `src/electron/cron/outcome-counts.ts`) recorded once per run key persisted with the run lease. Run success is `ok / classified attempts`; partial, needs-attention, failed, cancelled, skipped, and unknown-outcome runs are reported separately, follow-ups are classified from the thread's durable result, and legacy aggregates keep their old semantics for existing callers
-- **Learning evidence**: Playbook promotion and success context read the `playbook_evidence` ledger (`src/electron/memory/PlaybookEvidenceStore.ts`) instead of memory text. Only terminal-ok executions with a durably recorded memory create success evidence; one row per independent execution; reinforcement is a durable link that requires a deterministic relevance gate plus a matching approach key; corrections and deleted/edited source memories invalidate and scrub dependent evidence. Generated Playbook memories are excluded from generic prompt recall and archive synthesis, and skill proposals carry evidence provenance (legacy auto-proposals are `unverified` and cannot be approved until revalidated)
+- **Scheduled-run accounting**: each cron job keeps versioned per-category outcome counts (`src/shared/cron-outcomes.ts`, `src/electron/cron/outcome-counts.ts`) recorded together with each run's history entry. Run success is `ok / classified attempts`; partial, needs-attention, failed, cancelled, skipped, and unknown-outcome runs are reported separately, follow-ups are classified from the thread's durable result, and legacy aggregates keep their old semantics for existing callers
+- **Learning evidence**: Playbook promotion and success context read the `playbook_success_evidence` ledger (`src/electron/memory/PlaybookEvidenceStore.ts`) instead of searching memory text. Only terminal-ok executions with a durably recorded memory create success evidence; one row per task; the ledger holds no text, so readable fields come from the source memory and private or suppressed memories are never served; reinforcement is a durable link that requires a deterministic relevance gate plus a matching approach key; corrections and deleted/edited source memories invalidate dependent evidence. Generated Playbook memories are excluded from generic prompt recall and archive synthesis, and skill proposals carry evidence provenance (legacy auto-proposals are `unverified` and cannot be approved until revalidated)
 
 ## Profiles and Isolation
 
 ### CoWork Pulse analytics boundary
 
 `PulseService` reads existing local task/event/LLM tables and reduces them to daily counters. It
-stores consent windows, an identity-scoped outbox, acknowledged-day receipts
-(`pulse_sent_days`) and a cross-process delivery lease (`pulse_delivery_lease`) locally; the
-random profile ID/token, consent revision, identity start/endpoint and any pending deletion live
+stores consent windows, an identity-scoped outbox and acknowledged-day receipts
+(`pulse_sent_days`) locally; the random profile ID/token, consent revision, identity start/endpoint and any pending deletion live
 in encrypted settings. One lifecycle-owned instance serves the desktop timer and Settings IPC; the
 daemon keeps its own and settles it before closing the database; CLI commands create a
 short-lived one. Shared types, Electron IPC, onboarding, and the Pulse settings panel expose
@@ -59,11 +58,9 @@ outcomes, and deletion-pending retry.
 
 Every user decision runs in one short IMMEDIATE SQLite transaction over the encrypted settings
 record, consent windows and outbox, and increments the revision; no transaction is held across
-HTTP. Each delivery stage re-checks revision, identity, endpoint and lease before sending and
-before saving, so late responses cannot reverse a decision. This requires the secure-settings
-store to write through the same connection as the service, which is checked before every
-transaction; a mismatch or a refused write (keychain key changed) fails the operation instead of
-reporting success. Remote deletion is reported as the collector's acknowledgement; it cannot
+HTTP. A delivery re-checks revision, identity and endpoint before saving any result, so late
+responses cannot reverse a decision. A refused settings write (keychain key changed) fails the
+operation instead of reporting success. Remote deletion is reported as the collector's acknowledgement; it cannot
 retract a request the server already accepted.
 
 HTTPS enrollment/daily requests reach the separate `services/pulse-worker` deployment at
@@ -71,11 +68,10 @@ HTTPS enrollment/daily requests reach the separate `services/pulse-worker` deplo
 aggregates in D1. A cron prunes old rows; a bearer-protected API serves aggregate reports.
 The desktop updater is separate from Pulse. Manual checks (Settings) go directly to GitHub with
 an 8-second total deadline; background checks (startup) may first ask the identifier-free CoWork
-version endpoint for up to 2 seconds. Every `UpdateInfo` carries provenance (live, cached, or no
-published release) with check and retrieval times; `update-check-cache.json` is only an offline
-fallback, cached answers cannot start an install, same-intent checks are coalesced, and the
-newest check owns the install target. Operator OTLP export and local Usage Insights remain
-distinct data flows.
+version endpoint for up to 2 seconds. Every `UpdateInfo` says whether it is a live answer or
+no published release, with its check time. Release metadata is not cached: a failed check is an
+error, same-intent checks are coalesced, and only a manual check sets the install target.
+Operator OTLP export and local Usage Insights remain distinct data flows.
 
 See [CoWork Pulse](cowork-pulse.md) for contracts and delivery limitations, and the
 [collector runbook](../services/pulse-worker/README.md) for deployment and recovery. Server
@@ -222,6 +218,16 @@ counterpart to the Everything Workbench and Browser Workbench: direct CLI work n
 leave CoWork OS. Product behavior and QA guidance are documented in [Terminal Tabs](terminal-tabs.md)
 and [Access Profiles](access-profiles.md#network-and-command-behavior).
 
+## File edit integrity
+
+`edit_file` holds the target descriptor, revalidates authority and rebases exact replacements onto
+current content before writing. Within a user-data profile, device/inode keyed recovery records
+coordinate cooperating processes, including hard-link aliases. A private journal retains before
+and after bytes for failed or interrupted writes. Reconciliation never overwrites ambiguous current
+content automatically. This preserves existing inode metadata but does not provide arbitrary-writer
+compare-and-swap or power-loss atomicity. Limits and recovery behavior are documented in
+[File edit integrity and recovery](file-edit-integrity.md).
+
 ## CoWork CLI
 
 The standalone `cowork` CLI is implemented separately from in-app terminal tabs:
@@ -254,6 +260,18 @@ Chronicle is implemented as a dedicated desktop screen-context subsystem under `
 - renderer surfaces for Chronicle now live in Memory Hub, Memory settings, task-creation toggles, and tray/menu-bar controls
 
 Chronicle shares the Screen Recording prerequisite with computer use, but it is a different lane: local screen understanding rather than direct GUI control. Product-level behavior, testing, and privacy boundaries are documented in [Chronicle](chronicle.md).
+
+## Evaluation battery
+
+`scripts/qa/run_battery.cjs` defaults to synthetic fixtures in a disposable profile and workspace.
+Its authenticated local fixture service exercises task lifecycle, bounded cancellation, explicit
+approval scopes and independent artifact parsing. These results are labeled as fixture evidence.
+Explicit live mode starts an owned Node daemon in a fresh profile and uses its local Control Plane;
+legacy hook/database configuration is rejected by CI rather than counted as live coverage.
+Artifact graders run in bounded subprocesses, and unresolved cleanup retains the profile for
+inspection. This is application-profile isolation, not an operating-system sandbox. The optional
+scripted-provider smoke exercises native file tools without measuring model quality. Commands,
+prerequisites and rendering limits are documented in [Disposable evaluation battery](harness-eval-battery.md).
 
 ## Database Ownership
 

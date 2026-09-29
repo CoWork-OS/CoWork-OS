@@ -38,7 +38,6 @@ import type {
   AudioSummaryConfig,
   AudioSummaryResult,
   GatewayContextType,
-  InputRequestResponse,
   UpdateManagedAgentRoutineRequest,
   ManagedAgentAuditEntry,
   ManagedAgentChannelTarget,
@@ -68,11 +67,16 @@ import type {
   ManagedSessionCreateInput,
   ManagedSessionEvent,
   ManagedSessionInputContent,
+  ManagedSessionRequirementCorrectionEvent,
+  ManagedSessionSendEvent,
   ManagedSessionStatus,
+  RequirementEvidenceManifest,
   Task,
   TaskEvent,
 } from "../../shared/types";
 import { deriveCanonicalTaskStatus, isTerminalTaskStatus } from "../../shared/task-status";
+import { ManagedSessionRequirementCorrectionEventSchema } from "../../shared/managed-session-schemas";
+import { ManagedSessionSuccessCriteriaSchema } from "../../shared/managed-session-schemas";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
 import type { AgentDaemon } from "../agent/daemon";
 import type { LLMTool } from "../agent/llm/types";
@@ -1834,6 +1838,14 @@ export class ManagedSessionService {
   }
 
   async createSession(input: ManagedSessionCreateInput): Promise<ManagedSession> {
+    const criteriaResult =
+      input.successCriteria === undefined
+        ? undefined
+        : ManagedSessionSuccessCriteriaSchema.safeParse(input.successCriteria);
+    if (criteriaResult && !criteriaResult.success) {
+      throw new Error("Invalid managed session success criteria");
+    }
+    const successCriteria = criteriaResult?.success ? criteriaResult.data : undefined;
     const agent = await this.managedAgentRepo.findById(input.agentId);
     if (!agent) throw new Error(`Managed agent not found: ${input.agentId}`);
     if (agent.status === "suspended") {
@@ -1888,6 +1900,7 @@ export class ManagedSessionService {
         source: backingTaskSource,
         workspaceId: environment.config.workspaceId,
         agentConfig: baseAgentConfig,
+        ...(successCriteria ? { successCriteria } : {}),
       });
       this.ensureCanonicalTask(task);
 
@@ -1962,6 +1975,7 @@ export class ManagedSessionService {
       source: backingTaskSource,
       workspaceId: environment.config.workspaceId,
       agentConfig: baseAgentConfig,
+      ...(successCriteria ? { successCriteria } : {}),
     });
     this.ensureCanonicalTask(task);
 
@@ -2029,6 +2043,16 @@ export class ManagedSessionService {
 
   async getSession(sessionId: string): Promise<ManagedSession | undefined> {
     return this.refreshSession(sessionId);
+  }
+
+  async getSessionRequirementEvidenceManifest(
+    sessionId: string,
+  ): Promise<RequirementEvidenceManifest | undefined> {
+    const session = await this.managedSessionRepo.findById(sessionId);
+    if (!session?.backingTaskId) return undefined;
+    return this.agentDaemon
+      .getWorkSessionContractService?.()
+      .getRequirementEvidenceManifest(session.backingTaskId);
   }
 
   async listSessionEvents(sessionId: string, limit = 500): Promise<ManagedSessionEvent[]> {
@@ -2173,18 +2197,7 @@ export class ManagedSessionService {
 
   async sendEvent(
     sessionId: string,
-    event:
-      | {
-          type: "user.message";
-          content: ManagedSessionInputContent[];
-          expectedTurnId?: string;
-        }
-      | {
-          type: "input.received";
-          requestId: string;
-          answers?: InputRequestResponse["answers"];
-          status?: InputRequestResponse["status"];
-        },
+    event: ManagedSessionSendEvent,
   ): Promise<ManagedSession | undefined> {
     const session = await this.managedSessionRepo.findById(sessionId);
     if (!session?.backingTaskId) return undefined;
@@ -2192,6 +2205,45 @@ export class ManagedSessionService {
       session.workspaceId,
       event.type === "input.received" ? "canAnswerApprovals" : "canRunAgents",
     );
+
+    if (event.type === "requirement.corrected") {
+      const parsed = ManagedSessionRequirementCorrectionEventSchema.safeParse(event);
+      if (!parsed.success) throw new Error("Invalid managed session requirement correction event");
+      const correction: ManagedSessionRequirementCorrectionEvent = parsed.data;
+      const contractService = this.agentDaemon.getWorkSessionContractService?.();
+      if (!contractService) {
+        throw new Error("Work session contract service is not available");
+      }
+      const eventId = `requirement-correction:${createHash("sha256")
+        .update(`${session.id}:${correction.idempotencyKey}`)
+        .digest("hex")}`;
+      // The contract lives in the host's work-session store and the event log in the
+      // services domain (DB6), so no transaction spans both. Both writes are idempotent
+      // under the deterministic event id: correct the contract first, so a rejected
+      // correction leaves no event, then append the event. If the append fails after the
+      // correction, retrying the same event records it without correcting twice.
+      const updated = contractService.recordUserRequirementCorrection(session.backingTaskId!, {
+        requirementId: correction.requirementId,
+        statement: correction.statement,
+        criterion: correction.criterion,
+        sourceEventId: eventId,
+        idempotencyKey: correction.idempotencyKey,
+      });
+      if (!updated) throw new Error("No outcome contract is available for this session");
+      await this.managedSessionEventRepo.create({
+        id: eventId,
+        sessionId,
+        timestamp: Date.now(),
+        type: correction.type,
+        payload: {
+          requirementId: correction.requirementId,
+          statement: correction.statement,
+          criterion: correction.criterion,
+          idempotencyKey: correction.idempotencyKey,
+        },
+      });
+      return this.refreshSession(sessionId);
+    }
 
     if (event.type === "user.message") {
       if (session.backingTeamRunId) {

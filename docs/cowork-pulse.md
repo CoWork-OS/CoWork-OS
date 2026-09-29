@@ -30,15 +30,14 @@ cowork telemetry delete --yes
 Opening Settings or running `show` never creates an outbox row. Pulse keeps **one daily aggregate
 record** per fully consented UTC day; failed or unconfirmed requests may be retried with the same
 record and package ID, and the collector keeps the first row. This is idempotent delivery, not
-exactly-once networking. `send` reports `sent`, `busy`, `already_sent`, `no_eligible_day`,
+exactly-once networking. `send` reports `sent`, `already_sent`, `no_eligible_day`,
 `cancelled_by_state_change`, or `error`.
 
 The separate `/v1/latest-version` update request is identifier-free. It includes only version,
 platform, architecture, and surface, and is used only by **automatic** (startup) checks, with a
 2-second limit before falling back to GitHub. Checking manually in Settings goes directly to
 GitHub. It is suppressed in CI and tests and is reported as **Daily Update Checks**, never as
-unique users. The client keeps no request cache; the last release it retrieved is kept only as an
-offline fallback and is labeled with its retrieval time.
+unique users. The client keeps no release cache; a failed check is reported as an error.
 
 Example request shape:
 
@@ -103,11 +102,9 @@ stores, exports, or exposes that IP, and there is no IP column in D1.
 
 Local `SecureSettingsRepository` category `pulse` encrypts the UUID, deletion token, consent,
 revision, identity start and endpoint, any pending deletion target, and delivery status.
-`pulse_consent_windows`, `pulse_outbox`, `pulse_sent_days` (acknowledged package IDs and days)
-and `pulse_delivery_lease` (which process is delivering) are ordinary tables in the profile's
-SQLite database, not whole-file encrypted storage. The outbox contains the UUID and aggregate
-payload but not the deletion token. `update-check-cache.json` holds the last retrieved release
-metadata with its retrieval time and source, not task content.
+`pulse_consent_windows`, `pulse_outbox` and `pulse_sent_days` (acknowledged package IDs and days)
+are ordinary tables in the profile's SQLite database, not whole-file encrypted storage. The outbox contains the UUID and aggregate
+payload but not the deletion token.
 
 D1 stores an HMAC of the profile UUID, a SHA-256 deletion-token hash, consent version, daily
 aggregates, package IDs, first-active/value dates, and server receipt/update timestamps. The
@@ -171,13 +168,12 @@ event currently measures how often consent was offered or declined.
   more than a day. After upgrading from a build without revisions, eligibility for the existing
   identity starts conservatively at upgrade time.
 - The encrypted settings record, consent windows and outbox are changed in one SQLite
-  transaction, so the settings store must use the same connection as the Pulse service. This is
-  checked before every transaction; if it ever differs, decisions and sends fail with
-  `settings_connection_mismatch` and nothing is changed.
+  transaction on the profile database connection.
 - Desktop timer and Settings share one service instance. Concurrent flushes in one process share
-  one attempt; across processes sharing a profile, a 30-second delivery lease allows one sender
-  and the other reports `busy`. The lease and the captured revision are re-checked before each
-  network stage and before any result is saved; an expired owner cannot save or proceed.
+  one attempt. Two processes sharing a profile may both send the same queued day; they submit
+  identical bytes, the collector keeps the first row, and one receipt is recorded. The captured
+  revision and identity are re-checked before any result is saved, so a decision made in either
+  process discards a late result.
 - Each flush queues the previous-day package if it is eligible and not yet acknowledged, then
   sends the oldest queued package. Requests time out after 10 seconds. The queued bytes are
   immutable, so a retry resubmits the identical package. An acknowledged upload records a
@@ -194,9 +190,9 @@ event currently measures how often consent was offered or declined.
   task filter used for task counts. Tool classification is heuristic and uses closed categories.
 - Update discovery skips the CoWork endpoint in CI/tests. Manual checks use GitHub with an
   8-second total deadline; automatic checks allow the CoWork endpoint 2 seconds, then GitHub
-  8 seconds. Offline results are shown as cached with their retrieval time and cannot start an
-  install. The Pulse aggregate service itself has no CI/test guard; keep test profiles opted out
-  or use a local collector.
+  8 seconds. A failed check is reported as an error, never as an earlier answer. The Pulse
+  aggregate service itself has no CI/test guard; keep test profiles opted out or use a local
+  collector.
 - `COWORK_PULSE_ENDPOINT` overrides the destination for identities created while it is set, not
   the updater URL. An identity stays pinned to the endpoint it was created with, so changing the
   override later never redirects its deletion token. Use only trusted collectors and disposable

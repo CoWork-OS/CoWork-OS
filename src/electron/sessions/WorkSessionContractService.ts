@@ -5,7 +5,7 @@ import type {
   ConstraintLedgerEntry,
   EvidenceManifestEntry,
   OutcomeContract,
-  OutcomeContractRequirement,
+  RequirementEvidenceManifest,
   Task,
   TaskEvent,
   WaitState,
@@ -22,6 +22,7 @@ import {
   ApprovalStore,
   InputRequestStore,
   TaskStore,
+  WorkspaceStore,
 } from "../database/repositories";
 import {
   WorkSessionContractRepository,
@@ -32,6 +33,7 @@ import {
   type WaitStateInput,
 } from "../database/WorkSessionContractRepository";
 import { WorkSessionProtocolService } from "./WorkSessionProtocolService";
+import { WorkspaceArtifactEvidenceInspector } from "./WorkspaceArtifactEvidenceInspector";
 
 const TERMINAL_TASK_STATUSES = new Set<Task["status"]>(["completed", "failed", "cancelled"]);
 const DURABLE_BLOCKING_EVENT_KINDS: Partial<Record<string, WaitStateKind>> = {
@@ -117,8 +119,11 @@ function waitReason(type: string, payload: Record<string, unknown>): string {
 }
 
 function taskOutcome(
-  task: Pick<Task, "status" | "terminalStatus" | "verificationVerdict">,
+  task: Pick<Task, "status" | "terminalStatus" | "verificationVerdict" | "failureClass">,
 ): "complete" | "partial" | "failed" | undefined {
+  if (task.verificationVerdict === "FAIL" && task.failureClass === "required_verification") {
+    return "failed";
+  }
   if (task.status === "completed") {
     return task.terminalStatus === "partial_success" || task.verificationVerdict === "PARTIAL"
       ? "partial"
@@ -129,7 +134,7 @@ function taskOutcome(
 }
 
 function childStatusForTask(
-  task: Pick<Task, "status" | "terminalStatus" | "verificationVerdict">,
+  task: Pick<Task, "status" | "terminalStatus" | "verificationVerdict" | "failureClass">,
 ): "pending" | "running" | "completed" | "partial" | "failed" | "cancelled" {
   if (task.status === "cancelled") return "cancelled";
   if (taskOutcome(task) === "partial") return "partial";
@@ -167,6 +172,14 @@ export interface WorkSessionTaskTerminalResult {
   childAggregate?: WorkSessionChildAggregate;
 }
 
+export interface UserRequirementCorrection {
+  requirementId: string;
+  statement: string;
+  criterion: { type: "file_exists"; targetPath: string } | { type: "unsupported" };
+  sourceEventId?: string;
+  idempotencyKey: string;
+}
+
 export class WorkSessionContractService {
   private readonly repository: WorkSessionContractRepository;
   private readonly protocol: WorkSessionProtocolService;
@@ -174,10 +187,13 @@ export class WorkSessionContractService {
   private readonly artifactRepo: ArtifactStore;
   private readonly approvalRepo: ApprovalStore;
   private readonly inputRequestRepo: InputRequestStore;
+  private readonly workspaceRepo: WorkspaceStore;
+  private readonly artifactEvidenceInspector: WorkspaceArtifactEvidenceInspector;
 
   constructor(
     private readonly db: Database.Database,
     protocol?: WorkSessionProtocolService,
+    artifactEvidenceInspector?: WorkspaceArtifactEvidenceInspector,
   ) {
     this.repository = new WorkSessionContractRepository(db);
     this.protocol = protocol || new WorkSessionProtocolService(db);
@@ -185,6 +201,9 @@ export class WorkSessionContractService {
     this.artifactRepo = new ArtifactStore(db);
     this.approvalRepo = new ApprovalStore(db);
     this.inputRequestRepo = new InputRequestStore(db);
+    this.workspaceRepo = new WorkspaceStore(db);
+    this.artifactEvidenceInspector =
+      artifactEvidenceInspector || new WorkspaceArtifactEvidenceInspector();
   }
 
   getRepository(): WorkSessionContractRepository {
@@ -202,6 +221,7 @@ export class WorkSessionContractService {
       | "workspaceId"
       | "sessionId"
       | "status"
+      | "terminalStatus"
       | "prompt"
       | "successCriteria"
       | "parentTaskId"
@@ -238,6 +258,9 @@ export class WorkSessionContractService {
     }
     this.seedTaskConstraints(task, session);
     this.reconcilePersistedWaits(task.id, session.id);
+    if (contract) {
+      contract = this.reconcileOutcomeContract(task as Task, session.id, contract);
+    }
     return {
       session,
       contract,
@@ -252,7 +275,158 @@ export class WorkSessionContractService {
   }
 
   getForSession(sessionId: string): WorkSessionContractAggregate {
+    const current = this.repository.findOutcomeContract(sessionId);
+    const task = current?.taskId ? this.taskRepo.findById(current.taskId) : undefined;
+    if (task) this.ensureForTask(task);
     return this.repository.getContractAggregate(sessionId);
+  }
+
+  /** Refresh physical proof and return only evidence linked to active requirements. */
+  getRequirementEvidenceManifest(taskId: string): RequirementEvidenceManifest | undefined {
+    const result = this.getForTask(taskId);
+    const contract = result?.contract;
+    if (!contract) return undefined;
+    const ids = contract.requirements.flatMap((requirement) => requirement.evidenceIds || []);
+    const evidence = this.repository.listEvidenceByIds(contract.sessionId, ids);
+    const evidenceById = new Map(evidence.map((entry) => [entry.id, entry]));
+    const capturedAt = Date.now();
+    return {
+      contractId: contract.id,
+      contractVersion: contract.version,
+      capturedAt,
+      requirements: contract.requirements.map((requirement) => ({
+        requirementId: requirement.id,
+        description: requirement.description,
+        required: requirement.required,
+        status: requirement.status,
+        ...(requirement.verifier ? { verifier: requirement.verifier } : {}),
+        ...(requirement.targetPath ? { targetPath: requirement.targetPath } : {}),
+        evidence: (requirement.evidenceIds || []).flatMap((id) => {
+          const entry = evidenceById.get(id);
+          if (!entry) return [];
+          const revision = entry.artifactRevisionId
+            ? this.repository.getArtifactRevisionById(entry.artifactRevisionId)
+            : undefined;
+          return [
+            {
+              id: entry.id,
+              claim: entry.claim,
+              status: entry.status,
+              sourceType: entry.sourceType,
+              sourceRef: entry.sourceRef,
+              capturedAt: entry.capturedAt,
+              validatedAt: capturedAt,
+              ...(entry.freshnessExpiresAt ? { freshnessExpiresAt: entry.freshnessExpiresAt } : {}),
+              ...(entry.artifactRevisionId ? { artifactRevisionId: entry.artifactRevisionId } : {}),
+              ...(revision ? { sha256: revision.sha256, artifactStatus: revision.status } : {}),
+            },
+          ];
+        }),
+      })),
+    };
+  }
+
+  /** Persist a user correction as a constraint and reopen that exact requirement. */
+  recordUserRequirementCorrection(
+    taskId: string,
+    correction: UserRequirementCorrection,
+  ): OutcomeContract | undefined {
+    const result = this.getForTask(taskId);
+    const contract = result?.contract;
+    if (!result || !contract) return undefined;
+    const requirement = contract.requirements.find(
+      (candidate) => candidate.id === correction.requirementId,
+    );
+    if (!requirement) throw new Error(`Outcome requirement not found: ${correction.requirementId}`);
+    const statement = text(correction.statement, 4_000);
+    if (!statement) throw new Error("A requirement correction statement is required");
+    const idempotencyKey = text(correction.idempotencyKey, 200);
+    if (!idempotencyKey) throw new Error("A correction idempotency key is required");
+    if (
+      correction.criterion.type === "file_exists" &&
+      !text(correction.criterion.targetPath, 4_000)
+    ) {
+      throw new Error("A file_exists correction requires an exact target path");
+    }
+
+    const existingCorrection = this.repository.findConstraintByIdempotency(
+      result.session.id,
+      idempotencyKey,
+    );
+    if (existingCorrection) {
+      const sameCriterion =
+        existingCorrection.metadata?.verifier === correction.criterion.type &&
+        (correction.criterion.type !== "file_exists" ||
+          existingCorrection.metadata?.targetPath === text(correction.criterion.targetPath, 4_000));
+      if (
+        existingCorrection.kind !== "requirement" ||
+        existingCorrection.owner !== "user" ||
+        existingCorrection.metadata?.requirementId !== requirement.id ||
+        existingCorrection.statement !== statement ||
+        !sameCriterion
+      ) {
+        throw new Error("Correction idempotency key was already used for a different correction");
+      }
+      return this.repository.findOutcomeContract(result.session.id) || contract;
+    }
+
+    const requirements = contract.requirements.map((candidate) =>
+      candidate.id !== requirement.id
+        ? candidate
+        : {
+            ...candidate,
+            description: statement,
+            status: "pending" as const,
+            ...(correction.criterion.type === "file_exists"
+              ? {
+                  verifier: "file_exists",
+                  targetPath: text(correction.criterion.targetPath, 4_000)!,
+                }
+              : { verifier: undefined, targetPath: undefined }),
+            evidenceIds: undefined,
+          },
+    );
+    const priorCorrections = this.repository
+      .listConstraints(result.session.id, { status: "active" })
+      .filter(
+        (entry) =>
+          entry.kind === "requirement" &&
+          entry.metadata?.requirementId === requirement.id &&
+          entry.owner === "user",
+      );
+    return this.db.transaction(() => {
+      this.staleRequirementEvidence(result.session.id, requirement.evidenceIds || []);
+      for (const prior of priorCorrections) {
+        this.repository.updateConstraint(prior.id, { status: "superseded" });
+      }
+      this.repository.appendConstraint({
+        sessionId: result.session.id,
+        kind: "requirement",
+        key: requirement.id,
+        statement,
+        owner: "user",
+        metadata: {
+          requirementId: requirement.id,
+          ...(correction.sourceEventId ? { sourceEventId: correction.sourceEventId } : {}),
+          ...(correction.criterion.type === "file_exists"
+            ? {
+                verifier: "file_exists",
+                targetPath: text(correction.criterion.targetPath, 4_000),
+              }
+            : { verifier: "unsupported" }),
+        },
+        idempotencyKey,
+      });
+      return this.repository.createOutcomeContract({
+        sessionId: contract.sessionId,
+        taskId: contract.taskId,
+        version: contract.version + 1,
+        objective: contract.objective,
+        source: "user_correction",
+        idempotencyKey: `contract:${contract.sessionId}:correction:${idempotencyKey}`,
+        requirements,
+      });
+    })();
   }
 
   recordConstraint(
@@ -514,28 +688,10 @@ export class WorkSessionContractService {
     const outcome = taskOutcome(task);
     let contract = result.contract;
     if (contract && outcome) {
-      const requirements: OutcomeContractRequirement[] = contract.requirements.map(
-        (requirement) => ({
-          ...requirement,
-          status:
-            outcome === "complete"
-              ? "satisfied"
-              : outcome === "partial"
-                ? requirement.required
-                  ? "pending"
-                  : "satisfied"
-                : "failed",
-        }),
-      );
       const summary = text(
         task.resultSummary || task.error || (event && payloadRecord(event).message),
       );
-      contract = this.repository.updateOutcomeContract(contract.id, {
-        status: outcome === "complete" ? "satisfied" : outcome === "partial" ? "partial" : "unmet",
-        requirements,
-        ...(summary ? { summary } : {}),
-        ...(outcome === "complete" ? { satisfiedAt: Date.now() } : {}),
-      });
+      contract = this.reconcileOutcomeContract(task, result.session.id, contract, summary);
       const verificationReport = event
         ? text(payloadRecord(event).verificationReport || payloadRecord(event).report, 8_000)
         : undefined;
@@ -642,6 +798,248 @@ export class WorkSessionContractService {
     return this.protocol.getRepository().findSessionIdForTask(task.id) || task.sessionId || task.id;
   }
 
+  private reconcileOutcomeContract(
+    task: Task,
+    sessionId: string,
+    contract: OutcomeContract,
+    summary?: string,
+  ): OutcomeContract {
+    let fileIndex = 0;
+    const activeCorrections = this.repository
+      .listConstraints(sessionId, { status: "active" })
+      .filter((entry) => entry.kind === "requirement" && entry.owner === "user")
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    const latestCorrectionByRequirement = new Map<string, (typeof activeCorrections)[number]>();
+    for (const entry of activeCorrections) {
+      const requirementId =
+        typeof entry.metadata?.requirementId === "string" ? entry.metadata.requirementId : "";
+      if (requirementId && !latestCorrectionByRequirement.has(requirementId)) {
+        latestCorrectionByRequirement.set(requirementId, entry);
+      }
+    }
+    const requirements = contract.requirements.map(
+      (original): OutcomeContract["requirements"][number] => {
+        let requirement = original;
+        const encodedCriteriaIndex = /successCriteria:file_exists:(\d+)$/.exec(original.id)?.[1];
+        const criteriaIndex = encodedCriteriaIndex ? Number(encodedCriteriaIndex) : fileIndex;
+        if (encodedCriteriaIndex || original.verifier === "file_exists") {
+          fileIndex = Math.max(fileIndex, criteriaIndex + 1);
+        }
+        const correction = latestCorrectionByRequirement.get(requirement.id);
+        if (correction) {
+          const verifier = correction.metadata?.verifier;
+          const targetPath =
+            typeof correction.metadata?.targetPath === "string"
+              ? text(correction.metadata.targetPath, 4_000)
+              : undefined;
+          requirement = {
+            ...requirement,
+            description: correction.statement,
+            ...(verifier === "file_exists" && targetPath
+              ? { verifier: "file_exists", targetPath }
+              : { verifier: undefined, targetPath: undefined }),
+          };
+        }
+        if (!correction && requirement.verifier === "file_exists") {
+          const criteriaPath =
+            task.successCriteria?.type === "file_exists"
+              ? text(task.successCriteria.filePaths?.[criteriaIndex], 4_000)
+              : undefined;
+          const legacyPath = /^File exists:\s*(.+)$/i.exec(requirement.description)?.[1]?.trim();
+          if (!requirement.targetPath && (criteriaPath || legacyPath)) {
+            requirement = { ...requirement, targetPath: criteriaPath || legacyPath };
+          }
+        }
+
+        // The task-level verdict describes the verification run that finished the task. A user
+        // correction recorded after that run reopens the requirement, so the older FAIL must not
+        // be re-applied to it on later reads.
+        const verdictRecordedAt = task.completedAt ?? task.updatedAt;
+        const correctedAfterVerdict =
+          !!correction &&
+          typeof verdictRecordedAt === "number" &&
+          correction.createdAt > verdictRecordedAt;
+        if (
+          task.verificationVerdict === "FAIL" &&
+          task.failureClass === "required_verification" &&
+          requirement.required &&
+          !correctedAfterVerdict
+        ) {
+          const sourceRef = `task:${task.id}:verification-verdict`;
+          const previous = this.repository
+            .listEvidenceByIds(sessionId, requirement.evidenceIds || [])
+            .find(
+              (entry) =>
+                entry.contractId === contract.id &&
+                entry.status === "contradicting" &&
+                entry.sourceRef === sourceRef &&
+                entry.claim === "Server recorded a verification failure",
+            );
+          for (const evidence of this.repository.listEvidenceByIds(
+            sessionId,
+            requirement.evidenceIds || [],
+          )) {
+            if (evidence.id !== previous?.id && evidence.status !== "stale") {
+              this.repository.updateEvidenceStatus(evidence.id, "stale");
+            }
+          }
+          const failure =
+            previous ||
+            this.repository.appendEvidence({
+              sessionId,
+              contractId: contract.id,
+              claim: "Server recorded a verification failure",
+              sourceType: "task_event",
+              sourceRef,
+              snippet: "verdict=FAIL; source=server_task_verification_state",
+              confidence: 1,
+              status: "contradicting",
+            });
+          return { ...requirement, status: "failed", evidenceIds: [failure.id] };
+        }
+
+        const reviewReady =
+          TERMINAL_TASK_STATUSES.has(task.status) ||
+          task.terminalStatus === "awaiting_verification";
+        if (!reviewReady) {
+          this.staleRequirementEvidence(sessionId, requirement.evidenceIds || []);
+          return { ...requirement, status: "pending", evidenceIds: undefined };
+        }
+        if (requirement.verifier !== "file_exists" || !requirement.targetPath) {
+          this.staleRequirementEvidence(sessionId, requirement.evidenceIds || []);
+          return { ...requirement, status: "pending", evidenceIds: undefined };
+        }
+
+        const workspace = this.workspaceRepo.findById(task.workspaceId);
+        if (!workspace) {
+          this.staleRequirementEvidence(sessionId, requirement.evidenceIds || []);
+          return { ...requirement, status: "pending", evidenceIds: undefined };
+        }
+        const inspection = this.artifactEvidenceInspector.inspect(
+          workspace,
+          requirement.targetPath,
+        );
+        const linkedEvidence = this.repository.listEvidenceByIds(
+          sessionId,
+          requirement.evidenceIds || [],
+        );
+
+        if (inspection.status === "present") {
+          let revision = this.repository.findLatestArtifactRevision(sessionId, inspection.path);
+          if (
+            !revision ||
+            revision.status !== "committed" ||
+            revision.sha256 !== inspection.sha256 ||
+            revision.size !== inspection.size ||
+            revision.createdBy !== "system" ||
+            revision.metadata?.evidenceKind !== "workspace_file_exists"
+          ) {
+            revision = this.repository.createArtifactRevision({
+              sessionId,
+              taskId: task.id,
+              path: inspection.path,
+              mimeType: "application/octet-stream",
+              sha256: inspection.sha256,
+              size: inspection.size,
+              createdBy: "system",
+              metadata: {
+                evidenceKind: "workspace_file_exists",
+                verifier: "workspace_artifact_inspector",
+              },
+            });
+          }
+          const currentProof = linkedEvidence.find(
+            (entry) =>
+              entry.contractId === contract.id &&
+              entry.status === "supporting" &&
+              entry.sourceType === "artifact_revision" &&
+              entry.sourceRef === inspection.path &&
+              entry.artifactRevisionId === revision?.id &&
+              entry.claim === "Workspace file is present (existence only)",
+          );
+          for (const evidence of linkedEvidence) {
+            if (evidence.id !== currentProof?.id && evidence.status !== "stale") {
+              this.repository.updateEvidenceStatus(evidence.id, "stale");
+            }
+          }
+          const proof =
+            currentProof ||
+            this.repository.appendEvidence({
+              sessionId,
+              contractId: contract.id,
+              claim: "Workspace file is present (existence only)",
+              sourceType: "artifact_revision",
+              sourceRef: inspection.path,
+              snippet: `sha256=${inspection.sha256}; size=${inspection.size}; verifier=workspace_artifact_inspector`,
+              confidence: 1,
+              status: "supporting",
+              artifactRevisionId: revision.id,
+            });
+          return { ...requirement, status: "satisfied", evidenceIds: [proof.id] };
+        }
+
+        if (inspection.status === "missing") {
+          const currentContradiction = linkedEvidence.find(
+            (entry) =>
+              entry.contractId === contract.id &&
+              entry.status === "contradicting" &&
+              entry.sourceType === "task_event" &&
+              entry.sourceRef === inspection.path &&
+              entry.claim === "Workspace file is missing (existence check only)",
+          );
+          for (const evidence of linkedEvidence) {
+            if (evidence.id !== currentContradiction?.id && evidence.status !== "stale") {
+              this.repository.updateEvidenceStatus(evidence.id, "stale");
+            }
+          }
+          const contradiction =
+            currentContradiction ||
+            this.repository.appendEvidence({
+              sessionId,
+              contractId: contract.id,
+              claim: "Workspace file is missing (existence check only)",
+              sourceType: "task_event",
+              sourceRef: inspection.path,
+              snippet: `result=missing; verifier=workspace_artifact_inspector; requirement=${requirement.id}`,
+              confidence: 1,
+              status: "contradicting",
+            });
+          return { ...requirement, status: "failed", evidenceIds: [contradiction.id] };
+        }
+
+        this.staleRequirementEvidence(sessionId, requirement.evidenceIds || []);
+        return { ...requirement, status: "pending", evidenceIds: undefined };
+      },
+    );
+
+    const mandatory = requirements.filter((requirement) => requirement.required);
+    const satisfiedCount = mandatory.filter(
+      (requirement) => requirement.status === "satisfied" || requirement.status === "waived",
+    ).length;
+    const contractStatus =
+      mandatory.length === 0
+        ? "pending"
+        : mandatory.some((requirement) => requirement.status === "failed")
+          ? "unmet"
+          : satisfiedCount === mandatory.length
+            ? "satisfied"
+            : satisfiedCount > 0
+              ? "partial"
+              : "pending";
+    return this.repository.updateOutcomeContract(contract.id, {
+      status: contractStatus,
+      requirements,
+      ...(summary ? { summary } : {}),
+      satisfiedAt: contractStatus === "satisfied" ? (contract.satisfiedAt ?? Date.now()) : null,
+    });
+  }
+
+  private staleRequirementEvidence(sessionId: string, ids: string[]): void {
+    for (const evidence of this.repository.listEvidenceByIds(sessionId, ids)) {
+      if (evidence.status !== "stale") this.repository.updateEvidenceStatus(evidence.id, "stale");
+    }
+  }
+
   private buildRequirements(
     task: Pick<Task, "successCriteria">,
   ): OutcomeContractRequirementInput[] {
@@ -651,6 +1049,7 @@ export class WorkSessionContractService {
       return [
         {
           kind: "verification",
+          id: "successCriteria:shell_command",
           description: `Command exits successfully: ${text(criteria.command, 2_000)}`,
           required: true,
           verifier: "shell_command",
@@ -658,15 +1057,17 @@ export class WorkSessionContractService {
       ];
     }
     if (criteria.type === "file_exists" && Array.isArray(criteria.filePaths)) {
-      return criteria.filePaths.slice(0, 100).flatMap((filePath) => {
+      return criteria.filePaths.slice(0, 100).flatMap((filePath, index) => {
         const normalized = text(filePath, 4_000);
         return normalized
           ? [
               {
+                id: `successCriteria:file_exists:${index}`,
                 kind: "output" as const,
                 description: `File exists: ${normalized}`,
                 required: true,
                 verifier: "file_exists",
+                targetPath: normalized,
               },
             ]
           : [];

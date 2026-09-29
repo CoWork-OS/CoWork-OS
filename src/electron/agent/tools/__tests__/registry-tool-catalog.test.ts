@@ -2,10 +2,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PermissionEngine } from "../../runtime/PermissionEngine";
+import { resolveWorkerRoleAgentConfig } from "../../runtime/worker-role-registry";
 import {
   applyAccessProfileToWorkspace,
   resolveEffectiveAccessProfile,
 } from "../../../security/access-profile-resolver";
+import type { AccessProfileDefinition } from "../../../../shared/access-profiles";
+import type { PermissionSettingsData } from "../../../../shared/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import mermaid from "mermaid";
 
@@ -18,6 +21,7 @@ const mockMcpSettings = {
   toolNamePrefix: "mcp_",
   servers: [] as Array<{ id: string; name: string }>,
 };
+const mockMcpCallTool = vi.fn().mockResolvedValue({ content: [] });
 
 const mockBuiltinSettings = {
   categories: {
@@ -81,7 +85,7 @@ vi.mock("../../../mcp/client/MCPClientManager", () => ({
       hasTool: vi.fn((toolName: string) =>
         mockMcpState.tools.some((tool) => tool.name === toolName),
       ),
-      callTool: vi.fn(),
+      callTool: mockMcpCallTool,
     })),
   },
 }));
@@ -162,6 +166,157 @@ function createDaemon(): Any {
   };
 }
 
+const broadResearcherProfile: AccessProfileDefinition = {
+  id: "broad_researcher_profile",
+  label: "Broad researcher profile",
+  description: "A broad profile supplied by a caller.",
+  sandbox: "danger-full-access",
+  approval: "never",
+  reviewer: "none",
+  network: "enabled",
+  shellAccess: true,
+};
+
+const researcherAccessSettings: PermissionSettingsData = {
+  version: 1,
+  defaultMode: "bypass_permissions",
+  defaultShellEnabled: true,
+  defaultPermissionAccess: "full",
+  defaultAccessProfileId: broadResearcherProfile.id,
+  accessProfiles: [broadResearcherProfile],
+  rules: [],
+};
+
+async function assertResearcherDispatchBoundary(task: Any): Promise<void> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-researcher-authority-"));
+  const rawWorkspace = { ...createWorkspace(), path: root };
+  const inspectionPath = path.join(root, "inspection.md");
+  await fs.writeFile(inspectionPath, "Local evidence remains readable.\n", "utf8");
+
+  try {
+    const profile = resolveEffectiveAccessProfile({
+      task,
+      workspace: rawWorkspace,
+      settings: researcherAccessSettings,
+    });
+    const workspace = applyAccessProfileToWorkspace(rawWorkspace, profile);
+    const attackToolNames = [
+      "write_file",
+      "run_command",
+      "browser_click",
+      "gmail_action",
+      "mcp_research_mutate",
+      "click",
+      "write_clipboard",
+      "git_commit",
+    ];
+    const permissiveSessionRules = attackToolNames.slice(0, 5).map((toolName) => ({
+      source: "session",
+      effect: "allow",
+      scope: { kind: "tool", toolName },
+    }));
+    const daemon = {
+      ...createDaemon(),
+      getTaskById: vi.fn().mockResolvedValue(task),
+      getEffectiveAccessProfile: vi.fn(() => profile),
+      evaluateToolPermission: vi.fn((_taskId: string, request: Any) =>
+        PermissionEngine.evaluate({
+          workspace,
+          toolName: request.toolName,
+          toolInput: request.details?.params,
+          approvalType: request.approvalType,
+          mode: profile.permissionMode,
+          rules: permissiveSessionRules as Any,
+        }),
+      ),
+      requestApproval: vi.fn().mockResolvedValue(true),
+    };
+    const registry = new ToolRegistry(
+      workspace,
+      daemon as Any,
+      task.id,
+      undefined,
+      task.agentConfig?.toolRestrictions,
+    );
+    const internals = registry as Any;
+
+    const writeFile = vi
+      .spyOn(internals.fileTools, "writeFile")
+      .mockResolvedValue({ success: true } as Any);
+    const runCommand = vi
+      .spyOn(internals.shellTools, "runCommand")
+      .mockResolvedValue({ success: true } as Any);
+    const browserAction = vi
+      .spyOn(internals.browserTools, "executeTool")
+      .mockResolvedValue({ success: true } as Any);
+    const connectorAction = vi
+      .spyOn(internals.gmailTools, "executeAction")
+      .mockResolvedValue({ success: true } as Any);
+    const computerAction = vi
+      .spyOn(internals.computerUseTools, "click")
+      .mockResolvedValue({ success: true } as Any);
+    const clipboardAction = vi
+      .spyOn(internals.systemTools, "writeClipboard")
+      .mockResolvedValue({ success: true } as Any);
+    const gitAction = vi
+      .spyOn(internals.gitTools, "gitCommit")
+      .mockResolvedValue({ success: true } as Any);
+    mockMcpCallTool.mockClear();
+    mockMcpCallTool.mockResolvedValue({ content: [] });
+    mockMcpState.tools = [
+      {
+        name: "research_mutate",
+        description: "External mutation fixture",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        serverId: "research-server",
+      },
+    ];
+
+    const readResult = await registry.executeToolWithRuntime("read_file", {
+      path: inspectionPath,
+    });
+    expect(readResult.result.content).toContain("Local evidence remains readable.");
+
+    const mutationCalls = [
+      ["write_file", { path: path.join(root, "would-write.md"), content: "mutation" }],
+      ["run_command", { command: "touch would-run" }],
+      ["browser_click", { x: 1, y: 1 }],
+      ["gmail_action", { action: "send_email", to: "nobody@example.test" }],
+      ["mcp_research_mutate", { value: "mutation" }],
+      ["click", { x: 1, y: 1 }],
+      ["write_clipboard", { text: "mutation" }],
+      ["git_commit", { message: "mutation" }],
+    ] as const;
+    for (const [toolName, input] of mutationCalls) {
+      await expect(registry.executeToolWithRuntime(toolName, input)).rejects.toThrow();
+    }
+
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(browserAction).not.toHaveBeenCalled();
+    expect(connectorAction).not.toHaveBeenCalled();
+    expect(mockMcpCallTool).not.toHaveBeenCalled();
+    expect(computerAction).not.toHaveBeenCalled();
+    expect(clipboardAction).not.toHaveBeenCalled();
+    expect(gitAction).not.toHaveBeenCalled();
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+    expect(profile).toMatchObject({
+      permissionMode: "plan",
+      shellEnabled: false,
+      networkEnabled: false,
+      definition: {
+        sandbox: "read-only",
+        network: "disabled",
+        shellAccess: false,
+        approval: "never",
+        reviewer: "none",
+      },
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
 describe("ToolRegistry tool catalog versioning", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -170,6 +325,7 @@ describe("ToolRegistry tool catalog versioning", () => {
     mockMcpState.tools = [];
     mockMcpSettings.toolNamePrefix = "mcp_";
     mockMcpSettings.servers = [];
+    mockMcpCallTool.mockReset().mockResolvedValue({ content: [] });
     mockBuiltinSettings.toolOverrides = {};
     mockBuiltinSettings.version = "1.0.0";
     isToolEnabledMock.mockImplementation((toolName: string) => {
@@ -197,6 +353,41 @@ describe("ToolRegistry tool catalog versioning", () => {
 
     const secondTools = registry.getTools();
     expect(secondTools.some((tool) => tool.name === "mcp_alpha")).toBe(true);
+  });
+
+  it("blocks dispatch from a fresh researcher config even when its caller requests broad access", async () => {
+    const task = {
+      id: "new-researcher-task",
+      workerRole: "researcher",
+      agentConfig: resolveWorkerRoleAgentConfig("researcher", {
+        accessProfileId: broadResearcherProfile.id,
+        permissionMode: "bypass_permissions",
+        shellAccess: true,
+        readOnlyExecution: false,
+        toolRestrictions: [],
+      }),
+    };
+
+    await assertResearcherDispatchBoundary(task);
+    expect(task.agentConfig.readOnlyExecution).toBe(true);
+    expect(task.agentConfig.permissionMode).toBe("plan");
+    expect(task.agentConfig.shellAccess).toBe(false);
+  });
+
+  it("blocks dispatch from a saved researcher task without a read-only flag", async () => {
+    const task = {
+      id: "saved-researcher-task",
+      workerRole: "researcher",
+      agentConfig: {
+        accessProfileId: broadResearcherProfile.id,
+        permissionMode: "bypass_permissions",
+        shellAccess: true,
+        toolRestrictions: ["group:write", "delete_file"],
+      },
+    };
+
+    await assertResearcherDispatchBoundary(task);
+    expect(task.agentConfig.readOnlyExecution).toBeUndefined();
   });
 
   it("no longer registers security scan helpers as tools (migrated to codex-security plugin skills)", () => {

@@ -240,6 +240,7 @@ export interface OutcomeContractRequirementInput {
   description: string;
   required?: boolean;
   verifier?: string;
+  targetPath?: string;
   status?: OutcomeContractRequirementStatus;
   evidenceIds?: string[];
 }
@@ -642,6 +643,42 @@ export class WorkSessionContractRepository {
     return rows.slice(0, MAX_EVIDENCE).map((row) => this.mapEvidence(row));
   }
 
+  /** Fetch explicitly linked proof without the general manifest's presentation cap. */
+  listEvidenceByIds(sessionId: string, ids: string[]): EvidenceManifestEntry[] {
+    const normalizedSessionId = requiredId(sessionId, "sessionId");
+    const normalizedIds = Array.from(
+      new Set(ids.map(optionalId).filter((id): id is string => !!id)),
+    );
+    const found = new Map<string, EvidenceManifestEntry>();
+    for (let start = 0; start < normalizedIds.length; start += 500) {
+      const chunk = normalizedIds.slice(start, start + 500);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM work_session_evidence
+           WHERE session_id = ? AND id IN (${placeholders})`,
+        )
+        .all(normalizedSessionId, ...chunk) as DbRow[];
+      for (const row of rows) {
+        const evidence = this.mapEvidence(row);
+        found.set(evidence.id, evidence);
+      }
+    }
+    return normalizedIds.flatMap((id) => {
+      const evidence = found.get(id);
+      return evidence ? [evidence] : [];
+    });
+  }
+
+  updateEvidenceStatus(id: string, status: EvidenceManifestEntryStatus): EvidenceManifestEntry {
+    const normalizedId = requiredId(id, "evidenceId");
+    const result = this.db
+      .prepare("UPDATE work_session_evidence SET status = ? WHERE id = ?")
+      .run(normalizeEvidenceStatus(status), normalizedId);
+    if (result.changes === 0) throw new Error(`Evidence not found: ${normalizedId}`);
+    return this.findEvidenceById(normalizedId)!;
+  }
+
   getEvidenceManifest(sessionId: string): EvidenceManifest {
     const entries = this.listEvidence(sessionId);
     return {
@@ -756,6 +793,24 @@ export class WorkSessionContractRepository {
       )
       .get(requiredId(sessionId, "sessionId"), requiredId(path, "path")) as DbRow | undefined;
     return row ? this.mapArtifactRevision(row) : undefined;
+  }
+
+  getArtifactRevisionById(id: string): ArtifactRevision | undefined {
+    return this.findArtifactRevisionById(requiredId(id, "artifactRevisionId"));
+  }
+
+  findConstraintByIdempotency(
+    sessionId: string,
+    idempotencyKey: string,
+  ): ConstraintLedgerEntry | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT * FROM work_session_constraints WHERE session_id = ? AND idempotency_key = ?",
+      )
+      .get(requiredId(sessionId, "sessionId"), requiredId(idempotencyKey, "idempotencyKey")) as
+      | DbRow
+      | undefined;
+    return row ? this.mapConstraint(row) : undefined;
   }
 
   createWaitState(input: WaitStateInput): WaitState {
@@ -1080,6 +1135,9 @@ export class WorkSessionContractRepository {
           ...(optionalText(requirement.verifier, 256)
             ? { verifier: optionalText(requirement.verifier, 256) }
             : {}),
+          ...(optionalText(requirement.targetPath, 4_000)
+            ? { targetPath: optionalText(requirement.targetPath, 4_000) }
+            : {}),
           ...(evidenceIds && evidenceIds.length > 0 ? { evidenceIds } : {}),
         },
       ];
@@ -1109,18 +1167,6 @@ export class WorkSessionContractRepository {
     const row = this.db.prepare("SELECT * FROM work_session_constraints WHERE id = ?").get(id) as
       | DbRow
       | undefined;
-    return row ? this.mapConstraint(row) : undefined;
-  }
-
-  private findConstraintByIdempotency(
-    sessionId: string,
-    idempotencyKey: string,
-  ): ConstraintLedgerEntry | undefined {
-    const row = this.db
-      .prepare(
-        "SELECT * FROM work_session_constraints WHERE session_id = ? AND idempotency_key = ?",
-      )
-      .get(sessionId, idempotencyKey) as DbRow | undefined;
     return row ? this.mapConstraint(row) : undefined;
   }
 

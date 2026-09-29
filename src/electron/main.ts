@@ -1838,7 +1838,7 @@ if (isMacSafeStorageMigrationWorker) {
       keychainIdentityMismatch = verifySecureSettingsKeychainIdentity();
       // One lifecycle-owned instance serves the timer and the Settings IPC, so a
       // user decision and an in-flight delivery share one fence and one shutdown.
-      // Opt-in telemetry must never block startup; Settings falls back to its own instance.
+      // Opt-in telemetry must never block startup; Settings then reports it unavailable.
       try {
         pulseService = new PulseService(dbManager.getDatabase(), {
           version: app.getVersion(),

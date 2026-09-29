@@ -1042,7 +1042,7 @@ export interface OrchestrationNodeNotification {
   taskId?: string;
   remoteTaskId?: string;
   publicHandle?: string;
-  status: "running" | "completed" | "failed" | "cancelled";
+  status: "running" | "completed" | "failed" | "cancelled" | "blocked";
   summary: string;
   result?: string;
   usage?: Record<string, unknown>;
@@ -2346,6 +2346,13 @@ export interface AgentConfig {
   shellAccess?: boolean;
   /** Internal daemon-only contract for child helpers that must remain read-only. */
   readOnlyExecution?: boolean;
+  /**
+   * Internal orchestrator-only marker for team work item lanes that reuse the
+   * researcher worker label. These lanes keep the researcher tool denylist but
+   * not the delegated-helper read-only execution boundary. Never honored from
+   * follow-up overrides.
+   */
+  teamWorkItemLane?: boolean;
   /** Require git worktree isolation for this task and fail fast if unavailable. */
   requireWorktree?: boolean;
   /**
@@ -3685,7 +3692,39 @@ export interface OutcomeContractRequirement {
   required: boolean;
   status: OutcomeContractRequirementStatus;
   verifier?: string;
+  /** Exact target for the server-supported file_exists verifier. */
+  targetPath?: string;
   evidenceIds?: string[];
+}
+
+/** Requirement-selected evidence sent to the independent post-completion verifier. */
+export interface RequirementEvidenceManifest {
+  contractId: string;
+  contractVersion: number;
+  /** When the service refreshed physical proof and assembled this selected manifest. */
+  capturedAt: number;
+  requirements: Array<{
+    requirementId: string;
+    description: string;
+    required: boolean;
+    status: OutcomeContractRequirementStatus;
+    verifier?: string;
+    targetPath?: string;
+    evidence: Array<{
+      id: string;
+      claim: string;
+      status: EvidenceManifestEntryStatus;
+      sourceType: EvidenceManifestSourceType;
+      sourceRef: string;
+      capturedAt: number;
+      /** Time this evidence was revalidated for the current manifest. */
+      validatedAt: number;
+      freshnessExpiresAt?: number;
+      artifactRevisionId?: string;
+      sha256?: string;
+      artifactStatus?: ArtifactRevisionStatus;
+    }>;
+  }>;
 }
 
 export interface OutcomeContract {
@@ -6563,6 +6602,8 @@ export interface ManagedSessionCreateInput {
   environmentId: string;
   title: string;
   surface?: ManagedSessionSurface;
+  /** Explicit user-authored verification criteria; omitted tasks remain unverified. */
+  successCriteria?: SuccessCriteria;
   initialEvent?: {
     type: "user.message";
     content: ManagedSessionInputContent[];
@@ -6576,9 +6617,42 @@ export interface ManagedSessionUserMessageRequest {
   expectedTurnId?: string;
 }
 
+export type ManagedSessionRequirementCriterion =
+  | { type: "file_exists"; targetPath: string }
+  | { type: "unsupported" };
+
+/** A client correction revises a requirement; verification remains server-owned. */
+export interface ManagedSessionRequirementCorrectionEvent {
+  type: "requirement.corrected";
+  requirementId: string;
+  statement: string;
+  criterion: ManagedSessionRequirementCriterion;
+  idempotencyKey: string;
+}
+
+export interface ManagedSessionRequirementCorrectionRequest {
+  sessionId: string;
+  event: ManagedSessionRequirementCorrectionEvent;
+}
+
+export type ManagedSessionSendEvent =
+  | {
+      type: "user.message";
+      content: ManagedSessionInputContent[];
+      expectedTurnId?: string;
+    }
+  | {
+      type: "input.received";
+      requestId: string;
+      answers?: InputRequestResponse["answers"];
+      status?: InputRequestResponse["status"];
+    }
+  | ManagedSessionRequirementCorrectionEvent;
+
 export type ManagedSessionEventType =
   | "session.created"
   | "user.message"
+  | "requirement.corrected"
   | "assistant.message"
   | "tool.call"
   | "tool.result"
@@ -9413,6 +9487,7 @@ export const IPC_CHANNELS = {
   MANAGED_SESSION_GET_IPC: "managedSession:getIpc",
   MANAGED_SESSION_CREATE_IPC: "managedSession:createIpc",
   MANAGED_SESSION_SEND_USER_MESSAGE_IPC: "managedSession:sendUserMessageIpc",
+  MANAGED_SESSION_CORRECT_REQUIREMENT_IPC: "managedSession:correctRequirementIpc",
   MANAGED_SESSION_RESUME_IPC: "managedSession:resumeIpc",
   MANAGED_SESSION_CANCEL_IPC: "managedSession:cancelIpc",
   MANAGED_SESSION_EVENTS_LIST_IPC: "managedSession:eventsListIpc",
@@ -11383,21 +11458,14 @@ export type UpdateCheckIntent = "manual" | "background";
 
 /**
  * - live: release metadata retrieved during this check.
- * - cached: the network failed; this is the last release retrieved earlier.
  * - no_release: the release endpoint reported that nothing is published.
  */
-export type UpdateCheckSource = "live" | "cached" | "no_release";
+export type UpdateCheckSource = "live" | "no_release";
 
 export interface UpdateCheckProvenance {
   source: UpdateCheckSource;
-  /** Endpoint the metadata came from, when known. */
-  origin?: "github" | "cowork_endpoint";
   /** When this check ran. */
   checkedAt: number;
-  /** When release metadata was last retrieved successfully, if ever. */
-  lastSuccessfulRetrievalAt: number | null;
-  /** Why the live check failed, for cached results. */
-  networkError?: string;
 }
 
 export interface UpdateInfo {
@@ -11414,8 +11482,7 @@ export interface UpdateInfo {
   lastCompatibleVersion?: string;
   unsupportedReason?: string;
   recoveryCommand?: string;
-  /** Freshness of this answer. Absent (older builds) means unknown, never "fresh". */
-  provenance?: UpdateCheckProvenance;
+  provenance: UpdateCheckProvenance;
 }
 
 export interface UpdateProgress {

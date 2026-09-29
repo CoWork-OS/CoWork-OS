@@ -189,24 +189,28 @@ describe("memory domain on the host and in the database worker", () => {
     const recorded = await ledger.record({
       workspaceId: "ws",
       taskId: "task-1",
-      executionKey: "task-1",
-      turnId: null,
-      terminalEventId: null,
       sourceMemoryId: "mem-plan",
       sourceContentHash: hashMemoryContent("Reconcile invoices with the ledger export"),
-      outcome: "success",
-      grade: "observed_runtime_success",
       patternKey: "tools:ledger",
-      title: "Reconcile invoices",
-      approach: "Export the ledger",
-      requestExcerpt: "Reconcile invoices",
-      toolsUsed: ["ledger"],
-      sourceRefs: ["task:task-1"],
+    });
+    // Recorded against content the memory no longer has: reading it invalidates it.
+    const edited = await ledger.record({
+      workspaceId: "ws",
+      taskId: "task-2",
+      sourceMemoryId: "mem-old",
+      sourceContentHash: hashMemoryContent("content before an edit"),
+      patternKey: "tools:ledger",
     });
     result.playbook = {
       created: recorded.created,
-      verified: (await ledger.verifiedSuccesses("ws")).map((record) => record.title),
-      swept: await ledger.sweepWorkspace("ws"),
+      readable: (await ledger.listReadable("ws")).map(({ record, content }) => [
+        record.taskId,
+        content,
+      ]),
+      editedActive: (await ledger.get(edited.record.id))?.invalidatedAt === null,
+      linked: (await ledger.linkAll(recorded.record.id, [edited.record.id])).length,
+      invalidated: await ledger.invalidateTask("ws", "task-1", "corrected_by_user"),
+      readableAfter: (await ledger.listReadable("ws")).length,
     };
 
     const dreaming = new DreamingRepository(db);
@@ -328,7 +332,14 @@ describe("memory domain on the host and in the database worker", () => {
     expect(result.tiers).toEqual({ promoted: 1, evicted: 1 });
     expect(result.kg.sameEdge).toBe(true);
     expect(result.kg.selfLoop).toBe("Cannot create an edge from an entity to itself");
-    expect(result.playbook.verified).toEqual(["Reconcile invoices"]);
+    expect(result.playbook).toEqual({
+      created: true,
+      readable: [["task-1", "Reconcile invoices with the ledger export"]],
+      editedActive: false,
+      linked: 1,
+      invalidated: 1,
+      readableAfter: 0,
+    });
     expect(result.observations.suppressed).toEqual(["mem-plan"]);
     expect((result.durable.search as unknown[]).length).toBeGreaterThan(0);
     expect((result.markdown.search as Array<{ path: string }>)[0]?.path).toBe("notes/release.md");

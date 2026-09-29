@@ -92,6 +92,7 @@ import {
   PermissionRule,
   SessionActionAttribution,
   TaskVerificationEvidenceBundle,
+  RequirementEvidenceManifest,
   TaskStatus,
   TaskEvent,
   TaskTimelinePageCursor,
@@ -232,9 +233,12 @@ import { IntentRoute, IntentRouter } from "./strategy/IntentRouter";
 import { DerivedTaskStrategy, TaskStrategyService } from "./strategy/TaskStrategyService";
 import {
   getReadOnlyExecutionToolRestrictions,
+  isReadOnlyWorkerRole,
+  normalizeWorkerRoleTaskConfig,
   resolveDefaultWorkerRoleKind,
   resolveWorkerRoleAgentConfig,
   resolveWorkerRoleKind,
+  stripTeamWorkItemLaneOverride,
 } from "./runtime/worker-role-registry";
 import {
   createVerificationRuntime,
@@ -274,6 +278,7 @@ import {
   type OrchestrationGraphNodeInput,
 } from "./orchestration/OrchestrationGraphEngine";
 import { OrchestrationGraphRepository } from "./orchestration/orchestration-graph-repository-facades";
+import { OrchestrationGraphStore } from "./orchestration/OrchestrationGraphRepository";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { getMailboxServiceInstance } from "../mailbox/MailboxService";
 import { type RecurringApprovalFingerprintInput } from "../security/recurring-approval-service";
@@ -663,6 +668,8 @@ export class AgentDaemon extends EventEmitter {
   ]);
 
   private taskRepo: TaskStore;
+  /** Synchronous graph reads on the hot path (DB6); writes go through the engine's facade. */
+  private orchestrationGraphStore: OrchestrationGraphStore;
   private eventRepo: TaskEventRepository;
   private workspaceRepo: WorkspaceStore;
   private approvalRepo: ApprovalRepository;
@@ -778,6 +785,7 @@ export class AgentDaemon extends EventEmitter {
         this.options.recurringApprovalService || new RecurringApprovalService(db),
     };
     this.taskRepo = new TaskStore(db);
+    this.orchestrationGraphStore = new OrchestrationGraphStore(db);
     this.eventRepo = new TaskEventRepository(db);
     this.workspaceRepo = new WorkspaceStore(db);
     this.approvalRepo = new ApprovalRepository(db);
@@ -927,6 +935,43 @@ export class AgentDaemon extends EventEmitter {
 
   getOrchestrationGraphRepository(): OrchestrationGraphRepository {
     return this.orchestrationGraphEngine.getRepository();
+  }
+
+  /**
+   * Team work item tasks created before `teamWorkItemLane` existed carry
+   * workerRole "researcher" without the marker, so they would be resumed as
+   * strict read-only delegated researchers and lose network/shell. Recognize
+   * them from the orchestration graph (a `team_work_item` node dispatched to
+   * this task id), which only the team orchestrator and graph engine write,
+   * and persist the marker once so later reads agree. Team item rows are not
+   * used: renderer IPC can set their sourceTaskId and spawn_agent children in
+   * collaborative child-agent runs also get one. Any lookup failure keeps the
+   * strict researcher boundary.
+   */
+  private withLegacyTeamWorkItemLane<T extends Task>(task: T): T {
+    if (resolveWorkerRoleKind(task.workerRole) !== "researcher") return task;
+    if (task.agentConfig?.teamWorkItemLane === true) return task;
+    try {
+      // A synchronous read on the host store, like the rest of the daemon hot path
+      // (async SQLite migration plan, DB6): the async facade would return a Promise,
+      // which is always truthy and would widen the researcher's boundary.
+      if (!this.orchestrationGraphStore.isTeamWorkItemTask(task.id)) return task;
+    } catch (error) {
+      log.warn(
+        `Team lane lookup failed for researcher task ${task.id}; keeping read-only boundary`,
+        error,
+      );
+      return task;
+    }
+    const persistedAgentConfig = this.taskRepo.findById(task.id)?.agentConfig ?? task.agentConfig;
+    try {
+      this.taskRepo.update(task.id, {
+        agentConfig: { ...persistedAgentConfig, teamWorkItemLane: true },
+      });
+    } catch (error) {
+      log.warn(`Failed to persist team lane marker for task ${task.id}`, error);
+    }
+    return { ...task, agentConfig: { ...task.agentConfig, teamWorkItemLane: true } };
   }
 
   private isTransientRetryErrorMessage(message: unknown): boolean {
@@ -2523,6 +2568,17 @@ export class AgentDaemon extends EventEmitter {
         }
       }
 
+      executionTask = this.withLegacyTeamWorkItemLane(executionTask);
+      const workerRoleBoundary = normalizeWorkerRoleTaskConfig(executionTask);
+      executionTask = workerRoleBoundary.task;
+      if (workerRoleBoundary.changed) {
+        try {
+          this.taskRepo.update(executionTask.id, { agentConfig: executionTask.agentConfig });
+        } catch (error) {
+          console.warn("[AgentDaemon] Failed to persist worker role boundary:", error);
+        }
+      }
+
       if (await this.maybeLaunchCollaborativeTask(executionTask)) {
         this.finishQueueSlot(executionTask.id);
         return;
@@ -2898,8 +2954,21 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    // Apply agent role overrides (same as startTaskImmediate)
-    const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
+    // Apply agent role and worker security overrides before restoring any
+    // persisted runtime configuration. Older researcher tasks may still have
+    // an ACP runtime, which executes outside the native policy-wrapped tools.
+    const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(
+      this.withLegacyTeamWorkItemLane(task),
+    );
+    const workerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
+    const effectiveTask = workerRoleBoundary.task;
+    if (workerRoleBoundary.changed) {
+      try {
+        this.taskRepo.update(effectiveTask.id, { agentConfig: effectiveTask.agentConfig });
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist worker role boundary:", error);
+      }
+    }
 
     if (this.shutdownRequested) return;
 
@@ -3196,7 +3265,18 @@ export class AgentDaemon extends EventEmitter {
       );
     }
 
-    const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
+    const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(
+      this.withLegacyTeamWorkItemLane(task),
+    );
+    const workerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
+    const effectiveTask = workerRoleBoundary.task;
+    if (workerRoleBoundary.changed) {
+      try {
+        this.taskRepo.update(effectiveTask.id, { agentConfig: effectiveTask.agentConfig });
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist worker role boundary:", error);
+      }
+    }
 
     let effectiveWorkspace = this.applyTaskWorkspaceOverrides(effectiveTask, workspace);
     if (task.worktreePath && task.worktreeStatus === "active" && fs.existsSync(task.worktreePath)) {
@@ -4712,12 +4792,15 @@ export class AgentDaemon extends EventEmitter {
     const parent = this.taskRepo.findById(params.parentTaskId);
     const requestedWorkerRole = resolveWorkerRoleKind(params.workerRole);
     const workerRole = requestedWorkerRole || resolveDefaultWorkerRoleKind();
-    const isVerifierChild = workerRole === "verifier";
+    // Team work item lanes (teamWorkItemLane, set only by the team
+    // orchestrator) reuse the researcher label without the delegated-helper
+    // read-only boundary; see isReadOnlyWorkerRole.
+    const isReadOnlyRoleChild = isReadOnlyWorkerRole(workerRole, params.agentConfig);
     const isReadOnlyExecutionChild =
-      isVerifierChild ||
+      isReadOnlyRoleChild ||
       params.agentConfig?.readOnlyExecution === true ||
       parent?.agentConfig?.readOnlyExecution === true ||
-      parent?.workerRole === "verifier";
+      isReadOnlyWorkerRole(parent?.workerRole, parent?.agentConfig);
     const parentGatewayContext = parent?.agentConfig?.gatewayContext;
     const childGatewayContext = params.agentConfig?.gatewayContext;
     const parentAutonomousMode = parent?.agentConfig?.autonomousMode === true;
@@ -4726,9 +4809,10 @@ export class AgentDaemon extends EventEmitter {
     const mergedAllowUserInput = mergedAutonomousMode
       ? false
       : (params.agentConfig?.allowUserInput ?? parent?.agentConfig?.allowUserInput);
-    // Verifiers and internal read-only helpers are a trust boundary. A parent
-    // may intentionally bypass approvals for its own work, but that privilege
-    // must not flow into a child that is supposed to inspect the result only.
+    // Researcher/verifier roles and internal read-only helpers are a trust
+    // boundary. A parent may intentionally bypass approvals for its own work,
+    // but that privilege must not flow into a child that is supposed to inspect
+    // the result only.
     const mergedPermissionMode = isReadOnlyExecutionChild
       ? "plan"
       : parent?.agentConfig?.permissionMode === "bypass_permissions"
@@ -5656,6 +5740,11 @@ export class AgentDaemon extends EventEmitter {
     ) {
       return;
     }
+    const graphCancellation = this.orchestrationGraphEngine
+      .cancelRunForRootTask(taskId)
+      .catch((error) => {
+        log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
+      });
     this.pendingContinuationTaskIds.delete(taskId);
     const interruptRequestedAt = Date.now();
     this.logEvent(taskId, "agent_interrupt_requested", {
@@ -5688,6 +5777,7 @@ export class AgentDaemon extends EventEmitter {
           await this.cancelTask(child.id);
         }
       }
+      await graphCancellation;
       return;
     }
 
@@ -5698,11 +5788,15 @@ export class AgentDaemon extends EventEmitter {
       this.activeTasks.delete(taskId);
     }
 
-    await this.settleRunningTaskCancellation(taskId, {
-      message: "Task was stopped by user",
-      actor: "user",
-      requestedAt: interruptRequestedAt,
-    });
+    await this.settleRunningTaskCancellation(
+      taskId,
+      {
+        message: "Task was stopped by user",
+        actor: "user",
+        requestedAt: interruptRequestedAt,
+      },
+      graphCancellation,
+    );
   }
 
   /**
@@ -5726,7 +5820,13 @@ export class AgentDaemon extends EventEmitter {
   private async settleRunningTaskCancellation(
     taskId: string,
     input: { message: string; actor: "user" | "external_runtime"; requestedAt: number },
+    existingGraphCancellation?: Promise<unknown>,
   ): Promise<void> {
+    const graphCancellation = (
+      existingGraphCancellation || this.orchestrationGraphEngine.cancelRunForRootTask(taskId)
+    ).catch((error) => {
+      log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
+    });
     // Persist cancellation for running tasks too (important for remote clients querying task status).
     this.cancelTaskRecord(taskId, input.message);
     this.logEvent(taskId, "agent_interrupt_confirmed", {
@@ -5756,6 +5856,7 @@ export class AgentDaemon extends EventEmitter {
         await this.cancelTask(child.id);
       }
     }
+    await graphCancellation;
   }
 
   /**
@@ -9699,7 +9800,7 @@ export class AgentDaemon extends EventEmitter {
         ? "done"
         : notification.status === "failed"
           ? "failed"
-          : notification.status === "cancelled"
+          : notification.status === "cancelled" || notification.status === "blocked"
             ? "blocked"
             : "in_progress";
 
@@ -12629,10 +12730,23 @@ export class AgentDaemon extends EventEmitter {
           workerRole: "verifier",
         }),
     });
+    let requirementEvidenceManifest: RequirementEvidenceManifest | undefined;
+    try {
+      // Additive projection: a manifest failure must not fail verification itself.
+      requirementEvidenceManifest = this.workSessionContractService?.getRequirementEvidenceManifest(
+        parentTask.id,
+      );
+    } catch (error) {
+      log.warn(
+        `[work-session-contracts] Failed to build requirement evidence manifest for task ${parentTask.id}:`,
+        error,
+      );
+    }
     const result = await verificationRuntime.run({
       parentTask,
       parentSummary,
       verificationEvidenceBundle,
+      requirementEvidenceManifest,
       timeoutMs,
       ...gateContext,
     });
@@ -14061,10 +14175,11 @@ export class AgentDaemon extends EventEmitter {
     let executor: TaskExecutor;
 
     // Always get fresh task and workspace from DB to pick up permission changes
-    const task = this.taskRepo.findById(taskId);
-    if (!task) {
+    const storedTask = this.taskRepo.findById(taskId);
+    if (!storedTask) {
       throw new Error(`Task ${taskId} not found`);
     }
+    const task = this.withLegacyTeamWorkItemLane(storedTask);
     // Bot conversations are created dormant and their first user turn enters
     // through sendMessage rather than startTaskImmediate. Attach the
     // workspace-scoped persistent team here as well so the initial executor
@@ -14098,8 +14213,27 @@ export class AgentDaemon extends EventEmitter {
       this.activeTasks.delete(taskId);
       cached = undefined;
     }
+    // Only the team orchestrator may mark a task as a team lane; drop the
+    // marker from caller-supplied overrides so a delegated researcher cannot
+    // be widened through a follow-up.
+    if (options?.agentConfigOverride || options?.queuedFollowUp?.agentConfigOverride) {
+      options = {
+        ...options,
+        agentConfigOverride: stripTeamWorkItemLaneOverride(options.agentConfigOverride),
+        ...(options.queuedFollowUp
+          ? {
+              queuedFollowUp: {
+                ...options.queuedFollowUp,
+                agentConfigOverride: stripTeamWorkItemLaneOverride(
+                  options.queuedFollowUp.agentConfigOverride,
+                ),
+              },
+            }
+          : {}),
+      };
+    }
     const sideChatAgentConfigOverride = this.buildSideChatTurnAgentConfigOverride(task, message);
-    const effectiveOptions = sideChatAgentConfigOverride
+    let effectiveOptions = sideChatAgentConfigOverride
       ? {
           ...options,
           agentConfigOverride: {
@@ -14113,15 +14247,53 @@ export class AgentDaemon extends EventEmitter {
       this.taskRepo.update(taskId, { agentConfig: overrideResult.task.agentConfig });
     }
     const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(overrideResult.task);
-    const effectiveTask = effectiveOptions?.agentConfigOverride
+    const persistentWorkerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
+    const taskWithFollowUpOverride = effectiveOptions?.agentConfigOverride
       ? {
-          ...roleAdjustedTask,
+          ...persistentWorkerRoleBoundary.task,
           agentConfig: {
-            ...roleAdjustedTask.agentConfig,
+            ...persistentWorkerRoleBoundary.task.agentConfig,
             ...effectiveOptions.agentConfigOverride,
           },
         }
-      : roleAdjustedTask;
+      : persistentWorkerRoleBoundary.task;
+    const workerRoleBoundary = normalizeWorkerRoleTaskConfig(taskWithFollowUpOverride);
+    const effectiveTask = workerRoleBoundary.task;
+    if (effectiveTask.workerRole === "researcher" && effectiveOptions?.agentConfigOverride) {
+      // The executor merges this override again, including when queued. Forward
+      // the bounded config so that second merge cannot restore ACP or write access.
+      effectiveOptions = { ...effectiveOptions, agentConfigOverride: effectiveTask.agentConfig };
+    }
+    if (
+      effectiveTask.workerRole === "researcher" &&
+      effectiveOptions?.queuedFollowUp?.agentConfigOverride
+    ) {
+      const boundedQueuedTask = normalizeWorkerRoleTaskConfig({
+        ...effectiveTask,
+        agentConfig: {
+          ...effectiveTask.agentConfig,
+          ...effectiveOptions.queuedFollowUp.agentConfigOverride,
+        },
+      }).task;
+      effectiveOptions = {
+        ...effectiveOptions,
+        queuedFollowUp: {
+          ...effectiveOptions.queuedFollowUp,
+          agentConfigOverride: boundedQueuedTask.agentConfig,
+        },
+      };
+    }
+    if (persistentWorkerRoleBoundary.changed) {
+      try {
+        // Turn-only model/tool overrides stay transient; persist only the saved
+        // task's role boundary, which is re-applied on every execution entrypoint.
+        this.taskRepo.update(effectiveTask.id, {
+          agentConfig: persistentWorkerRoleBoundary.task.agentConfig,
+        });
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist worker role boundary:", error);
+      }
+    }
 
     const workspace = this.workspaceRepo.findById(effectiveTask.workspaceId);
     if (!workspace) {

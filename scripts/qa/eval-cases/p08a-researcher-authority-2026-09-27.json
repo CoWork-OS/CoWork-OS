@@ -1,0 +1,58 @@
+{
+  "id": "p08a-researcher-authority-2026-09-27",
+  "title": "Ordinary researcher role enforces read-only authority",
+  "source": {
+    "incident": "harness-p08a-researcher-authority",
+    "taskId": "harness-leadership-plan-2026-09-27"
+  },
+  "categories": [
+    {
+      "id": "fresh-researcher-hostile-config",
+      "prompt": "Create a researcher child under a bypass parent while the caller requests a broad profile, shell access, and readOnlyExecution false.",
+      "assertions": {
+        "permissionMode": "plan",
+        "shellEnabled": false,
+        "networkEnabled": false,
+        "externalRuntimeRemoved": true,
+        "mutationHandlersReached": false,
+        "localInspectionReadAvailable": true,
+        "executableTest": "src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts"
+      }
+    },
+    {
+      "id": "saved-researcher-broad-profile",
+      "prompt": "Resume a saved researcher task without readOnlyExecution under a broad named profile and attempt local, shell, browser, connector, MCP, computer-use, and system mutations.",
+      "assertions": {
+        "permissionMode": "plan",
+        "shellEnabled": false,
+        "networkEnabled": false,
+        "mutationHandlersReached": false,
+        "localInspectionReadAvailable": true,
+        "executableTest": "src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts"
+      }
+    },
+    {
+      "id": "researcher-follow-up-and-durable-override",
+      "prompt": "Send a hostile ACP/bypass override to idle and busy researchers, including a durable message requeued during an orphan-drain race.",
+      "assertions": {
+        "permissionMode": "plan",
+        "shellEnabled": false,
+        "externalRuntimeRemoved": true,
+        "turnOnlyModelNotPersisted": true,
+        "executableTest": "src/electron/agent/__tests__/daemon-followup-permissions.test.ts"
+      }
+    },
+    {
+      "id": "researcher-legacy-queue-consumption",
+      "prompt": "Consume a legacy queued researcher override with ACP/bypass/write authority, then restore a broad saved task config.",
+      "assertions": {
+        "permissionMode": "plan",
+        "shellEnabled": false,
+        "externalRuntimeRemoved": true,
+        "restoredConfigRemainsReadOnly": true,
+        "executableTest": "src/electron/agent/__tests__/executor-entrypoints.test.ts"
+      }
+    }
+  ],
+  "notes": "Specification only; the named Vitest regression exercises actual ToolRegistry dispatch with side-effect spies and a temporary local read fixture. No production profile, connector, browser session, or provider is used."
+}

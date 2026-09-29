@@ -102,6 +102,8 @@ import { PermissionSettingsManager } from "../security/permission-settings-manag
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import { AgentConfigSchema, validateInput } from "../utils/validation";
+import { ManagedSessionRequirementCorrectionEventSchema } from "../../shared/managed-session-schemas";
+import { ManagedSessionSuccessCriteriaSchema } from "../../shared/managed-session-schemas";
 import {
   buildTaskEventDetailForTransport,
   buildTaskEventHistoryForTransport,
@@ -1974,13 +1976,14 @@ function sanitizeManagedEnvironmentIdParams(params: unknown): { environmentId: s
   return { environmentId };
 }
 
-function sanitizeManagedSessionCreateParams(params: unknown): Any {
+export function sanitizeManagedSessionCreateParams(params: unknown): Any {
   return validateInput(
     z
       .object({
         agentId: z.string().trim().min(1).max(200),
         environmentId: z.string().trim().min(1).max(200),
         title: z.string().trim().min(1).max(500),
+        successCriteria: ManagedSessionSuccessCriteriaSchema.optional(),
         initialEvent: ManagedSessionInitialEventSchema.optional(),
       })
       .strict(),
@@ -2018,7 +2021,7 @@ function sanitizeManagedSessionEventsParams(params: unknown): { sessionId: strin
   return { sessionId, limit: Math.min(Math.max(rawLimit, 1), 5000) };
 }
 
-function sanitizeManagedSessionSendEventParams(params: unknown): Any {
+export function sanitizeManagedSessionSendEventParams(params: unknown): Any {
   const p = (params ?? {}) as Any;
   const { sessionId } = sanitizeManagedSessionIdParams(params);
   const event = p.event;
@@ -2056,6 +2059,16 @@ function sanitizeManagedSessionSendEventParams(params: unknown): Any {
             : "submitted",
       },
     };
+  }
+  if (type === "requirement.corrected") {
+    const parsed = ManagedSessionRequirementCorrectionEventSchema.safeParse(event);
+    if (!parsed.success) {
+      throw {
+        code: ErrorCodes.INVALID_PARAMS,
+        message: "Invalid managed session requirement correction event",
+      };
+    }
+    return { sessionId, event: parsed.data };
   }
   throw { code: ErrorCodes.INVALID_PARAMS, message: "Unsupported managed session event type" };
 }

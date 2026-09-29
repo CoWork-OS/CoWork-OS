@@ -3428,8 +3428,7 @@ export function App() {
     const checkUpdates = async () => {
       try {
         const info = await window.electronAPI.checkForUpdates("background");
-        // Only a live answer is worth an update prompt; cached metadata may be stale.
-        if (info.available && info.provenance?.source === "live") {
+        if (info.available) {
           setUpdateInfo(info);
         }
       } catch (error) {

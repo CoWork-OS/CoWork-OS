@@ -9,7 +9,7 @@ import {
  * Pulse's transaction groups as SQL only (async SQLite migration plan, DB5). The host
  * decrypts the Pulse settings, decides, re-encrypts and builds packages; these functions
  * then compare the settings row revision the host read and apply the settings row, the
- * consent windows, the outbox and the delivery lease atomically. They run on the host
+ * consent windows and the outbox atomically. They run on the host
  * connection inside an IMMEDIATE transaction, or in the database worker, and never call
  * the keychain, the network or a timer.
  */
@@ -31,8 +31,7 @@ export type PulseOp =
       periodStart: string;
       now: number;
     }
-  | { kind: "incrementAttempt"; packageId: string }
-  | { kind: "releaseLease"; owner: string };
+  | { kind: "incrementAttempt"; packageId: string };
 
 export interface PulseCommitRequest {
   /** The settings row revision the host decided from; `"any"` skips the check. */
@@ -40,16 +39,13 @@ export interface PulseCommitRequest {
   /** New settings ciphertext, or `null` to leave the settings row as it is. */
   record: SecureSettingsRecord | null;
   ops: PulseOp[];
-  /** Commit only while `owner` holds a live delivery lease; optionally renew it. */
-  lease?: { owner: string; now: number; renewUntil?: number };
   /** The stored row was unreadable: back its ciphertext up before replacing it. */
   backupUnreadableAs?: string;
 }
 
 export type PulseCommitResult =
   | { status: "committed"; revision: number | null }
-  | { status: "conflict" }
-  | { status: "lease_lost" };
+  | { status: "conflict" };
 
 export interface PulseClaimRequest {
   expectedRevision: number | null;
@@ -57,11 +53,6 @@ export interface PulseClaimRequest {
   /** Package for today, built by the host outside any transaction; queued if unsent. */
   candidate?: { packageId: string; periodStart: string; payloadJson: string; createdAt: number };
   dayPackageId: string;
-  owner: string;
-  /** The consent revision recorded on the lease row. */
-  consentRevision: number;
-  now: number;
-  leaseMs: number;
 }
 
 export interface PulseQueueHead {
@@ -72,7 +63,6 @@ export interface PulseQueueHead {
 
 export type PulseClaimResult =
   | { status: "conflict" }
-  | { status: "busy" }
   | { status: "no_eligible_day" }
   | { status: "already_sent" }
   | { status: "claimed"; head: PulseQueueHead };
@@ -96,12 +86,6 @@ export function ensurePulseSchema(db: Database.Database): void {
       installation_id TEXT NOT NULL,
       period_start TEXT NOT NULL,
       acknowledged_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS pulse_delivery_lease (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      owner TEXT NOT NULL,
-      revision INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL
     );
   `);
   const outboxColumns = new Set(
@@ -157,24 +141,11 @@ function applyPulseOp(db: Database.Database, op: PulseOp): void {
         "UPDATE pulse_outbox SET attempt_count = attempt_count + 1 WHERE package_id = ?",
       ).run(op.packageId);
       return;
-    case "releaseLease":
-      db.prepare("DELETE FROM pulse_delivery_lease WHERE owner = ?").run(op.owner);
-      return;
   }
-}
-
-function leaseHeld(db: Database.Database, owner: string, now: number): boolean {
-  const lease = db
-    .prepare("SELECT owner, expires_at FROM pulse_delivery_lease WHERE id = 1")
-    .get() as { owner: string; expires_at: number } | undefined;
-  return Boolean(lease && lease.owner === owner && lease.expires_at > now);
 }
 
 /** Run inside an IMMEDIATE transaction. Checks everything before changing anything. */
 export function pulseCommit(db: Database.Database, request: PulseCommitRequest): PulseCommitResult {
-  if (request.lease && !leaseHeld(db, request.lease.owner, request.lease.now)) {
-    return { status: "lease_lost" };
-  }
   if (
     request.expectedRevision !== "any" &&
     readSecureSettingsRevision(db, PULSE_SETTINGS_CATEGORY) !== request.expectedRevision
@@ -182,12 +153,6 @@ export function pulseCommit(db: Database.Database, request: PulseCommitRequest):
     return { status: "conflict" };
   }
   for (const op of request.ops) applyPulseOp(db, op);
-  if (request.lease?.renewUntil !== undefined) {
-    db.prepare("UPDATE pulse_delivery_lease SET expires_at = ? WHERE id = 1 AND owner = ?").run(
-      request.lease.renewUntil,
-      request.lease.owner,
-    );
-  }
   let revision = readSecureSettingsRevision(db, PULSE_SETTINGS_CATEGORY);
   if (request.record) {
     const result = commitSecureSettingsWrites(db, [
@@ -205,7 +170,7 @@ export function pulseCommit(db: Database.Database, request: PulseCommitRequest):
 
 /**
  * Run inside an IMMEDIATE transaction: drop unsendable rows, queue today's package if it
- * is still unsent, then claim the delivery lease for the oldest queued day.
+ * is still unsent, then return the oldest queued day.
  */
 export function pulseClaim(db: Database.Database, request: PulseClaimRequest): PulseClaimResult {
   if (readSecureSettingsRevision(db, PULSE_SETTINGS_CATEGORY) !== request.expectedRevision) {
@@ -242,16 +207,5 @@ export function pulseClaim(db: Database.Database, request: PulseClaimRequest): P
   if (!head) {
     return { status: receipt(request.dayPackageId) ? "already_sent" : "no_eligible_day" };
   }
-  const lease = db
-    .prepare("SELECT owner, expires_at FROM pulse_delivery_lease WHERE id = 1")
-    .get() as { owner: string; expires_at: number } | undefined;
-  if (lease && lease.owner !== request.owner && lease.expires_at > request.now) {
-    return { status: "busy" };
-  }
-  db.prepare(
-    `INSERT INTO pulse_delivery_lease (id, owner, revision, expires_at) VALUES (1, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET owner = excluded.owner, revision = excluded.revision,
-     expires_at = excluded.expires_at`,
-  ).run(request.owner, request.consentRevision, request.now + request.leaseMs);
   return { status: "claimed", head };
 }

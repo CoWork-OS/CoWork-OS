@@ -1,5 +1,7 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
+import { createHash, randomUUID } from "crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import {
@@ -13,10 +15,246 @@ import {
   resolveAccessControlledPath,
 } from "../../security/access-profile-paths";
 import { LLMTool } from "../llm/types";
+import { GuardrailManager } from "../../guardrails/guardrail-manager";
+import { getUserDataDir } from "../../utils/user-data-dir";
 
 function hasStableFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
   if (left.dev === 0 || right.dev === 0 || left.ino === 0 || right.ino === 0) return true;
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+interface EditRecoveryRecord {
+  version: 1;
+  path: string;
+  fileDev: number;
+  fileIno: number;
+  ownerPid: number;
+  // Optional for backward compatibility with records written before these fields existed.
+  // ownerBootTimeMs lets a reboot (and therefore PID reuse) prove the owner is gone;
+  // transactionId makes every record's checksum unique so cleanup can verify identity.
+  ownerBootTimeMs?: number;
+  transactionId?: string;
+  state: "prepared" | "committed";
+  beforeBase64: string;
+  afterBase64: string;
+  beforeSha256: string;
+  afterSha256: string;
+  checksum: string;
+}
+
+interface LoadedEditRecoveryRecord {
+  record: EditRecoveryRecord;
+  /** Identity of the record file itself, used to confirm cleanup removes the record it read. */
+  recordDev: number;
+  recordIno: number;
+}
+
+const editPathLocks = new Map<string, Promise<void>>();
+const activeEditTransactions = new Set<string>();
+const EDIT_RECOVERY_DIRECTORY = "edit-recovery";
+const EDIT_RECOVERY_RECORD_OVERHEAD_BYTES = 16 * 1024;
+// Separate from the configurable per-file guardrail: recovery retains two
+// versions and must stay bounded even when the ordinary size guardrail is off.
+const MAX_EDIT_RECOVERY_CONTENT_BYTES = 128 * 1024 * 1024;
+
+async function withEditPathLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const previous = editPathLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const queued = previous.then(() => held);
+  editPathLocks.set(key, queued);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (editPathLocks.get(key) === queued) editPathLocks.delete(key);
+  }
+}
+
+function editRecoveryPayload(record: EditRecoveryRecord): Omit<EditRecoveryRecord, "checksum"> {
+  const { checksum: _checksum, ...payload } = record;
+  return payload;
+}
+
+function editRecoveryChecksum(record: EditRecoveryRecord): string {
+  return createHash("sha256")
+    .update(JSON.stringify(editRecoveryPayload(record)))
+    .digest("hex");
+}
+
+function hashEditContent(content: Buffer): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function assertEditContentSize(sizeBytes: number): void {
+  const check = GuardrailManager.isFileSizeExceeded(sizeBytes);
+  if (check.exceeded) {
+    throw new Error(
+      `File size limit exceeded: ${check.sizeMB.toFixed(2)}MB exceeds limit of ${check.limitMB}MB.`,
+    );
+  }
+  if (sizeBytes > MAX_EDIT_RECOVERY_CONTENT_BYTES) {
+    throw new Error("Edit recovery storage supports at most 128 MiB per file version.");
+  }
+}
+
+function getEditRecoveryRecordLimitBytes(): number {
+  return (
+    Math.ceil((2 * MAX_EDIT_RECOVERY_CONTENT_BYTES * 4) / 3) + EDIT_RECOVERY_RECORD_OVERHEAD_BYTES
+  );
+}
+
+function getEditRecoveryRecordPath(directory: string, stats: fs.Stats, realPath: string): string {
+  // Processes using the same profile must contend even when they use different
+  // hard-link names. Different user-data profiles remain separate coordinators.
+  const id = createHash("sha256").update(getEditLockKey(stats, realPath)).digest("hex");
+  return path.join(directory, `${id}.json`);
+}
+
+function getEditLockKey(stats: fs.Stats, realPath: string): string {
+  if (stats.dev !== 0 && stats.ino !== 0) return `inode:${stats.dev}:${stats.ino}`;
+  return `path:${realPath}`;
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: Any) {
+    return error.code !== "ESRCH";
+  }
+}
+
+// Boot time derived from wall clock minus uptime drifts with clock adjustments, so allow a
+// generous margin. A false "same boot" only falls back to the PID probe; a false "different
+// boot" would discard a live record, so the tolerance errs toward treating the owner as alive.
+const BOOT_TIME_TOLERANCE_MS = 10 * 60 * 1000;
+
+function getCurrentBootTimeMs(): number {
+  return Math.round(Date.now() - os.uptime() * 1000);
+}
+
+/** Liveness of a record owned by another PID (same-PID ownership is tracked in-process). */
+function isOtherRecoveryRecordOwnerAlive(record: EditRecoveryRecord): boolean {
+  const hasBootTime = typeof record.ownerBootTimeMs === "number";
+  if (
+    hasBootTime &&
+    Math.abs((record.ownerBootTimeMs as number) - getCurrentBootTimeMs()) > BOOT_TIME_TOLERANCE_MS
+  ) {
+    // The owner ran before the last reboot; its PID may now belong to an unrelated process.
+    return false;
+  }
+  // Legacy records (no boot time) keep the previous conservative behavior: any error other
+  // than ESRCH, including EPERM, means alive. With a matching boot time, EPERM still means a
+  // process exists under that PID in this boot, so it is treated as alive too.
+  return isProcessAlive(record.ownerPid);
+}
+
+function cleanupStaleRecoveryTemps(directory: string): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const match = /^[a-f0-9]{64}\.(\d+)\.[a-f0-9-]+\.tmp$/.exec(name);
+    if (!match || isProcessAlive(Number(match[1]))) continue;
+    const candidate = path.join(directory, name);
+    try {
+      const stats = fs.lstatSync(candidate);
+      if (
+        stats.isFile() &&
+        !stats.isSymbolicLink() &&
+        (process.platform === "win32" || (stats.mode & 0o077) === 0)
+      ) {
+        fs.unlinkSync(candidate);
+      }
+    } catch {
+      // Stale temp cleanup is best effort; never block the user edit on it.
+    }
+  }
+}
+
+function writeBufferFully(fd: number, buffer: Buffer): void {
+  let offset = 0;
+  while (offset < buffer.length) {
+    const written = fs.writeSync(fd, buffer, offset, buffer.length - offset, offset);
+    if (written <= 0) throw new Error("File write made no progress");
+    offset += written;
+  }
+}
+
+function readDescriptorBuffer(fd: number): Buffer {
+  const initial = fs.fstatSync(fd);
+  if (!initial.isFile()) throw new Error("Edit target is not a regular file");
+  assertEditContentSize(initial.size);
+  const content = Buffer.alloc(initial.size);
+  let offset = 0;
+  while (offset < content.length) {
+    const read = fs.readSync(fd, content, offset, content.length - offset, offset);
+    if (read === 0) break;
+    offset += read;
+  }
+  const latest = fs.fstatSync(fd);
+  if (offset !== content.length || latest.size !== initial.size) {
+    throw new Error("File changed while its contents were being read; retry the edit.");
+  }
+  return content;
+}
+
+function writeRecoveryRecord(
+  recordPath: string,
+  record: EditRecoveryRecord,
+  create: boolean,
+): void {
+  const bytes = Buffer.from(JSON.stringify(record), "utf8");
+  if (bytes.length > getEditRecoveryRecordLimitBytes()) {
+    throw new Error("File edit recovery record exceeds the independent recovery storage limit.");
+  }
+  const noFollow = (fs.constants as Any).O_NOFOLLOW;
+  const noFollowFlag = typeof noFollow === "number" ? noFollow : 0;
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | noFollowFlag;
+  const tempPath = `${recordPath}.${process.pid}.${randomUUID()}.tmp`;
+  let fd: number | null = null;
+  let linkedRecord = false;
+  try {
+    fd = fs.openSync(tempPath, flags | fs.constants.O_EXCL, 0o600);
+    writeBufferFully(fd, bytes);
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = null;
+    if (create) {
+      fs.linkSync(tempPath, recordPath);
+      linkedRecord = true;
+      fs.unlinkSync(tempPath);
+    } else {
+      fs.renameSync(tempPath, recordPath);
+    }
+  } catch (error) {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Preserve the write error.
+      }
+    }
+    if (linkedRecord) {
+      try {
+        fs.unlinkSync(recordPath);
+      } catch {
+        // Preserve the write error.
+      }
+    }
+    try {
+      fs.unlinkSync(tempPath);
+    } catch {
+      // Preserve the write error.
+    }
+    throw error;
+  }
 }
 
 /**
@@ -48,7 +286,8 @@ export class EditTools {
           "Perform surgical text replacements in files. " +
           "Replaces exact matches of old_string with new_string. " +
           "PREFERRED over write_file when making targeted changes - safer and preserves file structure. " +
-          "The edit will FAIL if old_string is not found or is not unique (unless replace_all is true).",
+          "The edit will FAIL if old_string is not found or is not unique (unless replace_all is true). " +
+          "If the file changes before commit, the edit is rebased only when its original match remains safe; replace_all also requires the same match count.",
         input_schema: {
           type: "object",
           properties: {
@@ -200,111 +439,140 @@ export class EditTools {
         throw new Error(`Path is denied by the active access profile: ${realPath}`);
       }
       const initialStats = fs.statSync(realPath);
-
-      // Read file
-      const content = fs.readFileSync(fullPath, "utf-8");
-
-      // Count occurrences
-      const occurrences = this.countOccurrences(content, old_string);
-
-      if (occurrences === 0) {
-        throw new Error(
-          `old_string not found in file. Make sure the string matches exactly (including whitespace and indentation).`,
-        );
-      }
-
-      if (occurrences > 1 && !replace_all) {
-        throw new Error(
-          `old_string found ${occurrences} times in file. ` +
-            `Use replace_all: true to replace all occurrences, or provide more context to make it unique.`,
-        );
-      }
-
-      // Perform replacement
-      let newContent: string;
-      let replacements: number;
-
-      if (replace_all) {
-        newContent = content.split(old_string).join(new_string);
-        replacements = occurrences;
-      } else {
-        // Replace only first occurrence (we already verified it's unique)
-        const index = content.indexOf(old_string);
-        newContent =
-          content.substring(0, index) + new_string + content.substring(index + old_string.length);
-        replacements = 1;
-      }
-
-      // Write file
-      await this.daemon.captureTaskMutationBaseline?.(this.taskId, fullPath);
-      const latestAccess = evaluateWorkspaceFilesystemAccess(
-        this.workspace,
-        requestedFullPath,
-        "write",
-        {
-          externalApprovalGranted,
-        },
-      );
-      if (latestAccess.decision !== "allow") {
-        if (latestAccess.reason === "profile_filesystem_denied") {
-          throw new Error(`Path is denied by the active access profile: ${requestedFullPath}`);
+      if (!initialStats.isFile()) throw new Error("Edit target is not a regular file");
+      const initialParentPath = path.dirname(realPath);
+      const initialParentStats = fs.statSync(initialParentPath);
+      const noFollow = (fs.constants as Any).O_NOFOLLOW;
+      const descriptorFlags = fs.constants.O_RDWR | (typeof noFollow === "number" ? noFollow : 0);
+      const targetFd = fs.openSync(realPath, descriptorFlags);
+      try {
+        if (!hasStableFileIdentity(fs.fstatSync(targetFd), initialStats)) {
+          throw new Error("File target changed before edit was read");
         }
-        throw new Error("File path resolves outside workspace");
-      }
-      const latestRealPath = fs.realpathSync(latestAccess.path);
-      const latestRealAccess = evaluateWorkspaceFilesystemAccess(
-        this.workspace,
-        latestRealPath,
-        "write",
-        {
-          externalApprovalGranted,
-        },
-      );
-      if (latestRealAccess.decision !== "allow") {
-        if (latestRealAccess.reason === "profile_filesystem_denied") {
-          throw new Error(`Path is denied by the active access profile: ${latestRealPath}`);
-        }
-        throw new Error("File path resolves outside workspace");
-      }
-      if (latestRealPath !== realPath) {
-        throw new Error("File path changed during edit");
-      }
-      if (!hasStableFileIdentity(initialStats, fs.statSync(latestRealPath))) {
-        throw new Error("File target changed during edit");
-      }
-      this.writeFileThroughDescriptor(latestRealPath, newContent, initialStats);
 
-      this.daemon.logEvent(this.taskId, "tool_result", {
-        tool: "edit_file",
-        result: {
+        // Recover a prior interrupted edit before taking the content version used by this edit.
+        await withEditPathLock(getEditLockKey(initialStats, realPath), async () => {
+          await this.revalidateEditTarget({
+            requestedFullPath,
+            realPath,
+            initialStats,
+            initialParentStats,
+            targetFd,
+            externalApprovalGranted,
+          });
+          await this.recoverPendingEdit({
+            requestedFullPath,
+            realPath,
+            targetFd,
+            expectedIdentity: initialStats,
+            expectedParentIdentity: initialParentStats,
+            externalApprovalGranted,
+          });
+        });
+
+        const initialBuffer = readDescriptorBuffer(targetFd);
+        const initialContent = initialBuffer.toString("utf8");
+        const initialReplacement = this.buildReplacement(
+          initialContent,
+          old_string,
+          new_string,
+          replace_all,
+        );
+
+        await this.daemon.captureTaskMutationBaseline?.(this.taskId, fullPath);
+
+        const replacement = await withEditPathLock(
+          getEditLockKey(initialStats, realPath),
+          async () => {
+            await this.revalidateEditTarget({
+              requestedFullPath,
+              realPath,
+              initialStats,
+              initialParentStats,
+              targetFd,
+              externalApprovalGranted,
+            });
+            const currentBuffer = readDescriptorBuffer(targetFd);
+            const currentContent = currentBuffer.toString("utf8");
+            let next: { content: string; replacements: number };
+            try {
+              next = this.buildReplacement(currentContent, old_string, new_string, replace_all);
+            } catch (error: Any) {
+              if (!currentBuffer.equals(initialBuffer)) {
+                throw new Error(
+                  `File changed while this edit was waiting, and the requested text can no longer be matched safely. ${error.message} Re-read the file and retry with current text.`,
+                );
+              }
+              throw error;
+            }
+            if (
+              !currentBuffer.equals(initialBuffer) &&
+              replace_all &&
+              next.replacements !== initialReplacement.replacements
+            ) {
+              throw new Error(
+                `File changed while this edit was waiting, so replace_all would affect ${next.replacements} matches instead of the original ${initialReplacement.replacements}. Re-read the file and retry with current text.`,
+              );
+            }
+
+            const nextBuffer = Buffer.from(next.content, "utf8");
+            assertEditContentSize(nextBuffer.length);
+            await this.revalidateEditTarget({
+              requestedFullPath,
+              realPath,
+              initialStats,
+              initialParentStats,
+              targetFd,
+              externalApprovalGranted,
+            });
+            this.writeFileThroughDescriptor({
+              realPath,
+              requestedFullPath,
+              targetFd,
+              contentBefore: currentBuffer,
+              contentAfter: nextBuffer,
+              expectedIdentity: initialStats,
+              expectedParentIdentity: initialParentStats,
+              externalApprovalGranted,
+            });
+            return next;
+          },
+        );
+
+        this.daemon.logEvent(this.taskId, "tool_result", {
+          tool: "edit_file",
+          result: {
+            file_path,
+            replacements: replacement.replacements,
+            oldLength: old_string.length,
+            newLength: new_string.length,
+          },
+        });
+
+        // Emit file modified event with edit preview
+        const oldPreview = old_string.length > 80 ? old_string.slice(0, 80) + "..." : old_string;
+        const newPreview = new_string.length > 80 ? new_string.slice(0, 80) + "..." : new_string;
+        const oldLineCount = old_string.split("\n").length;
+        const newLineCount = new_string.split("\n").length;
+        const netLines = newLineCount - oldLineCount;
+
+        this.daemon.logEvent(this.taskId, "file_modified", {
+          path: file_path,
+          type: "edit",
+          replacements: replacement.replacements,
+          oldPreview,
+          newPreview,
+          netLines,
+        });
+
+        return {
+          success: true,
           file_path,
-          replacements,
-          oldLength: old_string.length,
-          newLength: new_string.length,
-        },
-      });
-
-      // Emit file modified event with edit preview
-      const oldPreview = old_string.length > 80 ? old_string.slice(0, 80) + "..." : old_string;
-      const newPreview = new_string.length > 80 ? new_string.slice(0, 80) + "..." : new_string;
-      const oldLineCount = old_string.split("\n").length;
-      const newLineCount = new_string.split("\n").length;
-      const netLines = newLineCount - oldLineCount;
-
-      this.daemon.logEvent(this.taskId, "file_modified", {
-        path: file_path,
-        type: "edit",
-        replacements,
-        oldPreview,
-        newPreview,
-        netLines,
-      });
-
-      return {
-        success: true,
-        file_path,
-        replacements,
-      };
+          replacements: replacement.replacements,
+        };
+      } finally {
+        fs.closeSync(targetFd);
+      }
     } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "edit_file",
@@ -337,22 +605,628 @@ export class EditTools {
     return count;
   }
 
-  private writeFileThroughDescriptor(
-    realPath: string,
+  private buildReplacement(
     content: string,
-    expectedIdentity: fs.Stats,
-  ): void {
-    const noFollow = (fs.constants as Any).O_NOFOLLOW;
-    const flags = fs.constants.O_WRONLY | (typeof noFollow === "number" ? noFollow : 0);
-    const fd = fs.openSync(realPath, flags);
-    try {
-      if (!hasStableFileIdentity(fs.fstatSync(fd), expectedIdentity)) {
-        throw new Error("File target changed before edit was written");
+    oldString: string,
+    newString: string,
+    replaceAll: boolean,
+  ): { content: string; replacements: number } {
+    const occurrences = this.countOccurrences(content, oldString);
+    if (occurrences === 0) {
+      throw new Error(
+        "old_string not found in file. Make sure the string matches exactly (including whitespace and indentation).",
+      );
+    }
+    if (occurrences > 1 && !replaceAll) {
+      throw new Error(
+        `old_string found ${occurrences} times in file. ` +
+          "Use replace_all: true to replace all occurrences, or provide more context to make it unique.",
+      );
+    }
+    if (replaceAll) {
+      return { content: content.split(oldString).join(newString), replacements: occurrences };
+    }
+    const index = content.indexOf(oldString);
+    return {
+      content:
+        content.substring(0, index) + newString + content.substring(index + oldString.length),
+      replacements: 1,
+    };
+  }
+
+  protected async revalidateEditTarget(options: {
+    requestedFullPath: string;
+    realPath: string;
+    initialStats: fs.Stats;
+    initialParentStats: fs.Stats;
+    targetFd: number;
+    externalApprovalGranted: boolean;
+  }): Promise<void> {
+    const {
+      requestedFullPath,
+      realPath,
+      initialStats,
+      initialParentStats,
+      targetFd,
+      externalApprovalGranted,
+    } = options;
+    const access = evaluateWorkspaceFilesystemAccess(this.workspace, requestedFullPath, "write", {
+      externalApprovalGranted,
+    });
+    if (access.decision !== "allow") {
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${requestedFullPath}`);
       }
-      fs.ftruncateSync(fd, 0);
-      fs.writeFileSync(fd, content, "utf-8");
+      if (access.reason === "outside_workspace") {
+        throw new Error("File path resolves outside workspace");
+      }
+      throw new Error(`Write permission not granted: ${access.reason}`);
+    }
+    const latestRealPath = fs.realpathSync(access.path);
+    if (latestRealPath !== realPath) throw new Error("File path changed during edit");
+    const realAccess = evaluateWorkspaceFilesystemAccess(this.workspace, latestRealPath, "write", {
+      externalApprovalGranted,
+    });
+    if (realAccess.decision !== "allow") {
+      if (realAccess.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${latestRealPath}`);
+      }
+      throw new Error("File path resolves outside workspace");
+    }
+    const pathEntry = fs.lstatSync(latestRealPath);
+    if (pathEntry.isSymbolicLink() || !pathEntry.isFile()) {
+      throw new Error("File path changed during edit");
+    }
+    const latestStats = fs.statSync(latestRealPath);
+    if (!hasStableFileIdentity(initialStats, latestStats)) {
+      throw new Error("File target changed during edit");
+    }
+    const latestParentPath = path.dirname(latestRealPath);
+    const latestParentStats = fs.statSync(latestParentPath);
+    if (
+      fs.realpathSync(latestParentPath) !== path.dirname(realPath) ||
+      !hasStableFileIdentity(initialParentStats, latestParentStats)
+    ) {
+      throw new Error("Parent directory changed during edit");
+    }
+    if (!hasStableFileIdentity(initialStats, fs.fstatSync(targetFd))) {
+      throw new Error("File target changed during edit");
+    }
+
+    const workspaceRoot = path.resolve(this.workspace.path);
+    const relPosix = getWorkspaceRelativePosixPath(workspaceRoot, access.path);
+    if (relPosix !== null) {
+      const projectId = getProjectIdFromWorkspaceRelPath(relPosix);
+      if (projectId) {
+        const taskGetter = (this.daemon as Any)?.getTask;
+        const task =
+          typeof taskGetter === "function" ? taskGetter.call(this.daemon, this.taskId) : null;
+        const res = await checkProjectAccess({
+          workspacePath: workspaceRoot,
+          projectId,
+          agentRoleId: task?.assignedAgentRoleId || null,
+        });
+        if (!res.allowed) {
+          throw new Error(res.reason || `Access denied for project "${projectId}"`);
+        }
+      }
+    }
+  }
+
+  private assertDescriptorCommitPath(options: {
+    requestedFullPath: string;
+    realPath: string;
+    targetFd: number;
+    expectedIdentity: fs.Stats;
+    expectedParentIdentity: fs.Stats;
+    externalApprovalGranted: boolean;
+  }): void {
+    const {
+      requestedFullPath,
+      realPath,
+      targetFd,
+      expectedIdentity,
+      expectedParentIdentity,
+      externalApprovalGranted,
+    } = options;
+    const access = evaluateWorkspaceFilesystemAccess(this.workspace, requestedFullPath, "write", {
+      externalApprovalGranted,
+    });
+    if (access.decision !== "allow") {
+      if (access.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${requestedFullPath}`);
+      }
+      throw new Error("File path resolves outside workspace");
+    }
+    const latestRealPath = fs.realpathSync(access.path);
+    if (latestRealPath !== realPath) throw new Error("File path changed during edit");
+    const realAccess = evaluateWorkspaceFilesystemAccess(this.workspace, latestRealPath, "write", {
+      externalApprovalGranted,
+    });
+    if (realAccess.decision !== "allow") {
+      if (realAccess.reason === "profile_filesystem_denied") {
+        throw new Error(`Path is denied by the active access profile: ${latestRealPath}`);
+      }
+      throw new Error("File path resolves outside workspace");
+    }
+    const entry = fs.lstatSync(latestRealPath);
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw new Error("File path changed during edit");
+    }
+    if (!hasStableFileIdentity(expectedIdentity, fs.statSync(latestRealPath))) {
+      throw new Error("File target changed during edit");
+    }
+    const parentPath = path.dirname(latestRealPath);
+    if (
+      fs.realpathSync(parentPath) !== path.dirname(realPath) ||
+      !hasStableFileIdentity(expectedParentIdentity, fs.statSync(parentPath))
+    ) {
+      throw new Error("Parent directory changed during edit");
+    }
+    if (!hasStableFileIdentity(expectedIdentity, fs.fstatSync(targetFd))) {
+      throw new Error("File target changed during edit");
+    }
+  }
+
+  private getRecoveryDirectory(): string {
+    const userDataPath = path.resolve(getUserDataDir());
+    const directory = path.join(userDataPath, EDIT_RECOVERY_DIRECTORY);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const stats = fs.lstatSync(directory);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      throw new Error("File edit recovery storage is not a private directory");
+    }
+    if (process.platform !== "win32") {
+      const userId = typeof process.getuid === "function" ? process.getuid() : null;
+      if (userId !== null && stats.uid !== userId) {
+        throw new Error("File edit recovery storage is owned by another user");
+      }
+      if ((stats.mode & 0o077) !== 0) fs.chmodSync(directory, 0o700);
+      const verified = fs.lstatSync(directory);
+      if ((verified.mode & 0o077) !== 0) {
+        throw new Error("File edit recovery storage permissions are too broad");
+      }
+    }
+    const realDirectory = fs.realpathSync(directory);
+    cleanupStaleRecoveryTemps(realDirectory);
+    return realDirectory;
+  }
+
+  private activeEditConflictError(recordPath: string, reason: string): Error {
+    const recordId = path.basename(recordPath, ".json");
+    return new Error(
+      `File edit conflict (${recordId}): ${reason}. No changes were made by this request; retry after the other edit finishes. Recovery record: ${recordPath}`,
+    );
+  }
+
+  private recoveryRequiredError(recordPath: string, reason: string): Error {
+    const recordId = path.basename(recordPath, ".json");
+    return new Error(
+      `File edit recovery is required (${recordId}): ${reason}. CoWork preserved the private recovery record at ${recordPath}. Save the current file and reconcile it with that record before retrying.`,
+    );
+  }
+
+  private readRecoveryRecord(
+    recordPath: string,
+    realPath: string,
+  ): LoadedEditRecoveryRecord | null {
+    let fd: number;
+    const noFollow = (fs.constants as Any).O_NOFOLLOW;
+    try {
+      fd = fs.openSync(
+        recordPath,
+        fs.constants.O_RDONLY | (typeof noFollow === "number" ? noFollow : 0),
+      );
+    } catch (error: Any) {
+      if (error.code === "ENOENT") return null;
+      throw this.recoveryRequiredError(
+        recordPath,
+        "the private recovery record cannot be opened safely",
+      );
+    }
+
+    try {
+      const stats = fs.fstatSync(fd);
+      const userId = typeof process.getuid === "function" ? process.getuid() : null;
+      if (
+        !stats.isFile() ||
+        stats.nlink > 2 ||
+        (userId !== null && stats.uid !== userId) ||
+        (process.platform !== "win32" && (stats.mode & 0o077) !== 0) ||
+        stats.size <= 0 ||
+        stats.size > getEditRecoveryRecordLimitBytes()
+      ) {
+        throw this.recoveryRequiredError(
+          recordPath,
+          "the private recovery record has unsafe metadata",
+        );
+      }
+      const parsed = JSON.parse(fs.readFileSync(fd, "utf8")) as Any;
+      const keys = Object.keys(parsed ?? {}).sort();
+      const baseKeys = [
+        "afterBase64",
+        "afterSha256",
+        "beforeBase64",
+        "beforeSha256",
+        "checksum",
+        "fileDev",
+        "fileIno",
+        "ownerPid",
+        "path",
+        "state",
+        "version",
+      ];
+      // Records written before ownerBootTimeMs/transactionId existed remain valid.
+      const hasOwnerIdentity = Object.prototype.hasOwnProperty.call(parsed ?? {}, "transactionId");
+      const expectedKeys = (
+        hasOwnerIdentity ? [...baseKeys, "ownerBootTimeMs", "transactionId"] : baseKeys
+      ).sort();
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        keys.length !== expectedKeys.length ||
+        keys.some((key: string, index: number) => key !== expectedKeys[index]) ||
+        parsed.version !== 1 ||
+        typeof parsed.path !== "string" ||
+        !path.isAbsolute(parsed.path) ||
+        ((parsed.fileDev === 0 || parsed.fileIno === 0) && parsed.path !== realPath) ||
+        !Number.isFinite(parsed.fileDev) ||
+        !Number.isFinite(parsed.fileIno) ||
+        !Number.isSafeInteger(parsed.ownerPid) ||
+        (hasOwnerIdentity &&
+          (!Number.isFinite(parsed.ownerBootTimeMs) ||
+            typeof parsed.transactionId !== "string" ||
+            !/^[a-f0-9-]{36}$/.test(parsed.transactionId))) ||
+        (parsed.state !== "prepared" && parsed.state !== "committed") ||
+        typeof parsed.beforeBase64 !== "string" ||
+        typeof parsed.afterBase64 !== "string" ||
+        typeof parsed.beforeSha256 !== "string" ||
+        typeof parsed.afterSha256 !== "string" ||
+        typeof parsed.checksum !== "string"
+      ) {
+        throw this.recoveryRequiredError(recordPath, "the private recovery record is malformed");
+      }
+      const record = parsed as EditRecoveryRecord;
+      if (
+        !/^[a-f0-9]{64}$/.test(record.checksum) ||
+        editRecoveryChecksum(record) !== record.checksum
+      ) {
+        throw this.recoveryRequiredError(
+          recordPath,
+          "the private recovery record failed its integrity check",
+        );
+      }
+      const before = Buffer.from(record.beforeBase64, "base64");
+      const after = Buffer.from(record.afterBase64, "base64");
+      if (
+        before.toString("base64") !== record.beforeBase64 ||
+        after.toString("base64") !== record.afterBase64 ||
+        before.length > MAX_EDIT_RECOVERY_CONTENT_BYTES ||
+        after.length > MAX_EDIT_RECOVERY_CONTENT_BYTES ||
+        hashEditContent(before) !== record.beforeSha256 ||
+        hashEditContent(after) !== record.afterSha256
+      ) {
+        throw this.recoveryRequiredError(
+          recordPath,
+          "the private recovery record contents failed validation",
+        );
+      }
+      return { record, recordDev: stats.dev, recordIno: stats.ino };
+    } catch (error: Any) {
+      if (
+        typeof error?.message === "string" &&
+        error.message.includes("File edit recovery is required")
+      ) {
+        throw error;
+      }
+      throw this.recoveryRequiredError(
+        recordPath,
+        "the private recovery record is malformed or unreadable",
+      );
     } finally {
       fs.closeSync(fd);
+    }
+  }
+
+  private removeRecoveryRecord(recordPath: string): void {
+    try {
+      fs.unlinkSync(recordPath);
+    } catch (error: Any) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+
+  /** Test seam: runs after a record is judged orphaned and before it is discarded. */
+  protected beforeOrphanRecoveryRecordRemoval(_recordPath: string): void {}
+
+  /**
+   * Discard an orphaned record only if the file at recordPath is still the record that was read.
+   * Another process sharing the profile may have already discarded that orphan and created its own
+   * live record at the same path; unlinking by path would silently delete the live record. POSIX
+   * has no unlink-if-inode, so move the entry to a unique tombstone, verify the moved file's
+   * identity and checksum (transactionId makes checksums unique), and restore it on mismatch.
+   */
+  private removeOrphanRecoveryRecord(
+    recordPath: string,
+    realPath: string,
+    loaded: LoadedEditRecoveryRecord,
+  ): void {
+    const isSameRecord = (candidate: LoadedEditRecoveryRecord | null): boolean =>
+      candidate !== null &&
+      candidate.record.checksum === loaded.record.checksum &&
+      (loaded.recordIno === 0 ||
+        candidate.recordIno === 0 ||
+        (candidate.recordDev === loaded.recordDev && candidate.recordIno === loaded.recordIno));
+    const replacedError = () =>
+      this.activeEditConflictError(
+        recordPath,
+        "another CoWork process replaced the recovery record while it was being reconciled",
+      );
+
+    try {
+      const onDisk = fs.lstatSync(recordPath);
+      if (
+        loaded.recordIno !== 0 &&
+        onDisk.ino !== 0 &&
+        (onDisk.dev !== loaded.recordDev || onDisk.ino !== loaded.recordIno)
+      ) {
+        throw replacedError();
+      }
+    } catch (error: Any) {
+      // Another reconciler already discarded this orphan; record creation is exclusive, so a
+      // concurrent new edit will still be detected when this request creates its own record.
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+
+    const tombstonePath = `${recordPath}.${process.pid}.${randomUUID()}.reap`;
+    try {
+      fs.renameSync(recordPath, tombstonePath);
+    } catch (error: Any) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+
+    let moved: LoadedEditRecoveryRecord | null = null;
+    try {
+      moved = this.readRecoveryRecord(tombstonePath, realPath);
+    } catch {
+      moved = null;
+    }
+    if (isSameRecord(moved)) {
+      this.removeRecoveryRecord(tombstonePath);
+      return;
+    }
+
+    // Not the orphan we inspected: put the other process's record back without overwriting
+    // anything created meanwhile (link fails with EEXIST), then report the live conflict.
+    try {
+      fs.linkSync(tombstonePath, recordPath);
+    } catch {
+      throw this.recoveryRequiredError(
+        tombstonePath,
+        "a concurrent edit replaced the recovery record during reconciliation and it could not be restored",
+      );
+    }
+    try {
+      fs.unlinkSync(tombstonePath);
+    } catch {
+      // The restored record is intact; a leftover tombstone link is harmless evidence.
+    }
+    throw replacedError();
+  }
+
+  /**
+   * Reconciliation runs on the next edit of this inode within the same profile, not during
+   * startup or read-only access. Fsynced before/after bytes make process-killed writes manually
+   * recoverable. Directory entries are not fsynced, so power-loss recovery is not promised.
+   * No partial prefix proves ownership: even empty bytes could be an external user's edit.
+   * Recovery never rewrites the target. Exact known states can discard the receipt; all other
+   * content is preserved with an actionable conflict and the receipt intact. The write retains the
+   * inode, hard links, mode, owner, ACLs, and other file metadata. On Windows privacy depends on
+   * the app user-data directory ACL because POSIX mode bits cannot express its access rules.
+   */
+  private async recoverPendingEdit(options: {
+    requestedFullPath: string;
+    realPath: string;
+    targetFd: number;
+    expectedIdentity: fs.Stats;
+    expectedParentIdentity: fs.Stats;
+    externalApprovalGranted: boolean;
+  }): Promise<void> {
+    const { realPath, targetFd, expectedIdentity } = options;
+    const directory = this.getRecoveryDirectory();
+    const recordPath = getEditRecoveryRecordPath(directory, expectedIdentity, realPath);
+    const loaded = this.readRecoveryRecord(recordPath, realPath);
+    if (!loaded) return;
+    const { record } = loaded;
+    if (
+      record.fileDev !== expectedIdentity.dev ||
+      record.fileIno !== expectedIdentity.ino ||
+      !hasStableFileIdentity(expectedIdentity, fs.fstatSync(targetFd))
+    ) {
+      throw this.recoveryRequiredError(
+        recordPath,
+        "the target inode no longer matches the interrupted edit",
+      );
+    }
+    const before = Buffer.from(record.beforeBase64, "base64");
+    const after = Buffer.from(record.afterBase64, "base64");
+    const current = readDescriptorBuffer(targetFd);
+    // A committed record whose target already holds the after-bytes describes a finished write:
+    // the owner's only remaining step is an ENOENT-tolerant unlink by path, so it is reclaimable
+    // even while the owner lives. Without this, a record that a concurrent reconciler tombstoned
+    // and restored after the owner's unlink would block other processes for as long as a
+    // long-lived owner (the daemon) runs. Prepared records never qualify: their owner may be
+    // mid-write.
+    const finishedCommit = record.state === "committed" && current.equals(after);
+    if (
+      !finishedCommit &&
+      ((record.ownerPid === process.pid && activeEditTransactions.has(recordPath)) ||
+        (record.ownerPid !== process.pid && isOtherRecoveryRecordOwnerAlive(record)))
+    ) {
+      throw this.activeEditConflictError(
+        recordPath,
+        "another live CoWork process owns this edit transaction",
+      );
+    }
+
+    this.beforeOrphanRecoveryRecordRemoval(recordPath);
+    if (record.state === "committed") {
+      if (!current.equals(after)) {
+        throw this.recoveryRequiredError(
+          recordPath,
+          "the file changed after the edit was committed; current user content was preserved",
+        );
+      }
+      this.removeOrphanRecoveryRecord(recordPath, realPath, loaded);
+      return;
+    }
+
+    if (current.equals(before)) {
+      this.removeOrphanRecoveryRecord(recordPath, realPath, loaded);
+      return;
+    }
+    if (current.equals(after)) {
+      this.removeOrphanRecoveryRecord(recordPath, realPath, loaded);
+      return;
+    }
+    throw this.recoveryRequiredError(
+      recordPath,
+      "the file may contain a partial write or an external edit; current user content was preserved",
+    );
+  }
+
+  protected writeTargetBuffer(targetFd: number, content: Buffer): void {
+    fs.ftruncateSync(targetFd, 0);
+    writeBufferFully(targetFd, content);
+    fs.fsyncSync(targetFd);
+  }
+
+  private writeFileThroughDescriptor(options: {
+    realPath: string;
+    requestedFullPath: string;
+    targetFd: number;
+    contentBefore: Buffer;
+    contentAfter: Buffer;
+    expectedIdentity: fs.Stats;
+    expectedParentIdentity: fs.Stats;
+    externalApprovalGranted: boolean;
+  }): void {
+    const {
+      realPath,
+      requestedFullPath,
+      targetFd,
+      contentBefore,
+      contentAfter,
+      expectedIdentity,
+      expectedParentIdentity,
+      externalApprovalGranted,
+    } = options;
+    const directory = this.getRecoveryDirectory();
+    const recordPath = getEditRecoveryRecordPath(directory, expectedIdentity, realPath);
+    const record: EditRecoveryRecord = {
+      version: 1,
+      path: realPath,
+      fileDev: expectedIdentity.dev,
+      fileIno: expectedIdentity.ino,
+      ownerPid: process.pid,
+      ownerBootTimeMs: getCurrentBootTimeMs(),
+      transactionId: randomUUID(),
+      state: "prepared",
+      beforeBase64: contentBefore.toString("base64"),
+      afterBase64: contentAfter.toString("base64"),
+      beforeSha256: hashEditContent(contentBefore),
+      afterSha256: hashEditContent(contentAfter),
+      checksum: "",
+    };
+    record.checksum = editRecoveryChecksum(record);
+    if (activeEditTransactions.has(recordPath)) {
+      throw this.recoveryRequiredError(
+        recordPath,
+        "another edit transaction for this target is active",
+      );
+    }
+    activeEditTransactions.add(recordPath);
+    try {
+      try {
+        writeRecoveryRecord(recordPath, record, true);
+      } catch (error: Any) {
+        if (error.code === "EEXIST") {
+          throw this.activeEditConflictError(
+            recordPath,
+            "another process created a recovery record for this target",
+          );
+        }
+        throw error;
+      }
+
+      let mutationStarted = false;
+      try {
+        this.assertDescriptorCommitPath({
+          requestedFullPath,
+          realPath,
+          targetFd,
+          expectedIdentity,
+          expectedParentIdentity,
+          externalApprovalGranted,
+        });
+        if (!readDescriptorBuffer(targetFd).equals(contentBefore)) {
+          throw new Error(
+            "File changed before edit commit; re-read it and retry with current text.",
+          );
+        }
+        mutationStarted = true;
+        this.writeTargetBuffer(targetFd, contentAfter);
+        if (!readDescriptorBuffer(targetFd).equals(contentAfter)) {
+          throw new Error("The edited file did not match the staged content after writing.");
+        }
+        // Detect path, parent, or policy changes at the write boundary. Preserve the
+        // current bytes and receipt on failure; a rollback cannot identify external edits.
+        this.assertDescriptorCommitPath({
+          requestedFullPath,
+          realPath,
+          targetFd,
+          expectedIdentity,
+          expectedParentIdentity,
+          externalApprovalGranted,
+        });
+        const committed: EditRecoveryRecord = { ...record, state: "committed", checksum: "" };
+        committed.checksum = editRecoveryChecksum(committed);
+        writeRecoveryRecord(recordPath, committed, false);
+      } catch (error: Any) {
+        if (!mutationStarted) {
+          this.removeRecoveryRecord(recordPath);
+          throw error;
+        }
+        let current: Buffer;
+        try {
+          current = readDescriptorBuffer(targetFd);
+        } catch (rollbackError: Any) {
+          throw this.recoveryRequiredError(
+            recordPath,
+            `the write failed and automatic rollback could not safely inspect the target (${rollbackError.message})`,
+          );
+        }
+        if (current.equals(contentBefore)) {
+          this.removeRecoveryRecord(recordPath);
+          throw error;
+        }
+        throw this.recoveryRequiredError(
+          recordPath,
+          `the write failed after mutation started (${error.message}); current user content was preserved`,
+        );
+      }
+
+      try {
+        this.removeRecoveryRecord(recordPath);
+      } catch (error: Any) {
+        this.daemon.logEvent(this.taskId, "log", {
+          message: `Edit committed, but its recovery record ${path.basename(recordPath)} could not be cleaned up: ${error.message}`,
+        });
+      }
+    } finally {
+      activeEditTransactions.delete(recordPath);
     }
   }
 }

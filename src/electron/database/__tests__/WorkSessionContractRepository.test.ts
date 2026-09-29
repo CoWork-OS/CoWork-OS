@@ -160,6 +160,62 @@ describeWithSqlite("WorkSessionContractRepository", () => {
     expect(manifest.checksum).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("resolves constraint idempotency keys and returns the original correction on retry", () => {
+    const task = createTask();
+    const session = createSession(task.id);
+    const original = repository.appendConstraint({
+      sessionId: session.id,
+      kind: "requirement",
+      key: "requirement-1",
+      statement: "The approved output must exist",
+      owner: "user",
+      metadata: {
+        requirementId: "requirement-1",
+        verifier: "file_exists",
+        targetPath: "approved.txt",
+      },
+      idempotencyKey: "correction:requirement-1:v2",
+    });
+    const retry = repository.appendConstraint({
+      sessionId: session.id,
+      kind: "requirement",
+      key: "requirement-1",
+      statement: "A different statement must not replace the first",
+      owner: "user",
+      idempotencyKey: "correction:requirement-1:v2",
+    });
+
+    expect(
+      repository.findConstraintByIdempotency(session.id, "correction:requirement-1:v2"),
+    ).toEqual(original);
+    expect(retry).toEqual(original);
+    expect(repository.listConstraints(session.id)).toHaveLength(1);
+  });
+
+  it("retrieves explicitly linked evidence beyond the 1,000-entry aggregate window", () => {
+    const task = createTask();
+    const session = createSession(task.id);
+    let lastId = "";
+    for (let index = 0; index < 1_005; index += 1) {
+      const entry = repository.appendEvidence({
+        sessionId: session.id,
+        claim: `Evidence ${index}`,
+        sourceType: "task_event",
+        sourceRef: `task-event:${index}`,
+        capturedAt: now + index,
+      });
+      if (index === 1_004) lastId = entry.id;
+    }
+
+    expect(repository.getEvidenceManifest(session.id).entries).toHaveLength(1_000);
+    expect(
+      repository.getEvidenceManifest(session.id).entries.some((entry) => entry.id === lastId),
+    ).toBe(false);
+    expect(repository.listEvidenceByIds(session.id, [lastId])).toEqual([
+      expect.objectContaining({ id: lastId, claim: "Evidence 1004" }),
+    ]);
+  });
+
   it("creates artifact revisions with monotonic versions, supersession, and retry idempotency", () => {
     const task = createTask();
     const session = createSession(task.id);

@@ -4,9 +4,57 @@ import { CsvArithmeticVerifier } from "../csv-arithmetic-verifier";
 import { AcpxRuntimeUnavailableError } from "../AcpxRuntimeRunner";
 import { PlaybookService } from "../../memory/PlaybookService";
 import { SessionRecallService } from "../../memory/SessionRecallService";
+import { normalizeWorkerRoleTaskConfig } from "../runtime/worker-role-registry";
 import type { Task, TaskBestKnownOutcome } from "../../../shared/types";
 
 describe("TaskExecutor entrypoint guards", () => {
+  it("bounds researcher overrides consumed from a legacy queue and restored saved config", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const savedTask = {
+      id: "legacy-queued-researcher",
+      workerRole: "researcher",
+      agentConfig: {
+        permissionMode: "bypass_permissions",
+        shellAccess: true,
+        externalRuntime: { kind: "acpx", agent: "codex", permissionMode: "approve-all" },
+      },
+    };
+    executor.task = savedTask;
+    executor.daemon = {
+      getTask: () => savedTask,
+      setTransientTaskAgentConfig: vi.fn(),
+      clearTransientTaskAgentConfig: vi.fn(),
+      getEffectiveWorkspaceForTask: () => undefined,
+    };
+    executor.applyQueuedAgentConfigOverride({
+      permissionMode: "bypass_permissions",
+      readOnlyExecution: false,
+      shellAccess: true,
+      externalRuntime: { kind: "acpx", agent: "claude", permissionMode: "approve-all" },
+      modelKey: "turn-only-model",
+    });
+    const forwarded = executor.daemon.setTransientTaskAgentConfig.mock.calls[0][1];
+    expect(forwarded).toMatchObject({
+      permissionMode: "plan",
+      readOnlyExecution: true,
+      shellAccess: false,
+      modelKey: "turn-only-model",
+    });
+    expect(forwarded.externalRuntime).toBeUndefined();
+    expect(executor.task.agentConfig.externalRuntime).toBeUndefined();
+    expect(executor.isAcpxExternalRuntimeTask()).toBe(false);
+
+    executor.clearQueuedAgentConfigOverride();
+    expect(executor.task.agentConfig).toMatchObject({
+      permissionMode: "plan",
+      readOnlyExecution: true,
+      shellAccess: false,
+    });
+    expect(executor.task.agentConfig.externalRuntime).toBeUndefined();
+    expect(executor.task.agentConfig.modelKey).toBeUndefined();
+    expect(savedTask.agentConfig.permissionMode).toBe("bypass_permissions");
+  });
+
   it("catches saved CSV arithmetic through real mutation/read hooks and prevents clean completion", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.workspace = { path: "/workspace" };
@@ -345,6 +393,32 @@ describe("TaskExecutor entrypoint guards", () => {
     );
     expect(executor.sendMessageUnified).not.toHaveBeenCalled();
     expect(executor.sendMessageLegacy).not.toHaveBeenCalled();
+  });
+
+  it("keeps resumed researcher follow-ups on the native path for saved ACP config", async () => {
+    const normalized = normalizeWorkerRoleTaskConfig({
+      id: "saved-researcher",
+      workerRole: "researcher",
+      agentConfig: {
+        externalRuntime: {
+          kind: "acpx",
+          agent: "codex",
+          sessionMode: "persistent",
+          outputMode: "json",
+          permissionMode: "approve-all",
+        },
+      },
+    });
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = normalized.task;
+    executor.sendMessageUnified = vi.fn(async () => undefined);
+    executor.sendMessageWithAcpxRuntime = vi.fn(async () => undefined);
+
+    await executor.sendMessageUnlocked("continue the saved research task");
+
+    expect(normalized.task.agentConfig.externalRuntime).toBeUndefined();
+    expect(executor.sendMessageUnified).toHaveBeenCalled();
+    expect(executor.sendMessageWithAcpxRuntime).not.toHaveBeenCalled();
   });
 
   it("falls back to native sendMessage flow when acpx is unavailable", async () => {

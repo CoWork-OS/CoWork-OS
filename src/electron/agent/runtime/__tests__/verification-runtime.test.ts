@@ -67,6 +67,154 @@ describe("VerificationRuntime", () => {
     expect(prompt).toContain("speculative abstractions");
   });
 
+  it("keeps the 41st mandatory requirement and a directly selected proof beyond 1,000 while bounding optional preview entries", async () => {
+    const runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "child-evidence",
+      status: "completed" as const,
+      summary: "VERDICT: PASS",
+    });
+    const runtime = new VerificationRuntime({ runReadOnlyChildTaskAndWait });
+    const requirements = Array.from({ length: 41 }, (_, index) => {
+      const selectedId = index === 40 ? 1_205 : index + 1;
+      return {
+        requirementId: `requirement-${index + 1}`,
+        description: `Check required output ${index + 1}`,
+        required: true,
+        status: "satisfied" as const,
+        verifier: "file_exists",
+        targetPath: `/workspace/output-${selectedId}.txt`,
+        evidence: [
+          {
+            id: `evidence-${selectedId}`,
+            claim: `Selected proof ${index + 1}`,
+            status: "supporting" as const,
+            sourceType: "artifact_revision" as const,
+            sourceRef: `/workspace/output-${selectedId}.txt`,
+            capturedAt: 10_000 + index,
+            validatedAt: 20_000 + index,
+            artifactRevisionId: `revision-${selectedId}`,
+            sha256: `${selectedId}`.padStart(64, "0"),
+            artifactStatus: "committed" as const,
+          },
+        ],
+      };
+    });
+
+    await runtime.run({
+      parentTask: makeTask(),
+      explicit: true,
+      verificationEvidenceBundle: {
+        entries: Array.from({ length: 50 }, (_, index) => ({
+          kind: "file_exists" as const,
+          ok: true,
+          detail: `generic ${index + 1}`,
+          capturedAt: index,
+        })),
+      },
+      requirementEvidenceManifest: {
+        contractId: "contract-1",
+        contractVersion: 2,
+        capturedAt: 30_000,
+        requirements,
+      },
+    });
+
+    const prompt = runReadOnlyChildTaskAndWait.mock.calls[0]?.[0]?.prompt || "";
+    expect(prompt).toContain("Selected proof 41");
+    expect(prompt).toContain("requirement-41");
+    expect(prompt).toContain("evidence-1205");
+    expect(prompt).toContain("validatedAt");
+    expect(prompt).toContain('"omittedCount": 30');
+    expect(prompt).toContain("does not establish file contents");
+    expect(prompt).toContain("generic 20");
+    expect(prompt).not.toContain("generic 50");
+  });
+
+  it("bounds large prompts, summaries, and manifest text so verification still runs with every requirement", async () => {
+    const runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "child-large",
+      status: "completed" as const,
+      summary: "VERDICT: PASS",
+    });
+    const runtime = new VerificationRuntime({ runReadOnlyChildTaskAndWait });
+    const requirements = Array.from({ length: 60 }, (_, index) => ({
+      requirementId: `large-requirement-${index}`,
+      description: `Check ${"d".repeat(3_000)}`,
+      targetPath: `/workspace/large-output-${index}.txt`,
+      verifier: "file_exists",
+      required: true,
+      status: "pending" as const,
+      evidence: [],
+    }));
+
+    const result = await runtime.run({
+      parentTask: makeTask({ rawPrompt: "p".repeat(40_000) } as Partial<Task>),
+      explicit: true,
+      parentSummary: "s".repeat(40_000),
+      outputSummary: {
+        created: Array.from({ length: 2_000 }, (_, index) => `/workspace/generated-${index}.txt`),
+        outputCount: 2_000,
+      } as never,
+      requirementEvidenceManifest: {
+        contractId: "large-contract",
+        contractVersion: 1,
+        capturedAt: 10,
+        requirements,
+      },
+    });
+
+    expect(runReadOnlyChildTaskAndWait).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ran: true, verdict: "PASS", shouldBlock: false });
+    const prompt = runReadOnlyChildTaskAndWait.mock.calls[0]?.[0]?.prompt || "";
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(64 * 1024);
+    expect(prompt).toContain("[truncated:");
+    for (const requirement of requirements) {
+      expect(prompt).toContain(requirement.requirementId);
+      expect(prompt).toContain(requirement.targetPath);
+    }
+  });
+
+  it("blocks an oversized selected manifest before starting a verifier without dropping requirements", async () => {
+    const runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "unexpected-child",
+      status: "completed" as const,
+      summary: "VERDICT: PASS",
+    });
+    const runtime = new VerificationRuntime({ runReadOnlyChildTaskAndWait });
+    const requirements = Array.from({ length: 100 }, (_, index) => ({
+      requirementId: `required-${index}`,
+      description: `File exists: ${"x".repeat(4_000)}`,
+      targetPath: "x".repeat(4_000),
+      verifier: "file_exists",
+      required: true,
+      status: "pending" as const,
+      evidence: [],
+    }));
+
+    const result = await runtime.run({
+      parentTask: makeTask({ title: "Review text", prompt: "Check the result" }),
+      explicit: true,
+      requirementEvidenceManifest: {
+        contractId: "oversized-contract",
+        contractVersion: 1,
+        capturedAt: 10,
+        requirements,
+      },
+    });
+
+    expect(runReadOnlyChildTaskAndWait).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      gated: true,
+      ran: false,
+      status: "skipped",
+      verdict: "PARTIAL",
+      shouldBlock: true,
+    });
+    expect(result.report).toContain("input limit");
+    expect(requirements).toHaveLength(100);
+    expect(requirements[99].targetPath).toHaveLength(4_000);
+  });
+
   it("blocks high-risk partial verification results", async () => {
     const runtime = new VerificationRuntime({
       runReadOnlyChildTaskAndWait: vi.fn().mockResolvedValue({

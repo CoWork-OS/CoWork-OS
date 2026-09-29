@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "boundary-binary-1-005",
+      "lines": [{ "quantity": 1, "unitPrice": "1.0050" }],
+      "discountPercent": "0.00",
+      "refund": "0.0000"
+    },
+    {
+      "id": "boundary-binary-1-255",
+      "lines": [{ "quantity": 1, "unitPrice": "1.2550" }],
+      "discountPercent": "0.00",
+      "refund": "0.0000"
+    },
+    {
+      "id": "boundary-discount-binary-half-cent",
+      "lines": [{ "quantity": 1, "unitPrice": "3.7500" }],
+      "discountPercent": "9.20",
+      "refund": "0.0000"
+    },
+    {
+      "id": "boundary-refund-half-cent-and-cap",
+      "lines": [{ "quantity": 1, "unitPrice": "0.01" }],
+      "discountPercent": "0.00",
+      "refund": "9.9999"
+    },
+    {
+      "id": "boundary-round-each-line-not-after-sum",
+      "lines": [
+        { "quantity": 1, "unitPrice": "0.0049" },
+        { "quantity": 1, "unitPrice": "0.0049" }
+      ],
+      "discountPercent": "0.00",
+      "refund": "0.0000"
+    },
+    {
+      "id": "boundary-full-discount",
+      "lines": [{ "quantity": 7, "unitPrice": "0.1234" }],
+      "discountPercent": "100.00",
+      "refund": "0.0000"
+    }
+  ]
+}

@@ -4,10 +4,12 @@ import {
   buildWorkerRolePrompt,
   getWorkerRoleSpec,
   inferWorkerRoleKindFromPrompt,
+  normalizeWorkerRoleTaskConfig,
   parseVerificationVerdict,
   resolveDelegationWorkerRole,
   resolveDefaultWorkerRoleKind,
   resolveWorkerRoleAgentConfig,
+  stripTeamWorkItemLaneOverride,
 } from "../worker-role-registry";
 
 describe("worker-role-registry", () => {
@@ -33,8 +35,10 @@ describe("worker-role-registry", () => {
     expect(verifier.shellAccess).toBe(false);
 
     const researcher = resolveWorkerRoleAgentConfig("researcher", {});
-    expect(researcher.toolRestrictions).toContain("delete_file");
-    expect(researcher.toolRestrictions).not.toContain("group:destructive");
+    expect(researcher.toolRestrictions).toContain("group:destructive");
+    expect(researcher.permissionMode).toBe("plan");
+    expect(researcher.shellAccess).toBe(false);
+    expect(researcher.readOnlyExecution).toBe(true);
   });
 
   it("builds a worker prompt with the role contract", () => {
@@ -47,6 +51,7 @@ describe("worker-role-registry", () => {
     });
 
     expect(prompt).toContain("WORKER ROLE: Researcher");
+    expect(prompt).toContain("Use local workspace evidence only");
     expect(prompt).toContain("Completion contract:");
     expect(prompt).toContain("Summarize useful changes");
   });
@@ -80,6 +85,80 @@ describe("worker-role-registry", () => {
     expect(verifier.shellAccess).toBe(false);
     expect(verifier.externalRuntime).toBeUndefined();
     expect(verifier.toolRestrictions).toContain("group:destructive");
+  });
+
+  it("keeps researcher execution controls read-only when callers request bypass", () => {
+    const researcher = resolveWorkerRoleAgentConfig("researcher", {
+      permissionMode: "bypass_permissions",
+      shellAccess: true,
+      readOnlyExecution: false,
+      externalRuntime: {
+        kind: "acpx",
+        agent: "codex",
+        sessionMode: "persistent",
+        outputMode: "json",
+        permissionMode: "approve-all",
+      },
+      toolRestrictions: ["group:destructive"],
+    });
+
+    expect(researcher.permissionMode).toBe("plan");
+    expect(researcher.shellAccess).toBe(false);
+    expect(researcher.readOnlyExecution).toBe(true);
+    expect(researcher.externalRuntime).toBeUndefined();
+    expect(researcher.toolRestrictions).toEqual(
+      expect.arrayContaining([
+        "group:write",
+        "group:destructive",
+        "group:system",
+        "group:memory",
+        "browser_click",
+        "gmail_send_email",
+      ]),
+    );
+  });
+
+  it("normalizes saved researcher tasks before selecting a runtime", () => {
+    const savedTask = {
+      workerRole: "researcher",
+      agentConfig: {
+        permissionMode: "bypass_permissions" as const,
+        shellAccess: true,
+        readOnlyExecution: false,
+        externalRuntime: {
+          kind: "acpx" as const,
+          agent: "codex" as const,
+          sessionMode: "persistent" as const,
+          outputMode: "json" as const,
+          permissionMode: "approve-all" as const,
+        },
+      },
+    };
+
+    const normalized = normalizeWorkerRoleTaskConfig(savedTask);
+    expect(normalized.changed).toBe(true);
+    expect(normalized.task.agentConfig.permissionMode).toBe("plan");
+    expect(normalized.task.agentConfig.shellAccess).toBe(false);
+    expect(normalized.task.agentConfig.readOnlyExecution).toBe(true);
+    expect(normalized.task.agentConfig.externalRuntime).toBeUndefined();
+    expect(normalizeWorkerRoleTaskConfig(normalized.task).changed).toBe(false);
+  });
+
+  it("keeps team work item lanes on the researcher denylist without the read-only boundary", () => {
+    const lane = resolveWorkerRoleAgentConfig("researcher", { teamWorkItemLane: true });
+    expect(lane.readOnlyExecution).toBeUndefined();
+    expect(lane.permissionMode).toBeUndefined();
+    expect(lane.toolRestrictions).toEqual(expect.arrayContaining(["group:write", "spawn_agent"]));
+    expect(lane.toolRestrictions).not.toContain("group:destructive");
+
+    expect(stripTeamWorkItemLaneOverride({ teamWorkItemLane: true, maxTurns: 3 })).toEqual({
+      maxTurns: 3,
+    });
+    const normalized = normalizeWorkerRoleTaskConfig({
+      workerRole: "researcher",
+      agentConfig: stripTeamWorkItemLaneOverride({ teamWorkItemLane: true }),
+    });
+    expect(normalized.task.agentConfig?.readOnlyExecution).toBe(true);
   });
 
   it("infers worker roles from delegation prompts and honors explicit overrides", () => {

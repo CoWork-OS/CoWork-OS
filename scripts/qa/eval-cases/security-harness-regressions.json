@@ -27,6 +27,18 @@
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true
       }
+    },
+    {
+      "id": "p08a-researcher-authority-confirmed-fix",
+      "prompt": "Regression guard for Enforce local-only read-only authority for researcher tasks: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "p08a-researcher-authority",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts"
+      }
     }
   ],
   "metrics": [

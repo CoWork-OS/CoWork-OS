@@ -33,16 +33,17 @@ describe.each(["release.yml", "nightly-hardening.yml"])("%s coverage gate", (fil
 
   it.each([
     ["absent", {}, "not_configured", 0],
+    ["failed fixtures", { FAKE_BATTERY_EXIT: "1" }, "failed", 1],
     ["partial", { COWORK_HOOKS_ORIGIN: "http://example.invalid" }, "failed", 1],
     [
-      "complete",
+      "complete legacy",
       {
         COWORK_HOOKS_ORIGIN: "http://example.invalid",
         COWORK_HOOKS_TOKEN: "fake",
         COWORK_DB_PATH: "fake.db",
       },
-      "completed",
-      0,
+      "failed",
+      1,
     ],
     [
       "failed",
@@ -62,15 +63,20 @@ describe.each(["release.yml", "nightly-hardening.yml"])("%s coverage gate", (fil
       try {
         fs.mkdirSync(path.join(dir, ".artifacts/hardening"), { recursive: true });
         // Execute the actual workflow shell without contacting a service or requiring GNU date.
-        fs.writeFileSync(path.join(dir, "node"), '#!/bin/sh\nexit "${FAKE_BATTERY_EXIT:-0}"\n', {
-          mode: 0o755,
-        });
+        fs.writeFileSync(
+          path.join(dir, "node"),
+          '#!/bin/sh\nprintf "%s\\n" "$@" > "$NODE_ARGV_LOG"\nexit "${FAKE_BATTERY_EXIT:-0}"\n',
+          {
+            mode: 0o755,
+          },
+        );
         fs.writeFileSync(path.join(dir, "date"), "#!/bin/sh\necho 1\n", { mode: 0o755 });
         const output = path.join(dir, "outputs");
         const env = {
           ...process.env,
           PATH: `${dir}:${process.env.PATH}`,
           GITHUB_OUTPUT: output,
+          NODE_ARGV_LOG: path.join(dir, "node-arguments"),
           COWORK_HOOKS_ORIGIN: "",
           COWORK_HOOKS_TOKEN: "",
           COWORK_DB_PATH: "",
@@ -78,6 +84,13 @@ describe.each(["release.yml", "nightly-hardening.yml"])("%s coverage gate", (fil
         };
         const run = spawnSync("bash", ["-c", battery.run], { cwd: dir, env, encoding: "utf8" });
         expect(run.status).toBe(expectedExit);
+        if (fs.existsSync(env.NODE_ARGV_LOG)) {
+          expect(fs.readFileSync(env.NODE_ARGV_LOG, "utf8")).toContain("--fixtures-only");
+        }
+        if (config.COWORK_HOOKS_ORIGIN) {
+          expect(run.stdout).toContain("Legacy hook/database battery configuration is unsupported");
+          expect(fs.existsSync(env.NODE_ARGV_LOG)).toBe(false);
+        }
         expect(fs.readFileSync(output, "utf8").trim().split("\n").at(-1)).toBe(
           `coverage=${coverage}`,
         );

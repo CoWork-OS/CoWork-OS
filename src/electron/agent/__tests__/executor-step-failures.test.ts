@@ -2427,6 +2427,91 @@ relationship_memory:
     }
   });
 
+  it.each([
+    "Remove the unused lodash import from src/utils.ts.",
+    "Move the formatDate helper into helpers.ts and update imports.",
+    "Edit config.yaml to set retries=3; don't remove existing keys.",
+  ])("requires edit_file, not delete/rename, for in-file edits: %s", (description) => {
+    executor = createExecutorWithStubs([], {});
+    const step: Any = { id: "in-file-edit", description, status: "pending" };
+    const tools = Array.from((executor as Any).resolveStepExecutionContract(step).requiredTools);
+    expect(tools).toContain("edit_file");
+    expect(tools).not.toContain("delete_file");
+    expect(tools).not.toContain("rename_file");
+  });
+
+  it.each([
+    ["Delete src/utils.ts from the workspace.", "delete_file"],
+    ["Rename a.ts to b.ts.", "rename_file"],
+  ])("requires the file-level tool when the verb targets the file: %s", (description, tool) => {
+    executor = createExecutorWithStubs([], {});
+    const step: Any = { id: "file-level-op", description, status: "pending" };
+    const tools = Array.from((executor as Any).resolveStepExecutionContract(step).requiredTools);
+    expect(tools).toContain(tool);
+    expect(tools).not.toContain("edit_file");
+  });
+
+  it("does not infer an edit from a filename inside a negated clause", () => {
+    executor = createExecutorWithStubs([], {});
+    const step: Any = {
+      id: "negated-filename",
+      description: "Update the changelog summary in your reply. Do not modify package.json.",
+      status: "pending",
+    };
+    const tools = Array.from((executor as Any).resolveStepExecutionContract(step).requiredTools);
+    expect(tools).not.toContain("edit_file");
+  });
+
+  it("accepts an edit of a named artifact without requiring an unrelated write_file call", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-named-artifact-edit-"));
+    const targetPath = path.join(tempDir, "native-probe.txt");
+    fs.writeFileSync(targetPath, "alpha=1\nbeta=1\n");
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("edit_file", {
+          file_path: "native-probe.txt",
+          old_string: "alpha=1",
+          new_string: "alpha=2",
+        }),
+        toolUseResponse("read_file", { path: "native-probe.txt" }),
+        textResponse("Updated native-probe.txt and verified alpha=2 and beta=1."),
+      ],
+      {},
+    );
+    executor.workspace.path = tempDir;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file") {
+        fs.writeFileSync(targetPath, "alpha=2\nbeta=1\n");
+        return { success: true, file_path: "native-probe.txt", replacements: 1 };
+      }
+      if (name === "read_file") {
+        return { content: fs.readFileSync(targetPath, "utf8"), path: "native-probe.txt" };
+      }
+      throw new Error(`Unexpected tool: ${name}`);
+    });
+    const step: Any = {
+      id: "named-artifact-edit",
+      description:
+        "Edit native-probe.txt by replacing alpha=1 with alpha=2, preserving beta=1. Read it back to check it, then finish. Do not use other files or network tools.",
+      status: "pending",
+    };
+    executor.task.prompt = step.description;
+    try {
+      const contract = executor.resolveStepExecutionContract(step);
+      expect(Array.from(contract.requiredTools)).toContain("edit_file");
+      expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+      await executor.executeStep(step);
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fs.readFileSync(targetPath, "utf8")).toBe("alpha=2\nbeta=1\n");
+      expect(executor.toolRegistry.executeTool.mock.calls.map((call: Any[]) => call[0])).toEqual([
+        "edit_file",
+        "read_file",
+      ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("treats verified run_command workspace writes as satisfying write_file contract", async () => {
     executor = createExecutorWithStubs(
       [

@@ -41,8 +41,6 @@ export type CronDeliverableStatus = "none" | "queued" | "sent" | "dead_letter";
  * Single run history entry
  */
 export interface CronRunHistoryEntry {
-  /** Stable run identity (see cronRunKey). Absent on entries written by older builds. */
-  runKey?: string;
   runAtMs: number;
   durationMs: number;
   status: CronJobStatus;
@@ -82,8 +80,6 @@ export interface CronThreadAutomationConfig {
 export interface CronJobState {
   nextRunAtMs?: number;
   runningAtMs?: number;
-  /** Stable key of the active run, persisted with its lease and kept in its history entry. */
-  runningRunKey?: string;
   lastRunAtMs?: number;
   lastStatus?: CronJobStatus;
   lastError?: string;
@@ -386,7 +382,6 @@ export interface CronRunHistoryResult {
   failedRuns: number;
   /** Per-category counts; the rate is ok / classified attempts. */
   outcomeCounts: CronOutcomeCountMap;
-  outcomeCountsLimitation?: string;
 }
 
 /**

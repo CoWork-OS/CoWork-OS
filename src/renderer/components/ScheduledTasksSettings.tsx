@@ -57,8 +57,6 @@ interface CronJobState {
   lastTaskId?: string;
   runHistory?: CronRunHistoryEntry[];
   totalRuns?: number;
-  successfulRuns?: number;
-  failedRuns?: number;
   outcomeCounts?: CronOutcomeCounts;
 }
 
@@ -87,10 +85,6 @@ interface CronRunHistoryResult {
   jobName: string;
   entries: CronRunHistoryEntry[];
   totalRuns: number;
-  successfulRuns: number;
-  failedRuns: number;
-  outcomeCounts?: CronOutcomeCountMap;
-  outcomeCountsLimitation?: string;
 }
 
 interface CronJob {
@@ -517,17 +511,9 @@ function getDeliveryTone(
   return "warning";
 }
 
-/**
- * Versioned outcome counts for a job. A job written only by an older build has no
- * classification, so every recorded run is unclassified rather than a guessed success.
- */
+/** Versioned outcome counts for a job; the main process classifies every loaded job. */
 function jobOutcomeCounts(state: CronJobState): CronOutcomeCountMap {
-  return (
-    state.outcomeCounts?.counts ?? {
-      ...emptyCronOutcomeCountMap(),
-      legacyUnknown: state.totalRuns ?? 0,
-    }
-  );
+  return state.outcomeCounts?.counts ?? emptyCronOutcomeCountMap();
 }
 
 /** Secondary line for a run-success figure: what the rate excludes and why. */
@@ -871,11 +857,6 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
               jobName: job.name,
               entries: job.state.runHistory ?? next[job.id].entries,
               totalRuns: job.state.totalRuns ?? next[job.id].totalRuns,
-              successfulRuns: job.state.successfulRuns ?? next[job.id].successfulRuns,
-              failedRuns: job.state.failedRuns ?? next[job.id].failedRuns,
-              outcomeCounts: job.state.outcomeCounts?.counts ?? next[job.id].outcomeCounts,
-              outcomeCountsLimitation:
-                job.state.outcomeCounts?.limitation ?? next[job.id].outcomeCountsLimitation,
             };
           }
         }
@@ -901,9 +882,6 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
             jobName: job.name,
             entries: job.state.runHistory ?? [],
             totalRuns: job.state.totalRuns ?? 0,
-            successfulRuns: job.state.successfulRuns ?? 0,
-            failedRuns: job.state.failedRuns ?? 0,
-            outcomeCounts: jobOutcomeCounts(job.state),
           },
         }));
       } catch (err: Any) {
@@ -1005,9 +983,6 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
           jobName: job.name,
           entries: [],
           totalRuns: 0,
-          successfulRuns: 0,
-          failedRuns: 0,
-          outcomeCounts: emptyCronOutcomeCountMap(),
         };
         return next;
       });
@@ -1161,15 +1136,9 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
               jobName: job.name,
               entries: job.state.runHistory ?? [],
               totalRuns: job.state.totalRuns ?? 0,
-              successfulRuns: job.state.successfulRuns ?? 0,
-              failedRuns: job.state.failedRuns ?? 0,
             };
             const latestRun = runHistory.entries[0];
-            const runSuccess = summarizeCronRunSuccess(
-              runHistory.outcomeCounts ?? jobOutcomeCounts(job.state),
-            );
-            const outcomeLimitation =
-              runHistory.outcomeCountsLimitation ?? job.state.outcomeCounts?.limitation;
+            const runSuccess = summarizeCronRunSuccess(jobOutcomeCounts(job.state));
             const latestTone = getStatusTone(latestRun?.status ?? lastStatus);
             const latestToneColors = getToneColors(latestTone);
             const deliveryToneColors = getToneColors(getDeliveryTone(job, latestRun));
@@ -1463,7 +1432,6 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                               }}
                             >
                               {describeRunSuccess(runSuccess)}
-                              {outcomeLimitation ? ` · ${outcomeLimitation}` : ""}
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: "8px" }}>

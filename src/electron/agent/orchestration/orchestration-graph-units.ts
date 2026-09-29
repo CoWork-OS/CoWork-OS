@@ -40,4 +40,32 @@ export const ORCHESTRATION_GRAPH_UNITS = {
   orchestrationGraph_listNodeNotifications: storeUnit(make, "listNodeNotifications", {
     readonly: true,
   }),
+  orchestrationGraph_markNodeReady: storeUnit(make, "markNodeReady", { readonly: false }),
+  orchestrationGraph_claimReadyNode: storeUnit(make, "claimReadyNode", { readonly: false }),
+  orchestrationGraph_updateNodeForDispatchClaim: storeUnit(make, "updateNodeForDispatchClaim", {
+    readonly: false,
+  }),
+  orchestrationGraph_markRunCancelled: storeUnit(make, "markRunCancelled", { readonly: false }),
+  orchestrationGraph_cancelRunningRunsForRootTask: storeUnit(make, "cancelRunningRunsForRootTask", {
+    readonly: false,
+  }),
+  orchestrationGraph_finishRunIfRunning: storeUnit(make, "finishRunIfRunning", { readonly: false }),
+  orchestrationGraph_cancelUnstartedNode: storeUnit(make, "cancelUnstartedNode", {
+    readonly: false,
+  }),
+  orchestrationGraph_resolveInterruptedCancellation: storeUnit(
+    make,
+    "resolveInterruptedCancellation",
+    { readonly: false },
+  ),
+  orchestrationGraph_beginNodeCancellation: storeUnit(make, "beginNodeCancellation", {
+    readonly: false,
+  }),
+  orchestrationGraph_updateNodeForCancellation: storeUnit(make, "updateNodeForCancellation", {
+    readonly: false,
+  }),
+  orchestrationGraph_listCancelledSnapshots: storeUnit(make, "listCancelledSnapshots", {
+    readonly: true,
+  }),
+  orchestrationGraph_isTeamWorkItemTask: storeUnit(make, "isTeamWorkItemTask", { readonly: true }),
 } satisfies UnitCatalog;

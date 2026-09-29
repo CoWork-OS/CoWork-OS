@@ -53,6 +53,14 @@
       }
     },
     {
+      "id": "acp-follow-up-uses-its-own-outcome",
+      "prompt": "An ACP turn stops at its token limit or is refused; the next follow-up ends normally.",
+      "assertions": {
+        "previousOutcomeInherited": false,
+        "executableTest": "src/electron/agent/__tests__/acp-prompt-outcome.test.ts"
+      }
+    },
+    {
       "id": "cron-needs-action-not-counted-as-success",
       "prompt": "A scheduled task whose every run needs user action.",
       "assertions": {
@@ -78,12 +86,29 @@
       }
     },
     {
-      "id": "update-check-bounded-and-labeled",
-      "prompt": "Check for updates while GitHub stalls, then while offline with a cache.",
+      "id": "playbook-private-memory-never-served",
+      "prompt": "A successful task's memory is private, or deleted in Memory Hub.",
+      "assertions": {
+        "ledgerStoresMemoryText": false,
+        "privateOrSuppressedEvidenceServed": false,
+        "executableTest": "src/electron/memory/__tests__/PlaybookService.test.ts"
+      }
+    },
+    {
+      "id": "playbook-correction-after-failed-follow-up",
+      "prompt": "A task succeeds, a follow-up fails, then the user corrects the agent.",
+      "assertions": {
+        "successInvalidated": true,
+        "executableTest": "src/electron/memory/__tests__/PlaybookService.test.ts"
+      }
+    },
+    {
+      "id": "update-check-bounded-and-never-stale",
+      "prompt": "Check for updates while GitHub stalls, then while offline.",
       "assertions": {
         "settlesWithinDeadline": true,
-        "cachedResultLabeled": true,
-        "cachedResultCanInstall": false,
+        "offlineResultIsError": true,
+        "staleResultShownAsCurrent": false,
         "executableTest": "src/electron/updater/__tests__/update-manager-freshness.test.ts"
       }
     }

@@ -39,6 +39,7 @@ function updateInfo(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
     latestVersion: "0.5.52",
     updateMode: "electron-updater",
     supported: false,
+    provenance: { source: "live", checkedAt: 0 },
     ...overrides,
   };
 }

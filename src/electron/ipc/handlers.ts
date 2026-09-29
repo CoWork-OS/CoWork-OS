@@ -82,6 +82,7 @@ import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { AgentMailRealtimeService } from "../agentmail/AgentMailRealtimeService";
 import { createMailboxStatementPort } from "../mailbox/mailbox-statement-port";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
+import { ManagedSessionRequirementCorrectionRequestSchema } from "../../shared/managed-session-schemas";
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
@@ -6600,6 +6601,17 @@ export async function setupIpcHandlers(
       typeof request.expectedTurnId === "string" ? request.expectedTurnId : undefined,
     );
   });
+  ipcMain.handle(
+    IPC_CHANNELS.MANAGED_SESSION_CORRECT_REQUIREMENT_IPC,
+    async (_, request: unknown) => {
+      const validated = validateInput(
+        ManagedSessionRequirementCorrectionRequestSchema,
+        request,
+        "managed session requirement correction",
+      );
+      return managedSessionService.sendEvent(validated.sessionId, validated.event);
+    },
+  );
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_RESUME_IPC, async (_, sessionId: string) => {
     return managedSessionService.resumeSession(sessionId);
   });
@@ -10552,17 +10564,11 @@ export async function setupIpcHandlers(
   // CoWork Pulse. The service never receives renderer-provided identifiers or payloads;
   // all aggregates are derived in the trusted main process from the local database.
   // Uses the lifecycle-owned instance from startup so the Settings decision and the
-  // timer-driven delivery share one fence. The local fallback only exists for hosts
-  // that register handlers without starting Pulse.
-  let pulseService: import("../telemetry/pulse-service").PulseService | null = null;
+  // timer-driven delivery share one fence and one shutdown.
   const getPulseService = async () => {
-    const shared = options?.getPulseService?.();
-    if (shared) return shared;
-    if (pulseService) return pulseService;
-    const { PulseService } = await import("../telemetry/pulse-service");
-    const { app } = await import("electron");
-    pulseService = new PulseService(db, { version: app.getVersion(), runtime: "desktop" });
-    return pulseService;
+    const service = options?.getPulseService?.();
+    if (!service) throw new Error("CoWork Pulse is unavailable in this session.");
+    return service;
   };
   ipcMain.handle(IPC_CHANNELS.PULSE_GET_SETTINGS, async () => {
     checkRateLimit(IPC_CHANNELS.PULSE_GET_SETTINGS);

@@ -12,6 +12,7 @@ import { DatabaseManager } from "../../database/schema";
 import { MCPSettingsManager } from "../../mcp/settings";
 import { RoutineService } from "../../routines/service";
 import { ManagedSessionService } from "../ManagedSessionService";
+import { WorkSessionContractService } from "../../sessions/WorkSessionContractService";
 
 vi.mock("../../utils/safe-storage", () => ({
   getSafeStorage: () => ({
@@ -172,6 +173,151 @@ describeWithSqlite("ManagedSessionService", () => {
     expect((await service.getSession(firstSession.id))?.agentVersion).toBe(1);
     expect(updated.agent.currentVersion).toBe(2);
     expect(secondSession.agentVersion).toBe(2);
+  });
+
+  it("creates, corrects, and re-verifies a user requirement through the managed-session event route", async () => {
+    const workspace = insertWorkspace("requirement-correction");
+    const environment = await service.createEnvironment({
+      name: "Correction env",
+      config: { workspaceId: workspace.id },
+    });
+    const created = await service.createAgent({
+      name: "Correction agent",
+      systemPrompt: "Work on the requested output.",
+      executionMode: "solo",
+    });
+    let contractService = new WorkSessionContractService(db);
+    daemon.getWorkSessionContractService = vi.fn(() => contractService);
+    fs.writeFileSync(path.join(workspace.path, "initial-report.txt"), "initial proof");
+
+    const session = await service.createSession({
+      agentId: created.agent.id,
+      environmentId: environment.id,
+      title: "Correct a report requirement",
+      successCriteria: { type: "file_exists", filePaths: ["initial-report.txt"] },
+      initialEvent: {
+        type: "user.message",
+        content: [{ type: "text", text: "Create the report." }],
+      },
+    });
+    const task = taskRepo.findById(session.backingTaskId!)!;
+    expect(task.successCriteria).toEqual({
+      type: "file_exists",
+      filePaths: ["initial-report.txt"],
+    });
+    contractService.ensureForTask(task);
+    const createRead = (await service.getSessionRequirementEvidenceManifest(session.id))!;
+    expect(createRead.requirements).toHaveLength(1);
+    const requirementId = createRead.requirements[0].requirementId;
+    taskRepo.update(task.id, {
+      status: "completed",
+      terminalStatus: "ok",
+      verificationVerdict: "PASS",
+      completedAt: Date.now(),
+    });
+    const satisfied = contractService.recordTaskTerminal(task.id).contract!;
+    const oldProofId = satisfied.requirements[0].evidenceIds![0];
+    const correction = {
+      type: "requirement.corrected" as const,
+      requirementId,
+      statement: "The approved report must exist at the corrected path",
+      criterion: { type: "file_exists" as const, targetPath: "approved-report.txt" },
+      idempotencyKey: "user-correction:approved-report-v2",
+    };
+
+    await service.sendEvent(session.id, correction);
+    const reopened = contractService.getRepository().findOutcomeContract(satisfied.sessionId)!;
+    expect(reopened).toMatchObject({ version: 2, status: "pending" });
+    expect(reopened.requirements[0]).toMatchObject({
+      status: "pending",
+      description: correction.statement,
+      verifier: "file_exists",
+      targetPath: "approved-report.txt",
+    });
+    expect(
+      contractService.getRepository().listEvidenceByIds(reopened.sessionId, [oldProofId]),
+    ).toEqual([expect.objectContaining({ status: "stale" })]);
+    expect(contractService.getRepository().listConstraints(reopened.sessionId)).toEqual([
+      expect.objectContaining({
+        owner: "user",
+        kind: "requirement",
+        metadata: {
+          requirementId: correction.requirementId,
+          sourceEventId: expect.stringMatching(/^requirement-correction:/),
+          verifier: "file_exists",
+          targetPath: "approved-report.txt",
+        },
+      }),
+    ]);
+
+    manager.close();
+    manager = new DatabaseManager();
+    db = manager.getDatabase();
+    taskRepo = new TaskStore(db);
+    contractService = new WorkSessionContractService(db);
+    daemon.getWorkSessionContractService = vi.fn(() => contractService);
+    service = new ManagedSessionService(db, daemon);
+    const persisted = contractService.getRepository().findOutcomeContract(reopened.sessionId)!;
+    expect(persisted).toMatchObject({ version: 2, status: "pending" });
+    expect(
+      contractService.getRepository().listEvidenceByIds(persisted.sessionId, [oldProofId]),
+    ).toEqual([expect.objectContaining({ status: "stale" })]);
+
+    fs.writeFileSync(path.join(workspace.path, "approved-report.txt"), "approved output");
+    const refreshedManifest = (await service.getSessionRequirementEvidenceManifest(session.id))!;
+    expect(refreshedManifest.contractVersion).toBe(2);
+    expect(refreshedManifest.requirements[0]).toMatchObject({
+      requirementId,
+      status: "satisfied",
+      targetPath: "approved-report.txt",
+    });
+    expect(refreshedManifest.requirements[0].evidence[0]).toMatchObject({
+      capturedAt: expect.any(Number),
+      validatedAt: expect.any(Number),
+    });
+    const refreshed = contractService.getForTask(task.id)!.contract!;
+    expect(refreshed.requirements[0]).toMatchObject({ status: "satisfied" });
+    const newProof = contractService
+      .getRepository()
+      .listEvidenceByIds(refreshed.sessionId, refreshed.requirements[0].evidenceIds!)[0];
+    expect(newProof.sourceRef).toBe(
+      fs.realpathSync(path.join(workspace.path, "approved-report.txt")),
+    );
+
+    await service.sendEvent(session.id, correction);
+    expect(contractService.getForTask(task.id)?.contract?.version).toBe(2);
+    expect(
+      (await service.listSessionEvents(session.id)).filter(
+        (event) => event.type === "requirement.corrected",
+      ),
+    ).toHaveLength(1);
+
+    const otherSession = await service.createSession({
+      agentId: created.agent.id,
+      environmentId: environment.id,
+      title: "Unrelated session",
+      initialEvent: {
+        type: "user.message",
+        content: [{ type: "text", text: "Do unrelated work." }],
+      },
+    });
+    const otherTask = taskRepo.findById(otherSession.backingTaskId!)!;
+    contractService.ensureForTask(otherTask);
+    await expect(service.sendEvent(otherSession.id, correction)).rejects.toThrow(
+      /Outcome requirement not found/,
+    );
+    expect(
+      (await service.listSessionEvents(otherSession.id)).some(
+        (event) => event.type === "requirement.corrected",
+      ),
+    ).toBe(false);
+    await expect(
+      service.sendEvent(otherSession.id, {
+        ...correction,
+        owner: "user",
+        status: "satisfied",
+      } as Any),
+    ).rejects.toThrow(/Invalid managed session requirement correction event/);
   });
 
   it("creates agent-panel sessions with isolated backing tasks and follow-up messages", async () => {

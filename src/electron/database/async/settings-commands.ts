@@ -129,8 +129,6 @@ function requirePulseOp(raw: unknown): PulseOp {
       };
     case "incrementAttempt":
       return { kind: "incrementAttempt", packageId: requireString(op.packageId, "packageId") };
-    case "releaseLease":
-      return { kind: "releaseLease", owner: requireString(op.owner, "owner") };
     default:
       throw new InvalidCommandArgumentsError("unknown Pulse op");
   }
@@ -147,22 +145,10 @@ function requirePulseCommit(raw: unknown): PulseCommitRequest {
       { category: "pulse", expectedRevision: "any", record: args.record },
     ])[0].record;
   }
-  let lease: PulseCommitRequest["lease"];
-  if (args.lease !== undefined) {
-    const value = requireObject(args.lease, "lease");
-    lease = {
-      owner: requireString(value.owner, "lease.owner"),
-      now: requireTime(value.now, "lease.now"),
-      ...(value.renewUntil !== undefined
-        ? { renewUntil: requireTime(value.renewUntil, "lease.renewUntil") }
-        : {}),
-    };
-  }
   return {
     expectedRevision: requireRevision(args.expectedRevision, true),
     record,
     ops: args.ops.map(requirePulseOp),
-    ...(lease ? { lease } : {}),
     ...(typeof args.backupUnreadableAs === "string"
       ? { backupUnreadableAs: args.backupUnreadableAs }
       : {}),
@@ -187,10 +173,6 @@ function requirePulseClaim(raw: unknown): PulseClaimRequest {
     installationId: requireString(args.installationId, "installationId"),
     ...(candidate ? { candidate } : {}),
     dayPackageId: requireString(args.dayPackageId, "dayPackageId"),
-    owner: requireString(args.owner, "owner"),
-    consentRevision: requireTime(args.consentRevision, "consentRevision"),
-    now: requireTime(args.now, "now"),
-    leaseMs: requireTime(args.leaseMs, "leaseMs"),
   };
 }
 
@@ -200,13 +182,12 @@ const PULSE_TABLES = [
   "pulse_consent_windows",
   "pulse_outbox",
   "pulse_sent_days",
-  "pulse_delivery_lease",
 ] as const;
 
 export const SETTINGS_COMMANDS = {
   /**
-   * One Pulse decision or delivery result: settings ciphertext, consent windows, outbox
-   * and lease, under the settings revision the host read and optionally a live lease.
+   * One Pulse decision or delivery result: settings ciphertext, consent windows and
+   * outbox, under the settings revision the host read.
    */
   "pulse.commit": {
     kind: "write",
@@ -215,7 +196,7 @@ export const SETTINGS_COMMANDS = {
       return pulseCommit(db, requirePulseCommit(args));
     },
   },
-  /** Queue today's package if still unsent and claim the delivery lease. */
+  /** Queue today's package if still unsent and return the oldest queued day. */
   "pulse.claim": {
     kind: "write",
     tables: PULSE_TABLES,

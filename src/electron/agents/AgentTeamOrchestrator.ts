@@ -425,6 +425,10 @@ export class AgentTeamOrchestrator {
           retainMemory: false,
           bypassQueue: false,
           llmProfile: deriveTeamItemProfile(item.title, item.description),
+          // Team lanes are user-planned work, not delegated read-only helpers.
+          // Keep the researcher denylist (no writes/spawning) but not the
+          // delegated researcher's plan/no-network/no-shell boundary.
+          teamWorkItemLane: true,
         };
         if (!useProfileRouting) {
           const modelKey = resolveModelPreferenceToModelKey(team.defaultModelPreference);

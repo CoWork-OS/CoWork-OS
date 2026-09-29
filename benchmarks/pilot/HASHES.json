@@ -1,0 +1,140 @@
+{
+  "schema": "cowork-os-pilot-hashes-v1",
+  "files": [
+    {
+      "path": "C01/README.md",
+      "sha256": "94580e231a1f4ef653e89857a7bb3afe8e7f04c5709d1a97a78829ae6972c0a6",
+      "role": "documentation"
+    },
+    {
+      "path": "C01/inputs/hidden-cases.json",
+      "sha256": "f7f641ae55fbf96148bf088e0bd3c02cc297bf059a11a00ef6feb18e8ac706c2",
+      "role": "input"
+    },
+    {
+      "path": "C01/starter/src/invoice.mjs",
+      "sha256": "8bcb58f8639e956c177cb98a0023fda92cd0b89eee831e49e918e088f36b5df5",
+      "role": "input"
+    },
+    {
+      "path": "C01/starter/tests/public-cases.json",
+      "sha256": "876b5d5dc308faa1d2f4c3578d4af4449fe4aec1e2230e97bb4b7319d5036774",
+      "role": "input"
+    },
+    {
+      "path": "R02/README.md",
+      "sha256": "320d2783ba3da0bbe88a2e2f3bf1136bc602bf9568ef09dbdccd6d623ba24f69",
+      "role": "documentation"
+    },
+    {
+      "path": "R02/packet.json",
+      "sha256": "dc257e9d594eff6e4ed5e8b66fc193df0ecf876f86a4c835dacf9b23eeafa821",
+      "role": "input"
+    },
+    {
+      "path": "README.md",
+      "sha256": "d56bf8af1bcbfee61a06628f3cc91186c89cd86470b4f412ec8f76642d82f133",
+      "role": "documentation"
+    },
+    {
+      "path": "known-submissions/C01/binary-float.mjs",
+      "sha256": "d5b4e06f955ced9c15aa57c0a6a6920e2a6b71d16d21f9b6c21805d870c29357",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/C01/boolean-cents.mjs",
+      "sha256": "e85ec9b02819bbb54810709d43bc3d353c88cc49c3e7ce1389751253f672c816",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/C01/correct.mjs",
+      "sha256": "68c128224b28977fa6f098fa402859960829e785fbc6c33406e8f469e9aa0541",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/C01/display-only.mjs",
+      "sha256": "a2b04b2e9fe3bfa21cdcbdc8da3973113e06303b9e6276520e97fea0adfd259d",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/C01/tamper.mjs",
+      "sha256": "33326f365d75611e589cceeef77200a52f33c95eee004ded15dca719bb7ae29b",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/correct.json",
+      "sha256": "2695ffa6afa60f5402dafb37b8c043403a0d0dc1e9dd3dc91c79a40ec6519a3d",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/correct.md",
+      "sha256": "0cbf2f7a728af3ea4f2c8923384c54d32f8c34f31bb4a73b70879d6e99b14025",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/invented-citation.json",
+      "sha256": "2695ffa6afa60f5402dafb37b8c043403a0d0dc1e9dd3dc91c79a40ec6519a3d",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/invented-citation.md",
+      "sha256": "f19cbcef07e7c24650f918edd1de7ff698a39fbb8e71536b9e98923be186faa1",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/json-explanation-disagreement.json",
+      "sha256": "2695ffa6afa60f5402dafb37b8c043403a0d0dc1e9dd3dc91c79a40ec6519a3d",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/json-explanation-disagreement.md",
+      "sha256": "26e567c60e3d590a4ba06fc6fe3501cf44d97a7140fddfa49e08a0357eff4cb4",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/missing-conflict.json",
+      "sha256": "4ca6c1829b1a06cb085d5f557caf0df2dec654dc221c91f1af9923a5407299e6",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/missing-conflict.md",
+      "sha256": "dba35c2eccec5fd36cf825ffea6ad306b63e829567bcda3f9dd094d3fce4a9c3",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/probe-contradiction.json",
+      "sha256": "2695ffa6afa60f5402dafb37b8c043403a0d0dc1e9dd3dc91c79a40ec6519a3d",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/probe-contradiction.md",
+      "sha256": "22c3b874eaa22daba9f5875d51379bab7f1ac8653da657041c8f3685031b689d",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/reversed-supersession.json",
+      "sha256": "2695ffa6afa60f5402dafb37b8c043403a0d0dc1e9dd3dc91c79a40ec6519a3d",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/reversed-supersession.md",
+      "sha256": "57e57314faa921f04f74fe20fe9bede8554277bf7b492b40f38de81b7c733d4a",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/stale-high.json",
+      "sha256": "4a29cdcc9d27bc7ffce0a737056f812e7d6f327f7b15680b46d2d2259041ba1b",
+      "role": "known-submission"
+    },
+    {
+      "path": "known-submissions/R02/stale-high.md",
+      "sha256": "66a2921bcd2c8af4ff4833f8bd01ed13478a6184622c9de307081a015afa705e",
+      "role": "known-submission"
+    },
+    {
+      "path": "pilot.py",
+      "sha256": "e9d4c1498629162fcb39c25543fdc0435017548125b3d810764b125cd7b14b24",
+      "role": "grader"
+    }
+  ]
+}

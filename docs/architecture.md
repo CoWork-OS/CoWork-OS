@@ -66,12 +66,16 @@ retract a request the server already accepted.
 HTTPS enrollment/daily requests reach the separate `services/pulse-worker` deployment at
 `pulse.coworkosapp.com`. The Worker validates closed payload shapes and stores pseudonyms and
 aggregates in D1. A cron prunes old rows; a bearer-protected API serves aggregate reports.
-The desktop updater is separate from Pulse. Manual checks (Settings) go directly to GitHub with
-an 8-second total deadline; background checks (startup) may first ask the identifier-free CoWork
-version endpoint for up to 2 seconds. Every `UpdateInfo` says whether it is a live answer or
-no published release, with its check time. Release metadata is not cached: a failed check is an
-error, same-intent checks are coalesced, and only a manual check sets the install target.
-Operator OTLP export and local Usage Insights remain distinct data flows.
+The desktop updater is separate from Pulse. For installed builds, manual checks (Settings) go
+directly to GitHub with an 8-second total deadline; background checks (startup) may first ask the
+identifier-free CoWork version endpoint for up to 2 seconds. Source checkouts fetch and compare the
+exact `origin/main` commit within one 15-second budget that includes local Git probes and the remote
+fetch. Their result is explicitly current, a new target, or unavailable; a failed fetch cannot
+establish that the checkout is current. Every `UpdateInfo` says whether it is a live answer, no
+published release, or an unavailable source check, with its check time. Release metadata is not
+cached: a failed release check is an error, same-intent checks are coalesced, and only a manual
+check sets the install target. Operator OTLP export and local Usage Insights remain distinct data
+flows.
 
 See [CoWork Pulse](cowork-pulse.md) for contracts and delivery limitations, and the
 [collector runbook](../services/pulse-worker/README.md) for deployment and recovery. Server

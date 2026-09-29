@@ -353,8 +353,9 @@ Reverse-proxied dashboards should set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to 
 ### Product Analytics and Outbound Data
 
 CoWork Pulse installation-linked usage reporting is disabled by default and requires explicit
-opt-in. The independent update check sends version/platform/architecture/surface to
-`pulse.coworkosapp.com` without an installation identifier and contributes daily request counts.
+opt-in. Automatic release checks in installed builds send version/platform/architecture/surface to
+`pulse.coworkosapp.com` without an installation identifier and contribute daily request counts.
+Source checkout update checks use Git against `origin/main` instead.
 Model providers, compatible gateways, web search, connectors, channels, and other services also
 receive operational requests when configured or invoked.
 

@@ -20,12 +20,12 @@ cowork telemetry delete --yes
 
 `show` describes exactly what would happen next, using the same selector as sending:
 
-| State          | Meaning                                                                                   |
-| -------------- | ----------------------------------------------------------------------------------------- |
-| `queued`       | The exact payload the next send attempt submits, provided consent is still on             |
-| `candidate`    | An estimate for the eligible UTC day; nothing is queued yet                               |
-| `ineligible`   | Nothing can be sent: Pulse is off, deletion is pending, or no fully consented day exists  |
-| `already_sent` | The collector acknowledged this day; `send` will not resend it                            |
+| State          | Meaning                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| `queued`       | The exact payload the next send attempt submits, provided consent is still on            |
+| `candidate`    | An estimate for the eligible UTC day; nothing is queued yet                              |
+| `ineligible`   | Nothing can be sent: Pulse is off, deletion is pending, or no fully consented day exists |
+| `already_sent` | The collector acknowledged this day; `send` will not resend it                           |
 
 Opening Settings or running `show` never creates an outbox row. Pulse keeps **one daily aggregate
 record** per fully consented UTC day; failed or unconfirmed requests may be retried with the same
@@ -34,10 +34,12 @@ exactly-once networking. `send` reports `sent`, `already_sent`, `no_eligible_day
 `cancelled_by_state_change`, or `error`.
 
 The separate `/v1/latest-version` update request is identifier-free. It includes only version,
-platform, architecture, and surface, and is used only by **automatic** (startup) checks, with a
-2-second limit before falling back to GitHub. Checking manually in Settings goes directly to
-GitHub. It is suppressed in CI and tests and is reported as **Daily Update Checks**, never as
-unique users. The client keeps no release cache; a failed check is reported as an error.
+platform, architecture, and surface, and is used only by **automatic** (startup) release checks
+for installed builds, with a 2-second limit before falling back to GitHub. Checking manually in
+Settings goes directly to GitHub. Source checkouts compare against `origin/main` through Git and
+do not call this endpoint. It is suppressed in CI and tests and is reported as **Daily Update
+Checks**, never as unique users. The client keeps no release cache; a failed check is reported as
+an error.
 
 Example request shape:
 

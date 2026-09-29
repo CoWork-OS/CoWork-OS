@@ -11459,19 +11459,24 @@ export type UpdateCheckIntent = "manual" | "background";
 /**
  * - live: release metadata retrieved during this check.
  * - no_release: the release endpoint reported that nothing is published.
+ * - unavailable: a source checkout could not verify origin/main.
  */
-export type UpdateCheckSource = "live" | "no_release";
+export type UpdateCheckSource = "live" | "no_release" | "unavailable";
 
 export interface UpdateCheckProvenance {
   source: UpdateCheckSource;
   /** When this check ran. */
   checkedAt: number;
+  /** Why an unavailable source-checkout check could not verify origin/main. */
+  networkError?: string;
 }
 
 export interface UpdateInfo {
   available: boolean;
   currentVersion: string;
   latestVersion: string;
+  /** Source checkout discovery against origin/main, including failed checks. */
+  sourceUpdateStatus?: "current" | "new_target" | "unavailable";
   releaseNotes?: string;
   releaseUrl?: string;
   publishedAt?: string;

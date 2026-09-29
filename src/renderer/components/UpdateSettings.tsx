@@ -32,6 +32,19 @@ function ReleaseNotesLink({ href, children, ...props }: React.ComponentPropsWith
   );
 }
 
+/** One line describing when and against what an update answer was checked. */
+function describeUpdateCheck(info: UpdateInfo): string {
+  const checked = new Date(info.provenance.checkedAt).toLocaleString();
+  if (info.provenance.source === "unavailable") {
+    const reason = info.provenance.networkError ? ` (${info.provenance.networkError})` : "";
+    return `Couldn't verify origin/main at ${checked}${reason}. Check your Git connection and try again.`;
+  }
+  if (info.sourceUpdateStatus === "current" || info.sourceUpdateStatus === "new_target") {
+    return `Checked ${checked} against origin/main.`;
+  }
+  return `Checked ${checked}.`;
+}
+
 export function UpdateSettings() {
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -270,6 +283,11 @@ export function UpdateSettings() {
                   </strong>
                 </div>
               </>
+            ) : updateInfo.provenance.source === "unavailable" ? (
+              <div className="update-header">
+                <XCircle size={20} strokeWidth={2} />
+                <span>Could not confirm you're up to date.</span>
+              </div>
             ) : updateInfo.provenance.source === "no_release" ? (
               <div className="update-header up-to-date">
                 <CheckCircle size={20} strokeWidth={2} />
@@ -281,9 +299,7 @@ export function UpdateSettings() {
                 <span>You're up to date!</span>
               </div>
             )}
-            <div className="update-date">
-              Checked {new Date(updateInfo.provenance.checkedAt).toLocaleString()}.
-            </div>
+            <div className="update-date">{describeUpdateCheck(updateInfo)}</div>
           </div>
         )}
 

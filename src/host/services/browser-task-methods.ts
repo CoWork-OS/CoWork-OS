@@ -1,5 +1,6 @@
 import type { Task, Workspace } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import {
   TaskAdmissionConflictError,
   TaskAdmissionReceiptUnavailableError,
@@ -23,6 +24,7 @@ export interface BrowserTaskCommands {
     title: string;
     prompt: string;
     workspaceId: string;
+    agentConfig: { accessProfileId: typeof BUILTIN_ACCESS_PROFILE_IDS.askForApproval };
     source: "api";
     requestIdentity: CreateTaskRequest;
     autoStart: false;
@@ -60,6 +62,10 @@ export function createBrowserTaskMethods(
           admitted = await sources.commands.createTaskIdempotent({
             operationKey: key,
             ...request,
+            // Browser admission has no profile editor. Preserve the shared
+            // composer's displayed approval boundary even if the host's
+            // default profile is broader.
+            agentConfig: { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval },
             source: "api",
             requestIdentity: request,
             autoStart: false,

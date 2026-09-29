@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Task, Workspace } from "../../../shared/types";
 import { TaskAdmissionConflictError } from "../../../electron/control-plane/task-admission-service";
+import { BUILTIN_ACCESS_PROFILE_IDS } from "../../../shared/access-profiles";
 import { createBrowserTaskMethods, type BrowserTaskCommands } from "../browser-task-methods";
 
 const task = {
@@ -52,6 +53,7 @@ describe("browser task methods", () => {
         operationKey: "web:control-plane:request-12345678",
         title: "Analyze data",
         prompt: "private prompt",
+        agentConfig: { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval },
         autoStart: false,
       }),
     );

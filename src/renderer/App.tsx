@@ -2916,6 +2916,9 @@ export function App() {
   // Timestamp of when onboarding was completed
   const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<string | undefined>(undefined);
   const hasElectronAPI = typeof window !== "undefined" && !!window.electronAPI;
+  const isBrowserHost =
+    typeof window !== "undefined" &&
+    (window as Window & { coworkBrowserHost?: boolean }).coworkBrowserHost === true;
   const [devLogCaptureEnabled, setDevLogCaptureEnabled] = useState(false);
   const rendererPerfLoggingEnabled = devRunLoggingEnabled || devLogCaptureEnabled;
   const startupMarksRef = useRef<Set<string>>(new Set());
@@ -3535,6 +3538,24 @@ export function App() {
 
   // Auto-load temp workspace on mount if no workspace is selected
   useEffect(() => {
+    if (isBrowserHost) {
+      let cancelled = false;
+      void window.electronAPI
+        .listWorkspaces()
+        .then((workspaces) => {
+          if (cancelled || workspaces.length === 0) return;
+          const activeWorkspaceId = window.coworkBrowserHostInfo?.activeWorkspaceId;
+          setCurrentWorkspace(
+            workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0],
+          );
+        })
+        .catch((error: unknown) => {
+          console.error("Failed to load browser workspaces:", error);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     if (!window.electronAPI?.getTempWorkspace) return;
 
     const initWorkspace = async () => {
@@ -3548,7 +3569,7 @@ export function App() {
       }
     };
     initWorkspace();
-  }, []);
+  }, [isBrowserHost]);
 
   // Load tasks when workspace is set
   useEffect(() => {
@@ -6816,7 +6837,7 @@ export function App() {
 
   // Smart right panel visibility: auto-collapse on welcome screen in focused mode
   const effectiveRightCollapsed =
-    currentView !== "main"
+    isBrowserHost || currentView !== "main"
       ? true
       : uiDensity === "full"
         ? rightSidebarCollapsed
@@ -7526,7 +7547,7 @@ export function App() {
         </div>
         <div className="title-bar-spacer" />
         <div className="title-bar-actions">
-          {titleBarBrowserTaskId && (
+          {titleBarBrowserTaskId && !isBrowserHost && (
             <button
               type="button"
               className="title-bar-btn title-bar-browser-toggle"
@@ -7559,7 +7580,7 @@ export function App() {
               </svg>
             </button>
           )}
-          {showTitleBarTerminalToggle && (
+          {showTitleBarTerminalToggle && !isBrowserHost && (
             <button
               type="button"
               className={`title-bar-btn title-bar-terminal-toggle ${terminalTabsOpen ? "active" : ""}`}
@@ -7636,41 +7657,54 @@ export function App() {
               </svg>
             )}
           </button>
-          <NotificationPanel
-            onNotificationClick={(notification) => {
-              // Prioritize taskId to show the completed task result
-              if (notification.taskId) {
-                void openTaskById(notification.taskId);
-                return;
-              }
-              if (notification.suggestionId) {
-                void (async () => {
-                  try {
-                    if (notification.workspaceId) {
-                      const workspaces = await window.electronAPI.listWorkspaces();
-                      const targetWorkspace = workspaces.find(
-                        (workspace) => workspace.id === notification.workspaceId,
-                      );
-                      if (targetWorkspace) {
-                        setCurrentWorkspace(targetWorkspace);
+          {!isBrowserHost && (
+            <NotificationPanel
+              onNotificationClick={(notification) => {
+                // Prioritize taskId to show the completed task result
+                if (notification.taskId) {
+                  void openTaskById(notification.taskId);
+                  return;
+                }
+                if (notification.suggestionId) {
+                  void (async () => {
+                    try {
+                      if (notification.workspaceId) {
+                        const workspaces = await window.electronAPI.listWorkspaces();
+                        const targetWorkspace = workspaces.find(
+                          (workspace) => workspace.id === notification.workspaceId,
+                        );
+                        if (targetWorkspace) {
+                          setCurrentWorkspace(targetWorkspace);
+                        }
                       }
+                    } catch {
+                      // best-effort
+                    } finally {
+                      setCurrentView("home");
+                      setHomeAutomationFocusTick((tick) => tick + 1);
                     }
-                  } catch {
-                    // best-effort
-                  } finally {
-                    setCurrentView("home");
-                    setHomeAutomationFocusTick((tick) => tick + 1);
-                  }
-                })();
-                return;
-              }
-              // Fall back to scheduled tasks settings if only cronJobId
-              if (notification.cronJobId) {
-                setSettingsTab("scheduled");
-                setCurrentView("settings");
-              }
-            }}
-          />
+                  })();
+                  return;
+                }
+                // Fall back to scheduled tasks settings if only cronJobId
+                if (notification.cronJobId) {
+                  setSettingsTab("scheduled");
+                  setCurrentView("settings");
+                }
+              }}
+            />
+          )}
+          {isBrowserHost && (
+            <button
+              type="button"
+              className="title-bar-btn title-bar-browser-signout"
+              onClick={() => window.dispatchEvent(new Event("cowork-browser-sign-out"))}
+              title="Sign out of this browser"
+              aria-label="Sign out of this browser"
+            >
+              Sign out
+            </button>
+          )}
           <button
             type="button"
             className={`title-bar-btn density-toggle ${uiDensity}`}
@@ -7714,7 +7748,7 @@ export function App() {
               </svg>
             )}
           </button>
-          {currentView === "main" && (
+          {currentView === "main" && !isBrowserHost && (
             <button
               type="button"
               className="title-bar-btn title-bar-panel-toggle"
@@ -7749,7 +7783,7 @@ export function App() {
           )}
         </div>
         {/* Windows custom window controls (minimize, maximize, close) */}
-        {isWindows && (
+        {isWindows && !isBrowserHost && (
           <div className="win-controls">
             <button
               type="button"

@@ -20,6 +20,7 @@ import {
 import { isTempWorkspaceId } from "../../shared/types";
 import { WebApplication, type WebDeploymentPolicy } from "../web/WebApplication";
 import { createBrowserReadMethods, createDatabaseBrowserReadSources } from "./browser-read-methods";
+import { createBrowserDesktopReadMethods } from "./browser-desktop-read-methods";
 import { BrowserWorkspaceFiles, createBrowserWorkspaceFileMethods } from "./browser-files";
 import { createBrowserTaskMethods, type BrowserTaskCommands } from "./browser-task-methods";
 import { createBrowserFollowUpMethods } from "./browser-follow-up-methods";
@@ -239,6 +240,11 @@ export function createBrowserHostApplication(
       (() => readBrowserSessionBootstrap(options.db, Boolean(options.taskCommands))),
     methods: {
       ...createBrowserReadMethods(createDatabaseBrowserReadSources(options.db)),
+      ...createBrowserDesktopReadMethods({
+        listWorkspaces: () => workspaceRepository.findAll(),
+        resolveWorkspace: resolveBrowserWorkspace,
+        getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+      }),
       ...createBrowserWorkspaceFileMethods(workspaceFiles),
       ...createBrowserArtifactMethods(browserArtifacts),
       ...createBrowserGitMethods({

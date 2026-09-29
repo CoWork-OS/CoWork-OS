@@ -3951,7 +3951,19 @@ function MainContentComponent({
   }, [draftRevision, draftSnapshot, draftValue, onDraftPatch, onResolveDraftAttachment, task?.id]);
 
   // Focused mode card pool - pick random cards on mount
-  const focusedCards = useMemo(() => pickFocusedCards(FOCUSED_CARD_POOL, CARDS_TO_SHOW), []);
+  const focusedCards = useMemo(
+    () =>
+      pickFocusedCards(
+        window.coworkBrowserHost
+          ? FOCUSED_CARD_POOL.filter(
+              (card) => card.action.type === "prompt" && card.id !== "discover-images",
+            )
+          : FOCUSED_CARD_POOL,
+        CARDS_TO_SHOW,
+      ),
+    [],
+  );
+  const isBrowserHost = window.coworkBrowserHost === true;
   const isCalm = useIsCalmTheme();
   const [showAllCalmChips, setShowAllCalmChips] = useState(false);
   // Picked once per app session so the chips don't reshuffle on every visit.
@@ -9639,8 +9651,12 @@ function MainContentComponent({
                   <button
                     className="attachment-btn attachment-btn-left"
                     onClick={handleAttachFiles}
-                    disabled={isUploadingAttachments}
-                    title="Add files"
+                    disabled={isUploadingAttachments || isBrowserHost}
+                    title={
+                      isBrowserHost
+                        ? "Task attachments are available in the desktop app"
+                        : "Add files"
+                    }
                     aria-label="Add files"
                   >
                     <Plus size={24} aria-hidden="true" />
@@ -10106,13 +10122,15 @@ function MainContentComponent({
                       <button
                         className={`voice-input-btn ${voiceInput.state}`}
                         onClick={voiceInput.toggleRecording}
-                        disabled={voiceInput.state === "processing"}
+                        disabled={isBrowserHost || voiceInput.state === "processing"}
                         title={
-                          voiceInput.state === "idle"
-                            ? "Start voice input"
-                            : voiceInput.state === "recording"
-                              ? "Stop recording"
-                              : "Processing..."
+                          isBrowserHost
+                            ? "Voice input is available in the desktop app"
+                            : voiceInput.state === "idle"
+                              ? "Start voice input"
+                              : voiceInput.state === "recording"
+                                ? "Stop recording"
+                                : "Processing..."
                         }
                       >
                         {voiceInput.state === "processing" ? (
@@ -10250,13 +10268,15 @@ function MainContentComponent({
                       <button
                         className={`voice-input-btn ${voiceInput.state}`}
                         onClick={voiceInput.toggleRecording}
-                        disabled={voiceInput.state === "processing"}
+                        disabled={isBrowserHost || voiceInput.state === "processing"}
                         title={
-                          voiceInput.state === "idle"
-                            ? "Start voice input"
-                            : voiceInput.state === "recording"
-                              ? "Stop recording"
-                              : "Processing..."
+                          isBrowserHost
+                            ? "Voice input is available in the desktop app"
+                            : voiceInput.state === "idle"
+                              ? "Start voice input"
+                              : voiceInput.state === "recording"
+                                ? "Stop recording"
+                                : "Processing..."
                         }
                       >
                         {voiceInput.state === "processing" ? (
@@ -11639,8 +11659,10 @@ function MainContentComponent({
             <button
               className="attachment-btn attachment-btn-left"
               onClick={handleAttachFiles}
-              disabled={isUploadingAttachments}
-              title="Attach files"
+              disabled={isUploadingAttachments || isBrowserHost}
+              title={
+                isBrowserHost ? "Task attachments are available in the desktop app" : "Attach files"
+              }
               aria-label="Attach files"
             >
               <Plus size={24} aria-hidden="true" />
@@ -11758,15 +11780,17 @@ function MainContentComponent({
               <button
                 className={`voice-input-btn ${voiceInput.state}`}
                 onClick={voiceInput.toggleRecording}
-                disabled={voiceInput.state === "processing" || talkMode.isActive}
+                disabled={isBrowserHost || voiceInput.state === "processing" || talkMode.isActive}
                 title={
-                  talkMode.isActive
-                    ? "Talk Mode active"
-                    : voiceInput.state === "idle"
-                      ? "Start voice input"
-                      : voiceInput.state === "recording"
-                        ? "Stop recording"
-                        : "Processing..."
+                  isBrowserHost
+                    ? "Voice input is available in the desktop app"
+                    : talkMode.isActive
+                      ? "Talk Mode active"
+                      : voiceInput.state === "idle"
+                        ? "Start voice input"
+                        : voiceInput.state === "recording"
+                          ? "Stop recording"
+                          : "Processing..."
                 }
               >
                 {voiceInput.state === "processing" ? (

@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 
 // Keep this build artifact version explicit; the host refuses assets whose
 // version differs from its runtime WEB_API_VERSION.
 const WEB_ARTIFACT_API_VERSION = 1;
+const WEB_OUTPUT_DIR = path.resolve(import.meta.dirname, "dist/web");
 
 const packageManifest = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf8"),
@@ -17,16 +18,20 @@ export default defineConfig({
     react(),
     {
       name: "cowork-web-artifact-manifest",
-      generateBundle(_options, bundle) {
-        this.emitFile({
-          type: "asset",
-          fileName: "web-manifest.json",
-          source: JSON.stringify({
+      closeBundle() {
+        // Rolldown can prune empty facade chunks after generateBundle. Record
+        // the files that actually exist so the host verifies the served build.
+        const assets = readdirSync(path.join(WEB_OUTPUT_DIR, "assets"))
+          .map((name) => `assets/${name}`)
+          .sort();
+        writeFileSync(
+          path.join(WEB_OUTPUT_DIR, "web-manifest.json"),
+          JSON.stringify({
             apiVersion: WEB_ARTIFACT_API_VERSION,
             appVersion: packageManifest.version,
-            assets: Object.keys(bundle).sort(),
+            assets,
           }),
-        });
+        );
       },
     },
   ],
@@ -34,7 +39,7 @@ export default defineConfig({
   base: "./",
   publicDir: path.resolve(import.meta.dirname, "src/renderer/public"),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/web"),
+    outDir: WEB_OUTPUT_DIR,
     emptyOutDir: true,
   },
   resolve: {

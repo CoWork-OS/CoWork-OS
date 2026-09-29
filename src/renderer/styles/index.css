@@ -1222,6 +1222,13 @@ html.platform-darwin .title-bar-left {
   background-color: var(--color-bg-secondary);
 }
 
+.title-bar-browser-signout {
+  width: auto;
+  padding: 0 8px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .title-bar-terminal-toggle.active {
   background-color: var(--color-bg-secondary);
 }
@@ -9537,8 +9544,7 @@ a,
 
 .theme-option-preview.calm {
   background:
-    radial-gradient(70% 60% at 10% 110%, rgba(56, 189, 248, 0.35), transparent 70%),
-    #fbfbf9;
+    radial-gradient(70% 60% at 10% 110%, rgba(56, 189, 248, 0.35), transparent 70%), #fbfbf9;
   border: 1px solid rgba(24, 24, 20, 0.08);
   padding: 8px;
   gap: 4px;
@@ -29641,8 +29647,13 @@ html:not(.theme-light) .selected-workspace-main-row {
   color: var(--text-primary, #eee);
 }
 
-.quick-first-run h1 { font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.1; }
-.quick-first-run p { line-height: 1.6; }
+.quick-first-run h1 {
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  line-height: 1.1;
+}
+.quick-first-run p {
+  line-height: 1.6;
+}
 .quick-first-run button,
 .first-task-card button {
   cursor: pointer;
@@ -29653,9 +29664,16 @@ html:not(.theme-light) .selected-workspace-main-row {
   background: transparent;
 }
 .quick-first-run button:first-of-type,
-.first-task-card button:first-of-type { background: var(--accent-color, #5d68d8); color: #fff; border-color: transparent; }
+.first-task-card button:first-of-type {
+  background: var(--accent-color, #5d68d8);
+  color: #fff;
+  border-color: transparent;
+}
 .quick-first-run button:disabled,
-.first-task-card button:disabled { opacity: 0.55; cursor: wait; }
+.first-task-card button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 .first-task-card {
   display: flex;
   flex-wrap: wrap;
@@ -29671,8 +29689,17 @@ html:not(.theme-light) .selected-workspace-main-row {
 .first-task-card h2,
 .first-task-card p,
 .first-task-card ul,
-.first-task-card small { flex-basis: 100%; margin: 0; }
-.first-task-card h2 { font-size: 1.2rem; }
+.first-task-card small {
+  flex-basis: 100%;
+  margin: 0;
+}
+.first-task-card h2 {
+  font-size: 1.2rem;
+}
 .first-task-card p,
-.first-task-card small { line-height: 1.5; }
-.first-task-card [role="alert"] { color: #e89090; }
+.first-task-card small {
+  line-height: 1.5;
+}
+.first-task-card [role="alert"] {
+  color: #e89090;
+}

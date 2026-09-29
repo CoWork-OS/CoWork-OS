@@ -1,3 +1,4 @@
+import { hasHostMethod } from "../../host/browser-capabilities";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type {
   AgentRoleData,
@@ -630,7 +631,9 @@ export function useMissionControlData(
     async (workspaceId: string, workspaceList: Workspace[]) => {
       const [loadedAgents, statuses, loadedTasks] = await Promise.all([
         window.electronAPI.getAgentRoles(true),
-        window.electronAPI.getAllHeartbeatStatus(),
+        hasHostMethod("getAllHeartbeatStatus")
+          ? window.electronAPI.getAllHeartbeatStatus()
+          : Promise.resolve([]),
         window.electronAPI.listTasks().catch(() => []),
       ]);
       const normalizedAgents = loadedAgents.map(normalizeMissionControlAgent);
@@ -1151,7 +1154,9 @@ export function useMissionControlData(
         }
         setEditingAgent(null);
         setIsCreatingAgent(false);
-        const statuses = await window.electronAPI.getAllHeartbeatStatus();
+        const statuses = hasHostMethod("getAllHeartbeatStatus")
+          ? await window.electronAPI.getAllHeartbeatStatus()
+          : [];
         setHeartbeatStatuses(statuses);
       } catch (err: Any) {
         setAgentError(err.message || "Failed to save agent");

@@ -706,6 +706,8 @@ async function main(): Promise<void> {
           deployment: webDeploymentFromEnv(),
           identity,
           taskCommands: agentDaemon,
+          agentDaemon,
+          channelGateway,
         });
         await startedControlPlane.server.setWebApplication(browserApp);
         startedControlPlane.server.registerMethod("web.pair", async (client) => {

@@ -1,8 +1,11 @@
 import type { ElectronAPI } from "../../electron/preload";
 import type { AppearanceSettings, Task, TaskEvent, Workspace } from "../../shared/types";
 import type { WebSessionBootstrap } from "../../shared/host-api/contracts";
-import { BrowserHostTransport } from "../../renderer-web/transport";
-import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
+import { BrowserHostTransport, webEndpoint } from "../../renderer-web/transport";
+import { createBrowserComposerDraftBridge } from "./browser-composer-draft-bridge";
+import { createBrowserFileBridge } from "./browser-file-bridge";
+import { createBrowserDecisionBridge } from "./browser-decision-bridge";
+import { createBrowserTerminalBridge } from "./browser-terminal-bridge";
 
 /** A browser build can only invoke operations implemented by the browser host API. */
 export class UnsupportedBrowserHostMethodError extends Error {
@@ -41,6 +44,10 @@ type BrowserTaskSummary = Pick<
       | "priority"
       | "labels"
       | "dueDate"
+      | "pinned"
+      | "sessionArchived"
+      | "sessionId"
+      | "source"
     >
   > & { prompt: "" };
 
@@ -121,6 +128,7 @@ export function installBrowserHostBridge(
   const browserInfo = {
     providerReady: session.providerReady,
     activeWorkspaceId: session.activeWorkspaceId,
+    desktopMethods: session.desktopMethods,
   };
   const appearanceStorageKey = `cowork:browser-appearance:${session.host.installationId}:${session.host.profileId}`;
   let active = true;
@@ -138,7 +146,7 @@ export function installBrowserHostBridge(
     verifyBrowserOperationSession(session, scope),
   );
   const getOperationStorageKey = async (
-    method: "create" | "follow-up" | "cancel",
+    method: "create" | "follow-up" | "cancel" | "decision" | "desktop",
     scope: string,
   ): Promise<string> => {
     const sessionScope = await sessionScopePromise;
@@ -155,6 +163,47 @@ export function installBrowserHostBridge(
     const result = await transport.request<T>(method, params, options);
     if (!active) throw new StaleBrowserHostBridgeError();
     return result;
+  };
+
+  const mutateDecision = async <T>(
+    method: string,
+    params: unknown,
+    scope: { workspaceId: string; taskId: string; id: string; expectedVersion: number },
+  ): Promise<T> => {
+    const storageKey = await getOperationStorageKey(
+      "decision",
+      `${method}:${scope.workspaceId}:${scope.taskId}:${scope.id}`,
+    );
+    const operation = await getOrCreatePendingOperation(
+      storageKey,
+      await fingerprintPayload(params),
+    );
+    try {
+      const result = await rpc<T>(method, params, {
+        operationKey: operation.key,
+        mutation: true,
+        timeoutMs: 120_000,
+      });
+      const outcome = isRecord(result) ? result.status : undefined;
+      if (outcome === "handled" || outcome === "duplicate" || outcome === "not_found") {
+        clearPendingOperation(storageKey, operation.key);
+      }
+      return result;
+    } catch (error) {
+      if (
+        [
+          "INVALID_REQUEST",
+          "FORBIDDEN",
+          "UNSUPPORTED_CAPABILITY",
+          "STALE_STATE",
+          "CONFLICT",
+          "RATE_LIMITED",
+        ].some((code) => hasErrorCode(error, code))
+      ) {
+        clearPendingOperation(storageKey, operation.key);
+      }
+      throw error;
+    }
   };
 
   const listWorkspaces = async (): Promise<Workspace[]> => {
@@ -174,6 +223,7 @@ export function installBrowserHostBridge(
     // Workspace selection is renderer state. The browser host exposes no
     // separate workspace.select mutation, so this does not change host state.
     selectedWorkspaceId = workspace.id;
+    browserInfo.activeWorkspaceId = workspace.id;
     return workspace;
   };
 
@@ -184,6 +234,13 @@ export function installBrowserHostBridge(
     }
     return (response.task as Task | null) ?? null;
   };
+
+  const decisions = createBrowserDecisionBridge({
+    rpc,
+    listWorkspaces,
+    getTask,
+    mutate: mutateDecision,
+  });
 
   const listTasks = async (
     options?: Parameters<ElectronAPI["listTasks"]>[0],
@@ -223,6 +280,9 @@ export function installBrowserHostBridge(
       throw new InvalidBrowserHostResponseError("task.events.snapshot");
     }
     const events = response.events as TaskEvent[];
+    const hydratedEvents = await Promise.all(
+      events.map((event) => decisions.hydrateTaskEvent(event)),
+    );
     const cursor = parseTaskMutationCursor(response.cursor, task.id);
     if (cursor) {
       observedTaskEventScopes.delete(task.id);
@@ -230,7 +290,7 @@ export function installBrowserHostBridge(
         taskId: task.id,
         workspaceId: task.workspaceId,
         cursor,
-        knownEventIds: new Set(events.flatMap((event) => (event.id ? [event.id] : []))),
+        knownEventIds: new Set(hydratedEvents.flatMap((event) => (event.id ? [event.id] : []))),
       });
       while (observedTaskEventScopes.size > 8) {
         const oldest = observedTaskEventScopes.keys().next().value as string | undefined;
@@ -239,7 +299,7 @@ export function installBrowserHostBridge(
       }
       scheduleTaskEventPoll();
     }
-    return events;
+    return hydratedEvents;
   };
 
   const onTaskEvent: ElectronAPI["onTaskEvent"] = (callback) => {
@@ -307,7 +367,7 @@ export function installBrowserHostBridge(
             for (const candidate of snapshot.events) {
               if (!isRecord(candidate) || typeof candidate.id !== "string") continue;
               if (!scope.knownEventIds.has(candidate.id)) {
-                emitTaskEvent(candidate as unknown as TaskEvent);
+                await emitTaskEvent(candidate as unknown as TaskEvent);
               }
               rememberEventId(scope, candidate.id);
             }
@@ -326,7 +386,7 @@ export function installBrowserHostBridge(
             }
             if (change.event.taskId !== scope.taskId) continue;
             if (typeof change.event.id === "string") rememberEventId(scope, change.event.id);
-            emitTaskEvent(change.event as unknown as TaskEvent);
+            await emitTaskEvent(change.event as unknown as TaskEvent);
           }
           const nextCursor = parseTaskMutationCursor(raw.nextCursor, scope.taskId);
           if (!nextCursor) break;
@@ -343,10 +403,11 @@ export function installBrowserHostBridge(
     }
   }
 
-  function emitTaskEvent(event: TaskEvent): void {
+  async function emitTaskEvent(event: TaskEvent): Promise<void> {
+    const hydrated = await decisions.hydrateTaskEvent(event);
     for (const listener of taskEventListeners) {
       try {
-        listener(event);
+        listener(hydrated);
       } catch {
         // An individual renderer subscriber must not stop other updates.
       }
@@ -421,7 +482,15 @@ export function installBrowserHostBridge(
     }
     const task = await getTask(taskId);
     if (!task) throw new Error("This task is unavailable to the browser session.");
-    const request = { taskId: task.id, workspaceId: task.workspaceId, message: cleanMessage };
+    const request = {
+      taskId: task.id,
+      workspaceId: task.workspaceId,
+      message: cleanMessage,
+      ...(options?.interactionMode ? { interactionMode: options.interactionMode } : {}),
+      ...(options?.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
+      ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
+      ...(options?.shellAccess !== undefined ? { shellAccess: options.shellAccess } : {}),
+    };
     const storageKey = await getOperationStorageKey("follow-up", `${task.workspaceId}:${task.id}`);
     const fingerprint = await fingerprintPayload(request);
     const operation = await getOrCreatePendingOperation(storageKey, fingerprint);
@@ -589,6 +658,21 @@ export function installBrowserHostBridge(
   };
 
   const supported: Record<string, unknown> = {
+    listBrowserWorkspaceFiles: (request: unknown) => rpc("workspace.files.list", request),
+    listBrowserTaskArtifacts: (request: unknown) => rpc("task.artifacts.list", request),
+    createBrowserArtifactDownload: async (request: unknown) => {
+      const storageKey = await getOperationStorageKey("desktop", "artifact.download.create");
+      const operation = await getOrCreatePendingOperation(
+        storageKey,
+        await fingerprintPayload(request),
+      );
+      const result = await rpc("artifact.download.create", request, {
+        operationKey: operation.key,
+        mutation: true,
+      });
+      clearPendingOperation(storageKey, operation.key);
+      return result;
+    },
     getPlatform: () => session.host.platform,
     getAppVersion: async () => ({ version: session.host.appVersion }),
     getNativeFrameMode: () => false,
@@ -605,6 +689,135 @@ export function installBrowserHostBridge(
     sendMessage,
     cancelTask,
   };
+  if (session.capabilities["tasks.approvals"]?.available) {
+    supported.respondToApproval = decisions.methods.respondToApproval;
+  }
+  if (session.capabilities["tasks.inputRequests"]?.available) {
+    supported.listInputRequests = decisions.methods.listInputRequests;
+    supported.respondToInputRequest = decisions.methods.respondToInputRequest;
+  }
+  browserInfo.desktopMethods = {
+    ...browserInfo.desktopMethods,
+    ...Object.fromEntries(
+      [
+        ...(session.capabilities["files.read"]?.available ? ["listBrowserWorkspaceFiles"] : []),
+        ...(session.capabilities["artifacts.read"]?.available
+          ? ["listBrowserTaskArtifacts", "createBrowserArtifactDownload"]
+          : []),
+      ].map((name) => [name, { mutation: name === "createBrowserArtifactDownload" }]),
+    ),
+  };
+  const files = createBrowserFileBridge({ session, listWorkspaces, isActive: () => active });
+  const drafts = createBrowserComposerDraftBridge({
+    installationId: session.host.installationId,
+    profileId: session.host.profileId,
+    isActive: () => active,
+    rekeyAttachments: files.rekeyAttachments,
+    releaseAttachments: files.releaseAttachments,
+  });
+  Object.assign(supported, drafts.methods);
+  browserInfo.desktopMethods = {
+    ...browserInfo.desktopMethods,
+    ...Object.fromEntries(
+      Object.keys(drafts.methods).map((name) => [name, { mutation: name !== "getComposerDraft" }]),
+    ),
+  };
+  for (const [name, method] of Object.entries(files.methods)) {
+    const capability =
+      name === "readFileForViewer" || name === "openFile" ? "files.read" : "files.upload";
+    if (!session.capabilities[capability]?.available) continue;
+    supported[name] = method;
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      [name]: { mutation: name.startsWith("import") },
+    };
+  }
+
+  const terminals = createBrowserTerminalBridge({
+    rpc,
+    listWorkspaces,
+    getTask,
+    session,
+    isActive: () => active,
+  });
+  if (session.capabilities["terminal.attach"]?.available) {
+    Object.assign(supported, terminals.methods);
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      ...Object.fromEntries(
+        Object.keys(terminals.methods).map((name) => [
+          name,
+          { mutation: !name.startsWith("list") && !name.startsWith("on") },
+        ]),
+      ),
+    };
+  }
+
+  const localListeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  const emitLocal = (name: string, ...args: unknown[]) => {
+    for (const listener of localListeners.get(name) ?? []) listener(...args);
+  };
+  const subscribeLocal = (name: string) => (listener: (...args: unknown[]) => void) => {
+    const listeners = localListeners.get(name) ?? new Set<(...args: unknown[]) => void>();
+    listeners.add(listener);
+    localListeners.set(name, listeners);
+    return () => listeners.delete(listener);
+  };
+  supported.onLLMSettingsChanged = subscribeLocal("llm");
+
+  const refreshProviderReadiness = async () => {
+    const response = await fetch(webEndpoint("session/bootstrap"), {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    const updated = (await response.json()) as WebSessionBootstrap;
+    if (updated.host?.generation !== session.host.generation) return;
+    session.providerReady = updated.providerReady;
+    browserInfo.providerReady = updated.providerReady;
+    emitLocal("llm");
+  };
+
+  for (const [name, descriptor] of Object.entries(session.desktopMethods ?? {})) {
+    if (!/^[a-zA-Z][a-zA-Z0-9]{0,79}$/.test(name) || name === "constructor") continue;
+    supported[name] = async (...args: unknown[]) => {
+      while (args.length > 0 && args[args.length - 1] === undefined) args.pop();
+      const omittedArgs = args.flatMap((arg, index) => (arg === undefined ? [index] : []));
+      const params = { args, ...(omittedArgs.length ? { omittedArgs } : {}) };
+      let operation: PendingOperation | null = null;
+      let storageKey: string | null = null;
+      if (descriptor.mutation) {
+        storageKey = await getOperationStorageKey("desktop", name);
+        operation = await getOrCreatePendingOperation(storageKey, await fingerprintPayload(params));
+      }
+      try {
+        const result = await rpc(`desktop.${name}`, params, {
+          ...(operation ? { operationKey: operation.key, mutation: true } : {}),
+          timeoutMs: 120_000,
+        });
+        if (storageKey && operation) clearPendingOperation(storageKey, operation.key);
+        if (name === "saveLLMSettings" || name === "setLLMProvider" || name === "setLLMModel") {
+          await refreshProviderReadiness();
+        }
+        return result;
+      } catch (error) {
+        if (
+          storageKey &&
+          operation &&
+          [
+            "INVALID_REQUEST",
+            "FORBIDDEN",
+            "UNSUPPORTED_CAPABILITY",
+            "CONFLICT",
+            "RATE_LIMITED",
+          ].some((code) => hasErrorCode(error, code))
+        ) {
+          clearPendingOperation(storageKey, operation.key);
+        }
+        throw error;
+      }
+    };
+  }
 
   // These optional probes are used by the shared desktop App to decide whether
   // to start Electron-only workflows. Keep them absent when the browser host
@@ -644,6 +857,7 @@ export function installBrowserHostBridge(
 
   return () => {
     if (!active) return;
+    terminals.dispose();
     active = false;
     const ownsBridge = window.electronAPI === adapter;
     if (ownsBridge) {
@@ -663,6 +877,10 @@ export function installBrowserHostBridge(
     taskEventListeners.clear();
     observedTaskEventScopes.clear();
     taskOffsets.clear();
+    localListeners.clear();
+    decisions.dispose();
+    drafts.dispose();
+    files.dispose();
   };
 }
 
@@ -861,7 +1079,7 @@ async function fingerprintPayload(payload: unknown): Promise<string> {
 function operationStorageKey(
   session: WebSessionBootstrap,
   sessionScope: string,
-  method: "create" | "follow-up" | "cancel",
+  method: "create" | "follow-up" | "cancel" | "decision" | "desktop",
   scope: string,
 ): string {
   return `cowork:browser-host:${session.host.installationId}:${session.host.profileId}:${sessionScope}:${method}:${scope}`;
@@ -912,6 +1130,9 @@ function parseTaskCreateRequest(value: unknown): {
   title: string;
   prompt: string;
   workspaceId: string;
+  generateTitle?: true;
+  agentConfig?: Record<string, unknown>;
+  assignedAgentRoleId?: string;
 } {
   if (!isRecord(value)) throw new Error("Task creation requires a title, prompt, and workspace.");
   const allowed = new Set([
@@ -929,12 +1150,14 @@ function parseTaskCreateRequest(value: unknown): {
   if (value.generateTitle !== undefined && value.generateTitle !== true) {
     throw new UnsupportedBrowserHostMethodError("task title generation options");
   }
-  if (value.assignedAgentRoleId !== undefined || value.images !== undefined) {
-    throw new UnsupportedBrowserHostMethodError("assigned agents or task attachments");
-  }
-  if (value.agentConfig !== undefined && !isSupportedDefaultAgentConfig(value.agentConfig)) {
-    throw new UnsupportedBrowserHostMethodError("non-default task execution options");
-  }
+  if (!isEmptyArray(value.images)) throw new UnsupportedBrowserHostMethodError("image task input");
+  if (value.agentConfig !== undefined && !isRecord(value.agentConfig))
+    throw new Error("Invalid task options.");
+  if (
+    value.assignedAgentRoleId !== undefined &&
+    (typeof value.assignedAgentRoleId !== "string" || value.assignedAgentRoleId.length > 128)
+  )
+    throw new Error("Invalid assigned agent.");
   const title = typeof value.title === "string" ? value.title.trim() : "";
   const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
   const workspaceId = typeof value.workspaceId === "string" ? value.workspaceId.trim() : "";
@@ -948,7 +1171,16 @@ function parseTaskCreateRequest(value: unknown): {
   ) {
     throw new Error("Task title, instructions, or workspace is invalid.");
   }
-  return { title, prompt, workspaceId };
+  return {
+    title,
+    prompt,
+    workspaceId,
+    ...(value.generateTitle === true ? { generateTitle: true as const } : {}),
+    ...(value.agentConfig ? { agentConfig: value.agentConfig as Record<string, unknown> } : {}),
+    ...(value.assignedAgentRoleId
+      ? { assignedAgentRoleId: value.assignedAgentRoleId as string }
+      : {}),
+  };
 }
 
 async function taskFromAdmission(
@@ -999,48 +1231,29 @@ function isSupportedFollowUpOptions(options: unknown): boolean {
     "deliveryMode",
     "accessProfileId",
     "integrationMentions",
+    "permissionMode",
+    "shellAccess",
   ]);
   if (Object.keys(options).some((key) => !allowed.has(key))) return false;
   if (options.returnOnAccepted !== undefined && options.returnOnAccepted !== true) return false;
   if (options.deliveryMode !== undefined && options.deliveryMode !== "follow_up") return false;
   if (options.messageId !== undefined && typeof options.messageId !== "string") return false;
+  if (options.accessProfileId !== undefined && typeof options.accessProfileId !== "string")
+    return false;
   if (
-    options.accessProfileId !== undefined &&
-    options.accessProfileId !== BUILTIN_ACCESS_PROFILE_IDS.askForApproval
+    options.permissionMode !== undefined &&
+    !["default", "plan", "dangerous_only"].includes(String(options.permissionMode))
   )
     return false;
+  if (options.shellAccess !== undefined && options.shellAccess !== false) return false;
   if (!isEmptyArray(options.integrationMentions)) return false;
-  if (!isDefaultSmartInteraction(options.interactionMode)) return false;
-  return true;
-}
-
-function isSupportedDefaultAgentConfig(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  const allowed = new Set([
-    "interactionMode",
-    "executionMode",
-    "taskDomain",
-    "chronicleMode",
-    "accessProfileId",
-    "integrationMentions",
-  ]);
-  if (Object.keys(value).some((key) => !allowed.has(key))) return false;
-  if (value.executionMode !== undefined && value.executionMode !== "execute") return false;
-  if (value.taskDomain !== undefined && value.taskDomain !== "auto") return false;
-  if (value.chronicleMode !== undefined && value.chronicleMode !== "inherit") return false;
   if (
-    value.accessProfileId !== undefined &&
-    value.accessProfileId !== BUILTIN_ACCESS_PROFILE_IDS.askForApproval
+    options.interactionMode !== undefined &&
+    (!isRecord(options.interactionMode) ||
+      !["smart", "chat"].includes(String(options.interactionMode.mode)))
   )
     return false;
-  if (!isEmptyArray(value.integrationMentions)) return false;
-  if (!isDefaultSmartInteraction(value.interactionMode)) return false;
   return true;
-}
-
-function isDefaultSmartInteraction(value: unknown): boolean {
-  if (value === undefined || value === null) return true;
-  return isRecord(value) && value.mode === "smart" && value.executionOverride === undefined;
 }
 
 function isEmptyArray(value: unknown): boolean {
@@ -1239,6 +1452,10 @@ function toBrowserTaskSummary(value: unknown): BrowserTaskSummary {
     "priority",
     "labels",
     "dueDate",
+    "pinned",
+    "sessionArchived",
+    "sessionId",
+    "source",
   ] as const;
   return {
     id: value.id,

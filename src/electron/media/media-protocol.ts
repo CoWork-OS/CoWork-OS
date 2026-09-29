@@ -217,7 +217,7 @@ export function registerMediaProtocol(): void {
     const rangeHeader = request.headers.get("range");
     if (!rangeHeader) {
       const stream = fs.createReadStream(resolvedPath);
-      return new Response(Readable.toWeb(stream) as BodyInit, {
+      return new Response(Readable.toWeb(stream) as RequestInit["body"], {
         status: 200,
         headers: {
           ...baseHeaders,
@@ -239,7 +239,7 @@ export function registerMediaProtocol(): void {
 
     const contentLength = range.end - range.start + 1;
     const stream = fs.createReadStream(resolvedPath, { start: range.start, end: range.end });
-    return new Response(Readable.toWeb(stream) as BodyInit, {
+    return new Response(Readable.toWeb(stream) as RequestInit["body"], {
       status: 206,
       headers: {
         ...baseHeaders,

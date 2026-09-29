@@ -31,20 +31,30 @@ function hasText(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+/** Paired browser settings report credential presence without returning its value. */
+function hasCredential(record: unknown, key: string): boolean {
+  if (!record || typeof record !== "object") return false;
+  const fields = record as Record<string, unknown>;
+  return hasText(fields[key]) || fields[`${key}Configured`] === true;
+}
+
 function hasOpenAiOAuth(settings: LLMSettingsData): boolean {
   return (
     settings.openai?.authMethod === "oauth" &&
-    hasText(settings.openai.accessToken) &&
-    hasText(settings.openai.refreshToken)
+    hasCredential(settings.openai, "accessToken") &&
+    hasCredential(settings.openai, "refreshToken")
   );
 }
 
 function hasOpenAiApiKey(settings: LLMSettingsData): boolean {
-  return hasText(settings.openai?.apiKey);
+  return hasCredential(settings.openai, "apiKey");
 }
 
 function hasClaudeCredential(settings: LLMSettingsData): boolean {
-  return hasText(settings.anthropic?.apiKey) || hasText(settings.anthropic?.subscriptionToken);
+  return (
+    hasCredential(settings.anthropic, "apiKey") ||
+    hasCredential(settings.anthropic, "subscriptionToken")
+  );
 }
 
 function hasAccountCredential(settings: LLMSettingsData, providerType: LLMProviderType): boolean {
@@ -53,17 +63,17 @@ function hasAccountCredential(settings: LLMSettingsData, providerType: LLMProvid
       return hasOpenAiOAuth(settings);
     case "anthropic":
       return (
-        hasText(settings.anthropic?.subscriptionToken) ||
+        hasCredential(settings.anthropic, "subscriptionToken") ||
         (settings.anthropic?.authMethod === "subscription" &&
-          hasText(settings.anthropic?.apiKey)) ||
+          hasCredential(settings.anthropic, "apiKey")) ||
         settings.anthropic?.apiKey?.includes("sk-ant-oat") === true
       );
     case "xai":
     case "xai-oauth":
       return (
         settings.xai?.authMethod === "oauth" &&
-        hasText(settings.xai?.accessToken) &&
-        hasText(settings.xai?.refreshToken)
+        hasCredential(settings.xai, "accessToken") &&
+        hasCredential(settings.xai, "refreshToken")
       );
     default:
       return false;
@@ -92,35 +102,38 @@ function hasConfiguredApiKeyProvider(
     case "openai":
       return hasOpenAiApiKey(settings) || hasOpenAiOAuth(settings);
     case "gemini":
-      return hasText(settings.gemini?.apiKey);
+      return hasCredential(settings.gemini, "apiKey");
     case "openrouter":
-      return hasText(settings.openrouter?.apiKey);
+      return hasCredential(settings.openrouter, "apiKey");
     case "deepseek":
-      return hasText(settings.deepseek?.apiKey);
+      return hasCredential(settings.deepseek, "apiKey");
     case "groq":
-      return hasText(settings.groq?.apiKey);
+      return hasCredential(settings.groq, "apiKey");
     case "xai":
       return (
-        hasText(settings.xai?.apiKey) ||
+        hasCredential(settings.xai, "apiKey") ||
         (settings.xai?.authMethod === "oauth" &&
-          hasText(settings.xai?.accessToken) &&
-          hasText(settings.xai?.refreshToken))
+          hasCredential(settings.xai, "accessToken") &&
+          hasCredential(settings.xai, "refreshToken"))
       );
     case "kimi":
-      return hasText(settings.kimi?.apiKey);
+      return hasCredential(settings.kimi, "apiKey");
     case "nano-gpt":
-      return hasText(settings.customProviders?.["nano-gpt"]?.apiKey);
+      return hasCredential(settings.customProviders?.["nano-gpt"], "apiKey");
     case "azure":
-      return hasText(settings.azure?.apiKey) && hasText(settings.azure?.endpoint);
+      return hasCredential(settings.azure, "apiKey") && hasText(settings.azure?.endpoint);
     case "azure-anthropic":
-      return hasText(settings.azureAnthropic?.apiKey) && hasText(settings.azureAnthropic?.endpoint);
+      return (
+        hasCredential(settings.azureAnthropic, "apiKey") &&
+        hasText(settings.azureAnthropic?.endpoint)
+      );
     case "openai-compatible":
       return (
         hasText(settings.openaiCompatible?.baseUrl) && hasText(settings.openaiCompatible?.model)
       );
     case "bedrock":
       return Boolean(
-        hasText(settings.bedrock?.accessKeyId) ||
+        hasCredential(settings.bedrock, "accessKeyId") ||
         hasText(settings.bedrock?.profile) ||
         settings.bedrock?.useDefaultCredentials === true ||
         hasText(settings.bedrock?.region),
@@ -140,7 +153,7 @@ function hasConfiguredApiKeyProvider(
         const config = settings.customProviders?.[providerType];
         const catalogEntry = CUSTOM_PROVIDER_MAP.get(providerType);
         return (
-          hasText(config?.apiKey) ||
+          hasCredential(config, "apiKey") ||
           (catalogEntry?.apiKeyOptional === true &&
             hasText(config?.baseUrl) &&
             hasText(config?.model))

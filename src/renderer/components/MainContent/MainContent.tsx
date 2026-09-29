@@ -1,3 +1,4 @@
+import { hasHostMethod } from "../../host/browser-capabilities";
 import {
   getInteractionModeSelection,
   isChatActionShortcut,
@@ -3869,8 +3870,24 @@ function MainContentComponent({
     }));
 
     if (taskChanged || draftChanged) {
-      setInputValue(draftValue ?? "");
-      setPendingAttachments(restoredAttachments);
+      // Creating the first draft during file staging must not erase the local file
+      // before the staging reply can attach its durable reference.
+      const preserveStaging =
+        !taskChanged &&
+        draftChanged &&
+        !previousDraftKeyRef.current &&
+        stagingAttachmentIdsRef.current.size > 0;
+      if (!preserveStaging) setInputValue(draftValue ?? "");
+      setPendingAttachments((current) =>
+        preserveStaging
+          ? [
+              ...restoredAttachments,
+              ...current.filter(
+                (item) => !restoredAttachments.some((restored) => restored.id === item.id),
+              ),
+            ]
+          : restoredAttachments,
+      );
       setIntegrationMentionSpans((draftSnapshot?.mentions ?? []) as IntegrationMentionSpan[]);
       setQuotedAssistantMessage(draftSnapshot?.quotedAssistantMessage ?? null);
       setAttachmentError(null);
@@ -5604,6 +5621,7 @@ function MainContentComponent({
 
   // Load voice settings
   useEffect(() => {
+    if (!hasHostMethod("getVoiceSettings")) return;
     window.electronAPI
       .getVoiceSettings()
       .then((settings) => {
@@ -9651,10 +9669,10 @@ function MainContentComponent({
                   <button
                     className="attachment-btn attachment-btn-left"
                     onClick={handleAttachFiles}
-                    disabled={isUploadingAttachments || isBrowserHost}
+                    disabled={isUploadingAttachments || !hasHostMethod("selectFiles")}
                     title={
-                      isBrowserHost
-                        ? "Task attachments are available in the desktop app"
+                      !hasHostMethod("selectFiles")
+                        ? "File uploads are unavailable on this host"
                         : "Add files"
                     }
                     aria-label="Add files"
@@ -10340,7 +10358,11 @@ function MainContentComponent({
                     <button
                       className="input-status-workspace"
                       onClick={handleWorkspaceDropdownToggle}
-                      title={getWorkspaceStatusFolderLabel(workspace)}
+                      title={
+                        isBrowserHost
+                          ? workspace?.name || "Select project"
+                          : getWorkspaceStatusFolderLabel(workspace)
+                      }
                     >
                       <svg
                         width="12"
@@ -10356,7 +10378,9 @@ function MainContentComponent({
                         <line x1="12" y1="17" x2="12" y2="21" />
                       </svg>
                       <span className="input-status-workspace-path">
-                        {getWorkspaceStatusFolderLabel(workspace)}
+                        {isBrowserHost
+                          ? workspace?.name || "Select project"
+                          : getWorkspaceStatusFolderLabel(workspace)}
                       </span>
                     </button>
                     {showWorkspaceDropdown && (
@@ -11659,9 +11683,11 @@ function MainContentComponent({
             <button
               className="attachment-btn attachment-btn-left"
               onClick={handleAttachFiles}
-              disabled={isUploadingAttachments || isBrowserHost}
+              disabled={isUploadingAttachments || !hasHostMethod("selectFiles")}
               title={
-                isBrowserHost ? "Task attachments are available in the desktop app" : "Attach files"
+                !hasHostMethod("selectFiles")
+                  ? "File uploads are unavailable on this host"
+                  : "Attach files"
               }
               aria-label="Attach files"
             >
@@ -11973,7 +11999,11 @@ function MainContentComponent({
             <button
               className="input-status-workspace"
               onClick={handleWorkspaceDropdownToggle}
-              title={getWorkspaceStatusFolderLabel(workspace)}
+              title={
+                isBrowserHost
+                  ? workspace?.name || "Select project"
+                  : getWorkspaceStatusFolderLabel(workspace)
+              }
             >
               <svg
                 width="12"
@@ -11989,7 +12019,9 @@ function MainContentComponent({
                 <line x1="12" y1="17" x2="12" y2="21" />
               </svg>
               <span className="input-status-workspace-path">
-                {getWorkspaceStatusFolderLabel(workspace)}
+                {isBrowserHost
+                  ? workspace?.name || "Select project"
+                  : getWorkspaceStatusFolderLabel(workspace)}
               </span>
             </button>
           </div>

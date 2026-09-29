@@ -12,6 +12,7 @@ const workspace = {
   permissions: { shell: true },
 } as Workspace;
 const task = { id: "task-1", workspaceId: workspace.id } as Task;
+const task2 = { id: "task-2", workspaceId: workspace.id } as Task;
 
 interface FakeOutputState {
   output: string;
@@ -63,6 +64,7 @@ function harness(options: { allowShell?: boolean; task?: Task } = {}) {
     { tabId: string; listener: Parameters<TerminalPtyManager["attachTerminalTabOutput"]>[2] }
   >();
   const tab = terminalTab();
+  let browserOwnedTabId: string | null = null;
   tabs.set(tab.id, tab);
   streams.set(tab.id, { output: "", offset: 0, nextOffset: 0 });
 
@@ -112,8 +114,19 @@ function harness(options: { allowShell?: boolean; task?: Task } = {}) {
       if (listeners.get(listenerKey)?.tabId !== tabId) return false;
       return listeners.delete(listenerKey);
     }),
-    writeToTab: vi.fn((tabId: string) => ({ ...tabs.get(tabId)! })),
+    writeToTab: vi.fn((tabId: string) => {
+      const value = tabs.get(tabId)!;
+      value.commandCount += 1;
+      value.status = "running";
+      return { ...value };
+    }),
     resizeTab: vi.fn((tabId: string) => ({ ...tabs.get(tabId)! })),
+    stopTab: vi.fn((tabId: string) => {
+      const tab = tabs.get(tabId);
+      if (!tab) return null;
+      tab.status = "inactive";
+      return { ...tab };
+    }),
     closeTab: vi.fn((tabId: string) => {
       const closed = tabs.get(tabId) ?? null;
       tabs.delete(tabId);
@@ -125,6 +138,7 @@ function harness(options: { allowShell?: boolean; task?: Task } = {}) {
     getWorkspace: vi.fn(async (id: string) => (id === workspace.id ? workspace : null)),
     getTask: vi.fn(async (id: string) => {
       if (id === task.id) return options.task ?? task;
+      if (id === task2.id) return task2;
       if (id === "task-other") return { id, workspaceId: "workspace-other" } as Task;
       return null;
     }),
@@ -139,6 +153,7 @@ function harness(options: { allowShell?: boolean; task?: Task } = {}) {
       | "detachTerminalTabOutput"
       | "writeToTab"
       | "resizeTab"
+      | "stopTab"
       | "closeTab"
     >,
     now: () => clock,
@@ -191,21 +206,41 @@ function harness(options: { allowShell?: boolean; task?: Task } = {}) {
     tabs,
     emit,
     setNow: (value: number) => (clock = value),
+    get browserOwnedTabId() {
+      return browserOwnedTabId;
+    },
+    set browserOwnedTabId(value: string | null) {
+      browserOwnedTabId = value;
+    },
   };
 }
 
 async function attach(
   h: ReturnType<typeof harness>,
   requestContext = context("session-1", "attach-0001"),
-  params: unknown = { workspaceId: workspace.id, taskId: task.id, tabId: terminalTab().id },
+  params?: unknown,
 ) {
+  if (!params && !h.browserOwnedTabId) {
+    const opened = await h.call<{ attachmentId: string; tab: ShellSessionInfo }>(
+      "terminal.open",
+      { workspaceId: workspace.id, taskId: task.id },
+      context("session-1", "open-default-01"),
+    );
+    h.browserOwnedTabId = opened.tab.id;
+    if (requestContext.sessionId === "session-1") return opened;
+  }
+  const resolvedParams = params ?? {
+    workspaceId: workspace.id,
+    taskId: task.id,
+    tabId: h.browserOwnedTabId,
+  };
   return h.call<{
     attachmentId: string;
     writer: boolean;
-    tab: { id: string; status: string };
+    tab: ShellSessionInfo;
     nextOffset: number;
     gap?: { from: number; to: number };
-  }>("terminal.attach", params, requestContext);
+  }>("terminal.attach", resolvedParams, requestContext);
 }
 
 describe("browser terminal methods", () => {
@@ -225,22 +260,21 @@ describe("browser terminal methods", () => {
     h.service.dispose();
   });
 
-  it("lists only safe host-owned terminal metadata and enforces task-workspace scope", async () => {
+  it("returns complete host-owned terminal DTOs and enforces task-workspace scope", async () => {
     const h = harness();
+    const opened = await h.call<{ tab: ShellSessionInfo }>(
+      "terminal.open",
+      { workspaceId: workspace.id, taskId: task.id },
+      context("session-1", "open-list-01"),
+    );
     const result = await h.call<{ tabs: Array<Record<string, unknown>> }>("terminal.list", {
       workspaceId: workspace.id,
       taskId: task.id,
     });
 
     expect(result.tabs).toHaveLength(1);
-    expect(result.tabs[0]).toEqual({
-      id: terminalTab().id,
-      status: "active",
-      createdAt: 1,
-      updatedAt: 2,
-    });
-    expect(JSON.stringify(result)).not.toContain("/private/work/path");
-    expect(JSON.stringify(result)).not.toContain("private command text");
+    expect(result.tabs[0]).toEqual({ ...opened.tab, scopeTaskId: task.id });
+    expect(result.tabs[0]).toMatchObject({ taskId: "tab-token", scopeTaskId: task.id });
     await expect(
       h.call("terminal.list", { workspaceId: workspace.id, taskId: "task-other" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
@@ -257,12 +291,12 @@ describe("browser terminal methods", () => {
     ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
 
     const params = { workspaceId: workspace.id, taskId: task.id, title: "Browser shell" };
-    const opened = await h.call<{ attachmentId: string; tab: { id: string } }>(
+    const opened = await h.call<{ attachmentId: string; tab: ShellSessionInfo }>(
       "terminal.open",
       params,
       context("session-1", "open-good-01"),
     );
-    const retry = await h.call<{ attachmentId: string; tab: { id: string } }>(
+    const retry = await h.call<{ attachmentId: string; tab: ShellSessionInfo }>(
       "terminal.open",
       params,
       context("session-1", "open-good-01"),
@@ -275,7 +309,43 @@ describe("browser terminal methods", () => {
       cwd: workspace.path,
       title: "Browser shell",
     });
+    expect(opened.tab.cwd).toBe(workspace.path);
+    expect(opened.tab.scope).toBe("tab");
     expect(retry).toEqual(opened);
+    expect(opened.tab.scopeTaskId).toBe(task.id);
+  });
+
+  it("hides unowned desktop tabs and prevents one task from attaching to another task tab", async () => {
+    const h = harness();
+    const unowned = await h.call<{ tabs: ShellSessionInfo[] }>("terminal.list", {
+      workspaceId: workspace.id,
+      taskId: task.id,
+    });
+    expect(unowned.tabs).toEqual([]);
+
+    const taskOne = await h.call<{ tab: ShellSessionInfo }>(
+      "terminal.open",
+      { workspaceId: workspace.id, taskId: task.id },
+      context("session-1", "open-task1-01"),
+    );
+    const taskTwo = await h.call<{ tab: ShellSessionInfo }>(
+      "terminal.open",
+      { workspaceId: workspace.id, taskId: task2.id },
+      context("session-1", "open-task2-01"),
+    );
+
+    const taskOneTabs = await h.call<{ tabs: ShellSessionInfo[] }>("terminal.list", {
+      workspaceId: workspace.id,
+      taskId: task.id,
+    });
+    expect(taskOneTabs.tabs.map((candidate) => candidate.id)).toEqual([taskOne.tab.id]);
+    await expect(
+      h.call(
+        "terminal.attach",
+        { workspaceId: workspace.id, taskId: task.id, tabId: taskTwo.tab.id },
+        context("session-2", "attach-cross-task-1"),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("grants one writer, promotes a reader after detach, and deduplicates input", async () => {
@@ -297,10 +367,20 @@ describe("browser terminal methods", () => {
     expect(h.terminal.writeToTab).not.toHaveBeenCalled();
 
     const writerInput = { ...inputRequest, attachmentId: writer.attachmentId, input: "\x03" };
-    await h.call("terminal.input", writerInput, context("session-1", "input-write-1"));
-    await h.call("terminal.input", writerInput, context("session-1", "input-write-1"));
+    const inputResult = await h.call<{
+      accepted: true;
+      nextOffset: number;
+      tab: ShellSessionInfo;
+    }>("terminal.input", writerInput, context("session-1", "input-write-1"));
+    const duplicateInput = await h.call(
+      "terminal.input",
+      writerInput,
+      context("session-1", "input-write-1"),
+    );
     expect(h.terminal.writeToTab).toHaveBeenCalledTimes(1);
-    expect(h.terminal.writeToTab).toHaveBeenCalledWith(terminalTab().id, "\x03");
+    expect(h.terminal.writeToTab).toHaveBeenCalledWith(writer.tab.id, "\x03");
+    expect(duplicateInput).toEqual(inputResult);
+    expect(inputResult.tab.commandCount).toBe(1);
 
     await h.call(
       "terminal.resize",
@@ -313,7 +393,7 @@ describe("browser terminal methods", () => {
       },
       context("session-1", "resize-write-1"),
     );
-    expect(h.terminal.resizeTab).toHaveBeenCalledWith(terminalTab().id, 500, 300);
+    expect(h.terminal.resizeTab).toHaveBeenCalledWith(writer.tab.id, 500, 300);
     await h.call(
       "terminal.detach",
       { workspaceId: workspace.id, taskId: task.id, attachmentId: writer.attachmentId },
@@ -330,19 +410,26 @@ describe("browser terminal methods", () => {
         context("session-2", "close-writer-1"),
       ),
     ).resolves.toEqual({ closed: true });
-    expect(h.terminal.closeTab).toHaveBeenCalledWith(terminalTab().id);
+    expect(h.terminal.closeTab).toHaveBeenCalledWith(writer.tab.id);
   });
 
   it("replays bounded output with explicit retention gaps and progressing offsets", async () => {
     const h = harness();
     const attached = await attach(h);
-    h.emit(terminalTab().id, "x".repeat(300_000));
+    h.emit(attached.tab.id, "x".repeat(300_000));
 
     const first = await h.call<{
-      chunks: Array<{ offset: number; text: string }>;
+      chunks: Array<{
+        offset: number;
+        text: string;
+        stream: "stdout";
+        cwd: string;
+        status: ShellSessionInfo["status"];
+      }>;
       nextOffset: number;
       hasMore: boolean;
       gap?: { from: number; to: number };
+      tab: ShellSessionInfo;
     }>("terminal.replay", {
       workspaceId: workspace.id,
       taskId: task.id,
@@ -354,13 +441,26 @@ describe("browser terminal methods", () => {
     expect(first.gap).toEqual({ from: 0, to: 300_000 - 256 * 1024 });
     expect(first.chunks).toHaveLength(1);
     expect(first.chunks[0]).toMatchObject({ offset: first.gap.to, text: "x".repeat(16_000) });
+    expect(first.chunks[0]).toMatchObject({
+      stream: "stdout",
+      cwd: "/private/work/path",
+      status: "active",
+    });
+    expect(first.tab).toEqual({ ...attached.tab, scopeTaskId: task.id });
     expect(first.nextOffset).toBe(first.gap.to + 16_000);
     expect(first.hasMore).toBe(true);
 
     const next = await h.call<{
-      chunks: Array<{ offset: number; text: string }>;
+      chunks: Array<{
+        offset: number;
+        text: string;
+        stream: "stdout";
+        cwd: string;
+        status: string;
+      }>;
       nextOffset: number;
       hasMore: boolean;
+      tab: ShellSessionInfo;
     }>("terminal.replay", {
       workspaceId: workspace.id,
       taskId: task.id,
@@ -370,6 +470,35 @@ describe("browser terminal methods", () => {
     expect(next.chunks[0]?.offset).toBe(first.nextOffset);
     expect(next.nextOffset).toBeGreaterThan(first.nextOffset);
     expect(next.hasMore).toBe(true);
+  });
+
+  it("stops the underlying PTY only for its writer attachment and deduplicates retries", async () => {
+    const h = harness();
+    const writer = await attach(h);
+    const reader = await attach(h, context("session-2", "attach-0002"));
+    const params = {
+      workspaceId: workspace.id,
+      taskId: task.id,
+      attachmentId: writer.attachmentId,
+    };
+
+    await expect(
+      h.call(
+        "terminal.stop",
+        { ...params, attachmentId: reader.attachmentId },
+        context("session-2", "stop-read-1"),
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(h.terminal.stopTab).not.toHaveBeenCalled();
+
+    const requestContext = context("session-1", "stop-write-01");
+    const stopped = await h.call<ShellSessionInfo | null>("terminal.stop", params, requestContext);
+    const retry = await h.call<ShellSessionInfo | null>("terminal.stop", params, requestContext);
+    expect(stopped?.status).toBe("inactive");
+    expect(retry).toEqual(stopped);
+    expect(h.terminal.stopTab).toHaveBeenCalledTimes(1);
+    expect(h.terminal.stopTab).toHaveBeenCalledWith(writer.tab.id);
+    expect(h.terminal.closeTab).not.toHaveBeenCalled();
   });
 
   it("binds attachments to the creating session and rechecks shell permission", async () => {

@@ -206,6 +206,33 @@ async function main() {
     assert.equal(session.capabilities["tasks.cancel"]?.available, true);
     assert.equal(session.capabilities["terminal.attach"]?.available, true);
 
+    // Shared desktop controls must reach real services, including omitted positional arguments.
+    const desktop = (name, args = [], operationKey, omittedArgs) => rpc(base, cookie, session.csrfToken, manifest.apiVersion,
+      `desktop.${name}`, { args, ...(omittedArgs ? { omittedArgs } : {}) }, operationKey);
+    for (const name of ["getLLMSettings", "getPersonalityConfigV2", "getRelationshipStats", "listManagedAgents", "listRoutines", "listProfiles", "createWorkspace"]) {
+      assert(session.desktopMethods?.[name], `${name} is missing from the browser method manifest`);
+    }
+    const settings = await desktop("getLLMSettings");
+    assert.equal(typeof settings.providerType, "string");
+    assert.equal((await desktop("getPersonalityConfigV2")).version, 2);
+    assert.equal(typeof (await desktop("getRelationshipStats")).tasksCompleted, "number");
+    assert(Array.isArray(await desktop("listManagedAgents")));
+    assert(Array.isArray(await desktop("listRoutines")));
+    assert(Array.isArray(await desktop("listRoutineWorkflowRuns", [null, 60], undefined, [0])));
+    const profiles = await desktop("listProfiles");
+    assert.equal(profiles.filter((profile) => profile.isActive).length, 1);
+    const createArgs = [{ name: "Browser controls project", path: "", permissions: { read: true, write: true, delete: true, network: true, shell: false } }];
+    const createdProject = await desktop("createWorkspace", createArgs, "browser-control-project-01");
+    assert.equal(createdProject.name, "Browser controls project");
+    assert.equal(createdProject.path, "");
+    const projectDb = new Database(path.join(profile, "cowork-os.db"));
+    try {
+      const row = projectDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(createdProject.id);
+      assert.equal(JSON.parse(row.permissions).shell, false, "Browser project creation must not grant shell access");
+    } finally { projectDb.close(); }
+    const replayedProject = await desktop("createWorkspace", createArgs, "browser-control-project-01");
+    assert.equal(replayedProject.id, createdProject.id);
+
     const workspaces = await rpc(
       base,
       cookie,
@@ -404,6 +431,12 @@ async function main() {
         await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assert(terminalOutput.includes(marker), "Detached terminal output did not replay");
+    const stoppedTerminal = await rpc(
+      base, cookie, session.csrfToken, manifest.apiVersion, "terminal.stop",
+      { ...terminalScope, attachmentId: reattachedTerminal.attachmentId }, randomUUID(),
+    );
+    assert.equal(stoppedTerminal.status, "inactive");
+
     await rpc(
       base,
       cookie,
@@ -540,7 +573,7 @@ async function main() {
     });
     assert.equal(afterLogout.status, 401);
     process.stdout.write(
-      "Browser preview smoke passed: pairing, scoped files, read-only Git, terminal detach/replay, upload/no-overwrite, artifact download/one-use handle, task cancellation/reconciliation, traversal denial, logout.\n",
+      "Browser preview smoke passed: shared desktop service reads, project creation/replay, pairing, scoped files, read-only Git, terminal detach/replay, upload/no-overwrite, artifact download/one-use handle, task cancellation/reconciliation, traversal denial, logout.\n",
     );
   } finally {
     await stopHost(child);

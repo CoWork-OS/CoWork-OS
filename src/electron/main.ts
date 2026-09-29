@@ -318,6 +318,11 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
         deployment: webDeploymentFromEnv(),
         identity,
         taskCommands: agentDaemon,
+        agentDaemon,
+        channelGateway,
+        getRoutineService: () => routineService,
+        getEventTriggerService: () => eventTriggerService,
+        getHeartbeatService: () => heartbeatService,
       });
     }
 

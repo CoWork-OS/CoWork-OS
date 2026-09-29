@@ -1,14 +1,37 @@
 import { createHash } from "node:crypto";
-import type { AgentMessageSendResult, Task, Workspace } from "../../shared/types";
+import type {
+  AgentMessageSendResult,
+  PermissionMode,
+  Task,
+  TaskFollowUpInput,
+  Workspace,
+} from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
+import {
+  resolveAccessProfileDefinitionWithStatus,
+  type AccessProfileId,
+} from "../../shared/access-profiles";
+import { PermissionSettingsManager } from "../../electron/security/permission-settings-manager";
+import type { InteractionModeSelection } from "../../shared/interaction-mode";
 import type { WebRpcMethod } from "../web/WebApplication";
 import { WebApplicationError } from "../web/WebApplication";
 
 const MAX_MESSAGE_LENGTH = 64_000;
 const OPERATION_KEY_RE = /^[A-Za-z0-9._:-]{8,128}$/;
+const MAX_OPERATION_RECEIPTS = 5_000;
+
+export type BrowserFollowUpOptions = Pick<
+  TaskFollowUpInput,
+  "interactionMode" | "accessProfileId" | "permissionMode" | "shellAccess"
+>;
 
 export interface BrowserFollowUpCommands {
-  sendFollowUp(taskId: string, message: string, messageId: string): Promise<AgentMessageSendResult>;
+  sendFollowUp(
+    taskId: string,
+    message: string,
+    messageId: string,
+    options: BrowserFollowUpOptions,
+  ): Promise<AgentMessageSendResult>;
   getFollowUpReceipt(taskId: string, messageId: string): Promise<AgentMessageSendResult | null>;
 }
 
@@ -22,6 +45,7 @@ interface FollowUpRequest {
   taskId: string;
   workspaceId: string;
   message: string;
+  options: BrowserFollowUpOptions;
 }
 
 interface ReceiptRequest {
@@ -41,7 +65,10 @@ export type BrowserFollowUpState = "admitted" | "pending" | "unavailable";
 export function createBrowserFollowUpMethods(
   sources: BrowserFollowUpSources,
 ): Record<string, WebRpcMethod> {
-  const inFlight = new Map<string, InFlightOperation>();
+  // Keep accepted identities for the lifetime of the host. This prevents a
+  // completed browser key from being reused with a different mode/profile.
+  // Durable task events remain the recovery source after a host restart.
+  const operations = new Map<string, InFlightOperation>();
 
   return {
     "task.followUp": {
@@ -52,27 +79,37 @@ export function createBrowserFollowUpMethods(
         const request = rawParams as FollowUpRequest;
         const task = await requireTaskScope(sources, request);
         const key = requireOperationKey(context.operationKey);
-        const scopedKey = scopeKey(context.audience, key);
+        const scopedKey = scopeKey(context.audience, context.sessionId, key);
         const messageId = stableMessageId(context.audience, key);
         const fingerprint = hashPayload({
           taskId: task.id,
           workspaceId: request.workspaceId,
           message: request.message,
+          options: request.options,
         });
 
-        const prior = inFlight.get(scopedKey);
+        const prior = operations.get(scopedKey);
         if (prior) {
           if (prior.fingerprint !== fingerprint) throw operationConflict();
           return prior.promise;
         }
-
-        const promise = admitFollowUp(sources, task.id, request.message, messageId);
-        inFlight.set(scopedKey, { fingerprint, promise });
-        try {
-          return await promise;
-        } finally {
-          if (inFlight.get(scopedKey)?.promise === promise) inFlight.delete(scopedKey);
+        if (operations.size >= MAX_OPERATION_RECEIPTS) {
+          throw new WebApplicationError(
+            "RATE_LIMITED",
+            "Pair a new browser session to continue.",
+            429,
+          );
         }
+
+        const promise = admitFollowUp(
+          sources,
+          task.id,
+          request.message,
+          messageId,
+          request.options,
+        );
+        operations.set(scopedKey, { fingerprint, promise });
+        return promise;
       },
     },
     "task.followUp.receipt": {
@@ -94,9 +131,10 @@ async function admitFollowUp(
   taskId: string,
   message: string,
   messageId: string,
+  options: BrowserFollowUpOptions,
 ): Promise<Record<string, unknown>> {
   try {
-    await sources.commands.sendFollowUp(taskId, message, messageId);
+    await sources.commands.sendFollowUp(taskId, message, messageId, options);
   } catch (error) {
     if (isMessageIdConflict(error)) throw operationConflict();
 
@@ -138,6 +176,8 @@ async function requireTaskScope(
     !workspace ||
     workspace.isTemp ||
     isTempWorkspaceId(workspace.id) ||
+    !workspace.permissions?.read ||
+    !workspace.permissions.write ||
     task.workspaceId !== workspace.id
   ) {
     throw invalidRequest();
@@ -147,14 +187,39 @@ async function requireTaskScope(
 
 function parseFollowUpRequest(value: unknown): FollowUpRequest {
   if (!isRecord(value)) throw invalidRequest();
-  if (Object.keys(value).some((key) => !["taskId", "workspaceId", "message"].includes(key))) {
+  const allowed = new Set([
+    "taskId",
+    "workspaceId",
+    "message",
+    "interactionMode",
+    "accessProfileId",
+    "permissionMode",
+    "shellAccess",
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) {
     throw invalidRequest();
   }
   const taskId = parseId(value.taskId);
   const workspaceId = parseId(value.workspaceId);
   const message = typeof value.message === "string" ? value.message.trim() : "";
   if (!message || message.length > MAX_MESSAGE_LENGTH) throw invalidRequest();
-  return { taskId, workspaceId, message };
+  const options: BrowserFollowUpOptions = {};
+  if (value.interactionMode !== undefined) {
+    options.interactionMode = parseInteractionMode(value.interactionMode);
+  }
+  if (value.accessProfileId !== undefined) {
+    options.accessProfileId = parseAccessProfileId(value.accessProfileId);
+  }
+  if (value.permissionMode !== undefined) {
+    options.permissionMode = parsePermissionMode(value.permissionMode);
+  }
+  if (value.shellAccess !== undefined) {
+    // Browser follow-ups can preserve a disabled shell boundary. Enabling the
+    // legacy shell override is an authority increase, so it stays desktop-only.
+    if (value.shellAccess !== false) throw invalidRequest();
+    options.shellAccess = false;
+  }
+  return { taskId, workspaceId, message, options };
 }
 
 function parseReceiptRequest(value: unknown): ReceiptRequest {
@@ -170,8 +235,64 @@ function parseReceiptRequest(value: unknown): ReceiptRequest {
 
 function parseId(value: unknown): string {
   const id = typeof value === "string" ? value.trim() : "";
-  if (!id || id.length > 128) throw invalidRequest();
+  if (!id || id.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(id)) throw invalidRequest();
   return id;
+}
+
+function parseInteractionMode(value: unknown): InteractionModeSelection {
+  if (!isRecord(value)) throw invalidRequest();
+  if (value.mode === "chat" && Object.keys(value).length === 1) return { mode: "chat" };
+  if (
+    value.mode === "smart" &&
+    (value.executionOverride === undefined || isExecutionOverride(value.executionOverride)) &&
+    Object.keys(value).every((key) => key === "mode" || key === "executionOverride")
+  ) {
+    return {
+      mode: "smart",
+      ...(value.executionOverride
+        ? {
+            executionOverride: value.executionOverride as
+              | "execute"
+              | "plan"
+              | "analyze"
+              | "debug"
+              | "verified",
+          }
+        : {}),
+    } as InteractionModeSelection;
+  }
+  throw invalidRequest();
+}
+
+function isExecutionOverride(
+  value: unknown,
+): value is NonNullable<Extract<InteractionModeSelection, { mode: "smart" }>["executionOverride"]> {
+  return (
+    value === "execute" ||
+    value === "plan" ||
+    value === "analyze" ||
+    value === "debug" ||
+    value === "verified"
+  );
+}
+
+function parseAccessProfileId(value: unknown): AccessProfileId {
+  const profileId = typeof value === "string" ? value.trim() : "";
+  if (!profileId || profileId.length > 100 || /[\u0000-\u001f\u007f]/.test(profileId)) {
+    throw invalidRequest();
+  }
+  const settings = PermissionSettingsManager.loadSettings();
+  const resolution = resolveAccessProfileDefinitionWithStatus(
+    profileId,
+    settings.accessProfiles ?? [],
+  );
+  if (resolution.status !== "resolved") throw invalidRequest();
+  return profileId as AccessProfileId;
+}
+
+function parsePermissionMode(value: unknown): PermissionMode {
+  if (value === "default" || value === "plan" || value === "dangerous_only") return value;
+  throw invalidRequest();
 }
 
 function requireOperationKey(value: unknown): string {
@@ -179,8 +300,8 @@ function requireOperationKey(value: unknown): string {
   return value;
 }
 
-function scopeKey(audience: string, operationKey: string): string {
-  return `${audience}:${operationKey}`;
+function scopeKey(audience: string, sessionId: string, operationKey: string): string {
+  return `${audience}:${sessionId}:${operationKey}`;
 }
 
 function stableMessageId(audience: string, operationKey: string): string {

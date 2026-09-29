@@ -1,3 +1,4 @@
+import { hasHostMethods } from "../host/browser-capabilities";
 import {
   useState,
   useEffect,
@@ -301,6 +302,25 @@ type SettingsTab =
   | "subconscious"
   | "access"
   | "webaccess";
+
+// A missing browser service should produce an explanation, never an endless loading panel.
+const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
+  appearance: [],
+  personality: ["getPersonalityConfigV2", "getRelationshipStats", "savePersonalityConfigV2"],
+  everydayAgent: ["everydayAgentGetProfile"],
+  aimodels: ["getLLMSettings", "saveLLMSettings"],
+  jev: ["testJevProvider"],
+  automations: ["listRoutines", "getRoutineWorkflowCapabilities"],
+  skills: ["listSkills", "getSkill"],
+  suggestions: ["listSuggestions", "dismissSuggestion"],
+  mcp: ["getMCPSettings", "saveMCPSettings"],
+  memory: ["getMemorySettings", "listMemories"],
+  tools: ["getBuiltinToolsSettings", "saveBuiltinToolsSettings"],
+  integrations: ["getConnectorSettings"],
+  customize: ["listPluginPacks"],
+  addtools: ["listPluginPacks", "getMCPSettings"],
+  access: ["getControlPlaneSettings", "getWebAccessStatus"],
+};
 
 // Secondary channels shown inside "More Channels" tab
 type SecondaryChannel =
@@ -8786,7 +8806,17 @@ export function Settings({
         <div className="settings-content-card">
           <div className="settings-content">
             <Suspense fallback={<div className="settings-loading">Loading settings...</div>}>
-              {activeTab === "appearance" ? (
+              {window.coworkBrowserHost === true &&
+              (!BROWSER_SETTINGS_METHODS[activeTab] ||
+                !hasHostMethods(...BROWSER_SETTINGS_METHODS[activeTab]!)) ? (
+                <section className="settings-section" role="status">
+                  <h2>This setting is unavailable on this browser host</h2>
+                  <p className="settings-description">
+                    The host does not expose this settings service yet. Configure it in the desktop
+                    app. Your saved host settings remain in effect.
+                  </p>
+                </section>
+              ) : activeTab === "appearance" ? (
                 <AppearanceSettings
                   themeMode={themeMode}
                   visualTheme={visualTheme}
@@ -8984,9 +9014,36 @@ export function Settings({
                   </div>
                   <div className="more-channels-content">
                     {activeAIModelsSubTab === "llm" && renderLLMPanel()}
-                    {activeAIModelsSubTab === "image" && renderImagePanel()}
-                    {activeAIModelsSubTab === "video" && renderVideoPanel()}
-                    {activeAIModelsSubTab === "search" && <SearchSettings />}
+                    {activeAIModelsSubTab === "image" &&
+                      (window.coworkBrowserHost &&
+                      !hasHostMethods("getImageSettings", "saveImageSettings") ? (
+                        <p role="status">
+                          Image provider configuration is unavailable on this browser host.
+                          Configure it in the desktop app.
+                        </p>
+                      ) : (
+                        renderImagePanel()
+                      ))}
+                    {activeAIModelsSubTab === "video" &&
+                      (window.coworkBrowserHost &&
+                      !hasHostMethods("getVideoSettings", "saveVideoSettings") ? (
+                        <p role="status">
+                          Video provider configuration is unavailable on this browser host.
+                          Configure it in the desktop app.
+                        </p>
+                      ) : (
+                        renderVideoPanel()
+                      ))}
+                    {activeAIModelsSubTab === "search" &&
+                      (window.coworkBrowserHost &&
+                      !hasHostMethods("getSearchSettings", "saveSearchSettings") ? (
+                        <p role="status">
+                          Search provider configuration is unavailable on this browser host.
+                          Configure it in the desktop app.
+                        </p>
+                      ) : (
+                        <SearchSettings />
+                      ))}
                   </div>
                 </div>
               ) : activeTab === "updates" ? (

@@ -73,6 +73,26 @@ afterEach(() => {
 });
 
 describe("browser host bridge", () => {
+  it("exposes file viewing independently of upload permission", () => {
+    const fakeWindow = stubBrowserWindow();
+    const readOnlySession = {
+      ...session,
+      capabilities: { "files.read": { available: true } },
+    } as WebSessionBootstrap;
+    const dispose = installBrowserHostBridge(
+      { request: vi.fn() } as unknown as BrowserHostTransport,
+      readOnlySession,
+    );
+    const manifest = (
+      fakeWindow.coworkBrowserHostInfo as unknown as { desktopMethods: Record<string, unknown> }
+    ).desktopMethods;
+    expect(manifest).toHaveProperty("readFileForViewer");
+    expect(manifest).toHaveProperty("openFile");
+    expect(manifest).not.toHaveProperty("selectFiles");
+    expect(manifest).not.toHaveProperty("importFilesToWorkspace");
+    dispose();
+  });
+
   it("installs truthful first-paint reads and persists appearance locally", async () => {
     const previousApi = { getPlatform: () => "win32" };
     const fakeWindow = stubBrowserWindow(previousApi);
@@ -105,7 +125,7 @@ describe("browser host bridge", () => {
     const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
 
     expect(fakeWindow.coworkBrowserHost).toBe(true);
-    expect(fakeWindow.coworkBrowserHostInfo).toEqual({
+    expect(fakeWindow.coworkBrowserHostInfo).toMatchObject({
       providerReady: true,
       activeWorkspaceId: workspace.id,
     });

@@ -1,3 +1,4 @@
+import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import {
   useState,
   useRef,
@@ -931,10 +932,17 @@ function SidebarComponent({
   onBotUpdated,
   onBotDeleted,
 }: SidebarProps) {
-  const isBrowserHost = typeof window !== "undefined" && window.coworkBrowserHost === true;
+  const isBrowserHost = window.coworkBrowserHost === true;
+  const [browserNotice, setBrowserNotice] = useState<string | null>(null);
+  const [newWorkspaceName, setNewWorkspaceName] = useState<string | null>(null);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const browserAction = (methods: string[], action: (() => void) | undefined, label: string) =>
+    hasHostMethods(...methods) && action
+      ? action
+      : () =>
+          setBrowserNotice(`${label} requires a host service that is unavailable in this session.`);
   const isCalm = useIsCalmTheme();
   const calmAgentContext = useAgentContext();
-  const [browserUnavailableNotice, setBrowserUnavailableNotice] = useState<string | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
   const [renameTaskId, setRenameTaskId] = useState<string | null>(null);
@@ -942,17 +950,13 @@ function SidebarComponent({
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
   const [agentRoles, setAgentRoles] = useState<Map<string, AgentRoleInfo>>(new Map());
   const [sidebarTab, setSidebarTab] = useState<"sessions" | "bots">(
-    isBotViewActive && !isBrowserHost ? "bots" : "sessions",
+    isBotViewActive ? "bots" : "sessions",
   );
   // Follow navigation into a bot, but let the user browse Sessions while that
   // conversation stays open. A render-time override made Sessions unclickable.
   useEffect(() => {
-    if (isBrowserHost) {
-      setSidebarTab("sessions");
-    } else if (isBotViewActive) {
-      setSidebarTab("bots");
-    }
-  }, [isBotViewActive, isBrowserHost, selectedTaskId]);
+    if (isBotViewActive) setSidebarTab("bots");
+  }, [isBotViewActive, selectedTaskId]);
   const [isLoadingBots, setIsLoadingBots] = useState(false);
   const [botsError, setBotsError] = useState<string | null>(null);
   // Keep the full session history visible by default. Users can still hide
@@ -982,16 +986,6 @@ function SidebarComponent({
   const [automatedFolderCollapsed, setAutomatedFolderCollapsed] = useState(true);
   const [mailboxDigest, setMailboxDigest] = useState<MailboxDigestSnapshot | null>(null);
   const [mailboxStatus, setMailboxStatus] = useState<MailboxSyncStatus | null>(null);
-  const reportBrowserUnavailable = useCallback(
-    (feature: string) => {
-      if (isBrowserHost) {
-        setBrowserUnavailableNotice(`${feature} is only available in the CoWork desktop app.`);
-      }
-    },
-    [isBrowserHost],
-  );
-  const getBrowserUnavailableTitle = (feature: string) =>
-    `${feature} is only available in the CoWork desktop app.`;
   const pinActionErrorTimeoutRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
@@ -1077,7 +1071,11 @@ function SidebarComponent({
 
   const handleAddWorkspace = useCallback(async () => {
     const api = window.electronAPI;
-    if (!api?.selectFolder || !api?.listWorkspaces || !api?.createWorkspace) return;
+    if (!api?.listWorkspaces || !api?.createWorkspace) return;
+    if (isBrowserHost) {
+      setNewWorkspaceName("");
+      return;
+    }
 
     try {
       const folderPath = await api.selectFolder();
@@ -1270,7 +1268,6 @@ function SidebarComponent({
   );
 
   const loadAgentRoles = useCallback(async () => {
-    if (isBrowserHost) return;
     if (!window.electronAPI?.getAgentRoles) return;
     setIsLoadingBots(true);
     setBotsError(null);
@@ -1301,7 +1298,7 @@ function SidebarComponent({
     } finally {
       setIsLoadingBots(false);
     }
-  }, [isBrowserHost]);
+  }, []);
 
   // Keep role labels available for existing Sessions rows immediately on
   // startup, then refresh again when the Bots surface is opened.
@@ -1339,7 +1336,7 @@ function SidebarComponent({
       ),
     [botTasksOverride, tasks, workspace?.id],
   );
-  const visibleSidebarTab = isBrowserHost ? "sessions" : sidebarTab;
+  const visibleSidebarTab = sidebarTab;
 
   const handleBotCreated = useCallback((bot: BotRole) => {
     if (bot.isSystem) return;
@@ -1390,18 +1387,12 @@ function SidebarComponent({
   }, [loadMailboxInboxUnread]);
 
   const inboxUnreadCount = mailboxDigest?.unreadCount ?? mailboxStatus?.unreadCount ?? 0;
-  const calmSegment: CalmSidebarSegment = isBrowserHost
-    ? "home"
-    : isBuildActive
-      ? "build"
-      : isAgentsActive || sidebarTab === "bots"
-        ? "agents"
-        : "home";
+  const calmSegment: CalmSidebarSegment = isBuildActive
+    ? "build"
+    : isAgentsActive || sidebarTab === "bots"
+      ? "agents"
+      : "home";
   const handleCalmSegmentChange = (segment: CalmSidebarSegment) => {
-    if (isBrowserHost && segment !== "home") {
-      reportBrowserUnavailable(segment === "agents" ? "Agents" : "Build");
-      return;
-    }
     if (segment === "agents") {
       setSidebarTab("bots");
       onOpenAgents?.();
@@ -2375,11 +2366,10 @@ function SidebarComponent({
           >
             <button
               type="button"
-              className={`sidebar-workspace-menu-option${isBrowserHost ? " sidebar-workspace-menu-option-disabled" : ""}`}
+              className="sidebar-workspace-menu-option"
               role="menuitem"
               data-menu-option="rename"
-              disabled={isBrowserHost}
-              title={isBrowserHost ? getBrowserUnavailableTitle("Session renaming") : undefined}
+              disabled={!hasHostMethod("renameTask")}
               onMouseDown={(e) => {
                 if (e.button === 0) {
                   e.preventDefault();
@@ -2399,11 +2389,10 @@ function SidebarComponent({
             </button>
             <button
               type="button"
-              className={`sidebar-workspace-menu-option${isBrowserHost ? " sidebar-workspace-menu-option-disabled" : ""}`}
+              className="sidebar-workspace-menu-option"
               role="menuitem"
               data-menu-option="pin"
-              disabled={isBrowserHost}
-              title={isBrowserHost ? getBrowserUnavailableTitle("Session pinning") : undefined}
+              disabled={!hasHostMethod("toggleTaskPin")}
               onMouseDown={(e) => {
                 if (e.button === 0) {
                   e.preventDefault();
@@ -2424,16 +2413,10 @@ function SidebarComponent({
             <div className="sidebar-workspace-menu-separator" role="separator" />
             <button
               type="button"
+              className="sidebar-workspace-menu-option sidebar-workspace-menu-option-danger"
               role="menuitem"
               data-menu-option="archive"
-              disabled={isBrowserHost}
-              title={isBrowserHost ? getBrowserUnavailableTitle("Session archiving") : undefined}
-              aria-disabled={isBrowserHost}
-              className={
-                isBrowserHost
-                  ? "sidebar-workspace-menu-option sidebar-workspace-menu-option-danger sidebar-workspace-menu-option-disabled"
-                  : "sidebar-workspace-menu-option sidebar-workspace-menu-option-danger"
-              }
+              disabled={!hasHostMethod("archiveTask")}
               onMouseDown={(e) => {
                 if (e.button === 0) {
                   e.preventDefault();
@@ -2664,6 +2647,7 @@ function SidebarComponent({
           className="sidebar-workspace-menu-option"
           role="menuitem"
           data-menu-option="pin"
+          disabled={!hasHostMethod("toggleTaskPin")}
           onClick={() => handleToggleWorkspacePin(workspaceId)}
         >
           {isPinned ? <PinOff size={16} /> : <Pin size={16} />}
@@ -2694,13 +2678,11 @@ function SidebarComponent({
         </button>
         <button
           type="button"
-          className={`sidebar-workspace-menu-option${isBrowserHost ? " sidebar-workspace-menu-option-disabled" : ""}`}
+          className="sidebar-workspace-menu-option"
           role="menuitem"
           data-menu-option="reveal"
           disabled={isBrowserHost}
-          title={
-            isBrowserHost ? getBrowserUnavailableTitle("Showing a folder in Finder") : undefined
-          }
+          title={isBrowserHost ? "Open host folders from the desktop app" : undefined}
           onClick={() => void handleRevealWorkspace(candidate)}
         >
           <FolderOpen size={16} />
@@ -2720,11 +2702,10 @@ function SidebarComponent({
         <div className="sidebar-workspace-menu-separator" role="separator" />
         <button
           type="button"
-          className={`sidebar-workspace-menu-option${isBrowserHost ? " sidebar-workspace-menu-option-disabled" : ""}`}
+          className="sidebar-workspace-menu-option"
           role="menuitem"
           data-menu-option="archive"
-          disabled={isBrowserHost}
-          title={isBrowserHost ? getBrowserUnavailableTitle("Archiving project chats") : undefined}
+          disabled={!hasHostMethod("archiveTask")}
           onClick={() => void handleArchiveWorkspace(workspaceId)}
         >
           <Archive size={16} />
@@ -2783,15 +2764,10 @@ function SidebarComponent({
                 >
                   <button
                     type="button"
-                    className={`sidebar-workspace-menu-option${isBrowserHost ? " sidebar-workspace-menu-option-disabled" : ""}`}
+                    className="sidebar-workspace-menu-option"
                     role="menuitem"
                     data-menu-option="add-folder"
-                    disabled={isBrowserHost}
-                    title={
-                      isBrowserHost
-                        ? getBrowserUnavailableTitle("Adding a project folder")
-                        : undefined
-                    }
+                    disabled={!hasHostMethod("createWorkspace")}
                     onClick={() => {
                       setWorkspaceSectionMenuOpen(false);
                       void handleAddWorkspace();
@@ -2959,41 +2935,90 @@ function SidebarComponent({
 
   return (
     <div className={`sidebar cli-sidebar${isCalm ? " calm-sidebar" : ""}`}>
-      {isBrowserHost && browserUnavailableNotice && (
+      {browserNotice && (
+        <div className="sidebar-browser-host-notice" role="status">
+          <span>{browserNotice}</span>
+          <button type="button" aria-label="Dismiss notice" onClick={() => setBrowserNotice(null)}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
+      {newWorkspaceName !== null && (
         <div
-          className="sidebar-browser-host-notice"
-          role="status"
-          aria-live="polite"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 12px",
-            borderBottom: "1px solid var(--color-border-subtle)",
-            color: "var(--color-text-secondary)",
-            fontFamily: "var(--font-ui)",
-            fontSize: 11,
-            lineHeight: 1.35,
-          }}
+          className="modal-overlay"
+          onClick={() => !creatingWorkspace && setNewWorkspaceName(null)}
         >
-          <span style={{ flex: 1 }}>{browserUnavailableNotice}</span>
-          <button
-            type="button"
-            onClick={() => setBrowserUnavailableNotice(null)}
-            aria-label="Dismiss browser access notice"
-            title="Dismiss"
-            style={{
-              display: "inline-flex",
-              flex: "0 0 auto",
-              padding: 2,
-              border: 0,
-              background: "transparent",
-              color: "inherit",
-              cursor: "pointer",
+          <form
+            className="modal-content"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Create project"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!newWorkspaceName.trim() || creatingWorkspace) return;
+              setCreatingWorkspace(true);
+              try {
+                const added = await window.electronAPI.createWorkspace({
+                  name: newWorkspaceName.trim(),
+                  path: "",
+                  permissions: {
+                    read: true,
+                    write: true,
+                    delete: true,
+                    network: true,
+                    shell: false,
+                  },
+                });
+                setSidebarWorkspaces((current) => [
+                  added,
+                  ...current.filter((item) => item.id !== added.id),
+                ]);
+                updateWorkspaceNavSettings((current) => ({
+                  ...current,
+                  visibleWorkspaceIds: [...new Set([...current.visibleWorkspaceIds, added.id])],
+                  expandedWorkspaceIds: [...new Set([...current.expandedWorkspaceIds, added.id])],
+                }));
+                window.dispatchEvent(
+                  new CustomEvent("cowork-browser-workspace-selected", { detail: added }),
+                );
+                setWorkspaceActionError(null);
+                setNewWorkspaceName(null);
+              } catch (error) {
+                setWorkspaceActionError(
+                  error instanceof Error ? error.message : "Could not create project",
+                );
+              } finally {
+                setCreatingWorkspace(false);
+              }
             }}
           >
-            <X size={12} />
-          </button>
+            <h2>Create project</h2>
+            <p>Your host will create a folder for this project.</p>
+            <label>
+              Project name
+              <input
+                autoFocus
+                required
+                maxLength={100}
+                value={newWorkspaceName}
+                onChange={(event) => setNewWorkspaceName(event.target.value)}
+              />
+            </label>
+            {workspaceActionError && <p role="alert">{workspaceActionError}</p>}
+            <div className="modal-actions">
+              <button
+                type="button"
+                disabled={creatingWorkspace}
+                onClick={() => setNewWorkspaceName(null)}
+              >
+                Cancel
+              </button>
+              <button type="submit" disabled={creatingWorkspace || !newWorkspaceName.trim()}>
+                {creatingWorkspace ? "Creating…" : "Create project"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
       {isCalm && (
@@ -3010,33 +3035,35 @@ function SidebarComponent({
             });
           }}
           isSearchActive={showSessionSearch}
-          onOpenLibrary={isBrowserHost ? () => reportBrowserUnavailable("Library") : onOpenLibrary}
+          onOpenLibrary={browserAction(
+            ["listBrowserWorkspaceFiles", "listBrowserTaskArtifacts"],
+            onOpenLibrary,
+            "Library",
+          )}
           isLibraryActive={isLibraryActive}
-          onOpenPlugins={
-            isBrowserHost ? () => reportBrowserUnavailable("Adding tools") : onOpenPlugins
-          }
-          onOpenAutomations={
-            isBrowserHost ? () => reportBrowserUnavailable("Automations") : onOpenAutomations
-          }
+          onOpenPlugins={browserAction(["listPluginPacks"], onOpenPlugins, "Tools")}
+          onOpenAutomations={browserAction(["listRoutines"], onOpenAutomations, "Automations")}
           isAutomationsActive={isAutomationsActive}
           more={{
             inboxLabel: "Inbox",
             inboxUnread: inboxUnreadCount,
-            onOpenInbox: isBrowserHost ? () => reportBrowserUnavailable("Inbox") : onOpenInboxAgent,
+            onOpenInbox: browserAction(
+              ["getMailboxSyncStatus", "listMailboxThreads"],
+              onOpenInboxAgent,
+              "Inbox",
+            ),
             isInboxActive: isInboxAgentActive,
-            onOpenEveryday: isBrowserHost
-              ? () => reportBrowserUnavailable("Everyday Agent")
-              : onOpenEverydayAgent,
+            onOpenEveryday: browserAction(
+              ["everydayAgentGetProfile"],
+              onOpenEverydayAgent,
+              "Everyday Agent",
+            ),
             isEverydayActive: isEverydayAgentActive,
-            onOpenDevices: isBrowserHost
-              ? () => reportBrowserUnavailable("Devices")
-              : onOpenDevices,
+            onOpenDevices,
             isDevicesActive,
-            onOpenMissionControl: isBrowserHost
-              ? () => reportBrowserUnavailable("Mission Control")
-              : onOpenMissionControl,
+            onOpenMissionControl,
             isMissionControlActive,
-            onOpenIdeas: isBrowserHost ? () => reportBrowserUnavailable("Ideas") : onOpenIdeas,
+            onOpenIdeas,
             isIdeasActive,
           }}
         />
@@ -3067,10 +3094,13 @@ function SidebarComponent({
           <button
             type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isAgentsActive ? "active" : ""}`}
-            onClick={onOpenAgents}
-            disabled={isBrowserHost}
+            onClick={browserAction(
+              ["listManagedAgents", "listManagedSessions"],
+              onOpenAgents,
+              "Agents",
+            )}
             aria-pressed={isAgentsActive}
-            title={isBrowserHost ? getBrowserUnavailableTitle("Agents") : "Agents"}
+            title="Agents"
           >
             <span className="cli-btn-text">
               <span className="terminal-only">agents</span>
@@ -3089,9 +3119,12 @@ function SidebarComponent({
 
           <button
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-devices-btn cli-devices-btn sidebar-nav-item ${isDevicesActive ? "active" : ""}`}
-            onClick={onOpenDevices}
-            disabled={isBrowserHost}
-            title={isBrowserHost ? getBrowserUnavailableTitle("Devices") : "Devices"}
+            onClick={browserAction(
+              ["listManagedDevices", "getDeviceSummary"],
+              onOpenDevices,
+              "Devices",
+            )}
+            title="Devices"
           >
             <span className="terminal-only">
               <span className="cli-btn-bracket">[</span>
@@ -3116,10 +3149,13 @@ function SidebarComponent({
           <button
             type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isInboxAgentActive ? "active" : ""}`}
-            onClick={onOpenInboxAgent}
-            disabled={isBrowserHost}
+            onClick={browserAction(
+              ["getMailboxSyncStatus", "listMailboxThreads"],
+              onOpenInboxAgent,
+              "Inbox",
+            )}
             aria-pressed={isInboxAgentActive}
-            title={isBrowserHost ? getBrowserUnavailableTitle("Inbox") : inboxNavLabel}
+            title={inboxNavLabel}
             aria-label={inboxNavLabel}
           >
             <span className="cli-btn-text">
@@ -3140,10 +3176,9 @@ function SidebarComponent({
           <button
             type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isAutomationsActive ? "active" : ""}`}
-            onClick={onOpenAutomations}
-            disabled={isBrowserHost}
+            onClick={browserAction(["listRoutines"], onOpenAutomations, "Automations")}
             aria-pressed={isAutomationsActive}
-            title={isBrowserHost ? getBrowserUnavailableTitle("Automations") : "Automations"}
+            title="Automations"
           >
             <span className="cli-btn-text">
               <span className="terminal-only">automation</span>
@@ -3163,10 +3198,13 @@ function SidebarComponent({
           <button
             type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isEverydayAgentActive ? "active" : ""}`}
-            onClick={onOpenEverydayAgent}
-            disabled={isBrowserHost}
+            onClick={browserAction(
+              ["everydayAgentGetProfile"],
+              onOpenEverydayAgent,
+              "Everyday Agent",
+            )}
             aria-pressed={isEverydayAgentActive}
-            title={isBrowserHost ? getBrowserUnavailableTitle("Everyday Agent") : "Everyday Agent"}
+            title="Everyday Agent"
           >
             <span className="cli-btn-text">
               <span className="terminal-only">everyday_agent</span>
@@ -3210,12 +3248,13 @@ function SidebarComponent({
               <button
                 type="button"
                 className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isMissionControlActive ? "active" : ""}`}
-                onClick={onOpenMissionControl}
-                disabled={isBrowserHost}
+                onClick={browserAction(
+                  ["getAgentRoles", "listMissionControlItems"],
+                  onOpenMissionControl,
+                  "Mission Control",
+                )}
                 aria-pressed={isMissionControlActive}
-                title={
-                  isBrowserHost ? getBrowserUnavailableTitle("Mission Control") : "Mission Control"
-                }
+                title="Mission Control"
               >
                 <span className="cli-btn-text">
                   <span className="terminal-only">mission_control</span>
@@ -3235,10 +3274,9 @@ function SidebarComponent({
               <button
                 type="button"
                 className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-ideas-btn sidebar-nav-item ${isIdeasActive ? "active" : ""}`}
-                onClick={onOpenIdeas}
-                disabled={isBrowserHost}
+                onClick={browserAction(["listSuggestions"], onOpenIdeas, "Ideas")}
                 aria-pressed={isIdeasActive}
-                title={isBrowserHost ? getBrowserUnavailableTitle("Ideas") : "Ideas"}
+                title="Ideas"
               >
                 <span className="cli-btn-text">
                   <span className="terminal-only">ideas</span>
@@ -3259,7 +3297,7 @@ function SidebarComponent({
         </div>
       </div>
 
-      {isDevicesActive && !isBrowserHost ? (
+      {isDevicesActive ? (
         <div className="devices-sidebar-panel">
           <div className="devices-sidebar-header">
             <div className="devices-sidebar-home">
@@ -3398,10 +3436,8 @@ function SidebarComponent({
             <button
               type="button"
               role="tab"
-              className={`sidebar-session-tab ${visibleSidebarTab === "bots" ? "active" : ""}${isBrowserHost ? " sidebar-workspace-menu-option-disabled" : ""}`}
+              className={`sidebar-session-tab ${visibleSidebarTab === "bots" ? "active" : ""}`}
               aria-selected={visibleSidebarTab === "bots"}
-              disabled={isBrowserHost}
-              title={isBrowserHost ? getBrowserUnavailableTitle("Bots") : undefined}
               onClick={() => setSidebarTab("bots")}
             >
               Bots
@@ -3421,7 +3457,11 @@ function SidebarComponent({
               onSelectTask={onSelectTask}
               onOpenBot={onOpenBot}
               onReopenBot={onReopenBot}
-              onOpenAgents={onOpenAgents}
+              onOpenAgents={browserAction(
+                ["listManagedAgents", "listManagedSessions"],
+                onOpenAgents,
+                "Agents",
+              )}
               onBotCreated={handleBotCreated}
               onBotUpdated={async (bot) => {
                 setAgentRoles((current) => {
@@ -3694,37 +3734,33 @@ function SidebarComponent({
       )}
 
       {isCalm && (
-        <div
-          style={{ display: "contents" }}
-          onClickCapture={(event) => {
-            if (!isBrowserHost || !(event.target instanceof Element)) return;
-            if (!event.target.closest(".calm-profile-identity")) return;
-            event.preventDefault();
-            event.stopPropagation();
-            reportBrowserUnavailable("Agent appearance settings");
-          }}
-        >
-          <CalmSidebarProfile
-            agentName={calmAgentContext.agentName}
-            onOpenSettings={
-              isBrowserHost ? () => reportBrowserUnavailable("Settings") : onOpenSettings
-            }
-          />
-        </div>
+        <CalmSidebarProfile
+          agentName={calmAgentContext.agentName}
+          onOpenSettings={browserAction(
+            ["getLLMSettings", "getLLMConfigStatus"],
+            onOpenSettings,
+            "Settings",
+          )}
+        />
       )}
       {/* Footer */}
       <div className="sidebar-footer cli-sidebar-footer" hidden={isCalm && !updateInfo?.available}>
         <InfraWalletBadge
-          onOpenSettings={
-            isBrowserHost ? () => reportBrowserUnavailable("Settings") : onOpenSettings
-          }
+          onOpenSettings={browserAction(
+            ["getLLMSettings", "getLLMConfigStatus"],
+            onOpenSettings,
+            "Settings",
+          )}
         />
         <div className="cli-footer-actions">
           <button
             className="settings-btn cli-settings-btn"
-            onClick={onOpenSettings}
-            disabled={isBrowserHost}
-            title={isBrowserHost ? getBrowserUnavailableTitle("Settings") : "Settings"}
+            onClick={browserAction(
+              ["getLLMSettings", "getLLMConfigStatus"],
+              onOpenSettings,
+              "Settings",
+            )}
+            title="Settings"
           >
             <span className="terminal-only">[cfg]</span>
             <span className="modern-only">
@@ -3758,14 +3794,6 @@ function SidebarComponent({
                   event.stopPropagation();
                   onViewUpdate?.();
                 }}
-                disabled={isBrowserHost}
-                title={
-                  isBrowserHost
-                    ? getBrowserUnavailableTitle("Update settings")
-                    : updateInfo.supported === false
-                      ? "View update system requirements"
-                      : "Open update settings"
-                }
               >
                 {updateInfo.supported === false ? "Requires macOS 13+" : "Update"}
               </button>

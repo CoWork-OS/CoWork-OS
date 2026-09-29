@@ -1,3 +1,4 @@
+import { hasHostMethod } from "../host/browser-capabilities";
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
@@ -179,7 +180,7 @@ export function SessionDashboardCard({
   }, [task?.id]);
 
   const refreshCredentialRequests = async () => {
-    if (!task?.id || !window.electronAPI?.listProtectedCredentialRequests) return;
+    if (!task?.id || !hasHostMethod("listProtectedCredentialRequests")) return;
     try {
       const next = await window.electronAPI.listProtectedCredentialRequests({
         taskId: task.id,
@@ -196,7 +197,7 @@ export function SessionDashboardCard({
 
   useEffect(() => {
     let cancelled = false;
-    if (!task?.id || !window.electronAPI?.listProtectedCredentialRequests) {
+    if (!task?.id || !hasHostMethod("listProtectedCredentialRequests")) {
       setCredentialRequests([]);
       setCredentialError(null);
       return;

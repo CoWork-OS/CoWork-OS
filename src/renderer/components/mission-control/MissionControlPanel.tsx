@@ -1,3 +1,4 @@
+import { hasHostMethod } from "../../host/browser-capabilities";
 import "./mission-control.css";
 import { isTempWorkspaceId } from "../../../shared/types";
 import { useMissionControlData } from "./useMissionControlData";
@@ -87,6 +88,11 @@ export function MissionControlPanel({
   return (
     <div className="mc-v2">
       <MCTopBar data={data} onOpenAgents={onOpenAgents} />
+      {!hasHostMethod("getAllHeartbeatStatus") && (
+        <p role="status" className="settings-description">
+          This host does not run agent heartbeats. Heartbeat status and controls are unavailable.
+        </p>
+      )}
 
       <div className="mc-v2-body">
         <div className="mc-v2-tab-content">

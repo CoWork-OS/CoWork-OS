@@ -1,3 +1,4 @@
+import { hasHostMethod } from "./host/browser-capabilities";
 import {
   memo,
   useState,
@@ -3536,6 +3537,27 @@ export function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!isBrowserHost) return;
+    const selectProject = (event: Event) => {
+      const workspace = (event as CustomEvent<Workspace>).detail;
+      if (workspace?.id) {
+        setSelectedTaskId(null);
+        setCurrentWorkspace(workspace);
+        setCurrentView("main");
+      }
+    };
+    window.addEventListener("cowork-browser-workspace-selected", selectProject);
+    return () => window.removeEventListener("cowork-browser-workspace-selected", selectProject);
+  }, [isBrowserHost]);
+
+  useEffect(() => {
+    if (!isBrowserHost || !currentWorkspace?.id) return;
+    void window.electronAPI
+      .selectWorkspace(currentWorkspace.id)
+      .catch((error: unknown) => console.error("Could not select project:", error));
+  }, [isBrowserHost, currentWorkspace?.id]);
+
   // Auto-load temp workspace on mount if no workspace is selected
   useEffect(() => {
     if (isBrowserHost) {
@@ -6837,7 +6859,7 @@ export function App() {
 
   // Smart right panel visibility: auto-collapse on welcome screen in focused mode
   const effectiveRightCollapsed =
-    isBrowserHost || currentView !== "main"
+    currentView !== "main"
       ? true
       : uiDensity === "full"
         ? rightSidebarCollapsed
@@ -7580,33 +7602,34 @@ export function App() {
               </svg>
             </button>
           )}
-          {showTitleBarTerminalToggle && !isBrowserHost && (
-            <button
-              type="button"
-              className={`title-bar-btn title-bar-terminal-toggle ${terminalTabsOpen ? "active" : ""}`}
-              onClick={() => setTerminalTabsOpen((open) => !open)}
-              title={terminalTabsOpen ? "Close terminal" : "Open terminal"}
-              aria-label={terminalTabsOpen ? "Close terminal" : "Open terminal"}
-              aria-pressed={terminalTabsOpen}
-            >
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
+          {showTitleBarTerminalToggle &&
+            (!isBrowserHost || (Boolean(selectedTaskId) && hasHostMethod("createTerminalTab"))) && (
+              <button
+                type="button"
+                className={`title-bar-btn title-bar-terminal-toggle ${terminalTabsOpen ? "active" : ""}`}
+                onClick={() => setTerminalTabsOpen((open) => !open)}
+                title={terminalTabsOpen ? "Close terminal" : "Open terminal"}
+                aria-label={terminalTabsOpen ? "Close terminal" : "Open terminal"}
+                aria-pressed={terminalTabsOpen}
               >
-                <path d="m7 11 2 2-2 2" />
-                <path d="M11 15h4" />
-                <rect x="3" y="4" width="18" height="16" rx="2" ry="2" />
-              </svg>
-            </button>
-          )}
+                <svg
+                  aria-hidden="true"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#6b7280"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: "block", flexShrink: 0 }}
+                >
+                  <path d="m7 11 2 2-2 2" />
+                  <path d="M11 15h4" />
+                  <rect x="3" y="4" width="18" height="16" rx="2" ry="2" />
+                </svg>
+              </button>
+            )}
           <button
             type="button"
             className="title-bar-btn title-bar-theme-toggle"
@@ -7748,39 +7771,41 @@ export function App() {
               </svg>
             )}
           </button>
-          {currentView === "main" && !isBrowserHost && (
-            <button
-              type="button"
-              className="title-bar-btn title-bar-panel-toggle"
-              onClick={handleRightSidebarToggle}
-              title={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
-              aria-label={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
-            >
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
+          {currentView === "main" &&
+            (uiDensity === "full" || Boolean(selectedTaskId)) &&
+            hasHostMethod("readFileForViewer") && (
+              <button
+                type="button"
+                className="title-bar-btn title-bar-panel-toggle"
+                onClick={handleRightSidebarToggle}
+                title={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
+                aria-label={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
               >
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <line x1="15" y1="3" x2="15" y2="21" />
-              </svg>
-              {effectiveRightCollapsed && unseenOutputCount > 0 && (
-                <span
-                  className="title-bar-output-badge"
-                  aria-label={`${unseenOutputCount} new outputs`}
+                <svg
+                  aria-hidden="true"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#6b7280"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: "block", flexShrink: 0 }}
                 >
-                  {unseenOutputCount > 9 ? "9+" : unseenOutputCount}
-                </span>
-              )}
-            </button>
-          )}
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <line x1="15" y1="3" x2="15" y2="21" />
+                </svg>
+                {effectiveRightCollapsed && unseenOutputCount > 0 && (
+                  <span
+                    className="title-bar-output-badge"
+                    aria-label={`${unseenOutputCount} new outputs`}
+                  >
+                    {unseenOutputCount > 9 ? "9+" : unseenOutputCount}
+                  </span>
+                )}
+              </button>
+            )}
         </div>
         {/* Windows custom window controls (minimize, maximize, close) */}
         {isWindows && !isBrowserHost && (

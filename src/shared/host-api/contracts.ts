@@ -34,6 +34,7 @@ export const HOST_CAPABILITIES = [
   "memory.manage",
   "reports.read",
   "devices.manage",
+  "mailbox.manage",
   "browser.interactive",
 ] as const;
 
@@ -75,6 +76,8 @@ export interface WebSessionBootstrap {
   onboardingCompleted: boolean;
   disclaimerAccepted: boolean;
   activeWorkspaceId: string | null;
+  /** Exact reviewed desktop operations mounted by this host. */
+  desktopMethods?: Record<string, { mutation: boolean }>;
 }
 
 export const WEB_ERROR_CODES = [

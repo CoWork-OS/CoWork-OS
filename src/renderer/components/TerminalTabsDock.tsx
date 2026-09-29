@@ -61,7 +61,11 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
   const userClosedAllTabsRef = useRef(false);
   const attachedTabIdsRef = useRef<Set<string>>(new Set());
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null;
-  const activeTabRunning = Boolean(activeTab && activeTab.status === "running");
+  const activeTabRunning = Boolean(
+    activeTab &&
+    (activeTab.status === "running" ||
+      (window.coworkBrowserHost === true && activeTab.status === "active")),
+  );
   const activeTabIdRef = useRef<string | null>(null);
 
   useEffect(() => {

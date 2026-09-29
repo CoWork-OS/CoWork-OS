@@ -5,6 +5,20 @@ import type { LLMSettingsData } from "../types";
 const workspace = { id: "workspace-1", path: "/tmp/workspace", isTemp: true };
 
 describe("first-run readiness", () => {
+  it("uses redacted credential presence without needing secret values", () => {
+    const settings = {
+      providerType: "openai",
+      modelKey: "gpt-5.5",
+      openai: { authMethod: "api_key", apiKeyConfigured: true },
+    } as unknown as LLMSettingsData;
+    expect(getFirstRunReadiness(settings).modelReady).toBe(true);
+    settings.openai = {
+      authMethod: "api_key",
+      apiKeyConfigured: false,
+    } as unknown as LLMSettingsData["openai"];
+    expect(getFirstRunReadiness(settings).modelReady).toBe(false);
+  });
+
   it("treats ChatGPT subscription OAuth as the easiest ready path", () => {
     const settings: LLMSettingsData = {
       providerType: "anthropic",

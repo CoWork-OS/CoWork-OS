@@ -33,6 +33,9 @@ interface OutputSegment {
   offset: number;
   text: string;
   touchedAt: number;
+  stream: "stdout";
+  cwd: string;
+  status: ShellSessionInfo["status"];
 }
 
 interface BrowserTerminalAttachment {
@@ -46,6 +49,11 @@ interface BrowserTerminalAttachment {
   taskId: string;
   tabId: string;
   expiresAt: number;
+}
+
+interface BrowserTerminalTabOwner {
+  workspaceId: string;
+  taskId: string;
 }
 
 interface TerminalOutputState {
@@ -86,6 +94,7 @@ interface TerminalWorkspaceSources {
     | "detachTerminalTabOutput"
     | "writeToTab"
     | "resizeTab"
+    | "stopTab"
     | "closeTab"
   >;
   now?: () => number;
@@ -114,6 +123,7 @@ export class BrowserTerminalAttachmentService {
   private readonly outputStates = new Map<string, TerminalOutputState>();
   private readonly attachments = new Map<string, TerminalOutputState>();
   private readonly operationReceipts = new Map<string, OperationReceipt>();
+  private readonly tabOwners = new Map<string, BrowserTerminalTabOwner>();
   private readonly serviceId = randomBytes(12).toString("hex");
   private readonly now: () => number;
   private readonly createAttachmentId: () => string;
@@ -133,12 +143,19 @@ export class BrowserTerminalAttachmentService {
         validateParams: parseScopeRequest,
         handler: async (context, rawParams) => {
           const request = rawParams as TerminalScopeRequest;
-          const { workspace } = await this.authorize(context, request, true);
-          const tabs = this.sources.terminal
-            .listTabs(workspace.id)
-            .slice(0, MAX_TERMINAL_TABS)
-            .map(toPublicTab);
-          return { workspaceId: workspace.id, taskId: request.taskId, tabs };
+          const { workspace, task } = await this.authorize(context, request, true);
+          const workspaceTabs = this.sources.terminal.listTabs(workspace.id);
+          this.pruneTabOwners(workspace.id, new Set(workspaceTabs.map((tab) => tab.id)));
+          const tabs = workspaceTabs.filter((tab) =>
+            this.hasTabOwner(tab.id, workspace.id, task.id),
+          );
+          return {
+            workspaceId: workspace.id,
+            taskId: request.taskId,
+            tabs: tabs
+              .slice(0, MAX_TERMINAL_TABS)
+              .map((tab) => cloneScopedSessionInfo(tab, task.id)),
+          };
         },
       },
       "terminal.attach": {
@@ -147,7 +164,8 @@ export class BrowserTerminalAttachmentService {
         validateParams: parseAttachRequest,
         handler: async (context, rawParams) => {
           const request = rawParams as AttachRequest;
-          const { workspace } = await this.authorize(context, request, true);
+          const { workspace, task } = await this.authorize(context, request, true);
+          this.requireTabOwner(request.tabId, workspace.id, task.id);
           this.findTab(workspace.id, request.tabId);
           return this.executeMutation(context, "terminal.attach", request, () =>
             this.attach(context, request),
@@ -169,7 +187,14 @@ export class BrowserTerminalAttachmentService {
               cwd: workspace.path,
               ...(request.title ? { title: request.title } : {}),
             });
-            return this.attach(context, { ...request, tabId: tab.id });
+            this.tabOwners.set(tab.id, { workspaceId: workspace.id, taskId: request.taskId });
+            try {
+              return await this.attach(context, { ...request, tabId: tab.id });
+            } catch (error) {
+              this.tabOwners.delete(tab.id);
+              this.sources.terminal.closeTab(tab.id);
+              throw error;
+            }
           });
         },
       },
@@ -179,7 +204,13 @@ export class BrowserTerminalAttachmentService {
         handler: async (context, rawParams) => {
           const request = rawParams as ReplayRequest;
           const state = await this.authorizeAttachment(context, request, true);
-          return this.readOutputPage(state, request.afterOffset, request.limit);
+          return {
+            ...this.readOutputPage(state, request.afterOffset, request.limit),
+            tab: cloneScopedSessionInfo(
+              this.findTab(request.workspaceId, state.tabId),
+              request.taskId,
+            ),
+          };
         },
       },
       "terminal.input": {
@@ -203,6 +234,19 @@ export class BrowserTerminalAttachmentService {
           await this.authorize(context, request, true);
           return this.executeMutation(context, "terminal.resize", request, () =>
             this.resize(context, request),
+          );
+        },
+      },
+      "terminal.stop": {
+        capability: "terminal.attach",
+        mutation: true,
+        validateParams: parseAttachmentRequest,
+        handler: async (context, rawParams) => {
+          const request = rawParams as TerminalAttachmentRequest;
+          const state = await this.authorizeAttachment(context, request, true);
+          this.requireWriter(context, request, state);
+          return this.executeMutation(context, "terminal.stop", request, () =>
+            this.stop(context, request),
           );
         },
       },
@@ -251,6 +295,7 @@ export class BrowserTerminalAttachmentService {
     this.outputStates.clear();
     this.attachments.clear();
     this.operationReceipts.clear();
+    this.tabOwners.clear();
     this.retainedOutputChars = 0;
     this.retainedOutputSegments = 0;
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
@@ -258,7 +303,8 @@ export class BrowserTerminalAttachmentService {
   }
 
   private async attach(context: WebRequestContext, request: AttachRequest): Promise<AttachResult> {
-    const { workspace } = await this.authorize(context, request, true);
+    const { workspace, task } = await this.authorize(context, request, true);
+    this.requireTabOwner(request.tabId, workspace.id, task.id);
     const tab = this.findTab(workspace.id, request.tabId);
     const state = this.getOutputState(workspace.id, tab.id);
     this.startCleanupTimer();
@@ -296,7 +342,7 @@ export class BrowserTerminalAttachmentService {
     return {
       attachmentId: attachment.id,
       writer: state.writerAttachmentId === attachment.id,
-      tab: toPublicTab(tab),
+      tab: cloneScopedSessionInfo(this.findTab(workspace.id, tab.id), task.id),
       nextOffset: state.nextOffset,
       ...(gap ? { gap } : {}),
     };
@@ -305,28 +351,45 @@ export class BrowserTerminalAttachmentService {
   private async writeInput(
     context: WebRequestContext,
     request: InputRequest,
-  ): Promise<{ accepted: true; nextOffset: number }> {
+  ): Promise<{ accepted: true; nextOffset: number; tab: ScopedShellSessionInfo }> {
     const state = await this.authorizeAttachment(context, request, true);
     const attachment = this.requireWriter(context, request, state);
     attachment.expiresAt = this.now() + ATTACHMENT_LEASE_MS;
     const input = normalizeTerminalAttachInput(request.input);
-    if (input) this.sources.terminal.writeToTab(attachment.tabId, input);
+    const tab = input
+      ? this.sources.terminal.writeToTab(attachment.tabId, input)
+      : this.findTab(request.workspaceId, attachment.tabId);
     state.lastTouchedAt = this.now();
-    return { accepted: true, nextOffset: state.nextOffset };
+    return {
+      accepted: true,
+      nextOffset: state.nextOffset,
+      tab: cloneScopedSessionInfo(tab, request.taskId),
+    };
   }
 
   private async resize(
     context: WebRequestContext,
     request: ResizeRequest,
-  ): Promise<{ cols: number; rows: number }> {
+  ): Promise<{ cols: number; rows: number; tab: ScopedShellSessionInfo }> {
     const state = await this.authorizeAttachment(context, request, true);
     const attachment = this.requireWriter(context, request, state);
     attachment.expiresAt = this.now() + ATTACHMENT_LEASE_MS;
     const cols = Math.min(MAX_COLUMNS, Math.max(2, request.cols));
     const rows = Math.min(MAX_ROWS, Math.max(1, request.rows));
-    this.sources.terminal.resizeTab(attachment.tabId, cols, rows);
+    const tab = this.sources.terminal.resizeTab(attachment.tabId, cols, rows);
     state.lastTouchedAt = this.now();
-    return { cols, rows };
+    return { cols, rows, tab: cloneScopedSessionInfo(tab, request.taskId) };
+  }
+
+  private async stop(
+    context: WebRequestContext,
+    request: TerminalAttachmentRequest,
+  ): Promise<ScopedShellSessionInfo | null> {
+    const state = await this.authorizeAttachment(context, request, true);
+    const attachment = this.requireWriter(context, request, state);
+    const tab = this.sources.terminal.stopTab(attachment.tabId);
+    state.lastTouchedAt = this.now();
+    return tab ? cloneScopedSessionInfo(tab, request.taskId) : null;
   }
 
   private async detach(
@@ -354,6 +417,7 @@ export class BrowserTerminalAttachmentService {
     state.writerAttachmentId = null;
     this.detachOutputListener(state);
     state.lastTouchedAt = this.now();
+    this.tabOwners.delete(attachment.tabId);
     return { closed: true };
   }
 
@@ -464,6 +528,21 @@ export class BrowserTerminalAttachmentService {
     return tab;
   }
 
+  private hasTabOwner(tabId: string, workspaceId: string, taskId: string): boolean {
+    const owner = this.tabOwners.get(tabId);
+    return owner?.workspaceId === workspaceId && owner.taskId === taskId;
+  }
+
+  private requireTabOwner(tabId: string, workspaceId: string, taskId: string): void {
+    if (!this.hasTabOwner(tabId, workspaceId, taskId)) throw forbidden();
+  }
+
+  private pruneTabOwners(workspaceId: string, liveTabIds: Set<string>): void {
+    for (const [tabId, owner] of this.tabOwners) {
+      if (owner.workspaceId === workspaceId && !liveTabIds.has(tabId)) this.tabOwners.delete(tabId);
+    }
+  }
+
   private findExistingAttachment(
     context: WebRequestContext,
     request: AttachRequest,
@@ -529,7 +608,11 @@ export class BrowserTerminalAttachmentService {
       ) {
         return;
       }
-      this.appendOutput(state, event.offset, event.output, event.nextOffset);
+      this.appendOutput(state, event.offset, event.output, event.nextOffset, {
+        stream: event.stream,
+        cwd: event.cwd,
+        status: event.status,
+      });
     };
     this.sources.terminal.attachTerminalTabOutput(state.tabId, state.listenerKey, listener);
     state.listenerAttached = true;
@@ -546,10 +629,11 @@ export class BrowserTerminalAttachmentService {
     offset: number,
     output: string,
     nextOffset: number,
+    metadata: Pick<OutputSegment, "stream" | "cwd" | "status">,
   ): void {
     const now = this.now();
     if (output) {
-      let uncovered: OutputSegment[] = [{ offset, text: output, touchedAt: now }];
+      let uncovered: OutputSegment[] = [{ offset, text: output, touchedAt: now, ...metadata }];
       for (const existing of state.segments) {
         uncovered = uncovered.flatMap((segment) => subtractSegment(segment, existing));
         if (!uncovered.length) break;
@@ -572,7 +656,13 @@ export class BrowserTerminalAttachmentService {
     const merged: OutputSegment[] = [];
     for (const segment of state.segments) {
       const previous = merged[merged.length - 1];
-      if (previous && previous.offset + previous.text.length === segment.offset) {
+      if (
+        previous &&
+        previous.offset + previous.text.length === segment.offset &&
+        previous.stream === segment.stream &&
+        previous.cwd === segment.cwd &&
+        previous.status === segment.status
+      ) {
         previous.text += segment.text;
         previous.touchedAt = Math.max(previous.touchedAt, segment.touchedAt);
         this.retainedOutputSegments -= 1;
@@ -637,7 +727,7 @@ export class BrowserTerminalAttachmentService {
       throw invalidRequest("The terminal replay cursor is ahead of current output.");
     }
     let cursor = requestedOffset;
-    const chunks: Array<{ offset: number; text: string }> = [];
+    const chunks: ReplayResult["chunks"] = [];
     let gap = this.outputGap(state, cursor);
     if (gap) cursor = gap.to;
 
@@ -656,7 +746,13 @@ export class BrowserTerminalAttachmentService {
       const take = safeUtf16Cut(segment.text.slice(from), Math.min(available, remaining));
       if (take <= 0) break;
       const text = segment.text.slice(from, from + take);
-      chunks.push({ offset: start, text });
+      chunks.push({
+        offset: start,
+        text,
+        stream: segment.stream,
+        cwd: segment.cwd,
+        status: segment.status,
+      });
       cursor = start + text.length;
       remaining -= text.length;
     }
@@ -841,24 +937,25 @@ interface ResizeRequest extends TerminalAttachmentRequest {
 interface AttachResult {
   attachmentId: string;
   writer: boolean;
-  tab: PublicTerminalTab;
+  tab: ScopedShellSessionInfo;
   nextOffset: number;
   gap?: { from: number; to: number };
 }
 
 interface ReplayResult {
-  chunks: Array<{ offset: number; text: string }>;
+  chunks: Array<{
+    offset: number;
+    text: string;
+    stream: "stdout";
+    cwd: string;
+    status: ShellSessionInfo["status"];
+  }>;
   nextOffset: number;
   hasMore: boolean;
   gap?: { from: number; to: number };
 }
 
-interface PublicTerminalTab {
-  id: string;
-  status: ShellSessionInfo["status"];
-  createdAt: number;
-  updatedAt: number;
-}
+type ScopedShellSessionInfo = ShellSessionInfo & { scopeTaskId: string };
 
 function parseScopeRequest(value: unknown): TerminalScopeRequest {
   if (!isRecord(value)) throw invalidRequest();
@@ -935,13 +1032,19 @@ function isSafeIntegerAtLeast(value: unknown, minimum: number): value is number 
   return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum;
 }
 
-function toPublicTab(tab: ShellSessionInfo): PublicTerminalTab {
+function cloneShellSessionInfo(tab: ShellSessionInfo): ShellSessionInfo {
   return {
-    id: tab.id,
-    status: tab.status,
-    createdAt: tab.createdAt,
-    updatedAt: tab.updatedAt,
+    ...tab,
+    aliases: [...tab.aliases],
+    envKeys: [...tab.envKeys],
   };
+}
+
+function cloneScopedSessionInfo(
+  tab: ShellSessionInfo,
+  scopeTaskId: string,
+): ScopedShellSessionInfo {
+  return { ...cloneShellSessionInfo(tab), scopeTaskId };
 }
 
 function subtractSegment(source: OutputSegment, existing: OutputSegment): OutputSegment[] {
@@ -955,6 +1058,9 @@ function subtractSegment(source: OutputSegment, existing: OutputSegment): Output
       offset: source.offset,
       text: source.text.slice(0, prefixEnd - source.offset),
       touchedAt: source.touchedAt,
+      stream: source.stream,
+      cwd: source.cwd,
+      status: source.status,
     });
   }
   if (existingEnd < sourceEnd) {
@@ -963,6 +1069,9 @@ function subtractSegment(source: OutputSegment, existing: OutputSegment): Output
       offset: suffixStart,
       text: source.text.slice(suffixStart - source.offset),
       touchedAt: source.touchedAt,
+      stream: source.stream,
+      cwd: source.cwd,
+      status: source.status,
     });
   }
   return remaining.filter((segment) => segment.text.length > 0);

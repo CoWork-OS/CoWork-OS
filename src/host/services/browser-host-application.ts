@@ -44,12 +44,30 @@ import { BrowserTerminalAttachmentService } from "./browser-terminal-methods";
 import { TerminalPtyManager } from "../../electron/terminal/TerminalPtyManager";
 import { assertTerminalShellAllowed } from "../../electron/terminal/terminal-shell-policy";
 import { WorkSessionContractRepository } from "../../electron/database/WorkSessionContractRepository";
+import { AgentRoleRepository } from "../../electron/agents/agent-repository-facades";
+import type { ChannelGateway } from "../../electron/gateway";
+import type { RoutineService } from "../../electron/routines/service";
+import type { EventTriggerService } from "../../electron/triggers/EventTriggerService";
+import type { HeartbeatService } from "../../electron/agents/HeartbeatService";
+import { BrowserDesktopRpcService } from "./browser-desktop-rpc";
+import { createBrowserCoreDefinitions } from "./browser-core-methods";
+import { createBrowserSettingsDefinitions } from "./browser-settings-methods";
+import { createBrowserMailboxDefinitions } from "./browser-mailbox-methods";
+import { createBrowserNavigationDefinitions } from "./browser-navigation-methods";
+import { createBrowserPlanningDefinitions } from "./browser-planning-methods";
+import { createBrowserDeviceDefinitions } from "./browser-device-methods";
+import { getFirstRunReadiness } from "../../shared/first-run-readiness";
 
 export interface BrowserHostApplicationOptions {
   db: Database.Database;
   webDirectory: string;
   deployment: WebDeploymentPolicy;
   identity: HostIdentity;
+  agentDaemon?: AgentDaemon;
+  channelGateway?: ChannelGateway;
+  getRoutineService?: () => RoutineService | null;
+  getEventTriggerService?: () => EventTriggerService | null;
+  getHeartbeatService?: () => HeartbeatService | null;
   taskCommands?: Pick<BrowserTaskCommands, "createTaskIdempotent" | "startAdmittedTask"> &
     BrowserApprovalCommands &
     Pick<AgentDaemon, "sendMessage" | "getDurableTaskFollowUpReceipt" | "cancelTask">;
@@ -71,11 +89,13 @@ const READ_CAPABILITIES = new Set([
 export function browserHostCapabilities(
   taskCreationAvailable = false,
   uploadsAvailable = false,
+  desktopCapabilities = new Set<string>(),
 ): HostCapabilities {
   return Object.fromEntries(
     HOST_CAPABILITIES.map((name) => [
       name,
       READ_CAPABILITIES.has(name) ||
+      desktopCapabilities.has(name) ||
       (uploadsAvailable && name === "files.upload") ||
       (taskCreationAvailable &&
         (name === "tasks.create" || name === "tasks.followUp" || name === "tasks.cancel")) ||
@@ -103,7 +123,7 @@ export function createBrowserHostApplication(
   const inputRequestRepository = options.taskCommands
     ? new InputRequestRepository(options.db)
     : null;
-  const getCapabilities = () => browserHostCapabilities(Boolean(options.taskCommands), true);
+  const agentRoles = new AgentRoleRepository(options.db);
   const resolveBrowserWorkspace = async (workspaceId: string) => {
     const workspace = await workspaceRepository.findById(workspaceId);
     if (!workspace) return null;
@@ -114,6 +134,42 @@ export function createBrowserHostApplication(
     });
     return applyAccessProfileToWorkspace(workspace, profile);
   };
+  const mailbox = createBrowserMailboxDefinitions(options.db);
+  const devices = createBrowserDeviceDefinitions({
+    db: options.db,
+    identity: options.identity,
+    resolveWorkspace: resolveBrowserWorkspace,
+    channelGateway: options.channelGateway,
+  });
+  const navigation = options.agentDaemon
+    ? createBrowserNavigationDefinitions({
+        db: options.db,
+        agentDaemon: options.agentDaemon,
+        channelGateway: options.channelGateway,
+        getRoutineService: options.getRoutineService,
+        getEventTriggerService: options.getEventTriggerService,
+        getHeartbeatService: options.getHeartbeatService,
+        resolveWorkspace: resolveBrowserWorkspace,
+      })
+    : null;
+  const desktop = new BrowserDesktopRpcService({
+    ...createBrowserCoreDefinitions({
+      db: options.db,
+      agentDaemon: options.agentDaemon ?? {},
+      resolveWorkspace: resolveBrowserWorkspace,
+    }),
+    ...createBrowserSettingsDefinitions(),
+    ...mailbox.definitions,
+    ...devices.definitions,
+    ...navigation?.definitions,
+    ...createBrowserPlanningDefinitions({
+      db: options.db,
+      agentDaemon: options.agentDaemon,
+      resolveWorkspace: resolveBrowserWorkspace,
+    }),
+  });
+  const getCapabilities = () =>
+    browserHostCapabilities(Boolean(options.taskCommands), true, desktop.capabilities);
   const workspaceFiles = new BrowserWorkspaceFiles({
     resolveWorkspace: resolveBrowserWorkspace,
     getCapabilities,
@@ -162,21 +218,21 @@ export function createBrowserHostApplication(
               options.taskCommands!.startAdmittedTask(operationKey, taskId),
             getTaskAdmission: (operationKey) => taskAdmission.getByOperationKey(operationKey),
           },
-          getWorkspace: async (workspaceId) =>
-            (await workspaceRepository.findById(workspaceId)) ?? null,
+          getWorkspace: resolveBrowserWorkspace,
+          isActiveAgentRole: async (id) => (await agentRoles.findById(id))?.isActive === true,
         })
       : {};
   const followUpMethods = options.taskCommands
     ? createBrowserFollowUpMethods({
-        getWorkspace: async (workspaceId) =>
-          (await workspaceRepository.findById(workspaceId)) ?? null,
+        getWorkspace: resolveBrowserWorkspace,
         getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
         commands: {
-          sendFollowUp: (taskId, message, messageId) =>
+          sendFollowUp: (taskId, message, messageId, followUpOptions) =>
             options.taskCommands!.sendMessage(taskId, message, undefined, undefined, {
               deliveryMode: "follow_up",
               returnOnAccepted: true,
               messageId,
+              ...followUpOptions,
             }),
           getFollowUpReceipt: async (taskId, messageId) =>
             options.taskCommands!.getDurableTaskFollowUpReceipt(taskId, messageId),
@@ -186,8 +242,7 @@ export function createBrowserHostApplication(
   const approvalMethods =
     options.taskCommands && approvalRepository && inputRequestRepository
       ? createBrowserApprovalMethods({
-          getWorkspace: async (workspaceId) =>
-            (await workspaceRepository.findById(workspaceId)) ?? null,
+          getWorkspace: resolveBrowserWorkspace,
           getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
           listPendingApprovals: () => approvalRepository.findAllPending(),
           getApproval: async (approvalId) =>
@@ -235,11 +290,16 @@ export function createBrowserHostApplication(
     deployment: options.deployment,
     getHostIdentity: () => options.identity,
     getCapabilities,
-    getSessionBootstrap:
-      options.getSessionBootstrap ??
-      (() => readBrowserSessionBootstrap(options.db, Boolean(options.taskCommands))),
+    getSessionBootstrap: async () => ({
+      ...(await (options.getSessionBootstrap?.() ??
+        readBrowserSessionBootstrap(options.db, Boolean(options.taskCommands)))),
+      capabilities: getCapabilities(),
+      desktopMethods: desktop.manifest,
+    }),
     methods: {
-      ...createBrowserReadMethods(createDatabaseBrowserReadSources(options.db)),
+      ...createBrowserReadMethods(
+        createDatabaseBrowserReadSources(options.db, resolveBrowserWorkspace),
+      ),
       ...createBrowserDesktopReadMethods({
         listWorkspaces: () => workspaceRepository.findAll(),
         resolveWorkspace: resolveBrowserWorkspace,
@@ -257,6 +317,7 @@ export function createBrowserHostApplication(
       ...approvalMethods,
       ...cancellationMethods,
       ...terminal.methods(),
+      ...desktop.methods(),
     },
     handleWorkspaceFileDownload: (context, req, res) =>
       workspaceFiles.handleDownloadRequest(context, req, res),
@@ -267,10 +328,15 @@ export function createBrowserHostApplication(
     onSessionRevoked: (sessionId) => {
       browserArtifacts.revokeSession(sessionId);
       terminal.revokeSession(sessionId);
+      desktop.revokeSession(sessionId);
     },
     onClose: () => {
       browserArtifacts.dispose();
       terminal.dispose();
+      desktop.dispose();
+      mailbox.dispose();
+      navigation?.dispose?.();
+      devices.dispose();
     },
     appVersion: options.identity.appVersion,
   });
@@ -286,23 +352,7 @@ async function readBrowserSessionBootstrap(
   );
   const appearance = AppearanceManager.loadSettings();
   const llm = LLMProviderFactory.loadSettings();
-  const providerReady = Boolean(
-    llm.anthropic?.apiKey ||
-    llm.anthropic?.subscriptionToken ||
-    llm.openai?.apiKey ||
-    llm.openai?.accessToken ||
-    llm.gemini?.apiKey ||
-    llm.openrouter?.apiKey ||
-    llm.groq?.apiKey ||
-    llm.xai?.apiKey ||
-    llm.kimi?.apiKey ||
-    llm.azure?.apiKey ||
-    llm.bedrock?.accessKeyId ||
-    llm.bedrock?.profile ||
-    Object.values(llm.customProviders || {}).some(
-      (provider) => typeof provider?.apiKey === "string" && provider.apiKey.trim().length > 0,
-    ),
-  );
+  const providerReady = getFirstRunReadiness(llm).modelReady;
   return {
     providerReady,
     onboardingCompleted: appearance.onboardingCompleted === true,

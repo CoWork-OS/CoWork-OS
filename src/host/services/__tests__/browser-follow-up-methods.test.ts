@@ -8,7 +8,11 @@ import {
   type BrowserFollowUpSources,
 } from "../browser-follow-up-methods";
 
-const workspace = { id: "workspace-1", isTemp: false } as Workspace;
+const workspace = {
+  id: "workspace-1",
+  isTemp: false,
+  permissions: { read: true, write: true, delete: false, network: true, shell: false },
+} as Workspace;
 const task = {
   id: "task-1",
   workspaceId: workspace.id,
@@ -32,7 +36,7 @@ const context = {
 
 function commands(): BrowserFollowUpCommands {
   return {
-    sendFollowUp: vi.fn(async (_taskId, _message, messageId) => ({
+    sendFollowUp: vi.fn(async (_taskId, _message, messageId, _options) => ({
       queued: false,
       messageId,
       deliveryMode: "follow_up",
@@ -91,6 +95,7 @@ describe("browser task follow-up methods", () => {
       task.id,
       "Continue from the last result.",
       stableMessageId(context.audience, context.operationKey!),
+      {},
     );
     expect(
       JSON.stringify(
@@ -127,7 +132,61 @@ describe("browser task follow-up methods", () => {
     ).toThrow();
   });
 
-  it("replays the same request through the durable message identity and conflicts on changed text", async () => {
+  it("accepts safe composer modes and access profiles, and binds them to the operation identity", async () => {
+    const dependency = sources();
+    const methods = createBrowserFollowUpMethods(dependency);
+    const request = {
+      taskId: task.id,
+      workspaceId: workspace.id,
+      message: "Continue with a plan.",
+      interactionMode: { mode: "smart", executionOverride: "plan" },
+      accessProfileId: "ask_for_approval",
+      permissionMode: "plan",
+      shellAccess: false,
+    };
+    await methods["task.followUp"].handler(
+      context,
+      methods["task.followUp"].validateParams!(request),
+    );
+    expect(dependency.commands.sendFollowUp).toHaveBeenCalledWith(
+      task.id,
+      request.message,
+      stableMessageId(context.audience, context.operationKey!),
+      {
+        interactionMode: request.interactionMode,
+        accessProfileId: "ask_for_approval",
+        permissionMode: "plan",
+        shellAccess: false,
+      },
+    );
+
+    await expect(
+      methods["task.followUp"].handler(
+        context,
+        methods["task.followUp"].validateParams!({
+          ...request,
+          interactionMode: { mode: "chat" },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(dependency.commands.sendFollowUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects unavailable profiles and permission or shell options that broaden authority", () => {
+    const methods = createBrowserFollowUpMethods(sources());
+    const base = { taskId: task.id, workspaceId: workspace.id, message: "Continue" };
+    for (const options of [
+      { accessProfileId: "missing_profile" },
+      { permissionMode: "bypass_permissions" },
+      { permissionMode: "dont_ask" },
+      { shellAccess: true },
+      { interactionMode: { mode: "unknown" } },
+    ]) {
+      expect(() => methods["task.followUp"].validateParams!({ ...base, ...options })).toThrow();
+    }
+  });
+
+  it("replays one accepted request and conflicts when its text changes under the same key", async () => {
     const dependency = sources();
     const durable = new Map<string, { taskId: string; message: string }>();
     vi.mocked(dependency.commands.sendFollowUp).mockImplementation(
@@ -158,14 +217,13 @@ describe("browser task follow-up methods", () => {
     );
     const methods = createBrowserFollowUpMethods(dependency);
 
-    await methods["task.followUp"].handler(
-      context,
-      methods["task.followUp"].validateParams!({
-        taskId: task.id,
-        workspaceId: workspace.id,
-        message: "First message",
-      }),
-    );
+    const first = methods["task.followUp"].validateParams!({
+      taskId: task.id,
+      workspaceId: workspace.id,
+      message: "First message",
+    });
+    await methods["task.followUp"].handler(context, first);
+    await methods["task.followUp"].handler(context, first);
     await expect(
       methods["task.followUp"].handler(
         context,
@@ -176,7 +234,7 @@ describe("browser task follow-up methods", () => {
         }),
       ),
     ).rejects.toMatchObject({ code: "CONFLICT" });
-    expect(dependency.commands.sendFollowUp).toHaveBeenCalledTimes(2);
+    expect(dependency.commands.sendFollowUp).toHaveBeenCalledTimes(1);
   });
 
   it("serializes concurrent uses of one key and rejects a changed concurrent request", async () => {

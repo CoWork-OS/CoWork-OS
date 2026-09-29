@@ -238,13 +238,6 @@ export function ModelDropdown({
     currentProviderModels.find((model) => model.key === selectedModel) ||
     models.find((model) => model.key === selectedModel);
   const selectedModelLabel = selectedModelInfo?.displayName || selectedModel || "Select Model";
-  const browserHost = typeof window !== "undefined" && window.coworkBrowserHost === true;
-  const browserProviderReady = window.coworkBrowserHostInfo?.providerReady === true;
-  const displayModelLabel = browserHost
-    ? browserProviderReady
-      ? "Host model"
-      : "No model configured"
-    : selectedModelLabel;
   const currentProviderLabel =
     configuredProviders.find((provider) => provider.type === selectedProvider)?.name ||
     selectedProvider;
@@ -375,18 +368,9 @@ export function ModelDropdown({
     >
       <button
         type="button"
-        disabled={browserHost}
         className={`${variant === "label" ? "model-label-subtle" : "model-selector"} ${isOpen ? "open" : ""}`}
-        title={
-          browserHost
-            ? "Model selection is managed on the CoWork host"
-            : `${currentProviderLabel}: ${selectedModelLabel} (${currentAccess.label})`
-        }
-        aria-label={
-          browserHost
-            ? displayModelLabel
-            : `Change model source, currently ${currentProviderLabel}, ${selectedModelLabel}`
-        }
+        title={`${currentProviderLabel}: ${selectedModelLabel} (${currentAccess.label})`}
+        aria-label={`Change model source, currently ${currentProviderLabel}, ${selectedModelLabel}`}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         onClick={() => {
@@ -417,7 +401,7 @@ export function ModelDropdown({
             <path d="M18 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
           </svg>
         )}
-        <span className="model-label-text">{displayModelLabel}</span>
+        <span className="model-label-text">{selectedModelLabel}</span>
         {effectiveReasoningEffort && (
           <span className="model-selector-effort">
             {

@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { TaskRepository, WorkspaceRepository } from "../../electron/database/repository-facades";
+import type { Workspace } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
 import { WebApplicationError, type WebRpcMethod } from "../web/WebApplication";
 
@@ -11,17 +12,50 @@ export interface BrowserReadSources {
   getTask: (id: string) => Promise<RecordLike | null>;
 }
 
-export function createDatabaseBrowserReadSources(db: Database.Database): BrowserReadSources {
+export function createDatabaseBrowserReadSources(
+  db: Database.Database,
+  resolveWorkspace?: (id: string) => Promise<Workspace | null>,
+): BrowserReadSources {
   const tasks = new TaskRepository(db);
   const workspaces = new WorkspaceRepository(db);
+  const readable = async (id: string) =>
+    !resolveWorkspace || Boolean((await resolveWorkspace(id))?.permissions.read);
   return {
-    listWorkspaces: async () => (await workspaces.findAll()) as unknown as RecordLike[],
-    listTasks: async ({ limit, offset, workspaceId }) =>
-      (workspaceId
-        ? await tasks.findByWorkspace(workspaceId, limit + 1, offset)
-        : await tasks.findAll(limit + 1, offset)) as unknown as RecordLike[],
-    getTask: async (id) =>
-      ((await tasks.findById(id)) as unknown as RecordLike | undefined) ?? null,
+    listWorkspaces: async () => {
+      const rows = await workspaces.findAll();
+      const allowed = await Promise.all(rows.map((row) => readable(row.id)));
+      return rows.filter((_row, index) => allowed[index]) as unknown as RecordLike[];
+    },
+    listTasks: async ({ limit, offset, workspaceId }) => {
+      if (workspaceId) {
+        if (!(await readable(workspaceId))) return [];
+        return (await tasks.findByWorkspace(
+          workspaceId,
+          limit + 1,
+          offset,
+        )) as unknown as RecordLike[];
+      }
+      // Filter before applying the browser's offset, preserving the repository's stable order.
+      const ids = new Set((await workspaces.findAll()).map((row) => row.id));
+      const allowed = new Set(
+        (await Promise.all([...ids].map(async (id) => ((await readable(id)) ? id : null)))).filter(
+          (id): id is string => id !== null,
+        ),
+      );
+      const collected = [];
+      let cursor = 0;
+      while (collected.length < offset + limit + 1 && allowed.size) {
+        const page = await tasks.findAll(500, cursor, { includeArchivedSessions: false });
+        collected.push(...page.filter((row) => allowed.has(row.workspaceId)));
+        if (page.length < 500) break;
+        cursor += page.length;
+      }
+      return collected.slice(offset, offset + limit + 1) as unknown as RecordLike[];
+    },
+    getTask: async (id) => {
+      const task = await tasks.findById(id);
+      return task && (await readable(task.workspaceId)) ? (task as unknown as RecordLike) : null;
+    },
   };
 }
 
@@ -141,6 +175,10 @@ function toPublicTask(task: RecordLike): RecordLike {
     "priority",
     "labels",
     "dueDate",
+    "pinned",
+    "sessionArchived",
+    "sessionId",
+    "source",
   ]);
 }
 

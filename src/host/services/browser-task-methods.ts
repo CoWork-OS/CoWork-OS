@@ -1,6 +1,12 @@
-import type { Task, Workspace } from "../../shared/types";
+import { AgentConfigSchema } from "../../electron/utils/validation";
+import type { AgentConfig, Task, Workspace } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
-import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
+import { LLM_PROVIDER_TYPES } from "../../shared/types";
+import {
+  BUILTIN_ACCESS_PROFILE_IDS,
+  resolveAccessProfileDefinitionWithStatus,
+} from "../../shared/access-profiles";
+import { PermissionSettingsManager } from "../../electron/security/permission-settings-manager";
 import {
   TaskAdmissionConflictError,
   TaskAdmissionReceiptUnavailableError,
@@ -12,10 +18,42 @@ import {
   type WebRpcMethod,
 } from "../web/WebApplication";
 
+type SafeAgentConfig = Pick<
+  AgentConfig,
+  | "accessProfileId"
+  | "interactionMode"
+  | "executionMode"
+  | "taskDomain"
+  | "chronicleMode"
+  | "providerType"
+  | "modelKey"
+  | "llmProfile"
+  | "llmProfileForced"
+  | "permissionMode"
+  | "shellAccess"
+  | "integrationMentions"
+  | "humanInputPolicy"
+  | "allowUserInput"
+  | "autonomousMode"
+  | "collaborativeMode"
+  | "verificationAgent"
+  | "videoGenerationMode"
+  | "multitaskMode"
+  | "multitaskLaneCount"
+  | "multitaskAssignmentMode"
+  | "multiLlmMode"
+  | "multiLlmConfig"
+  | "researchWorkflow"
+  | "qualityPasses"
+>;
+
 interface CreateTaskRequest {
   title: string;
   prompt: string;
   workspaceId: string;
+  agentConfig: SafeAgentConfig;
+  assignedAgentRoleId?: string;
+  generateTitle?: true;
 }
 
 export interface BrowserTaskCommands {
@@ -24,7 +62,8 @@ export interface BrowserTaskCommands {
     title: string;
     prompt: string;
     workspaceId: string;
-    agentConfig: { accessProfileId: typeof BUILTIN_ACCESS_PROFILE_IDS.askForApproval };
+    agentConfig: SafeAgentConfig;
+    taskOverrides?: Partial<Task>;
     source: "api";
     requestIdentity: CreateTaskRequest;
     autoStart: false;
@@ -39,6 +78,8 @@ export interface BrowserTaskSources {
     "createTaskIdempotent" | "startAdmittedTask" | "getTaskAdmission"
   >;
   getWorkspace: (id: string) => Promise<Workspace | null>;
+  /** Browser tasks may target active agent roles only. */
+  isActiveAgentRole?: (id: string) => Promise<boolean> | boolean;
 }
 
 /** A narrow task surface that admits work through the existing durable queue. */
@@ -49,12 +90,18 @@ export function createBrowserTaskMethods(
     "task.create": {
       capability: "tasks.create",
       mutation: true,
-      validateParams: parseCreateTaskRequest,
+      validateParams: parseBrowserCreateTaskRequest,
       handler: async (context, params) => {
         const request = params as CreateTaskRequest;
         const workspace = await sources.getWorkspace(request.workspaceId);
         if (!workspace || workspace.isTemp || isTempWorkspaceId(workspace.id)) {
           throw new WebApplicationError("INVALID_REQUEST", "Workspace is unavailable.", 400);
+        }
+        if (request.assignedAgentRoleId) {
+          const roleIsActive = await sources.isActiveAgentRole?.(request.assignedAgentRoleId);
+          if (roleIsActive !== true) {
+            throw new WebApplicationError("INVALID_REQUEST", "Agent role is unavailable.", 400);
+          }
         }
         const key = scopedOperationKey(context);
         let admitted: { task: Task; replayed: boolean };
@@ -62,10 +109,9 @@ export function createBrowserTaskMethods(
           admitted = await sources.commands.createTaskIdempotent({
             operationKey: key,
             ...request,
-            // Browser admission has no profile editor. Preserve the shared
-            // composer's displayed approval boundary even if the host's
-            // default profile is broader.
-            agentConfig: { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval },
+            taskOverrides: request.assignedAgentRoleId
+              ? { assignedAgentRoleId: request.assignedAgentRoleId }
+              : undefined,
             source: "api",
             requestIdentity: request,
             autoStart: false,
@@ -123,8 +169,18 @@ export function createBrowserTaskMethods(
   };
 }
 
-function parseCreateTaskRequest(value: unknown): CreateTaskRequest {
+export function parseBrowserCreateTaskRequest(value: unknown): CreateTaskRequest {
   if (!isRecord(value)) throw invalidRequest();
+  const allowed = new Set([
+    "title",
+    "prompt",
+    "workspaceId",
+    "agentConfig",
+    "assignedAgentRoleId",
+    "generateTitle",
+    "images",
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw invalidRequest();
   const title = typeof value.title === "string" ? value.title.trim() : "";
   const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
   const workspaceId = typeof value.workspaceId === "string" ? value.workspaceId.trim() : "";
@@ -138,7 +194,221 @@ function parseCreateTaskRequest(value: unknown): CreateTaskRequest {
   ) {
     throw invalidRequest();
   }
-  return { title, prompt, workspaceId };
+  if (value.generateTitle !== undefined && value.generateTitle !== true) throw invalidRequest();
+  // Host-local image paths and arbitrary image payloads are not accepted from a browser.
+  if (value.images !== undefined && (!Array.isArray(value.images) || value.images.length > 0)) {
+    throw invalidRequest();
+  }
+
+  const assignedAgentRoleId = value.assignedAgentRoleId;
+  if (
+    assignedAgentRoleId !== undefined &&
+    (typeof assignedAgentRoleId !== "string" || !isUuid(assignedAgentRoleId))
+  ) {
+    throw invalidRequest();
+  }
+
+  const agentConfig = parseSafeAgentConfig(value.agentConfig);
+  return {
+    title,
+    prompt,
+    workspaceId,
+    agentConfig,
+    ...(assignedAgentRoleId ? { assignedAgentRoleId } : {}),
+    ...(value.generateTitle === true ? { generateTitle: true } : {}),
+  };
+}
+
+const BrowserTaskOptionsSchema = AgentConfigSchema.pick({
+  permissionMode: true,
+  shellAccess: true,
+  integrationMentions: true,
+  humanInputPolicy: true,
+  allowUserInput: true,
+  autonomousMode: true,
+  collaborativeMode: true,
+  verificationAgent: true,
+  videoGenerationMode: true,
+  multitaskMode: true,
+  multitaskLaneCount: true,
+  multitaskAssignmentMode: true,
+  multiLlmMode: true,
+  multiLlmConfig: true,
+  researchWorkflow: true,
+  qualityPasses: true,
+}).strict();
+
+function parseSafeAgentConfig(value: unknown): SafeAgentConfig {
+  const record = value === undefined ? {} : value;
+  if (!isRecord(record)) throw invalidRequest();
+  const allowed = new Set([
+    "accessProfileId",
+    "interactionMode",
+    "executionMode",
+    "taskDomain",
+    "chronicleMode",
+    "providerType",
+    "modelKey",
+    "llmProfile",
+    "llmProfileForced",
+    "permissionMode",
+    "shellAccess",
+    "integrationMentions",
+    "humanInputPolicy",
+    "allowUserInput",
+    "autonomousMode",
+    "collaborativeMode",
+    "verificationAgent",
+    "videoGenerationMode",
+    "multitaskMode",
+    "multitaskLaneCount",
+    "multitaskAssignmentMode",
+    "multiLlmMode",
+    "multiLlmConfig",
+    "researchWorkflow",
+    "qualityPasses",
+  ]);
+  if (Object.keys(record).some((key) => !allowed.has(key))) throw invalidRequest();
+
+  const config: SafeAgentConfig = {
+    accessProfileId: resolveAccessProfileId(record.accessProfileId),
+  };
+
+  if (record.interactionMode !== undefined) {
+    if (!isRecord(record.interactionMode)) throw invalidRequest();
+    const interaction = record.interactionMode;
+    if (interaction.mode === "chat" && Object.keys(interaction).length === 1) {
+      config.interactionMode = { mode: "chat" };
+    } else if (
+      interaction.mode === "smart" &&
+      (interaction.executionOverride === undefined ||
+        isExecutionModeOverride(interaction.executionOverride)) &&
+      Object.keys(interaction).every((key) => key === "mode" || key === "executionOverride")
+    ) {
+      config.interactionMode = {
+        mode: "smart",
+        ...(interaction.executionOverride
+          ? { executionOverride: interaction.executionOverride }
+          : {}),
+      };
+    } else {
+      throw invalidRequest();
+    }
+  }
+
+  if (record.executionMode !== undefined) {
+    if (!isExecutionMode(record.executionMode)) throw invalidRequest();
+    config.executionMode = record.executionMode;
+  }
+  if (record.taskDomain !== undefined) {
+    if (!isTaskDomain(record.taskDomain)) throw invalidRequest();
+    config.taskDomain = record.taskDomain;
+  }
+  if (record.chronicleMode !== undefined) {
+    if (!isChronicleMode(record.chronicleMode)) throw invalidRequest();
+    config.chronicleMode = record.chronicleMode;
+  }
+  if (record.providerType !== undefined) {
+    if (
+      typeof record.providerType !== "string" ||
+      !(LLM_PROVIDER_TYPES as readonly string[]).includes(record.providerType)
+    ) {
+      throw invalidRequest();
+    }
+    config.providerType = record.providerType as AgentConfig["providerType"];
+  }
+  if (record.modelKey !== undefined) {
+    if (!isValidModelKey(record.modelKey)) throw invalidRequest();
+    config.modelKey = record.modelKey;
+  }
+  if (record.llmProfile !== undefined) {
+    if (record.llmProfile !== "strong" && record.llmProfile !== "cheap") throw invalidRequest();
+    config.llmProfile = record.llmProfile;
+  }
+  if (record.llmProfileForced !== undefined) {
+    if (typeof record.llmProfileForced !== "boolean") throw invalidRequest();
+    config.llmProfileForced = record.llmProfileForced;
+  }
+
+  const additional = BrowserTaskOptionsSchema.safeParse(
+    Object.fromEntries(
+      Object.entries(record).filter(([key]) => key in BrowserTaskOptionsSchema.shape),
+    ),
+  );
+  if (!additional.success) throw invalidRequest();
+  return { ...config, ...additional.data };
+}
+
+function resolveAccessProfileId(value: unknown): SafeAgentConfig["accessProfileId"] {
+  const profileId =
+    value === undefined
+      ? BUILTIN_ACCESS_PROFILE_IDS.askForApproval
+      : typeof value === "string"
+        ? value.trim()
+        : "";
+  if (!profileId || profileId.length > 100) throw invalidRequest();
+  const settings = PermissionSettingsManager.loadSettings();
+  const resolution = resolveAccessProfileDefinitionWithStatus(
+    profileId,
+    settings.accessProfiles ?? [],
+  );
+  if (resolution.status !== "resolved") {
+    throw new WebApplicationError("INVALID_REQUEST", "Access profile is unavailable.", 400);
+  }
+  return profileId as SafeAgentConfig["accessProfileId"];
+}
+
+function isExecutionMode(value: unknown): value is NonNullable<AgentConfig["executionMode"]> {
+  return (
+    value === "execute" ||
+    value === "chat" ||
+    value === "plan" ||
+    value === "analyze" ||
+    value === "verified" ||
+    value === "debug"
+  );
+}
+
+function isExecutionModeOverride(
+  value: unknown,
+): value is "execute" | "plan" | "analyze" | "debug" | "verified" {
+  return (
+    value === "execute" ||
+    value === "plan" ||
+    value === "analyze" ||
+    value === "debug" ||
+    value === "verified"
+  );
+}
+
+function isTaskDomain(value: unknown): value is NonNullable<AgentConfig["taskDomain"]> {
+  return (
+    value === "auto" ||
+    value === "code" ||
+    value === "research" ||
+    value === "operations" ||
+    value === "writing" ||
+    value === "general" ||
+    value === "media"
+  );
+}
+
+function isChronicleMode(value: unknown): value is NonNullable<AgentConfig["chronicleMode"]> {
+  return value === "inherit" || value === "enabled" || value === "disabled";
+}
+
+function isValidModelKey(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 200 &&
+    /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value) &&
+    !value.split("/").some((segment) => segment === "." || segment === "..")
+  );
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function parseAdmissionLookup(value: unknown): { operationKey: string } {

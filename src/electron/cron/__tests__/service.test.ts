@@ -178,7 +178,7 @@ describe("CronService", () => {
 
       service = createService({
         nowMs: () => 1000000,
-        findActiveTaskForJob: async () => ({ id: "task-active", status: "interrupted" }),
+        findActiveTaskForJob: async () => ({ id: "task-active", status: "executing" }),
       });
       await service.start();
 
@@ -188,8 +188,47 @@ describe("CronService", () => {
       expect(job?.state.nextRunAtMs).toBe(1060000);
 
       const result = await service.run("job-active", "due");
-      expect(result).toEqual({ ok: true, ran: false, reason: "not-due" });
+      // The active persisted task is checked before the schedule, so no second task starts.
+      expect(result).toEqual({ ok: true, ran: false, reason: "already-running" });
       expect(mockCreateTask).not.toHaveBeenCalled();
+    });
+
+    it("does not adopt a matching interrupted task as a live run", async () => {
+      (loadCronStore as ReturnType<typeof vi.fn>).mockResolvedValue({
+        version: 1,
+        jobs: [
+          {
+            id: "job-interrupted",
+            name: "Interrupted Job",
+            enabled: true,
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            workspaceId: "ws-1",
+            taskPrompt: "Run work",
+            taskTitle: "Interrupted brief",
+            schedule: { kind: "every", everyMs: 60000 },
+            state: {
+              nextRunAtMs: 2000000,
+              runHistory: [],
+              totalRuns: 0,
+              successfulRuns: 0,
+              failedRuns: 0,
+            },
+          },
+        ],
+      } satisfies CronStoreFile);
+
+      service = createService({
+        nowMs: () => 1000000,
+        // Interrupted, paused and blocked tasks are run outcomes, not in-flight runs.
+        findActiveTaskForJob: async () => ({ id: "task-interrupted", status: "interrupted" }),
+      });
+      await service.start();
+
+      const job = await service.get("job-interrupted");
+      expect(job?.state.runningAtMs).toBeUndefined();
+      expect(job?.state.lastTaskId).toBeUndefined();
+      expect(job?.state.nextRunAtMs).toBe(2000000);
     });
 
     it("does not use title fallback when multiple enabled jobs share a task title", async () => {

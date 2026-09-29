@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   addCronOutcomeCountMaps,
   emptyCronOutcomeCountMap,
@@ -108,14 +108,29 @@ interface CronJob {
   state: CronJobState;
 }
 
+interface CronSchedulerObservation {
+  profileScope: "current_profile" | "unknown";
+  runnerKind: "desktop" | "daemon" | "unknown";
+  runnerHost?: string;
+  state: "running" | "disabled" | "not_started" | "unavailable";
+  observedAtMs: number;
+  timeZone: string;
+  runnerExclusivity: "not_verified" | "unknown";
+}
+
 interface CronStatusSummary {
   enabled: boolean;
   storePath: string;
   jobCount: number;
   enabledJobCount: number;
-  runningJobCount?: number;
-  maxConcurrentRuns?: number;
+  runningJobCount: number;
+  maxConcurrentRuns: number;
   nextWakeAtMs: number | null;
+  nextWakeReason?: "scheduled_job" | "task_recovery_check" | "run_timeout_check";
+  nextWakeScheduleKind?: "at" | "every" | "cron";
+  nextWakeTimeZone?: string;
+  // Older Electron main processes may still be active while the renderer hot reloads.
+  scheduler?: CronSchedulerObservation;
 }
 
 function isWarningLikeLastStatus(status?: CronJobState["lastStatus"]): boolean {
@@ -355,11 +370,14 @@ const Icons = {
   ),
 };
 
-function describeSchedule(schedule: CronSchedule): string {
+function describeSchedule(schedule: CronSchedule, schedulerTimeZone?: string): string {
   switch (schedule.kind) {
     case "at": {
-      const date = new Date(schedule.atMs);
-      return `Once at ${date.toLocaleString()}`;
+      return `Once at ${
+        schedulerTimeZone
+          ? formatScheduledTime(schedule.atMs, schedulerTimeZone)
+          : new Date(schedule.atMs).toLocaleString()
+      }`;
     }
     case "every": {
       const ms = schedule.everyMs;
@@ -409,6 +427,56 @@ function formatRelativeTime(ms: number): string {
   }
   const days = Math.round(absDiff / 86400000);
   return isPast ? `${days}d ago` : `in ${days}d`;
+}
+
+function formatScheduledTime(ms: number, timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone,
+    }).format(new Date(ms));
+  } catch {
+    return new Date(ms).toLocaleString();
+  }
+}
+
+function getLocalTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function schedulerStateLabel(state?: CronSchedulerObservation["state"]): string {
+  switch (state) {
+    case "running":
+      return "running in this process";
+    case "disabled":
+      return "disabled in this process";
+    case "not_started":
+      return "initialized but not started in this process";
+    default:
+      return "unavailable from this process";
+  }
+}
+
+function schedulerRunnerLabel(scheduler?: CronSchedulerObservation): string {
+  if (!scheduler) return "scheduler runner unknown";
+  const kind =
+    scheduler.runnerKind === "desktop"
+      ? "desktop app"
+      : scheduler.runnerKind === "daemon"
+        ? "daemon"
+        : "CoWork process";
+  return scheduler.runnerHost ? `${kind} on ${scheduler.runnerHost}` : kind;
+}
+
+function getJobScheduleTimeZone(
+  job: CronJob,
+  scheduler?: CronSchedulerObservation,
+): string | null {
+  if (job.schedule.kind === "cron") {
+    return job.schedule.tz || scheduler?.timeZone || getLocalTimeZone();
+  }
+  return job.schedule.kind === "at" ? scheduler?.timeZone || getLocalTimeZone() : null;
 }
 
 function formatDuration(ms: number): string {
@@ -820,9 +888,10 @@ const styles = {
 
 interface ScheduledTasksSettingsProps {
   onOpenTask?: (taskId: string) => void;
+  focusJobId?: string;
 }
 
-export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsProps) {
+export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTasksSettingsProps) {
   const [status, setStatus] = useState<CronStatusSummary | null>(null);
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -835,6 +904,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
     {},
   );
   const [historyLoadingJobId, setHistoryLoadingJobId] = useState<string | null>(null);
+  const appliedFocusJobId = useRef<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -900,6 +970,18 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
       void loadRunHistory(job);
     }
   };
+
+  useEffect(() => {
+    if (!focusJobId || loading || appliedFocusJobId.current === focusJobId) return;
+    appliedFocusJobId.current = focusJobId;
+    const job = jobs.find((entry) => entry.id === focusJobId);
+    if (!job) {
+      setError("This scheduled task is no longer available in the current profile.");
+      return;
+    }
+    setExpandedJobId(job.id);
+    void loadRunHistory(job);
+  }, [focusJobId, jobs, loading, loadRunHistory]);
 
   useEffect(() => {
     loadData();
@@ -1022,6 +1104,8 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
     { counts: emptyCronOutcomeCountMap(), needsAttention: 0 },
   );
   const aggregateSuccess = summarizeCronRunSuccess(runStats.counts);
+  const schedulerTimeZone = status?.scheduler?.timeZone || getLocalTimeZone();
+  const nextWakeTimeZone = status?.nextWakeTimeZone || schedulerTimeZone;
 
   return (
     <div style={styles.container}>
@@ -1030,8 +1114,55 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
           <h3>Scheduled Tasks</h3>
         </div>
         <p className="settings-description">
-          Automate tasks to run on a schedule. Results appear in your workspace.
+          Schedules are stored in this CoWork profile and can run while a desktop app or daemon
+          process is available. Results appear in your workspace.
         </p>
+        <div
+          role="note"
+          style={{
+            display: "grid",
+            gap: 6,
+            marginTop: 12,
+            padding: 12,
+            border: "1px solid var(--color-border-subtle)",
+            borderRadius: 10,
+            color: "var(--color-text-secondary)",
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          <div>
+            <strong style={{ color: "var(--color-text-primary)" }}>Scheduler availability</strong>
+            {status?.scheduler ? (
+              <span>
+                {`: ${schedulerRunnerLabel(status.scheduler)} is ${schedulerStateLabel(status.scheduler.state)}. `}
+                Observed {new Date(status.scheduler.observedAtMs).toLocaleTimeString()} in{" "}
+                {status.scheduler.timeZone}.
+              </span>
+            ) : (
+              <span>
+                {status
+                  ? ": scheduler details are unavailable from this process."
+                  : ": checking the current process…"}
+              </span>
+            )}
+          </div>
+          <span>
+            This reports only the current process. CoWork does not verify whether another desktop
+            app or daemon is using the same profile, and this snapshot cannot promise future uptime.
+            Keep the scheduler host awake and the process running.
+          </span>
+          <span>
+            If the scheduler resumes with a saved job overdue, it may run once; missed schedule
+            slots are not replayed individually. Calendar schedules without their own timezone use
+            the scheduler process timezone. A one-shot time newly set in the past has no next run.
+          </span>
+          <span>
+            Saved credentials are not a guarantee that a provider will accept a later run. Review
+            the latest run error for connection or permission problems; pending approvals stay in
+            their task or workflow record. Turning triggers off does not stop work already running.
+          </span>
+        </div>
       </div>
 
       {/* Error Banner */}
@@ -1069,9 +1200,19 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
           <span style={styles.statHint}>{describeRunSuccess(aggregateSuccess)}</span>
         </div>
         <div style={styles.statCard}>
-          <span style={styles.statLabel}>Next Run</span>
+          <span style={styles.statLabel}>Scheduled for</span>
           <span style={{ ...styles.statValue, fontSize: "16px" }}>
-            {status?.nextWakeAtMs ? formatRelativeTime(status.nextWakeAtMs) : "-"}
+            {status?.nextWakeAtMs
+              ? status.nextWakeReason === "task_recovery_check"
+                ? `Checking a recovered task ${formatRelativeTime(status.nextWakeAtMs)}`
+                : status.nextWakeReason === "run_timeout_check"
+                  ? `Checking a recovered run ${formatRelativeTime(status.nextWakeAtMs)}`
+                  : status.nextWakeAtMs <= Date.now()
+                    ? "Due when scheduler is available"
+                    : status.nextWakeScheduleKind === "every"
+                      ? formatRelativeTime(status.nextWakeAtMs)
+                      : `${formatScheduledTime(status.nextWakeAtMs, nextWakeTimeZone)} · ${nextWakeTimeZone}`
+              : "-"}
           </span>
           <span style={styles.statHint}>
             {status?.runningJobCount ? `${status.runningJobCount} running now` : "No active run"}
@@ -1139,6 +1280,7 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
             };
             const latestRun = runHistory.entries[0];
             const runSuccess = summarizeCronRunSuccess(jobOutcomeCounts(job.state));
+            const jobTimeZone = getJobScheduleTimeZone(job, status?.scheduler);
             const latestTone = getStatusTone(latestRun?.status ?? lastStatus);
             const latestToneColors = getToneColors(latestTone);
             const deliveryToneColors = getToneColors(getDeliveryTone(job, latestRun));
@@ -1214,7 +1356,14 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                     <div style={styles.jobMeta}>
                       <span style={styles.scheduleTag}>
                         {getScheduleIcon(job.schedule)}
-                        {describeSchedule(job.schedule)}
+                        {describeSchedule(job.schedule, schedulerTimeZone)}
+                        {job.schedule.kind === "cron" && (
+                          <span>
+                            {job.schedule.tz
+                              ? ` · ${job.schedule.tz}`
+                              : ` · scheduler time ${jobTimeZone || "unknown"}`}
+                          </span>
+                        )}
                       </span>
                       {isInboxAutomation && (
                         <span
@@ -1241,7 +1390,15 @@ export function ScheduledTasksSettings({ onOpenTask }: ScheduledTasksSettingsPro
                   {job.enabled && job.state.nextRunAtMs && (
                     <div style={styles.nextRun}>
                       {Icons.zap}
-                      <span>{formatRelativeTime(job.state.nextRunAtMs)}</span>
+                      <span>
+                        {job.state.nextRunAtMs <= Date.now()
+                          ? status?.scheduler?.state === "running"
+                            ? "Due · may run once when eligible"
+                            : "Due when scheduler is available"
+                          : jobTimeZone
+                            ? `Scheduled for ${formatScheduledTime(job.state.nextRunAtMs, jobTimeZone)} · ${jobTimeZone}`
+                            : `Scheduled for ${formatRelativeTime(job.state.nextRunAtMs)} (interval)`}
+                      </span>
                     </div>
                   )}
 

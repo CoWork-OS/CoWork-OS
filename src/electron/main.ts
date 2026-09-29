@@ -137,7 +137,13 @@ import { PersonalityManager } from "./settings/personality-manager";
 import { MCPClientManager } from "./mcp/client/MCPClientManager";
 import { InfraManager } from "./infra/infra-manager";
 import { trayManager } from "./tray";
-import { CronService, setCronService, getCronStorePath, type CronEvent } from "./cron";
+import {
+  CRON_ACTIVE_TASK_STATUSES,
+  CronService,
+  setCronService,
+  getCronStorePath,
+  type CronEvent,
+} from "./cron";
 import { resolveTaskResultText } from "./cron/result-text";
 import {
   StrategicPlannerService,
@@ -2398,6 +2404,7 @@ if (isMacSafeStorageMigrationWorker) {
 
         cronService = new CronService({
           cronEnabled: true,
+          runnerKind: "desktop",
           storePath: getCronStorePath(),
           maxConcurrentRuns: 3, // Allow up to 3 concurrent jobs
           // Webhook configuration (disabled by default, can be enabled in settings)
@@ -2639,14 +2646,9 @@ if (isMacSafeStorageMigrationWorker) {
             if (params.runMode !== "new_task") return null;
             const title = typeof params.taskTitle === "string" ? params.taskTitle.trim() : "";
             if (!title) return null;
-            const activeStatuses = new Set([
-              "queued",
-              "planning",
-              "executing",
-              "interrupted",
-              "paused",
-              "blocked",
-            ]);
+            // The scheduler's own definition: a match it would reject must not hide an
+            // executing task listed after it.
+            const activeStatuses = CRON_ACTIVE_TASK_STATUSES;
             const tasks = taskRepo.findByWorkspace(params.workspaceId, 50, 0);
             const exactJobMatch = tasks.find(
               (task) =>

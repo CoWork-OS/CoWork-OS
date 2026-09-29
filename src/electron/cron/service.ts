@@ -4,13 +4,16 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
+import os from "node:os";
 import type {
   CronJob,
   CronJobCreate,
   CronJobPatch,
+  CronSchedule,
   CronServiceDeps,
   CronStoreFile,
   CronStatusSummary,
+  CronSchedulerObservation,
   CronRunResult,
   CronRemoveResult,
   CronAddResult,
@@ -30,7 +33,7 @@ import {
   recordCronRunCompletion,
   resetCronOutcomeCounts,
 } from "./outcome-counts";
-import { computeNextRunAtMs } from "./schedule";
+import { computeNextRunAtMs, validateCronExpression, validateCronTimeZone } from "./schedule";
 import { CronWebhookServer } from "./webhook";
 import { createLogger } from "../utils/logger";
 
@@ -43,13 +46,15 @@ const MAX_TIMEOUT_MS = 2147483647;
 const DEFAULT_MAX_CONCURRENT_RUNS = 1;
 const DEFAULT_JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const DEFAULT_MAX_HISTORY_ENTRIES = 10;
-const ACTIVE_TASK_STATUSES = new Set([
+const PERSISTED_TASK_RECHECK_INTERVAL_MS = 15_000;
+/**
+ * Task statuses that mean a scheduled run is still in flight. Interrupted, paused and
+ * blocked tasks are run outcomes (see reconcilePersistedTaskOutcome), not active runs.
+ */
+export const CRON_ACTIVE_TASK_STATUSES: ReadonlySet<string> = new Set([
   "queued",
   "planning",
   "executing",
-  "interrupted",
-  "paused",
-  "blocked",
 ]);
 
 // Default logger
@@ -82,6 +87,7 @@ interface CronServiceState {
     Omit<
       CronServiceDeps,
       | "nowMs"
+      | "runnerKind"
       | "onEvent"
       | "log"
       | "maxConcurrentRuns"
@@ -99,6 +105,7 @@ interface CronServiceState {
     >
   > & {
     nowMs: () => number;
+    runnerKind: NonNullable<CronServiceDeps["runnerKind"]>;
     onEvent?: (evt: CronEvent) => void;
     log: typeof defaultLog;
     maxConcurrentRuns: number;
@@ -118,6 +125,7 @@ interface CronServiceState {
   timer: ReturnType<typeof setTimeout> | null;
   outboxTimer: ReturnType<typeof setTimeout> | null;
   running: boolean;
+  schedulerStarted: boolean;
   processingOutbox: boolean;
   runningJobIds: Set<string>; // Track currently running jobs
   opLock: Promise<unknown>;
@@ -126,12 +134,14 @@ interface CronServiceState {
 
 export class CronService {
   private state: CronServiceState;
+  private lifecycleOperation: Promise<unknown> = Promise.resolve();
 
   constructor(deps: CronServiceDeps) {
     this.state = {
       deps: {
         ...deps,
         nowMs: deps.nowMs ?? (() => Date.now()),
+        runnerKind: deps.runnerKind ?? "unknown",
         log: deps.log ?? defaultLog,
         maxConcurrentRuns: deps.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS,
         defaultTimeoutMs: deps.defaultTimeoutMs ?? DEFAULT_JOB_TIMEOUT_MS,
@@ -150,6 +160,7 @@ export class CronService {
       timer: null,
       outboxTimer: null,
       running: false,
+      schedulerStarted: false,
       processingOutbox: false,
       runningJobIds: new Set(),
       opLock: Promise.resolve(),
@@ -162,33 +173,42 @@ export class CronService {
    * Loads jobs from store and arms the timer
    */
   async start(): Promise<void> {
-    await this.withLock(async () => {
-      const { deps, log } = this.getContext();
+    await this.withLifecycleLock(async () => {
+      if (this.state.schedulerStarted) return;
+      await this.withLock(async () => {
+        const { deps, log } = this.getContext();
+        if (this.state.schedulerStarted) return;
 
-      if (!deps.cronEnabled) {
-        log.info("Cron service disabled");
-        return;
-      }
+        this.stopTimer();
+        this.stopOutboxTimer();
+        if (!deps.cronEnabled) {
+          this.state.schedulerStarted = false;
+          log.info("Cron service disabled");
+          return;
+        }
 
-      const storePath = resolveCronStorePath(deps.storePath);
-      this.state.store = await loadCronStore(storePath);
-      // Idempotent: classifies retained history once and detects older writers.
-      for (const job of this.state.store.jobs) reconcileCronOutcomeCounts(job.state);
+        const storePath = resolveCronStorePath(deps.storePath);
+        this.state.store = await loadCronStore(storePath);
+        // Idempotent: classifies retained history once and detects older writers.
+        for (const job of this.state.store.jobs) reconcileCronOutcomeCounts(job.state);
 
-      const enabledCount = this.state.store.jobs.filter((j) => j.enabled).length;
-      log.info(`Cron service started with ${enabledCount} enabled jobs`);
+        const enabledCount = this.state.store.jobs.filter((j) => j.enabled).length;
+        log.info(`Cron service started with ${enabledCount} enabled jobs`);
 
-      const nowMs = deps.nowMs();
-      await this.reconcileLoadedJobs(nowMs);
+        const nowMs = deps.nowMs();
+        await this.reconcileLoadedJobs(nowMs);
 
-      await this.persist();
-      this.armTimer();
-      this.armOutboxTimer();
+        await this.persist();
 
-      // Start webhook server if configured
-      if (deps.webhook?.enabled) {
-        await this.startWebhookServer();
-      }
+        // Start webhook server before marking the timer scheduler live.
+        if (deps.webhook?.enabled) {
+          await this.startWebhookServer();
+        }
+
+        this.state.schedulerStarted = true;
+        this.armTimer();
+        this.armOutboxTimer();
+      });
     });
   }
 
@@ -229,17 +249,21 @@ export class CronService {
    * Stop the cron service
    */
   async stop(): Promise<void> {
-    this.stopTimer();
-    this.stopOutboxTimer();
+    await this.withLifecycleLock(async () => {
+      this.state.schedulerStarted = false;
+      this.stopTimer();
+      this.stopOutboxTimer();
 
-    // Stop webhook server if running
-    if (this.state.webhookServer) {
-      await this.state.webhookServer.stop();
-      this.state.webhookServer = null;
-    }
+      // Stop webhook server if running
+      if (this.state.webhookServer) {
+        await this.state.webhookServer.stop();
+        this.state.webhookServer = null;
+      }
 
-    this.state.store = null;
-    this.getContext().log.info("Cron service stopped");
+      // Keep the loaded store object until the service is discarded. Clearing it
+      // while ordinary operations are queued can detach their local store reference.
+      this.getContext().log.info("Cron service stopped");
+    });
   }
 
   /**
@@ -250,20 +274,66 @@ export class CronService {
       const { deps } = this.getContext();
       const store = this.ensureStore();
 
-      const nextJob = store.jobs
-        .filter((j) => j.enabled && j.state.nextRunAtMs)
+      const eligibleJobs = store.jobs.filter(
+        (job) =>
+          (job.enabled || job.state.runningAtMs !== undefined) &&
+          !this.state.runningJobIds.has(job.id),
+      );
+      const nextScheduledJob = eligibleJobs
+        .filter(
+          (job) =>
+            job.enabled &&
+            job.state.runningAtMs === undefined &&
+            job.state.nextRunAtMs !== undefined,
+        )
         .sort((a, b) => (a.state.nextRunAtMs ?? Infinity) - (b.state.nextRunAtMs ?? Infinity))[0];
+      const recoveryJob = eligibleJobs.find((job) => job.state.runningAtMs !== undefined);
+      const canCheckRecoveredTask = Boolean(recoveryJob?.state.lastTaskId && deps.getTaskStatus);
+      const recoveryAtMs = recoveryJob
+        ? canCheckRecoveredTask
+          ? deps.nowMs() + PERSISTED_TASK_RECHECK_INTERVAL_MS
+          : recoveryJob.state.runningAtMs! + this.getJobTimeoutMs(recoveryJob)
+        : Infinity;
+      const useRecoveryWake = Boolean(
+        recoveryJob &&
+        (!nextScheduledJob?.state.nextRunAtMs || recoveryAtMs < nextScheduledJob.state.nextRunAtMs),
+      );
+      const nextJob = useRecoveryWake ? recoveryJob : nextScheduledJob;
+      const nextWakeAtMs = useRecoveryWake ? recoveryAtMs : (nextJob?.state.nextRunAtMs ?? null);
 
       const webhookAddr = this.state.webhookServer?.getAddress();
+      const scheduler = this.getSchedulerObservation(deps);
+      const nextWakeTimeZone =
+        nextJob?.schedule.kind === "cron"
+          ? nextJob.schedule.tz || scheduler.timeZone
+          : nextJob?.schedule.kind === "at"
+            ? scheduler.timeZone
+            : undefined;
 
       return {
         enabled: deps.cronEnabled,
         storePath: resolveCronStorePath(deps.storePath),
         jobCount: store.jobs.length,
         enabledJobCount: store.jobs.filter((j) => j.enabled).length,
-        runningJobCount: this.state.runningJobIds.size,
+        // Leases persisted by another process (or surviving an app restart) are
+        // active work too, even though this process did not start them.
+        runningJobCount:
+          this.state.runningJobIds.size +
+          store.jobs.filter(
+            (job) => job.state.runningAtMs !== undefined && !this.state.runningJobIds.has(job.id),
+          ).length,
         maxConcurrentRuns: deps.maxConcurrentRuns,
-        nextWakeAtMs: nextJob?.state.nextRunAtMs ?? null,
+        nextWakeAtMs,
+        nextWakeReason: useRecoveryWake
+          ? canCheckRecoveredTask
+            ? "task_recovery_check"
+            : "run_timeout_check"
+          : nextJob
+            ? "scheduled_job"
+            : undefined,
+        nextWakeScheduleKind: useRecoveryWake ? undefined : nextJob?.schedule.kind,
+        nextWakeTimeZone: useRecoveryWake ? undefined : nextWakeTimeZone,
+        scheduler,
         webhook: webhookAddr
           ? {
               enabled: true,
@@ -273,6 +343,22 @@ export class CronService {
           : undefined,
       };
     });
+  }
+
+  private getSchedulerObservation(deps: CronServiceDeps): CronSchedulerObservation {
+    return {
+      profileScope: "current_profile",
+      runnerKind: deps.runnerKind ?? "unknown",
+      runnerHost: os.hostname(),
+      state: !deps.cronEnabled
+        ? "disabled"
+        : this.state.schedulerStarted
+          ? "running"
+          : "not_started",
+      observedAtMs: deps.nowMs?.() ?? Date.now(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      runnerExclusivity: "not_verified",
+    };
   }
 
   /**
@@ -335,6 +421,20 @@ export class CronService {
       const store = this.ensureStore();
       const nowMs = deps.nowMs();
 
+      if (input.schedule.kind === "cron") {
+        if (!validateCronExpression(input.schedule.expr)) {
+          return { ok: false, error: "Schedule must be a valid five-field cron expression." };
+        }
+        if (!validateCronTimeZone(input.schedule.tz)) {
+          return { ok: false, error: "Schedule timezone must be a valid IANA timezone." };
+        }
+      }
+
+      const schedule =
+        input.schedule.kind === "every" && input.schedule.anchorMs === undefined
+          ? { ...input.schedule, anchorMs: nowMs }
+          : input.schedule;
+
       const job: CronJob = {
         id: uuidv4(),
         name: input.name,
@@ -353,7 +453,7 @@ export class CronService {
         deleteAfterRun: input.deleteAfterRun,
         createdAtMs: nowMs,
         updatedAtMs: nowMs,
-        schedule: input.schedule,
+        schedule,
         workspaceId: input.workspaceId,
         taskPrompt: input.taskPrompt,
         taskTitle: input.taskTitle,
@@ -418,6 +518,24 @@ export class CronService {
 
       const job = store.jobs[index];
       const wasEnabled = job.enabled;
+      let proposedSchedule = patch.schedule ?? job.schedule;
+      const scheduleWillBeActivated =
+        patch.schedule !== undefined || (!wasEnabled && patch.enabled === true);
+      if (scheduleWillBeActivated && proposedSchedule.kind === "cron") {
+        if (!validateCronExpression(proposedSchedule.expr)) {
+          return { ok: false, error: "Schedule must be a valid five-field cron expression." };
+        }
+        if (!validateCronTimeZone(proposedSchedule.tz)) {
+          return { ok: false, error: "Schedule timezone must be a valid IANA timezone." };
+        }
+      }
+      if (
+        scheduleWillBeActivated &&
+        proposedSchedule.kind === "every" &&
+        proposedSchedule.anchorMs === undefined
+      ) {
+        proposedSchedule = { ...proposedSchedule, anchorMs: nowMs };
+      }
 
       // Apply patch - basic fields
       if (patch.name !== undefined) job.name = patch.name;
@@ -427,7 +545,7 @@ export class CronService {
       if (patch.shellAccess !== undefined) job.shellAccess = patch.shellAccess;
       if (patch.allowUserInput !== undefined) job.allowUserInput = patch.allowUserInput;
       if (patch.deleteAfterRun !== undefined) job.deleteAfterRun = patch.deleteAfterRun;
-      if (patch.schedule !== undefined) job.schedule = patch.schedule;
+      if (scheduleWillBeActivated) job.schedule = proposedSchedule;
       if (patch.workspaceId !== undefined) job.workspaceId = patch.workspaceId;
       if (patch.taskPrompt !== undefined) job.taskPrompt = patch.taskPrompt;
       if (patch.taskTitle !== undefined) job.taskTitle = patch.taskTitle;
@@ -522,24 +640,37 @@ export class CronService {
         return { ok: true, ran: false, reason: "disabled" };
       }
 
-      // Check if due (unless forcing)
-      if (mode === "due") {
-        const nextRun = job.state.nextRunAtMs;
-        if (!nextRun || nextRun > nowMs) {
-          return { ok: true, ran: false, reason: "not-due" };
-        }
+      if (this.state.runningJobIds.has(job.id)) {
+        return { ok: true, ran: false, reason: "already-running" };
+      }
+
+      const recoveredOutcome = await this.reconcilePersistedTaskOutcome(job, nowMs);
+      if (recoveredOutcome && !store.jobs.some((candidate) => candidate.id === job.id)) {
+        return { ok: true, ran: false, reason: "not-found" };
       }
 
       const activeRun = await this.findActivePersistedRun(job);
       if (activeRun) {
         job.state.lastTaskId = activeRun.id;
         job.state.runningAtMs = job.state.runningAtMs ?? nowMs;
+        job.state.runningRunMode = job.state.runningRunMode ?? job.runMode ?? "new_task";
         job.state.lastRunAtMs = job.state.lastRunAtMs ?? job.state.runningAtMs;
-        if (job.enabled && (!job.state.nextRunAtMs || job.state.nextRunAtMs <= nowMs)) {
-          job.state.nextRunAtMs = computeNextRunAtMs(job.schedule, job.state.runningAtMs);
+        if (
+          job.enabled &&
+          !job.deleteAfterRun &&
+          (!job.state.nextRunAtMs || job.state.nextRunAtMs <= nowMs)
+        ) {
+          job.state.nextRunAtMs = this.computeNextFutureRunAtMs(job.schedule, nowMs);
         }
         await this.persist();
         return { ok: true, ran: false, reason: "already-running" };
+      }
+
+      if (mode === "due") {
+        const nextRun = job.state.nextRunAtMs;
+        if (!nextRun || nextRun > nowMs) {
+          return { ok: true, ran: false, reason: "not-due" };
+        }
       }
 
       // Execute the job
@@ -582,8 +713,13 @@ export class CronService {
     return Math.max(1, Math.floor(job.timeoutMs ?? this.state.deps.defaultTimeoutMs));
   }
 
+  private computeNextFutureRunAtMs(schedule: CronSchedule, afterMs: number): number | undefined {
+    const next = computeNextRunAtMs(schedule, afterMs);
+    return next !== undefined && next <= afterMs ? computeNextRunAtMs(schedule, afterMs + 1) : next;
+  }
+
   private isActiveTaskStatus(status: unknown): boolean {
-    return typeof status === "string" && ACTIVE_TASK_STATUSES.has(status);
+    return typeof status === "string" && CRON_ACTIVE_TASK_STATUSES.has(status);
   }
 
   private isUniqueEnabledTaskTitle(job: CronJob): boolean {
@@ -624,15 +760,207 @@ export class CronService {
     return null;
   }
 
+  private async reconcilePersistedTaskOutcome(job: CronJob, nowMs: number): Promise<boolean> {
+    const taskId = job.state.lastTaskId;
+    const runAtMs = job.state.runningAtMs;
+    const runMode = job.state.runningRunMode ?? job.runMode ?? "new_task";
+    const getTaskStatus = this.state.deps.getTaskStatus;
+    if (runMode !== "new_task" || !taskId || runAtMs === undefined || !getTaskStatus) return false;
+
+    let task: Awaited<ReturnType<NonNullable<CronServiceDeps["getTaskStatus"]>>>;
+    try {
+      task = await getTaskStatus(taskId);
+    } catch {
+      return false;
+    }
+    if (!task || this.isActiveTaskStatus(task.status)) return false;
+
+    let status: CronJobStatus;
+    let error: string | undefined;
+    if (task.status === "completed") {
+      status = cronStatusForCompletedTask(task.terminalStatus);
+      if (task.terminalStatus === "failed") error = task.error || "Task failed";
+    } else if (task.status === "failed") {
+      status = "error";
+      error = task.error || "Task failed";
+    } else if (task.status === "cancelled") {
+      status = "cancelled";
+      error = task.error || "Task cancelled";
+    } else if (task.status === "paused" || task.status === "blocked") {
+      status = "needs_user_action";
+      error = task.error || `Task ${task.status}`;
+    } else if (task.status === "interrupted") {
+      status = task.terminalStatus === "resume_available" ? "partial_success" : "error";
+      error = task.error || "Task interrupted";
+    } else {
+      return false;
+    }
+
+    let resultText: string | undefined;
+    if (
+      (status === "ok" || status === "partial_success" || status === "needs_user_action") &&
+      this.state.deps.getTaskResultText
+    ) {
+      try {
+        resultText = await this.state.deps.getTaskResultText(taskId);
+      } catch {
+        // The durable task status is authoritative; result text is optional for recovery.
+      }
+    }
+    if (!resultText && task.resultSummary?.trim()) resultText = task.resultSummary.trim();
+    const historyEntry: CronRunHistoryEntry = {
+      runAtMs,
+      durationMs: Math.max(0, nowMs - runAtMs),
+      status,
+      error,
+      taskId,
+      taskStillRunning: false,
+      runMode,
+      workspaceId: job.workspaceId,
+      deliveryAttempts: 0,
+      deliverableStatus: "none",
+    };
+
+    job.state.lastDurationMs = historyEntry.durationMs;
+    job.state.runningAtMs = undefined;
+    job.state.runningRunMode = undefined;
+    job.state.lastStatus = status;
+    job.state.lastError = error;
+    recordCronRunCompletion(
+      job.state,
+      historyEntry,
+      job.maxHistoryEntries ?? this.state.deps.maxHistoryEntries,
+    );
+
+    if (job.deleteAfterRun) {
+      const jobs = this.ensureStore().jobs;
+      const index = jobs.findIndex((candidate) => candidate.id === job.id);
+      if (index !== -1) jobs.splice(index, 1);
+    } else if (!job.state.nextRunAtMs || job.state.nextRunAtMs <= nowMs) {
+      job.state.nextRunAtMs = job.enabled
+        ? this.computeNextFutureRunAtMs(job.schedule, nowMs)
+        : undefined;
+    }
+
+    const deliveryConfig = job.delivery;
+    const isSuccess =
+      status === "ok" || status === "partial_success" || status === "needs_user_action";
+    const shouldQueueDelivery =
+      deliveryConfig?.enabled === true &&
+      Boolean(deliveryConfig.channelType && deliveryConfig.channelId) &&
+      Boolean(this.state.deps.deliverToChannel) &&
+      ((isSuccess && deliveryConfig.deliverOnSuccess !== false) ||
+        (!isSuccess && deliveryConfig.deliverOnError !== false)) &&
+      !(
+        isSuccess &&
+        deliveryConfig.deliverOnlyIfResult &&
+        !(typeof resultText === "string" && resultText.trim())
+      );
+    if (shouldQueueDelivery && deliveryConfig?.channelType && deliveryConfig.channelId) {
+      const idempotencyKey = `${job.id}:${Math.trunc(runAtMs)}:${taskId || "no-task"}:${deliveryConfig.channelType}:${deliveryConfig.channelId}`;
+      this.enqueueOutboxEntry({
+        job,
+        runAtMs,
+        status,
+        channelType: deliveryConfig.channelType,
+        channelDbId: deliveryConfig.channelDbId,
+        channelId: deliveryConfig.channelId,
+        summaryOnly: deliveryConfig.summaryOnly,
+        resultText,
+        error,
+        taskId,
+        idempotencyKey,
+        initialAttemptCount: 0,
+        attemptImmediately: true,
+      });
+      historyEntry.deliveryStatus = "skipped";
+      historyEntry.deliveryMode = "outbox";
+      historyEntry.deliveryAttempts = 0;
+      historyEntry.deliverableStatus = "queued";
+    }
+    // Commit the recovered outcome and any notification intent together. If
+    // the process exits, the outbox survives and resumes after the next start.
+    await this.persist();
+    this.emit({
+      jobId: job.id,
+      action: "finished",
+      runAtMs,
+      durationMs: historyEntry.durationMs,
+      status,
+      error,
+      taskId,
+      taskStillRunning: false,
+      nextRunAtMs: job.state.nextRunAtMs,
+    });
+    return true;
+  }
+
   private async reconcileLoadedJobs(nowMs: number): Promise<void> {
     const { log } = this.getContext();
     const store = this.ensureStore();
 
-    for (const job of store.jobs) {
+    for (const job of [...store.jobs]) {
+      if (await this.reconcilePersistedTaskOutcome(job, nowMs)) continue;
+
+      // A disabled job does not stop work already in flight. Keep checking a
+      // persisted lease so its completion still reaches run history and delivery.
+      if (job.state.runningAtMs !== undefined) {
+        const activeRun = await this.findActivePersistedRun(job);
+        if (activeRun) {
+          job.state.lastTaskId = activeRun.id;
+          job.state.runningRunMode = job.state.runningRunMode ?? job.runMode ?? "new_task";
+          job.state.lastRunAtMs = job.state.lastRunAtMs ?? job.state.runningAtMs;
+          if (
+            job.enabled &&
+            (!job.state.nextRunAtMs || job.state.nextRunAtMs <= nowMs) &&
+            !job.deleteAfterRun
+          ) {
+            // Do not replay recurrences that became due while this task was active.
+            job.state.nextRunAtMs = this.computeNextFutureRunAtMs(job.schedule, nowMs);
+          }
+          log.warn(
+            `Cron job "${job.name}" has active task ${activeRun.id}; preserving run lease instead of creating a duplicate`,
+          );
+          continue;
+        }
+
+        const timedOutAtMs = job.state.runningAtMs + this.getJobTimeoutMs(job);
+        if (timedOutAtMs > nowMs) {
+          // The task status could not be confirmed. Keep the lease until its existing
+          // timeout instead of starting a second task on an overdue recurrence.
+          if (job.enabled && (!job.state.nextRunAtMs || job.state.nextRunAtMs <= nowMs)) {
+            job.state.nextRunAtMs = timedOutAtMs;
+          }
+          continue;
+        }
+
+        const interruptedRunAtMs = job.state.runningAtMs;
+        job.state.lastStatus = "timeout";
+        job.state.lastError =
+          `Scheduled run interrupted before completion after app restart; ` +
+          `started at ${new Date(interruptedRunAtMs).toISOString()}`;
+        job.state.runningAtMs = undefined;
+        job.state.runningRunMode = undefined;
+        recordCronRunCompletion(
+          job.state,
+          {
+            runAtMs: interruptedRunAtMs,
+            durationMs: Math.max(0, nowMs - interruptedRunAtMs),
+            status: "timeout",
+            error: job.state.lastError,
+            taskId: job.state.lastTaskId,
+            runMode: job.runMode ?? "new_task",
+            workspaceId: job.workspaceId,
+            deliveryAttempts: 0,
+            deliverableStatus: "none",
+          },
+          job.maxHistoryEntries ?? this.state.deps.maxHistoryEntries,
+        );
+      }
+
       if (!job.enabled) {
-        if (job.state.nextRunAtMs !== undefined || job.state.runningAtMs !== undefined) {
+        if (job.state.nextRunAtMs !== undefined) {
           job.state.nextRunAtMs = undefined;
-          job.state.runningAtMs = undefined;
         }
         continue;
       }
@@ -641,42 +969,16 @@ export class CronService {
       if (activeRun) {
         job.state.lastTaskId = activeRun.id;
         job.state.runningAtMs = job.state.runningAtMs ?? nowMs;
+        job.state.runningRunMode = job.state.runningRunMode ?? job.runMode ?? "new_task";
         job.state.lastRunAtMs = job.state.lastRunAtMs ?? job.state.runningAtMs;
-        const nextAfterRun = computeNextRunAtMs(job.schedule, job.state.runningAtMs);
         if (!job.state.nextRunAtMs || job.state.nextRunAtMs <= nowMs) {
-          job.state.nextRunAtMs = nextAfterRun;
+          // Do not replay recurrences that became due while the recovered task was active.
+          job.state.nextRunAtMs = this.computeNextFutureRunAtMs(job.schedule, nowMs);
         }
         log.warn(
           `Cron job "${job.name}" has active task ${activeRun.id}; preserving run lease instead of creating a duplicate`,
         );
         continue;
-      }
-
-      if (job.state.runningAtMs !== undefined) {
-        const timedOutAtMs = job.state.runningAtMs + this.getJobTimeoutMs(job);
-        if (timedOutAtMs <= nowMs) {
-          const interruptedRunAtMs = job.state.runningAtMs;
-          job.state.lastStatus = "timeout";
-          job.state.lastError =
-            `Scheduled run interrupted before completion after app restart; ` +
-            `started at ${new Date(interruptedRunAtMs).toISOString()}`;
-          job.state.runningAtMs = undefined;
-          recordCronRunCompletion(
-            job.state,
-            {
-              runAtMs: interruptedRunAtMs,
-              durationMs: Math.max(0, nowMs - interruptedRunAtMs),
-              status: "timeout",
-              error: job.state.lastError,
-              taskId: job.state.lastTaskId,
-              runMode: job.runMode ?? "new_task",
-              workspaceId: job.workspaceId,
-              deliveryAttempts: 0,
-              deliverableStatus: "none",
-            },
-            job.maxHistoryEntries ?? this.state.deps.maxHistoryEntries,
-          );
-        }
       }
 
       if (!job.state.nextRunAtMs) {
@@ -741,6 +1043,21 @@ export class CronService {
     }
   }
 
+  private async withLifecycleLock<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.lifecycleOperation;
+    let resolve: (value?: unknown) => void;
+    this.lifecycleOperation = new Promise((done) => {
+      resolve = done;
+    });
+
+    try {
+      await previous;
+      return await fn();
+    } finally {
+      resolve!();
+    }
+  }
+
   /**
    * Execute a job and create a task
    */
@@ -758,11 +1075,14 @@ export class CronService {
 
       const prevRunAtMs = job.state.lastRunAtMs;
       job.state.runningAtMs = nowMs;
+      job.state.runningRunMode = job.runMode ?? "new_task";
       job.state.lastRunAtMs = nowMs;
       job.state.lastStatus = undefined;
       job.state.lastError = undefined;
       if (!job.deleteAfterRun) {
-        job.state.nextRunAtMs = job.enabled ? computeNextRunAtMs(job.schedule, nowMs) : undefined;
+        job.state.nextRunAtMs = job.enabled
+          ? this.computeNextFutureRunAtMs(job.schedule, nowMs)
+          : undefined;
       }
       await this.persist();
       this.armTimer();
@@ -1018,6 +1338,7 @@ export class CronService {
       // Update job state
       job.state.lastDurationMs = durationMs;
       job.state.runningAtMs = undefined;
+      job.state.runningRunMode = undefined;
       job.state.lastStatus = status;
       job.state.lastError = errorMsg;
 
@@ -1050,7 +1371,9 @@ export class CronService {
         log.info(`Deleted one-shot job: ${job.name}`);
       } else {
         // Compute next run time
-        job.state.nextRunAtMs = job.enabled ? computeNextRunAtMs(job.schedule, nowMs) : undefined;
+        job.state.nextRunAtMs = job.enabled
+          ? this.computeNextFutureRunAtMs(job.schedule, nowMs)
+          : undefined;
       }
 
       await this.persist();
@@ -1104,6 +1427,7 @@ export class CronService {
       }
     } finally {
       this.state.runningJobIds.delete(job.id);
+      this.armTimer();
     }
   }
 
@@ -1361,22 +1685,37 @@ export class CronService {
     this.stopTimer();
 
     const { deps, log } = this.getContext();
-    if (!deps.cronEnabled) return;
+    if (!deps.cronEnabled || !this.state.schedulerStarted) return;
 
     const store = this.ensureStore();
     const nowMs = deps.nowMs();
 
     // Find the next job to run
-    const nextJob = store.jobs
-      .filter((j) => j.enabled && j.state.nextRunAtMs)
-      .sort((a, b) => (a.state.nextRunAtMs ?? Infinity) - (b.state.nextRunAtMs ?? Infinity))[0];
+    const nextWake = store.jobs
+      .filter(
+        (job) =>
+          (job.enabled || job.state.runningAtMs !== undefined) &&
+          !this.state.runningJobIds.has(job.id),
+      )
+      .map((job) => ({
+        job,
+        atMs: Math.min(
+          job.enabled ? (job.state.nextRunAtMs ?? Infinity) : Infinity,
+          job.state.runningAtMs !== undefined
+            ? job.state.lastTaskId && deps.getTaskStatus
+              ? nowMs + PERSISTED_TASK_RECHECK_INTERVAL_MS
+              : job.state.runningAtMs + this.getJobTimeoutMs(job)
+            : Infinity,
+        ),
+      }))
+      .sort((a, b) => a.atMs - b.atMs)[0];
 
-    if (!nextJob || !nextJob.state.nextRunAtMs) {
+    if (!nextWake || !Number.isFinite(nextWake.atMs)) {
       log.debug("No jobs scheduled");
       return;
     }
 
-    let delayMs = nextJob.state.nextRunAtMs - nowMs;
+    let delayMs = nextWake.atMs - nowMs;
 
     // Clamp delay to prevent overflow
     if (delayMs > MAX_TIMEOUT_MS) {
@@ -1389,7 +1728,7 @@ export class CronService {
       delayMs = 1;
     }
 
-    log.debug(`Next job "${nextJob.name}" in ${Math.round(delayMs / 1000)}s`);
+    log.debug(`Next scheduler wake for "${nextWake.job.name}" in ${Math.round(delayMs / 1000)}s`);
 
     this.state.timer = setTimeout(() => {
       this.onTimer().catch((err) => {
@@ -1425,6 +1764,8 @@ export class CronService {
     error?: string;
     taskId?: string;
     idempotencyKey: string;
+    initialAttemptCount?: number;
+    attemptImmediately?: boolean;
   }): boolean {
     const store = this.ensureStore();
     const channelType = params.channelType;
@@ -1446,9 +1787,10 @@ export class CronService {
       jobId: params.job.id,
       runAtMs: params.runAtMs,
       queuedAtMs: nowMs,
-      nextAttemptAtMs: nowMs + this.computeOutboxBackoffMs(1),
+      nextAttemptAtMs: params.attemptImmediately ? nowMs : nowMs + this.computeOutboxBackoffMs(1),
       attempts: 0,
       maxAttempts: 6,
+      initialAttemptCount: params.initialAttemptCount ?? 1,
       status: params.status,
       channelType,
       channelDbId: params.channelDbId,
@@ -1474,7 +1816,8 @@ export class CronService {
     if (!history) return;
     history.deliveryMode = "outbox";
     // Include the initial direct delivery attempt that queued this outbox entry.
-    history.deliveryAttempts = Math.max(1, entry.attempts + 1);
+    const initialAttemptCount = entry.initialAttemptCount ?? 1;
+    history.deliveryAttempts = initialAttemptCount + entry.attempts;
     if (entry.state === "sent") {
       history.deliveryStatus = "success";
       history.deliverableStatus = "sent";
@@ -1599,42 +1942,54 @@ export class CronService {
    */
   private async onTimer(): Promise<void> {
     // Prevent concurrent timer callbacks
-    if (this.state.running) return;
+    if (this.state.running || !this.state.schedulerStarted) return;
     this.state.running = true;
 
     try {
-      const { deps, log } = this.getContext();
-      const store = this.ensureStore();
-      const nowMs = deps.nowMs();
+      const prepared = await this.withLock(async () => {
+        const { deps, log } = this.getContext();
+        const nowMs = deps.nowMs();
+        if (!deps.cronEnabled || !this.state.schedulerStarted) {
+          return { jobs: [] as CronJob[], nowMs };
+        }
 
-      // Find all due jobs that aren't already running
-      const dueJobs = store.jobs.filter(
-        (j) =>
-          j.enabled &&
-          j.state.nextRunAtMs &&
-          j.state.nextRunAtMs <= nowMs &&
-          !this.state.runningJobIds.has(j.id),
-      );
+        const store = this.ensureStore();
+        // Recheck persisted task state at each wake. A run restored after restart
+        // must not be duplicated by this timer path, which otherwise bypasses run().
+        await this.reconcileLoadedJobs(nowMs);
+        if (!this.state.schedulerStarted) return { jobs: [] as CronJob[], nowMs };
+        await this.persist();
 
-      // Sort by next run time (oldest first)
-      dueJobs.sort((a, b) => (a.state.nextRunAtMs ?? 0) - (b.state.nextRunAtMs ?? 0));
-
-      // Execute due jobs up to max concurrent limit
-      const availableSlots = deps.maxConcurrentRuns - this.state.runningJobIds.size;
-      const jobsToRun = dueJobs.slice(0, Math.max(0, availableSlots));
-
-      if (dueJobs.length > jobsToRun.length) {
-        log.debug(
-          `${dueJobs.length} jobs due, running ${jobsToRun.length} (max concurrent: ${deps.maxConcurrentRuns})`,
+        const dueJobs = store.jobs.filter(
+          (job) =>
+            job.enabled &&
+            job.state.nextRunAtMs !== undefined &&
+            job.state.nextRunAtMs <= nowMs &&
+            !this.state.runningJobIds.has(job.id),
         );
-      }
+        dueJobs.sort((a, b) => (a.state.nextRunAtMs ?? 0) - (b.state.nextRunAtMs ?? 0));
 
-      // Execute jobs
-      for (const job of jobsToRun) {
+        const availableSlots = deps.maxConcurrentRuns - this.state.runningJobIds.size;
+        const jobs = dueJobs.slice(0, Math.max(0, availableSlots));
+        for (const job of jobs) this.state.runningJobIds.add(job.id);
+
+        if (dueJobs.length > jobs.length) {
+          log.debug(
+            `${dueJobs.length} jobs due, running ${jobs.length} (max concurrent: ${deps.maxConcurrentRuns})`,
+          );
+        }
+        return { jobs, nowMs };
+      });
+
+      for (const job of prepared.jobs) {
+        if (!this.state.schedulerStarted) {
+          this.state.runningJobIds.delete(job.id);
+          continue;
+        }
         try {
-          await this.executeJob(job, nowMs);
+          await this.executeJob(job, prepared.nowMs);
         } catch (error) {
-          log.error(`Failed to execute job ${job.name}:`, error);
+          this.getContext().log.error(`Failed to execute job ${job.name}:`, error);
         }
       }
     } finally {

@@ -413,6 +413,7 @@ async function main(): Promise<void> {
 
     cronService = new CronService({
       cronEnabled: true,
+      runnerKind: "daemon",
       storePath: getCronStorePath(),
       maxConcurrentRuns: 3,
       webhook: {

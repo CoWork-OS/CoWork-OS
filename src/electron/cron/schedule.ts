@@ -73,11 +73,11 @@ function computeNextCronRun(expr: string, now: Date, tz?: string): number | unde
     return undefined;
   }
 
-  // Search for the next valid time
-  // Start from the next minute
-  const candidate = new Date(now.getTime());
-  candidate.setSeconds(0, 0);
-  candidate.setMinutes(candidate.getMinutes() + 1);
+  // Search by epoch minute so a DST fold in the host timezone cannot skip or
+  // repeat candidates. Cron fields are matched in the requested timezone below.
+  const candidate = new Date(Math.floor(now.getTime() / 60_000) * 60_000 + 60_000);
+  const dayOfMonthUnrestricted = dayExpr === "*";
+  const dayOfWeekUnrestricted = dowExpr === "*";
 
   // Search up to 2 years ahead
   const maxIterations = 365 * 2 * 24 * 60; // ~2 years of minutes
@@ -88,18 +88,18 @@ function computeNextCronRun(expr: string, now: Date, tz?: string): number | unde
     const { month, day, dow, hour, minute } = parts;
 
     // Check if this time matches the cron expression
-    if (
-      months.has(month) &&
-      days.has(day) &&
-      dows.has(dow) &&
-      hours.has(hour) &&
-      minutes.has(minute)
-    ) {
+    const dayMatches =
+      dayOfMonthUnrestricted || dayOfWeekUnrestricted
+        ? days.has(day) && dows.has(dow)
+        : days.has(day) || dows.has(dow);
+
+    if (months.has(month) && dayMatches && hours.has(hour) && minutes.has(minute)) {
       return candidate.getTime();
     }
 
-    // Move to next minute
-    candidate.setMinutes(candidate.getMinutes() + 1);
+    // Move to the next absolute minute. Local Date setters can skip an hour
+    // when the machine timezone leaves a DST fold, even for another schedule TZ.
+    candidate.setTime(candidate.getTime() + 60_000);
   }
 
   // No valid time found within 2 years
@@ -256,6 +256,16 @@ export function validateCronExpression(expr: string): boolean {
     parseField(month, 1, 12) !== null &&
     parseField(dow, 0, 6) !== null
   );
+}
+
+export function validateCronTimeZone(timeZone?: string): boolean {
+  if (!timeZone?.trim()) return true;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timeZone.trim() }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

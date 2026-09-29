@@ -44,6 +44,8 @@ interface GitUpdateTarget {
 export const MANUAL_CHECK_DEADLINE_MS = 8_000;
 /** Optional CoWork endpoint deadline for background checks, before GitHub. */
 export const BACKGROUND_ENDPOINT_DEADLINE_MS = 2_000;
+/** Whole source-check budget, including local Git probes and the remote fetch. */
+export const SOURCE_CHECK_DEADLINE_MS = 15_000;
 
 export class UpdateManager {
   private mainWindow: BrowserWindow | null = null;
@@ -82,7 +84,7 @@ export class UpdateManager {
     }
   }
 
-  async getVersionInfo(): Promise<AppVersionInfo> {
+  async getVersionInfo(signal?: AbortSignal): Promise<AppVersionInfo> {
     const version = app.getVersion();
     const isDev = !app.isPackaged;
     let isGitRepo = false;
@@ -99,14 +101,18 @@ export class UpdateManager {
       try {
         const { stdout: branchOut } = await this.runGitCommand("git rev-parse --abbrev-ref HEAD", {
           cwd: appPath,
+          signal,
         });
         gitBranch = branchOut.trim();
 
         const { stdout: commitOut } = await this.runGitCommand("git rev-parse --short HEAD", {
           cwd: appPath,
+          signal,
         });
         gitCommit = commitOut.trim();
-
+        if (!gitBranch || !/^[0-9a-f]{4,64}$/i.test(gitCommit)) {
+          throw new Error("Could not identify the source checkout");
+        }
         isGitRepo = true;
       } catch {
         isGitRepo = false;
@@ -184,34 +190,129 @@ export class UpdateManager {
   /**
    * Check for an update.
    *
-   * `manual` (the default, used by Settings) asks GitHub directly with an 8-second total
-   * deadline. `background` (app startup) may first ask CoWork's identifier-free endpoint
-   * for at most 2 seconds, then GitHub. Duplicate checks of the same intent share one
-   * request. Installing starts from Settings, so only a manual check sets the install
-   * target; a background result can never replace the manual answer.
+   * Source checkouts compare against origin/main within one 15-second budget that
+   * includes the local Git probes and the fetch; a check that cannot verify the target
+   * is reported as unavailable, never as current. Installed builds use the release
+   * lookup: `manual` (the default, used by Settings) asks GitHub directly with an
+   * 8-second total deadline; `background` (app startup) may first ask CoWork's
+   * identifier-free endpoint for at most 2 seconds, then GitHub. Duplicate checks of
+   * the same intent share one request. Installing starts from Settings, so only a manual
+   * check sets the install target; a background result can never replace the manual
+   * answer.
    */
   checkForUpdates(intent: UpdateCheckIntent = "manual"): Promise<UpdateInfo> {
     const existing = this.inflightChecks.get(intent);
     if (existing) return existing;
-    const run = this.runUpdateCheck(intent).finally(() => {
+    const sourceCheckout = !app.isPackaged && !this.detectNpmGlobalInstall(app.getAppPath());
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unavailable = (reason?: string): UpdateInfo => {
+      const result = this.sourceUnavailableInfo(app.getVersion(), reason);
+      if (intent === "manual") {
+        this.lastCheckedUpdateInfo = result;
+        this.checkedGitTarget = null;
+      }
+      return result;
+    };
+    const attempt = this.runUpdateCheck(intent, sourceCheckout, controller.signal).catch(
+      (error: unknown) => {
+        if (!sourceCheckout) throw error;
+        return unavailable(error instanceof Error ? error.message : String(error));
+      },
+    );
+    const run = (
+      sourceCheckout
+        ? Promise.race([
+            attempt,
+            new Promise<UpdateInfo>((resolve) => {
+              timer = setTimeout(() => {
+                // Aborting also stops the unfinished attempt from recording its result.
+                controller.abort();
+                resolve(unavailable("Source update check timed out"));
+              }, SOURCE_CHECK_DEADLINE_MS);
+              timer.unref?.();
+            }),
+          ])
+        : attempt
+    ).finally(() => {
+      if (timer) clearTimeout(timer);
       if (this.inflightChecks.get(intent) === run) this.inflightChecks.delete(intent);
     });
     this.inflightChecks.set(intent, run);
     return run;
   }
 
-  private async runUpdateCheck(intent: UpdateCheckIntent): Promise<UpdateInfo> {
-    const versionInfo = await this.getVersionInfo();
+  private sourceUnavailableInfo(
+    version: string,
+    reason = "Could not verify origin/main",
+  ): UpdateInfo {
+    return {
+      available: false,
+      currentVersion: version,
+      latestVersion: version,
+      sourceUpdateStatus: "unavailable",
+      updateMode: "git",
+      supported: true,
+      provenance: { source: "unavailable", checkedAt: Date.now(), networkError: reason },
+    };
+  }
+
+  private async runUpdateCheck(
+    intent: UpdateCheckIntent,
+    sourceCheckout: boolean,
+    signal: AbortSignal,
+  ): Promise<UpdateInfo> {
+    const versionInfo = await this.getVersionInfo(signal);
     const currentVersion = versionInfo.version;
     const checkedAt = Date.now();
     let checkedGitTarget: GitUpdateTarget | null = null;
     const record = (updateInfo: UpdateInfo): UpdateInfo => {
-      if (intent === "manual") {
+      // A timed-out source check already recorded its unavailable result.
+      if (intent === "manual" && !signal.aborted) {
         this.lastCheckedUpdateInfo = updateInfo;
         this.checkedGitTarget = checkedGitTarget;
       }
       return updateInfo;
     };
+
+    if (sourceCheckout || versionInfo.isGitRepo) {
+      // A source checkout updates from origin/main, so validate that exact commit
+      // instead of assuming it matches the latest release tag.
+      if (!versionInfo.isGitRepo) return record(this.sourceUnavailableInfo(currentVersion));
+      let gitTarget: GitUpdateTarget | null;
+      try {
+        gitTarget = await this.checkForNewCommits(signal);
+      } catch {
+        return record(this.sourceUnavailableInfo(currentVersion));
+      }
+      const provenance = { source: "live", checkedAt: Date.now() } as const;
+      const displayedCurrent = versionInfo.gitCommit
+        ? `${currentVersion} (${versionInfo.gitCommit})`
+        : currentVersion;
+      if (!gitTarget) {
+        return record({
+          available: false,
+          currentVersion: displayedCurrent,
+          latestVersion: displayedCurrent,
+          sourceUpdateStatus: "current",
+          updateMode: "git",
+          supported: true,
+          provenance,
+        });
+      }
+      checkedGitTarget = gitTarget;
+      return record({
+        available: true,
+        currentVersion: displayedCurrent,
+        latestVersion: `${gitTarget.version} (${gitTarget.commit.slice(0, 7)})`,
+        sourceUpdateStatus: "new_target",
+        releaseNotes: "New commits available on the main branch.",
+        releaseUrl: `https://github.com/${this.repoOwner}/${this.repoName}`,
+        updateMode: "git",
+        ...this.getCompatibility(gitTarget.version),
+        provenance,
+      });
+    }
 
     const release = await this.fetchLatestRelease(currentVersion, intent);
 
@@ -231,35 +332,9 @@ export class UpdateManager {
       });
     }
 
-    const provenance = { source: "live", checkedAt } as const;
     const latestVersion = release.tag_name.replace(/^v/, "");
-    const available = this.isNewerVersion(latestVersion, currentVersion);
-
-    if (versionInfo.isGitRepo) {
-      // A source checkout updates from origin/main, so validate that exact
-      // commit instead of assuming it matches the latest release tag.
-      const localIsNewer = this.isNewerVersion(currentVersion, latestVersion);
-      if (!localIsNewer) {
-        const gitTarget = await this.checkForNewCommits();
-        if (gitTarget) {
-          checkedGitTarget = gitTarget;
-          return record({
-            available: true,
-            currentVersion: `${currentVersion} (${versionInfo.gitCommit})`,
-            latestVersion: `${gitTarget.version} (${gitTarget.commit.slice(0, 7)})`,
-            releaseNotes: "New commits available on the main branch.",
-            releaseUrl: `https://github.com/${this.repoOwner}/${this.repoName}`,
-            updateMode: "git",
-            ...this.getCompatibility(gitTarget.version),
-            provenance,
-          });
-        }
-      }
-    }
-
     return record({
-      // Git updates are offered only when an exact fetched commit was captured above.
-      available: updateMode === "git" ? false : available,
+      available: this.isNewerVersion(latestVersion, currentVersion),
       currentVersion,
       latestVersion,
       releaseNotes: typeof release.body === "string" ? release.body : undefined,
@@ -267,7 +342,7 @@ export class UpdateManager {
       publishedAt: release.published_at,
       updateMode,
       ...this.getCompatibility(latestVersion),
-      provenance,
+      provenance: { source: "live", checkedAt },
     });
   }
 
@@ -374,41 +449,69 @@ export class UpdateManager {
     );
   }
 
-  private runGitCommand(command: string, options: { cwd: string }) {
+  private runGitCommand(command: string, options: { cwd: string; signal?: AbortSignal }) {
     return execAsync(command, options);
   }
 
-  private async checkForNewCommits(): Promise<GitUpdateTarget | null> {
-    try {
-      const appPath = app.getAppPath();
+  private async checkForNewCommits(signal?: AbortSignal): Promise<GitUpdateTarget | null> {
+    const appPath = app.getAppPath();
 
-      // Fetch latest from remote
-      await this.runGitCommand("git fetch origin", { cwd: appPath });
+    // Fetch latest from remote
+    await this.runGitCommand("git fetch origin", { cwd: appPath, signal });
 
-      const { stdout: commitOut } = await this.runGitCommand("git rev-parse origin/main", {
-        cwd: appPath,
-      });
-      const commit = commitOut.trim();
-      if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(commit)) return null;
-
-      // Check if there are commits ahead on the exact fetched target.
-      const { stdout } = await this.runGitCommand(`git rev-list HEAD..${commit} --count`, {
-        cwd: appPath,
-      });
-      const commitsAhead = parseInt(stdout.trim(), 10);
-      if (commitsAhead <= 0) return null;
-
-      const { stdout: packageJsonText } = await this.runGitCommand(
-        `git show ${commit}:package.json`,
-        { cwd: appPath },
-      );
-      const version = JSON.parse(packageJsonText)?.version;
-      if (typeof version !== "string" || !version.trim()) return null;
-
-      return { commit, version: version.trim() };
-    } catch {
-      return null;
+    const { stdout: commitOut } = await this.runGitCommand("git rev-parse origin/main", {
+      cwd: appPath,
+      signal,
+    });
+    const commit = commitOut.trim();
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(commit)) {
+      throw new Error("Invalid origin/main commit");
     }
+
+    const { stdout: headOut } = await this.runGitCommand("git rev-parse HEAD", {
+      cwd: appPath,
+      signal,
+    });
+    const head = headOut.trim();
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(head)) {
+      throw new Error("Invalid local HEAD commit");
+    }
+    if (head === commit) return null;
+
+    // Check if there are commits ahead on the exact fetched target. A zero count
+    // can also mean the local branch is ahead of origin/main, which is not current.
+    const { stdout } = await this.runGitCommand(`git rev-list HEAD..${commit} --count`, {
+      cwd: appPath,
+      signal,
+    });
+    const countText = stdout.trim();
+    const commitsAhead = Number(countText);
+    if (!/^\d+$/.test(countText) || !Number.isSafeInteger(commitsAhead)) {
+      throw new Error("Invalid commit count from Git");
+    }
+    if (commitsAhead === 0) {
+      throw new Error("Local checkout is ahead of origin/main");
+    }
+
+    // The installer uses --ff-only. Do not offer a target it cannot apply.
+    await this.runGitCommand(`git merge-base --is-ancestor HEAD ${commit}`, {
+      cwd: appPath,
+      signal,
+    });
+
+    const { stdout: packageJsonText } = await this.runGitCommand(
+      `git show ${commit}:package.json`,
+      {
+        cwd: appPath,
+        signal,
+      },
+    );
+    const version = JSON.parse(packageJsonText)?.version;
+    if (typeof version !== "string" || !version.trim()) {
+      throw new Error("Invalid package version on origin/main");
+    }
+
+    return { commit, version: version.trim() };
   }
 
   private isNewerVersion(latest: string, current: string): boolean {

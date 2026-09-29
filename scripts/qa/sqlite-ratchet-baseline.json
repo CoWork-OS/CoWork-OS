@@ -1,0 +1,450 @@
+{
+  "description": "Exception register for synchronous SQLite access on application threads. Counts may only decrease; see docs/async-sqlite-migration-plan-2026-09-27.md (decision 10).",
+  "tracked": [
+    "prepare",
+    "getDatabase",
+    "runtimeImport"
+  ],
+  "totals": {
+    "prepare": 1507,
+    "getDatabase": 130,
+    "runtimeImport": 50
+  },
+  "files": {
+    "src/cli/direct-run.ts": {
+      "prepare": 1,
+      "getDatabase": 4
+    },
+    "src/cli/local-control-plane-discovery.ts": {
+      "prepare": 1,
+      "runtimeImport": 1
+    },
+    "src/daemon/control-plane-methods.ts": {
+      "getDatabase": 1
+    },
+    "src/daemon/main.ts": {
+      "getDatabase": 9
+    },
+    "src/electron/acp/acp-sql.ts": {
+      "prepare": 5
+    },
+    "src/electron/activity/ActivityRepository.ts": {
+      "prepare": 11
+    },
+    "src/electron/agent/daemon.ts": {
+      "getDatabase": 33
+    },
+    "src/electron/agent/decisions/decision-usage-telemetry.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/agent/llm/usage-telemetry-sql.ts": {
+      "prepare": 2
+    },
+    "src/electron/agent/llm/usage-telemetry.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/agent/orchestration/OrchestrationGraphRepository.ts": {
+      "prepare": 36
+    },
+    "src/electron/agent/OrchestrationRepository.ts": {
+      "prepare": 6
+    },
+    "src/electron/agent/tools/channel-history-sql.ts": {
+      "prepare": 2
+    },
+    "src/electron/agent/tools/mention-tools.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/agent/tools/registry.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/agent/tools/system-tools.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/agents/agent-signal-sql.ts": {
+      "prepare": 2
+    },
+    "src/electron/agents/AgentRoleRepository.ts": {
+      "prepare": 20,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/AgentTeamItemRepository.ts": {
+      "prepare": 8,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/AgentTeamMemberRepository.ts": {
+      "prepare": 9,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/AgentTeamOrchestrator.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/agents/AgentTeamRepository.ts": {
+      "prepare": 11,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/AgentTeamRunRepository.ts": {
+      "prepare": 8,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/AgentTeamThoughtRepository.ts": {
+      "prepare": 7,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/AutomationProfileRepository.ts": {
+      "prepare": 10,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/HeartbeatPolicyRepository.ts": {
+      "prepare": 5,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/HeartbeatRunRepository.ts": {
+      "prepare": 12,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/MentionRepository.ts": {
+      "prepare": 10,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/TaskSubscriptionRepository.ts": {
+      "prepare": 12,
+      "runtimeImport": 1
+    },
+    "src/electron/agents/WorkingStateRepository.ts": {
+      "prepare": 14,
+      "runtimeImport": 1
+    },
+    "src/electron/automation/AutomationRunOutcomeRepository.ts": {
+      "prepare": 7
+    },
+    "src/electron/briefing/briefing-sql.ts": {
+      "prepare": 5
+    },
+    "src/electron/chronicle/ChronicleObservationRepository.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/control-plane/control-plane-sql.ts": {
+      "prepare": 71
+    },
+    "src/electron/control-plane/handlers.ts": {
+      "getDatabase": 15
+    },
+    "src/electron/core/CoreEvalCaseRepository.ts": {
+      "prepare": 6,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreFailureClusterRepository.ts": {
+      "prepare": 7,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreFailureRecordRepository.ts": {
+      "prepare": 5,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreHarnessExperimentRepository.ts": {
+      "prepare": 8,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreLearningsRepository.ts": {
+      "prepare": 2,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreMemoryCandidateRepository.ts": {
+      "prepare": 4,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreMemoryDistillRunRepository.ts": {
+      "prepare": 4,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreMemoryScopeStateRepository.ts": {
+      "prepare": 2,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreRegressionGateRepository.ts": {
+      "prepare": 3,
+      "runtimeImport": 1
+    },
+    "src/electron/core/CoreTraceRepository.ts": {
+      "prepare": 7,
+      "runtimeImport": 1
+    },
+    "src/electron/council/council-sql.ts": {
+      "prepare": 16
+    },
+    "src/electron/database/async/statement-commands.ts": {
+      "prepare": 1
+    },
+    "src/electron/database/composer-draft-repository.ts": {
+      "prepare": 12,
+      "runtimeImport": 1
+    },
+    "src/electron/database/DeviceProfileRepository.ts": {
+      "prepare": 6
+    },
+    "src/electron/database/llm-call-events.ts": {
+      "prepare": 1
+    },
+    "src/electron/database/memory-embedding-sql.ts": {
+      "prepare": 1
+    },
+    "src/electron/database/migrated-event-sql.ts": {
+      "prepare": 1
+    },
+    "src/electron/database/post-startup-maintenance.ts": {
+      "prepare": 9
+    },
+    "src/electron/database/profile-lifecycle.ts": {
+      "prepare": 3
+    },
+    "src/electron/database/repositories.ts": {
+      "prepare": 283,
+      "runtimeImport": 1
+    },
+    "src/electron/database/schema.ts": {
+      "prepare": 34,
+      "getDatabase": 1,
+      "runtimeImport": 1
+    },
+    "src/electron/database/secure-settings-sql.ts": {
+      "prepare": 5
+    },
+    "src/electron/database/SecureSettingsRepository.ts": {
+      "prepare": 10,
+      "runtimeImport": 1
+    },
+    "src/electron/database/TaskLabelRepository.ts": {
+      "prepare": 8,
+      "runtimeImport": 1
+    },
+    "src/electron/database/TimelineProjectionOutboxRepository.ts": {
+      "prepare": 4
+    },
+    "src/electron/database/WorkSessionActivityLeaseRepository.ts": {
+      "prepare": 16,
+      "runtimeImport": 1
+    },
+    "src/electron/database/WorkSessionContractRepository.ts": {
+      "prepare": 42,
+      "runtimeImport": 1
+    },
+    "src/electron/database/WorkSessionOperationalMetricsRepository.ts": {
+      "prepare": 7,
+      "runtimeImport": 1
+    },
+    "src/electron/database/WorkSessionProjectionRepository.ts": {
+      "prepare": 4,
+      "runtimeImport": 1
+    },
+    "src/electron/database/WorkSessionProtocolRepository.ts": {
+      "prepare": 33,
+      "runtimeImport": 1
+    },
+    "src/electron/eval/EvalService.ts": {
+      "prepare": 25
+    },
+    "src/electron/everyday-agent/EverydayAgentService.ts": {
+      "prepare": 21
+    },
+    "src/electron/file-hub/file-hub-sql.ts": {
+      "prepare": 2
+    },
+    "src/electron/first-task/attempt-schema.ts": {
+      "prepare": 1
+    },
+    "src/electron/first-task/first-task-sql.ts": {
+      "prepare": 13
+    },
+    "src/electron/first-task/real-work-state.ts": {
+      "prepare": 4
+    },
+    "src/electron/gateway/context-policy.ts": {
+      "prepare": 7
+    },
+    "src/electron/git/WorktreeManager.ts": {
+      "prepare": 2
+    },
+    "src/electron/hooks/agent-ingress.ts": {
+      "getDatabase": 2
+    },
+    "src/electron/hooks/HookSessionRepository.ts": {
+      "prepare": 5
+    },
+    "src/electron/identity/ContactIdentityService.ts": {
+      "prepare": 37,
+      "runtimeImport": 1
+    },
+    "src/electron/improvement/ImprovementRepositories.ts": {
+      "prepare": 34
+    },
+    "src/electron/ipc/handlers.ts": {
+      "getDatabase": 8
+    },
+    "src/electron/knowledge-graph/knowledge-graph-sql.ts": {
+      "prepare": 27
+    },
+    "src/electron/mailbox/mailbox-units.ts": {
+      "prepare": 1
+    },
+    "src/electron/main.ts": {
+      "getDatabase": 36
+    },
+    "src/electron/managed/managed-sql.ts": {
+      "prepare": 15
+    },
+    "src/electron/managed/repositories.ts": {
+      "prepare": 24,
+      "runtimeImport": 1
+    },
+    "src/electron/memory/box-brain-sql.ts": {
+      "prepare": 13
+    },
+    "src/electron/memory/ChatGPTImporter.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/memory/CuratedMemoryService.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/memory/dreaming-sql.ts": {
+      "prepare": 8
+    },
+    "src/electron/memory/durable-context-sql.ts": {
+      "prepare": 29
+    },
+    "src/electron/memory/DurableContextService.ts": {
+      "getDatabase": 1
+    },
+    "src/electron/memory/markdown-index-sql.ts": {
+      "prepare": 21
+    },
+    "src/electron/memory/memory-capture-sql.ts": {
+      "prepare": 3
+    },
+    "src/electron/memory/memory-observation-sql.ts": {
+      "prepare": 12
+    },
+    "src/electron/memory/memory-units.ts": {
+      "prepare": 4
+    },
+    "src/electron/memory/MemoryService.ts": {
+      "getDatabase": 2,
+      "runtimeImport": 2
+    },
+    "src/electron/memory/MemoryWriteGate.ts": {
+      "getDatabase": 1,
+      "runtimeImport": 1
+    },
+    "src/electron/memory/PlaybookEvidenceStore.ts": {
+      "prepare": 9
+    },
+    "src/electron/memory/TranscriptStore.ts": {
+      "getDatabase": 3,
+      "runtimeImport": 4
+    },
+    "src/electron/mission-control/MissionControlIntelligenceService.ts": {
+      "prepare": 9,
+      "runtimeImport": 1
+    },
+    "src/electron/mission-control/MissionControlRepository.ts": {
+      "prepare": 10,
+      "runtimeImport": 1
+    },
+    "src/electron/reports/agent-performance-review-sql.ts": {
+      "prepare": 8
+    },
+    "src/electron/reports/daily-briefing-sql.ts": {
+      "prepare": 2
+    },
+    "src/electron/reports/standup-report-sql.ts": {
+      "prepare": 9
+    },
+    "src/electron/reports/UsageInsightsProjector.ts": {
+      "prepare": 32,
+      "runtimeImport": 1
+    },
+    "src/electron/reports/UsageInsightsService.ts": {
+      "prepare": 40,
+      "runtimeImport": 1
+    },
+    "src/electron/routines/routine-sql.ts": {
+      "prepare": 23
+    },
+    "src/electron/routines/service.ts": {
+      "prepare": 1
+    },
+    "src/electron/routines/workflow/repository.ts": {
+      "prepare": 44
+    },
+    "src/electron/security/numbat/AgentSecurityRepository.ts": {
+      "prepare": 16
+    },
+    "src/electron/security/protected-credential-service.ts": {
+      "prepare": 9
+    },
+    "src/electron/security/recurring-approval-service.ts": {
+      "prepare": 5
+    },
+    "src/electron/sessions/SessionProgressService.ts": {
+      "prepare": 2
+    },
+    "src/electron/sessions/WorkSessionProtocolService.ts": {
+      "prepare": 2
+    },
+    "src/electron/sessions/WorkSessionRolloutService.ts": {
+      "prepare": 5
+    },
+    "src/electron/subconscious/subconscious-sql.ts": {
+      "prepare": 12
+    },
+    "src/electron/subconscious/SubconsciousMigrationService.ts": {
+      "prepare": 3
+    },
+    "src/electron/subconscious/SubconsciousRepositories.ts": {
+      "prepare": 33,
+      "runtimeImport": 1
+    },
+    "src/electron/supervisor/SupervisorExchangeRepository.ts": {
+      "prepare": 9
+    },
+    "src/electron/telemetry/pulse-report-sql.ts": {
+      "prepare": 9
+    },
+    "src/electron/telemetry/pulse-store-sql.ts": {
+      "prepare": 13
+    },
+    "src/electron/tray/TrayManager.ts": {
+      "getDatabase": 2
+    },
+    "src/electron/triggers/trigger-sql.ts": {
+      "prepare": 12
+    },
+    "src/electron/utils/mac-safe-storage-migration.ts": {
+      "prepare": 3
+    },
+    "src/electron/utils/temp-workspace-sql.ts": {
+      "prepare": 16
+    },
+    "src/electron/workspaces/SessionMembershipService.ts": {
+      "prepare": 23,
+      "runtimeImport": 1
+    },
+    "src/electron/workspaces/WorkContextRepository.ts": {
+      "prepare": 8,
+      "runtimeImport": 1
+    },
+    "src/electron/workspaces/WorkContextService.ts": {
+      "prepare": 5,
+      "runtimeImport": 1
+    },
+    "src/electron/youtube/youtube-transcript-sql.ts": {
+      "prepare": 7
+    },
+    "src/electron/youtube/YouTubeTranscriptStore.ts": {
+      "getDatabase": 3
+    },
+    "src/renderer/components/timeline/SemanticTimeline.tsx": {
+      "prepare": 1
+    }
+  }
+}

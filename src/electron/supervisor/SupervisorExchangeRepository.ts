@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import type {
   SupervisorExchange,
@@ -29,7 +29,13 @@ type CreateSupervisorExchangeRequest = Omit<
 
 type AddSupervisorExchangeMessageRequest = Omit<SupervisorExchangeMessage, "id" | "createdAt">;
 
-export class SupervisorExchangeRepository {
+/**
+ * Discord supervisor exchanges and their messages (async SQLite migration plan, DB6). As
+ * services-domain units these run in the database worker when the domain is routed
+ * there; callers use the async SupervisorExchangeRepository facade in supervisor-
+ * repository-facades.ts.
+ */
+export class SupervisorExchangeStore {
   constructor(private db: Database.Database) {}
 
   create(request: CreateSupervisorExchangeRequest): SupervisorExchange {

@@ -342,7 +342,7 @@ export class SupermemoryService {
   }> {
     const containerTag = this.resolveContainerTag(args.workspace, args.containerTag);
     if (!args.skipMemoryWriteGate) {
-      const gate = MemoryWriteGate.evaluate({
+      const gate = await MemoryWriteGate.evaluate({
         workspaceId: args.workspace.id,
         taskId: args.taskId,
         target: "external",
@@ -430,7 +430,7 @@ export class SupermemoryService {
 
     const containerTag = this.resolveContainerTag(args.workspace);
     if (!args.skipMemoryWriteGate) {
-      const gate = MemoryWriteGate.evaluate({
+      const gate = await MemoryWriteGate.evaluate({
         workspaceId: args.workspace.id,
         taskId: args.taskId,
         target: "external",

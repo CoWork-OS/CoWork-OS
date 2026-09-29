@@ -11,7 +11,7 @@ import {
 /**
  * Repository for managing agent working state in the database
  */
-export class WorkingStateRepository {
+export class WorkingStateStore {
   constructor(private db: Database.Database) {}
 
   /**

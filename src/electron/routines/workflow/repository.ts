@@ -34,12 +34,17 @@ export interface WorkflowEventRecord extends Required<
   updatedAt: number;
 }
 
-export class RoutineWorkflowRepository {
+export class RoutineWorkflowStore {
+  /**
+   * `ensureSchema: false` is for the services domain's units, which run after the facade
+   * ensured the schema once on the host connection (DB6).
+   */
   constructor(
     private readonly db: Any,
     private readonly now: () => number = () => Date.now(),
+    options: { ensureSchema?: boolean } = {},
   ) {
-    this.ensureSchema();
+    if (options.ensureSchema !== false) this.ensureSchema();
   }
 
   createVersion(
@@ -224,10 +229,19 @@ export class RoutineWorkflowRepository {
     return Number(result.changes || 0);
   }
 
+  /**
+   * Without `retentionDaysForVersion`, each run's retention comes from its workflow
+   * version's `settings.retainStepDataDays` (as a unit, callers cannot pass a function).
+   */
   pruneExpiredData(
-    retentionDaysForVersion: (workflowVersionId: string) => number,
+    retentionDaysForVersion?: (workflowVersionId: string) => number,
     defaultRetentionDays = 30,
   ): { runsSanitized: number; eventsDeleted: number; samplesDeleted: number } {
+    const retentionFor =
+      retentionDaysForVersion ??
+      ((workflowVersionId: string) =>
+        this.getVersion(workflowVersionId)?.definition.settings?.retainStepDataDays ||
+        defaultRetentionDays);
     const now = this.now();
     let runsSanitized = 0;
     const terminalRuns = this.db
@@ -245,7 +259,7 @@ export class RoutineWorkflowRepository {
     const deleteSteps = this.db.prepare("DELETE FROM routine_run_steps WHERE run_id = ?");
     this.db.transaction(() => {
       for (const run of terminalRuns) {
-        const configuredDays = retentionDaysForVersion(String(run.workflow_version_id));
+        const configuredDays = retentionFor(String(run.workflow_version_id));
         const retentionDays = clampRetentionDays(configuredDays, defaultRetentionDays);
         if (Number(run.retention_at) > now - retentionDays * 86_400_000) continue;
         deleteSteps.run(run.id);

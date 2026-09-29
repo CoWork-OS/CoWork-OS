@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AutomationRunOutcome, CreateAutomationRunOutcomeInput } from "../../shared/types";
-import type { AutomationRunOutcomeRepository } from "./AutomationRunOutcomeRepository";
+import type { AutomationRunOutcomeRepository } from "./automation-outcome-repository-facades";
 import {
   buildAutomationNotification,
   type AutomationNotificationPayload,
@@ -85,11 +85,11 @@ export class AutomationOutcomeService {
       changeHash: input.changeHash?.trim() || deriveChangeHash(input),
       notificationKey: deriveNotificationKey(input),
     };
-    const previous = this.deps.repo.findLatestByNotificationKey?.(
+    const previous = await this.deps.repo.findLatestByNotificationKey?.(
       normalizedInput.notificationKey || "",
       deriveNotificationScope(normalizedInput),
     );
-    const storedOutcome = this.deps.repo.create(normalizedInput);
+    const storedOutcome = await this.deps.repo.create(normalizedInput);
     const outcome: AutomationRunOutcome = {
       ...storedOutcome,
       changeHash: storedOutcome.changeHash || normalizedInput.changeHash,
@@ -100,7 +100,7 @@ export class AutomationOutcomeService {
 
     if (previous?.changeHash && previous.changeHash === outcome.changeHash) {
       const skippedAt = Date.now();
-      this.deps.repo.markNotificationSkipped?.(outcome.id, "unchanged_output", skippedAt);
+      await this.deps.repo.markNotificationSkipped?.(outcome.id, "unchanged_output", skippedAt);
       return {
         ...outcome,
         notificationSkippedAt: skippedAt,
@@ -110,7 +110,7 @@ export class AutomationOutcomeService {
 
     try {
       await this.deps.notify(notification);
-      this.deps.repo.markNotificationDelivered(outcome.id);
+      await this.deps.repo.markNotificationDelivered(outcome.id);
       return {
         ...outcome,
         notificationDeliveredAt: Date.now(),
@@ -123,13 +123,13 @@ export class AutomationOutcomeService {
 
   /** Retry a previously suppressed or failed notification with a new delivery id. */
   async retryNotification(outcomeId: string): Promise<AutomationRunOutcome> {
-    const outcome = this.deps.repo.findById?.(outcomeId);
+    const outcome = await this.deps.repo.findById?.(outcomeId);
     if (!outcome) throw new Error("Automation outcome not found.");
     const notification = buildAutomationNotification(outcome);
     if (!notification || !this.deps.notify) return outcome;
     await this.deps.notify({ ...notification, deliveryId: randomUUID() });
     const deliveredAt = Date.now();
-    this.deps.repo.markNotificationDelivered(outcome.id, deliveredAt);
+    await this.deps.repo.markNotificationDelivered(outcome.id, deliveredAt);
     return {
       ...outcome,
       notificationDeliveredAt: deliveredAt,

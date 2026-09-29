@@ -236,7 +236,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
 
     const result = await service.refreshTargets();
-    const targets = service.listTargets();
+    const targets = await service.listTargets();
     const keys = new Set(targets.map((target) => target.key));
 
     expect(result.targetCount).toBeGreaterThanOrEqual(4);
@@ -323,8 +323,8 @@ describeWithSqlite("SubconsciousLoopService", () => {
     });
 
     await service.refreshTargets();
-    const codeTargets = service
-      .listTargets()
+    const codeTargets = (await service
+      .listTargets())
       .filter((target) => target.target.kind === "code_workspace");
 
     expect(codeTargets).toHaveLength(1);
@@ -384,7 +384,9 @@ describeWithSqlite("SubconsciousLoopService", () => {
       )
       .get(targetKey) as Any;
     expect(Number(row.count)).toBe(1);
-    expect(service.listTargets().find((target) => target.key === targetKey)?.backlogCount).toBe(1);
+    expect(
+      (await service.listTargets()).find((target) => target.key === targetKey)?.backlogCount,
+    ).toBe(1);
   });
 
   it("does not recreate missing workspace roots when refreshing stale workspace targets", async () => {
@@ -475,7 +477,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
     const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
 
     await service.refreshTargets();
-    const targets = service.listTargets();
+    const targets = await service.listTargets();
 
     expect(targets.some((target) => target.key === "agent_role:operator-role")).toBe(true);
     expect(targets.some((target) => target.key === "agent_role:twin-role")).toBe(false);
@@ -755,7 +757,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
       durableTargetKinds: ["workspace"],
     });
     await first.refreshTargets();
-    expect(first.listTargets().some((target) => target.key === "agent_role:session-role")).toBe(
+    expect((await first.listTargets()).some((target) => target.key === "agent_role:session-role")).toBe(
       true,
     );
     first.stop();
@@ -769,7 +771,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
     });
     await second.start({} as unknown as import("../../agent/daemon").AgentDaemon);
 
-    const targets = second.listTargets();
+    const targets = await second.listTargets();
     const role = targets.find((target) => target.key === "agent_role:session-role");
     const workspaceTarget = targets.find((target) => target.key === `workspace:${workspace.id}`);
 

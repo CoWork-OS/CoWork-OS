@@ -62,7 +62,8 @@ vi.mock("../ImprovementEligibilityService", () => ({
   getImprovementEligibility: mockImprovementEligibility,
 }));
 
-vi.mock("../../database/repositories", () => ({
+// The services read tasks and workspaces through the storage facades (storage slice C).
+vi.mock("../../database/repository-facades", () => ({
   WorkspaceRepository: class {
     findAll() {
       return [...workspaces.values()];
@@ -105,7 +106,7 @@ vi.mock("../../database/repositories", () => ({
   },
 }));
 
-vi.mock("../ImprovementRepositories", () => ({
+vi.mock("../improvement-repository-facades", () => ({
   ImprovementCandidateRepository: class {
     list(params?: { workspaceId?: string }) {
       let rows = [...candidates.values()];

@@ -9,7 +9,7 @@ import {
   type EverydayCapabilityBundle,
   type EverydayPauseScope,
 } from "../../shared/types";
-import { EverydayAgentService } from "../everyday-agent/EverydayAgentService";
+import { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
 
 export function setupEverydayAgentHandlers(service: EverydayAgentService): void {
   ipcMain.handle(IPC_CHANNELS.EVERYDAY_AGENT_GET_PROFILE, async () => {

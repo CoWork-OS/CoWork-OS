@@ -1,3 +1,4 @@
+import { TaskRepository } from "../database/repository-facades";
 import fs from "fs/promises";
 import path from "path";
 import type Database from "better-sqlite3";
@@ -6,11 +7,7 @@ import type {
   VerbatimQuoteSearchResult,
   VerbatimQuoteSourceType,
 } from "../../shared/types";
-import {
-  TaskEventRepository,
-  TaskRepository,
-  type MemorySearchResult,
-} from "../database/repositories";
+import { TaskEventRepository, type MemorySearchResult } from "../database/repositories";
 import { MemoryService } from "./MemoryService";
 import { TranscriptStore, type TranscriptSearchResult } from "./TranscriptStore";
 import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
@@ -315,7 +312,9 @@ export class QuoteRecallService {
       const taskRepo = new TaskRepository(params.db);
       const taskIds = params.taskId
         ? [params.taskId]
-        : taskRepo.findByWorkspace(params.workspaceId, MAX_EVENT_TASKS).map((task) => task.id);
+        : (await taskRepo.findByWorkspace(params.workspaceId, MAX_EVENT_TASKS)).map(
+            (task) => task.id,
+          );
       const events =
         taskIds.length > 0 ? eventRepo.findByTaskIds(taskIds, [...MESSAGE_EVENT_TYPES]) : [];
       for (const event of events) {
@@ -333,9 +332,9 @@ export class QuoteRecallService {
     }
 
     if (allowSource("memory")) {
-      const memoryHits = MemoryService.search(params.workspaceId, query, candidateLimit);
+      const memoryHits = await MemoryService.searchAsync(params.workspaceId, query, candidateLimit);
       const fullEntriesById = new Map(
-        MemoryService.getFullDetails(memoryHits.map((entry) => entry.id)).map((entry) => [
+        (await MemoryService.getFullDetails(memoryHits.map((entry) => entry.id))).map((entry) => [
           entry.id,
           entry,
         ]),
@@ -368,12 +367,14 @@ export class QuoteRecallService {
     }
 
     if (params.includeWorkspaceNotes !== false && allowSource("workspace_markdown")) {
-      const noteHits = MemoryService.searchWorkspaceMarkdown(
-        params.workspaceId,
-        path.join(params.workspacePath, ".cowork"),
-        query,
-        candidateLimit,
-        params.readGuard,
+      const noteHits = (
+        await MemoryService.searchWorkspaceMarkdown(
+          params.workspaceId,
+          path.join(params.workspacePath, ".cowork"),
+          query,
+          candidateLimit,
+          params.readGuard,
+        )
       ).filter(
         (entry): entry is Extract<MemorySearchResult, { source: "markdown" }> =>
           entry.source === "markdown",

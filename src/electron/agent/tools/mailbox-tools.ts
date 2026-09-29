@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { MailboxService } from "../../mailbox/MailboxService";

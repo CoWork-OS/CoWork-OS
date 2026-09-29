@@ -21,7 +21,7 @@ export function registerStrategicPlannerMethods(options: {
   server.registerMethod(Methods.PLANNER_CONFIG_GET, async (client, params) => {
     requireScope(client, "read");
     const companyId = requireString((params as Any)?.companyId, "companyId");
-    return { config: plannerService.getConfig(companyId) };
+    return { config: await plannerService.getConfig(companyId) };
   });
 
   server.registerMethod(Methods.PLANNER_CONFIG_UPDATE, async (client, params) => {
@@ -29,7 +29,7 @@ export function registerStrategicPlannerMethods(options: {
     const p = (params || {}) as Any;
     const companyId = requireString(p.companyId, "companyId");
     return {
-      config: plannerService.updateConfig(companyId, {
+      config: await plannerService.updateConfig(companyId, {
         enabled: typeof p.enabled === "boolean" ? p.enabled : undefined,
         intervalMinutes:
           typeof p.intervalMinutes === "number" && Number.isFinite(p.intervalMinutes)
@@ -80,7 +80,7 @@ export function registerStrategicPlannerMethods(options: {
     requireScope(client, "read");
     const p = (params || {}) as Any;
     return {
-      runs: plannerService.listRuns({
+      runs: await plannerService.listRuns({
         companyId: typeof p.companyId === "string" ? p.companyId.trim() : undefined,
         limit: typeof p.limit === "number" && Number.isFinite(p.limit) ? p.limit : undefined,
         offset: typeof p.offset === "number" && Number.isFinite(p.offset) ? p.offset : undefined,

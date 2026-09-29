@@ -11,7 +11,8 @@ const memoryState = vi.hoisted(() => ({
 
 vi.mock("../MemoryObservationService", () => ({
   MemoryObservationService: {
-    isPromptSuppressed: (memoryId: string) => memoryState.suppressed.has(memoryId),
+    suppressedIds: async (memoryIds: string[]) =>
+      new Set(memoryIds.filter((memoryId) => memoryState.suppressed.has(memoryId))),
   },
 }));
 
@@ -94,24 +95,26 @@ describe("Playbook evidence capture", () => {
     );
     const captured = await success("successful-task", "Reconcile invoices");
     expect(captured.status).toBe("recorded");
-    const reinforced = PlaybookService.reinforceFromEvidence(
+    const reinforced = await PlaybookService.reinforceFromEvidence(
       WS,
       (captured.status === "recorded" && captured.evidenceId) || "",
     );
     expect(reinforced.linkedEvidenceIds).toEqual([]);
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).not.toContain(
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).not.toContain(
       "wrong spreadsheet",
     );
   });
 
   it("unrelated prompts return nothing and do not link", async () => {
     await success("old-task", "Export payroll CSV", ["write_file"]);
-    expect(PlaybookService.getPlaybookForContext(WS, "Botanical taxonomy of ferns")).toBe("");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Botanical taxonomy of ferns")).toBe("");
     const current = await success("new-task", "Botanical taxonomy of ferns", ["write_file"]);
     expect(
-      PlaybookService.reinforceFromEvidence(
-        WS,
-        (current.status === "recorded" && current.evidenceId) || "",
+      (
+        await PlaybookService.reinforceFromEvidence(
+          WS,
+          (current.status === "recorded" && current.evidenceId) || "",
+        )
       ).linkedEvidenceIds,
     ).toEqual([]);
   });
@@ -152,7 +155,7 @@ describe("Playbook evidence capture", () => {
       [],
       "[CORRECTION] that is the wrong ledger",
     );
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
   });
 
   it("a correction invalidates success even after a failed follow-up or an unwritten memory", async () => {
@@ -171,17 +174,19 @@ describe("Playbook evidence capture", () => {
     await fail("Tool execution failed");
     memoryState.enabled = false;
     await fail("[CORRECTION] that is the wrong ledger");
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
   });
 
   it("deleting or editing the source memory invalidates dependent evidence", async () => {
     const first = await success("task-1", "Reconcile invoices");
     const second = await success("task-2", "Reconcile vendor invoices");
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toContain("Reconcile");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toContain(
+      "Reconcile",
+    );
     if (first.status !== "recorded" || second.status !== "recorded") throw new Error("setup");
     db.prepare("DELETE FROM memories WHERE id = ?").run(first.memoryId);
     db.prepare("UPDATE memories SET content = 'edited' WHERE id = ?").run(second.memoryId);
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
     const reasons = db
       .prepare("SELECT invalidation_reason AS r FROM playbook_success_evidence ORDER BY r")
       .all();
@@ -200,8 +205,8 @@ describe("Playbook evidence capture", () => {
     );
     await PlaybookService.captureMailboxPattern(WS, { title: "Reconcile invoices", summary: "x" });
     expect(evidenceCount()).toBe(0);
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
-    expect(PlaybookSkillPromoter.findCandidates(WS, 1)).toEqual([]);
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+    expect(await PlaybookSkillPromoter.findCandidates(WS, 1)).toEqual([]);
   });
 });
 
@@ -218,7 +223,10 @@ describe("Playbook evidence privacy", () => {
     );
     const ledger = JSON.stringify(db.prepare("SELECT * FROM playbook_success_evidence").all());
     expect(ledger).not.toMatch(/Reconcile|ledger export|4411/);
-    const [success] = PlaybookService.eligibleSuccesses(PlaybookService.getEvidenceStore()!, WS);
+    const [success] = await PlaybookService.eligibleSuccesses(
+      PlaybookService.getEvidenceStore()!,
+      WS,
+    );
     expect(success.request).toBe("Reconcile invoices for [private content redacted] this month");
   });
 
@@ -228,17 +236,17 @@ describe("Playbook evidence privacy", () => {
       const captured = await success(taskId, "Reconcile monthly invoices");
       if (captured.status !== "recorded" || !captured.evidenceId) throw new Error("setup");
       ids.push(captured.memoryId);
-      PlaybookService.reinforceFromEvidence(WS, captured.evidenceId);
+      await PlaybookService.reinforceFromEvidence(WS, captured.evidenceId);
     }
-    expect(PlaybookSkillPromoter.findCandidates(WS, 3)).toHaveLength(1);
+    expect(await PlaybookSkillPromoter.findCandidates(WS, 3)).toHaveLength(1);
     db.prepare("UPDATE memories SET is_private = 1 WHERE id = ?").run(ids[0]);
     memoryState.suppressed.add(ids[1]);
-    expect(PlaybookSkillPromoter.findCandidates(WS, 2)).toEqual([]);
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile monthly invoices")).toContain(
+    expect(await PlaybookSkillPromoter.findCandidates(WS, 2)).toEqual([]);
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile monthly invoices")).toContain(
       "approach for Reconcile monthly invoices",
     );
     memoryState.suppressed.add(ids[2]);
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile monthly invoices")).toBe("");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile monthly invoices")).toBe("");
   });
 });
 
@@ -248,10 +256,10 @@ describe("Playbook reinforcement and promotion", () => {
     await success("t2", "Reconcile monthly invoices", ["browser_navigate"]);
     const third = await success("t3", "Reconcile monthly invoices", ["write_file", "read_file"]);
     if (third.status !== "recorded" || !third.evidenceId) throw new Error("setup");
-    const result = PlaybookService.reinforceFromEvidence(WS, third.evidenceId);
+    const result = await PlaybookService.reinforceFromEvidence(WS, third.evidenceId);
     expect(result.linkedEvidenceIds).toHaveLength(1);
     // Re-running reinforcement does not create duplicate links.
-    expect(PlaybookService.reinforceFromEvidence(WS, third.evidenceId).linkedEvidenceIds).toEqual(
+    expect((await PlaybookService.reinforceFromEvidence(WS, third.evidenceId)).linkedEvidenceIds).toEqual(
       [],
     );
   });
@@ -262,14 +270,14 @@ describe("Playbook reinforcement and promotion", () => {
       const captured = await success(taskId, "Reconcile monthly invoices", ["read_file"]);
       if (captured.status !== "recorded" || !captured.evidenceId) throw new Error("setup");
       ids.push(captured.evidenceId);
-      PlaybookService.reinforceFromEvidence(WS, captured.evidenceId);
+      await PlaybookService.reinforceFromEvidence(WS, captured.evidenceId);
     }
     // Repeated callbacks for t3 add nothing.
     await success("t3", "Reconcile monthly invoices", ["read_file"]);
-    const [candidate] = PlaybookSkillPromoter.findCandidates(WS, 3);
+    const [candidate] = await PlaybookSkillPromoter.findCandidates(WS, 3);
     expect(candidate.executionCount).toBe(3);
     expect(candidate.sourceEvidence[0]).toMatch(/^Observed successful execution of task t\d/);
-    expect(PlaybookSkillPromoter.findCandidates(WS, 4)).toEqual([]);
+    expect(await PlaybookSkillPromoter.findCandidates(WS, 4)).toEqual([]);
   });
 });
 

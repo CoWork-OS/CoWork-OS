@@ -1,8 +1,9 @@
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import type Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import type { AgentDaemon } from "../agent/daemon";
-import { TaskRepository, WorkspaceRepository } from "../database/repositories";
+
 import type {
   ImprovementCampaign,
   ImprovementCandidate,
@@ -27,7 +28,7 @@ import {
   ImprovementRunRepository,
   ImprovementVariantRunRepository,
   clearImprovementHistoryData,
-} from "./ImprovementRepositories";
+} from "./improvement-repository-facades";
 import { saveImprovementResetBaselineAt } from "./ImprovementHistoryState";
 import { ImprovementSettingsManager } from "./ImprovementSettingsManager";
 import { evaluateNetworkPolicy } from "../security/network-policy";
@@ -94,10 +95,10 @@ export class ImprovementLoopService {
     this.started = true;
     this.agentDaemon = agentDaemon;
 
-    this.worktreeCreatedListener = (evt: Any) => {
+    const onWorktreeCreated = async (evt: Any) => {
       const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
       if (!taskId) return;
-      const variant = this.variantRepo.findByTaskId(taskId);
+      const variant = await this.variantRepo.findByTaskId(taskId);
       if (!variant) return;
       const branch =
         typeof evt?.payload?.branch === "string"
@@ -106,27 +107,36 @@ export class ImprovementLoopService {
             ? evt.branch
             : "";
       if (branch) {
-        this.variantRepo.update(variant.id, { branchName: branch });
+        await this.variantRepo.update(variant.id, { branchName: branch });
       }
     };
+    // Listeners start their work and report failures; the emitter does not wait.
+    const detached =
+      <A extends unknown[]>(run: (...args: A) => Promise<void>, label: string) =>
+      (...args: A): void => {
+        void run(...args).catch((error: unknown) => {
+          console.error(`[ImprovementLoop] ${label} failed:`, error);
+        });
+      };
+    this.worktreeCreatedListener = detached(onWorktreeCreated, "Worktree branch update");
     agentDaemon.on("worktree_created", this.worktreeCreatedListener);
 
-    const finalize = (taskId: string) => {
-      const variant = this.variantRepo.findByTaskId(taskId);
+    const finalize = async (taskId: string) => {
+      const variant = await this.variantRepo.findByTaskId(taskId);
       if (!variant || (variant.status !== "queued" && variant.status !== "running")) return;
       void this.finalizeVariant(variant.id, taskId);
     };
 
-    this.taskCompletedListener = (evt: Any) => {
+    this.taskCompletedListener = detached(async (evt: Any) => {
       const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
-      if (taskId) finalize(taskId);
-    };
+      if (taskId) await finalize(taskId);
+    }, "Variant finalization");
     agentDaemon.on("task_completed", this.taskCompletedListener);
 
-    this.taskStatusListener = (evt: Any) => {
+    this.taskStatusListener = detached(async (evt: Any) => {
       const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
-      if (taskId) finalize(taskId);
-    };
+      if (taskId) await finalize(taskId);
+    }, "Variant finalization");
     agentDaemon.on("task_status", this.taskStatusListener);
 
     await this.refreshCandidates();
@@ -174,12 +184,12 @@ export class ImprovementLoopService {
     return this.applyEligibilityGuard(this.normalizeSettings(next));
   }
 
-  listCandidates(workspaceId?: string): ImprovementCandidate[] {
+  async listCandidates(workspaceId?: string): Promise<ImprovementCandidate[]> {
     return this.candidateRepo.list({ workspaceId });
   }
 
-  listCampaigns(workspaceId?: string): ImprovementCampaign[] {
-    return this.enrichCampaigns(this.campaignRepo.list({ workspaceId }));
+  async listCampaigns(workspaceId?: string): Promise<ImprovementCampaign[]> {
+    return this.enrichCampaigns(await this.campaignRepo.list({ workspaceId }));
   }
 
   async listCampaignsFresh(workspaceId?: string): Promise<ImprovementCampaign[]> {
@@ -191,13 +201,13 @@ export class ImprovementLoopService {
     return this.candidateService.refresh();
   }
 
-  dismissCandidate(candidateId: string): ImprovementCandidate | undefined {
+  async dismissCandidate(candidateId: string): Promise<ImprovementCandidate | undefined> {
     return this.candidateService.dismissCandidate(candidateId);
   }
 
   async resetHistory(): Promise<ImprovementHistoryResetResult> {
     const cancelledTaskIds = await this.cancelImprovementTasksForReset();
-    const deleted = clearImprovementHistoryData(this.db);
+    const deleted = await clearImprovementHistoryData(this.db);
     const resetAt = Date.now();
     saveImprovementResetBaselineAt(resetAt);
     return {
@@ -215,11 +225,11 @@ export class ImprovementLoopService {
       this.assertImprovementEligible();
     }
 
-    const campaign = this.campaignRepo.findById(campaignId);
+    const campaign = await this.campaignRepo.findById(campaignId);
     if (!campaign) return undefined;
 
     if (reviewStatus === "dismissed") {
-      this.campaignRepo.update(campaignId, {
+      await this.campaignRepo.update(campaignId, {
         reviewStatus,
         status: "parked",
         stage: "completed",
@@ -228,7 +238,7 @@ export class ImprovementLoopService {
         stopReason: "dismissed_from_review",
         completedAt: campaign.completedAt || Date.now(),
       });
-      this.candidateService.markCandidateParked(
+      await this.candidateService.markCandidateParked(
         campaign.candidateId,
         campaign.promotionError || "Campaign was dismissed before opening a PR.",
       );
@@ -247,7 +257,7 @@ export class ImprovementLoopService {
     }
 
     if (!["verifying", "ready_for_review", "promoted"].includes(campaign.status)) {
-      this.campaignRepo.update(campaignId, {
+      await this.campaignRepo.update(campaignId, {
         promotionStatus: "promotion_failed",
         promotionError: "Only promotable campaigns can open a PR.",
       });
@@ -255,19 +265,19 @@ export class ImprovementLoopService {
     }
 
     const winner = campaign.winnerVariantId
-      ? this.variantRepo.findById(campaign.winnerVariantId)
+      ? await this.variantRepo.findById(campaign.winnerVariantId)
       : undefined;
     if (!winner?.taskId) {
-      this.campaignRepo.update(campaignId, {
+      await this.campaignRepo.update(campaignId, {
         promotionStatus: "promotion_failed",
         promotionError: "No promotable winner variant is linked to this campaign.",
       });
       return this.getCampaign(campaignId);
     }
 
-    const task = this.taskRepo.findById(winner.taskId);
+    const task = await this.taskRepo.findById(winner.taskId);
     if (!this.canPromoteVariant(winner, task)) {
-      this.campaignRepo.update(campaignId, {
+      await this.campaignRepo.update(campaignId, {
         reviewStatus: "dismissed",
         status: "failed",
         stage: "completed",
@@ -276,10 +286,10 @@ export class ImprovementLoopService {
         stopReason: "winner_not_promotable",
         completedAt: Date.now(),
       });
-      this.candidateService.recordCampaignFailure(campaign.candidateId, {
+      await this.candidateService.recordCampaignFailure(campaign.candidateId, {
         failureClass: "non_promotable_result",
         attemptFingerprint: this.buildAttemptFingerprint(
-          this.candidateRepo.findById(campaign.candidateId),
+          await this.candidateRepo.findById(campaign.candidateId),
           "review",
         ),
         reason: "Winner did not satisfy PR promotion gates.",
@@ -295,7 +305,7 @@ export class ImprovementLoopService {
     const settings = this.getSettings();
     if (!settings.enabled) return null;
     await this.reconcileActiveCampaigns();
-    if (this.campaignRepo.countActive() >= settings.maxConcurrentCampaigns) {
+    if ((await this.campaignRepo.countActive()) >= settings.maxConcurrentCampaigns) {
       return null;
     }
 
@@ -311,17 +321,17 @@ export class ImprovementLoopService {
       throw new Error("Retry could not start because the self-improvement loop is disabled.");
     }
     await this.reconcileActiveCampaigns();
-    if (this.campaignRepo.countActive() >= settings.maxConcurrentCampaigns) {
+    if ((await this.campaignRepo.countActive()) >= settings.maxConcurrentCampaigns) {
       throw new Error(
         "Retry could not start because the maximum number of active campaigns is already in progress.",
       );
     }
-    const prior = this.campaignRepo.findById(campaignId);
+    const prior = await this.campaignRepo.findById(campaignId);
     if (!prior)
       throw new Error("Retry could not start because the previous campaign no longer exists.");
     if (prior.status !== "failed") throw new Error("Retry is only available for failed campaigns.");
 
-    const candidate = this.candidateRepo.findById(prior.candidateId);
+    const candidate = await this.candidateRepo.findById(prior.candidateId);
     if (!candidate)
       throw new Error("Retry could not start because the candidate no longer exists.");
     if (candidate.status !== "open") {
@@ -336,16 +346,16 @@ export class ImprovementLoopService {
     candidate: ImprovementCandidate,
     settings: ImprovementLoopSettings,
   ): Promise<ImprovementCampaign | null> {
-    const sourceWorkspace = this.workspaceRepo.findById(candidate.workspaceId);
+    const sourceWorkspace = await this.workspaceRepo.findById(candidate.workspaceId);
     if (!sourceWorkspace) return null;
-    const executionWorkspace = this.resolveExecutionWorkspace(candidate, sourceWorkspace);
-    const baselineMetrics = this.evaluationService.snapshot(settings.evalWindowDays);
+    const executionWorkspace = await this.resolveExecutionWorkspace(candidate, sourceWorkspace);
+    const baselineMetrics = await this.evaluationService.snapshot(settings.evalWindowDays);
     const { trainingEvidence, holdoutEvidence, replayCases } = this.buildReplaySet(
       candidate,
       settings,
     );
 
-    const rootTask = this.taskRepo.create({
+    const rootTask = await this.taskRepo.create({
       title: `Improve campaign: ${candidate.title}`,
       prompt: `Failure-closed self-improvement campaign for candidate "${candidate.title}" that must end in a draft pull request candidate or fail quickly.`,
       rawPrompt: `Failure-closed self-improvement campaign for candidate "${candidate.title}" that must end in a draft pull request candidate or fail quickly.`,
@@ -377,7 +387,7 @@ export class ImprovementLoopService {
       resultSummary: "Preparing staged self-improvement campaign.",
     });
 
-    const campaign = this.campaignRepo.create({
+    const campaign = await this.campaignRepo.create({
       candidateId: candidate.id,
       workspaceId: candidate.workspaceId,
       executionWorkspaceId: executionWorkspace.id,
@@ -421,7 +431,7 @@ export class ImprovementLoopService {
       },
     });
 
-    this.candidateService.markCandidateRunning(candidate.id);
+    await this.candidateService.markCandidateRunning(candidate.id);
 
     try {
       const preflight = await this.runPreflightChecks(
@@ -435,10 +445,10 @@ export class ImprovementLoopService {
           failureClass: preflight.failureClass,
           message: preflight.message,
         });
-        return this.getCampaign(campaign.id) || null;
+        return (await this.getCampaign(campaign.id)) || null;
       }
 
-      this.campaignRepo.update(campaign.id, {
+      await this.campaignRepo.update(campaign.id, {
         status: "reproducing",
         stage: "reproducing",
         startedAt: Date.now(),
@@ -449,7 +459,7 @@ export class ImprovementLoopService {
           "Preflight passed. Starting scout variant.",
         ),
       });
-      this.taskRepo.update(rootTask.id, {
+      await this.taskRepo.update(rootTask.id, {
         status: "executing",
         resultSummary: "Running scout stage to reproduce and scope the failure.",
       });
@@ -480,17 +490,17 @@ export class ImprovementLoopService {
       });
     }
 
-    return this.getCampaign(campaign.id) || null;
+    return (await this.getCampaign(campaign.id)) || null;
   }
 
-  private markRootTaskCompleted(taskId: string, summary: string): void {
+  private async markRootTaskCompleted(taskId: string, summary: string): Promise<void> {
     if (this.agentDaemon) {
-      this.agentDaemon.completeTask(taskId, summary, {
+      await this.agentDaemon.completeTask(taskId, summary, {
         terminalStatus: "ok",
       });
       return;
     }
-    this.taskRepo.update(taskId, {
+    await this.taskRepo.update(taskId, {
       status: "completed",
       terminalStatus: "ok",
       completedAt: Date.now(),
@@ -498,11 +508,11 @@ export class ImprovementLoopService {
     });
   }
 
-  private markRootTaskFailed(
+  private async markRootTaskFailed(
     taskId: string,
     message: string,
     failureClass?: Task["failureClass"],
-  ): void {
+  ): Promise<void> {
     if (this.agentDaemon) {
       this.agentDaemon.failTask(taskId, message, {
         terminalStatus: "failed",
@@ -511,7 +521,7 @@ export class ImprovementLoopService {
       });
       return;
     }
-    this.taskRepo.update(taskId, {
+    await this.taskRepo.update(taskId, {
       status: "failed",
       terminalStatus: "failed",
       completedAt: Date.now(),
@@ -521,25 +531,27 @@ export class ImprovementLoopService {
   }
 
   private async finalizeVariant(variantId: string, taskId: string): Promise<void> {
-    const variant = this.variantRepo.findById(variantId);
+    const variant = await this.variantRepo.findById(variantId);
     if (!variant) return;
-    const task = this.taskRepo.findById(taskId);
+    const task = await this.taskRepo.findById(taskId);
     if (!task || !["completed", "failed", "cancelled"].includes(task.status)) return;
 
     const settings = this.getSettings();
-    const campaign = this.campaignRepo.findById(variant.campaignId);
+    const campaign = await this.campaignRepo.findById(variant.campaignId);
     if (!campaign) return;
 
-    const evaluation = this.evaluationService.evaluateVariant({
+    const evaluation = await this.evaluationService.evaluateVariant({
       variant,
       baselineMetrics:
-        campaign.baselineMetrics || this.evaluationService.snapshot(settings.evalWindowDays),
+        campaign.baselineMetrics ||
+        (await this.evaluationService.snapshot(settings.evalWindowDays)),
       evalWindowDays: settings.evalWindowDays,
       replayCases: campaign.replayCases,
       maxPatchFiles: settings.maxPatchFiles,
     });
 
-    this.variantRepo.update(variant.id, {
+    const outcomeMetrics = await this.evaluationService.snapshot(settings.evalWindowDays);
+    await this.variantRepo.update(variant.id, {
       status:
         task.status === "cancelled"
           ? "cancelled"
@@ -547,7 +559,7 @@ export class ImprovementLoopService {
             ? "passed"
             : "failed",
       completedAt: Date.now(),
-      outcomeMetrics: this.evaluationService.snapshot(settings.evalWindowDays),
+      outcomeMetrics,
       verdictSummary: evaluation.summary,
       evaluationNotes: evaluation.notes.join("\n"),
       branchName: variant.branchName || task.worktreeBranch,
@@ -570,9 +582,9 @@ export class ImprovementLoopService {
         },
       },
     });
-    const updatedVariant = this.variantRepo.findById(variant.id);
-    const enriched = this.getCampaign(campaign.id);
-    const candidate = this.candidateRepo.findById(campaign.candidateId);
+    const updatedVariant = await this.variantRepo.findById(variant.id);
+    const enriched = await this.getCampaign(campaign.id);
+    const candidate = await this.candidateRepo.findById(campaign.candidateId);
     if (!updatedVariant || !enriched || !candidate) return;
 
     if (campaign.stage === "reproducing") {
@@ -588,8 +600,8 @@ export class ImprovementLoopService {
     }
 
     if (campaign.stage === "implementing") {
-      const implementationVariants = this.variantRepo
-        .listByCampaignId(campaign.id)
+      const implementationVariants = (await this.variantRepo
+        .listByCampaignId(campaign.id))
         .filter((item) => item.lane !== SCOUT_LANE);
       const pendingVariants = implementationVariants.filter(
         (item) => item.status === "queued" || item.status === "running",
@@ -598,19 +610,19 @@ export class ImprovementLoopService {
         return;
       }
 
-      const judged = this.evaluationService.evaluateCampaign({
+      const judged = await this.evaluationService.evaluateCampaign({
         campaign: enriched,
         variants: implementationVariants,
         evalWindowDays: settings.evalWindowDays,
       });
-      this.judgeVerdictRepo.upsert(judged.verdict);
+      await this.judgeVerdictRepo.upsert(judged.verdict);
 
       const allVerificationCommands = judged.evaluations.flatMap(
         (item) => item.artifactSummary.verificationCommands,
       );
 
       if (!judged.winner) {
-        this.campaignRepo.update(campaign.id, {
+        await this.campaignRepo.update(campaign.id, {
           winnerVariantId: undefined,
           verdictSummary: judged.verdict.summary,
           evaluationNotes: judged.verdict.notes.join("\n"),
@@ -629,8 +641,9 @@ export class ImprovementLoopService {
         return;
       }
 
-      const winnerVariant = this.variantRepo.findById(judged.winner.variantId) || updatedVariant;
-      this.campaignRepo.update(campaign.id, {
+      const winnerVariant =
+        (await this.variantRepo.findById(judged.winner.variantId)) || updatedVariant;
+      await this.campaignRepo.update(campaign.id, {
         status: settings.reviewRequired ? "ready_for_review" : "verifying",
         stage: "verifying",
         winnerVariantId: winnerVariant.id,
@@ -646,7 +659,7 @@ export class ImprovementLoopService {
       });
 
       if (settings.reviewRequired) {
-        this.candidateService.markCandidateReview(campaign.candidateId);
+        await this.candidateService.markCandidateReview(campaign.candidateId);
         return;
       }
 
@@ -659,9 +672,9 @@ export class ImprovementLoopService {
     winner: ImprovementVariantRun,
     reviewStatus: ImprovementReviewStatus = "accepted",
   ): Promise<ImprovementCampaign | undefined> {
-    const campaign = this.campaignRepo.findById(campaignId);
+    const campaign = await this.campaignRepo.findById(campaignId);
     if (!campaign) return undefined;
-    const candidate = this.candidateRepo.findById(campaign.candidateId);
+    const candidate = await this.candidateRepo.findById(campaign.candidateId);
     const promotionMode = "github_pr";
     const eligibility = getImprovementEligibility();
 
@@ -670,7 +683,7 @@ export class ImprovementLoopService {
       return this.getCampaign(campaignId);
     }
 
-    this.campaignRepo.update(campaignId, {
+    await this.campaignRepo.update(campaignId, {
       reviewStatus,
       promotionStatus: "promoting",
       promotionError: undefined,
@@ -691,7 +704,7 @@ export class ImprovementLoopService {
       },
     });
     if (campaign.rootTaskId) {
-      this.taskRepo.update(campaign.rootTaskId, {
+      await this.taskRepo.update(campaign.rootTaskId, {
         resultSummary: `Promoting winner ${winner.lane}.`,
       });
     }
@@ -711,7 +724,7 @@ export class ImprovementLoopService {
     }
 
     const worktreeManager = this.agentDaemon.getWorktreeManager();
-    const worktreeInfo = worktreeManager.getWorktreeInfo?.(winner.taskId);
+    const worktreeInfo = await worktreeManager.getWorktreeInfo?.(winner.taskId);
     const assertFilesystemAccess = (this.agentDaemon as Any).assertTaskWorkspaceFilesystemAccess;
     const assertBaseFilesystemAccess = (this.agentDaemon as Any)
       .assertTaskBaseWorkspaceFilesystemAccess;
@@ -740,7 +753,7 @@ export class ImprovementLoopService {
     const effectiveWorkspace =
       typeof (this.agentDaemon as Any).getEffectiveWorkspaceForTask === "function"
         ? (this.agentDaemon as Any).getEffectiveWorkspaceForTask(winner.taskId)
-        : this.workspaceRepo.findById(campaign.workspaceId);
+        : await this.workspaceRepo.findById(campaign.workspaceId);
     const networkDecision = evaluateNetworkPolicy({
       url: "https://github.com",
       toolName: "improvement_pull_request",
@@ -784,7 +797,7 @@ export class ImprovementLoopService {
       body: this.buildPullRequestBody(candidate, campaign, winner),
     });
     if (pullRequest.success) {
-      this.campaignRepo.update(campaignId, {
+      await this.campaignRepo.update(campaignId, {
         status: "pr_opened",
         stage: "completed",
         reviewStatus,
@@ -809,9 +822,12 @@ export class ImprovementLoopService {
           ],
         },
       });
-      this.candidateService.markCandidateResolved(campaign.candidateId);
+      await this.candidateService.markCandidateResolved(campaign.candidateId);
       if (campaign.rootTaskId) {
-        this.markRootTaskCompleted(campaign.rootTaskId, `Draft PR opened from ${winner.lane}.`);
+        await this.markRootTaskCompleted(
+          campaign.rootTaskId,
+          `Draft PR opened from ${winner.lane}.`,
+        );
       }
       void this.notify({
         type: "task_completed",
@@ -833,7 +849,7 @@ export class ImprovementLoopService {
   }
 
   private async reconcileActiveCampaigns(): Promise<void> {
-    const activeCampaigns = this.campaignRepo.list({
+    const activeCampaigns = await this.campaignRepo.list({
       status: [
         "queued",
         "preflight",
@@ -846,9 +862,9 @@ export class ImprovementLoopService {
       ],
     });
     for (const campaign of activeCampaigns) {
-      const variants = this.variantRepo.listByCampaignId(campaign.id);
+      const variants = await this.variantRepo.listByCampaignId(campaign.id);
       if (variants.length === 0) {
-        const candidate = this.candidateRepo.findById(campaign.candidateId);
+        const candidate = await this.candidateRepo.findById(campaign.candidateId);
         if (candidate) {
           await this.failCampaign(campaign.id, candidate, {
             failureClass: "missing_resumable_state",
@@ -859,7 +875,7 @@ export class ImprovementLoopService {
       }
       for (const variant of variants) {
         if (!variant.taskId) {
-          this.variantRepo.update(variant.id, {
+          await this.variantRepo.update(variant.id, {
             status: "failed",
             completedAt: Date.now(),
             verdictSummary:
@@ -867,14 +883,14 @@ export class ImprovementLoopService {
           });
           continue;
         }
-        const task = this.taskRepo.findById(variant.taskId);
+        const task = await this.taskRepo.findById(variant.taskId);
         if (!task) {
-          this.variantRepo.update(variant.id, {
+          await this.variantRepo.update(variant.id, {
             status: "failed",
             completedAt: Date.now(),
             verdictSummary: "Variant task record was missing during reconciliation.",
           });
-          const candidate = this.candidateRepo.findById(campaign.candidateId);
+          const candidate = await this.candidateRepo.findById(campaign.candidateId);
           if (candidate) {
             await this.failCampaign(campaign.id, candidate, {
               failureClass: "missing_resumable_state",
@@ -896,14 +912,14 @@ export class ImprovementLoopService {
   private async pickNextCandidate(
     requireWorktree: boolean,
   ): Promise<ImprovementCandidate | undefined> {
-    const workspaces = this.workspaceRepo.findAll();
+    const workspaces = await this.workspaceRepo.findAll();
     const ranked: Array<{ candidate: ImprovementCandidate; promotable: boolean; score: number }> =
       [];
     const worktreeManager = this.agentDaemon?.getWorktreeManager();
     for (const workspace of workspaces) {
-      const candidate = this.candidateService.getTopCandidateForWorkspace(workspace.id);
+      const candidate = await this.candidateService.getTopCandidateForWorkspace(workspace.id);
       if (!candidate) continue;
-      const executionWorkspace = this.resolveExecutionWorkspace(candidate, workspace);
+      const executionWorkspace = await this.resolveExecutionWorkspace(candidate, workspace);
       const score = this.scoreExecutionWorkspace(executionWorkspace, candidate);
       const promotable =
         !!executionWorkspace &&
@@ -915,7 +931,7 @@ export class ImprovementLoopService {
               requireWorktree,
             ))));
       if (!promotable) {
-        this.candidateService.recordCandidateSkip(
+        await this.candidateService.recordCandidateSkip(
           candidate.id,
           requireWorktree
             ? `Skipped because execution workspace ${executionWorkspace.name} cannot provide required git worktree isolation.`
@@ -935,15 +951,14 @@ export class ImprovementLoopService {
     return ranked[0]?.candidate;
   }
 
-  private resolveExecutionWorkspace(
+  private async resolveExecutionWorkspace(
     candidate: ImprovementCandidate,
     sourceWorkspace: Workspace,
-  ): Workspace {
-    const canonicalCoworkWorkspace = this.findCanonicalCoworkWorkspace();
+  ): Promise<Workspace> {
+    const canonicalCoworkWorkspace = await this.findCanonicalCoworkWorkspace();
     if (canonicalCoworkWorkspace) return canonicalCoworkWorkspace;
     if (this.isLikelyCoworkCodeWorkspace(sourceWorkspace)) return sourceWorkspace;
-    const alternatives = this.workspaceRepo
-      .findAll()
+    const alternatives = (await this.workspaceRepo.findAll())
       .filter((workspace) => workspace.id !== sourceWorkspace.id)
       .map((workspace) => ({
         workspace,
@@ -967,8 +982,8 @@ export class ImprovementLoopService {
     return bestAlternative?.workspace || sourceWorkspace;
   }
 
-  private findCanonicalCoworkWorkspace(): Workspace | undefined {
-    const workspaces = this.workspaceRepo.findAll();
+  private async findCanonicalCoworkWorkspace(): Promise<Workspace | undefined> {
+    const workspaces = await this.workspaceRepo.findAll();
     const preferredPath = this.getPreferredCoworkRepoPath();
 
     if (preferredPath) {
@@ -1186,11 +1201,11 @@ export class ImprovementLoopService {
     candidate: ImprovementCandidate,
     settings: ImprovementLoopSettings,
   ): Promise<void> {
-    const campaign = this.campaignRepo.findById(campaignId);
+    const campaign = await this.campaignRepo.findById(campaignId);
     if (!campaign) return;
-    const sourceWorkspace = this.workspaceRepo.findById(candidate.workspaceId);
+    const sourceWorkspace = await this.workspaceRepo.findById(candidate.workspaceId);
     const executionWorkspace = campaign.executionWorkspaceId
-      ? this.workspaceRepo.findById(campaign.executionWorkspaceId)
+      ? await this.workspaceRepo.findById(campaign.executionWorkspaceId)
       : sourceWorkspace;
     if (!sourceWorkspace || !executionWorkspace) {
       await this.failCampaign(campaignId, candidate, {
@@ -1199,7 +1214,7 @@ export class ImprovementLoopService {
       });
       return;
     }
-    this.campaignRepo.update(campaignId, {
+    await this.campaignRepo.update(campaignId, {
       status: "implementing",
       stage: "implementing",
       verdictSummary: "Scout stage passed. Starting implementation stage.",
@@ -1241,7 +1256,7 @@ export class ImprovementLoopService {
     maxTokens: number;
   }): Promise<void> {
     if (!this.agentDaemon) throw new Error("Agent daemon unavailable");
-    const campaign = this.campaignRepo.findById(params.campaignId);
+    const campaign = await this.campaignRepo.findById(params.campaignId);
     if (!campaign?.rootTaskId) throw new Error("Campaign root task missing");
     const shouldRequireWorktree = await this.shouldRequireWorktreeForWorkspace(
       params.executionWorkspace.path,
@@ -1252,7 +1267,7 @@ export class ImprovementLoopService {
       params.executionWorkspace,
       params.settings.improvementProgramPath,
     );
-    const variant = this.variantRepo.create({
+    const variant = await this.variantRepo.create({
       campaignId: params.campaignId,
       candidateId: params.candidate.id,
       workspaceId: params.candidate.workspaceId,
@@ -1306,7 +1321,7 @@ export class ImprovementLoopService {
         bypassQueue: false,
       },
     });
-    this.variantRepo.update(variant.id, {
+    await this.variantRepo.update(variant.id, {
       taskId: task.id,
       status: "running",
       startedAt: Date.now(),
@@ -1323,9 +1338,9 @@ export class ImprovementLoopService {
     candidate: ImprovementCandidate,
     params: { failureClass: ImprovementFailureClass; message: string },
   ): Promise<void> {
-    const campaign = this.campaignRepo.findById(campaignId);
+    const campaign = await this.campaignRepo.findById(campaignId);
     if (!campaign) return;
-    this.campaignRepo.update(campaignId, {
+    await this.campaignRepo.update(campaignId, {
       status: params.failureClass.startsWith("provider_") ? "parked" : "failed",
       stage: "completed",
       reviewStatus: "dismissed",
@@ -1341,9 +1356,9 @@ export class ImprovementLoopService {
       ),
     });
     if (campaign.rootTaskId) {
-      this.markRootTaskFailed(campaign.rootTaskId, params.message);
+      await this.markRootTaskFailed(campaign.rootTaskId, params.message);
     }
-    this.candidateService.recordCampaignFailure(candidate.id, {
+    await this.candidateService.recordCampaignFailure(candidate.id, {
       failureClass: params.failureClass,
       attemptFingerprint: this.buildAttemptFingerprint(
         candidate,
@@ -1367,9 +1382,9 @@ export class ImprovementLoopService {
     message: string,
     pullRequest?: { success?: boolean; error?: string; url?: string; number?: number },
   ): Promise<void> {
-    const campaign = this.campaignRepo.findById(campaignId);
+    const campaign = await this.campaignRepo.findById(campaignId);
     if (!campaign) return;
-    this.campaignRepo.update(campaignId, {
+    await this.campaignRepo.update(campaignId, {
       status: "parked",
       stage: "completed",
       reviewStatus: "dismissed",
@@ -1393,10 +1408,10 @@ export class ImprovementLoopService {
       },
     });
     if (campaign.rootTaskId) {
-      this.markRootTaskFailed(campaign.rootTaskId, message);
+      await this.markRootTaskFailed(campaign.rootTaskId, message);
     }
     if (candidate) {
-      this.candidateService.recordCampaignFailure(candidate.id, {
+      await this.candidateService.recordCampaignFailure(candidate.id, {
         failureClass: this.classifyFailureFromText(message),
         attemptFingerprint: this.buildAttemptFingerprint(candidate, "promotion"),
         reason: message,
@@ -1426,28 +1441,30 @@ export class ImprovementLoopService {
     return [...logPaths];
   }
 
-  private enrichCampaigns(campaigns: ImprovementCampaign[]): ImprovementCampaign[] {
-    return campaigns.map((campaign) => this.enrichCampaign(campaign));
+  private enrichCampaigns(campaigns: ImprovementCampaign[]): Promise<ImprovementCampaign[]> {
+    return Promise.all(campaigns.map((campaign) => this.enrichCampaign(campaign)));
   }
 
-  private enrichCampaign(campaign: ImprovementCampaign): ImprovementCampaign {
+  private async enrichCampaign(campaign: ImprovementCampaign): Promise<ImprovementCampaign> {
     return {
       ...campaign,
-      variants: this.variantRepo.listByCampaignId(campaign.id).map((variant) => {
-        if (!variant.taskId) return variant;
-        const task = this.taskRepo.findById(variant.taskId);
-        return {
-          ...variant,
-          executionWorkspaceId: task?.workspaceId || variant.executionWorkspaceId,
-        };
-      }),
-      judgeVerdict: this.judgeVerdictRepo.findByCampaignId(campaign.id),
+      variants: await Promise.all(
+        (await this.variantRepo.listByCampaignId(campaign.id)).map(async (variant) => {
+          if (!variant.taskId) return variant;
+          const task = await this.taskRepo.findById(variant.taskId);
+          return {
+            ...variant,
+            executionWorkspaceId: task?.workspaceId || variant.executionWorkspaceId,
+          };
+        }),
+      ),
+      judgeVerdict: await this.judgeVerdictRepo.findByCampaignId(campaign.id),
     };
   }
 
-  private getCampaign(campaignId: string): ImprovementCampaign | undefined {
-    const campaign = this.campaignRepo.findById(campaignId);
-    return campaign ? this.enrichCampaign(campaign) : undefined;
+  private async getCampaign(campaignId: string): Promise<ImprovementCampaign | undefined> {
+    const campaign = await this.campaignRepo.findById(campaignId);
+    return campaign ? await this.enrichCampaign(campaign) : undefined;
   }
 
   private async shouldRequireWorktreeForWorkspace(
@@ -1638,14 +1655,14 @@ export class ImprovementLoopService {
   private async cancelImprovementTasksForReset(): Promise<string[]> {
     const taskIds = new Set<string>();
 
-    for (const run of this.runRepo.list()) {
+    for (const run of await this.runRepo.list()) {
       if (run.taskId) taskIds.add(run.taskId);
     }
 
-    for (const campaign of this.campaignRepo.list()) {
+    for (const campaign of await this.campaignRepo.list()) {
       if (campaign.rootTaskId) taskIds.add(campaign.rootTaskId);
       if (campaign.promotedTaskId) taskIds.add(campaign.promotedTaskId);
-      for (const variant of this.variantRepo.listByCampaignId(campaign.id)) {
+      for (const variant of await this.variantRepo.listByCampaignId(campaign.id)) {
         if (variant.taskId) taskIds.add(variant.taskId);
       }
     }

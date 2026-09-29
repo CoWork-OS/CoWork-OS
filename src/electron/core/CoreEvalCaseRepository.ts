@@ -13,7 +13,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-export class CoreEvalCaseRepository {
+export class CoreEvalCaseStore {
   constructor(private readonly db: Database.Database) {}
 
   create(input: Omit<CoreEvalCase, "id"> & { id?: string }): CoreEvalCase {

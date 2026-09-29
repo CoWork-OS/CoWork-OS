@@ -59,11 +59,11 @@ afterEach(() => {
 });
 
 describeWithNativeDb("DurableContextService", () => {
-  it("records searchable task messages without re-indexing injected memory blocks", () => {
+  it("records searchable task messages without re-indexing injected memory blocks", async () => {
     enableDurableContext();
     createDb();
 
-    DurableContextService.recordHistory({
+    await DurableContextService.recordHistory({
       workspaceId: "ws-1",
       taskId: "task-1",
       source: "test",
@@ -77,7 +77,7 @@ describeWithNativeDb("DurableContextService", () => {
       ],
     });
 
-    const hits = DurableContextService.search({
+    const hits = await DurableContextService.search({
       workspaceId: "ws-1",
       taskId: "task-1",
       query: "alpha migration",
@@ -86,7 +86,7 @@ describeWithNativeDb("DurableContextService", () => {
     expect(hits[0]?.kind).toBe("message");
     expect(hits[0]?.snippet).toContain("alpha migration constraint");
 
-    const injectedHits = DurableContextService.search({
+    const injectedHits = await DurableContextService.search({
       workspaceId: "ws-1",
       taskId: "task-1",
       query: "cowork_recall_hints",
@@ -94,11 +94,11 @@ describeWithNativeDb("DurableContextService", () => {
     expect(injectedHits).toHaveLength(0);
   });
 
-  it("does not re-index durable context tool result payloads", () => {
+  it("does not re-index durable context tool result payloads", async () => {
     enableDurableContext();
     createDb();
 
-    DurableContextService.recordHistory({
+    await DurableContextService.recordHistory({
       workspaceId: "ws-1",
       taskId: "task-1",
       source: "test",
@@ -136,7 +136,7 @@ describeWithNativeDb("DurableContextService", () => {
       ],
     });
 
-    const hits = DurableContextService.search({
+    const hits = await DurableContextService.search({
       workspaceId: "ws-1",
       taskId: "task-1",
       query: "Lantern Harbor",
@@ -146,11 +146,11 @@ describeWithNativeDb("DurableContextService", () => {
     expect(hits[0]?.snippet).not.toContain("dcm_existing");
   });
 
-  it("prefers direct facts over execution wrapper messages", () => {
+  it("prefers direct facts over execution wrapper messages", async () => {
     enableDurableContext();
     createDb();
 
-    DurableContextService.recordHistory({
+    await DurableContextService.recordHistory({
       workspaceId: "ws-1",
       taskId: "task-1",
       source: "test",
@@ -160,7 +160,7 @@ describeWithNativeDb("DurableContextService", () => {
       ],
     });
 
-    const hits = DurableContextService.search({
+    const hits = await DurableContextService.search({
       workspaceId: "ws-1",
       taskId: "task-1",
       query: "Lantern Harbor",
@@ -168,17 +168,17 @@ describeWithNativeDb("DurableContextService", () => {
     expect(hits[0]?.snippet).toBe("assistant: Lantern Harbor");
   });
 
-  it("keeps durable searches scoped to the requested task", () => {
+  it("keeps durable searches scoped to the requested task", async () => {
     enableDurableContext();
     createDb();
 
-    DurableContextService.recordHistory({
+    await DurableContextService.recordHistory({
       workspaceId: "ws-1",
       taskId: "task-source",
       source: "test",
       messages: [{ role: "user", content: "The rollback phrase is blue anchor." }],
     });
-    DurableContextService.recordHistory({
+    await DurableContextService.recordHistory({
       workspaceId: "ws-1",
       taskId: "task-other",
       source: "test",
@@ -186,14 +186,14 @@ describeWithNativeDb("DurableContextService", () => {
     });
 
     expect(
-      DurableContextService.search({
+      await DurableContextService.search({
         workspaceId: "ws-1",
         taskId: "task-other",
         query: "blue anchor",
       }),
     ).toEqual([]);
     expect(
-      DurableContextService.search({
+      await DurableContextService.search({
         workspaceId: "ws-1",
         taskId: "task-source",
         query: "blue anchor",
@@ -201,11 +201,11 @@ describeWithNativeDb("DurableContextService", () => {
     ).toHaveLength(1);
   });
 
-  it("stores compaction summaries linked back to source messages", () => {
+  it("stores compaction summaries linked back to source messages", async () => {
     enableDurableContext();
     createDb();
 
-    const summaryId = DurableContextService.recordCompactionSummary({
+    const summaryId = await DurableContextService.recordCompactionSummary({
       workspaceId: "ws-1",
       taskId: "task-1",
       removedMessages: [
@@ -218,7 +218,7 @@ describeWithNativeDb("DurableContextService", () => {
     });
 
     expect(summaryId).toMatch(/^dcs_/);
-    const hits = DurableContextService.search({
+    const hits = await DurableContextService.search({
       workspaceId: "ws-1",
       taskId: "task-1",
       query: "source-linked tree",
@@ -227,7 +227,7 @@ describeWithNativeDb("DurableContextService", () => {
     expect(hits[0]?.kind).toBe("summary");
     expect(hits[0]?.sourceMessageCount).toBe(2);
 
-    const described = DurableContextService.describe({
+    const described = await DurableContextService.describe({
       workspaceId: "ws-1",
       taskId: "task-1",
       id: summaryId || "",
@@ -239,11 +239,11 @@ describeWithNativeDb("DurableContextService", () => {
     expect(described?.sourceMessages?.[0]?.text).toContain("old workspace search");
   });
 
-  it("does not read or write durable context while disabled", () => {
+  it("does not read or write durable context while disabled", async () => {
     disableDurableContext();
     createDb();
 
-    DurableContextService.recordHistory({
+    await DurableContextService.recordHistory({
       workspaceId: "ws-1",
       taskId: "task-1",
       source: "test",
@@ -251,7 +251,7 @@ describeWithNativeDb("DurableContextService", () => {
     });
 
     expect(
-      DurableContextService.search({
+      await DurableContextService.search({
         workspaceId: "ws-1",
         taskId: "task-1",
         query: "disabled message",
@@ -259,19 +259,19 @@ describeWithNativeDb("DurableContextService", () => {
     ).toEqual([]);
   });
 
-  it("stores large messages by reference while keeping a retrievable preview", () => {
+  it("stores large messages by reference while keeping a retrievable preview", async () => {
     enableDurableContext();
     createDb();
 
     const longText = Array.from({ length: 120 }, (_, index) => `payload-${index}`).join(" ");
-    DurableContextService.recordHistory({
+    await DurableContextService.recordHistory({
       workspaceId: "ws-1",
       taskId: "task-1",
       source: "test",
       messages: [{ role: "assistant", content: longText }],
     });
 
-    const hits = DurableContextService.search({
+    const hits = await DurableContextService.search({
       workspaceId: "ws-1",
       taskId: "task-1",
       query: "payload-1",
@@ -279,7 +279,7 @@ describeWithNativeDb("DurableContextService", () => {
     expect(hits).toHaveLength(1);
     expect(hits[0]?.snippet).toContain("large_payload_ref");
 
-    const described = DurableContextService.describe({
+    const described = await DurableContextService.describe({
       workspaceId: "ws-1",
       taskId: "task-1",
       id: hits[0]?.id || "",
@@ -288,11 +288,11 @@ describeWithNativeDb("DurableContextService", () => {
     expect(described?.largePayload?.preview).toContain("payload-119");
   });
 
-  it("links overlapping summaries into a parent DAG", () => {
+  it("links overlapping summaries into a parent DAG", async () => {
     enableDurableContext();
     const db = createDb();
 
-    const firstSummary = DurableContextService.recordCompactionSummary({
+    const firstSummary = await DurableContextService.recordCompactionSummary({
       workspaceId: "ws-1",
       taskId: "task-1",
       removedMessages: [
@@ -301,7 +301,7 @@ describeWithNativeDb("DurableContextService", () => {
       ],
       summaryBlock: "Alpha summary",
     });
-    const secondSummary = DurableContextService.recordCompactionSummary({
+    const secondSummary = await DurableContextService.recordCompactionSummary({
       workspaceId: "ws-1",
       taskId: "task-1",
       removedMessages: [
@@ -320,7 +320,7 @@ describeWithNativeDb("DurableContextService", () => {
       )
       .get(secondSummary) as { parent_summary_id?: string } | undefined;
     expect(parent?.parent_summary_id).toBe(firstSummary);
-    const described = DurableContextService.describe({
+    const described = await DurableContextService.describe({
       workspaceId: "ws-1",
       taskId: "task-1",
       id: secondSummary || "",
@@ -328,20 +328,20 @@ describeWithNativeDb("DurableContextService", () => {
     expect(described?.depth).toBe(1);
   });
 
-  it("clears durable context for a workspace", () => {
+  it("clears durable context for a workspace", async () => {
     enableDurableContext();
     createDb();
 
-    DurableContextService.recordHistory({
+    await DurableContextService.recordHistory({
       workspaceId: "ws-1",
       taskId: "task-1",
       source: "test",
       messages: [{ role: "user", content: "erase this durable context" }],
     });
 
-    expect(DurableContextService.clearWorkspace("ws-1")).toBeGreaterThan(0);
+    expect(await DurableContextService.clearWorkspace("ws-1")).toBeGreaterThan(0);
     expect(
-      DurableContextService.search({
+      await DurableContextService.search({
         workspaceId: "ws-1",
         taskId: "task-1",
         query: "erase this",

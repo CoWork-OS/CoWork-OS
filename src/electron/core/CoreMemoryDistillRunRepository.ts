@@ -13,7 +13,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-export class CoreMemoryDistillRunRepository {
+export class CoreMemoryDistillRunStore {
   constructor(private readonly db: Database.Database) {}
 
   create(input: Omit<CoreMemoryDistillRun, "id"> & { id?: string }): CoreMemoryDistillRun {

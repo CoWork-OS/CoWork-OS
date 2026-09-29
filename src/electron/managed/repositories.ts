@@ -17,7 +17,7 @@ function safeJsonParse<T>(jsonString: string | null | undefined, defaultValue: T
   }
 }
 
-export class ManagedAgentRepository {
+export class ManagedAgentStore {
   constructor(private db: Database.Database) {}
 
   create(input: Omit<ManagedAgent, "createdAt" | "updatedAt">): ManagedAgent {
@@ -138,7 +138,7 @@ export class ManagedAgentRepository {
   }
 }
 
-export class ManagedAgentVersionRepository {
+export class ManagedAgentVersionStore {
   constructor(private db: Database.Database) {}
 
   create(input: ManagedAgentVersion): ManagedAgentVersion {
@@ -221,7 +221,7 @@ export class ManagedAgentVersionRepository {
   }
 }
 
-export class ManagedEnvironmentRepository {
+export class ManagedEnvironmentStore {
   constructor(private db: Database.Database) {}
 
   create(input: Omit<ManagedEnvironment, "createdAt" | "updatedAt">): ManagedEnvironment {
@@ -344,7 +344,7 @@ export class ManagedEnvironmentRepository {
   }
 }
 
-export class ManagedSessionRepository {
+export class ManagedSessionStore {
   constructor(private db: Database.Database) {}
 
   create(input: Omit<ManagedSession, "createdAt" | "updatedAt">): ManagedSession {
@@ -502,7 +502,7 @@ export class ManagedSessionRepository {
   }
 }
 
-export class ManagedSessionEventRepository {
+export class ManagedSessionEventStore {
   constructor(private db: Database.Database) {}
 
   create(

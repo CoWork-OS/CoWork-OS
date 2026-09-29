@@ -28,6 +28,24 @@ const DEFAULT_MAX_MESSAGES = 120;
 const DEFAULT_MAX_CHARS = 30_000;
 const DEFAULT_MAX_MESSAGE_CHARS = 500;
 
+/**
+ * Resolve, up front, the channel users a transcript names, so the formatter's
+ * `lookupUser` stays synchronous over users read through the async storage facade.
+ */
+export async function prefetchTranscriptUsers(
+  messages: ChannelMessage[],
+  findUser: (userId: string) => Promise<ChannelUser | undefined>,
+): Promise<(userId: string) => ChannelUser | undefined> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    if (typeof message.userId === "string" && message.userId) ids.add(message.userId);
+  }
+  const users = new Map<string, ChannelUser | undefined>(
+    await Promise.all([...ids].map(async (id) => [id, await findUser(id)] as const)),
+  );
+  return (userId) => users.get(userId);
+}
+
 export function formatChatTranscriptForPrompt(
   messages: ChannelMessage[],
   opts?: ChatTranscriptOptions,

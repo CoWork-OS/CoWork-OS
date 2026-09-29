@@ -173,7 +173,15 @@ interface HeartbeatRunRow {
   completed_at?: number | null;
 }
 
-export class MissionControlIntelligenceService {
+/**
+ * Mission Control's projection of tasks, mentions, activities, heartbeat runs, core
+ * memory and subconscious state into attention items (async SQLite migration plan, DB6).
+ * As services-domain units these run in the database worker when the domain is routed
+ * there; callers use the async MissionControlIntelligenceService facade in mission-
+ * control-repository-facades.ts. A refresh re-projects every source and reads the brief
+ * in one unit.
+ */
+export class MissionControlIntelligenceStore {
   private readonly repo: MissionControlRepository;
 
   constructor(private readonly db: Database.Database) {

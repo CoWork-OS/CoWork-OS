@@ -600,7 +600,7 @@ delete process.env.COWORK_PROFILE;
 delete process.env.COWORK_PROFILE_ID;
 const { DatabaseManager } = require(${JSON.stringify(path.join(repoRoot, "dist/electron/electron/database/schema.js"))});
 const { SecureSettingsRepository } = require(${JSON.stringify(path.join(repoRoot, "dist/electron/electron/database/SecureSettingsRepository.js"))});
-const { WorkspaceRepository, TaskRepository, TaskEventRepository } = require(${JSON.stringify(path.join(repoRoot, "dist/electron/electron/database/repositories.js"))});
+const { WorkspaceStore: WorkspaceRepository, TaskStore: TaskRepository, TaskEventRepository } = require(${JSON.stringify(path.join(repoRoot, "dist/electron/electron/database/repositories.js"))});
 const dbManager = new DatabaseManager();
 try {
   const db = dbManager.getDatabase();

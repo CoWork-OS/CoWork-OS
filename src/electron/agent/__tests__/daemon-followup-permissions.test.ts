@@ -366,7 +366,8 @@ describe("AgentDaemon follow-up permission overrides", () => {
         taskRepo: { findById: vi.fn().mockReturnValue(task), update: vi.fn(), touch: vi.fn() },
         workspaceRepo: { findById: vi.fn().mockReturnValue(workspace) },
         annotationRepo: { listOpenByTask: vi.fn().mockReturnValue([]) },
-        getOrchestrationGraphRepository: vi.fn().mockReturnValue({ isTeamWorkItemTask }),
+        // The hot path reads the graph through the daemon's synchronous store (DB6).
+        orchestrationGraphStore: { isTeamWorkItemTask },
         setTransientTaskAgentConfig: vi.fn(),
         clearTransientTaskAgentConfig: vi.fn(),
         getEffectiveWorkspaceForTask: vi.fn().mockReturnValue(workspace),

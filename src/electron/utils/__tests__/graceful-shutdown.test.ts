@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 import * as typescript from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import { installGracefulShutdown } from "../graceful-shutdown";
+import { installGracefulShutdown, runShutdownSteps } from "../graceful-shutdown";
 
 class TestApp extends EventEmitter {
   exits = 0;
@@ -261,5 +261,26 @@ describe("graceful Electron shutdown", () => {
       if (!child.killed) child.kill("SIGKILL");
       rmSync(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("tells each step whether the shutdown is still quiescent", async () => {
+    const seen: Array<{ quiescent: boolean; failedSteps: readonly string[] }> = [];
+    await runShutdownSteps(
+      [
+        { name: "first", run: (context) => void seen.push(context) },
+        {
+          name: "fails",
+          run: () => {
+            throw new Error("stuck");
+          },
+        },
+        { name: "records", run: (context) => void seen.push(context) },
+      ],
+      () => undefined,
+    );
+    expect(seen).toEqual([
+      { quiescent: true, failedSteps: [] },
+      { quiescent: false, failedSteps: ["fails"] },
+    ]);
   });
 });

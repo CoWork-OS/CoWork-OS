@@ -1,3 +1,11 @@
+import {
+  AnnotationRepository,
+  ApprovalRepository,
+  ArtifactRepository,
+  InputRequestRepository,
+  TaskSessionMetadataRepository,
+  WorkspacePermissionRuleRepository,
+} from "../database/repository-facades";
 import { EventEmitter } from "events";
 import {
   authorizationFingerprint,
@@ -9,19 +17,30 @@ import * as crypto from "crypto";
 import * as path from "path";
 import { createLogger } from "../utils/logger";
 import { DatabaseManager } from "../database/schema";
+import { recordHostOperation } from "../database/sqlite-instrumentation";
+import { getDatabaseClient, isTimelineProjectionWorkerEnabled } from "../database/async/runtime";
+import { TimelineProjectionQueue } from "../database/async/TimelineProjectionQueue";
+import { TimelineWriter } from "../database/async/TimelineWriter";
+import { pendingTimelineWritesCommitted } from "../database/timeline-write-registry";
+import { serviceStatements } from "../database/service-statements";
+import { TimelineProjectionOutboxRepository } from "../database/TimelineProjectionOutboxRepository";
+import {
+  drainTimelineProjectionOutbox,
+  projectTimelineEvent,
+  type TimelineProjectionFailure,
+} from "../sessions/timeline-projection";
+import { pruneTaskEventsWithWorker, readStorageStats } from "../database/async/maintenance";
+import { performance } from "perf_hooks";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
 import type Database from "better-sqlite3";
 import {
-  TaskRepository,
+  TaskStore,
   TaskEventRepository,
-  TaskSessionMetadataRepository,
-  WorkspaceRepository,
-  ApprovalRepository,
-  WorkspacePermissionRuleRepository,
-  InputRequestRepository,
-  ArtifactRepository,
-  AnnotationRepository,
+  WorkspaceStore,
   MemoryType,
+  withTaskRowReadScope,
+  TaskSessionMetadataStore,
+  ApprovalStore,
 } from "../database/repositories";
 import { SessionRetentionService } from "../sessions/SessionRetentionService";
 import { SessionProgressService } from "../sessions/SessionProgressService";
@@ -31,22 +50,28 @@ import {
   loadSessionRetentionSettings,
   saveSessionRetentionSettings,
 } from "../sessions/session-retention-settings";
-import { ActivityRepository } from "../activity/ActivityRepository";
-import { AgentRoleRepository } from "../agents/AgentRoleRepository";
-import { AgentTeamRepository } from "../agents/AgentTeamRepository";
-import { AgentTeamMemberRepository } from "../agents/AgentTeamMemberRepository";
+import { ActivityStore } from "../activity/ActivityRepository";
+import { AgentRoleStore } from "../agents/AgentRoleRepository";
+import { AgentTeamStore } from "../agents/AgentTeamRepository";
+import { AgentTeamMemberStore } from "../agents/AgentTeamMemberRepository";
 import {
   DEFAULT_BOT_TEAM_NAME,
   ensureDefaultBotRoles,
   ensureDefaultBotTeam,
 } from "../agents/bot-team";
-import { MentionRepository } from "../agents/MentionRepository";
+import { MentionStore } from "../agents/MentionRepository";
 import { buildAgentDispatchPrompt } from "../agents/agent-dispatch";
 import { extractMentionedRoles } from "../agents/mentions";
 import { selectAgentsForTask } from "../agents/capabilityMatcher";
 import { MultitaskLanePlanner } from "../agents/MultitaskLanePlanner";
 import { buildSubagentDisplayName } from "../agents/subagent-display-names";
-import { recordLlmCallError, recordLlmCallSuccess } from "./llm/usage-telemetry";
+import {
+  afterLlmCallRow,
+  commitLlmCallRow,
+  prepareLlmCallError,
+  prepareLlmCallSuccess,
+} from "./llm/usage-telemetry";
+import type { LlmCallRow } from "../database/llm-call-events";
 import { TaskMutationLedger } from "./task-mutation-ledger";
 import { LLMProviderFactory } from "./llm/provider-factory";
 import { createConfiguredJevProvider, isJevActiveHarnessEnabled } from "./jev";
@@ -221,8 +246,9 @@ import {
 } from "./runtime/VerificationRuntime";
 import { QueuedAttachmentStore, type QueuedAttachmentRef } from "./runtime/queued-attachment-store";
 import type { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
-import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
-import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
+import { AgentTeamItemStore } from "../agents/AgentTeamItemRepository";
+import { AgentTeamRunStore } from "../agents/AgentTeamRunRepository";
+import { AgentTeamThoughtStore } from "../agents/AgentTeamThoughtRepository";
 import {
   resolveOperationalAutonomyPolicy,
   buildAgentConfigFromAutonomyPolicy,
@@ -251,13 +277,12 @@ import {
   OrchestrationGraphEngine,
   type OrchestrationGraphNodeInput,
 } from "./orchestration/OrchestrationGraphEngine";
-import { OrchestrationGraphRepository } from "./orchestration/OrchestrationGraphRepository";
+import { OrchestrationGraphRepository } from "./orchestration/orchestration-graph-repository-facades";
+import { OrchestrationGraphStore } from "./orchestration/OrchestrationGraphRepository";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { getMailboxServiceInstance } from "../mailbox/MailboxService";
-import {
-  RecurringApprovalService,
-  type RecurringApprovalFingerprintInput,
-} from "../security/recurring-approval-service";
+import { type RecurringApprovalFingerprintInput } from "../security/recurring-approval-service";
+import { RecurringApprovalService } from "../security/recurring-approval-repository-facades";
 import {
   extractMailboxComposeDraftInputFromText,
   type ChatInlineFrame,
@@ -270,6 +295,37 @@ export interface AgentDaemonOptions {
 }
 
 const log = createLogger("AgentDaemon");
+
+/** Record a usage row derived from a timeline event: through the writer, or on the host. */
+function recordTaskEventLlmCall(writer: TimelineWriter | null | undefined, row: LlmCallRow): void {
+  if (writer) writer.enqueueLlmCall(row, () => afterLlmCallRow(row));
+  else commitLlmCallRow(row);
+}
+
+/** Log projection failures with the messages used before projections could run in a worker. */
+function logTimelineProjectionFailures(failures: TimelineProjectionFailure[]): void {
+  for (const failure of failures) {
+    const detail = failure.error ?? failure.message;
+    if (failure.projection === "protocol") {
+      // Keep the legacy TaskEvent stream authoritative while the canonical
+      // WorkSession projection rolls out across existing databases.
+      log.warn(
+        `[work-session-protocol] Failed to dual-write event ${failure.eventId} for task ${failure.taskId}:`,
+        detail,
+      );
+    } else if (failure.projection === "contracts") {
+      // Contract/evidence projections are additive and must not interrupt the
+      // legacy timeline or task execution if a migrated database is incomplete.
+      log.warn(
+        `[work-session-contracts] Failed to project event ${failure.eventId} for task ${failure.taskId}:`,
+        detail,
+      );
+    } else {
+      // A projection failure must never interrupt task execution or timeline persistence.
+      log.warn("[session-progress] Failed to update durable projection:", detail);
+    }
+  }
+}
 
 /** Maximum time a bot coordinator waits for a teammate reply before preserving
  * a partial result and making the missing reply explicit. */
@@ -611,10 +667,15 @@ export class AgentDaemon extends EventEmitter {
     "jev_decision",
   ]);
 
-  private taskRepo: TaskRepository;
+  private taskRepo: TaskStore;
+  /** Synchronous graph reads on the hot path (DB6); writes go through the engine's facade. */
+  private orchestrationGraphStore: OrchestrationGraphStore;
   private eventRepo: TaskEventRepository;
-  private workspaceRepo: WorkspaceRepository;
+  private workspaceRepo: WorkspaceStore;
   private approvalRepo: ApprovalRepository;
+  // Denials at task end commit on the host before the task's terminal update, which the
+  // daemon also writes on the host (the daemon keeps its stores).
+  private approvalStore: ApprovalStore;
   private workspacePermissionRuleRepo: WorkspacePermissionRuleRepository;
   private inputRequestRepo: InputRequestRepository;
   private artifactRepo: ArtifactRepository;
@@ -622,9 +683,9 @@ export class AgentDaemon extends EventEmitter {
   private workSessionProtocolService: WorkSessionProtocolService;
   private workSessionContractService: WorkSessionContractService;
   private annotationRepo: AnnotationRepository;
-  private activityRepo: ActivityRepository;
-  private agentRoleRepo: AgentRoleRepository;
-  private mentionRepo: MentionRepository;
+  private activityRepo: ActivityStore;
+  private agentRoleRepo: AgentRoleStore;
+  private mentionRepo: MentionStore;
   private teamOrchestrator: AgentTeamOrchestrator | null = null;
   private orchestrationGraphEngine: OrchestrationGraphEngine;
   private activeTasks: Map<string, CachedExecutor> = new Map();
@@ -649,6 +710,12 @@ export class AgentDaemon extends EventEmitter {
   > = new Map();
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private maintenanceIntervalHandle?: ReturnType<typeof setInterval>;
+  private vacuumRetryHandle?: ReturnType<typeof setTimeout>;
+  /** Set when timeline projections run in the database worker for this run (DB3). */
+  private timelineProjection: TimelineProjectionQueue | null = null;
+  /** Set with `timelineProjection`: timeline rows are inserted by the worker as well. */
+  private timelineWriter: TimelineWriter | null = null;
+  private pendingVacuumThresholdMb?: number;
   private botHandoffTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private queueManager: TaskQueueManager;
   // Activity throttle: Map<taskId:eventType, lastTimestamp>
@@ -717,10 +784,12 @@ export class AgentDaemon extends EventEmitter {
       recurringApprovalService:
         this.options.recurringApprovalService || new RecurringApprovalService(db),
     };
-    this.taskRepo = new TaskRepository(db);
+    this.taskRepo = new TaskStore(db);
+    this.orchestrationGraphStore = new OrchestrationGraphStore(db);
     this.eventRepo = new TaskEventRepository(db);
-    this.workspaceRepo = new WorkspaceRepository(db);
+    this.workspaceRepo = new WorkspaceStore(db);
     this.approvalRepo = new ApprovalRepository(db);
+    this.approvalStore = new ApprovalStore(db);
     this.workspacePermissionRuleRepo = new WorkspacePermissionRuleRepository(db);
     this.inputRequestRepo = new InputRequestRepository(db);
     this.artifactRepo = new ArtifactRepository(db);
@@ -732,9 +801,9 @@ export class AgentDaemon extends EventEmitter {
       this.workSessionProtocolService,
     );
     this.annotationRepo = new AnnotationRepository(db);
-    this.activityRepo = new ActivityRepository(db);
-    this.agentRoleRepo = new AgentRoleRepository(db);
-    this.mentionRepo = new MentionRepository(db);
+    this.activityRepo = new ActivityStore(db);
+    this.agentRoleRepo = new AgentRoleStore(db);
+    this.mentionRepo = new MentionStore(db);
     this.taskMutationLedger = new TaskMutationLedger();
 
     // Initialize queue manager with callbacks
@@ -883,7 +952,10 @@ export class AgentDaemon extends EventEmitter {
     if (resolveWorkerRoleKind(task.workerRole) !== "researcher") return task;
     if (task.agentConfig?.teamWorkItemLane === true) return task;
     try {
-      if (!this.getOrchestrationGraphRepository().isTeamWorkItemTask(task.id)) return task;
+      // A synchronous read on the host store, like the rest of the daemon hot path
+      // (async SQLite migration plan, DB6): the async facade would return a Promise,
+      // which is always truthy and would widen the researcher's boundary.
+      if (!this.orchestrationGraphStore.isTeamWorkItemTask(task.id)) return task;
     } catch (error) {
       log.warn(
         `Team lane lookup failed for researcher task ${task.id}; keeping read-only boundary`,
@@ -981,13 +1053,61 @@ export class AgentDaemon extends EventEmitter {
   private async runDatabaseMaintenance(): Promise<void> {
     try {
       const repo = new TaskEventRepository(this.dbManager.getDatabase());
-      const pruned = repo.pruneOldEvents(90);
+      // DB2 pilot: with the opt-in database worker, pruning runs off the host thread.
+      // The backend is fixed for the run; a worker failure fails this run explicitly.
+      const worker = await getDatabaseClient();
+      const pruned = worker
+        ? await pruneTaskEventsWithWorker(worker, 90)
+        : await repo.pruneOldEvents(90);
       if (pruned > 0) log.info(`DB maintenance: pruned ${pruned} old events`);
-      repo.vacuumIfNeeded(500);
+      if (worker) {
+        const stats = await readStorageStats(worker);
+        log.info(
+          `DB maintenance: ${Math.round(stats.freelistBytes / 1048576)} MB free of ${Math.round((stats.pageCount * stats.pageSize) / 1048576)} MB`,
+        );
+      }
+      this.vacuumWhenIdle(500);
       await this.runSessionAutoPrune(repo);
     } catch (error) {
       log.error("DB maintenance failed:", error);
     }
+  }
+
+  /**
+   * A full VACUUM holds the write lock for its whole duration and cannot be chunked,
+   * so it runs only while this runtime has no running or queued tasks. Otherwise it is
+   * retried every 30 minutes with the lowest threshold requested so far.
+   */
+  private vacuumWhenIdle(thresholdMb: number): void {
+    if (this.shutdownRequested) return;
+    const status = this.queueManager.getStatus();
+    if (status.runningCount === 0 && status.queuedCount === 0) {
+      try {
+        const vacuumed = new TaskEventRepository(this.dbManager.getDatabase()).vacuumIfNeeded(
+          thresholdMb,
+        );
+        if (vacuumed) log.info(`DB maintenance: vacuumed (freelist threshold ${thresholdMb} MB)`);
+      } catch (error) {
+        log.warn("DB maintenance: VACUUM failed:", error);
+      }
+      return;
+    }
+    this.pendingVacuumThresholdMb = Math.min(
+      this.pendingVacuumThresholdMb ?? Number.POSITIVE_INFINITY,
+      thresholdMb,
+    );
+    if (this.vacuumRetryHandle) return;
+    log.info("DB maintenance: deferring VACUUM while tasks are active");
+    this.vacuumRetryHandle = setTimeout(
+      () => {
+        this.vacuumRetryHandle = undefined;
+        const pendingThreshold = this.pendingVacuumThresholdMb ?? thresholdMb;
+        this.pendingVacuumThresholdMb = undefined;
+        this.vacuumWhenIdle(pendingThreshold);
+      },
+      30 * 60 * 1000,
+    );
+    this.vacuumRetryHandle.unref?.();
   }
 
   private async runSessionAutoPrune(taskEventRepo: TaskEventRepository): Promise<void> {
@@ -1013,10 +1133,11 @@ export class AgentDaemon extends EventEmitter {
 
     const db = this.dbManager.getDatabase();
     const sessionRetention = new SessionRetentionService(
-      new TaskRepository(db),
+      new TaskStore(db),
       taskEventRepo,
-      new TaskSessionMetadataRepository(db),
-      new WorkspaceRepository(db),
+      // The retention service is synchronous like the task repositories it gets (slice C).
+      new TaskSessionMetadataStore(db),
+      new WorkspaceStore(db),
     );
     const result = await sessionRetention.pruneSessions(
       {
@@ -1036,7 +1157,7 @@ export class AgentDaemon extends EventEmitter {
     );
 
     if (autoPrune.vacuum === true) {
-      taskEventRepo.vacuumIfNeeded(0);
+      this.vacuumWhenIdle(0);
     }
     saveSessionRetentionSettings({
       ...settings,
@@ -1780,7 +1901,88 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Initialize the daemon - call after construction to set up queue
    */
+  /**
+   * Choose where timeline projections run (async SQLite migration plan, DB3). With
+   * `COWORK_DB_WORKER_TIMELINE=1` and a running database worker, the host commits each
+   * event with an outbox row and the worker projects it; otherwise projections run inline
+   * as before, after first repairing any outbox entries a worker run left behind.
+   */
+  private async configureTimelineProjection(): Promise<void> {
+    if (this.timelineProjection) return;
+    const worker = isTimelineProjectionWorkerEnabled() ? await getDatabaseClient() : null;
+    if (worker) {
+      // The worker's WorkSession services acquire the activity leases from now on, so
+      // lease upkeep moves there too.
+      this.workSessionProtocolService.getReliabilityService().stop();
+      const batchBudgetMs = Number(process.env.COWORK_DB_WORKER_TIMELINE_BUDGET_MS);
+      const projection = new TimelineProjectionQueue(worker, {
+        onProjectionFailures: logTimelineProjectionFailures,
+        ...(Number.isFinite(batchBudgetMs) && batchBudgetMs > 0 ? { batchBudgetMs } : {}),
+      });
+      this.timelineProjection = projection;
+      this.timelineWriter = new TimelineWriter(this.dbManager.getDatabase(), worker, {
+        onEventsCommitted: () => projection.wake(),
+      });
+      log.info("Timeline writes and projections run in the database worker");
+      return;
+    }
+    await this.drainTimelineProjectionOutboxOnHost();
+  }
+
+  private async drainTimelineProjectionOutboxOnHost(): Promise<void> {
+    const db = this.dbManager.getDatabase();
+    try {
+      if (new TimelineProjectionOutboxRepository(db).count() === 0) return;
+    } catch (error) {
+      log.warn("Could not read the timeline projection outbox:", error);
+      return;
+    }
+    const services = {
+      protocol: this.workSessionProtocolService,
+      contracts: this.workSessionContractService,
+      progress: this.sessionProgressService,
+    };
+    let repaired = 0;
+    try {
+      for (;;) {
+        const result = db
+          .transaction(() => drainTimelineProjectionOutbox(db, services, 64))
+          .immediate();
+        logTimelineProjectionFailures(result.failures);
+        repaired += result.processed.length;
+        if (result.processed.length < 64) break;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    } catch (error) {
+      log.error("Could not repair pending timeline projections; they stay queued:", error);
+    }
+    if (repaired > 0) log.info(`Projected ${repaired} timeline event(s) left by an earlier run`);
+  }
+
+  /**
+   * Read barrier for derived WorkSession state: resolves once this process's events for
+   * the task are projected. Immediate when projections run inline.
+   */
+  /**
+   * Backpressure point for executors: waits while timeline projections in the database
+   * worker are far behind. Immediate on the host backend.
+   */
+  waitForTimelineCapacity(): Promise<void> {
+    return this.timelineProjection?.waitForCapacity() ?? Promise.resolve();
+  }
+
+  /** Resolves once this task's accepted timeline rows are committed (immediate on the host backend). */
+  timelineRowsCommitted(taskId: string): Promise<void> {
+    return this.timelineWriter?.committed(taskId) ?? Promise.resolve();
+  }
+
+  flushTimelineProjections(taskId?: string, timeoutMs?: number): Promise<void> {
+    return this.timelineProjection?.flush(taskId, timeoutMs) ?? Promise.resolve();
+  }
+
   async initialize(): Promise<void> {
+    // Before recovery logs any event: the projection backend is fixed for the run.
+    await this.configureTimelineProjection();
     this.orchestrationGraphEngine.start();
 
     if (this.options.startupRecovery === false) {
@@ -1847,7 +2049,7 @@ export class AgentDaemon extends EventEmitter {
     // Approval/input Promises live only in memory.  Rehydrate their durable
     // rows before queue recovery so a restart leaves the task visibly blocked
     // and response handlers can safely resolve the persisted request.
-    this.reconcileDurableWaitsOnStartup();
+    await this.reconcileDurableWaitsOnStartup();
 
     // Recover stale retry tasks that were incorrectly persisted as executing.
     // These should re-enter the queue on startup so retries can continue.
@@ -1970,14 +2172,16 @@ export class AgentDaemon extends EventEmitter {
     if (tasksToResume.length > 0) {
       console.log(`[AgentDaemon] ${tasksToResume.length} task(s) scheduled for resume`);
       setTimeout(() => {
-        this.resumeInterruptedTasks(tasksToResume);
+        this.resumeInterruptedTasks(tasksToResume).catch((error) => {
+          log.error("Failed to resume interrupted tasks:", error);
+        });
       }, 2000);
     }
 
     await this.orchestrationGraphEngine.resumeRunningRuns();
   }
 
-  private reconcileDurableWaitsOnStartup(): void {
+  private async reconcileDurableWaitsOnStartup(): Promise<void> {
     const findByStatus = (this.taskRepo as Any).findByStatus as
       | ((status: TaskStatus | TaskStatus[]) => Task[])
       | undefined;
@@ -2023,10 +2227,11 @@ export class AgentDaemon extends EventEmitter {
     // never use it here or stale approvals beyond the first page could survive
     // a restart.
     const findAllPendingApprovals = (this.approvalRepo as Any).findAllPending;
+    // The approval repository is an async facade (storage slice A): await the lookup.
     const pendingApprovals: ApprovalRequest[] =
       typeof findAllPendingApprovals === "function"
-        ? findAllPendingApprovals.call(this.approvalRepo)
-        : this.approvalRepo.findPending(1000);
+        ? await findAllPendingApprovals.call(this.approvalRepo)
+        : await this.approvalRepo.findPending(1000);
     const promptsDisabled = approvalPromptsDisabled();
     for (const approval of pendingApprovals) {
       const task = this.taskRepo.findById(approval.taskId);
@@ -2038,7 +2243,7 @@ export class AgentDaemon extends EventEmitter {
         // Approval-free runtimes must not resurrect a stale durable wait after
         // restart. Explicit high-impact requests also fail closed even when
         // the legacy popup queue is temporarily enabled for diagnostics.
-        this.approvalRepo.update(approval.id, "denied");
+        await this.approvalRepo.update(approval.id, "denied");
         this.logEvent(approval.taskId, "approval_denied", {
           approvalId: approval.id,
           reason: explicitHighImpact
@@ -2084,7 +2289,7 @@ export class AgentDaemon extends EventEmitter {
     // marker keep a completed/failed task looking approval-blocked forever.
     for (const task of Array.isArray(candidateTasks) ? candidateTasks : []) {
       if (task.terminalStatus !== "awaiting_approval") continue;
-      if (this.approvalRepo.findPendingByTaskId(task.id).length > 0) continue;
+      if ((await this.approvalRepo.findPendingByTaskId(task.id)).length > 0) continue;
 
       const terminal = isTerminalTaskStatus(deriveCanonicalTaskStatus(task));
       this.taskRepo.update(task.id, {
@@ -2107,8 +2312,8 @@ export class AgentDaemon extends EventEmitter {
     const findAllPendingInputs = (this.inputRequestRepo as Any).findAllPending;
     const pendingInputs: InputRequest[] =
       typeof findAllPendingInputs === "function"
-        ? findAllPendingInputs.call(this.inputRequestRepo)
-        : this.inputRequestRepo.list({
+        ? await findAllPendingInputs.call(this.inputRequestRepo)
+        : await this.inputRequestRepo.list({
             limit: 1000,
             offset: 0,
             status: "pending",
@@ -2121,7 +2326,7 @@ export class AgentDaemon extends EventEmitter {
       // fresh task turn can ask again with current authority and context.
       if (isAssistantApprovalInputRequest(request)) {
         if (typeof (this.inputRequestRepo as Any).resolve === "function") {
-          this.inputRequestRepo.resolve(request.id, "dismissed");
+          await this.inputRequestRepo.resolve(request.id, "dismissed");
         }
         this.logEvent(request.taskId, "approval_denied", {
           requestId: request.id,
@@ -3837,7 +4042,7 @@ export class AgentDaemon extends EventEmitter {
 
   private getBotTeamContext(task: Task):
     | {
-        team: ReturnType<AgentTeamRepository["findById"]>;
+        team: ReturnType<AgentTeamStore["findById"]>;
         roleIds: Set<string>;
       }
     | undefined {
@@ -3851,11 +4056,11 @@ export class AgentDaemon extends EventEmitter {
       return undefined;
     }
 
-    const team = new AgentTeamRepository(this.dbManager.getDatabase()).findById(botTeamId);
+    const team = new AgentTeamStore(this.dbManager.getDatabase()).findById(botTeamId);
     if (!team || !team.isActive || !team.persistent || team.workspaceId !== task.workspaceId) {
       return undefined;
     }
-    const members = new AgentTeamMemberRepository(this.dbManager.getDatabase()).listByTeam(team.id);
+    const members = new AgentTeamMemberStore(this.dbManager.getDatabase()).listByTeam(team.id);
     const roleIds = new Set([team.leadAgentRoleId, ...members.map((member) => member.agentRoleId)]);
     if (!roleIds.has(task.assignedAgentRoleId)) return undefined;
     return { team, roleIds };
@@ -3877,7 +4082,7 @@ export class AgentDaemon extends EventEmitter {
       const db = this.dbManager.getDatabase();
       const existingTeamId = task.agentConfig.botTeamId;
       const existingTeam = existingTeamId
-        ? new AgentTeamRepository(db).findById(existingTeamId)
+        ? new AgentTeamStore(db).findById(existingTeamId)
         : undefined;
       // A non-empty team id is an authorization claim, not a hint that may be
       // silently repaired. Legacy conversations without a team id may attach
@@ -3989,7 +4194,7 @@ export class AgentDaemon extends EventEmitter {
       | "team_unavailable"
       | "membership_revoked";
     message: string;
-    team?: ReturnType<AgentTeamRepository["findById"]>;
+    team?: ReturnType<AgentTeamStore["findById"]>;
     roleIds: Set<string>;
   } {
     if (task.agentConfig?.botConversation !== true || !task.assignedAgentRoleId) {
@@ -4007,7 +4212,7 @@ export class AgentDaemon extends EventEmitter {
         roleIds: new Set(),
       };
     }
-    const teamRepo = new AgentTeamRepository(this.dbManager.getDatabase());
+    const teamRepo = new AgentTeamStore(this.dbManager.getDatabase());
     const team = teamRepo.findById(teamId);
     if (!team || team.workspaceId !== task.workspaceId || !team.isActive || !team.persistent) {
       return {
@@ -4016,7 +4221,7 @@ export class AgentDaemon extends EventEmitter {
         roleIds: new Set(),
       };
     }
-    const members = new AgentTeamMemberRepository(this.dbManager.getDatabase()).listByTeam(team.id);
+    const members = new AgentTeamMemberStore(this.dbManager.getDatabase()).listByTeam(team.id);
     const roleIds = new Set([team.leadAgentRoleId, ...members.map((member) => member.agentRoleId)]);
     if (!roleIds.has(task.assignedAgentRoleId)) {
       return {
@@ -4201,7 +4406,7 @@ export class AgentDaemon extends EventEmitter {
     if (!existingSender) return [];
     const sender = this.ensureBotTaskTeam(existingSender);
     const diagnostic = this.getBotTeamDiagnostic(sender);
-    const roleRepo = new AgentRoleRepository(this.dbManager.getDatabase());
+    const roleRepo = new AgentRoleStore(this.dbManager.getDatabase());
     const roles = diagnostic.roleIds.size
       ? Array.from(diagnostic.roleIds)
           .map((roleId) => roleRepo.findById(roleId))
@@ -4264,15 +4469,15 @@ export class AgentDaemon extends EventEmitter {
     }
     const roleId = params.agentRoleId?.trim() || oldTask?.assignedAgentRoleId?.trim() || "";
     const role = roleId
-      ? new AgentRoleRepository(this.dbManager.getDatabase()).findById(roleId)
+      ? new AgentRoleStore(this.dbManager.getDatabase()).findById(roleId)
       : undefined;
     if (!role) {
       throw new Error("BOT_NOT_FOUND: The bot role is no longer available.");
     }
 
     const db = this.dbManager.getDatabase();
-    const teamRepo = new AgentTeamRepository(db);
-    const memberRepo = new AgentTeamMemberRepository(db);
+    const teamRepo = new AgentTeamStore(db);
+    const memberRepo = new AgentTeamMemberStore(db);
     const oldTeamId = oldTask?.agentConfig?.botTeamId;
     const oldTeam = typeof oldTeamId === "string" ? teamRepo.findById(oldTeamId) : undefined;
     // A temporary UI workspace may continue a transcript from the reserved
@@ -4402,7 +4607,7 @@ export class AgentDaemon extends EventEmitter {
       };
     }
 
-    const roleRepo = new AgentRoleRepository(this.dbManager.getDatabase());
+    const roleRepo = new AgentRoleStore(this.dbManager.getDatabase());
     let role: AgentRole | undefined;
     let target: Task | undefined;
     if (recipient.taskId) {
@@ -5044,14 +5249,14 @@ export class AgentDaemon extends EventEmitter {
     const childTasks = this.taskRepo.findByParent(parentTaskId);
     if (childTasks.length < 2) {
       const db = this.dbManager.getDatabase();
-      return new AgentTeamRunRepository(db).findByRootTaskId(parentTaskId) || null;
+      return new AgentTeamRunStore(db).findByRootTaskId(parentTaskId) || null;
     }
 
     const db = this.dbManager.getDatabase();
-    const teamRepo = new AgentTeamRepository(db);
-    const teamMemberRepo = new AgentTeamMemberRepository(db);
-    const teamRunRepo = new AgentTeamRunRepository(db);
-    const teamItemRepo = new AgentTeamItemRepository(db);
+    const teamRepo = new AgentTeamStore(db);
+    const teamMemberRepo = new AgentTeamMemberStore(db);
+    const teamRunRepo = new AgentTeamRunStore(db);
+    const teamItemRepo = new AgentTeamItemStore(db);
     const existingRun = teamRunRepo.findByRootTaskId(parentTaskId);
 
     if (existingRun) {
@@ -5138,8 +5343,8 @@ export class AgentDaemon extends EventEmitter {
   private ensureChildTasksHaveTeamItems(
     run: AgentTeamRun,
     childTasks: Task[],
-    teamMemberRepo: AgentTeamMemberRepository,
-    teamItemRepo: AgentTeamItemRepository,
+    teamMemberRepo: AgentTeamMemberStore,
+    teamItemRepo: AgentTeamItemStore,
   ): AgentTeamItem[] {
     const existingItems = teamItemRepo.listByRun(run.id);
     const existingSourceTaskIds = new Set(
@@ -5223,10 +5428,10 @@ export class AgentDaemon extends EventEmitter {
     });
 
     const db = this.dbManager.getDatabase();
-    const teamRepo = new AgentTeamRepository(db);
-    const teamMemberRepo = new AgentTeamMemberRepository(db);
-    const teamRunRepo = new AgentTeamRunRepository(db);
-    const teamItemRepo = new AgentTeamItemRepository(db);
+    const teamRepo = new AgentTeamStore(db);
+    const teamMemberRepo = new AgentTeamMemberStore(db);
+    const teamRunRepo = new AgentTeamRunStore(db);
+    const teamItemRepo = new AgentTeamItemStore(db);
     const existingRun = teamRunRepo.findByRootTaskId(task.id);
 
     if (existingRun) {
@@ -5777,9 +5982,9 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    const pendingRequests = this.inputRequestRepo.findPendingByTaskId(taskId);
+    const pendingRequests = await this.inputRequestRepo.findPendingByTaskId(taskId);
     for (const request of pendingRequests) {
-      this.inputRequestRepo.resolve(request.id, "dismissed");
+      await this.inputRequestRepo.resolve(request.id, "dismissed");
       const pending = this.pendingInputRequests.get(request.id);
       if (pending && !pending.resolved) {
         pending.resolved = true;
@@ -5953,7 +6158,7 @@ export class AgentDaemon extends EventEmitter {
     this.activeTasks.delete(taskId);
     this.finishQueueSlot(taskId);
 
-    const handle = setTimeout(async () => {
+    const runRetry = async (): Promise<void> => {
       this.pendingRetries.delete(taskId);
       const task = this.taskRepo.findById(taskId);
       if (!task) {
@@ -5977,6 +6182,11 @@ export class AgentDaemon extends EventEmitter {
         return;
       }
       await this.startTask(taskToStart);
+    };
+    const handle = setTimeout(() => {
+      runRetry().catch((error) => {
+        log.error(`Transient retry for task ${taskId} failed:`, error);
+      });
     }, delayMs);
 
     this.pendingRetries.set(taskId, handle);
@@ -6071,7 +6281,10 @@ export class AgentDaemon extends EventEmitter {
 
   private finishQueueSlot(taskId: string): void {
     this.releaseComputerUseSession(taskId);
-    this.queueManager.onTaskFinished(taskId);
+    // Freeing the slot starts the next queued task; a failure there must not be dropped.
+    this.queueManager.onTaskFinished(taskId).catch((error) => {
+      log.error(`Failed to advance the task queue after ${taskId}:`, error);
+    });
   }
 
   /**
@@ -6276,15 +6489,15 @@ export class AgentDaemon extends EventEmitter {
     );
   }
 
-  private buildPermissionRules(
+  private async buildPermissionRules(
     taskId: string,
     task: Task | undefined,
     workspace: Workspace | undefined,
-  ): PermissionRule[] {
+  ): Promise<PermissionRule[]> {
     const runtime = this.getExecutorForTask(taskId)?.runtime;
     const sessionRules = runtime?.getPermissionState().sessionRules || [];
     const workspaceDbRules = workspace
-      ? this.workspacePermissionRuleRepo.listByWorkspaceId(workspace.id)
+      ? await this.workspacePermissionRuleRepo.listByWorkspaceId(workspace.id)
       : [];
     // The manifest is a checked-in mirror, so it is untrusted input: permissive
     // rules count only when the workspace database already holds the same rule.
@@ -6379,12 +6592,12 @@ export class AgentDaemon extends EventEmitter {
     return this.inferToolNameFromApprovalType(type);
   }
 
-  private evaluatePermissionRequest(
+  private async evaluatePermissionRequest(
     taskId: string,
     type: ApprovalType | undefined,
     details: Any,
     allowPersistence = true,
-  ): {
+  ): Promise<{
     evaluation: PermissionEvaluationResult;
     promptDetails: PermissionPromptDetails;
     scope: PermissionRule["scope"];
@@ -6392,7 +6605,7 @@ export class AgentDaemon extends EventEmitter {
     runtime: TaskExecutor["runtime"] | null;
     workspace: Workspace | undefined;
     authorizationKey?: string;
-  } {
+  }> {
     const task = this.getTaskWithTransientAgentConfig(this.taskRepo.findById(taskId));
     const storedWorkspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
     // Task-level shell access is an explicit in-memory capability override. Keep
@@ -6412,7 +6625,7 @@ export class AgentDaemon extends EventEmitter {
         : null;
     const permissionToolInput = authorizationToolInput(details || {});
     const mode = this.buildPermissionMode(taskId, task);
-    const rules = this.buildPermissionRules(taskId, task, workspace);
+    const rules = await this.buildPermissionRules(taskId, task, workspace);
     const evaluation = PermissionEngine.evaluate({
       workspace:
         workspace ||
@@ -6528,16 +6741,16 @@ export class AgentDaemon extends EventEmitter {
     };
   }
 
-  private persistApprovalActionRule(
+  private async persistApprovalActionRule(
     action: ApprovalResponseAction,
     approval: Any,
-  ): {
+  ): Promise<{
     effect?: PermissionEffect;
     destination?: "session" | "workspace" | "profile" | "recurring";
     dbPersisted?: boolean;
     manifestPersisted?: boolean;
     manifestError?: string;
-  } {
+  }> {
     const details =
       approval?.details && typeof approval.details === "object"
         ? (approval.details as Record<string, unknown>)
@@ -6599,11 +6812,14 @@ export class AgentDaemon extends EventEmitter {
           manifestError: "Recurring approval storage is unavailable for this task.",
         };
       }
-      recurringService.create({
+      await recurringService.create({
         ...recurringInput,
         effect: effect === "deny" ? "deny" : "allow",
         scopePreview: prompt.scopePreview,
         createdByApprovalId: approval.id,
+        // The user's response is being handled now; a revocation after this instant
+        // must win over this write.
+        decidedAt: Date.now(),
       });
       return { effect, destination, dbPersisted: true };
     }
@@ -6620,7 +6836,7 @@ export class AgentDaemon extends EventEmitter {
       return { effect, destination };
     }
     if (workspace) {
-      this.workspacePermissionRuleRepo.create({
+      await this.workspacePermissionRuleRepo.create({
         workspaceId: workspace.id,
         effect,
         scope: prompt.scope,
@@ -6705,7 +6921,7 @@ export class AgentDaemon extends EventEmitter {
     };
   }
 
-  evaluateToolPermission(
+  async evaluateToolPermission(
     taskId: string,
     opts: {
       approvalType?: ApprovalType;
@@ -6713,8 +6929,8 @@ export class AgentDaemon extends EventEmitter {
       details?: Any;
       allowPersistence?: boolean;
     },
-  ): PermissionEvaluationResult {
-    const result = this.evaluatePermissionRequest(
+  ): Promise<PermissionEvaluationResult> {
+    const result = await this.evaluatePermissionRequest(
       taskId,
       opts.approvalType,
       {
@@ -6741,7 +6957,7 @@ export class AgentDaemon extends EventEmitter {
   ): Promise<boolean> {
     if (request.signal?.aborted) throw new Error("Tool authorization cancelled");
     const details = { ...(request.details || {}), tool: request.toolName };
-    const permission = this.evaluateToolPermission(taskId, {
+    const permission = await this.evaluateToolPermission(taskId, {
       toolName: request.toolName,
       approvalType: request.approvalType,
       details,
@@ -6768,12 +6984,12 @@ export class AgentDaemon extends EventEmitter {
     );
   }
 
-  listInputRequests(params?: {
+  async listInputRequests(params?: {
     limit?: number;
     offset?: number;
     taskId?: string;
     status?: InputRequest["status"];
-  }): InputRequest[] {
+  }): Promise<InputRequest[]> {
     const limit = Math.min(Math.max(params?.limit ?? 200, 1), 500);
     const offset = Math.max(params?.offset ?? 0, 0);
     const taskId = typeof params?.taskId === "string" ? params.taskId.trim() : "";
@@ -6790,14 +7006,14 @@ export class AgentDaemon extends EventEmitter {
     taskId: string,
     args: RequestUserInputArgs,
   ): Promise<InputRequestResponse> {
-    const existingPending = this.inputRequestRepo.findPendingByTaskId(taskId);
+    const existingPending = await this.inputRequestRepo.findPendingByTaskId(taskId);
     if (existingPending.length > 0) {
       throw new Error(
         `Task ${taskId} already has a pending structured input request. Resolve it before requesting another.`,
       );
     }
 
-    const request = this.inputRequestRepo.create({
+    const request = await this.inputRequestRepo.create({
       taskId,
       questions: args.questions,
       requestedAt: Date.now(),
@@ -6904,11 +7120,11 @@ export class AgentDaemon extends EventEmitter {
       if (signal?.aborted) {
         const pending =
           typeof (this.inputRequestRepo as Any)?.findPendingByTaskId === "function"
-            ? this.inputRequestRepo.findPendingByTaskId(taskId)[0]
+            ? (await this.inputRequestRepo.findPendingByTaskId(taskId))[0]
             : undefined;
         if (pending) {
           if (typeof (this.inputRequestRepo as Any)?.resolve === "function") {
-            this.inputRequestRepo.resolve(pending.id, "dismissed");
+            await this.inputRequestRepo.resolve(pending.id, "dismissed");
           }
           const pendingWait = this.pendingInputRequests?.get(pending.id);
           if (pendingWait && !pendingWait.resolved) {
@@ -6958,7 +7174,7 @@ export class AgentDaemon extends EventEmitter {
       details && typeof details === "object" && !Array.isArray(details)
         ? { ...details }
         : { value: details };
-    const permission = this.evaluatePermissionRequest(
+    const permission = await this.evaluatePermissionRequest(
       taskId,
       type as ApprovalType,
       enrichedDetails,
@@ -7063,7 +7279,7 @@ export class AgentDaemon extends EventEmitter {
         : null;
       const recurringMatch =
         recurringInput && type !== "protected_credential"
-          ? recurringApprovalService.findActive(recurringInput)
+          ? await recurringApprovalService.findActive(recurringInput)
           : null;
       if (recurringMatch) {
         const approved = recurringMatch.summary.effect === "allow";
@@ -7185,7 +7401,7 @@ export class AgentDaemon extends EventEmitter {
       if (type === "external_file_access") {
         this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
       }
-      const approval = this.approvalRepo.create({
+      const approval = await this.approvalRepo.create({
         taskId,
         type: type as Any,
         description,
@@ -7193,7 +7409,7 @@ export class AgentDaemon extends EventEmitter {
         status: "approved",
         requestedAt: Date.now(),
       });
-      this.approvalRepo.update(approval.id, "approved");
+      await this.approvalRepo.update(approval.id, "approved");
       this.logEvent(taskId, "approval_requested", {
         approval,
         autoApproved: true,
@@ -7213,7 +7429,7 @@ export class AgentDaemon extends EventEmitter {
       if (type === "external_file_access") {
         this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
       }
-      const approval = this.approvalRepo.create({
+      const approval = await this.approvalRepo.create({
         taskId,
         type: type as Any,
         description,
@@ -7221,7 +7437,7 @@ export class AgentDaemon extends EventEmitter {
         status: "approved",
         requestedAt: Date.now(),
       });
-      this.approvalRepo.update(approval.id, "approved");
+      await this.approvalRepo.update(approval.id, "approved");
       this.logEvent(taskId, "approval_requested", {
         approval,
         autoApproved: true,
@@ -7246,7 +7462,7 @@ export class AgentDaemon extends EventEmitter {
       return false;
     }
 
-    const approval = this.approvalRepo.create({
+    const approval = await this.approvalRepo.create({
       taskId,
       type: type as Any,
       description,
@@ -7277,7 +7493,11 @@ export class AgentDaemon extends EventEmitter {
             pending.abortSignal.removeEventListener("abort", pending.abortListener);
           }
           this.pendingApprovals.delete(approval.id);
-          this.approvalRepo.update(approval.id, "denied");
+          void Promise.resolve(this.approvalRepo.update(approval.id, "denied")).catch(
+            (error: unknown) => {
+              log.warn("Failed to record a timed-out approval as denied:", error);
+            },
+          );
           if (isTerminalTaskStatus(currentStatus)) {
             reject(new Error("Approval request timed out after task completion"));
             return;
@@ -7312,7 +7532,12 @@ export class AgentDaemon extends EventEmitter {
         clearTimeout(current.timeoutHandle);
         current.abortSignal?.removeEventListener("abort", abortListener);
         this.pendingApprovals.delete(approval.id);
-        this.approvalRepo.update(approval.id, "denied");
+        // Issued before the event and the rejection; a failure is logged, not thrown here.
+        void Promise.resolve(this.approvalRepo.update(approval.id, "denied")).catch(
+          (error: unknown) => {
+            log.warn("Failed to record a cancelled approval as denied:", error);
+          },
+        );
         this.logEvent(taskId, "approval_denied", {
           approvalId: approval.id,
           reason: "tool_execution_cancelled",
@@ -7333,11 +7558,11 @@ export class AgentDaemon extends EventEmitter {
    * Uses idempotency to prevent double-approval race conditions
    * Implements C6: Approval Gate Enforcement
    */
-  private isApprovalAuthorityCurrent(approval: ApprovalRequest): boolean {
+  private async isApprovalAuthorityCurrent(approval: ApprovalRequest): Promise<boolean> {
     const task = this.taskRepo.findById(approval.taskId);
     if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return false;
     const details = (approval.details || {}) as Record<string, Any>;
-    const current = this.evaluatePermissionRequest(approval.taskId, approval.type, details);
+    const current = await this.evaluatePermissionRequest(approval.taskId, approval.type, details);
     if (current.evaluation.decision === "deny") return false;
     if (
       current.workspace?.permissions.accessApprovalPolicy === "never" &&
@@ -7392,7 +7617,7 @@ export class AgentDaemon extends EventEmitter {
             pending.abortSignal.removeEventListener("abort", pending.abortListener);
           }
           this.pendingApprovals.delete(approvalId);
-          this.approvalRepo.update(approvalId, "denied", attribution);
+          await this.approvalRepo.update(approvalId, "denied", attribution);
           this.logEvent(pending.taskId, "approval_denied", {
             approvalId,
             reason: "task_terminal_before_response",
@@ -7407,7 +7632,7 @@ export class AgentDaemon extends EventEmitter {
         if (
           normalizedAction.startsWith("allow_") &&
           typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
-          !this.isApprovalAuthorityCurrent(pending.approval)
+          !(await this.isApprovalAuthorityCurrent(pending.approval))
         ) {
           normalizedAction = "deny_once";
           authorityChanged = true;
@@ -7415,7 +7640,7 @@ export class AgentDaemon extends EventEmitter {
         const denialReason = authorityChanged
           ? "Approval expired because task authority changed; retry the operation."
           : "User denied approval";
-        const persistenceResult = this.persistApprovalActionRule(
+        const persistenceResult = await this.persistApprovalActionRule(
           normalizedAction,
           pending.approval,
         );
@@ -7455,9 +7680,13 @@ export class AgentDaemon extends EventEmitter {
 
         this.pendingApprovals.delete(approvalId);
         if (attribution) {
-          this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied", attribution);
+          await this.approvalRepo.update(
+            approvalId,
+            didApprove ? "approved" : "denied",
+            attribution,
+          );
         } else {
-          this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
+          await this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
         }
         const awaitingAnotherApproval = [...this.pendingApprovals.values()].some(
           (entry) => entry.taskId === pending.taskId && !entry.resolved,
@@ -7495,7 +7724,7 @@ export class AgentDaemon extends EventEmitter {
       // restart.  Resolve the durable approval row directly and reconstruct
       // the executor from its checkpoint/events instead of returning a false
       // `not_found` response (or silently losing the user's decision).
-      const persistedApproval = this.approvalRepo.findById(approvalId);
+      const persistedApproval = await this.approvalRepo.findById(approvalId);
       if (!persistedApproval || persistedApproval.status !== "pending") {
         approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
         return "not_found";
@@ -7507,7 +7736,7 @@ export class AgentDaemon extends EventEmitter {
       if (
         normalizedAction.startsWith("allow_") &&
         typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
-        !this.isApprovalAuthorityCurrent(persistedApproval)
+        !(await this.isApprovalAuthorityCurrent(persistedApproval))
       ) {
         normalizedAction = "deny_once";
         authorityChanged = true;
@@ -7529,9 +7758,9 @@ export class AgentDaemon extends EventEmitter {
       // Never apply a late approval to an already terminal task.
       if (!persistedTask || isTerminalTaskStatus(persistedTaskStatus)) {
         if (attribution) {
-          this.approvalRepo.update(approvalId, "denied", attribution);
+          await this.approvalRepo.update(approvalId, "denied", attribution);
         } else {
-          this.approvalRepo.update(approvalId, "denied");
+          await this.approvalRepo.update(approvalId, "denied");
         }
         this.logEvent(persistedApproval.taskId, "approval_denied", {
           approvalId,
@@ -7542,7 +7771,10 @@ export class AgentDaemon extends EventEmitter {
         return "handled";
       }
 
-      const persistenceResult = this.persistApprovalActionRule(normalizedAction, persistedApproval);
+      const persistenceResult = await this.persistApprovalActionRule(
+        normalizedAction,
+        persistedApproval,
+      );
       if (didApprove && normalizedAction === "allow_once") {
         const rememberDurableApprovalGrant = (this as Any).rememberDurableApprovalGrant as
           | ((taskId: string, approval: ApprovalRequest) => void)
@@ -7550,9 +7782,9 @@ export class AgentDaemon extends EventEmitter {
         rememberDurableApprovalGrant?.call(this, persistedApproval.taskId, persistedApproval);
       }
       if (attribution) {
-        this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied", attribution);
+        await this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied", attribution);
       } else {
-        this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
+        await this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
       }
       if (didApprove && persistedApproval.type === "external_file_access") {
         this.grantExternalFileApprovalsFromDetails(
@@ -7587,6 +7819,11 @@ export class AgentDaemon extends EventEmitter {
     }
   }
 
+  /**
+   * Synchronous so a task's pending approvals are denied before its terminal update, as
+   * before (DB6): the approval row write is issued here and completes during the call on
+   * the host backend; in the worker it is queued in order and its failure is logged.
+   */
   private cleanupPendingApprovalsForTask(taskId: string, rejectionMessage: string): number {
     let cleared = 0;
 
@@ -7604,7 +7841,11 @@ export class AgentDaemon extends EventEmitter {
       }
 
       pending.resolved = true;
-      this.approvalRepo.update(approvalId, "denied");
+      try {
+        this.approvalStore.update(approvalId, "denied");
+      } catch (error) {
+        log.warn("Failed to record an approval denied at task end:", error);
+      }
       this.logEvent(taskId, "approval_denied", {
         approvalId,
         reason: "task_ended",
@@ -7692,7 +7933,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     try {
-      const request = this.inputRequestRepo.findById(response.requestId);
+      const request = await this.inputRequestRepo.findById(response.requestId);
       if (!request) {
         inputRequestIdempotency.complete(idempotencyKey, { status: "not_found" });
         return { status: "not_found", requestId: response.requestId };
@@ -7702,7 +7943,7 @@ export class AgentDaemon extends EventEmitter {
         return { status: "duplicate", requestId: response.requestId };
       }
 
-      this.inputRequestRepo.resolve(response.requestId, response.status, response.answers);
+      await this.inputRequestRepo.resolve(response.requestId, response.status, response.answers);
 
       if (response.status === "submitted") {
         this.logEvent(request.taskId, "assistant_message", {
@@ -7880,6 +8121,12 @@ export class AgentDaemon extends EventEmitter {
   }
 
   logEvent(taskId: string, type: string, payload: Any): void {
+    // One task-row read scope per event (async SQLite plan, DB1): the projections
+    // below would otherwise re-read the same task row about ten times.
+    withTaskRowReadScope(() => this.logEventWithinTaskRowReadScope(taskId, type, payload));
+  }
+
+  private logEventWithinTaskRowReadScope(taskId: string, type: string, payload: Any): void {
     const timestamp = Date.now();
     const payloadObj: Record<string, unknown> =
       payload && typeof payload === "object" && !Array.isArray(payload)
@@ -8707,6 +8954,9 @@ export class AgentDaemon extends EventEmitter {
       params.task.id,
       params.readGuard,
     );
+    // The reads below need the event just logged; wait for the worker to commit it
+    // rather than committing it on the host.
+    await this.timelineRowsCommitted(params.task.id);
     const meaningfulEvents = this.eventRepo
       .findByTaskIdAndTypes(params.task.id, ["user_message", "assistant_message"], 24)
       .filter((event) =>
@@ -9260,13 +9510,14 @@ export class AgentDaemon extends EventEmitter {
       options.legacyPayload || (event.payload as Record<string, unknown>);
     const effectiveType = effectiveLegacyType || event.type;
 
-    const storedEvent = this.eventRepo.create({
+    const persistStartedAt = performance.now();
+    const eventInput = {
       id: event.id,
       taskId: event.taskId,
       timestamp: event.timestamp,
       type: event.type,
       payload: event.payload,
-      schemaVersion: 2,
+      schemaVersion: 2 as const,
       eventId: event.eventId,
       seq: event.seq,
       ts: event.ts,
@@ -9275,44 +9526,49 @@ export class AgentDaemon extends EventEmitter {
       groupId: event.groupId,
       actor: event.actor,
       legacyType: effectiveLegacyType as Any,
-    });
+    };
+    const projection = (this as Any).timelineProjection as
+      | TimelineProjectionQueue
+      | null
+      | undefined;
+    const writer = (this as Any).timelineWriter as TimelineWriter | null | undefined;
+    let storedEvent: TaskEvent;
+    if (writer && projection) {
+      // The worker inserts the row; durable milestones are committed before returning.
+      const prepared = TaskEventRepository.prepareForInsert(eventInput);
+      storedEvent = prepared.stored;
+      projection.notifyEnqueued(storedEvent.taskId, storedEvent.id);
+      // Milestones go to the worker like every other row (DB6 slice C2); boundaries that
+      // must not proceed before one is durable await `timelineRowsCommitted`.
+      writer.enqueueTaskEvent(prepared, {
+        afterCommit: () => this.eventRepo.afterInsert(prepared.stored),
+      });
+    } else {
+      storedEvent = this.eventRepo.create(eventInput);
+    }
+    // The TaskEvent insert is the authoritative commit; projections follow it.
+    recordHostOperation("timeline.insert", performance.now() - persistStartedAt);
     const storedLegacyPayload = sanitizeTimelinePayloadForStorage(effectiveLegacyPayload) as Record<
       string,
       unknown
     >;
 
     const task = this.taskRepo.findById(event.taskId);
-    try {
-      const protocol = (this as Any).workSessionProtocolService as
-        | WorkSessionProtocolService
-        | undefined;
-      protocol?.recordTaskEvent(event.taskId, storedEvent);
-    } catch (error) {
-      // Keep the legacy TaskEvent stream authoritative while the canonical
-      // WorkSession projection rolls out across existing databases.
-      log.warn(
-        `[work-session-protocol] Failed to dual-write event ${event.id} for task ${event.taskId}:`,
-        error,
+    if (!projection) {
+      logTimelineProjectionFailures(
+        projectTimelineEvent(
+          {
+            protocol: (this as Any).workSessionProtocolService as
+              | WorkSessionProtocolService
+              | undefined,
+            contracts: (this as Any).workSessionContractService as
+              | WorkSessionContractService
+              | undefined,
+            progress: this.sessionProgressService,
+          },
+          storedEvent,
+        ),
       );
-    }
-    try {
-      const contracts = (this as Any).workSessionContractService as
-        | WorkSessionContractService
-        | undefined;
-      contracts?.recordTaskEvent(event.taskId, storedEvent);
-    } catch (error) {
-      // Contract/evidence projections are additive and must not interrupt the
-      // legacy timeline or task execution if a migrated database is incomplete.
-      log.warn(
-        `[work-session-contracts] Failed to project event ${event.id} for task ${event.taskId}:`,
-        error,
-      );
-    }
-    try {
-      this.sessionProgressService.updateFromEvent(storedEvent);
-    } catch (error) {
-      // A projection failure must never interrupt task execution or timeline persistence.
-      log.warn("[session-progress] Failed to update durable projection:", error);
     }
     this.maybeMaterializeMailComposeInlineFrame(storedEvent, effectiveType, task);
     if (task && effectiveType === "llm_usage") {
@@ -9326,22 +9582,25 @@ export class AgentDaemon extends EventEmitter {
           cachedTokens?: number;
         };
       };
-      recordLlmCallSuccess(
-        {
-          workspaceId: task.workspaceId,
-          taskId: task.id,
-          sourceKind: "task_event",
-          sourceId: event.id,
-          providerType: usagePayload.providerType,
-          modelKey: usagePayload.modelKey,
-          modelId: usagePayload.modelId,
-          timestamp: event.timestamp,
-        },
-        {
-          inputTokens: usagePayload.delta?.inputTokens || 0,
-          outputTokens: usagePayload.delta?.outputTokens || 0,
-          cachedTokens: usagePayload.delta?.cachedTokens || 0,
-        },
+      recordTaskEventLlmCall(
+        writer,
+        prepareLlmCallSuccess(
+          {
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            sourceKind: "task_event",
+            sourceId: event.id,
+            providerType: usagePayload.providerType,
+            modelKey: usagePayload.modelKey,
+            modelId: usagePayload.modelId,
+            timestamp: event.timestamp,
+          },
+          {
+            inputTokens: usagePayload.delta?.inputTokens || 0,
+            outputTokens: usagePayload.delta?.outputTokens || 0,
+            cachedTokens: usagePayload.delta?.cachedTokens || 0,
+          },
+        ),
       );
     } else if (task && effectiveType === "llm_error") {
       const errorPayload = storedLegacyPayload as {
@@ -9351,24 +9610,27 @@ export class AgentDaemon extends EventEmitter {
         message?: string;
         details?: string;
       };
-      recordLlmCallError(
-        {
-          workspaceId: task.workspaceId,
-          taskId: task.id,
-          sourceKind: "task_event",
-          sourceId: event.id,
-          providerType: errorPayload.providerType,
-          modelKey: errorPayload.modelKey,
-          modelId: errorPayload.modelId,
-          timestamp: event.timestamp,
-        },
-        {
-          code: "llm_error",
-          message:
-            typeof errorPayload.details === "string"
-              ? `${errorPayload.message || "LLM error"} ${errorPayload.details}`.trim()
-              : errorPayload.message || "LLM error",
-        },
+      recordTaskEventLlmCall(
+        writer,
+        prepareLlmCallError(
+          {
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            sourceKind: "task_event",
+            sourceId: event.id,
+            providerType: errorPayload.providerType,
+            modelKey: errorPayload.modelKey,
+            modelId: errorPayload.modelId,
+            timestamp: event.timestamp,
+          },
+          {
+            code: "llm_error",
+            message:
+              typeof errorPayload.details === "string"
+                ? `${errorPayload.message || "LLM error"} ${errorPayload.details}`.trim()
+                : errorPayload.message || "LLM error",
+          },
+        ),
       );
     }
 
@@ -9377,6 +9639,7 @@ export class AgentDaemon extends EventEmitter {
     } else {
       this.logActivityForEvent(event.taskId, event.type, storedEvent.payload);
     }
+    recordHostOperation("timeline.persist", performance.now() - persistStartedAt);
 
     this.emitTaskEvent(storedEvent);
 
@@ -9407,12 +9670,13 @@ export class AgentDaemon extends EventEmitter {
     const task = this.taskRepo.findById(taskId);
     if (!task || !task.parentTaskId) return;
 
-    const thoughtRepo = this.teamOrchestrator.getThoughtRepo();
-    if (!thoughtRepo) return;
+    if (!this.teamOrchestrator.getThoughtRepo()) return;
 
     const db = this.dbManager.getDatabase();
-    const itemRepo = new AgentTeamItemRepository(db);
-    const runRepo = new AgentTeamRunRepository(db);
+    // The timeline path is synchronous, so the thought is written through the store.
+    const thoughtRepo = new AgentTeamThoughtStore(db);
+    const itemRepo = new AgentTeamItemStore(db);
+    const runRepo = new AgentTeamRunStore(db);
 
     // Primary path: look up the team item linked to this child task
     let items = itemRepo.listBySourceTaskId(taskId);
@@ -9524,10 +9788,10 @@ export class AgentDaemon extends EventEmitter {
     notification: OrchestrationNodeNotification,
   ): Promise<void> {
     const repo = this.getOrchestrationGraphRepository();
-    const node = repo.findNodeById(notification.nodeId);
+    const node = await repo.findNodeById(notification.nodeId);
     if (!node?.teamItemId || !node.teamRunId) return;
 
-    const itemRepo = new AgentTeamItemRepository(this.dbManager.getDatabase());
+    const itemRepo = new AgentTeamItemStore(this.dbManager.getDatabase());
     const existing = itemRepo.findById(node.teamItemId);
     if (!existing) return;
 
@@ -9600,8 +9864,8 @@ export class AgentDaemon extends EventEmitter {
     if (!task || !task.parentTaskId) return;
 
     const db = this.dbManager.getDatabase();
-    const itemRepo = new AgentTeamItemRepository(db);
-    const runRepo = new AgentTeamRunRepository(db);
+    const itemRepo = new AgentTeamItemStore(db);
+    const runRepo = new AgentTeamRunStore(db);
 
     // Find the run this child task belongs to
     let items = itemRepo.listBySourceTaskId(taskId);
@@ -9902,7 +10166,15 @@ export class AgentDaemon extends EventEmitter {
     const activity = this.buildActivityFromEvent(task, type, payload);
     if (!activity) return;
 
-    const created = this.activityRepo.create(activity);
+    const writer = (this as Any).timelineWriter as TimelineWriter | null | undefined;
+    let created: Activity;
+    if (writer) {
+      // Written by the database worker; activity reads commit pending rows first.
+      created = ActivityStore.prepareForInsert(activity);
+      writer.enqueueActivity(created);
+    } else {
+      created = this.activityRepo.create(activity);
+    }
     this.emitActivityEvent(created);
   }
 
@@ -10159,7 +10431,7 @@ export class AgentDaemon extends EventEmitter {
    * Register an artifact (file created during task execution)
    * This allows files like screenshots to be sent back to the user
    */
-  registerArtifact(taskId: string, filePath: string, mimeType: string): void {
+  async registerArtifact(taskId: string, filePath: string, mimeType: string): Promise<void> {
     try {
       if (!fs.existsSync(filePath)) {
         console.error(`[AgentDaemon] Artifact file not found: ${filePath}`);
@@ -10170,7 +10442,7 @@ export class AgentDaemon extends EventEmitter {
       const fileBuffer = fs.readFileSync(filePath);
       const sha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
-      const artifact = this.artifactRepo.create({
+      const artifact = await this.artifactRepo.create({
         taskId,
         path: filePath,
         mimeType,
@@ -10922,7 +11194,7 @@ export class AgentDaemon extends EventEmitter {
    * Query task event logs from the local database (tool calls/results, messages, feedback, file ops).
    * This is privacy-sensitive and may be blocked in shared gateway contexts.
    */
-  queryTaskEvents(params: {
+  async queryTaskEvents(params: {
     period: "today" | "yesterday" | "last_7_days" | "last_30_days" | "custom";
     from?: string | number;
     to?: string | number;
@@ -10930,7 +11202,7 @@ export class AgentDaemon extends EventEmitter {
     workspaceId?: string;
     types?: string[];
     includePayload?: boolean;
-  }):
+  }): Promise<
     | {
         success: true;
         period: string;
@@ -10938,7 +11210,12 @@ export class AgentDaemon extends EventEmitter {
         stats: Any;
         events: Any[];
       }
-    | { success: false; error: string } {
+    | { success: false; error: string }
+  > {
+    // The range read sees rows the worker has committed: wait for the rows accepted so far
+    // rather than committing them on the host.
+    const pendingDb = (this as Any).dbManager?.getDatabase?.() as Database.Database | undefined;
+    if (pendingDb) await pendingTimelineWritesCommitted(pendingDb);
     try {
       const period = params?.period;
       if (!period) {
@@ -11039,47 +11316,10 @@ export class AgentDaemon extends EventEmitter {
         : [];
       const includePayload = params?.includePayload !== false;
 
-      const db = this.dbManager.getDatabase();
-
-      let sql = `
-        SELECT
-          e.id as id,
-          e.task_id as taskId,
-          e.timestamp as timestamp,
-          e.type as type,
-          e.legacy_type as legacy_type,
-          e.payload as payload,
-          t.title as taskTitle,
-          t.workspace_id as workspaceId
-        FROM task_events e
-        JOIN tasks t ON t.id = e.task_id
-        WHERE e.timestamp >= ? AND e.timestamp < ?
-      `;
-
-      const args: Any[] = [startMs, endMs];
-      if (workspaceFilter) {
-        sql += " AND t.workspace_id = ?";
-        args.push(workspaceFilter);
-      }
-      if (normalizedTypes.length > 0) {
-        const placeholders = normalizedTypes.map(() => "?").join(", ");
-        sql += ` AND (e.type IN (${placeholders}) OR e.legacy_type IN (${placeholders}))`;
-        args.push(...normalizedTypes, ...normalizedTypes);
-      }
-
-      sql += " ORDER BY e.timestamp ASC LIMIT ?";
-      args.push(limit);
-
-      const rows = db.prepare(sql).all(...args) as Array<{
-        id: string;
-        taskId: string;
-        timestamp: number;
-        type: string;
-        legacy_type?: string;
-        payload: string;
-        taskTitle: string;
-        workspaceId: string;
-      }>;
+      const rows = await serviceStatements(this.dbManager.getDatabase()).unit(
+        "agentSignal_eventsInRange",
+        [{ startMs, endMs, workspaceId: workspaceFilter ?? null, types: normalizedTypes, limit }],
+      );
 
       const byType: Record<string, number> = {};
       const toolCallsByName: Record<string, number> = {};
@@ -11482,7 +11722,7 @@ export class AgentDaemon extends EventEmitter {
    * List projects from the control-plane database.
    * Optionally filter to only active projects.
    */
-  listProjects(opts?: { includeArchived?: boolean }): Project[] {
+  async listProjects(opts?: { includeArchived?: boolean }): Promise<Project[]> {
     const core = new ControlPlaneCoreService(this.dbManager.getDatabase());
     return core.listProjects({ includeArchived: opts?.includeArchived ?? false });
   }
@@ -11491,11 +11731,11 @@ export class AgentDaemon extends EventEmitter {
    * Link a workspace to a project in the control-plane database.
    * Creates the link if it doesn't exist; updates isPrimary if it does.
    */
-  linkProjectWorkspace(input: {
+  async linkProjectWorkspace(input: {
     projectId: string;
     workspaceId: string;
     isPrimary?: boolean;
-  }): ProjectWorkspaceLink {
+  }): Promise<ProjectWorkspaceLink> {
     const core = new ControlPlaneCoreService(this.dbManager.getDatabase());
     return core.linkProjectWorkspace(input);
   }
@@ -11503,7 +11743,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * List workspace links for a project.
    */
-  listProjectWorkspaces(projectId: string): ProjectWorkspaceLink[] {
+  async listProjectWorkspaces(projectId: string): Promise<ProjectWorkspaceLink[]> {
     const core = new ControlPlaneCoreService(this.dbManager.getDatabase());
     return core.listProjectWorkspaces(projectId);
   }
@@ -11511,7 +11751,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * List goals from the control-plane database.
    */
-  listGoals(companyId?: string): Goal[] {
+  async listGoals(companyId?: string): Promise<Goal[]> {
     const core = new ControlPlaneCoreService(this.dbManager.getDatabase());
     return core.listGoals(companyId);
   }
@@ -11519,7 +11759,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * List issues from the control-plane database with optional filters.
    */
-  listIssues(filters?: IssueFilters): Issue[] {
+  async listIssues(filters?: IssueFilters): Promise<Issue[]> {
     const core = new ControlPlaneCoreService(this.dbManager.getDatabase());
     return core.listIssues(filters);
   }
@@ -11527,7 +11767,7 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Create an issue in the control-plane database.
    */
-  createIssue(input: Partial<Issue> & Pick<Issue, "title">): Issue {
+  async createIssue(input: Partial<Issue> & Pick<Issue, "title">): Promise<Issue> {
     const core = new ControlPlaneCoreService(this.dbManager.getDatabase());
     return core.createIssue(input);
   }
@@ -13807,16 +14047,19 @@ export class AgentDaemon extends EventEmitter {
     this.clearTimelineTaskState(taskId);
     // Notify queue manager so it can start next task
     this.finishQueueSlot(taskId);
+    // Callers see completion only once its milestone rows are committed, by the worker
+    // when it runs (DB6 slice C2); this waits without blocking the host thread.
+    await this.timelineRowsCommitted(taskId);
   }
 
-  private buildAnnotationFollowUpContext(
+  private async buildAnnotationFollowUpContext(
     taskId: string,
     message: string,
-  ): {
+  ): Promise<{
     message: string;
     annotations: Annotation[];
-  } {
-    const annotations = this.annotationRepo.listOpenByTask(taskId);
+  }> {
+    const annotations = await this.annotationRepo.listOpenByTask(taskId);
     if (annotations.length === 0) return { message, annotations: [] };
 
     const lines = [
@@ -13944,7 +14187,9 @@ export class AgentDaemon extends EventEmitter {
     this.ensureBotTaskTeam(task);
     if (options?.expectedTurnId) {
       // Validate before touching task metadata, annotations, or the executor;
-      // a stale client must not mutate a newer turn.
+      // a stale client must not mutate a newer turn. The turn is derived state, so wait
+      // for this task's pending projections first.
+      await this.flushTimelineProjections(taskId);
       this.workSessionProtocolService.assertExpectedTurnForTask(taskId, options.expectedTurnId);
     }
 
@@ -14079,11 +14324,11 @@ export class AgentDaemon extends EventEmitter {
     }
 
     this.taskRepo.touch(taskId);
-    const annotationContext = this.buildAnnotationFollowUpContext(taskId, message);
+    const annotationContext = await this.buildAnnotationFollowUpContext(taskId, message);
     const effectiveMessage = annotationContext.message;
     const userMessageAttachmentMetadata = buildUserMessageAttachmentMetadata(images);
     if (annotationContext.annotations.length > 0) {
-      const changedCount = this.annotationRepo.markAddressing(
+      const changedCount = await this.annotationRepo.markAddressing(
         taskId,
         annotationContext.annotations.map((annotation) => annotation.id),
       );
@@ -15976,6 +16221,10 @@ export class AgentDaemon extends EventEmitter {
     }
 
     // Clear the database maintenance interval
+    if (this.vacuumRetryHandle) {
+      clearTimeout(this.vacuumRetryHandle);
+      this.vacuumRetryHandle = undefined;
+    }
     if (this.maintenanceIntervalHandle) {
       clearInterval(this.maintenanceIntervalHandle);
       this.maintenanceIntervalHandle = undefined;
@@ -16086,6 +16335,13 @@ export class AgentDaemon extends EventEmitter {
     } finally {
       if (cancellationTimer) clearTimeout(cancellationTimer);
     }
+
+    // Commit rows the worker has not written, then project what the shutdown logged;
+    // anything left stays in the outbox for the next run.
+    await this.timelineWriter?.stop();
+    this.timelineWriter = null;
+    await this.timelineProjection?.stop(5_000);
+    this.timelineProjection = null;
 
     // A failed or timed-out cancellation does not establish quiescence. Keep
     // active task references and listeners alive so late workers can finish

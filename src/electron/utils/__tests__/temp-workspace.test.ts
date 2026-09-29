@@ -36,6 +36,11 @@ class MockDb {
   tasks: TaskRow[] = [];
   sessions: SessionRow[] = [];
 
+  // Prune queries run as units, in a transaction (DB6); the mock runs the body directly.
+  transaction<T>(fn: T): T {
+    return fn;
+  }
+
   prepare(sql: string): {
     all?: (...args: Any[]) => Any[];
     get?: (...args: Any[]) => Any;
@@ -204,7 +209,7 @@ describe("pruneTempWorkspaces", () => {
     return { id, dir };
   };
 
-  it("removes old temp workspaces but keeps current and active ones", () => {
+  it("removes old temp workspaces but keeps current and active ones", async () => {
     const db = new MockDb();
     const root = createTempRoot();
     const nowMs = 2_000_000;
@@ -215,7 +220,7 @@ describe("pruneTempWorkspaces", () => {
 
     db.tasks.push({ id: "t1", workspace_id: activeOld.id, status: "executing" });
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: root,
       currentWorkspaceId: recent.id,
@@ -234,7 +239,7 @@ describe("pruneTempWorkspaces", () => {
     expect(db.workspaces.some((workspace) => workspace.id === old.id)).toBe(false);
   });
 
-  it("enforces hard limit by deleting oldest temp workspaces when needed", () => {
+  it("enforces hard limit by deleting oldest temp workspaces when needed", async () => {
     const db = new MockDb();
     const root = createTempRoot();
     const nowMs = 3_000_000;
@@ -243,7 +248,7 @@ describe("pruneTempWorkspaces", () => {
       insertTempWorkspace(db, root, `w${index}`, nowMs - index * 100),
     );
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
@@ -264,7 +269,7 @@ describe("pruneTempWorkspaces", () => {
     expect(remainingIds.has(workspaces[2].id)).toBe(true);
   });
 
-  it("keeps temp workspace referenced by idle session", () => {
+  it("keeps temp workspace referenced by idle session", async () => {
     const db = new MockDb();
     const root = createTempRoot();
     const nowMs = 4_000_000;
@@ -277,7 +282,7 @@ describe("pruneTempWorkspaces", () => {
       last_activity_at: nowMs - 100,
     });
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
@@ -293,7 +298,7 @@ describe("pruneTempWorkspaces", () => {
     expect(db.workspaces.some((workspace) => workspace.id === idleReferenced.id)).toBe(true);
   });
 
-  it("prunes orphan temp directories that have no DB workspace rows", () => {
+  it("prunes orphan temp directories that have no DB workspace rows", async () => {
     const db = new MockDb();
     const root = createTempRoot();
     const nowMs = Date.now();
@@ -306,7 +311,7 @@ describe("pruneTempWorkspaces", () => {
     const freshOrphanDir = path.join(root, "orphan-fresh");
     fs.mkdirSync(freshOrphanDir, { recursive: true });
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
@@ -356,7 +361,7 @@ describe("pruneTempWorkspaces", () => {
     expect(fs.existsSync(external)).toBe(true);
   });
 
-  it("does not follow or delete symlinked stale workspace paths", () => {
+  it("does not follow or delete symlinked stale workspace paths", async () => {
     const db = new MockDb();
     const root = createTempRoot();
     const external = createTempRoot();
@@ -377,7 +382,7 @@ describe("pruneTempWorkspaces", () => {
       permissions: "{}",
     });
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
@@ -393,7 +398,7 @@ describe("pruneTempWorkspaces", () => {
     expect(fs.existsSync(external)).toBe(true);
   });
 
-  it("can report unused temp workspaces and orphan directories without deleting them", () => {
+  it("can report unused temp workspaces and orphan directories without deleting them", async () => {
     const db = new MockDb();
     const root = createTempRoot();
     const nowMs = Date.now();
@@ -404,7 +409,7 @@ describe("pruneTempWorkspaces", () => {
     const oldDate = new Date(nowMs - 30_000);
     fs.utimesSync(orphanDir, oldDate, oldDate);
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
@@ -429,7 +434,7 @@ describe("pruneTempWorkspaces", () => {
     expect(db.workspaces.some((workspace) => workspace.id === staleWorkspace.id)).toBe(true);
   });
 
-  it("does not over-report hard-cap candidates in dry run after simulated stale row removal", () => {
+  it("does not over-report hard-cap candidates in dry run after simulated stale row removal", async () => {
     const db = new MockDb();
     const root = createTempRoot();
     const nowMs = 8_000_000;
@@ -441,7 +446,7 @@ describe("pruneTempWorkspaces", () => {
       insertTempWorkspace(db, root, `fresh-${index}`, nowMs - index * 100),
     );
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
@@ -461,7 +466,7 @@ describe("pruneTempWorkspaces", () => {
     }
   });
 
-  it("does not treat wildcard-like IDs as temp workspace IDs", () => {
+  it("does not treat wildcard-like IDs as temp workspace IDs", async () => {
     const db = new MockDb();
     const root = createTempRoot();
     const nowMs = 5_000_000;
@@ -480,7 +485,7 @@ describe("pruneTempWorkspaces", () => {
 
     const oldTemp = insertTempWorkspace(db, root, "real-temp", nowMs - 100_000);
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: root,
       nowMs,
@@ -498,7 +503,7 @@ describe("pruneTempWorkspaces", () => {
     expect(fs.existsSync(oldTemp.dir)).toBe(false);
   });
 
-  it("prunes stale temp workspace DB rows even when temp root does not exist", () => {
+  it("prunes stale temp workspace DB rows even when temp root does not exist", async () => {
     const db = new MockDb();
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-temp-prune-missing-root-"));
     tempDirsToCleanup.push(base);
@@ -514,7 +519,7 @@ describe("pruneTempWorkspaces", () => {
       permissions: "{}",
     });
 
-    const result = pruneTempWorkspaces({
+    const result = await pruneTempWorkspaces({
       db: db as Any,
       tempWorkspaceRoot: missingRoot,
       nowMs,

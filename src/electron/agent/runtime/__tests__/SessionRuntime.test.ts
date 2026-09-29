@@ -1159,7 +1159,7 @@ describe("SessionRuntime", () => {
     const runtime = harness.runtime as Any;
     const recordHistory = vi
       .spyOn(DurableContextService, "recordHistory")
-      .mockImplementation(() => undefined);
+      .mockResolvedValue(undefined);
     let releaseSummary!: (value: string) => void;
     const summaryPending = new Promise<string>((resolve) => {
       releaseSummary = resolve;

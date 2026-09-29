@@ -244,13 +244,13 @@ export class RemoteGatewayClient {
 
       const testWs = new WebSocket(this.config.url, testOptions);
 
-      return new Promise((resolve) => {
+      return await new Promise((resolve) => {
         const timeout = setTimeout(() => {
           testWs.close();
           resolve({ success: false, error: "Connection timeout" });
         }, 15000);
 
-        testWs.on("open", async () => {
+        testWs.on("open", () => {
           try {
             // Send connect request
             const connectFrame = createRequest(1, Methods.CONNECT, {

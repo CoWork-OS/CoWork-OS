@@ -335,9 +335,9 @@ print(json.dumps([{"text": x.text, "start": x.start, "duration": x.duration} for
       }
     }
 
-    YouTubeTranscriptStore.saveVideo(this.workspaceId, video);
+    await YouTubeTranscriptStore.saveVideo(this.workspaceId, video);
     if (segments.length) {
-      YouTubeTranscriptStore.saveSegments(this.workspaceId, videoId, segments);
+      await YouTubeTranscriptStore.saveSegments(this.workspaceId, videoId, segments);
     }
 
     return {

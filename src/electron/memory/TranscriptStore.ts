@@ -4,8 +4,10 @@ import os from "os";
 import path from "path";
 import { createHash, randomUUID } from "crypto";
 import BetterSqlite3 from "better-sqlite3";
+import type Database from "better-sqlite3";
 import type { TaskEvent } from "../../shared/types";
 import { DatabaseManager } from "../database/schema";
+import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
 
 export interface TranscriptSpanRecord {
   taskId: string;
@@ -454,6 +456,7 @@ function safeParseLine(line: string): TranscriptSpanRecord | null {
 export class TranscriptStore {
   private static dbOverride: TranscriptDatabase | null | undefined;
   private static dbSchemaReady = false;
+  private static statements: { db: TranscriptDatabase; port: MemoryStatementPort } | null = null;
   private static readonly checkpointWriteTails = new Map<string, Promise<void>>();
 
   static setDatabaseForTests(db: TranscriptDatabase | null): void {
@@ -483,7 +486,7 @@ export class TranscriptStore {
     };
     const rawLine = JSON.stringify(record);
     await fs.appendFile(taskSpanPath(workspacePath, event.taskId), `${rawLine}\n`, "utf8");
-    this.indexSpan(workspacePath, record, rawLine);
+    await this.indexSpan(workspacePath, record, rawLine);
   }
 
   static async writeCheckpoint(
@@ -670,7 +673,7 @@ export class TranscriptStore {
     if (params.taskId && !isSafeTaskId(params.taskId)) return [];
 
     const limit = Math.max(1, params.limit ?? 10);
-    const indexedResults = this.searchIndexedSpans({
+    const indexedResults = await this.searchIndexedSpans({
       workspacePath: params.workspacePath,
       query,
       taskId: params.taskId,
@@ -788,21 +791,26 @@ export class TranscriptStore {
     }
   }
 
-  private static indexSpan(
+  /** The memory statement port for the current database, schema created on first use. */
+  private static getStatements(): MemoryStatementPort | null {
+    const db = this.getDatabase();
+    if (!db || !this.ensureDbSchema(db)) return null;
+    if (this.statements?.db !== db) {
+      this.statements = { db, port: createMemoryStatementPort(db as Database.Database) };
+    }
+    return this.statements.port;
+  }
+
+  private static async indexSpan(
     workspacePath: string,
     record: TranscriptSpanRecord,
     rawLine: string,
-  ): void {
-    const db = this.getDatabase();
-    if (!db || !this.ensureDbSchema(db)) return;
+  ): Promise<void> {
+    const sql = this.getStatements();
+    if (!sql) return;
 
     try {
-      db.prepare<unknown[]>(
-        `INSERT OR IGNORE INTO transcript_spans (
-          id, workspace_path, task_id, timestamp, type, payload_json,
-          event_id, seq, raw_line, search_text, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run?.(
+      await sql.run("transcript_indexSpan", [
         buildSpanId(workspacePath, record, rawLine),
         normalizeWorkspacePath(workspacePath),
         record.taskId,
@@ -814,47 +822,33 @@ export class TranscriptStore {
         rawLine,
         `${record.type} ${payloadToSearchText(record.payload)}`,
         Date.now(),
-      );
+      ]);
     } catch {
       // Search falls back to JSONL scans when SQLite/FTS is unavailable.
     }
   }
 
-  private static searchIndexedSpans(params: {
+  private static async searchIndexedSpans(params: {
     workspacePath: string;
     query: string;
     taskId?: string;
     limit: number;
     readGuard?: TranscriptReadGuard;
-  }): TranscriptSearchResult[] {
-    const db = this.getDatabase();
-    if (!db || !this.ensureDbSchema(db)) return [];
+  }): Promise<TranscriptSearchResult[]> {
+    const sql = this.getStatements();
+    if (!sql) return [];
 
     const ftsQuery = buildFtsQuery(params.query);
     if (!ftsQuery) return [];
 
-    const whereTask = params.taskId ? "AND s.task_id = ?" : "";
-    const values: unknown[] = [
-      ftsQuery,
-      normalizeWorkspacePath(params.workspacePath),
-      ...(params.taskId ? [params.taskId] : []),
-      params.limit,
-    ];
-
     try {
-      const rows =
-        db
-          .prepare<unknown[], Record<string, unknown>>(
-            `SELECT s.task_id, s.timestamp, s.type, s.payload_json, s.event_id, s.seq, s.raw_line
-           FROM transcript_spans_fts f
-           JOIN transcript_spans s ON s.rowid = f.rowid
-           WHERE transcript_spans_fts MATCH ?
-             AND s.workspace_path = ?
-             ${whereTask}
-           ORDER BY bm25(transcript_spans_fts), s.timestamp DESC
-           LIMIT ?`,
-          )
-          .all?.(...values) || [];
+      const rows = await sql.all<Record<string, unknown>>("transcript_searchSpans", [
+        ftsQuery,
+        normalizeWorkspacePath(params.workspacePath),
+        params.taskId ?? null,
+        params.taskId ?? null,
+        params.limit,
+      ]);
 
       return rows
         .map((row) => {

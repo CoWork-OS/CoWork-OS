@@ -287,8 +287,8 @@ export class KnowledgeGraphTools {
     }
   }
 
-  private createEntity(input: Any): Any {
-    const entity = KnowledgeGraphService.createEntity(
+  private async createEntity(input: Any): Promise<Any> {
+    const entity = await KnowledgeGraphService.createEntity(
       this.workspace.id,
       {
         entityType: input.entity_type,
@@ -311,8 +311,8 @@ export class KnowledgeGraphTools {
     };
   }
 
-  private updateEntity(input: Any): Any {
-    const entity = KnowledgeGraphService.updateEntity({
+  private async updateEntity(input: Any): Promise<Any> {
+    const entity = await KnowledgeGraphService.updateEntity({
       entityId: input.entity_id,
       description: input.description,
       properties: input.properties,
@@ -332,14 +332,14 @@ export class KnowledgeGraphTools {
     };
   }
 
-  private deleteEntity(input: Any): Any {
-    const deleted = KnowledgeGraphService.deleteEntity(input.entity_id);
+  private async deleteEntity(input: Any): Promise<Any> {
+    const deleted = await KnowledgeGraphService.deleteEntity(input.entity_id);
     return { success: deleted, message: deleted ? "Entity deleted" : "Entity not found" };
   }
 
-  private createEdge(input: Any): Any {
+  private async createEdge(input: Any): Promise<Any> {
     try {
-      const edge = KnowledgeGraphService.createEdge(
+      const edge = await KnowledgeGraphService.createEdge(
         this.workspace.id,
         {
           sourceEntityId: input.source_entity_id,
@@ -368,14 +368,14 @@ export class KnowledgeGraphTools {
     }
   }
 
-  private deleteEdge(input: Any): Any {
-    const deleted = KnowledgeGraphService.deleteEdge(input.edge_id);
+  private async deleteEdge(input: Any): Promise<Any> {
+    const deleted = await KnowledgeGraphService.deleteEdge(input.edge_id);
     return { success: deleted, message: deleted ? "Edge deleted" : "Edge not found" };
   }
 
-  private invalidateEdge(input: Any): Any {
+  private async invalidateEdge(input: Any): Promise<Any> {
     try {
-      const edge = KnowledgeGraphService.invalidateEdge(
+      const edge = await KnowledgeGraphService.invalidateEdge(
         input.edge_id,
         Number.isFinite(input.valid_to) ? input.valid_to : Date.now(),
       );
@@ -398,9 +398,9 @@ export class KnowledgeGraphTools {
     }
   }
 
-  private addObservation(input: Any): Any {
+  private async addObservation(input: Any): Promise<Any> {
     try {
-      const observation = KnowledgeGraphService.addObservation(
+      const observation = await KnowledgeGraphService.addObservation(
         { entityId: input.entity_id, content: input.content },
         "agent",
         this.taskId,
@@ -419,9 +419,9 @@ export class KnowledgeGraphTools {
     }
   }
 
-  private searchEntities(input: Any): Any {
+  private async searchEntities(input: Any): Promise<Any> {
     const limit = Math.min(Math.max(1, input.limit || 10), 50);
-    let results = KnowledgeGraphService.search(this.workspace.id, input.query, limit);
+    let results = await KnowledgeGraphService.search(this.workspace.id, input.query, limit);
 
     // Filter by entity type if specified
     if (input.entity_type) {
@@ -442,9 +442,9 @@ export class KnowledgeGraphTools {
     };
   }
 
-  private getNeighbors(input: Any): Any {
+  private async getNeighbors(input: Any): Promise<Any> {
     const depth = Math.min(Math.max(1, input.depth || 1), 3);
-    const neighbors = KnowledgeGraphService.getNeighbors(
+    const neighbors = await KnowledgeGraphService.getNeighbors(
       input.entity_id,
       depth,
       input.edge_types,
@@ -472,8 +472,8 @@ export class KnowledgeGraphTools {
     };
   }
 
-  private getSubgraph(input: Any): Any {
-    const subgraph = KnowledgeGraphService.getSubgraph(input.entity_ids || [], input.as_of);
+  private async getSubgraph(input: Any): Promise<Any> {
+    const subgraph = await KnowledgeGraphService.getSubgraph(input.entity_ids || [], input.as_of);
 
     return {
       entities: subgraph.entities.map((e) => ({

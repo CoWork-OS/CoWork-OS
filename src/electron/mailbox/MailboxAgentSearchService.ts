@@ -1,4 +1,6 @@
+import { bindStatementContext } from "../database/statements/statement-burst";
 import type Database from "better-sqlite3";
+import type { MailboxStatementPort } from "./mailbox-statement-port";
 import { createHash } from "crypto";
 import { cosineSimilarity, createLocalEmbedding } from "../memory/local-embedding";
 import type {
@@ -162,22 +164,24 @@ const FINANCIAL_EXPANSIONS: Array<{ pattern: RegExp; terms: string[] }> = [
 ];
 
 export class MailboxAgentSearchService {
+  /** Create the embedding table with `ensureMailboxEmbeddingTable` before searching. */
   constructor(
-    private db: Database.Database,
+    private readonly sql: MailboxStatementPort,
     private readonly deps: {
       getThread(threadId: string): Promise<MailboxThreadDetail | null>;
-      getAttachment(attachmentId: string, includeText?: boolean): MailboxAttachmentRecord | null;
+      getAttachment(
+        attachmentId: string,
+        includeText?: boolean,
+      ): Promise<MailboxAttachmentRecord | null>;
       extractCandidateAttachments?(query: string): Promise<void>;
-      ensureLocalSearchIndex?(): void;
+      ensureLocalSearchIndex?(): Promise<void>;
       providerSearch?(
         plan: MailboxSearchQueryPlan,
         limit: number,
       ): Promise<Array<{ thread: MailboxThreadDetail; snippet?: string; score?: number }>>;
       fallbackSearch?(query: string, limit: number): Promise<MailboxAskResult["results"]>;
     },
-  ) {
-    this.ensureEmbeddingTable();
-  }
+  ) {}
 
   async search(
     query: string,
@@ -201,7 +205,7 @@ export class MailboxAgentSearchService {
       "Prepare local indexes",
       "Refreshing mailbox text and semantic search indexes.",
     );
-    this.deps.ensureLocalSearchIndex?.();
+    await this.deps.ensureLocalSearchIndex?.();
     progress?.stepStarted(
       "extract_attachments",
       "Check attachments",
@@ -209,7 +213,7 @@ export class MailboxAgentSearchService {
     );
     await this.deps.extractCandidateAttachments?.(plan.semanticQuery);
     progress?.stepCompleted("extract_attachments", "Check attachments");
-    this.backfillEmbeddingsFromFts();
+    await this.backfillEmbeddingsFromFts();
     progress?.stepCompleted("prepare_indexes", "Prepare local indexes");
 
     const candidates = new Map<string, SearchCandidate>();
@@ -218,7 +222,7 @@ export class MailboxAgentSearchService {
       "Search local mailbox text",
       "Searching subjects, senders, bodies, and extracted attachment text.",
     );
-    const ftsCandidates = this.searchLocalFts(plan, limit);
+    const ftsCandidates = await this.searchLocalFts(plan, limit);
     for (const candidate of ftsCandidates) mergeCandidate(candidates, candidate);
     progress?.stepCompleted(
       "local_fts",
@@ -234,7 +238,7 @@ export class MailboxAgentSearchService {
       "Search semantic mailbox index",
       "Comparing the question to local message and attachment embeddings.",
     );
-    const vectorCandidates = this.searchLocalVectors(plan, limit);
+    const vectorCandidates = await this.searchLocalVectors(plan, limit);
     for (const candidate of vectorCandidates) mergeCandidate(candidates, candidate);
     progress?.stepCompleted(
       "local_vector",
@@ -299,9 +303,10 @@ export class MailboxAgentSearchService {
       seenThreads.add(candidate.threadId);
 
       const attachmentId =
-        candidate.attachmentId || this.findBestAttachmentForThread(plan, candidate.threadId);
+        candidate.attachmentId ||
+        (await this.findBestAttachmentForThread(plan, candidate.threadId));
       const matchedAttachment = attachmentId
-        ? this.deps.getAttachment(attachmentId, true) || undefined
+        ? (await this.deps.getAttachment(attachmentId, true)) || undefined
         : undefined;
       const snippet = normalizeWhitespace(
         candidate.evidenceSnippets.find((entry) => entry.trim().length > 0) ||
@@ -350,8 +355,11 @@ export class MailboxAgentSearchService {
     };
   }
 
-  static upsertEmbeddingForPlainText(
-    db: Database.Database,
+  /**
+   * The `search_upsertEmbeddingForPlainText_2` parameters for a record, or null when its
+   * text is too short or unchanged since `existingHash` (DB6: a thread upsert batches these).
+   */
+  static prepareEmbeddingParams(
     input: {
       recordType: "message" | "attachment";
       recordId: string;
@@ -365,8 +373,8 @@ export class MailboxAgentSearchService {
       attachmentFilename?: string;
       attachmentText?: string;
     },
-  ): void {
-    ensureMailboxEmbeddingTable(db);
+    existingHash: string | null | undefined,
+  ): Array<string | number | null> | null {
     const text = buildEmbeddingText({
       subject: input.subject || "",
       sender: input.sender || "",
@@ -374,28 +382,10 @@ export class MailboxAgentSearchService {
       attachment_filename: input.attachmentFilename || "",
       attachment_text: input.attachmentText || "",
     });
-    if (text.length < 3) return;
+    if (text.length < 3) return null;
     const textHash = sha256(text);
-    const existing = db
-      .prepare(
-        `SELECT source_text_hash FROM mailbox_search_embeddings WHERE record_type = ? AND record_id = ?`,
-      )
-      .get(input.recordType, input.recordId) as { source_text_hash: string } | undefined;
-    if (existing?.source_text_hash === textHash) return;
-    db.prepare(
-      `INSERT INTO mailbox_search_embeddings
-        (record_type, record_id, account_id, thread_id, message_id, attachment_id, source_text_hash, embedding_json, snippet, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(record_type, record_id) DO UPDATE SET
-         account_id = excluded.account_id,
-         thread_id = excluded.thread_id,
-         message_id = excluded.message_id,
-         attachment_id = excluded.attachment_id,
-         source_text_hash = excluded.source_text_hash,
-         embedding_json = excluded.embedding_json,
-         snippet = excluded.snippet,
-         updated_at = excluded.updated_at`,
-    ).run(
+    if (existingHash === textHash) return null;
+    return [
       input.recordType,
       input.recordId,
       input.accountId || null,
@@ -406,34 +396,64 @@ export class MailboxAgentSearchService {
       JSON.stringify(createLocalEmbedding(text)),
       normalizeWhitespace(text, 500),
       Date.now(),
-    );
+    ];
   }
 
-  private ensureEmbeddingTable(): void {
-    ensureMailboxEmbeddingTable(this.db);
+  static async upsertEmbeddingForPlainText(
+    sql: MailboxStatementPort,
+    input: {
+      recordType: "message" | "attachment";
+      recordId: string;
+      accountId?: string;
+      threadId: string;
+      messageId?: string | null;
+      attachmentId?: string | null;
+      subject?: string;
+      sender?: string;
+      body?: string;
+      attachmentFilename?: string;
+      attachmentText?: string;
+    },
+  ): Promise<void> {
+    const text = buildEmbeddingText({
+      subject: input.subject || "",
+      sender: input.sender || "",
+      body: input.body || "",
+      attachment_filename: input.attachmentFilename || "",
+      attachment_text: input.attachmentText || "",
+    });
+    if (text.length < 3) return;
+    const textHash = sha256(text);
+    const existing = (await sql.get("search_upsertEmbeddingForPlainText_1", [
+      input.recordType,
+      input.recordId,
+    ])) as { source_text_hash: string } | undefined;
+    if (existing?.source_text_hash === textHash) return;
+    await sql.run("search_upsertEmbeddingForPlainText_2", [
+      input.recordType,
+      input.recordId,
+      input.accountId || null,
+      input.threadId,
+      input.messageId || null,
+      input.attachmentId || null,
+      textHash,
+      JSON.stringify(createLocalEmbedding(text)),
+      normalizeWhitespace(text, 500),
+      Date.now(),
+    ]);
   }
 
-  private backfillEmbeddingsFromFts(): void {
+  private async backfillEmbeddingsFromFts(): Promise<void> {
     try {
-      const rows = this.db
-        .prepare(
-          `SELECT f.record_type, f.record_id, t.account_id, f.thread_id, f.message_id, f.attachment_id,
-                  f.subject, f.sender, f.body, f.attachment_filename, f.attachment_text
-           FROM mailbox_search_fts f
-           LEFT JOIN mailbox_threads t ON t.id = f.thread_id
-           LEFT JOIN mailbox_search_embeddings e
-             ON e.record_type = f.record_type
-            AND e.record_id = f.record_id
-           WHERE e.record_id IS NULL
-           LIMIT ?`,
-        )
-        .all(MAILBOX_SEARCH_MAX_EMBEDDING_BACKFILL) as Array<
+      const rows = (await this.sql.all("search_backfillEmbeddingsFromFts_1", [
+        MAILBOX_SEARCH_MAX_EMBEDDING_BACKFILL,
+      ])) as Array<
         FtsSearchRow & {
           account_id: string | null;
         }
       >;
       for (const row of rows) {
-        MailboxAgentSearchService.upsertEmbeddingForPlainText(this.db, {
+        await MailboxAgentSearchService.upsertEmbeddingForPlainText(this.sql, {
           recordType: row.record_type === "attachment" ? "attachment" : "message",
           recordId: row.record_id,
           accountId: row.account_id || undefined,
@@ -452,37 +472,30 @@ export class MailboxAgentSearchService {
     }
   }
 
-  private searchLocalFts(plan: MailboxSearchQueryPlan, limit: number): SearchCandidate[] {
+  private async searchLocalFts(
+    plan: MailboxSearchQueryPlan,
+    limit: number,
+  ): Promise<SearchCandidate[]> {
     if (!plan.ftsQuery) return [];
     try {
-      const rows = this.db
-        .prepare(
-          `SELECT record_type, record_id, thread_id, message_id, attachment_id,
-                  snippet(mailbox_search_fts, 7, '[', ']', ' ... ', 18) AS snippet,
-                  subject, sender, body, attachment_filename, attachment_text,
-                  bm25(mailbox_search_fts) AS fts_score
-           FROM mailbox_search_fts
-           WHERE mailbox_search_fts MATCH ?
-           ORDER BY fts_score ASC
-           LIMIT ?`,
-        )
-        .all(plan.ftsQuery, Math.max(limit * 18, 100)) as FtsSearchRow[];
+      const rows = (await this.sql.all("search_searchLocalFts_1", [
+        plan.ftsQuery,
+        Math.max(limit * 18, 100),
+      ])) as FtsSearchRow[];
       return rows.map((row) => this.candidateFromFtsRow(plan, row));
     } catch {
       return [];
     }
   }
 
-  private searchLocalVectors(plan: MailboxSearchQueryPlan, limit: number): SearchCandidate[] {
+  private async searchLocalVectors(
+    plan: MailboxSearchQueryPlan,
+    limit: number,
+  ): Promise<SearchCandidate[]> {
     const queryEmbedding = createLocalEmbedding(plan.semanticQuery);
-    const rows = this.db
-      .prepare(
-        `SELECT record_type, record_id, thread_id, message_id, attachment_id, snippet, embedding_json, updated_at
-         FROM mailbox_search_embeddings
-         ORDER BY updated_at DESC
-         LIMIT ?`,
-      )
-      .all(MAILBOX_SEARCH_MAX_VECTOR_SCAN) as EmbeddingRow[];
+    const rows = (await this.sql.all("search_searchLocalVectors_1", [
+      MAILBOX_SEARCH_MAX_VECTOR_SCAN,
+    ])) as EmbeddingRow[];
     return rows
       .map((row) => {
         const embedding = parseEmbedding(row.embedding_json);
@@ -582,19 +595,12 @@ export class MailboxAgentSearchService {
     };
   }
 
-  private findBestAttachmentForThread(
+  private async findBestAttachmentForThread(
     plan: MailboxSearchQueryPlan,
     threadId: string,
-  ): string | undefined {
+  ): Promise<string | undefined> {
     if (!plan.wantsAttachmentEvidence && !plan.wantsFinancialEvidence) return undefined;
-    const rows = this.db
-      .prepare(
-        `SELECT record_id, attachment_id, attachment_filename, attachment_text
-         FROM mailbox_search_fts
-         WHERE record_type = 'attachment'
-           AND thread_id = ?`,
-      )
-      .all(threadId) as Array<{
+    const rows = (await this.sql.all("search_findBestAttachmentForThread_1", [threadId])) as Array<{
       record_id: string;
       attachment_id: string | null;
       attachment_filename: string | null;
@@ -671,7 +677,7 @@ export function buildMailboxAskNoEvidenceAnswer(output: MailboxAgentSearchOutput
   return `I searched the ${providerText}, but I did not find reliable email evidence for this question.`;
 }
 
-function ensureMailboxEmbeddingTable(db: Database.Database): void {
+export function ensureMailboxEmbeddingTable(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS mailbox_search_embeddings (
       record_type TEXT NOT NULL,
@@ -825,3 +831,7 @@ function parseEmbedding(value: string): number[] | null {
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
+
+// Each call is one mailbox operation for the statement burst gate (DB6).
+bindStatementContext(MailboxAgentSearchService.prototype, "MailboxAgentSearchService");
+bindStatementContext(MailboxAgentSearchService, "MailboxAgentSearchService");

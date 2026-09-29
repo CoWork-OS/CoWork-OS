@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseManager } from "../schema";
-import { TaskRepository } from "../repositories";
+import { TaskStore } from "../repositories";
 import { WorkSessionActivityLeaseRepository } from "../WorkSessionActivityLeaseRepository";
 import { WorkSessionOperationalMetricsRepository } from "../WorkSessionOperationalMetricsRepository";
 import { WorkSessionProjectionRepository } from "../WorkSessionProjectionRepository";
@@ -28,7 +28,7 @@ describeWithSqlite("WorkSession Phase 5 repositories", () => {
   let previousUserDataDir: string | undefined;
   let manager: DatabaseManager;
   let db: Database.Database;
-  let taskRepo: TaskRepository;
+  let taskRepo: TaskStore;
   let protocol: WorkSessionProtocolRepository;
   let now: number;
 
@@ -38,7 +38,7 @@ describeWithSqlite("WorkSession Phase 5 repositories", () => {
     process.env.COWORK_USER_DATA_DIR = tempDir;
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     protocol = new WorkSessionProtocolRepository(db);
     now = 1_000_000;
     db.prepare(
@@ -235,6 +235,39 @@ describeWithSqlite("WorkSession Phase 5 repositories", () => {
       });
     }
     expect(metrics.list({ name: "daemon.heartbeat", limit: 100 })).toHaveLength(10);
+  });
+
+  it("prunes large retentions on a cadence and keeps the overshoot bounded", () => {
+    const metrics = new WorkSessionOperationalMetricsRepository(db, {
+      now: () => now,
+      retentionPerScope: 100,
+    });
+    // retention 100 prunes every 5 inserts: never more than 104 rows in the scope.
+    let maxRows = 0;
+    for (let index = 0; index < 250; index += 1) {
+      metrics.record({ workspaceId: "workspace-1", name: "work_session.event", value: index });
+      maxRows = Math.max(
+        maxRows,
+        metrics.list({ workspaceId: "workspace-1", limit: 1_000 }).length,
+      );
+    }
+    expect(maxRows).toBeLessThanOrEqual(104);
+    expect(metrics.list({ workspaceId: "workspace-1", limit: 1_000 }).length).toBe(100);
+  });
+
+  it("retains the newest rows per scope, breaking timestamp ties by insertion order", () => {
+    const metrics = new WorkSessionOperationalMetricsRepository(db, {
+      now: () => now,
+      retentionPerScope: 10,
+    });
+    for (let index = 0; index < 25; index += 1) {
+      metrics.record({ workspaceId: "workspace-1", name: "work_session.event", value: index });
+    }
+    const values = metrics
+      .list({ workspaceId: "workspace-1", limit: 100 })
+      .map((metric) => metric.value)
+      .sort((left, right) => left - right);
+    expect(values).toEqual([15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
   });
 
   it("wires canonical events through the projection, lease, and metrics layer", () => {

@@ -1,7 +1,7 @@
+import { AgentRoleRepository, MentionRepository } from "../../agents/agent-repository-facades";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
-import { MentionRepository } from "../../agents/MentionRepository";
-import { AgentRoleRepository } from "../../agents/AgentRoleRepository";
+
 import { DatabaseManager } from "../../database/schema";
 import { MentionType, AgentRole } from "../../../shared/types";
 
@@ -51,7 +51,7 @@ export class MentionTools {
       tool: "list_agent_roles",
     });
 
-    const roles = this.agentRoleRepo.findAll(false); // false = only active roles
+    const roles = await this.agentRoleRepo.findAll(false); // false = only active roles
 
     const result = {
       agents: roles.map((role: AgentRole) => ({
@@ -106,7 +106,7 @@ export class MentionTools {
     });
 
     // Find the agent role by name or displayName
-    const allRoles = this.agentRoleRepo.findAll(false); // false = only active roles
+    const allRoles = await this.agentRoleRepo.findAll(false); // false = only active roles
     const targetRole = allRoles.find(
       (r: AgentRole) =>
         r.name.toLowerCase() === agentRole.toLowerCase() ||
@@ -124,7 +124,7 @@ export class MentionTools {
     }
 
     // Create the mention
-    const mention = this.mentionRepo.create({
+    const mention = await this.mentionRepo.create({
       workspaceId: this.workspaceId,
       taskId: this.taskId,
       fromAgentRoleId: this.currentAgentRoleId,
@@ -175,12 +175,15 @@ export class MentionTools {
       tool: "get_pending_mentions",
     });
 
-    const pending = this.mentionRepo.getPendingForAgent(this.currentAgentRoleId, this.workspaceId);
+    const pending = await this.mentionRepo.getPendingForAgent(
+      this.currentAgentRoleId,
+      this.workspaceId,
+    );
 
-    const mentions = pending.map((m) => {
+    const mentions = await Promise.all(pending.map(async (m) => {
       let fromAgent: string | null = null;
       if (m.fromAgentRoleId) {
-        const role = this.agentRoleRepo.findById(m.fromAgentRoleId);
+        const role = await this.agentRoleRepo.findById(m.fromAgentRoleId);
         fromAgent = role?.displayName || null;
       }
 
@@ -191,7 +194,7 @@ export class MentionTools {
         context: m.context,
         createdAt: m.createdAt,
       };
-    });
+    }));
 
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "get_pending_mentions",
@@ -218,7 +221,7 @@ export class MentionTools {
       mentionId,
     });
 
-    const mention = this.mentionRepo.acknowledge(mentionId);
+    const mention = await this.mentionRepo.acknowledge(mentionId);
 
     if (!mention) {
       throw new Error(`Mention "${mentionId}" not found or already processed`);
@@ -251,7 +254,7 @@ export class MentionTools {
       mentionId,
     });
 
-    const mention = this.mentionRepo.complete(mentionId);
+    const mention = await this.mentionRepo.complete(mentionId);
 
     if (!mention) {
       throw new Error(`Mention "${mentionId}" not found`);

@@ -29,7 +29,7 @@ const nativeSqliteAvailable = await import("better-sqlite3")
 
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
-describeWithSqlite("ChannelRepository logging", () => {
+describeWithSqlite("ChannelStore logging", () => {
   let tmpDir: string;
   let previousUserDataDir: string | undefined;
   let manager: import("../schema").DatabaseManager;
@@ -70,7 +70,7 @@ describeWithSqlite("ChannelRepository logging", () => {
       }
     });
 
-    const repo = new repositories.ChannelRepository(manager.getDatabase());
+    const repo = new repositories.ChannelStore(manager.getDatabase());
     const channel = repo.create({
       type: "telegram",
       name: "Telegram",

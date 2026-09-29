@@ -36,7 +36,7 @@ describe("DailyBriefingService", () => {
 
   it("returns latest briefing after generation", async () => {
     await service.generateBriefing("ws-1");
-    const latest = service.getLatestBriefing("ws-1");
+    const latest = await service.getLatestBriefing("ws-1");
 
     expect(latest).toBeDefined();
     expect(latest?.workspaceId).toBe("ws-1");
@@ -380,14 +380,14 @@ describe("DailyBriefingService", () => {
 
   // ── Config management ─────────────────────────────────────────
 
-  it("returns default config for unknown workspace", () => {
-    const config = service.getConfig("unknown-ws");
+  it("returns default config for unknown workspace", async () => {
+    const config = await service.getConfig("unknown-ws");
     expect(config.scheduleTime).toBe("08:00");
     expect(config.enabled).toBe(false);
   });
 
-  it("saves and retrieves config", () => {
-    service.saveConfig("ws-1", {
+  it("saves and retrieves config", async () => {
+    await service.saveConfig("ws-1", {
       scheduleTime: "09:30",
       enabledSections: {
         task_summary: true,
@@ -401,7 +401,7 @@ describe("DailyBriefingService", () => {
       enabled: true,
     });
 
-    const config = service.getConfig("ws-1");
+    const config = await service.getConfig("ws-1");
     expect(config.scheduleTime).toBe("09:30");
     expect(config.enabled).toBe(true);
     expect(config.enabledSections.memory_highlights).toBe(false);

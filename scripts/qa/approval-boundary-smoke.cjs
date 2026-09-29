@@ -20,7 +20,11 @@ const results = [];
 async function main() {
   const { DatabaseManager } = fromBuild("electron/database/schema.js");
   const { SecureSettingsRepository } = fromBuild("electron/database/SecureSettingsRepository.js");
-  const { WorkspaceRepository, TaskRepository, ApprovalRepository } = fromBuild(
+  const {
+    WorkspaceStore: WorkspaceRepository,
+    TaskStore: TaskRepository,
+    ApprovalStore: ApprovalRepository,
+  } = fromBuild(
     "electron/database/repositories.js",
   );
   const { AgentDaemon } = fromBuild("electron/agent/daemon.js");
@@ -130,8 +134,18 @@ async function main() {
       operation: "write",
     },
   };
+  // The permission path awaits storage reads before it records an approval, so wait for
+  // the pending rows rather than expecting them when the call returns.
+  const waitForPending = async (taskId, count = 1) => {
+    let pending = approvals.findPendingByTaskId(taskId);
+    for (let attempt = 0; attempt < 200 && pending.length < count; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      pending = approvals.findPendingByTaskId(taskId);
+    }
+    return pending;
+  };
   const decision = daemon.authorizeToolAction(externalTask.id, external);
-  const pending = approvals.findPendingByTaskId(externalTask.id);
+  const pending = await waitForPending(externalTask.id);
   assert.equal(pending.length, 1);
   await daemon.respondToApproval(pending[0].id, true, "allow_once");
   assert.equal(await decision, true);
@@ -189,7 +203,7 @@ async function main() {
     (allowed) => allowed,
     () => false,
   );
-  const staleApproval = approvals.findPendingByTaskId(staleTask.id)[0];
+  const staleApproval = (await waitForPending(staleTask.id))[0];
   assert.ok(staleApproval);
   taskRepo.update(staleTask.id, { agentConfig: { accessProfileId: "smoke_bounded_never" } });
   await daemon.respondToApproval(staleApproval.id, true, "allow_once");
@@ -200,7 +214,7 @@ async function main() {
 
   const endedTask = makeTask("ask_for_approval");
   const endedDecision = daemon.authorizeToolAction(endedTask.id, external);
-  const endedApproval = approvals.findPendingByTaskId(endedTask.id)[0];
+  const endedApproval = (await waitForPending(endedTask.id))[0];
   assert.ok(endedApproval);
   taskRepo.update(endedTask.id, { status: "completed" });
   await daemon.respondToApproval(endedApproval.id, true, "allow_once");
@@ -214,7 +228,7 @@ async function main() {
     ...external,
     details: { ...external.details, path: path.join(root, "second-outside.md") },
   });
-  const concurrent = approvals.findPendingByTaskId(concurrentTask.id);
+  const concurrent = await waitForPending(concurrentTask.id, 2);
   assert.equal(concurrent.length, 2);
   await daemon.respondToApproval(concurrent[0].id, true, "allow_once");
   assert.equal(taskRepo.findById(concurrentTask.id).status, "blocked");

@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import type {
   AgentSecurityDiagnostic,
@@ -28,7 +28,21 @@ function parseStringArray(value: string): string[] {
   }
 }
 
-export class AgentSecurityRepository {
+/** One write from a Numbat record file, applied in order by `applyIngest`. */
+export type AgentSecurityIngestOp =
+  | { kind: "finding"; finding: AgentSecurityFinding }
+  | { kind: "decision"; decision: AgentSecurityEnforcement }
+  | { kind: "diagnostic"; diagnostic: Omit<AgentSecurityDiagnostic, "id" | "createdAt"> };
+
+/**
+ * Agent security (Numbat) findings, enforcement decisions, diagnostics and agent
+ * inventory (async SQLite migration plan, DB6). As services-domain units these run in
+ * the database worker when the domain is routed there; callers use the async
+ * AgentSecurityRepository facade in agent-security-repository-facades.ts. A record
+ * file's findings, decisions and diagnostics are written in one transaction
+ * (applyIngest), in record order.
+ */
+export class AgentSecurityStore {
   constructor(private readonly db: Database.Database) {}
 
   upsertFinding(finding: AgentSecurityFinding): void {
@@ -215,6 +229,20 @@ export class AgentSecurityRepository {
         diagnostic.createdAt,
       );
     return diagnostic;
+  }
+
+  /**
+   * Write one record file's findings, decisions and diagnostics in record order, in one
+   * transaction. Returns the stored diagnostics, in order.
+   */
+  applyIngest(ops: AgentSecurityIngestOp[]): AgentSecurityDiagnostic[] {
+    const diagnostics: AgentSecurityDiagnostic[] = [];
+    for (const op of ops) {
+      if (op.kind === "finding") this.upsertFinding(op.finding);
+      else if (op.kind === "decision") this.upsertDecision(op.decision);
+      else diagnostics.push(this.addDiagnostic(op.diagnostic));
+    }
+    return diagnostics;
   }
 
   listDiagnostics(limit = 100): AgentSecurityDiagnostic[] {

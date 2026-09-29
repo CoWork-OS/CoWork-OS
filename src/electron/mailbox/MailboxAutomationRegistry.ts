@@ -1,5 +1,7 @@
+import { bindStatementContext } from "../database/statements/statement-burst";
 import type Database from "better-sqlite3";
 import { randomUUID } from "crypto";
+import { createMailboxStatementPort, type MailboxStatementPort } from "./mailbox-statement-port";
 import { getCronService } from "../cron";
 import { computeNextRunAtMs } from "../cron/schedule";
 import type { CronEvent, CronJobCreate, CronJobPatch } from "../cron/types";
@@ -112,80 +114,59 @@ function normalizeStringArray(values: unknown, lowercase = true): string[] {
 
 export class MailboxAutomationRegistry {
   private static deps: MailboxAutomationRegistryDeps | null = null;
+  private static sql: MailboxStatementPort | null = null;
 
+  /** `deps.db` is used only to create the schema; statements go through the mailbox port. */
   static configure(deps: MailboxAutomationRegistryDeps): void {
     this.deps = deps;
     this.ensureSchema();
+    this.sql = createMailboxStatementPort(deps.db);
   }
 
   static reset(): void {
     this.deps = null;
+    this.sql = null;
   }
 
-  static listAutomations(input?: {
+  private static statements(): MailboxStatementPort {
+    if (!this.sql) {
+      throw new Error("Mailbox automation registry is not configured");
+    }
+    return this.sql;
+  }
+
+  static async listAutomations(input?: {
     workspaceId?: string;
     threadId?: string;
-  }): MailboxAutomationRecord[] {
-    const deps = this.getDeps();
-    const conditions: string[] = ["status != 'deleted'"];
-    const values: unknown[] = [];
-    if (input?.workspaceId) {
-      conditions.push("workspace_id = ?");
-      values.push(input.workspaceId);
-    }
-    if (input?.threadId) {
-      conditions.push("(thread_id = ? OR thread_id IS NULL)");
-      values.push(input.threadId);
-    }
-
-    const rows = deps.db
-      .prepare(
-        `SELECT
-           id,
-           workspace_id,
-           kind,
-           status,
-           name,
-           description,
-           thread_id,
-           source,
-           recipe_json,
-           backing_trigger_id,
-           backing_cron_job_id,
-           latest_outcome,
-           latest_fire_at,
-           latest_run_at,
-           next_run_at,
-           latest_error,
-           created_at,
-           updated_at
-         FROM mailbox_automations
-         ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
-         ORDER BY updated_at DESC`,
-      )
-      .all(...values) as MailboxAutomationRow[];
+  }): Promise<MailboxAutomationRecord[]> {
+    const workspaceId = input?.workspaceId || null;
+    const threadId = input?.threadId || null;
+    const rows = await this.statements().all<MailboxAutomationRow>("automation_listAutomations", [
+      workspaceId,
+      workspaceId,
+      threadId,
+      threadId,
+    ]);
 
     return rows.map((row) => this.enrichRecord(row));
   }
 
-  static listThreadAutomations(threadId: string): MailboxAutomationRecord[] {
+  static listThreadAutomations(threadId: string): Promise<MailboxAutomationRecord[]> {
     return this.listAutomations({ threadId });
   }
 
-  static listAutomationHistory(automationId: string, limit = 25): MailboxAutomationAuditRow[] {
+  static async listAutomationHistory(
+    automationId: string,
+    limit = 25,
+  ): Promise<MailboxAutomationAuditRow[]> {
     const deps = this.getDeps();
-    return deps.db
-      .prepare(
-        `SELECT id, automation_id, workspace_id, event_type, detail_json, created_at
-         FROM mailbox_automation_audit
-         WHERE automation_id = ?
-         ORDER BY created_at DESC
-         LIMIT ?`,
-      )
-      .all(automationId, Math.min(Math.max(limit, 1), 100)) as MailboxAutomationAuditRow[];
+    return (await this.statements().all("automation_listAutomationHistory_1", [
+      automationId,
+      Math.min(Math.max(limit, 1), 100),
+    ])) as MailboxAutomationAuditRow[];
   }
 
-  static createRule(recipe: MailboxRuleRecipe): MailboxAutomationRecord {
+  static async createRule(recipe: MailboxRuleRecipe): Promise<MailboxAutomationRecord> {
     const deps = this.getDeps();
     const workspaceId = recipe.workspaceId?.trim() || deps.resolveDefaultWorkspaceId();
     if (!workspaceId) {
@@ -201,7 +182,7 @@ export class MailboxAutomationRegistry {
 
     const automationId = randomUUID();
     const now = Date.now();
-    const trigger = triggerService.addTrigger({
+    const trigger = await triggerService.addTrigger({
       name: ruleTriggerName(recipe),
       description: recipe.description,
       enabled: recipe.enabled ?? true,
@@ -244,25 +225,25 @@ export class MailboxAutomationRegistry {
       updatedAt: now,
     };
 
-    this.insertRecord(record, {
+    await this.insertRecord(record, {
       automationId,
       workspaceId,
       eventType: "created",
       detail: { kind: "rule", triggerId: trigger.id },
     });
-    const created = this.fetchRow(automationId);
+    const created = await this.fetchRow(automationId);
     if (!created) {
       throw new Error("Failed to persist mailbox rule");
     }
     return this.enrichRecord(created);
   }
 
-  static updateRule(
+  static async updateRule(
     automationId: string,
     patch: Partial<MailboxRuleRecipe> & { status?: MailboxAutomationStatus },
-  ): MailboxAutomationRecord | null {
+  ): Promise<MailboxAutomationRecord | null> {
     const deps = this.getDeps();
-    const row = this.fetchRow(automationId);
+    const row = await this.fetchRow(automationId);
     if (!row || row.kind !== "rule") return null;
 
     const record = this.enrichRecord(row);
@@ -280,7 +261,7 @@ export class MailboxAutomationRegistry {
     if (record.backingTriggerId && triggerService) {
       const existing = triggerService.getTrigger(record.backingTriggerId);
       if (existing) {
-        triggerService.updateTrigger(record.backingTriggerId, {
+        await triggerService.updateTrigger(record.backingTriggerId, {
           name: nextRule.name ?? record.name,
           description: nextRule.description ?? record.description,
           enabled: patch.status ? patch.status === "active" : existing.enabled,
@@ -311,43 +292,39 @@ export class MailboxAutomationRegistry {
 
     const now = Date.now();
     const nextStatus = patch.status ?? record.status;
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET name = ?, description = ?, status = ?, thread_id = ?, recipe_json = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        normalizeString(nextRule.name) || record.name,
-        nextRule.description || null,
-        nextStatus,
-        nextRule.threadId || null,
-        stringifyJson(nextRule),
-        now,
-        automationId,
-      );
-    this.appendAudit(automationId, record.workspaceId, "updated", { patch });
+    await this.statements().run("automation_updateRule_1", [
+      normalizeString(nextRule.name) || record.name,
+      nextRule.description || null,
+      nextStatus,
+      nextRule.threadId || null,
+      stringifyJson(nextRule),
+      now,
+      automationId,
+    ]);
+    await this.appendAudit(automationId, record.workspaceId, "updated", { patch });
     deps.onMutation?.();
     return (
-      this.listAutomations({ workspaceId: record.workspaceId }).find(
+      (await this.listAutomations({ workspaceId: record.workspaceId })).find(
         (item) => item.id === automationId,
       ) ?? null
     );
   }
 
-  static deleteRule(automationId: string): boolean {
+  static async deleteRule(automationId: string): Promise<boolean> {
     const deps = this.getDeps();
-    const row = this.fetchRow(automationId);
+    const row = await this.fetchRow(automationId);
     if (!row || row.kind !== "rule") return false;
     const record = this.enrichRecord(row);
     if (record.backingTriggerId && deps.triggerService) {
-      deps.triggerService.removeTrigger(record.backingTriggerId);
+      await deps.triggerService.removeTrigger(record.backingTriggerId);
     }
-    this.markDeleted(record.id, record.workspaceId, { backingTriggerId: record.backingTriggerId });
+    await this.markDeleted(record.id, record.workspaceId, {
+      backingTriggerId: record.backingTriggerId,
+    });
     return true;
   }
 
-  static createForward(recipe: MailboxForwardRecipe): MailboxAutomationRecord {
+  static async createForward(recipe: MailboxForwardRecipe): Promise<MailboxAutomationRecord> {
     const deps = this.getDeps();
     const workspaceId = recipe.workspaceId?.trim() || deps.resolveDefaultWorkspaceId();
     if (!workspaceId) {
@@ -406,25 +383,25 @@ export class MailboxAutomationRegistry {
       updatedAt: now,
     };
 
-    this.insertRecord(record, {
+    await this.insertRecord(record, {
       automationId,
       workspaceId,
       eventType: "created",
       detail: { kind: "forward" },
     });
-    const created = this.fetchRow(automationId);
+    const created = await this.fetchRow(automationId);
     if (!created) {
       throw new Error("Failed to persist forwarding automation");
     }
     return this.enrichRecord(created);
   }
 
-  static updateForward(
+  static async updateForward(
     automationId: string,
     patch: Partial<MailboxForwardRecipe> & { status?: MailboxAutomationStatus },
-  ): MailboxAutomationRecord | null {
+  ): Promise<MailboxAutomationRecord | null> {
     const deps = this.getDeps();
-    const row = this.fetchRow(automationId);
+    const row = await this.fetchRow(automationId);
     if (!row || row.kind !== "forward") return null;
 
     const record = this.enrichRecord(row);
@@ -508,35 +485,29 @@ export class MailboxAutomationRegistry {
     const nextRunAt =
       nextStatus === "active" ? computeNextRunAtMs(nextForward.schedule, Date.now()) : null;
     const now = Date.now();
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET name = ?, description = ?, status = ?, thread_id = ?, recipe_json = ?, next_run_at = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        nextForward.name,
-        nextForward.description || null,
-        nextStatus,
-        nextForward.threadId || null,
-        stringifyJson(nextForward),
-        nextRunAt ?? null,
-        now,
-        automationId,
-      );
-    this.appendAudit(automationId, record.workspaceId, "updated", { patch });
+    await this.statements().run("automation_updateForward_1", [
+      nextForward.name,
+      nextForward.description || null,
+      nextStatus,
+      nextForward.threadId || null,
+      stringifyJson(nextForward),
+      nextRunAt ?? null,
+      now,
+      automationId,
+    ]);
+    await this.appendAudit(automationId, record.workspaceId, "updated", { patch });
     deps.onMutation?.();
     return (
-      this.listAutomations({ workspaceId: record.workspaceId }).find(
+      (await this.listAutomations({ workspaceId: record.workspaceId })).find(
         (item) => item.id === automationId,
       ) ?? null
     );
   }
 
-  static deleteForward(automationId: string): boolean {
-    const row = this.fetchRow(automationId);
+  static async deleteForward(automationId: string): Promise<boolean> {
+    const row = await this.fetchRow(automationId);
     if (!row || row.kind !== "forward") return false;
-    this.markDeleted(row.id, row.workspace_id, {});
+    await this.markDeleted(row.id, row.workspace_id, {});
     return true;
   }
 
@@ -595,7 +566,7 @@ export class MailboxAutomationRegistry {
     patch: Partial<MailboxScheduleRecipe> & { status?: MailboxAutomationStatus },
   ): Promise<MailboxAutomationRecord | null> {
     const deps = this.getDeps();
-    const row = this.fetchRow(automationId);
+    const row = await this.fetchRow(automationId);
     if (!row || (row.kind !== "schedule" && row.kind !== "reminder")) return null;
     const record = this.enrichRecord(row);
     const cron = getCronService();
@@ -627,25 +598,19 @@ export class MailboxAutomationRegistry {
 
     const now = Date.now();
     const nextStatus = patch.status ?? record.status;
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET name = ?, description = ?, status = ?, thread_id = ?, recipe_json = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        normalizeString(recipe.name) || record.name,
-        recipe.description || null,
-        nextStatus,
-        recipe.threadId || null,
-        stringifyJson(recipe),
-        now,
-        automationId,
-      );
-    this.appendAudit(automationId, record.workspaceId, "updated", { patch });
+    await this.statements().run("automation_updateRule_1", [
+      normalizeString(recipe.name) || record.name,
+      recipe.description || null,
+      nextStatus,
+      recipe.threadId || null,
+      stringifyJson(recipe),
+      now,
+      automationId,
+    ]);
+    await this.appendAudit(automationId, record.workspaceId, "updated", { patch });
     deps.onMutation?.();
     return (
-      this.listAutomations({ workspaceId: record.workspaceId }).find(
+      (await this.listAutomations({ workspaceId: record.workspaceId })).find(
         (item) => item.id === automationId,
       ) ?? null
     );
@@ -653,36 +618,37 @@ export class MailboxAutomationRegistry {
 
   static async deleteSchedule(automationId: string): Promise<boolean> {
     const deps = this.getDeps();
-    const row = this.fetchRow(automationId);
+    const row = await this.fetchRow(automationId);
     if (!row || (row.kind !== "schedule" && row.kind !== "reminder")) return false;
     const record = this.enrichRecord(row);
     const cron = getCronService();
     if (record.backingCronJobId && cron) {
       await cron.remove(record.backingCronJobId);
     }
-    this.markDeleted(record.id, record.workspaceId, { backingCronJobId: record.backingCronJobId });
+    await this.markDeleted(record.id, record.workspaceId, {
+      backingCronJobId: record.backingCronJobId,
+    });
     return true;
   }
 
-  static recordTriggerFire(payload: {
+  static async recordTriggerFire(payload: {
     trigger: EventTrigger;
     event: TriggerEvent;
     historyEntry: TriggerHistoryEntry;
-  }): void {
+  }): Promise<void> {
     const deps = this.getDeps();
-    const row = deps.db
-      .prepare(`SELECT * FROM mailbox_automations WHERE backing_trigger_id = ? LIMIT 1`)
-      .get(payload.trigger.id) as MailboxAutomationRow | undefined;
+    const row = (await this.statements().get("automation_recordTriggerFire_1", [
+      payload.trigger.id,
+    ])) as MailboxAutomationRow | undefined;
     if (!row) return;
     const now = Date.now();
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET latest_outcome = ?, latest_fire_at = ?, latest_error = NULL, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(payload.historyEntry.actionResult || "fired", payload.historyEntry.firedAt, now, row.id);
-    this.appendAudit(row.id, row.workspace_id, "trigger_fired", {
+    await this.statements().run("automation_recordTriggerFire_2", [
+      payload.historyEntry.actionResult || "fired",
+      payload.historyEntry.firedAt,
+      now,
+      row.id,
+    ]);
+    await this.appendAudit(row.id, row.workspace_id, "trigger_fired", {
       triggerId: payload.trigger.id,
       actionResult: payload.historyEntry.actionResult,
       eventType:
@@ -694,9 +660,9 @@ export class MailboxAutomationRegistry {
 
   static async recordCronEvent(evt: CronEvent): Promise<void> {
     const deps = this.getDeps();
-    const row = deps.db
-      .prepare(`SELECT * FROM mailbox_automations WHERE backing_cron_job_id = ? LIMIT 1`)
-      .get(evt.jobId) as MailboxAutomationRow | undefined;
+    const row = (await this.statements().get("automation_recordCronEvent_1", [evt.jobId])) as
+      | MailboxAutomationRow
+      | undefined;
     if (!row) return;
     const cron = getCronService();
     const jobPromise = cron?.get(evt.jobId);
@@ -704,40 +670,32 @@ export class MailboxAutomationRegistry {
 
     const now = Date.now();
     if (evt.action === "removed") {
-      deps.db
-        .prepare(`UPDATE mailbox_automations SET status = ?, updated_at = ? WHERE id = ?`)
-        .run("deleted", now, row.id);
-      this.appendAudit(row.id, row.workspace_id, "cron_removed", { jobId: evt.jobId });
+      await this.statements().run("automation_recordCronEvent_2", ["deleted", now, row.id]);
+      await this.appendAudit(row.id, row.workspace_id, "cron_removed", { jobId: evt.jobId });
       return;
     }
 
     const latestOutcome =
       evt.action === "finished" ? evt.status || row.latest_outcome || null : row.latest_outcome;
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET latest_outcome = ?, latest_run_at = COALESCE(?, latest_run_at), next_run_at = ?, latest_error = ?, status = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        latestOutcome,
-        evt.action === "started"
+    await this.statements().run("automation_recordCronEvent_3", [
+      latestOutcome,
+      evt.action === "started"
+        ? (evt.runAtMs ?? now)
+        : evt.action === "finished"
           ? (evt.runAtMs ?? now)
-          : evt.action === "finished"
-            ? (evt.runAtMs ?? now)
-            : null,
-        evt.nextRunAtMs ?? job?.state.nextRunAtMs ?? row.next_run_at,
-        evt.error || null,
-        evt.action === "finished" && evt.status === "error"
-          ? "error"
-          : job?.enabled === false
-            ? "paused"
-            : row.status === "deleted"
-              ? "deleted"
-              : "active",
-        now,
-        row.id,
-      );
+          : null,
+      evt.nextRunAtMs ?? job?.state.nextRunAtMs ?? row.next_run_at,
+      evt.error || null,
+      evt.action === "finished" && evt.status === "error"
+        ? "error"
+        : job?.enabled === false
+          ? "paused"
+          : row.status === "deleted"
+            ? "deleted"
+            : "active",
+      now,
+      row.id,
+    ]);
     const auditEvent: MailboxAutomationAuditEvent =
       evt.action === "started"
         ? "cron_started"
@@ -746,7 +704,7 @@ export class MailboxAutomationRegistry {
           : evt.action === "added"
             ? "cron_added"
             : "cron_updated";
-    this.appendAudit(row.id, row.workspace_id, auditEvent, {
+    await this.appendAudit(row.id, row.workspace_id, auditEvent, {
       jobId: evt.jobId,
       status: evt.status,
       error: evt.error,
@@ -803,33 +761,11 @@ export class MailboxAutomationRegistry {
     return this.deps;
   }
 
-  private static fetchRow(automationId: string): MailboxAutomationRow | undefined {
+  private static async fetchRow(automationId: string): Promise<MailboxAutomationRow | undefined> {
     const deps = this.getDeps();
-    return deps.db
-      .prepare(
-        `SELECT
-           id,
-           workspace_id,
-           kind,
-           status,
-           name,
-           description,
-           thread_id,
-           source,
-           recipe_json,
-           backing_trigger_id,
-           backing_cron_job_id,
-           latest_outcome,
-           latest_fire_at,
-           latest_run_at,
-           next_run_at,
-           latest_error,
-           created_at,
-           updated_at
-         FROM mailbox_automations
-         WHERE id = ?`,
-      )
-      .get(automationId) as MailboxAutomationRow | undefined;
+    return (await this.statements().get("automation_fetchRow_1", [automationId])) as
+      | MailboxAutomationRow
+      | undefined;
   }
 
   private static enrichRecord(row: MailboxAutomationRow): MailboxAutomationRecord {
@@ -870,7 +806,7 @@ export class MailboxAutomationRegistry {
     };
   }
 
-  private static insertRecord(
+  private static async insertRecord(
     record: MailboxAutomationRecord,
     audit: {
       automationId: string;
@@ -878,45 +814,39 @@ export class MailboxAutomationRegistry {
       eventType: MailboxAutomationAuditEvent;
       detail: Record<string, unknown>;
     },
-  ): void {
+  ): Promise<void> {
     const deps = this.getDeps();
-    deps.db
-      .prepare(
-        `INSERT INTO mailbox_automations
-          (id, workspace_id, kind, status, name, description, thread_id, source, recipe_json, backing_trigger_id, backing_cron_job_id, latest_outcome, latest_fire_at, latest_run_at, next_run_at, latest_error, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        record.id,
-        record.workspaceId,
-        record.kind,
-        record.status,
-        record.name,
-        record.description || null,
-        record.threadId || null,
-        record.source,
-        stringifyJson(
-          record.kind === "rule"
-            ? record.rule || {}
-            : record.kind === "forward"
-              ? record.forward || {}
-              : record.schedule || {},
-        ),
-        record.backingTriggerId || null,
-        record.backingCronJobId || null,
-        record.latestOutcome || null,
-        record.latestFireAt || null,
-        record.latestRunAt || null,
-        record.nextRunAt || null,
-        record.latestError || null,
-        record.createdAt,
-        record.updatedAt,
-      );
-    this.appendAudit(audit.automationId, audit.workspaceId, audit.eventType, audit.detail);
+    await this.statements().run("automation_insertRecord_1", [
+      record.id,
+      record.workspaceId,
+      record.kind,
+      record.status,
+      record.name,
+      record.description || null,
+      record.threadId || null,
+      record.source,
+      stringifyJson(
+        record.kind === "rule"
+          ? record.rule || {}
+          : record.kind === "forward"
+            ? record.forward || {}
+            : record.schedule || {},
+      ),
+      record.backingTriggerId || null,
+      record.backingCronJobId || null,
+      record.latestOutcome || null,
+      record.latestFireAt || null,
+      record.latestRunAt || null,
+      record.nextRunAt || null,
+      record.latestError || null,
+      record.createdAt,
+      record.updatedAt,
+    ]);
+    await this.appendAudit(audit.automationId, audit.workspaceId, audit.eventType, audit.detail);
     deps.onMutation?.();
   }
 
-  private static insertScheduleRecord(input: {
+  private static async insertScheduleRecord(input: {
     automationId: string;
     workspaceId: string;
     recipe: MailboxScheduleRecipe;
@@ -924,7 +854,7 @@ export class MailboxAutomationRegistry {
     status: MailboxAutomationStatus;
     now: number;
     nextRunAt?: number;
-  }): MailboxAutomationRecord {
+  }): Promise<MailboxAutomationRecord> {
     const record: MailboxAutomationRecord = {
       id: input.automationId,
       workspaceId: input.workspaceId,
@@ -942,68 +872,61 @@ export class MailboxAutomationRegistry {
       createdAt: input.now,
       updatedAt: input.now,
     };
-    this.insertRecord(record, {
+    await this.insertRecord(record, {
       automationId: record.id,
       workspaceId: record.workspaceId,
       eventType: "created",
       detail: { kind: record.kind, cronJobId: record.backingCronJobId },
     });
-    const created = this.fetchRow(record.id);
+    const created = await this.fetchRow(record.id);
     if (!created) {
       throw new Error("Failed to persist mailbox schedule");
     }
     return this.enrichRecord(created);
   }
 
-  private static appendAudit(
+  private static async appendAudit(
     automationId: string,
     workspaceId: string,
     eventType: MailboxAutomationAuditEvent,
     detail: Record<string, unknown>,
-  ): void {
+  ): Promise<void> {
     const deps = this.getDeps();
-    deps.db
-      .prepare(
-        `INSERT INTO mailbox_automation_audit
-          (id, automation_id, workspace_id, event_type, detail_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(randomUUID(), automationId, workspaceId, eventType, stringifyJson(detail), Date.now());
+    await this.statements().run("automation_appendAudit_1", [
+      randomUUID(),
+      automationId,
+      workspaceId,
+      eventType,
+      stringifyJson(detail),
+      Date.now(),
+    ]);
   }
 
-  private static markDeleted(
+  private static async markDeleted(
     automationId: string,
     workspaceId: string,
     detail: Record<string, unknown>,
-  ): void {
+  ): Promise<void> {
     const deps = this.getDeps();
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET status = 'deleted', updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(Date.now(), automationId);
-    this.appendAudit(automationId, workspaceId, "deleted", detail);
+    await this.statements().run("automation_markDeleted_1", [Date.now(), automationId]);
+    await this.appendAudit(automationId, workspaceId, "deleted", detail);
     deps.onMutation?.();
   }
 
-  static markForwardRunStarted(automationId: string, runAtMs: number): void {
+  static async markForwardRunStarted(automationId: string, runAtMs: number): Promise<void> {
     const deps = this.getDeps();
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET latest_run_at = ?, latest_error = NULL, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(runAtMs, Date.now(), automationId);
-    const row = this.fetchRow(automationId);
+    await this.statements().run("automation_markForwardRunStarted_1", [
+      runAtMs,
+      Date.now(),
+      automationId,
+    ]);
+    const row = await this.fetchRow(automationId);
     if (row) {
-      this.appendAudit(automationId, row.workspace_id, "forward_run_started", { runAtMs });
+      await this.appendAudit(automationId, row.workspace_id, "forward_run_started", { runAtMs });
     }
   }
 
-  static markForwardRunFinished(
+  static async markForwardRunFinished(
     automationId: string,
     input: {
       status: MailboxAutomationStatus;
@@ -1012,26 +935,20 @@ export class MailboxAutomationRegistry {
       latestFireAt?: number;
       nextRunAt?: number | null;
     },
-  ): void {
+  ): Promise<void> {
     const deps = this.getDeps();
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET status = ?, latest_outcome = ?, latest_error = ?, latest_fire_at = ?, next_run_at = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        input.status,
-        input.latestOutcome || null,
-        input.latestError || null,
-        input.latestFireAt || null,
-        input.nextRunAt ?? null,
-        Date.now(),
-        automationId,
-      );
-    const row = this.fetchRow(automationId);
+    await this.statements().run("automation_markForwardRunFinished_1", [
+      input.status,
+      input.latestOutcome || null,
+      input.latestError || null,
+      input.latestFireAt || null,
+      input.nextRunAt ?? null,
+      Date.now(),
+      automationId,
+    ]);
+    const row = await this.fetchRow(automationId);
     if (row) {
-      this.appendAudit(automationId, row.workspace_id, "forward_run_finished", {
+      await this.appendAudit(automationId, row.workspace_id, "forward_run_finished", {
         status: input.status,
         latestOutcome: input.latestOutcome,
         latestError: input.latestError,
@@ -1041,14 +958,15 @@ export class MailboxAutomationRegistry {
     }
   }
 
-  static setForwardNextRun(automationId: string, nextRunAt?: number): void {
+  static async setForwardNextRun(automationId: string, nextRunAt?: number): Promise<void> {
     const deps = this.getDeps();
-    deps.db
-      .prepare(
-        `UPDATE mailbox_automations
-         SET next_run_at = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(nextRunAt ?? null, Date.now(), automationId);
+    await this.statements().run("automation_setForwardNextRun_1", [
+      nextRunAt ?? null,
+      Date.now(),
+      automationId,
+    ]);
   }
 }
+
+// Each call is one mailbox operation for the statement burst gate (DB6).
+bindStatementContext(MailboxAutomationRegistry, "MailboxAutomationRegistry");

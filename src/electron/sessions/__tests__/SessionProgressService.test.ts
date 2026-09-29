@@ -4,11 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  ApprovalRepository,
-  ArtifactRepository,
-  InputRequestRepository,
+  ApprovalStore,
+  ArtifactStore,
+  InputRequestStore,
   TaskEventRepository,
-  TaskRepository,
+  TaskStore,
 } from "../../database/repositories";
 import { DatabaseManager } from "../../database/schema";
 import { SessionProgressService } from "../SessionProgressService";
@@ -30,7 +30,7 @@ describeWithSqlite("SessionProgressService", () => {
   let previousUserDataDir: string | undefined;
   let manager: DatabaseManager;
   let db: Database.Database;
-  let taskRepo: TaskRepository;
+  let taskRepo: TaskStore;
   let eventRepo: TaskEventRepository;
   let service: SessionProgressService;
 
@@ -40,7 +40,7 @@ describeWithSqlite("SessionProgressService", () => {
     process.env.COWORK_USER_DATA_DIR = tempDir;
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     eventRepo = new TaskEventRepository(db);
     service = new SessionProgressService(db);
     db.prepare(
@@ -93,7 +93,7 @@ describeWithSqlite("SessionProgressService", () => {
       step: { id: "research", description: "Research the launch" },
     });
 
-    const artifactRepo = new ArtifactRepository(db);
+    const artifactRepo = new ArtifactStore(db);
     artifactRepo.create({
       taskId: task.id,
       path: path.join(tempDir, "launch-brief.md"),
@@ -102,7 +102,7 @@ describeWithSqlite("SessionProgressService", () => {
       size: 120,
       createdAt: Date.now(),
     });
-    const approval = new ApprovalRepository(db).create({
+    const approval = new ApprovalStore(db).create({
       taskId: task.id,
       type: "network_access",
       description: "Allow the research request",
@@ -130,7 +130,7 @@ describeWithSqlite("SessionProgressService", () => {
 
   it("restores pending structured input and searches only the requested workspace", () => {
     const task = createTask("Quarterly planning");
-    new InputRequestRepository(db).create({
+    new InputRequestStore(db).create({
       taskId: task.id,
       questions: [
         {

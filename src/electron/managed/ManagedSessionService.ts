@@ -1,3 +1,22 @@
+import type Database from "better-sqlite3";
+import {
+  ManagedAgentRepository,
+  ManagedAgentVersionRepository,
+  ManagedEnvironmentRepository,
+  ManagedSessionEventRepository,
+  ManagedSessionRepository,
+  ManagedRepository,
+} from "./managed-repository-facades";
+import {
+  AgentRoleRepository,
+  AgentTeamItemRepository,
+  AgentTeamMemberRepository,
+  AgentTeamRepository,
+  AgentTeamRunRepository,
+  AutomationProfileRepository,
+} from "../agents/agent-repository-facades";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import { ArtifactRepository, InputRequestRepository } from "../database/repository-facades";
 import { createHash, randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -62,27 +81,15 @@ import { isComputerUseToolName } from "../../shared/computer-use-contract";
 import type { AgentDaemon } from "../agent/daemon";
 import type { LLMTool } from "../agent/llm/types";
 import { ToolRegistry } from "../agent/tools/registry";
-import { AgentRoleRepository } from "../agents/AgentRoleRepository";
-import { AutomationProfileRepository } from "../agents/AutomationProfileRepository";
-import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
-import { AgentTeamMemberRepository } from "../agents/AgentTeamMemberRepository";
-import { AgentTeamRepository } from "../agents/AgentTeamRepository";
-import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
-import {
-  ArtifactRepository,
-  ChannelRepository,
-  InputRequestRepository,
-  TaskEventRepository,
-  TaskRepository,
-  WorkspaceRepository,
-} from "../database/repositories";
+
+import { ChannelStore, TaskEventRepository } from "../database/repositories";
 import { createMediaPlaybackUrl } from "../media";
 import { MCPSettingsManager } from "../mcp/settings";
 import { getBuiltinRegistryServer } from "../mcp/registry/MCPRegistryManager";
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { getVoiceService } from "../voice/VoiceService";
 import { ImageGenProfileService } from "./ImageGenProfileService";
-import type { WorkContextService } from "../workspaces/WorkContextService";
+import type { WorkContextService } from "../workspaces/workspaces-repository-facades";
 import {
   applyAccessProfileToWorkspace,
   resolveEffectiveAccessProfile,
@@ -91,13 +98,6 @@ import { PermissionSettingsManager } from "../security/permission-settings-manag
 import { createLogger } from "../utils/logger";
 import type { RoutineService } from "../routines/service";
 import type { Routine, RoutineCreate, RoutineTrigger } from "../routines/types";
-import {
-  ManagedAgentRepository,
-  ManagedAgentVersionRepository,
-  ManagedEnvironmentRepository,
-  ManagedSessionEventRepository,
-  ManagedSessionRepository,
-} from "./repositories";
 
 const workContextLogger = createLogger("ManagedSessionWorkContext");
 
@@ -753,8 +753,12 @@ export class ManagedSessionService {
   private readonly workspaceRepo: WorkspaceRepository;
   private readonly artifactRepo: ArtifactRepository;
   private readonly inputRequestRepo: InputRequestRepository;
-  private readonly channelRepo: ChannelRepository;
+  // Slack target sync is a read-modify-write of the encrypted channel config, kept
+  // synchronous on the host connection so it stays atomic.
+  private readonly channelRepo: ChannelStore;
   private readonly managedAgentRepo: ManagedAgentRepository;
+  // The service's own SQL (memberships, audit, routine rows), through services-domain units.
+  private readonly managedRows: ManagedRepository;
   private readonly managedAgentVersionRepo: ManagedAgentVersionRepository;
   private readonly managedEnvironmentRepo: ManagedEnvironmentRepository;
   private readonly managedSessionRepo: ManagedSessionRepository;
@@ -768,7 +772,7 @@ export class ManagedSessionService {
   private readonly imageGenProfileService: ImageGenProfileService;
 
   constructor(
-    private readonly db: import("better-sqlite3").Database,
+    private readonly db: Database.Database,
     private readonly agentDaemon: AgentDaemon,
     private readonly options: {
       getRoutineService?: () => RoutineService | null;
@@ -781,8 +785,9 @@ export class ManagedSessionService {
     this.workspaceRepo = new WorkspaceRepository(db);
     this.artifactRepo = new ArtifactRepository(db);
     this.inputRequestRepo = new InputRequestRepository(db);
-    this.channelRepo = new ChannelRepository(db);
+    this.channelRepo = new ChannelStore(db);
     this.managedAgentRepo = new ManagedAgentRepository(db);
+    this.managedRows = new ManagedRepository(db);
     this.managedAgentVersionRepo = new ManagedAgentVersionRepository(db);
     this.managedEnvironmentRepo = new ManagedEnvironmentRepository(db);
     this.managedSessionRepo = new ManagedSessionRepository(db);
@@ -835,33 +840,32 @@ export class ManagedSessionService {
     `);
   }
 
-  private resolveWorkspaceIdForAgent(agentId: string): string | undefined {
-    const detail = this.getAgent(agentId);
+  private async resolveWorkspaceIdForAgent(agentId: string): Promise<string | undefined> {
+    const detail = await this.getAgent(agentId);
     const studio = detail?.currentVersion ? getStudioConfig(detail.currentVersion) : undefined;
     const environmentId = studio?.defaultEnvironmentId;
     if (environmentId) {
-      const environment = this.getEnvironment(environmentId);
+      const environment = await this.getEnvironment(environmentId);
       if (environment?.config.workspaceId) return environment.config.workspaceId;
     }
-    const latestSession = this.listSessions({ limit: 200 }).find(
+    const latestSession = (await this.listSessions({ limit: 200 })).find(
       (session) => session.agentId === agentId,
     );
     return latestSession?.workspaceId;
   }
 
-  private getStoredWorkspaceRole(
+  private async getStoredWorkspaceRole(
     workspaceId: string,
     principalId = normalizePrincipalId(),
-  ): import("../../shared/types").AgentWorkspaceRole | undefined {
-    this.ensureWorkspaceMembershipSeeded(workspaceId);
-    const row = this.db
-      .prepare(
-        `SELECT role
-         FROM agent_workspace_memberships
-         WHERE workspace_id = ? AND principal_id = ?`,
-      )
-      .get(workspaceId, principalId) as { role?: string } | undefined;
-    const role = row?.role;
+  ): Promise<import("../../shared/types").AgentWorkspaceRole | undefined> {
+    // Seeding the workspace's first member and reading the role share one unit (DB6).
+    const role = await this.managedRows.workspaceRole(
+      workspaceId,
+      principalId,
+      normalizePrincipalId(),
+      Date.now(),
+      randomUUID(),
+    );
     if (
       role === "viewer" ||
       role === "operator" ||
@@ -874,26 +878,16 @@ export class ManagedSessionService {
     return undefined;
   }
 
-  private ensureWorkspaceMembershipSeeded(workspaceId: string): void {
-    const membershipCount = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM agent_workspace_memberships
-         WHERE workspace_id = ?`,
-      )
-      .get(workspaceId) as { count?: number } | undefined;
-    if ((membershipCount?.count || 0) > 0) return;
-    const now = Date.now();
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO agent_workspace_memberships
-         (id, workspace_id, principal_id, role, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(randomUUID(), workspaceId, normalizePrincipalId(), "admin", now, now);
+  private async ensureWorkspaceMembershipSeeded(workspaceId: string): Promise<void> {
+    await this.managedRows.seedMembership(
+      workspaceId,
+      normalizePrincipalId(),
+      Date.now(),
+      randomUUID(),
+    );
   }
 
-  private assertWorkspacePermission(
+  private async assertWorkspacePermission(
     workspaceId: string,
     check:
       | "canViewAgents"
@@ -907,49 +901,34 @@ export class ManagedSessionService {
       | "canManageMemberships"
       | "canAuditAgents",
     principalId = normalizePrincipalId(),
-  ): void {
-    const snapshot = this.getMyWorkspacePermissions(workspaceId, principalId);
+  ): Promise<void> {
+    const snapshot = await this.getMyWorkspacePermissions(workspaceId, principalId);
     if (!snapshot[check]) {
       throw new Error(`Workspace role ${snapshot.role} does not permit ${check}`);
     }
   }
 
-  getMyWorkspacePermissions(
+  async getMyWorkspacePermissions(
     workspaceId: string,
     _principalId = normalizePrincipalId(),
-  ): AgentWorkspacePermissionSnapshot {
+  ): Promise<AgentWorkspacePermissionSnapshot> {
     const principalId = normalizePrincipalId();
     return getPermissionSnapshot(
       workspaceId,
       principalId,
-      this.getStoredWorkspaceRole(workspaceId, principalId),
+      await this.getStoredWorkspaceRole(workspaceId, principalId),
     );
   }
 
-  listWorkspaceMemberships(workspaceId?: string): AgentWorkspaceMembership[] {
+  async listWorkspaceMemberships(workspaceId?: string): Promise<AgentWorkspaceMembership[]> {
     if (workspaceId) {
-      this.ensureWorkspaceMembershipSeeded(workspaceId);
+      await this.ensureWorkspaceMembershipSeeded(workspaceId);
     } else {
-      for (const workspace of this.workspaceRepo.findAll()) {
-        this.ensureWorkspaceMembershipSeeded(workspace.id);
+      for (const workspace of await this.workspaceRepo.findAll()) {
+        await this.ensureWorkspaceMembershipSeeded(workspace.id);
       }
     }
-    const rows = (
-      workspaceId
-        ? this.db
-            .prepare(
-              `SELECT * FROM agent_workspace_memberships
-             WHERE workspace_id = ?
-             ORDER BY updated_at DESC`,
-            )
-            .all(workspaceId)
-        : this.db
-            .prepare(
-              `SELECT * FROM agent_workspace_memberships
-             ORDER BY updated_at DESC`,
-            )
-            .all()
-    ) as Any[];
+    const rows = await this.managedRows.listMembershipRows(workspaceId ?? null);
     return rows.map((row) => ({
       id: String(row.id),
       workspaceId: String(row.workspace_id),
@@ -960,44 +939,27 @@ export class ManagedSessionService {
     }));
   }
 
-  updateWorkspaceMembership(input: {
+  async updateWorkspaceMembership(input: {
     workspaceId: string;
     principalId: string;
     role: import("../../shared/types").AgentWorkspaceRole;
-  }): AgentWorkspaceMembership {
-    this.assertWorkspacePermission(input.workspaceId, "canManageMemberships");
-    const now = Date.now();
-    const existing = this.db
-      .prepare(
-        `SELECT * FROM agent_workspace_memberships
-         WHERE workspace_id = ? AND principal_id = ?`,
-      )
-      .get(input.workspaceId, input.principalId) as Any | undefined;
-    const id = existing?.id ? String(existing.id) : randomUUID();
-    this.db
-      .prepare(
-        `INSERT INTO agent_workspace_memberships
-         (id, workspace_id, principal_id, role, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(workspace_id, principal_id) DO UPDATE SET
-           role = excluded.role,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        id,
-        input.workspaceId,
-        input.principalId,
-        input.role,
-        existing?.created_at ? Number(existing.created_at) : now,
-        now,
-      );
-    const membership = this.listWorkspaceMemberships(input.workspaceId).find(
+  }): Promise<AgentWorkspaceMembership> {
+    await this.assertWorkspacePermission(input.workspaceId, "canManageMemberships");
+    // Keeping the membership's id and creation time and writing it share one unit (DB6).
+    const id = await this.managedRows.upsertMembership({
+      workspaceId: input.workspaceId,
+      principalId: input.principalId,
+      role: input.role,
+      now: Date.now(),
+      newId: randomUUID(),
+    });
+    const membership = (await this.listWorkspaceMemberships(input.workspaceId)).find(
       (entry) => entry.id === id,
     );
     if (!membership) {
       throw new Error("Failed to persist workspace membership");
     }
-    this.appendAudit({
+    await this.appendAudit({
       agentId: `workspace:${input.workspaceId}`,
       workspaceId: input.workspaceId,
       action: "membership_updated",
@@ -1007,17 +969,10 @@ export class ManagedSessionService {
     return membership;
   }
 
-  listAuditEntries(agentId: string, limit = 50): ManagedAgentAuditEntry[] {
-    const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
-    if (workspaceId) this.assertWorkspacePermission(workspaceId, "canAuditAgents");
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM managed_agent_audit
-         WHERE agent_id = ?
-         ORDER BY created_at DESC
-         LIMIT ?`,
-      )
-      .all(agentId, limit) as Any[];
+  async listAuditEntries(agentId: string, limit = 50): Promise<ManagedAgentAuditEntry[]> {
+    const workspaceId = await this.resolveWorkspaceIdForAgent(agentId);
+    if (workspaceId) await this.assertWorkspacePermission(workspaceId, "canAuditAgents");
+    const rows = await this.managedRows.listAuditRows(agentId, limit);
     return rows.map((row) => ({
       id: String(row.id),
       agentId: String(row.agent_id),
@@ -1030,14 +985,14 @@ export class ManagedSessionService {
     }));
   }
 
-  private appendAudit(input: {
+  private async appendAudit(input: {
     agentId: string;
     workspaceId: string;
     action: ManagedAgentAuditEntry["action"];
     summary: string;
     metadata?: Record<string, unknown>;
     actorId?: string;
-  }): ManagedAgentAuditEntry {
+  }): Promise<ManagedAgentAuditEntry> {
     const entry: ManagedAgentAuditEntry = {
       id: randomUUID(),
       agentId: input.agentId,
@@ -1048,41 +1003,36 @@ export class ManagedSessionService {
       metadata: input.metadata,
       createdAt: Date.now(),
     };
-    this.db
-      .prepare(
-        `INSERT INTO managed_agent_audit
-         (id, agent_id, workspace_id, actor_id, action, summary, metadata_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        entry.id,
-        entry.agentId,
-        entry.workspaceId,
-        entry.actorId,
-        entry.action,
-        entry.summary,
-        entry.metadata ? JSON.stringify(entry.metadata) : null,
-        entry.createdAt,
-      );
+    // Awaited: callers do not report an action before its audit row is written.
+    await this.managedRows.insertAudit({
+      id: entry.id,
+      agentId: entry.agentId,
+      workspaceId: entry.workspaceId,
+      actorId: entry.actorId,
+      action: entry.action,
+      summary: entry.summary,
+      metadataJson: entry.metadata ? JSON.stringify(entry.metadata) : null,
+      createdAt: entry.createdAt,
+    });
     return entry;
   }
 
-  listAgents(params?: {
+  async listAgents(params?: {
     limit?: number;
     offset?: number;
     status?: ManagedAgent["status"];
-  }): ManagedAgent[] {
+  }): Promise<ManagedAgent[]> {
     return this.managedAgentRepo.list(params);
   }
 
-  getAgent(
+  async getAgent(
     agentId: string,
-  ): { agent: ManagedAgent; currentVersion?: ManagedAgentVersion } | undefined {
-    const agent = this.managedAgentRepo.findById(agentId);
+  ): Promise<{ agent: ManagedAgent; currentVersion?: ManagedAgentVersion } | undefined> {
+    const agent = await this.managedAgentRepo.findById(agentId);
     if (!agent) return undefined;
     return {
       agent,
-      currentVersion: this.managedAgentVersionRepo.find(agentId, agent.currentVersion),
+      currentVersion: await this.managedAgentVersionRepo.find(agentId, agent.currentVersion),
     };
   }
 
@@ -1142,16 +1092,10 @@ export class ManagedSessionService {
     };
   }
 
-  listManagedAgentRoutines(agentId: string): ManagedAgentRoutineRecord[] {
-    const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
-    if (workspaceId) this.assertWorkspacePermission(workspaceId, "canViewAgents");
-    if (!this.hasDatabaseTable("automation_routines")) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM automation_routines
-         ORDER BY updated_at DESC, created_at DESC`,
-      )
-      .all() as Any[];
+  async listManagedAgentRoutines(agentId: string): Promise<ManagedAgentRoutineRecord[]> {
+    const workspaceId = await this.resolveWorkspaceIdForAgent(agentId);
+    if (workspaceId) await this.assertWorkspacePermission(workspaceId, "canViewAgents");
+    const rows = await this.managedRows.listRoutineRows();
     return rows
       .map((row) => {
         const definition = safeJsonParse<Routine | null>(row.definition_json, null);
@@ -1162,9 +1106,9 @@ export class ManagedSessionService {
       .filter((entry): entry is ManagedAgentRoutineRecord => Boolean(entry));
   }
 
-  buildManagedAgentRoutineDefinition(
+  async buildManagedAgentRoutineDefinition(
     request: CreateManagedAgentRoutineRequest | UpdateManagedAgentRoutineRequest,
-  ): {
+  ): Promise<{
     name?: string;
     description?: string;
     enabled?: boolean;
@@ -1172,8 +1116,8 @@ export class ManagedSessionService {
     environmentId: string;
     trigger: ManagedAgentRoutineTriggerConfig;
     instructions: string;
-  } {
-    const detail = this.getAgent(request.agentId);
+  }> {
+    const detail = await this.getAgent(request.agentId);
     if (!detail?.agent || !detail.currentVersion) {
       throw new Error(`Managed agent not found: ${request.agentId}`);
     }
@@ -1184,11 +1128,11 @@ export class ManagedSessionService {
         "Managed agent needs a default environment before routines can be configured",
       );
     }
-    const environment = this.getEnvironment(environmentId);
+    const environment = await this.getEnvironment(environmentId);
     if (!environment) {
       throw new Error(`Managed environment not found: ${environmentId}`);
     }
-    this.assertWorkspacePermission(environment.config.workspaceId, "canManageRoutines");
+    await this.assertWorkspacePermission(environment.config.workspaceId, "canManageRoutines");
     const trigger = ("trigger" in request && request.trigger ? request.trigger : undefined) as
       | ManagedAgentRoutineTriggerConfig
       | undefined;
@@ -1321,20 +1265,20 @@ export class ManagedSessionService {
     };
   }
 
-  private updateCurrentStudioConfig(
+  private async updateCurrentStudioConfig(
     agentId: string,
     mutate: (
       studio: ManagedAgentStudioConfig,
       version: ManagedAgentVersion,
     ) => ManagedAgentStudioConfig,
-  ): ManagedAgentVersion {
-    const detail = this.getAgent(agentId);
+  ): Promise<ManagedAgentVersion> {
+    const detail = await this.getAgent(agentId);
     if (!detail?.currentVersion) {
       throw new Error(`Managed agent not found: ${agentId}`);
     }
     const currentStudio = getStudioConfig(detail.currentVersion) || {};
     const nextStudio = mutate(currentStudio, detail.currentVersion);
-    const updated = this.managedAgentVersionRepo.updateMetadata(
+    const updated = await this.managedAgentVersionRepo.updateMetadata(
       detail.currentVersion.agentId,
       detail.currentVersion.version,
       setStudioConfigMetadata(detail.currentVersion.metadata, nextStudio),
@@ -1342,8 +1286,8 @@ export class ManagedSessionService {
     return updated || detail.currentVersion;
   }
 
-  syncManagedAgentRoutineRefs(agentId: string): ManagedAgentLinkedRoutineRef[] {
-    const routines = this.listManagedAgentRoutines(agentId);
+  async syncManagedAgentRoutineRefs(agentId: string): Promise<ManagedAgentLinkedRoutineRef[]> {
+    const routines = await this.listManagedAgentRoutines(agentId);
     const linkedRoutines = routines.map((routine) => ({
       routineId: routine.id,
       name: routine.name,
@@ -1351,7 +1295,7 @@ export class ManagedSessionService {
       triggerTypes: [routine.trigger.type],
       summary: summarizeRoutineTrigger(routine.trigger),
     }));
-    this.updateCurrentStudioConfig(agentId, (studio) => ({
+    await this.updateCurrentStudioConfig(agentId, (studio) => ({
       ...studio,
       routineIds: linkedRoutines.map((entry) => entry.routineId),
       linkedRoutines,
@@ -1365,26 +1309,9 @@ export class ManagedSessionService {
     return linkedRoutines;
   }
 
-  private setRoutineEnabledInDb(routineId: string, enabled: boolean): void {
-    const row = this.db.prepare("SELECT * FROM automation_routines WHERE id = ?").get(routineId) as
-      | Any
-      | undefined;
-    if (!row) return;
-    const definition = safeJsonParse<Routine | null>(row.definition_json, null);
-    if (!definition) {
-      this.db
-        .prepare("UPDATE automation_routines SET enabled = ?, updated_at = ? WHERE id = ?")
-        .run(enabled ? 1 : 0, Date.now(), routineId);
-      return;
-    }
-    const nextDefinition = { ...definition, enabled, updatedAt: Date.now() };
-    this.db
-      .prepare(
-        `UPDATE automation_routines
-         SET enabled = ?, definition_json = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(enabled ? 1 : 0, JSON.stringify(nextDefinition), nextDefinition.updatedAt, routineId);
+  private async setRoutineEnabledInDb(routineId: string, enabled: boolean): Promise<void> {
+    // Reading the routine and writing its enabled state share one unit (DB6).
+    await this.managedRows.setRoutineEnabled(routineId, enabled, Date.now());
   }
 
   private async setRoutineEnabled(routineId: string, enabled: boolean): Promise<void> {
@@ -1393,11 +1320,11 @@ export class ManagedSessionService {
       const updated = await routineService.update(routineId, { enabled });
       if (updated) return;
     }
-    this.setRoutineEnabledInDb(routineId, enabled);
+    await this.setRoutineEnabledInDb(routineId, enabled);
   }
 
-  getRuntimeToolCatalog(agentId: string): ManagedAgentRuntimeToolCatalog {
-    const agentDetail = this.getAgent(agentId);
+  async getRuntimeToolCatalog(agentId: string): Promise<ManagedAgentRuntimeToolCatalog> {
+    const agentDetail = await this.getAgent(agentId);
     if (!agentDetail?.agent) {
       throw new Error(`Managed agent not found: ${agentId}`);
     }
@@ -1416,11 +1343,11 @@ export class ManagedSessionService {
         slack: [],
       };
     }
-    const environment = this.getEnvironment(environmentId);
+    const environment = await this.getEnvironment(environmentId);
     if (!environment) {
       throw new Error(`Managed environment not found: ${environmentId}`);
     }
-    const workspace = this.workspaceRepo.findById(environment.config.workspaceId);
+    const workspace = await this.workspaceRepo.findById(environment.config.workspaceId);
     if (!workspace) {
       throw new Error(`Workspace not found: ${environment.config.workspaceId}`);
     }
@@ -1470,7 +1397,7 @@ export class ManagedSessionService {
     };
   }
 
-  createAgent(input: {
+  async createAgent(input: {
     name: string;
     description?: string;
     systemPrompt: string;
@@ -1481,9 +1408,9 @@ export class ManagedSessionService {
     mcpServers?: string[];
     teamTemplate?: ManagedAgentVersion["teamTemplate"];
     metadata?: Record<string, unknown>;
-  }): { agent: ManagedAgent; version: ManagedAgentVersion } {
+  }): Promise<{ agent: ManagedAgent; version: ManagedAgentVersion }> {
     const id = randomUUID();
-    const agent = this.managedAgentRepo.create({
+    const agent = await this.managedAgentRepo.create({
       id,
       name: input.name,
       description: input.description,
@@ -1503,14 +1430,14 @@ export class ManagedSessionService {
       metadata: input.metadata,
       createdAt: Date.now(),
     };
-    this.managedAgentVersionRepo.create(version);
-    const syncedVersion = this.syncLegacyMirror(agent, version);
+    await this.managedAgentVersionRepo.create(version);
+    const syncedVersion = await this.syncLegacyMirror(agent, version);
     const workspaceId = getStudioConfig(syncedVersion)?.defaultEnvironmentId
-      ? this.getEnvironment(getStudioConfig(syncedVersion)?.defaultEnvironmentId || "")?.config
+      ? (await this.getEnvironment(getStudioConfig(syncedVersion)?.defaultEnvironmentId || ""))?.config
           .workspaceId
       : undefined;
     if (workspaceId) {
-      this.appendAudit({
+      await this.appendAudit({
         agentId: agent.id,
         workspaceId,
         action: "created",
@@ -1536,8 +1463,8 @@ export class ManagedSessionService {
       );
     }
     const workspace = request.workspaceId
-      ? this.workspaceRepo.findById(request.workspaceId)
-      : this.workspaceRepo.findAll()[0];
+      ? await this.workspaceRepo.findById(request.workspaceId)
+      : (await this.workspaceRepo.findAll())[0];
     if (!workspace) {
       throw new Error("At least one workspace is required before creating an agent");
     }
@@ -1577,7 +1504,7 @@ export class ManagedSessionService {
       mode: "manual",
     };
 
-    const environment = this.createEnvironment({
+    const environment = await this.createEnvironment({
       name: `${plan.name} Environment`,
       config: {
         workspaceId: workspace.id,
@@ -1627,7 +1554,7 @@ export class ManagedSessionService {
         .map((connection) => connection.id),
     };
 
-    const created = this.createAgent({
+    const created = await this.createAgent({
       name: plan.name,
       description: plan.description,
       systemPrompt: plan.instructions,
@@ -1666,17 +1593,17 @@ export class ManagedSessionService {
     const routineService = this.options.getRoutineService?.() || null;
     if (routineService) {
       for (const draft of routineDrafts) {
-        const prepared = this.buildManagedAgentRoutineDefinition(draft);
+        const prepared = await this.buildManagedAgentRoutineDefinition(draft);
         await routineService.create(this.toManagedRoutinePayload(prepared, draft.agentId));
       }
-      this.syncManagedAgentRoutineRefs(created.agent.id);
+      await this.syncManagedAgentRoutineRefs(created.agent.id);
     }
 
     if (request.activate !== false) {
       await this.publishAgent(created.agent.id);
     }
 
-    const detail = this.getAgent(created.agent.id);
+    const detail = await this.getAgent(created.agent.id);
     if (!detail?.currentVersion) {
       throw new Error(
         `Managed agent version missing: ${created.agent.id}@${created.agent.currentVersion}`,
@@ -1686,11 +1613,11 @@ export class ManagedSessionService {
       agent: detail.agent,
       version: detail.currentVersion,
       environment,
-      routines: this.listManagedAgentRoutines(created.agent.id),
+      routines: await this.listManagedAgentRoutines(created.agent.id),
     };
   }
 
-  updateAgent(
+  async updateAgent(
     agentId: string,
     input: {
       name?: string;
@@ -1704,19 +1631,22 @@ export class ManagedSessionService {
       teamTemplate?: ManagedAgentVersion["teamTemplate"];
       metadata?: Record<string, unknown>;
     },
-  ): { agent: ManagedAgent; version: ManagedAgentVersion } {
-    const existing = this.managedAgentRepo.findById(agentId);
+  ): Promise<{ agent: ManagedAgent; version: ManagedAgentVersion }> {
+    const existing = await this.managedAgentRepo.findById(agentId);
     if (!existing) throw new Error(`Managed agent not found: ${agentId}`);
-    const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
+    const workspaceId = await this.resolveWorkspaceIdForAgent(agentId);
     if (workspaceId) {
-      this.assertWorkspacePermission(workspaceId, "canEditDrafts");
+      await this.assertWorkspacePermission(workspaceId, "canEditDrafts");
     }
-    const currentVersion = this.managedAgentVersionRepo.find(agentId, existing.currentVersion);
+    const currentVersion = await this.managedAgentVersionRepo.find(
+      agentId,
+      existing.currentVersion,
+    );
     if (!currentVersion) {
       throw new Error(`Managed agent version missing: ${agentId}@${existing.currentVersion}`);
     }
     const nextVersion = existing.currentVersion + 1;
-    const agent = this.managedAgentRepo.update(agentId, {
+    const agent = await this.managedAgentRepo.update(agentId, {
       name: input.name,
       description: input.description,
       currentVersion: nextVersion,
@@ -1735,10 +1665,14 @@ export class ManagedSessionService {
       metadata: input.metadata ?? currentVersion.metadata,
       createdAt: Date.now(),
     };
-    this.managedAgentVersionRepo.create(version);
-    const syncedVersion = this.syncLegacyMirror(agent, version, getStudioConfig(currentVersion));
+    await this.managedAgentVersionRepo.create(version);
+    const syncedVersion = await this.syncLegacyMirror(
+      agent,
+      version,
+      getStudioConfig(currentVersion),
+    );
     if (workspaceId) {
-      this.appendAudit({
+      await this.appendAudit({
         agentId,
         workspaceId,
         action: "updated",
@@ -1749,111 +1683,118 @@ export class ManagedSessionService {
   }
 
   async archiveAgent(agentId: string): Promise<ManagedAgent | undefined> {
-    const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
-    if (workspaceId) this.assertWorkspacePermission(workspaceId, "canPublishAgents");
-    const agent = this.managedAgentRepo.update(agentId, { status: "archived" });
+    const workspaceId = await this.resolveWorkspaceIdForAgent(agentId);
+    if (workspaceId) await this.assertWorkspacePermission(workspaceId, "canPublishAgents");
+    const agent = await this.managedAgentRepo.update(agentId, { status: "archived" });
     if (!agent) return undefined;
-    const routines = this.listManagedAgentRoutines(agentId);
+    const routines = await this.listManagedAgentRoutines(agentId);
     for (const routine of routines) {
       await this.setRoutineEnabled(routine.id, false);
     }
-    const detail = this.getAgent(agentId);
+    const detail = await this.getAgent(agentId);
     if (detail?.currentVersion) {
-      this.syncLegacyMirror(agent, detail.currentVersion, getStudioConfig(detail.currentVersion));
+      await this.syncLegacyMirror(
+        agent,
+        detail.currentVersion,
+        getStudioConfig(detail.currentVersion),
+      );
     }
     if (workspaceId) {
-      this.appendAudit({
+      await this.appendAudit({
         agentId,
         workspaceId,
         action: "archived",
         summary: `Archived managed agent ${agent.name}`,
       });
     }
-    this.syncManagedAgentRoutineRefs(agentId);
+    await this.syncManagedAgentRoutineRefs(agentId);
     return agent;
   }
 
   async publishAgent(agentId: string): Promise<ManagedAgent | undefined> {
-    const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
-    if (workspaceId) this.assertWorkspacePermission(workspaceId, "canPublishAgents");
-    const agent = this.managedAgentRepo.update(agentId, { status: "active" });
+    const workspaceId = await this.resolveWorkspaceIdForAgent(agentId);
+    if (workspaceId) await this.assertWorkspacePermission(workspaceId, "canPublishAgents");
+    const agent = await this.managedAgentRepo.update(agentId, { status: "active" });
     if (!agent) return undefined;
-    const detail = this.getAgent(agentId);
+    const detail = await this.getAgent(agentId);
     const studio = detail?.currentVersion ? getStudioConfig(detail.currentVersion) : undefined;
-    for (const routine of this.listManagedAgentRoutines(agentId)) {
+    for (const routine of await this.listManagedAgentRoutines(agentId)) {
       await this.setRoutineEnabled(routine.id, routine.trigger.enabled !== false);
     }
     if (detail?.currentVersion) {
-      this.syncLegacyMirror(agent, detail.currentVersion, studio);
+      await this.syncLegacyMirror(agent, detail.currentVersion, studio);
     }
     if (workspaceId) {
-      this.appendAudit({
+      await this.appendAudit({
         agentId,
         workspaceId,
         action: "published",
         summary: `Published managed agent ${agent.name}`,
       });
     }
-    this.syncManagedAgentRoutineRefs(agentId);
+    await this.syncManagedAgentRoutineRefs(agentId);
     return agent;
   }
 
   async suspendAgent(agentId: string): Promise<ManagedAgent | undefined> {
-    const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
-    if (workspaceId) this.assertWorkspacePermission(workspaceId, "canPublishAgents");
-    const agent = this.managedAgentRepo.update(agentId, { status: "suspended" });
+    const workspaceId = await this.resolveWorkspaceIdForAgent(agentId);
+    if (workspaceId) await this.assertWorkspacePermission(workspaceId, "canPublishAgents");
+    const agent = await this.managedAgentRepo.update(agentId, { status: "suspended" });
     if (!agent) return undefined;
-    const detail = this.getAgent(agentId);
+    const detail = await this.getAgent(agentId);
     const currentVersion = detail?.currentVersion;
     const studio = currentVersion ? getStudioConfig(currentVersion) : undefined;
-    for (const routine of this.listManagedAgentRoutines(agentId)) {
+    for (const routine of await this.listManagedAgentRoutines(agentId)) {
       await this.setRoutineEnabled(routine.id, false);
     }
     if (currentVersion) {
-      this.syncLegacyMirror(agent, currentVersion, studio);
+      await this.syncLegacyMirror(agent, currentVersion, studio);
     }
     if (workspaceId) {
-      this.appendAudit({
+      await this.appendAudit({
         agentId,
         workspaceId,
         action: "suspended",
         summary: `Suspended managed agent ${agent.name}`,
       });
     }
-    this.syncManagedAgentRoutineRefs(agentId);
+    await this.syncManagedAgentRoutineRefs(agentId);
     return agent;
   }
 
-  listAgentVersions(agentId: string): ManagedAgentVersion[] {
+  async listAgentVersions(agentId: string): Promise<ManagedAgentVersion[]> {
     return this.managedAgentVersionRepo.list(agentId);
   }
 
-  getAgentVersion(agentId: string, version: number): ManagedAgentVersion | undefined {
+  async getAgentVersion(
+    agentId: string,
+    version: number,
+  ): Promise<ManagedAgentVersion | undefined> {
     return this.managedAgentVersionRepo.find(agentId, version);
   }
 
-  listEnvironments(params?: {
+  async listEnvironments(params?: {
     limit?: number;
     offset?: number;
     status?: ManagedEnvironment["status"];
-  }): ManagedEnvironment[] {
+  }): Promise<ManagedEnvironment[]> {
     return this.managedEnvironmentRepo.list(params);
   }
 
-  getEnvironment(environmentId: string): ManagedEnvironment | undefined {
+  async getEnvironment(environmentId: string): Promise<ManagedEnvironment | undefined> {
     return this.managedEnvironmentRepo.findById(environmentId);
   }
 
-  createEnvironment(input: {
+  async createEnvironment(input: {
     name: string;
     kind?: ManagedEnvironment["kind"];
     config: ManagedEnvironment["config"];
-  }): ManagedEnvironment {
+  }): Promise<ManagedEnvironment> {
     const config = normalizeManagedEnvironmentConfig(input.config);
-    if (!this.workspaceRepo.findById(config.workspaceId)) {
+    if (!(await this.workspaceRepo.findById(config.workspaceId))) {
       throw new Error(`Workspace not found: ${config.workspaceId}`);
     }
-    this.assertWorkspacePermission(config.workspaceId, "canManageEnvironments");
+    await this.assertWorkspacePermission(config.workspaceId, "canManageEnvironments");
     this.validateManagedAccountRefs(config.managedAccountRefs);
     return this.managedEnvironmentRepo.create({
       id: randomUUID(),
@@ -1865,19 +1806,19 @@ export class ManagedSessionService {
     });
   }
 
-  updateEnvironment(
+  async updateEnvironment(
     environmentId: string,
     input: { name?: string; config?: ManagedEnvironment["config"] },
-  ): ManagedEnvironment | undefined {
-    const existing = this.managedEnvironmentRepo.findById(environmentId);
+  ): Promise<ManagedEnvironment | undefined> {
+    const existing = await this.managedEnvironmentRepo.findById(environmentId);
     if (!existing) return undefined;
     const nextConfig = input.config
       ? normalizeManagedEnvironmentConfig({ ...existing.config, ...input.config })
       : undefined;
-    if (nextConfig?.workspaceId && !this.workspaceRepo.findById(nextConfig.workspaceId)) {
+    if (nextConfig?.workspaceId && !(await this.workspaceRepo.findById(nextConfig.workspaceId))) {
       throw new Error(`Workspace not found: ${nextConfig.workspaceId}`);
     }
-    this.assertWorkspacePermission(
+    await this.assertWorkspacePermission(
       nextConfig?.workspaceId || existing.config.workspaceId,
       "canManageEnvironments",
     );
@@ -1889,10 +1830,10 @@ export class ManagedSessionService {
     });
   }
 
-  archiveEnvironment(environmentId: string): ManagedEnvironment | undefined {
-    const existing = this.managedEnvironmentRepo.findById(environmentId);
+  async archiveEnvironment(environmentId: string): Promise<ManagedEnvironment | undefined> {
+    const existing = await this.managedEnvironmentRepo.findById(environmentId);
     if (!existing) return undefined;
-    this.assertWorkspacePermission(existing.config.workspaceId, "canManageEnvironments");
+    await this.assertWorkspacePermission(existing.config.workspaceId, "canManageEnvironments");
     return this.managedEnvironmentRepo.update(environmentId, { status: "archived" });
   }
 
@@ -1905,7 +1846,7 @@ export class ManagedSessionService {
       throw new Error("Invalid managed session success criteria");
     }
     const successCriteria = criteriaResult?.success ? criteriaResult.data : undefined;
-    const agent = this.managedAgentRepo.findById(input.agentId);
+    const agent = await this.managedAgentRepo.findById(input.agentId);
     if (!agent) throw new Error(`Managed agent not found: ${input.agentId}`);
     if (agent.status === "suspended") {
       throw new Error(`Managed agent is suspended and cannot be run: ${agent.name}`);
@@ -1913,20 +1854,20 @@ export class ManagedSessionService {
     if (agent.status === "archived") {
       throw new Error(`Managed agent is archived and cannot be run: ${agent.name}`);
     }
-    const version = this.managedAgentVersionRepo.find(agent.id, agent.currentVersion);
+    const version = await this.managedAgentVersionRepo.find(agent.id, agent.currentVersion);
     if (!version)
       throw new Error(`Managed agent version missing: ${agent.id}@${agent.currentVersion}`);
-    const environment = this.managedEnvironmentRepo.findById(input.environmentId);
+    const environment = await this.managedEnvironmentRepo.findById(input.environmentId);
     if (!environment) throw new Error(`Managed environment not found: ${input.environmentId}`);
-    const workspace = this.workspaceRepo.findById(environment.config.workspaceId);
+    const workspace = await this.workspaceRepo.findById(environment.config.workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${environment.config.workspaceId}`);
-    this.assertWorkspacePermission(environment.config.workspaceId, "canRunAgents");
+    await this.assertWorkspacePermission(environment.config.workspaceId, "canRunAgents");
 
     const now = Date.now();
     const surface = input.surface || "runtime";
     const backingTaskSource: Task["source"] =
       surface === "agent_panel" ? "managed_agent_panel" : "manual";
-    const userPrompt = this.materializeContent(input.initialEvent?.content || []);
+    const userPrompt = await this.materializeContent(input.initialEvent?.content || []);
     const mcpToolAccess = this.resolveMcpToolAccess(environment);
     if (mcpToolAccess.unresolvedToolMetadataServerIds.length > 0) {
       throw new Error(
@@ -1950,7 +1891,7 @@ export class ManagedSessionService {
     };
 
     if (version.executionMode === "team") {
-      const task = this.taskRepo.create({
+      const task = await this.taskRepo.create({
         title: input.title,
         prompt: effectivePrompt,
         rawPrompt: effectivePrompt,
@@ -1964,7 +1905,7 @@ export class ManagedSessionService {
       this.ensureCanonicalTask(task);
 
       const { teamRunId } = await this.createManagedTeamRun(task, agent, version);
-      const session = this.managedSessionRepo.create({
+      const session = await this.managedSessionRepo.create({
         id: randomUUID(),
         agentId: agent.id,
         agentVersion: version.version,
@@ -1978,7 +1919,7 @@ export class ManagedSessionService {
         latestSummary: undefined,
         startedAt: now,
       });
-      this.managedSessionEventRepo.create({
+      await this.managedSessionEventRepo.create({
         sessionId: session.id,
         timestamp: now,
         type: "session.created",
@@ -1992,9 +1933,9 @@ export class ManagedSessionService {
           ...sessionTemplatePayload,
         },
       });
-      this.registerWorkContext(session);
+      await this.registerWorkContext(session);
       if (input.initialEvent?.type === "user.message") {
-        this.managedSessionEventRepo.create({
+        await this.managedSessionEventRepo.create({
           sessionId: session.id,
           timestamp: now,
           type: "user.message",
@@ -2005,27 +1946,27 @@ export class ManagedSessionService {
         await this.agentDaemon.startTask(task);
       } catch (error: Any) {
         const message = error?.message || "Failed to start managed team session";
-        this.teamRunRepo.update(teamRunId, { status: "failed", error: message });
+        await this.teamRunRepo.update(teamRunId, { status: "failed", error: message });
         this.agentDaemon.failTask(task.id, message, {
           resultSummary: message,
         });
-        this.managedSessionRepo.update(session.id, {
+        await this.managedSessionRepo.update(session.id, {
           status: "failed",
           latestSummary: message,
           completedAt: Date.now(),
         });
-        this.managedSessionEventRepo.create({
+        await this.managedSessionEventRepo.create({
           sessionId: session.id,
           timestamp: Date.now(),
           type: "session.failed",
           payload: { error: message },
         });
-        return this.refreshSession(session.id) || session;
+        return (await this.refreshSession(session.id)) || session;
       }
-      return this.refreshSession(session.id) || session;
+      return (await this.refreshSession(session.id)) || session;
     }
 
-    const task = this.taskRepo.create({
+    const task = await this.taskRepo.create({
       title: input.title,
       prompt: effectivePrompt,
       rawPrompt: effectivePrompt,
@@ -2038,7 +1979,7 @@ export class ManagedSessionService {
     });
     this.ensureCanonicalTask(task);
 
-    const session = this.managedSessionRepo.create({
+    const session = await this.managedSessionRepo.create({
       id: randomUUID(),
       agentId: agent.id,
       agentVersion: version.version,
@@ -2050,7 +1991,7 @@ export class ManagedSessionService {
       backingTaskId: task.id,
       latestSummary: undefined,
     });
-    this.managedSessionEventRepo.create({
+    await this.managedSessionEventRepo.create({
       sessionId: session.id,
       timestamp: now,
       type: "session.created",
@@ -2063,9 +2004,9 @@ export class ManagedSessionService {
         ...sessionTemplatePayload,
       },
     });
-    this.registerWorkContext(session);
+    await this.registerWorkContext(session);
     if (input.initialEvent?.type === "user.message") {
-      this.managedSessionEventRepo.create({
+      await this.managedSessionEventRepo.create({
         sessionId: session.id,
         timestamp: now,
         type: "user.message",
@@ -2074,60 +2015,63 @@ export class ManagedSessionService {
     }
 
     await this.agentDaemon.startTask(task);
-    return this.refreshSession(session.id) || session;
+    return (await this.refreshSession(session.id)) || session;
   }
 
-  listSessions(params?: {
+  async listSessions(params?: {
     limit?: number;
     offset?: number;
     agentId?: string;
     workspaceId?: string;
     status?: ManagedSession["status"];
     surface?: ManagedSession["surface"];
-  }): ManagedSession[] {
-    return this.managedSessionRepo.list(params).map((session) => {
-      if (
-        session.status === "completed" ||
-        session.status === "failed" ||
-        session.status === "cancelled"
-      ) {
-        return session;
-      }
-      return this.refreshSession(session.id) || session;
-    });
+  }): Promise<ManagedSession[]> {
+    const sessions = await this.managedSessionRepo.list(params);
+    return Promise.all(
+      sessions.map(async (session) => {
+        if (
+          session.status === "completed" ||
+          session.status === "failed" ||
+          session.status === "cancelled"
+        ) {
+          return session;
+        }
+        return (await this.refreshSession(session.id)) || session;
+      }),
+    );
   }
 
-  getSession(sessionId: string): ManagedSession | undefined {
+  async getSession(sessionId: string): Promise<ManagedSession | undefined> {
     return this.refreshSession(sessionId);
   }
 
-  getSessionRequirementEvidenceManifest(
+  async getSessionRequirementEvidenceManifest(
     sessionId: string,
-  ): RequirementEvidenceManifest | undefined {
-    const session = this.managedSessionRepo.findById(sessionId);
+  ): Promise<RequirementEvidenceManifest | undefined> {
+    const session = await this.managedSessionRepo.findById(sessionId);
     if (!session?.backingTaskId) return undefined;
     return this.agentDaemon
       .getWorkSessionContractService?.()
       .getRequirementEvidenceManifest(session.backingTaskId);
   }
 
-  listSessionEvents(sessionId: string, limit = 500): ManagedSessionEvent[] {
-    const session = this.refreshSession(sessionId);
+  async listSessionEvents(sessionId: string, limit = 500): Promise<ManagedSessionEvent[]> {
+    const session = await this.refreshSession(sessionId);
     if (!session) return [];
     return this.managedSessionEventRepo.listBySessionId(sessionId, limit);
   }
 
   async cancelSession(sessionId: string): Promise<ManagedSession | undefined> {
-    const session = this.managedSessionRepo.findById(sessionId);
+    const session = await this.managedSessionRepo.findById(sessionId);
     if (!session) return undefined;
-    this.assertWorkspacePermission(session.workspaceId, "canRunAgents");
+    await this.assertWorkspacePermission(session.workspaceId, "canRunAgents");
     if (session.backingTeamRunId) {
       await this.cancelManagedTeamRun(session.backingTeamRunId);
     }
     if (session.backingTaskId) {
       await this.agentDaemon.cancelTask(session.backingTaskId).catch(() => {});
     }
-    this.managedSessionEventRepo.create({
+    await this.managedSessionEventRepo.create({
       sessionId,
       timestamp: Date.now(),
       type: "status.changed",
@@ -2137,16 +2081,16 @@ export class ManagedSessionService {
   }
 
   async resumeSession(sessionId: string): Promise<{ resumed: boolean; session?: ManagedSession }> {
-    const session = this.managedSessionRepo.findById(sessionId);
+    const session = await this.managedSessionRepo.findById(sessionId);
     if (!session?.backingTaskId) return { resumed: false, session };
-    this.assertWorkspacePermission(session.workspaceId, "canResumeSessions");
+    await this.assertWorkspacePermission(session.workspaceId, "canResumeSessions");
     if (session.backingTeamRunId) {
       await this.tickManagedTeamRun(session.backingTeamRunId);
-      const refreshed = this.refreshSession(sessionId);
+      const refreshed = await this.refreshSession(sessionId);
       return { resumed: true, session: refreshed };
     }
     const resumed = await this.agentDaemon.resumeTask(session.backingTaskId);
-    const refreshed = this.refreshSession(sessionId);
+    const refreshed = await this.refreshSession(sessionId);
     return { resumed, session: refreshed };
   }
 
@@ -2168,9 +2112,9 @@ export class ManagedSessionService {
     }
   }
 
-  private registerWorkContext(session: ManagedSession): void {
+  private async registerWorkContext(session: ManagedSession): Promise<void> {
     try {
-      this.options.workContextService?.ensureForManagedSession(session);
+      await this.options.workContextService?.ensureForManagedSession(session);
     } catch (error) {
       // WorkContext is continuity metadata; a failure must not prevent the
       // underlying managed session from starting.
@@ -2184,7 +2128,7 @@ export class ManagedSessionService {
     expectedTurnId?: string,
   ): Promise<void> {
     const teamRun = session.backingTeamRunId
-      ? this.teamRunRepo.findById(session.backingTeamRunId)
+      ? await this.teamRunRepo.findById(session.backingTeamRunId)
       : undefined;
     if (!teamRun) {
       throw new Error(`Managed team run not found: ${session.backingTeamRunId}`);
@@ -2206,15 +2150,17 @@ export class ManagedSessionService {
     if (!rootTaskId) {
       throw new Error(`Backing team task not found for session: ${session.id}`);
     }
-    const rootTask = this.taskRepo.findById(rootTaskId);
+    const rootTask = await this.taskRepo.findById(rootTaskId);
     if (!rootTask) {
       throw new Error(`Backing team task not found: ${session.backingTaskId}`);
     }
     if (expectedTurnId) {
+      // The current turn is projected state; wait for this task's pending projections.
+      await this.agentDaemon.flushTimelineProjections?.(rootTask.id);
       const protocol = this.agentDaemon.getWorkSessionProtocolService?.();
       protocol?.assertExpectedTurnForTask(rootTask.id, expectedTurnId);
     }
-    const message = this.materializeContent(content).trim();
+    const message = (await this.materializeContent(content)).trim();
     if (!message) {
       throw new Error("Team steering message cannot be empty");
     }
@@ -2223,7 +2169,7 @@ export class ManagedSessionService {
     // the root task is the durable source of context used by future team items and
     // synthesis. Persist the steering in both the root task timeline and its prompt
     // context, then tick the run so pending work observes it immediately.
-    this.taskRepo.update(rootTask.id, {
+    await this.taskRepo.update(rootTask.id, {
       prompt: appendTeamSteering(rootTask.prompt, message),
     });
     const steeringEvent = this.taskEventRepo.create({
@@ -2253,9 +2199,9 @@ export class ManagedSessionService {
     sessionId: string,
     event: ManagedSessionSendEvent,
   ): Promise<ManagedSession | undefined> {
-    const session = this.managedSessionRepo.findById(sessionId);
+    const session = await this.managedSessionRepo.findById(sessionId);
     if (!session?.backingTaskId) return undefined;
-    this.assertWorkspacePermission(
+    await this.assertWorkspacePermission(
       session.workspaceId,
       event.type === "input.received" ? "canAnswerApprovals" : "canRunAgents",
     );
@@ -2271,35 +2217,38 @@ export class ManagedSessionService {
       const eventId = `requirement-correction:${createHash("sha256")
         .update(`${session.id}:${correction.idempotencyKey}`)
         .digest("hex")}`;
-      this.db.transaction(() => {
-        const userEvent = this.managedSessionEventRepo.create({
-          id: eventId,
-          sessionId,
-          timestamp: Date.now(),
-          type: correction.type,
-          payload: {
-            requirementId: correction.requirementId,
-            statement: correction.statement,
-            criterion: correction.criterion,
-            idempotencyKey: correction.idempotencyKey,
-          },
-        });
-        const updated = contractService.recordUserRequirementCorrection(session.backingTaskId!, {
+      // The contract lives in the host's work-session store and the event log in the
+      // services domain (DB6), so no transaction spans both. Both writes are idempotent
+      // under the deterministic event id: correct the contract first, so a rejected
+      // correction leaves no event, then append the event. If the append fails after the
+      // correction, retrying the same event records it without correcting twice.
+      const updated = contractService.recordUserRequirementCorrection(session.backingTaskId!, {
+        requirementId: correction.requirementId,
+        statement: correction.statement,
+        criterion: correction.criterion,
+        sourceEventId: eventId,
+        idempotencyKey: correction.idempotencyKey,
+      });
+      if (!updated) throw new Error("No outcome contract is available for this session");
+      await this.managedSessionEventRepo.create({
+        id: eventId,
+        sessionId,
+        timestamp: Date.now(),
+        type: correction.type,
+        payload: {
           requirementId: correction.requirementId,
           statement: correction.statement,
           criterion: correction.criterion,
-          sourceEventId: userEvent.id,
           idempotencyKey: correction.idempotencyKey,
-        });
-        if (!updated) throw new Error("No outcome contract is available for this session");
-      })();
+        },
+      });
       return this.refreshSession(sessionId);
     }
 
     if (event.type === "user.message") {
       if (session.backingTeamRunId) {
         await this.steerManagedTeamSession(session, event.content, event.expectedTurnId);
-        this.managedSessionEventRepo.create({
+        await this.managedSessionEventRepo.create({
           sessionId,
           timestamp: Date.now(),
           type: "user.message",
@@ -2311,8 +2260,8 @@ export class ManagedSessionService {
         });
         return this.refreshSession(sessionId);
       }
-      const message = this.materializeContent(event.content);
-      this.managedSessionEventRepo.create({
+      const message = await this.materializeContent(event.content);
+      await this.managedSessionEventRepo.create({
         sessionId,
         timestamp: Date.now(),
         type: "user.message",
@@ -2328,7 +2277,7 @@ export class ManagedSessionService {
       return this.refreshSession(sessionId);
     }
 
-    this.managedSessionEventRepo.create({
+    await this.managedSessionEventRepo.create({
       sessionId,
       timestamp: Date.now(),
       type: "input.received",
@@ -2350,24 +2299,24 @@ export class ManagedSessionService {
     sessionId: string,
     input?: Partial<AudioSummaryConfig>,
   ): Promise<AudioSummaryResult> {
-    const session = this.refreshSession(sessionId);
+    const session = await this.refreshSession(sessionId);
     if (!session?.backingTaskId) {
       throw new Error(`Managed session not found: ${sessionId}`);
     }
-    const task = this.taskRepo.findById(session.backingTaskId);
+    const task = await this.taskRepo.findById(session.backingTaskId);
     if (!task) {
       throw new Error(`Backing task not found for managed session: ${sessionId}`);
     }
-    const workspace = this.workspaceRepo.findById(session.workspaceId);
+    const workspace = await this.workspaceRepo.findById(session.workspaceId);
     if (!workspace) {
       throw new Error(`Workspace not found: ${session.workspaceId}`);
     }
-    const { currentVersion } = this.getAgent(session.agentId) || {};
+    const { currentVersion } = (await this.getAgent(session.agentId)) || {};
     const studio = currentVersion ? getStudioConfig(currentVersion) : undefined;
     const style = input?.style || studio?.audioSummaryConfig?.style || "executive-briefing";
     const title =
       input?.title || studio?.audioSummaryConfig?.title || `${session.title} audio summary`;
-    const script = this.buildAudioSummaryScript(session, style);
+    const script = await this.buildAudioSummaryScript(session, style);
     const audioBuffer = await getVoiceService().speak(script);
     if (!audioBuffer) {
       throw new Error("Audio summary generation returned no audio");
@@ -2377,7 +2326,7 @@ export class ManagedSessionService {
     const safeTitle = slugifyName(title);
     const outputPath = path.join(outputDir, `${safeTitle}-${Date.now()}.mp3`);
     await fs.writeFile(outputPath, audioBuffer);
-    const artifact = this.artifactRepo.create({
+    const artifact = await this.artifactRepo.create({
       taskId: session.backingTaskId,
       path: outputPath,
       mimeType: "audio/mpeg",
@@ -2385,7 +2334,7 @@ export class ManagedSessionService {
       size: audioBuffer.length,
       createdAt: Date.now(),
     });
-    this.managedSessionEventRepo.create({
+    await this.managedSessionEventRepo.create({
       sessionId,
       timestamp: Date.now(),
       type: "tool.result",
@@ -2408,7 +2357,7 @@ export class ManagedSessionService {
           lastArtifactId: artifact.id,
         },
       };
-      this.managedAgentVersionRepo.updateMetadata(
+      await this.managedAgentVersionRepo.updateMetadata(
         currentVersion.agentId,
         currentVersion.version,
         setStudioConfigMetadata(currentVersion.metadata, nextStudio),
@@ -2428,13 +2377,13 @@ export class ManagedSessionService {
     };
   }
 
-  getAgentInsights(agentId: string): ManagedAgentInsights {
-    const workspaceId = this.resolveWorkspaceIdForAgent(agentId);
-    if (workspaceId) this.assertWorkspacePermission(workspaceId, "canViewAgents");
+  async getAgentInsights(agentId: string): Promise<ManagedAgentInsights> {
+    const workspaceId = await this.resolveWorkspaceIdForAgent(agentId);
+    if (workspaceId) await this.assertWorkspacePermission(workspaceId, "canViewAgents");
     const sessions: ManagedSession[] = [];
     const pageSize = 500;
     for (let offset = 0; ; offset += pageSize) {
-      const page = this.listSessions({ limit: pageSize, offset });
+      const page = await this.listSessions({ limit: pageSize, offset });
       sessions.push(...page.filter((session) => session.agentId === agentId));
       if (page.length < pageSize) break;
     }
@@ -2474,12 +2423,12 @@ export class ManagedSessionService {
           userKeys.add(userKey);
         }
       }
-      for (const event of this.listSessionEvents(session.id, 200)) {
+      for (const event of await this.listSessionEvents(session.id, 200)) {
         for (const userKey of this.extractUserKeysFromPayload(event.payload)) {
           userKeys.add(userKey);
         }
       }
-      const inputs = this.inputRequestRepo.list({
+      const inputs = await this.inputRequestRepo.list({
         limit: 100,
         offset: 0,
         taskId: session.backingTaskId,
@@ -2490,7 +2439,7 @@ export class ManagedSessionService {
 
     const triggerBreakdown = new Map<string, number>();
     const deploymentBreakdown = new Map<string, number>();
-    for (const row of this.listRoutineRunsForAgent(agentId)) {
+    for (const row of await this.listRoutineRunsForAgent(agentId)) {
       const triggerType = row.run.triggerType || "manual";
       triggerBreakdown.set(triggerType, (triggerBreakdown.get(triggerType) || 0) + 1);
       deploymentBreakdown.set(row.surface, (deploymentBreakdown.get(row.surface) || 0) + 1);
@@ -2540,10 +2489,10 @@ export class ManagedSessionService {
     };
   }
 
-  getSlackDeploymentHealth(
+  async getSlackDeploymentHealth(
     agentId: string,
-  ): import("../../shared/types").ManagedAgentSlackDeploymentHealth {
-    const detail = this.getAgent(agentId);
+  ): Promise<import("../../shared/types").ManagedAgentSlackDeploymentHealth> {
+    const detail = await this.getAgent(agentId);
     if (!detail?.agent || !detail.currentVersion) {
       throw new Error(`Managed agent not found: ${agentId}`);
     }
@@ -2565,7 +2514,7 @@ export class ManagedSessionService {
         configReadError: channel?.configReadError,
       };
     });
-    const slackRuns = this.listRoutineRunsForAgent(agentId)
+    const slackRuns = (await this.listRoutineRunsForAgent(agentId))
       .filter((row) => row.surface === "slack")
       .map((row) => row.run);
     const lastSuccessful = slackRuns.find((run) => this.isSuccessfulSlackRun(run));
@@ -2586,19 +2535,19 @@ export class ManagedSessionService {
     };
   }
 
-  getSessionWorkpaper(sessionId: string): ManagedSessionWorkpaper {
-    const session = this.getSession(sessionId);
+  async getSessionWorkpaper(sessionId: string): Promise<ManagedSessionWorkpaper> {
+    const session = await this.getSession(sessionId);
     if (!session) {
       throw new Error(`Managed session not found: ${sessionId}`);
     }
-    this.assertWorkspacePermission(session.workspaceId, "canViewAgents");
+    await this.assertWorkspacePermission(session.workspaceId, "canViewAgents");
     const taskId = session.backingTaskId;
-    const workspace = this.workspaceRepo.findById(session.workspaceId);
-    const events = this.listSessionEvents(sessionId, 200);
+    const workspace = await this.workspaceRepo.findById(session.workspaceId);
+    const events = await this.listSessionEvents(sessionId, 200);
     const inputRequests = taskId
-      ? this.inputRequestRepo.list({ limit: 100, offset: 0, taskId })
+      ? await this.inputRequestRepo.list({ limit: 100, offset: 0, taskId })
       : [];
-    const artifacts = taskId ? this.artifactRepo.findByTaskId(taskId) : [];
+    const artifacts = taskId ? await this.artifactRepo.findByTaskId(taskId) : [];
     const summary =
       session.latestSummary ||
       events
@@ -2606,7 +2555,7 @@ export class ManagedSessionService {
         .filter(Boolean)
         .slice(-1)[0] ||
       "No summary recorded yet.";
-    const canAudit = this.getMyWorkspacePermissions(session.workspaceId).canAuditAgents;
+    const canAudit = (await this.getMyWorkspacePermissions(session.workspaceId)).canAuditAgents;
 
     return {
       sessionId,
@@ -2649,7 +2598,7 @@ export class ManagedSessionService {
             : undefined,
       })),
       auditTrail: canAudit
-        ? this.listAuditEntries(session.agentId, 8).map((entry) => ({
+        ? (await this.listAuditEntries(session.agentId, 8)).map((entry) => ({
             id: entry.id,
             action: entry.action,
             summary: entry.summary,
@@ -2661,19 +2610,18 @@ export class ManagedSessionService {
     };
   }
 
-  convertAgentRoleToManagedAgent(request: ConvertAgentRoleToManagedAgentRequest): Omit<
-    ManagedAgentConversionResult,
-    "routines"
-  > & {
-    routineDrafts: CreateManagedAgentRoutineRequest[];
-  } {
-    const role = this.agentRoleRepo.findById(request.agentRoleId);
+  async convertAgentRoleToManagedAgent(request: ConvertAgentRoleToManagedAgentRequest): Promise<
+    Omit<ManagedAgentConversionResult, "routines"> & {
+      routineDrafts: CreateManagedAgentRoutineRequest[];
+    }
+  > {
+    const role = await this.agentRoleRepo.findById(request.agentRoleId);
     if (!role) {
       throw new Error(`Agent role not found: ${request.agentRoleId}`);
     }
     const workspace = request.workspaceId
-      ? this.workspaceRepo.findById(request.workspaceId)
-      : this.workspaceRepo.findAll()[0];
+      ? await this.workspaceRepo.findById(request.workspaceId)
+      : (await this.workspaceRepo.findAll())[0];
     if (!workspace) {
       throw new Error("At least one workspace is required before converting agent personas");
     }
@@ -2682,7 +2630,7 @@ export class ManagedSessionService {
     if (role.capabilities.includes("research")) capabilityFamilies.push("search", "communication");
     if (role.capabilities.includes("code")) capabilityFamilies.push("files");
     if (role.capabilities.includes("document")) capabilityFamilies.push("documents");
-    const environment = this.createEnvironment({
+    const environment = await this.createEnvironment({
       name: `${role.displayName} Environment`,
       config: {
         workspaceId: workspace.id,
@@ -2725,7 +2673,7 @@ export class ManagedSessionService {
         },
       } satisfies ManagedAgentStudioConfig,
     };
-    const created = this.createAgent({
+    const created = await this.createAgent({
       name: role.displayName,
       description: role.description,
       systemPrompt: role.systemPrompt || `Act as ${role.displayName}.`,
@@ -2739,7 +2687,7 @@ export class ManagedSessionService {
           : undefined,
       metadata,
     });
-    this.agentRoleRepo.update({
+    await this.agentRoleRepo.update({
       id: role.id,
       soul: JSON.stringify({
         ...parsedSoul,
@@ -2747,7 +2695,7 @@ export class ManagedSessionService {
         managedAgentId: created.agent.id,
       }),
     });
-    this.appendAudit({
+    await this.appendAudit({
       agentId: created.agent.id,
       workspaceId: workspace.id,
       action: "converted_from_agent_role",
@@ -2764,20 +2712,22 @@ export class ManagedSessionService {
     };
   }
 
-  convertAutomationProfileToManagedAgent(
+  async convertAutomationProfileToManagedAgent(
     request: ConvertAutomationProfileToManagedAgentRequest,
-  ): Omit<ManagedAgentConversionResult, "routines"> & {
-    routineDrafts: CreateManagedAgentRoutineRequest[];
-  } {
-    const profile = this.automationProfileRepo.findById(request.automationProfileId);
+  ): Promise<
+    Omit<ManagedAgentConversionResult, "routines"> & {
+      routineDrafts: CreateManagedAgentRoutineRequest[];
+    }
+  > {
+    const profile = await this.automationProfileRepo.findById(request.automationProfileId);
     if (!profile) {
       throw new Error(`Automation profile not found: ${request.automationProfileId}`);
     }
-    const role = this.agentRoleRepo.findById(profile.agentRoleId);
+    const role = await this.agentRoleRepo.findById(profile.agentRoleId);
     if (!role) {
       throw new Error(`Agent role not found for automation profile: ${profile.agentRoleId}`);
     }
-    const converted = this.convertAgentRoleToManagedAgent({
+    const converted = await this.convertAgentRoleToManagedAgent({
       agentRoleId: role.id,
       workspaceId: request.workspaceId,
     });
@@ -2796,14 +2746,14 @@ export class ManagedSessionService {
           },
         ]
       : [];
-    this.automationProfileRepo.update({
+    await this.automationProfileRepo.update({
       id: profile.id,
       enabled: false,
       cadenceMinutes: profile.cadenceMinutes,
       profile: profile.profile,
       activeHours: profile.activeHours ?? null,
     });
-    this.updateCurrentStudioConfig(converted.agent.id, (studio) => ({
+    await this.updateCurrentStudioConfig(converted.agent.id, (studio) => ({
       ...studio,
       conversion: {
         sourceType: "automation_profile",
@@ -2812,7 +2762,7 @@ export class ManagedSessionService {
         migratedAt: Date.now(),
       },
     }));
-    this.appendAudit({
+    await this.appendAudit({
       agentId: converted.agent.id,
       workspaceId: converted.environment.config.workspaceId,
       action: "converted_from_automation_profile",
@@ -2827,7 +2777,7 @@ export class ManagedSessionService {
     };
   }
 
-  bridgeTaskEventNotification(
+  async bridgeTaskEventNotification(
     taskId: string,
     taskEvent: {
       eventId?: string;
@@ -2836,16 +2786,16 @@ export class ManagedSessionService {
       payload?: unknown;
       status?: string;
     },
-  ): { session?: ManagedSession; appended?: ManagedSessionEvent } {
-    const session = this.managedSessionRepo.findByBackingTaskId(taskId);
+  ): Promise<{ session?: ManagedSession; appended?: ManagedSessionEvent }> {
+    const session = await this.managedSessionRepo.findByBackingTaskId(taskId);
     if (!session) return {};
     if (
       taskEvent.eventId &&
-      this.managedSessionEventRepo.hasSourceTaskEvent(session.id, taskEvent.eventId)
+      (await this.managedSessionEventRepo.hasSourceTaskEvent(session.id, taskEvent.eventId))
     ) {
-      return { session: this.refreshSession(session.id) || session };
+      return { session: (await this.refreshSession(session.id)) || session };
     }
-    const appended = this.managedSessionEventRepo.create({
+    const appended = await this.managedSessionEventRepo.create({
       sessionId: session.id,
       timestamp: taskEvent.timestamp || Date.now(),
       type: this.mapDaemonTaskEvent(taskEvent.type),
@@ -2854,44 +2804,44 @@ export class ManagedSessionService {
       sourceTaskEventId: taskEvent.eventId,
     });
     return {
-      session: this.refreshSession(session.id) || session,
+      session: (await this.refreshSession(session.id)) || session,
       appended,
     };
   }
 
-  refreshSession(sessionId: string): ManagedSession | undefined {
-    const session = this.managedSessionRepo.findById(sessionId);
+  async refreshSession(sessionId: string): Promise<ManagedSession | undefined> {
+    const session = await this.managedSessionRepo.findById(sessionId);
     if (!session) return undefined;
     if (session.backingTaskId) {
-      this.syncTaskEvents(session);
+      await this.syncTaskEvents(session);
     }
-    let nextSession = this.managedSessionRepo.findById(sessionId) || session;
+    let nextSession = (await this.managedSessionRepo.findById(sessionId)) || session;
     if (nextSession.backingTaskId && !nextSession.backingTeamRunId) {
-      const run = this.teamRunRepo.findByRootTaskId(nextSession.backingTaskId);
+      const run = await this.teamRunRepo.findByRootTaskId(nextSession.backingTaskId);
       if (run) {
         nextSession =
-          this.managedSessionRepo.update(nextSession.id, { backingTeamRunId: run.id }) ||
+          (await this.managedSessionRepo.update(nextSession.id, { backingTeamRunId: run.id })) ||
           nextSession;
       }
     }
 
     const task = nextSession.backingTaskId
-      ? this.taskRepo.findById(nextSession.backingTaskId)
+      ? await this.taskRepo.findById(nextSession.backingTaskId)
       : undefined;
     const pendingInputs = nextSession.backingTaskId
-      ? this.inputRequestRepo.findPendingByTaskId(nextSession.backingTaskId)
+      ? await this.inputRequestRepo.findPendingByTaskId(nextSession.backingTaskId)
       : [];
     const nextStatus = toManagedSessionStatus(task, pendingInputs.length > 0);
     const latestSummary =
       task?.resultSummary ||
       (nextSession.backingTeamRunId
-        ? this.teamRunRepo.findById(nextSession.backingTeamRunId)?.summary
+        ? (await this.teamRunRepo.findById(nextSession.backingTeamRunId))?.summary
         : undefined) ||
       nextSession.latestSummary;
     const completedAt =
       task?.completedAt ||
       (nextSession.backingTeamRunId
-        ? this.teamRunRepo.findById(nextSession.backingTeamRunId)?.completedAt
+        ? (await this.teamRunRepo.findById(nextSession.backingTeamRunId))?.completedAt
         : undefined) ||
       nextSession.completedAt;
 
@@ -2909,9 +2859,9 @@ export class ManagedSessionService {
       updates.completedAt = completedAt;
     }
     if (Object.keys(updates).length > 0) {
-      nextSession = this.managedSessionRepo.update(nextSession.id, updates) || nextSession;
+      nextSession = (await this.managedSessionRepo.update(nextSession.id, updates)) || nextSession;
       if (updates.status) {
-        this.managedSessionEventRepo.create({
+        await this.managedSessionEventRepo.create({
           sessionId: nextSession.id,
           timestamp: Date.now(),
           type:
@@ -2930,12 +2880,12 @@ export class ManagedSessionService {
     return nextSession;
   }
 
-  private syncTaskEvents(session: ManagedSession): void {
+  private async syncTaskEvents(session: ManagedSession): Promise<void> {
     if (!session.backingTaskId) return;
     const events = this.taskEventRepo.findByTaskId(session.backingTaskId);
     for (const event of events) {
-      if (this.managedSessionEventRepo.hasSourceTaskEvent(session.id, event.id)) continue;
-      this.managedSessionEventRepo.create({
+      if (await this.managedSessionEventRepo.hasSourceTaskEvent(session.id, event.id)) continue;
+      await this.managedSessionEventRepo.create({
         sessionId: session.id,
         timestamp: event.timestamp,
         type: mapTaskEventType(event),
@@ -2988,7 +2938,7 @@ export class ManagedSessionService {
     return promptParts.join("\n");
   }
 
-  private materializeContent(content: ManagedSessionInputContent[]): string {
+  private async materializeContent(content: ManagedSessionInputContent[]): Promise<string> {
     const lines: string[] = [];
     for (const item of content) {
       if (item.type === "text" && item.text.trim()) {
@@ -2996,7 +2946,7 @@ export class ManagedSessionService {
         continue;
       }
       if (item.type === "file") {
-        const artifact = this.artifactRepo.findById(item.artifactId);
+        const artifact = await this.artifactRepo.findById(item.artifactId);
         lines.push(
           artifact?.path
             ? `[Attached artifact: ${artifact.path}]`
@@ -3096,16 +3046,17 @@ export class ManagedSessionService {
     agent: ManagedAgent,
     version: ManagedAgentVersion,
   ): Promise<{ teamId: string; teamRunId: string }> {
-    const activeRoles = this.agentRoleRepo.findAll(false).filter((role) => role.isActive);
+    const activeRoles = (await this.agentRoleRepo.findAll(false)).filter((role) => role.isActive);
     const template = version.teamTemplate || {};
     const leadAgentRoleId =
-      (template.leadAgentRoleId && this.agentRoleRepo.findById(template.leadAgentRoleId)?.id) ||
+      (template.leadAgentRoleId &&
+        (await this.agentRoleRepo.findById(template.leadAgentRoleId))?.id) ||
       activeRoles[0]?.id;
     if (!leadAgentRoleId) {
       throw new Error("No active agent role available for managed team session");
     }
 
-    const team = this.teamRepo.create({
+    const team = await this.teamRepo.create({
       workspaceId: rootTask.workspaceId,
       name: `ManagedAgent-${agent.name}-${Date.now()}`,
       description: `Managed team for agent ${agent.name}`,
@@ -3117,15 +3068,15 @@ export class ManagedSessionService {
       persistent: false,
     });
     for (const [index, roleId] of (template.memberAgentRoleIds || []).entries()) {
-      if (!this.agentRoleRepo.findById(roleId)) continue;
-      this.teamMemberRepo.add({
+      if (!(await this.agentRoleRepo.findById(roleId))) continue;
+      await this.teamMemberRepo.add({
         teamId: team.id,
         agentRoleId: roleId,
         memberOrder: (index + 1) * 10,
         isRequired: true,
       });
     }
-    const run = this.teamRunRepo.create({
+    const run = await this.teamRunRepo.create({
       teamId: team.id,
       rootTaskId: rootTask.id,
       status: "running",
@@ -3137,10 +3088,10 @@ export class ManagedSessionService {
       ? template.memberAgentRoleIds
       : [leadAgentRoleId];
     for (const [index, roleId] of memberRoleIds.entries()) {
-      if (!this.agentRoleRepo.findById(roleId)) continue;
-      this.teamItemRepo.create({
+      if (!(await this.agentRoleRepo.findById(roleId))) continue;
+      await this.teamItemRepo.create({
         teamRunId: run.id,
-        title: this.agentRoleRepo.findById(roleId)?.displayName || `Agent ${index + 1}`,
+        title: (await this.agentRoleRepo.findById(roleId))?.displayName || `Agent ${index + 1}`,
         description: rootTask.prompt,
         ownerAgentRoleId: roleId,
         status: "todo",
@@ -3189,23 +3140,27 @@ export class ManagedSessionService {
     }
   }
 
-  private syncLegacyMirror(
+  private async syncLegacyMirror(
     agent: ManagedAgent,
     version: ManagedAgentVersion,
     previousStudio?: ManagedAgentStudioConfig,
-  ): ManagedAgentVersion {
+  ): Promise<ManagedAgentVersion> {
     const studio = getStudioConfig(version);
     if (!studio) return version;
 
     const templateId = studio.templateId;
     const roleId = studio.legacyMirror?.agentRoleId ?? previousStudio?.legacyMirror?.agentRoleId;
     const existingRole =
-      (roleId ? this.agentRoleRepo.findById(roleId) : undefined) ||
-      this.agentRoleRepo.findAll(true).find((role) => roleMirrorsManagedAgent(role, agent.id)) ||
-      (() => {
-        const namedRole = this.agentRoleRepo.findByName(managedMirrorRoleBaseName(agent.name));
+      (roleId ? await this.agentRoleRepo.findById(roleId) : undefined) ||
+      (await this.agentRoleRepo.findAll(true)).find((role) =>
+        roleMirrorsManagedAgent(role, agent.id),
+      ) ||
+      (await (async () => {
+        const namedRole = await this.agentRoleRepo.findByName(
+          managedMirrorRoleBaseName(agent.name),
+        );
         return roleMirrorsManagedAgent(namedRole, agent.id) ? namedRole : undefined;
-      })();
+      })());
     const heartbeatPolicy = studio.scheduleConfig?.enabled
       ? {
           enabled: true,
@@ -3219,7 +3174,7 @@ export class ManagedSessionService {
     const autonomyPolicy = toManagedAutonomyPolicy(studio.approvalPolicy);
     let mirroredRole = existingRole;
     if (existingRole) {
-      mirroredRole = this.agentRoleRepo.update({
+      mirroredRole = await this.agentRoleRepo.update({
         id: existingRole.id,
         displayName: agent.name,
         description: agent.description,
@@ -3241,7 +3196,7 @@ export class ManagedSessionService {
         }),
       });
     } else {
-      mirroredRole = this.createLegacyMirrorRole(agent, {
+      mirroredRole = await this.createLegacyMirrorRole(agent, {
         name: managedMirrorRoleBaseName(agent.name),
         displayName: agent.name,
         description: agent.description,
@@ -3269,7 +3224,7 @@ export class ManagedSessionService {
     let automationProfileId = studio.legacyMirror?.automationProfileId;
     if (mirroredRole) {
       if (studio.scheduleConfig?.enabled) {
-        const profile = this.automationProfileRepo.createOrReplace({
+        const profile = await this.automationProfileRepo.createOrReplace({
           agentRoleId: mirroredRole.id,
           enabled: false,
           cadenceMinutes: Math.max(15, studio.scheduleConfig.cadenceMinutes || 180),
@@ -3278,9 +3233,9 @@ export class ManagedSessionService {
         });
         automationProfileId = profile.id;
       } else {
-        const existingProfile = this.automationProfileRepo.findByAgentRoleId(mirroredRole.id);
+        const existingProfile = await this.automationProfileRepo.findByAgentRoleId(mirroredRole.id);
         if (existingProfile) {
-          this.automationProfileRepo.update({
+          await this.automationProfileRepo.update({
             id: existingProfile.id,
             enabled: false,
             cadenceMinutes: existingProfile.cadenceMinutes,
@@ -3306,22 +3261,25 @@ export class ManagedSessionService {
       },
     };
     return (
-      this.managedAgentVersionRepo.updateMetadata(
+      (await this.managedAgentVersionRepo.updateMetadata(
         version.agentId,
         version.version,
         setStudioConfigMetadata(version.metadata, nextStudio),
-      ) || version
+      )) || version
     );
   }
 
-  private createLegacyMirrorRole(agent: ManagedAgent, request: CreateAgentRoleRequest): AgentRole {
+  private async createLegacyMirrorRole(
+    agent: ManagedAgent,
+    request: CreateAgentRoleRequest,
+  ): Promise<AgentRole> {
     const reservedNames = new Set<string>();
     let lastConstraintError: unknown;
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const name = this.allocateManagedMirrorRoleName(agent, reservedNames);
+      const name = await this.allocateManagedMirrorRoleName(agent, reservedNames);
       try {
-        return this.agentRoleRepo.create({
+        return await this.agentRoleRepo.create({
           ...request,
           name,
         });
@@ -3329,7 +3287,7 @@ export class ManagedSessionService {
         if (!isAgentRoleNameUniqueConstraint(error)) {
           throw error;
         }
-        const existingRole = this.agentRoleRepo.findByName(name);
+        const existingRole = await this.agentRoleRepo.findByName(name);
         if (existingRole && roleMirrorsManagedAgent(existingRole, agent.id)) {
           return existingRole;
         }
@@ -3344,12 +3302,12 @@ export class ManagedSessionService {
     );
   }
 
-  private allocateManagedMirrorRoleName(
+  private async allocateManagedMirrorRoleName(
     agent: ManagedAgent,
     reservedNames: Set<string> = new Set(),
-  ): string {
+  ): Promise<string> {
     const baseName = managedMirrorRoleBaseName(agent.name);
-    const existingBase = this.agentRoleRepo.findByName(baseName);
+    const existingBase = await this.agentRoleRepo.findByName(baseName);
     if (
       !reservedNames.has(baseName) &&
       (!existingBase || roleMirrorsManagedAgent(existingBase, agent.id))
@@ -3359,7 +3317,7 @@ export class ManagedSessionService {
 
     const suffix = agent.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "mirror";
     const candidate = `${baseName}-${suffix}`;
-    const existingCandidate = this.agentRoleRepo.findByName(candidate);
+    const existingCandidate = await this.agentRoleRepo.findByName(candidate);
     if (
       !reservedNames.has(candidate) &&
       (!existingCandidate || roleMirrorsManagedAgent(existingCandidate, agent.id))
@@ -3369,7 +3327,7 @@ export class ManagedSessionService {
 
     for (let index = 2; index < 1000; index += 1) {
       const indexedCandidate = `${candidate}-${index}`;
-      const existing = this.agentRoleRepo.findByName(indexedCandidate);
+      const existing = await this.agentRoleRepo.findByName(indexedCandidate);
       if (
         !reservedNames.has(indexedCandidate) &&
         (!existing || roleMirrorsManagedAgent(existing, agent.id))
@@ -3429,23 +3387,12 @@ export class ManagedSessionService {
     }
   }
 
-  private listRoutineRunsForAgent(agentId: string): Array<{
+  private async listRoutineRunsForAgent(agentId: string): Promise<Array<{
     run: import("../routines/types").RoutineRun;
     definition: Routine;
     surface: "slack" | "chatgpt";
-  }> {
-    if (!this.hasDatabaseTable("routine_runs") || !this.hasDatabaseTable("automation_routines")) {
-      return [];
-    }
-
-    const rows = this.db
-      .prepare(
-        `SELECT rr.*, ar.definition_json
-         FROM routine_runs rr
-         JOIN automation_routines ar ON ar.id = rr.routine_id
-         ORDER BY rr.updated_at DESC`,
-      )
-      .all() as Any[];
+  }>> {
+    const rows = await this.managedRows.routineRunRowsWithDefinition();
     const runs: Array<{
       run: import("../routines/types").RoutineRun;
       definition: Routine;
@@ -3485,15 +3432,6 @@ export class ManagedSessionService {
       runs.push({ run, definition, surface });
     }
     return runs;
-  }
-
-  private hasDatabaseTable(tableName: string): boolean {
-    if (!/^[a-zA-Z0-9_]+$/.test(tableName)) return false;
-    return Boolean(
-      this.db
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
-        .get(tableName),
-    );
   }
 
   private isSuccessfulSlackRun(run: import("../routines/types").RoutineRun): boolean {
@@ -3537,11 +3475,11 @@ export class ManagedSessionService {
     return Array.from(seen);
   }
 
-  private buildAudioSummaryScript(
+  private async buildAudioSummaryScript(
     session: ManagedSession,
     style: AudioSummaryConfig["style"],
-  ): string {
-    const events = this.managedSessionEventRepo.listBySessionId(session.id, 80);
+  ): Promise<string> {
+    const events = await this.managedSessionEventRepo.listBySessionId(session.id, 80);
     const assistantHighlights = events
       .filter((event) => event.type === "assistant.message")
       .map((event) => String(event.payload?.message || event.payload?.content || "").trim())

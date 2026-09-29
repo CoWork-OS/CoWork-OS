@@ -4,6 +4,14 @@
  * IPC handlers for managing the WebSocket control plane from the renderer.
  */
 
+import { AgentRoleRepository } from "../agents/agent-repository-facades";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import { ChannelRepository } from "../database/repository-facades";
+import {
+  ApprovalRepository,
+  ArtifactRepository,
+  InputRequestRepository,
+} from "../database/repository-facades";
 import { app, ipcMain, BrowserWindow } from "electron";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
@@ -50,20 +58,12 @@ import type { AgentDaemon } from "../agent/daemon";
 import type { DatabaseManager } from "../database/schema";
 import type { ChannelGateway } from "../gateway";
 import type { RoutineService } from "../routines/service";
-import {
-  ApprovalRepository,
-  ArtifactRepository,
-  ChannelRepository,
-  InputRequestRepository,
-  TaskEventRepository,
-  TaskRepository,
-  WorkspaceRepository,
-} from "../database/repositories";
+import { invalidateTaskRowReads, TaskEventRepository, TaskStore } from "../database/repositories";
 import { SearchProviderFactory } from "../agent/search";
 import { configureLlmFromControlPlaneParams, getControlPlaneLlmStatus } from "./llm-configure";
 import { checkTailscaleAvailability, getExposureStatus } from "../tailscale";
 import { registerACPMethods, shutdownACP, type ACPHandlerDeps } from "../acp";
-import { AgentRoleRepository } from "../agents/AgentRoleRepository";
+
 import { TailscaleSettingsManager } from "../tailscale/settings";
 import { RemoteGatewayClient } from "./remote-client";
 import {
@@ -95,7 +95,7 @@ import {
 } from "./fleet-manager";
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
-import { EverydayAgentService } from "../everyday-agent/EverydayAgentService";
+import { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
 import { normalizeImagesForRemote, sanitizeTaskMessageParams } from "./sanitize";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
@@ -114,6 +114,7 @@ import {
 } from "./task-event-transport";
 import { resolvePathWithinRoot } from "./path-containment";
 import { evaluateControlPlaneDeploymentPosture } from "./deployment-posture";
+import { controlPlaneStatements } from "./control-plane-statement-port";
 
 // Server instance
 let controlPlaneServer: ControlPlaneServer | null = null;
@@ -551,9 +552,9 @@ async function findManagedRemoteDeviceByNodeId(nodeId: string): Promise<ManagedD
   return null;
 }
 
-function getDefaultLocalWorkspaceId(db: Any): string | undefined {
+async function getDefaultLocalWorkspaceId(db: Any): Promise<string | undefined> {
   const workspaceRepo = new WorkspaceRepository(db);
-  return workspaceRepo.findAll()[0]?.id;
+  return (await workspaceRepo.findAll())[0]?.id;
 }
 
 /** Normalize path for cross-machine comparison (trim, unify slashes, remove trailing slash). */
@@ -584,12 +585,12 @@ function pathsMatch(a: string, b: string): boolean {
  * Resolve the local workspace ID for a remote task by matching remote workspace path to a local workspace.
  * Falls back to the default (most recently used) local workspace when no path match is found.
  */
-function resolveLocalWorkspaceIdForRemoteTask(
+async function resolveLocalWorkspaceIdForRemoteTask(
   db: Any,
   remoteWorkspaces: Array<{ id?: string; path?: string }>,
   remoteTask: { workspaceId?: string },
   fallbackWorkspaceId: string | undefined,
-): string | undefined {
+): Promise<string | undefined> {
   const workspaceRepo = new WorkspaceRepository(db);
   const remoteWorkspaceId = remoteTask?.workspaceId;
   if (!remoteWorkspaceId) return fallbackWorkspaceId;
@@ -601,8 +602,8 @@ function resolveLocalWorkspaceIdForRemoteTask(
   const normalizedRemote = normalizePathForMatch(remotePath);
   if (!normalizedRemote) return fallbackWorkspaceId;
 
-  const localWorkspaces = workspaceRepo
-    .findAll()
+  const localWorkspaces = (await workspaceRepo
+    .findAll())
     .filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
   const match = localWorkspaces.find((w) => pathsMatch(w.path, remotePath));
   return match?.id ?? fallbackWorkspaceId;
@@ -659,11 +660,11 @@ async function getLocalConfigSnapshot(): Promise<Any> {
   const taskRepo = new TaskRepository(db);
   const channelRepo = new ChannelRepository(db);
 
-  const allWorkspaces = workspaceRepo
-    .findAll()
+  const allWorkspaces = (await workspaceRepo
+    .findAll())
     .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
-  const allLocalTasks = taskRepo
-    .findAll(250, 0)
+  const allLocalTasks = (await taskRepo
+    .findAll(250, 0))
     .filter((task) => !task.targetNodeId || isLocalManagedDeviceIdentifier(task.targetNodeId));
   const byStatus = allLocalTasks.reduce(
     (acc: Record<string, number>, task) => {
@@ -673,7 +674,7 @@ async function getLocalConfigSnapshot(): Promise<Any> {
     },
     {} as Record<string, number>,
   );
-  const channels = channelRepo.findAll();
+  const channels = await channelRepo.findAll();
 
   return {
     runtime: {
@@ -709,8 +710,8 @@ async function getLocalStorageSummary(db: Any): Promise<{
 }> {
   const workspaceRepo = new WorkspaceRepository(db);
   const artifactRepo = new ArtifactRepository(db);
-  const workspaces = workspaceRepo
-    .findAll()
+  const workspaces = (await workspaceRepo
+    .findAll())
     .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
   const workspaceRoots = workspaces.map((workspace) => ({
     id: workspace.id,
@@ -736,7 +737,7 @@ async function getLocalStorageSummary(db: Any): Promise<{
     }
   }
 
-  const artifactCount = db.prepare("SELECT COUNT(1) AS count FROM artifacts").get() as Any;
+  const artifactCount = (await controlPlaneStatements(db).get("api_artifactCount", [])) as Any;
   return {
     storage: {
       workspaceCount: workspaceRoots.length,
@@ -752,25 +753,17 @@ async function getLocalStorageSummary(db: Any): Promise<{
   };
 }
 
-function upsertRemoteShadowTask(db: Any, workspaceId: string, nodeId: string, task: Any): void {
+async function upsertRemoteShadowTask(
+  db: Any,
+  workspaceId: string,
+  nodeId: string,
+  task: Any,
+): Promise<void> {
   const id = task?.id || randomUUID();
   const now = Date.now();
   const nextUpdatedAt =
     typeof task?.updatedAt === "number" && Number.isFinite(task.updatedAt) ? task.updatedAt : now;
-  db.prepare(
-    `INSERT INTO tasks (id, title, prompt, status, workspace_id, target_node_id, terminal_status, error, completed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       title = excluded.title,
-       prompt = excluded.prompt,
-       status = excluded.status,
-       workspace_id = excluded.workspace_id,
-       target_node_id = excluded.target_node_id,
-       terminal_status = excluded.terminal_status,
-       error = excluded.error,
-       completed_at = excluded.completed_at,
-       updated_at = excluded.updated_at`,
-  ).run(
+  await controlPlaneStatements(db).run("api_upsertRemoteShadowTask", [
     id,
     task?.title || task?.prompt || "Remote task",
     task?.prompt || task?.title || "",
@@ -782,7 +775,8 @@ function upsertRemoteShadowTask(db: Any, workspaceId: string, nodeId: string, ta
     task?.completedAt || null,
     typeof task?.createdAt === "number" && Number.isFinite(task.createdAt) ? task.createdAt : now,
     nextUpdatedAt,
-  );
+  ]);
+  invalidateTaskRowReads(db);
 }
 
 const REMOTE_TASK_SYNC_LIMIT = 200;
@@ -798,7 +792,7 @@ async function syncRemoteShadowTasksForNode(nodeId: string): Promise<void> {
   if (!remoteClient || status?.state !== "connected") return;
 
   const db = controlPlaneDeps.dbManager.getDatabase();
-  const fallbackWorkspaceId = getDefaultLocalWorkspaceId(db);
+  const fallbackWorkspaceId = await getDefaultLocalWorkspaceId(db);
   if (!fallbackWorkspaceId) return;
 
   try {
@@ -825,31 +819,30 @@ async function syncRemoteShadowTasksForNode(nodeId: string): Promise<void> {
             ? remoteTask.createdAt
             : Math.min(oldestFetchedCreatedAt, remoteTask.createdAt);
       }
-      const workspaceId = resolveLocalWorkspaceIdForRemoteTask(
+      const workspaceId = await resolveLocalWorkspaceIdForRemoteTask(
         db,
         remoteWorkspaces,
         remoteTask,
         fallbackWorkspaceId,
       );
       if (workspaceId) {
-        upsertRemoteShadowTask(db, workspaceId, targetNodeId, remoteTask);
+        await upsertRemoteShadowTask(db, workspaceId, targetNodeId, remoteTask);
       }
     }
 
     // Only prune rows that are guaranteed to be covered by the first page of remote tasks.
     if (remoteTasks.length === 0) {
-      repo.pruneByTargetNodeIds(targetNodeAliases, []);
+      await repo.pruneByTargetNodeIds(targetNodeAliases, []);
     } else if (oldestFetchedCreatedAt !== undefined) {
-      repo.pruneByTargetNodeIds(targetNodeAliases, remoteTaskIds, oldestFetchedCreatedAt);
+      await repo.pruneByTargetNodeIds(targetNodeAliases, remoteTaskIds, oldestFetchedCreatedAt);
     }
   } catch (error) {
     console.warn(`[ControlPlane] Failed to sync remote task list for ${remoteDevice.id}:`, error);
   }
 }
 
-function listLocalDeviceTasks(taskRepo: TaskRepository, limit = 50): Task[] {
-  return taskRepo
-    .findAll(Math.max(limit * 3, limit), 0)
+async function listLocalDeviceTasks(taskRepo: TaskRepository, limit = 50): Promise<Task[]> {
+  return (await taskRepo.findAll(Math.max(limit * 3, limit), 0))
     .filter((task) => !task.targetNodeId || isLocalManagedDeviceIdentifier(task.targetNodeId))
     .slice(0, limit);
 }
@@ -1001,16 +994,19 @@ async function buildLocalManagedDeviceSummary(): Promise<ManagedDeviceSummary> {
   const db = controlPlaneDeps.dbManager.getDatabase();
   const taskRepo = new TaskRepository(db);
   const inputRequestRepo = new InputRequestRepository(db);
-  const recentTasks = listLocalDeviceTasks(taskRepo, 12);
-  const approvalsPendingRow = db
-    .prepare("SELECT COUNT(1) AS count FROM approvals WHERE status = 'pending'")
-    .get() as Any;
+  const recentTasks = await listLocalDeviceTasks(taskRepo, 12);
+  const approvalsPendingRow = (await controlPlaneStatements(db).get(
+    "api_pendingApprovalCount",
+    [],
+  )) as Any;
   const approvalsPending = Number(approvalsPendingRow?.count || 0);
-  const inputRequestsPending = inputRequestRepo.list({
-    limit: 100,
-    offset: 0,
-    status: "pending",
-  }).length;
+  const inputRequestsPending = (
+    await inputRequestRepo.list({
+      limit: 100,
+      offset: 0,
+      status: "pending",
+    })
+  ).length;
   const accounts = ManagedAccountManager.list().map((account) =>
     ManagedAccountManager.toPublicView(account, false),
   );
@@ -1097,7 +1093,7 @@ async function buildRemoteManagedDeviceSummary(
   const db = controlPlaneDeps?.dbManager?.getDatabase() || null;
   const taskRepo = db ? new TaskRepository(db) : null;
   const aliases = await getManagedRemoteNodeAliases(device, device.taskNodeId || device.id);
-  const fallbackTasks = taskRepo ? taskRepo.findByTargetNodeIds(aliases, 12) : [];
+  const fallbackTasks = taskRepo ? await taskRepo.findByTargetNodeIds(aliases, 12) : [];
 
   let configSnapshot: Any = null;
   let taskSnapshot: Task[] = fallbackTasks;
@@ -1157,17 +1153,17 @@ async function buildRemoteManagedDeviceSummary(
     }
 
     if (db) {
-      const fallbackWorkspaceId = getDefaultLocalWorkspaceId(db);
+      const fallbackWorkspaceId = await getDefaultLocalWorkspaceId(db);
       const targetNodeId = device.taskNodeId || `remote-gateway:${device.id}`;
       for (const task of taskSnapshot) {
-        const workspaceId = resolveLocalWorkspaceIdForRemoteTask(
+        const workspaceId = await resolveLocalWorkspaceIdForRemoteTask(
           db,
           workspaces,
           task,
           fallbackWorkspaceId,
         );
         if (workspaceId) {
-          upsertRemoteShadowTask(db, workspaceId, targetNodeId, task);
+          await upsertRemoteShadowTask(db, workspaceId, targetNodeId, task);
         }
       }
     }
@@ -1175,7 +1171,7 @@ async function buildRemoteManagedDeviceSummary(
 
   const total =
     Number(configSnapshot?.tasks?.total || 0) ||
-    (taskRepo ? taskRepo.findByTargetNodeIds(aliases, 200).length : taskSnapshot.length);
+    (taskRepo ? (await taskRepo.findByTargetNodeIds(aliases, 200)).length : taskSnapshot.length);
   const active = configSnapshot?.tasks?.byStatus
     ? Object.entries(configSnapshot.tasks.byStatus).reduce((count, [state, value]) => {
         return count + (isActiveTaskStatus(state) ? Number(value || 0) : 0);
@@ -1298,7 +1294,7 @@ async function listManagedDevicesForRenderer(): Promise<ManagedDevice[]> {
   return [local, ...remotes];
 }
 
-function forwardRemoteTaskEvent(deviceId: string, payload: unknown): void {
+async function forwardRemoteTaskEvent(deviceId: string, payload: unknown): Promise<void> {
   if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
   const taskEvent = payload as Any;
   const taskId = taskEvent?.taskId;
@@ -1315,7 +1311,7 @@ function forwardRemoteTaskEvent(deviceId: string, payload: unknown): void {
   try {
     const db = controlPlaneDeps.dbManager.getDatabase();
     const repo = new TaskRepository(db);
-    const existing = repo.findById(taskId);
+    const existing = await repo.findById(taskId);
     if (!existing) return;
     const remoteNodeId = listStoredManagedDevices().find((d) => d.id === deviceId)?.taskNodeId;
     const isRemoteShadow =
@@ -1323,7 +1319,7 @@ function forwardRemoteTaskEvent(deviceId: string, payload: unknown): void {
       (existing.targetNodeId === remoteNodeId ||
         existing.targetNodeId === `remote-gateway:${deviceId}`);
     if (!isRemoteShadow) return;
-    repo.update(taskId, { status });
+    await repo.update(taskId, { status });
   } catch (error) {
     console.error(`[RemoteGateway] Failed to update local task ${taskId}:`, error);
   }
@@ -1353,7 +1349,9 @@ function ensureFleetManager() {
         });
       }
       if (event === Events.TASK_EVENT) {
-        forwardRemoteTaskEvent(deviceId, payload);
+        // Forwarding reads the task through the async storage facade; the listener stays
+        // synchronous, as before.
+        void forwardRemoteTaskEvent(deviceId, payload).catch(() => undefined);
       }
     },
     onTunnelStateChange: ({ deviceId, status, error }) => {
@@ -1412,6 +1410,8 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
   const db = controlPlaneDeps.dbManager.getDatabase();
   const taskRepo = new TaskRepository(db);
   const eventRepo = new TaskEventRepository(db);
+  // Timeline transports read tasks with the host task-event repository (storage slice C).
+  const taskStore = new TaskStore(db);
   const workspaceRepo = new WorkspaceRepository(db);
   const channelRepo = new ChannelRepository(db);
   const inputRequestRepo = new InputRequestRepository(db);
@@ -1422,28 +1422,28 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.CONFIG_GET:
       return getLocalConfigSnapshot();
     case Methods.WORKSPACE_LIST: {
-      const workspaces = workspaceRepo
-        .findAll()
+      const workspaces = (await workspaceRepo
+        .findAll())
         .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
       return { workspaces };
     }
     case Methods.TASK_LIST: {
       const { limit, offset, workspaceId } = sanitizeTaskListParams(params);
-      const tasks = listLocalDeviceTasks(taskRepo, limit + offset).slice(offset);
+      const tasks = (await listLocalDeviceTasks(taskRepo, limit + offset)).slice(offset);
       return {
         tasks: workspaceId ? tasks.filter((task) => task.workspaceId === workspaceId) : tasks,
       };
     }
     case Methods.TASK_GET: {
       const { taskId } = sanitizeTaskIdParams(params);
-      return { task: taskRepo.findById(taskId) || null };
+      return { task: (await taskRepo.findById(taskId)) || null };
     }
     case Methods.TASK_EVENTS: {
       const { taskId, limit } = sanitizeTaskEventsParams(params);
       const events = buildTaskEventHistoryForTransport({
         taskId,
         limit,
-        taskRepo,
+        taskRepo: taskStore,
         eventRepo,
       }).map((event) => serializeTaskEventForTransport(event, sanitizeForBroadcast));
       return { events };
@@ -1452,7 +1452,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
       const request = sanitizeTaskTimelinePageRequest(params);
       return buildTaskTimelinePageForTransport({
         request,
-        taskRepo,
+        taskRepo: taskStore,
         eventRepo,
         sanitizeValue: sanitizeForBroadcast,
       });
@@ -1461,7 +1461,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
       const request = sanitizeTaskEventDetailRequest(params);
       return buildTaskEventDetailForTransport({
         request,
-        taskRepo,
+        taskRepo: taskStore,
         eventRepo,
         sanitizeValue: sanitizeForBroadcast,
       });
@@ -1509,15 +1509,12 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.APPROVAL_LIST: {
       const { limit, offset, taskId } = sanitizeApprovalListParams(params);
       const approvals = taskId
-        ? approvalRepo.findPendingByTaskId(taskId).slice(offset, offset + limit)
-        : (() => {
-            const stmt = db.prepare(`
-              SELECT * FROM approvals
-              WHERE status = 'pending'
-              ORDER BY requested_at ASC
-              LIMIT ? OFFSET ?
-            `);
-            return stmt.all(limit, offset) as Any[];
+        ? (await approvalRepo.findPendingByTaskId(taskId)).slice(offset, offset + limit)
+        : await (async () => {
+            return (await controlPlaneStatements(db).all("api_listPendingApprovals", [
+              limit,
+              offset,
+            ])) as Any[];
           })();
       return { approvals };
     }
@@ -1529,7 +1526,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.INPUT_REQUEST_LIST: {
       const p = (params ?? {}) as Any;
       return {
-        inputRequests: inputRequestRepo.list({
+        inputRequests: await inputRequestRepo.list({
           limit:
             typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.max(1, p.limit) : 50,
           offset:
@@ -1542,22 +1539,19 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.INPUT_REQUEST_RESPOND:
       return controlPlaneDeps.agentDaemon.respondToInputRequest(params as Any);
     case Methods.CHANNEL_LIST:
-      return { channels: channelRepo.findAll() };
+      return { channels: await channelRepo.findAll() };
     case Methods.CHANNEL_GET: {
       const { channelId } = sanitizeChannelIdParams(params);
-      return { channel: channelRepo.findById(channelId) || null };
+      return { channel: (await channelRepo.findById(channelId)) || null };
     }
     case Methods.CHANNEL_CREATE: {
       const validated = sanitizeChannelCreateParams(params);
-      const existing = channelRepo.findByType(validated.type);
+      const existing = await channelRepo.findByType(validated.type);
       if (existing?.id) {
         throw new Error(`Channel type "${validated.type}" already exists`);
       }
       const id = randomUUID();
-      db.prepare(`
-        INSERT INTO channels (id, type, name, enabled, config, security_config, status, bot_username, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
+      await controlPlaneStatements(db).run("api_insertChannel", [
         id,
         validated.type,
         validated.name,
@@ -1568,7 +1562,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         null,
         Date.now(),
         Date.now(),
-      );
+      ]);
       if (validated.enabled && channelGateway) {
         await channelGateway.enableChannel(id);
       }
@@ -1577,17 +1571,17 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.CHANNEL_UPDATE: {
       const { channelId, updates } = sanitizeChannelUpdateParams(params);
       if (channelGateway) {
-        channelGateway.updateChannel(channelId, updates as Any);
+        await channelGateway.updateChannel(channelId, updates as Any);
         return { ok: true };
       }
       // Gateway not initialized: persist to DB; gateway will pick up on restart
-      channelRepo.update(channelId, updates as Any);
+      await channelRepo.update(channelId, updates as Any);
       return { ok: true, restartRequired: true };
     }
     case Methods.CHANNEL_ENABLE: {
       const { channelId } = sanitizeChannelIdParams(params);
       if (!channelGateway) {
-        channelRepo.update(channelId, { enabled: true });
+        await channelRepo.update(channelId, { enabled: true });
         return { ok: true, restartRequired: true };
       }
       await channelGateway.enableChannel(channelId);
@@ -1596,7 +1590,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.CHANNEL_DISABLE: {
       const { channelId } = sanitizeChannelIdParams(params);
       if (!channelGateway) {
-        channelRepo.update(channelId, { enabled: false, status: "disconnected" as Any });
+        await channelRepo.update(channelId, { enabled: false, status: "disconnected" as Any });
         return { ok: true, restartRequired: true };
       }
       await channelGateway.disableChannel(channelId);
@@ -1612,7 +1606,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.CHANNEL_REMOVE: {
       const { channelId } = sanitizeChannelIdParams(params);
       if (!channelGateway) {
-        channelRepo.delete(channelId);
+        await channelRepo.delete(channelId);
         return { ok: true, restartRequired: true };
       }
       await channelGateway.removeChannel(channelId);
@@ -2300,7 +2294,7 @@ function attachAgentDaemonTaskBridge(
   const unsubscribes: Array<() => void> = [];
 
   for (const eventType of allowlist) {
-    const handler = (evt: any) => {
+    const handler = async (evt: any) => {
       try {
         const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
         if (!taskId) return;
@@ -2360,7 +2354,7 @@ function attachAgentDaemonTaskBridge(
         });
 
         if (managedSessions) {
-          const bridged = managedSessions.bridgeTaskEventNotification(taskId, {
+          const bridged = await managedSessions.bridgeTaskEventNotification(taskId, {
             eventId: typeof evt?.eventId === "string" ? evt.eventId : undefined,
             timestamp:
               typeof evt?.timestamp === "number" && Number.isFinite(evt.timestamp)
@@ -2399,8 +2393,10 @@ function attachAgentDaemonTaskBridge(
       }
     };
 
-    daemon.on(eventType, handler);
-    unsubscribes.push(() => daemon.off(eventType, handler));
+    // The broadcast awaits storage reads; the listener itself stays synchronous.
+    const listener = (evt: any) => void handler(evt);
+    daemon.on(eventType, listener);
+    unsubscribes.push(() => daemon.off(eventType, listener));
   }
 
   return () => {
@@ -2613,14 +2609,14 @@ function registerACPMethodsOnServer(
       let workspaceId = params.workspaceId;
       if (!workspaceId) {
         const workspaceRepo = new WorkspaceRepository(db);
-        const workspaces = workspaceRepo.findAll().filter((w: any) => !w.isTemp);
+        const workspaces = (await workspaceRepo.findAll()).filter((w: any) => !w.isTemp);
         if (workspaces.length > 0) {
           workspaceId = workspaces[0].id;
         } else {
           throw new Error("No workspace available for ACP task delegation");
         }
       }
-      const task = taskRepo.create({
+      const task = await taskRepo.create({
         title: params.title,
         prompt: params.prompt,
         status: "pending",
@@ -2638,7 +2634,7 @@ function registerACPMethodsOnServer(
       let workspaceId = params.workspaceId;
       if (!workspaceId) {
         const workspaceRepo = new WorkspaceRepository(db);
-        const workspaces = workspaceRepo.findAll().filter((w: any) => !w.isTemp);
+        const workspaces = (await workspaceRepo.findAll()).filter((w: any) => !w.isTemp);
         if (workspaces.length > 0) {
           workspaceId = workspaces[0].id;
         } else {
@@ -2674,8 +2670,8 @@ function registerACPMethodsOnServer(
         error: node.error,
       };
     },
-    getDelegatedGraphStatus: (acpTaskId) => {
-      const node = deps.agentDaemon
+    getDelegatedGraphStatus: async (acpTaskId) => {
+      const node = await deps.agentDaemon
         .getOrchestrationGraphRepository()
         .findNodeByAcpTaskId(acpTaskId);
       if (!node) return undefined;
@@ -2688,15 +2684,15 @@ function registerACPMethodsOnServer(
       };
     },
     cancelDelegatedGraphTask: async (acpTaskId) => {
-      const node = deps.agentDaemon
+      const node = await deps.agentDaemon
         .getOrchestrationGraphRepository()
         .findNodeByAcpTaskId(acpTaskId);
       if (!node?.publicHandle) return;
       const rootTaskId = node.parentTaskId || `acp:${acpTaskId}`;
       await deps.agentDaemon.cancelDelegatedNode(rootTaskId, node.publicHandle);
     },
-    getTask: (taskId) => {
-      const task = taskRepo.findById(taskId);
+    getTask: async (taskId) => {
+      const task = await taskRepo.findById(taskId);
       if (!task) return undefined;
       return { id: task.id, status: task.status, error: (task as any).error };
     },
@@ -2902,6 +2898,8 @@ function registerTaskAndWorkspaceMethods(
   const channelRepo = new ChannelRepository(db);
   const approvalRepo = new ApprovalRepository(db);
   const eventRepo = new TaskEventRepository(db);
+  // Timeline transports read tasks with the host task-event repository (storage slice C).
+  const taskStore = new TaskStore(db);
   const managedSessions = getManagedSessionService(deps);
   const everydayAgent = getEverydayAgentService(deps);
   const agentDaemon = deps.agentDaemon;
@@ -2955,7 +2953,7 @@ function registerTaskAndWorkspaceMethods(
   // Workspaces
   server.registerMethod(Methods.WORKSPACE_LIST, async (client) => {
     requireScope(client, "read");
-    const all = workspaceRepo.findAll();
+    const all = await workspaceRepo.findAll();
     const workspaces = all.filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
     return {
       workspaces: isAdminClient(client) ? workspaces : workspaces.map(redactWorkspaceForRead),
@@ -2965,7 +2963,7 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.WORKSPACE_GET, async (client, params) => {
     requireScope(client, "read");
     const { workspaceId } = sanitizeWorkspaceIdParams(params);
-    const workspace = workspaceRepo.findById(workspaceId);
+    const workspace = await workspaceRepo.findById(workspaceId);
     if (!workspace) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Workspace not found: ${workspaceId}` };
     }
@@ -2976,7 +2974,7 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "admin");
     const validated = sanitizeWorkspaceCreateParams(params);
 
-    if (workspaceRepo.existsByPath(validated.path)) {
+    if (await workspaceRepo.existsByPath(validated.path)) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
         message: `A workspace with path "${validated.path}" already exists`,
@@ -3000,7 +2998,7 @@ function registerTaskAndWorkspaceMethods(
       shell: false,
     };
 
-    const workspace = workspaceRepo.create(
+    const workspace = await workspaceRepo.create(
       validated.name,
       validated.path,
       defaultPermissions as any,
@@ -3016,7 +3014,7 @@ function registerTaskAndWorkspaceMethods(
     const relativePath = typeof p.path === "string" ? p.path.trim() || "." : ".";
     if (!workspaceId) throw { code: ErrorCodes.INVALID_PARAMS, message: "workspaceId is required" };
 
-    const workspace = workspaceRepo.findById(workspaceId);
+    const workspace = await workspaceRepo.findById(workspaceId);
     if (!workspace) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Workspace not found: ${workspaceId}` };
     }
@@ -3086,7 +3084,9 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.EVERYDAY_AGENT_LIST_RECEIPTS, async (client, params) => {
     requireEverydayAgentReceiptAccess(client);
     return {
-      receipts: everydayAgent.listReceipts((params || {}) as EverydayAgentListReceiptsRequest),
+      receipts: await everydayAgent.listReceipts(
+        (params || {}) as EverydayAgentListReceiptsRequest,
+      ),
     };
   });
 
@@ -3097,19 +3097,21 @@ function registerTaskAndWorkspaceMethods(
 
   server.registerMethod(Methods.EVERYDAY_AGENT_PREVIEW_ACTION, async (client, params) => {
     requireScope(client, "admin");
-    return { preview: everydayAgent.previewAction(params as EverydayActionPreviewInput) };
+    return { preview: await everydayAgent.previewAction(params as EverydayActionPreviewInput) };
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_APPROVE_ACTION, async (client, params) => {
     requireScope(client, "admin");
-    return { receipt: everydayAgent.approveAction(params as EverydayAgentApproveActionRequest) };
+    return {
+      receipt: await everydayAgent.approveAction(params as EverydayAgentApproveActionRequest),
+    };
   });
 
   server.registerMethod(Methods.MANAGED_AGENT_LIST, async (client, params) => {
     requireScope(client, "read");
     const p = sanitizeManagedSessionListParams(params);
     return {
-      agents: managedSessions.listAgents({
+      agents: await managedSessions.listAgents({
         limit: p.limit,
         offset: p.offset,
         status: p.status,
@@ -3120,7 +3122,7 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.MANAGED_AGENT_GET, async (client, params) => {
     requireScope(client, "read");
     const { agentId } = sanitizeManagedAgentIdParams(params);
-    const result = managedSessions.getAgent(agentId);
+    const result = await managedSessions.getAgent(agentId);
     if (!result) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Managed agent not found: ${agentId}` };
     }
@@ -3147,25 +3149,25 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.MANAGED_AGENT_VERSION_LIST, async (client, params) => {
     requireScope(client, "read");
     const { agentId } = sanitizeManagedAgentIdParams(params);
-    return { versions: managedSessions.listAgentVersions(agentId) };
+    return { versions: await managedSessions.listAgentVersions(agentId) };
   });
 
   server.registerMethod(Methods.MANAGED_AGENT_VERSION_GET, async (client, params) => {
     requireScope(client, "read");
     const { agentId, version } = sanitizeManagedAgentVersionParams(params);
-    return { version: managedSessions.getAgentVersion(agentId, version) || null };
+    return { version: (await managedSessions.getAgentVersion(agentId, version)) || null };
   });
 
   server.registerMethod(Methods.MANAGED_ENVIRONMENT_LIST, async (client, params) => {
     requireScope(client, "read");
     const p = sanitizeManagedSessionListParams(params);
     return {
-      environments: managedSessions
+      environments: (await managedSessions
         .listEnvironments({
           limit: p.limit,
           offset: p.offset,
           status: p.status,
-        })
+        }))
         .map(redactManagedEnvironmentForRead),
     };
   });
@@ -3173,7 +3175,7 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.MANAGED_ENVIRONMENT_GET, async (client, params) => {
     requireScope(client, "read");
     const { environmentId } = sanitizeManagedEnvironmentIdParams(params);
-    const environment = managedSessions.getEnvironment(environmentId);
+    const environment = await managedSessions.getEnvironment(environmentId);
     if (!environment) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -3187,7 +3189,7 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "admin");
     return {
       environment: redactManagedEnvironmentForRead(
-        managedSessions.createEnvironment(sanitizeManagedEnvironmentCreateParams(params)),
+        await managedSessions.createEnvironment(sanitizeManagedEnvironmentCreateParams(params)),
       ),
     };
   });
@@ -3197,7 +3199,7 @@ function registerTaskAndWorkspaceMethods(
     const validated = sanitizeManagedEnvironmentUpdateParams(params);
     return {
       environment: redactManagedEnvironmentForRead(
-        managedSessions.updateEnvironment(validated.environmentId, validated) || null,
+        (await managedSessions.updateEnvironment(validated.environmentId, validated)) || null,
       ),
     };
   });
@@ -3207,20 +3209,22 @@ function registerTaskAndWorkspaceMethods(
     const { environmentId } = sanitizeManagedEnvironmentIdParams(params);
     return {
       environment: redactManagedEnvironmentForRead(
-        managedSessions.archiveEnvironment(environmentId) || null,
+        (await managedSessions.archiveEnvironment(environmentId)) || null,
       ),
     };
   });
 
   server.registerMethod(Methods.MANAGED_SESSION_LIST, async (client, params) => {
     requireScope(client, "read");
-    return { sessions: managedSessions.listSessions(sanitizeManagedSessionListParams(params)) };
+    return {
+      sessions: await managedSessions.listSessions(sanitizeManagedSessionListParams(params)),
+    };
   });
 
   server.registerMethod(Methods.MANAGED_SESSION_GET, async (client, params) => {
     requireScope(client, "read");
     const { sessionId } = sanitizeManagedSessionIdParams(params);
-    const session = managedSessions.getSession(sessionId);
+    const session = await managedSessions.getSession(sessionId);
     if (!session) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -3273,7 +3277,7 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "read");
     const { sessionId, limit } = sanitizeManagedSessionEventsParams(params);
     return {
-      events: managedSessions.listSessionEvents(sessionId, limit).map((event) => ({
+      events: (await managedSessions.listSessionEvents(sessionId, limit)).map((event) => ({
         ...event,
         payload: sanitizeForBroadcast(event.payload),
       })),
@@ -3285,7 +3289,7 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "admin");
     const validated = sanitizeTaskCreateParams(params);
 
-    const workspace = workspaceRepo.findById(validated.workspaceId);
+    const workspace = await workspaceRepo.findById(validated.workspaceId);
     if (!workspace) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -3327,7 +3331,7 @@ function registerTaskAndWorkspaceMethods(
         }
       : undefined;
 
-    const task = taskRepo.create({
+    const task = await taskRepo.create({
       title: validated.title,
       prompt: validated.prompt,
       rawPrompt: validated.prompt,
@@ -3346,13 +3350,13 @@ function registerTaskAndWorkspaceMethods(
       initialUpdates.boardColumn = "todo";
     }
     if (Object.keys(initialUpdates).length > 0) {
-      taskRepo.update(task.id, initialUpdates);
+      await taskRepo.update(task.id, initialUpdates);
       Object.assign(task, initialUpdates);
     }
 
     if (!isTempWorkspaceId(validated.workspaceId) && !workspace?.isTemp) {
       try {
-        workspaceRepo.updateLastUsedAt(validated.workspaceId);
+        await workspaceRepo.updateLastUsedAt(validated.workspaceId);
       } catch (error) {
         console.warn("[ControlPlane] Failed to update workspace last used time:", error);
       }
@@ -3361,7 +3365,7 @@ function registerTaskAndWorkspaceMethods(
     try {
       await agentDaemon.startTask(task);
     } catch (error: any) {
-      agentDaemon.failTask(task.id, error?.message || "Failed to start task");
+      await agentDaemon.failTask(task.id, error?.message || "Failed to start task");
       throw {
         code: ErrorCodes.METHOD_FAILED,
         message: error?.message || "Failed to start task. Check LLM provider settings.",
@@ -3377,7 +3381,7 @@ function registerTaskAndWorkspaceMethods(
     const events = buildTaskEventHistoryForTransport({
       taskId,
       limit,
-      taskRepo,
+      taskRepo: taskStore,
       eventRepo,
     }).map((event) => serializeTaskEventForTransport(event, sanitizeForBroadcast));
     return { events };
@@ -3388,7 +3392,7 @@ function registerTaskAndWorkspaceMethods(
     const request = sanitizeTaskTimelinePageRequest(params);
     return buildTaskTimelinePageForTransport({
       request,
-      taskRepo,
+      taskRepo: taskStore,
       eventRepo,
       sanitizeValue: sanitizeForBroadcast,
     });
@@ -3399,7 +3403,7 @@ function registerTaskAndWorkspaceMethods(
     const request = sanitizeTaskEventDetailRequest(params);
     return buildTaskEventDetailForTransport({
       request,
-      taskRepo,
+      taskRepo: taskStore,
       eventRepo,
       sanitizeValue: sanitizeForBroadcast,
     });
@@ -3408,7 +3412,7 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.TASK_GET, async (client, params) => {
     requireScope(client, "read");
     const { taskId } = sanitizeTaskIdParams(params);
-    const task = taskRepo.findById(taskId);
+    const task = await taskRepo.findById(taskId);
     if (!task) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Task not found: ${taskId}` };
     }
@@ -3420,8 +3424,8 @@ function registerTaskAndWorkspaceMethods(
     const { limit, offset, workspaceId } = sanitizeTaskListParams(params);
 
     if (workspaceId) {
-      const total = taskRepo.countByWorkspace(workspaceId);
-      const tasks = taskRepo.findByWorkspace(workspaceId, limit, offset);
+      const total = await taskRepo.countByWorkspace(workspaceId);
+      const tasks = await taskRepo.findByWorkspace(workspaceId, limit, offset);
       return {
         tasks: isAdminClient(client) ? tasks : tasks.map(redactTaskForRead),
         total,
@@ -3430,7 +3434,7 @@ function registerTaskAndWorkspaceMethods(
       };
     }
 
-    const tasks = taskRepo.findAll(limit, offset);
+    const tasks = await taskRepo.findAll(limit, offset);
     return { tasks: isAdminClient(client) ? tasks : tasks.map(redactTaskForRead), limit, offset };
   });
 
@@ -3478,16 +3482,13 @@ function registerTaskAndWorkspaceMethods(
     const { limit, offset, taskId } = sanitizeApprovalListParams(params);
 
     const approvals = taskId
-      ? approvalRepo.findPendingByTaskId(taskId).slice(offset, offset + limit)
-      : (() => {
+      ? (await approvalRepo.findPendingByTaskId(taskId)).slice(offset, offset + limit)
+      : await (async () => {
           // The repository only has findPendingByTaskId; implement global listing here.
-          const stmt = db.prepare(`
-            SELECT * FROM approvals
-            WHERE status = 'pending'
-            ORDER BY requested_at ASC
-            LIMIT ? OFFSET ?
-          `);
-          const rows = stmt.all(limit, offset) as any[];
+          const rows = (await controlPlaneStatements(db).all("api_listPendingApprovals", [
+            limit,
+            offset,
+          ])) as any[];
           return rows.map((row) => ({
             id: String(row.id ?? ""),
             taskId: String(row.task_id ?? ""),
@@ -3506,14 +3507,16 @@ function registerTaskAndWorkspaceMethods(
           }));
         })();
 
-    const enriched = approvals.map((a: any) => {
-      const t = a.taskId ? taskRepo.findById(a.taskId) : undefined;
-      return {
-        ...a,
-        ...(t ? { taskTitle: t.title, workspaceId: t.workspaceId, taskStatus: t.status } : {}),
-        details: sanitizeForBroadcast(a.details),
-      };
-    });
+    const enriched = await Promise.all(
+      approvals.map(async (a: any) => {
+        const t = a.taskId ? await taskRepo.findById(a.taskId) : undefined;
+        return {
+          ...a,
+          ...(t ? { taskTitle: t.title, workspaceId: t.workspaceId, taskStatus: t.status } : {}),
+          details: sanitizeForBroadcast(a.details),
+        };
+      }),
+    );
 
     return { approvals: enriched };
   });
@@ -3528,7 +3531,7 @@ function registerTaskAndWorkspaceMethods(
   // Channels (gateway)
   server.registerMethod(Methods.CHANNEL_LIST, async (client) => {
     requireScope(client, "read");
-    const rows = db.prepare("SELECT * FROM channels ORDER BY created_at ASC").all() as any[];
+    const rows = (await controlPlaneStatements(db).all("api_listChannels", [])) as any[];
     const channels = rows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),
@@ -3577,7 +3580,7 @@ function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.CHANNEL_GET, async (client, params) => {
     requireScope(client, "read");
     const { channelId } = sanitizeChannelIdParams(params);
-    const row = db.prepare("SELECT * FROM channels WHERE id = ?").get(channelId) as any;
+    const row = (await controlPlaneStatements(db).get("api_getChannel", [channelId])) as any;
     if (!row) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Channel not found: ${channelId}` };
     }
@@ -3630,9 +3633,9 @@ function registerTaskAndWorkspaceMethods(
     const validated = sanitizeChannelCreateParams(params);
 
     // Enforce one channel per type (router registers by type).
-    const existing = db
-      .prepare("SELECT id FROM channels WHERE type = ? LIMIT 1")
-      .get(validated.type) as any;
+    const existing = (await controlPlaneStatements(db).get("api_channelIdForType", [
+      validated.type,
+    ])) as any;
     if (existing?.id) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -3642,10 +3645,7 @@ function registerTaskAndWorkspaceMethods(
 
     const now = Date.now();
     const id = randomUUID();
-    db.prepare(`
-      INSERT INTO channels (id, type, name, enabled, config, security_config, status, bot_username, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await controlPlaneStatements(db).run("api_insertChannel", [
       id,
       validated.type,
       validated.name,
@@ -3656,7 +3656,7 @@ function registerTaskAndWorkspaceMethods(
       null,
       now,
       now,
-    );
+    ]);
 
     // If the gateway is running, optionally connect immediately when enabled.
     if (validated.enabled && channelGateway) {
@@ -3664,11 +3664,11 @@ function registerTaskAndWorkspaceMethods(
         await channelGateway.enableChannel(id);
       } catch (error: any) {
         // Keep the channel record but surface the connection error.
-        db.prepare("UPDATE channels SET enabled = 0, status = ?, updated_at = ? WHERE id = ?").run(
+        await controlPlaneStatements(db).run("api_disableChannel", [
           "disconnected",
           Date.now(),
           id,
-        );
+        ]);
         throw {
           code: ErrorCodes.METHOD_FAILED,
           message: error?.message || "Failed to enable channel",
@@ -3684,30 +3684,26 @@ function registerTaskAndWorkspaceMethods(
     const { channelId, updates } = sanitizeChannelUpdateParams(params);
 
     if (channelGateway) {
-      channelGateway.updateChannel(channelId, updates as any);
+      await channelGateway.updateChannel(channelId, updates as any);
       return { ok: true };
     }
 
-    // Fallback: update DB only (restart required to take effect).
-    const fields: string[] = [];
-    const values: any[] = [];
-    if (updates.name !== undefined) {
-      fields.push("name = ?");
-      values.push(updates.name);
+    // Fallback: update DB only (restart required to take effect). Unset fields keep
+    // their stored value.
+    if (
+      updates.name === undefined &&
+      updates.config === undefined &&
+      updates.securityConfig === undefined
+    ) {
+      return { ok: true };
     }
-    if (updates.config !== undefined) {
-      fields.push("config = ?");
-      values.push(JSON.stringify(updates.config));
-    }
-    if (updates.securityConfig !== undefined) {
-      fields.push("security_config = ?");
-      values.push(JSON.stringify(updates.securityConfig));
-    }
-    if (fields.length === 0) return { ok: true };
-    fields.push("updated_at = ?");
-    values.push(Date.now());
-    values.push(channelId);
-    db.prepare(`UPDATE channels SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    await controlPlaneStatements(db).run("api_updateChannelFields", [
+      updates.name ?? null,
+      updates.config === undefined ? null : JSON.stringify(updates.config),
+      updates.securityConfig === undefined ? null : JSON.stringify(updates.securityConfig),
+      Date.now(),
+      channelId,
+    ]);
     return { ok: true, restartRequired: true };
   });
 
@@ -3724,10 +3720,7 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "admin");
     const { channelId } = sanitizeChannelIdParams(params);
     if (!channelGateway) {
-      db.prepare("UPDATE channels SET enabled = 1, updated_at = ? WHERE id = ?").run(
-        Date.now(),
-        channelId,
-      );
+      await controlPlaneStatements(db).run("api_enableChannel", [Date.now(), channelId]);
       return { ok: true, restartRequired: true };
     }
     await channelGateway.enableChannel(channelId);
@@ -3738,11 +3731,11 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "admin");
     const { channelId } = sanitizeChannelIdParams(params);
     if (!channelGateway) {
-      db.prepare("UPDATE channels SET enabled = 0, status = ?, updated_at = ? WHERE id = ?").run(
+      await controlPlaneStatements(db).run("api_disableChannel", [
         "disconnected",
         Date.now(),
         channelId,
-      );
+      ]);
       return { ok: true, restartRequired: true };
     }
     await channelGateway.disableChannel(channelId);
@@ -3753,7 +3746,7 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "admin");
     const { channelId } = sanitizeChannelIdParams(params);
     if (!channelGateway) {
-      channelRepo.delete(channelId);
+      await channelRepo.delete(channelId);
       return { ok: true, restartRequired: true };
     }
     await channelGateway.removeChannel(channelId);
@@ -3771,14 +3764,15 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "read");
     const isAdmin = isAdminClient(client);
 
-    const allWorkspaces = workspaceRepo
-      .findAll()
+    const allWorkspaces = (await workspaceRepo
+      .findAll())
       .filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
     const workspacesForClient = isAdmin ? allWorkspaces : allWorkspaces.map(redactWorkspaceForRead);
 
-    const taskStatusRows = db
-      .prepare(`SELECT status, COUNT(1) AS count FROM tasks GROUP BY status`)
-      .all() as Array<{ status: string; count: number }>;
+    const taskStatusRows = (await controlPlaneStatements(db).all(
+      "api_taskStatusCounts",
+      [],
+    )) as Array<{ status: string; count: number }>;
 
     const tasksByStatus: Record<string, number> = {};
     let taskTotal = 0;
@@ -3861,11 +3855,7 @@ function registerTaskAndWorkspaceMethods(
     }
 
     // Channels summary (no secrets).
-    const channelRows = db
-      .prepare(
-        `SELECT id, type, name, enabled, status, bot_username, security_config, created_at, updated_at FROM channels ORDER BY created_at ASC`,
-      )
-      .all() as any[];
+    const channelRows = (await controlPlaneStatements(db).all("api_channelSummaries", [])) as any[];
     const channels = channelRows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),
@@ -4796,9 +4786,9 @@ export function setupControlPlaneHandlers(
         const db = controlPlaneDeps.dbManager.getDatabase();
         const workspaceRepo = new WorkspaceRepository(db);
         const requestedLocalWorkspace = params.workspaceId
-          ? workspaceRepo.findById(params.workspaceId)
+          ? await workspaceRepo.findById(params.workspaceId)
           : undefined;
-        const fallbackLocalWorkspace = workspaceRepo.findAll()[0];
+        const fallbackLocalWorkspace = (await workspaceRepo.findAll())[0];
         const localWorkspaceId = requestedLocalWorkspace?.id || fallbackLocalWorkspace?.id;
         if (!localWorkspaceId) {
           return { ok: false, error: "No local workspace available for remote task shadow record" };
@@ -4867,7 +4857,7 @@ export function setupControlPlaneHandlers(
 
         const remoteTask = remoteTaskRes?.task;
         const id = remoteTaskRes?.taskId || remoteTask?.id || randomUUID();
-        upsertRemoteShadowTask(
+        await upsertRemoteShadowTask(
           db,
           localWorkspaceId,
           remoteDevice.taskNodeId || `remote-gateway:${remoteDevice.id}`,
@@ -4955,9 +4945,9 @@ export function setupControlPlaneHandlers(
   ipcMain.handle(IPC_CHANNELS.DEVICE_GET_PROFILES, async () => {
     try {
       if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
-      const { DeviceProfileRepository } = await import("../database/DeviceProfileRepository");
+      const { DeviceProfileRepository } = await import("../database/repository-facades");
       const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
-      return { ok: true, profiles: repo.list() };
+      return { ok: true, profiles: await repo.list() };
     } catch (error: any) {
       return { ok: false, error: error.message || String(error) };
     }
@@ -4972,9 +4962,9 @@ export function setupControlPlaneHandlers(
     ) => {
       try {
         if (!controlPlaneDeps?.dbManager) return { ok: false, error: "No database" };
-        const { DeviceProfileRepository } = await import("../database/DeviceProfileRepository");
+        const { DeviceProfileRepository } = await import("../database/repository-facades");
         const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
-        repo.upsert(deviceId, data);
+        await repo.upsert(deviceId, data);
         return { ok: true };
       } catch (error: any) {
         return { ok: false, error: error.message || String(error) };

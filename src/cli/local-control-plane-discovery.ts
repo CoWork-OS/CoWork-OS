@@ -131,6 +131,9 @@ function readDatabaseSettings(userDataDir: string): LocalControlPlaneDiscoveryRe
     const Database = require("better-sqlite3");
     const openedDb = new Database(dbPath, { readonly: true, fileMustExist: true });
     db = openedDb;
+    // Every connection sets its own lock wait (DB6); a reader waits, it never fails fast
+    // on a writer's lock.
+    openedDb.pragma("busy_timeout = 2000");
     const row = openedDb
       .prepare("SELECT encrypted_data, checksum FROM secure_settings WHERE category = ?")
       .get("controlplane") as SecureSettingsRow | undefined;

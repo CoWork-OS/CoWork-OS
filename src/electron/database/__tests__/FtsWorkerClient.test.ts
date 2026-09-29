@@ -91,6 +91,31 @@ describe("FtsWorkerClient", () => {
     expect(mockWorkerInstance).not.toBe(workerBeforeRestart);
   });
 
+  it("treats an exit with code zero as a crash and respawns", async () => {
+    const promise = client.search("ws-1", "test", 10, false);
+    const exitedWorker = mockWorkerInstance;
+
+    exitedWorker.emit("exit", 0);
+
+    await expect(promise).rejects.toThrow("crashed");
+    vi.advanceTimersByTime(1000);
+    expect(mockWorkerInstance).not.toBe(exitedWorker);
+  });
+
+  it("ignores late events from a replaced worker", async () => {
+    const replacedWorker = mockWorkerInstance;
+    replacedWorker.emit("error", new Error("boom"));
+    vi.advanceTimersByTime(1000);
+    const currentWorker = mockWorkerInstance;
+    expect(currentWorker).not.toBe(replacedWorker);
+
+    const promise = client.search("ws-1", "still alive", 10, false);
+    replacedWorker.emit("exit", 1);
+    const msg = currentWorker.postMessage.mock.calls[0][0];
+    currentWorker.emit("message", { id: msg.id, result: [] });
+    await expect(promise).resolves.toEqual([]);
+  });
+
   it("respawns with exponential backoff after crash", () => {
     mockWorkerInstance.emit("error", new Error("crash 1"));
     expect(mockWorkerInstance.terminate).not.toHaveBeenCalled();

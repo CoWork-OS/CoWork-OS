@@ -125,7 +125,7 @@ export class PlaybookSkillPromoter {
 
     try {
       // Find reinforcement candidates
-      const candidates = this.findCandidates(workspaceId);
+      const candidates = await this.findCandidates(workspaceId);
       if (candidates.length === 0) {
         return { proposed: false, reason: "no_candidates" };
       }
@@ -152,15 +152,15 @@ export class PlaybookSkillPromoter {
    * Clusters of active success evidence joined by durable reinforcement links, counting
    * distinct independent executions (not memory rows or chains) per cluster.
    */
-  static findCandidates(
+  static async findCandidates(
     workspaceId: string,
     threshold = DEFAULT_PROMOTION_THRESHOLD,
-  ): PromotionCandidate[] {
+  ): Promise<PromotionCandidate[]> {
     try {
       const store = PlaybookService.getEvidenceStore();
       if (!store) return [];
       const eligible = new Map<string, PlaybookSuccess>();
-      for (const success of PlaybookService.eligibleSuccesses(store, workspaceId)) {
+      for (const success of await PlaybookService.eligibleSuccesses(store, workspaceId)) {
         if (success.record.patternKey) eligible.set(success.record.id, success);
       }
       if (eligible.size === 0) return [];
@@ -174,7 +174,7 @@ export class PlaybookSkillPromoter {
         return root;
       };
       for (const id of eligible.keys()) parent.set(id, id);
-      for (const link of store.listActiveLinks(workspaceId)) {
+      for (const link of await store.listActiveLinks(workspaceId)) {
         const from = eligible.get(link.from);
         const to = eligible.get(link.to);
         if (!from || !to || from.record.patternKey !== to.record.patternKey) continue;

@@ -1,3 +1,9 @@
+import { TaskRepository, WorkspaceRepository } from "../electron/database/repository-facades";
+import { ChannelRepository } from "../electron/database/repository-facades";
+import {
+  ApprovalRepository,
+  InputRequestRepository,
+} from "../electron/database/repository-facades";
 import * as fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -11,14 +17,7 @@ import { isTempWorkspaceId } from "../shared/types";
 import type { AgentDaemon } from "../electron/agent/daemon";
 import type { DatabaseManager } from "../electron/database/schema";
 import type { ChannelGateway } from "../electron/gateway";
-import {
-  ApprovalRepository,
-  ChannelRepository,
-  InputRequestRepository,
-  TaskEventRepository,
-  TaskRepository,
-  WorkspaceRepository,
-} from "../electron/database/repositories";
+import { TaskEventRepository, TaskStore } from "../electron/database/repositories";
 import { SearchProviderFactory } from "../electron/agent/search";
 import {
   configureLlmFromControlPlaneParams,
@@ -54,6 +53,7 @@ import {
   sanitizeTaskEventDetailRequest,
   sanitizeTaskTimelinePageRequest,
 } from "../electron/control-plane/task-event-transport";
+import { controlPlaneStatements } from "../electron/control-plane/control-plane-statement-port";
 
 export interface ControlPlaneMethodDeps {
   agentDaemon: AgentDaemon;
@@ -762,6 +762,8 @@ export function registerControlPlaneMethods(
   const approvalRepo = new ApprovalRepository(db);
   const inputRequestRepo = new InputRequestRepository(db);
   const eventRepo = new TaskEventRepository(db);
+  // Timeline transports read tasks with the host task-event repository (storage slice C).
+  const taskStore = new TaskStore(db);
   const channelRepo = new ChannelRepository(db);
   const agentDaemon = deps.agentDaemon;
   const channelGateway = deps.channelGateway;
@@ -874,7 +876,7 @@ export function registerControlPlaneMethods(
   // Workspaces
   server.registerMethod(Methods.WORKSPACE_LIST, async (client) => {
     requireScope(client, "read");
-    const all = workspaceRepo.findAll();
+    const all = await workspaceRepo.findAll();
     const workspaces = all.filter((w) => !isTempWorkspaceId(w.id));
     return {
       workspaces: isAdminClient(client) ? workspaces : workspaces.map(redactWorkspaceForRead),
@@ -884,7 +886,7 @@ export function registerControlPlaneMethods(
   server.registerMethod(Methods.WORKSPACE_GET, async (client, params) => {
     requireScope(client, "read");
     const { workspaceId } = sanitizeWorkspaceIdParams(params);
-    const workspace = workspaceRepo.findById(workspaceId);
+    const workspace = await workspaceRepo.findById(workspaceId);
     if (!workspace) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Workspace not found: ${workspaceId}` };
     }
@@ -895,7 +897,7 @@ export function registerControlPlaneMethods(
     requireScope(client, "admin");
     const validated = sanitizeWorkspaceCreateParams(params);
 
-    if (workspaceRepo.existsByPath(validated.path)) {
+    if (await workspaceRepo.existsByPath(validated.path)) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
         message: `A workspace with path "${validated.path}" already exists`,
@@ -919,7 +921,7 @@ export function registerControlPlaneMethods(
       shell: false,
     };
 
-    const workspace = workspaceRepo.create(
+    const workspace = await workspaceRepo.create(
       validated.name,
       validated.path,
       defaultPermissions as Any,
@@ -935,7 +937,7 @@ export function registerControlPlaneMethods(
     const relativePath = typeof p.path === "string" ? p.path.trim() || "." : ".";
     if (!workspaceId) throw { code: ErrorCodes.INVALID_PARAMS, message: "workspaceId is required" };
 
-    const workspace = workspaceRepo.findById(workspaceId);
+    const workspace = await workspaceRepo.findById(workspaceId);
     if (!workspace) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Workspace not found: ${workspaceId}` };
     }
@@ -976,7 +978,7 @@ export function registerControlPlaneMethods(
     requireScope(client, "admin");
     const validated = sanitizeTaskCreateParams(params);
 
-    const workspace = workspaceRepo.findById(validated.workspaceId);
+    const workspace = await workspaceRepo.findById(validated.workspaceId);
     if (!workspace) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -1005,7 +1007,7 @@ export function registerControlPlaneMethods(
       PermissionSettingsManager.loadSettings(),
     );
 
-    const task = taskRepo.create({
+    const task = await taskRepo.create({
       title: validated.title,
       prompt: validated.prompt,
       status: "pending",
@@ -1021,13 +1023,13 @@ export function registerControlPlaneMethods(
       initialUpdates.boardColumn = "todo";
     }
     if (Object.keys(initialUpdates).length > 0) {
-      taskRepo.update(task.id, initialUpdates);
+      await taskRepo.update(task.id, initialUpdates);
       Object.assign(task, initialUpdates);
     }
 
     if (!isTempWorkspaceId(validated.workspaceId)) {
       try {
-        workspaceRepo.updateLastUsedAt(validated.workspaceId);
+        await workspaceRepo.updateLastUsedAt(validated.workspaceId);
       } catch (error) {
         console.warn("[ControlPlane] Failed to update workspace last used time:", error);
       }
@@ -1036,7 +1038,7 @@ export function registerControlPlaneMethods(
     try {
       await agentDaemon.startTask(task);
     } catch (error: Any) {
-      taskRepo.update(task.id, {
+      await taskRepo.update(task.id, {
         status: "failed",
         error: error?.message || "Failed to start task",
         completedAt: Date.now(),
@@ -1072,7 +1074,7 @@ export function registerControlPlaneMethods(
     const request = sanitizeTaskTimelinePageRequest(params);
     return buildTaskTimelinePageForTransport({
       request,
-      taskRepo,
+      taskRepo: taskStore,
       eventRepo,
       sanitizeValue: sanitizeForBroadcast,
     });
@@ -1083,7 +1085,7 @@ export function registerControlPlaneMethods(
     const request = sanitizeTaskEventDetailRequest(params);
     return buildTaskEventDetailForTransport({
       request,
-      taskRepo,
+      taskRepo: taskStore,
       eventRepo,
       sanitizeValue: sanitizeForBroadcast,
     });
@@ -1092,7 +1094,7 @@ export function registerControlPlaneMethods(
   server.registerMethod(Methods.TASK_GET, async (client, params) => {
     requireScope(client, "read");
     const { taskId } = sanitizeTaskIdParams(params);
-    const task = taskRepo.findById(taskId);
+    const task = await taskRepo.findById(taskId);
     if (!task) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Task not found: ${taskId}` };
     }
@@ -1104,8 +1106,8 @@ export function registerControlPlaneMethods(
     const { limit, offset, workspaceId } = sanitizeTaskListParams(params);
 
     if (workspaceId) {
-      const total = taskRepo.countByWorkspace(workspaceId);
-      const tasks = taskRepo.findByWorkspace(workspaceId, limit, offset);
+      const total = await taskRepo.countByWorkspace(workspaceId);
+      const tasks = await taskRepo.findByWorkspace(workspaceId, limit, offset);
       return {
         tasks: isAdminClient(client) ? tasks : tasks.map(redactTaskForRead),
         total,
@@ -1114,7 +1116,7 @@ export function registerControlPlaneMethods(
       };
     }
 
-    const tasks = taskRepo.findAll(limit, offset);
+    const tasks = await taskRepo.findAll(limit, offset);
     return { tasks: isAdminClient(client) ? tasks : tasks.map(redactTaskForRead), limit, offset };
   });
 
@@ -1142,15 +1144,12 @@ export function registerControlPlaneMethods(
     const { limit, offset, taskId } = sanitizeApprovalListParams(params);
 
     const approvals = taskId
-      ? approvalRepo.findPendingByTaskId(taskId).slice(offset, offset + limit)
-      : (() => {
-          const stmt = db.prepare(`
-            SELECT * FROM approvals
-            WHERE status = 'pending'
-            ORDER BY requested_at ASC
-            LIMIT ? OFFSET ?
-          `);
-          const rows = stmt.all(limit, offset) as Any[];
+      ? (await approvalRepo.findPendingByTaskId(taskId)).slice(offset, offset + limit)
+      : await (async () => {
+          const rows = (await controlPlaneStatements(db).all("api_listPendingApprovals", [
+            limit,
+            offset,
+          ])) as Any[];
           return rows.map((row) => ({
             id: String(row.id ?? ""),
             taskId: String(row.task_id ?? ""),
@@ -1169,14 +1168,16 @@ export function registerControlPlaneMethods(
           }));
         })();
 
-    const enriched = approvals.map((a: Any) => {
-      const t = a.taskId ? taskRepo.findById(a.taskId) : undefined;
-      return {
-        ...a,
-        ...(t ? { taskTitle: t.title, workspaceId: t.workspaceId, taskStatus: t.status } : {}),
-        details: sanitizeForBroadcast(a.details),
-      };
-    });
+    const enriched = await Promise.all(
+      approvals.map(async (a: Any) => {
+        const t = a.taskId ? await taskRepo.findById(a.taskId) : undefined;
+        return {
+          ...a,
+          ...(t ? { taskTitle: t.title, workspaceId: t.workspaceId, taskStatus: t.status } : {}),
+          details: sanitizeForBroadcast(a.details),
+        };
+      }),
+    );
 
     return { approvals: enriched };
   });
@@ -1191,23 +1192,25 @@ export function registerControlPlaneMethods(
   server.registerMethod(Methods.INPUT_REQUEST_LIST, async (client, params) => {
     requireScope(client, "admin");
     const { limit, offset, taskId, status } = sanitizeInputRequestListParams(params);
-    const requests = inputRequestRepo.list({
+    const requests = await inputRequestRepo.list({
       limit,
       offset,
       ...(taskId ? { taskId } : {}),
       ...(status ? { status } : {}),
     });
-    const enriched = requests.map((request) => {
-      const task = request.taskId ? taskRepo.findById(request.taskId) : undefined;
-      return {
-        ...request,
-        ...(task
-          ? { taskTitle: task.title, workspaceId: task.workspaceId, taskStatus: task.status }
-          : {}),
-        questions: sanitizeForBroadcast(request.questions),
-        answers: sanitizeForBroadcast(request.answers),
-      };
-    });
+    const enriched = await Promise.all(
+      requests.map(async (request) => {
+        const task = request.taskId ? await taskRepo.findById(request.taskId) : undefined;
+        return {
+          ...request,
+          ...(task
+            ? { taskTitle: task.title, workspaceId: task.workspaceId, taskStatus: task.status }
+            : {}),
+          questions: sanitizeForBroadcast(request.questions),
+          answers: sanitizeForBroadcast(request.answers),
+        };
+      }),
+    );
     return { inputRequests: enriched };
   });
 
@@ -1220,7 +1223,7 @@ export function registerControlPlaneMethods(
   // Channels (gateway)
   server.registerMethod(Methods.CHANNEL_LIST, async (client) => {
     requireScope(client, "read");
-    const rows = db.prepare("SELECT * FROM channels ORDER BY created_at ASC").all() as Any[];
+    const rows = (await controlPlaneStatements(db).all("api_listChannels", [])) as Any[];
     const channels = rows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),
@@ -1269,7 +1272,7 @@ export function registerControlPlaneMethods(
   server.registerMethod(Methods.CHANNEL_GET, async (client, params) => {
     requireScope(client, "read");
     const { channelId } = sanitizeChannelIdParams(params);
-    const row = db.prepare("SELECT * FROM channels WHERE id = ?").get(channelId) as Any;
+    const row = (await controlPlaneStatements(db).get("api_getChannel", [channelId])) as Any;
     if (!row) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Channel not found: ${channelId}` };
     }
@@ -1321,9 +1324,9 @@ export function registerControlPlaneMethods(
     requireScope(client, "admin");
     const validated = sanitizeChannelCreateParams(params);
     // Enforce one channel per type (router registers by type).
-    const existing = db
-      .prepare("SELECT id FROM channels WHERE type = ? LIMIT 1")
-      .get(validated.type) as Any;
+    const existing = (await controlPlaneStatements(db).get("api_channelIdForType", [
+      validated.type,
+    ])) as Any;
     if (existing?.id) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -1333,10 +1336,7 @@ export function registerControlPlaneMethods(
 
     const now = Date.now();
     const id = randomUUID();
-    db.prepare(`
-      INSERT INTO channels (id, type, name, enabled, config, security_config, status, bot_username, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await controlPlaneStatements(db).run("api_insertChannel", [
       id,
       validated.type,
       validated.name,
@@ -1347,7 +1347,7 @@ export function registerControlPlaneMethods(
       null,
       now,
       now,
-    );
+    ]);
 
     // If the gateway is running, optionally connect immediately when enabled.
     if (validated.enabled && channelGateway) {
@@ -1355,11 +1355,11 @@ export function registerControlPlaneMethods(
         await channelGateway.enableChannel(id);
       } catch (error: Any) {
         // Keep the channel record but surface the connection error.
-        db.prepare("UPDATE channels SET enabled = 0, status = ?, updated_at = ? WHERE id = ?").run(
+        await controlPlaneStatements(db).run("api_disableChannel", [
           "disconnected",
           Date.now(),
           id,
-        );
+        ]);
         throw {
           code: ErrorCodes.METHOD_FAILED,
           message: error?.message || "Failed to enable channel",
@@ -1375,30 +1375,26 @@ export function registerControlPlaneMethods(
     const { channelId, updates } = sanitizeChannelUpdateParams(params);
 
     if (channelGateway) {
-      channelGateway.updateChannel(channelId, updates as Any);
+      await channelGateway.updateChannel(channelId, updates as Any);
       return { ok: true };
     }
 
-    // Fallback: update DB only (restart required to take effect).
-    const fields: string[] = [];
-    const values: Any[] = [];
-    if (updates.name !== undefined) {
-      fields.push("name = ?");
-      values.push(updates.name);
+    // Fallback: update DB only (restart required to take effect). Unset fields keep
+    // their stored value.
+    if (
+      updates.name === undefined &&
+      updates.config === undefined &&
+      updates.securityConfig === undefined
+    ) {
+      return { ok: true };
     }
-    if (updates.config !== undefined) {
-      fields.push("config = ?");
-      values.push(JSON.stringify(updates.config));
-    }
-    if (updates.securityConfig !== undefined) {
-      fields.push("security_config = ?");
-      values.push(JSON.stringify(updates.securityConfig));
-    }
-    if (fields.length === 0) return { ok: true };
-    fields.push("updated_at = ?");
-    values.push(Date.now());
-    values.push(channelId);
-    db.prepare(`UPDATE channels SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    await controlPlaneStatements(db).run("api_updateChannelFields", [
+      updates.name ?? null,
+      updates.config === undefined ? null : JSON.stringify(updates.config),
+      updates.securityConfig === undefined ? null : JSON.stringify(updates.securityConfig),
+      Date.now(),
+      channelId,
+    ]);
     return { ok: true, restartRequired: true };
   });
 
@@ -1415,10 +1411,7 @@ export function registerControlPlaneMethods(
     requireScope(client, "admin");
     const { channelId } = sanitizeChannelIdParams(params);
     if (!channelGateway) {
-      db.prepare("UPDATE channels SET enabled = 1, updated_at = ? WHERE id = ?").run(
-        Date.now(),
-        channelId,
-      );
+      await controlPlaneStatements(db).run("api_enableChannel", [Date.now(), channelId]);
       return { ok: true, restartRequired: true };
     }
     await channelGateway.enableChannel(channelId);
@@ -1429,11 +1422,11 @@ export function registerControlPlaneMethods(
     requireScope(client, "admin");
     const { channelId } = sanitizeChannelIdParams(params);
     if (!channelGateway) {
-      db.prepare("UPDATE channels SET enabled = 0, status = ?, updated_at = ? WHERE id = ?").run(
+      await controlPlaneStatements(db).run("api_disableChannel", [
         "disconnected",
         Date.now(),
         channelId,
-      );
+      ]);
       return { ok: true, restartRequired: true };
     }
     await channelGateway.disableChannel(channelId);
@@ -1444,7 +1437,7 @@ export function registerControlPlaneMethods(
     requireScope(client, "admin");
     const { channelId } = sanitizeChannelIdParams(params);
     if (!channelGateway) {
-      channelRepo.delete(channelId);
+      await channelRepo.delete(channelId);
       return { ok: true, restartRequired: true };
     }
     await channelGateway.removeChannel(channelId);
@@ -1462,12 +1455,13 @@ export function registerControlPlaneMethods(
     requireScope(client, "read");
     const isAdmin = isAdminClient(client);
 
-    const allWorkspaces = workspaceRepo.findAll().filter((w) => !isTempWorkspaceId(w.id));
+    const allWorkspaces = (await workspaceRepo.findAll()).filter((w) => !isTempWorkspaceId(w.id));
     const workspacesForClient = isAdmin ? allWorkspaces : allWorkspaces.map(redactWorkspaceForRead);
 
-    const taskStatusRows = db
-      .prepare(`SELECT status, COUNT(1) AS count FROM tasks GROUP BY status`)
-      .all() as Array<{ status: string; count: number }>;
+    const taskStatusRows = (await controlPlaneStatements(db).all(
+      "api_taskStatusCounts",
+      [],
+    )) as Array<{ status: string; count: number }>;
 
     const tasksByStatus: Record<string, number> = {};
     let taskTotal = 0;
@@ -1549,11 +1543,7 @@ export function registerControlPlaneMethods(
     }
 
     // Channels summary (no secrets).
-    const channelRows = db
-      .prepare(
-        `SELECT id, type, name, enabled, status, bot_username, security_config, created_at, updated_at FROM channels ORDER BY created_at ASC`,
-      )
-      .all() as Any[];
+    const channelRows = (await controlPlaneStatements(db).all("api_channelSummaries", [])) as Any[];
     const channels = channelRows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),

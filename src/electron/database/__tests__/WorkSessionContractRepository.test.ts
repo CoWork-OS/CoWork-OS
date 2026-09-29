@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DatabaseManager } from "../schema";
-import { TaskRepository } from "../repositories";
+import { TaskStore } from "../repositories";
 import { WorkSessionContractRepository } from "../WorkSessionContractRepository";
 import { WorkSessionProtocolRepository } from "../WorkSessionProtocolRepository";
 
@@ -25,7 +25,7 @@ describeWithSqlite("WorkSessionContractRepository", () => {
   let previousUserDataDir: string | undefined;
   let manager: DatabaseManager;
   let db: Database.Database;
-  let taskRepo: TaskRepository;
+  let taskRepo: TaskStore;
   let protocol: WorkSessionProtocolRepository;
   let repository: WorkSessionContractRepository;
   let now: number;
@@ -36,7 +36,7 @@ describeWithSqlite("WorkSessionContractRepository", () => {
     process.env.COWORK_USER_DATA_DIR = tempDir;
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     protocol = new WorkSessionProtocolRepository(db);
     now = Date.now();
     repository = new WorkSessionContractRepository(db, { now: () => now });
@@ -61,7 +61,7 @@ describeWithSqlite("WorkSessionContractRepository", () => {
       workspaceId: "workspace-1",
       source: "manual",
       ...overrides,
-    } as Parameters<TaskRepository["create"]>[0]);
+    } as Parameters<TaskStore["create"]>[0]);
   }
 
   function createSession(taskId: string, sessionId = `session:${taskId}`) {

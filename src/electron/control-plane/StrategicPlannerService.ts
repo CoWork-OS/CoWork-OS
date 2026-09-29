@@ -1,4 +1,11 @@
-import Database from "better-sqlite3";
+import { AgentRoleRepository } from "../agents/agent-repository-facades";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import type Database from "better-sqlite3";
+import { bindStatementContext } from "../database/statements/statement-burst";
+import {
+  createControlPlaneStatementPort,
+  type ControlPlaneStatementPort,
+} from "./control-plane-statement-port";
 import { randomUUID } from "crypto";
 import type {
   AgentRole,
@@ -15,8 +22,8 @@ import type {
   CreateAutomationRunOutcomeInput,
 } from "../../shared/types";
 import type { AgentDaemon } from "../agent/daemon";
-import { TaskRepository, WorkspaceRepository } from "../database/repositories";
-import { AgentRoleRepository } from "../agents/AgentRoleRepository";
+
+
 import { ControlPlaneCoreService } from "./ControlPlaneCoreService";
 import {
   buildAgentConfigFromAutonomyPolicy,
@@ -75,7 +82,11 @@ export class StrategicPlannerService {
   private intervalHandle: NodeJS.Timeout | null = null;
   private readonly activeRuns = new Set<string>();
 
+  /** Planner configs and runs, through the control-plane port (DB6). */
+  private readonly sql: ControlPlaneStatementPort;
+
   constructor(private readonly deps: StrategicPlannerServiceDeps) {
+    this.sql = createControlPlaneStatementPort(deps.db);
     this.core = new ControlPlaneCoreService(deps.db);
     this.taskRepo = new TaskRepository(deps.db);
     this.workspaceRepo = new WorkspaceRepository(deps.db);
@@ -97,24 +108,20 @@ export class StrategicPlannerService {
     }
   }
 
-  listConfigs(): StrategicPlannerConfig[] {
-    const rows = this.deps.db
-      .prepare("SELECT * FROM strategic_planner_configs ORDER BY created_at ASC")
-      .all() as Any[];
+  async listConfigs(): Promise<StrategicPlannerConfig[]> {
+    const rows = (await this.sql.all("planner_listConfigs_1", [])) as Any[];
     return rows.map((row) => this.mapConfig(row));
   }
 
-  getConfig(companyId: string): StrategicPlannerConfig {
-    const row = this.deps.db
-      .prepare("SELECT * FROM strategic_planner_configs WHERE company_id = ?")
-      .get(companyId) as Any;
+  async getConfig(companyId: string): Promise<StrategicPlannerConfig> {
+    const row = (await this.sql.get("planner_getConfig_1", [companyId])) as Any;
     if (row) {
-      const config = this.sanitizeConfigReferences(this.mapConfig(row));
+      const config = await this.sanitizeConfigReferences(this.mapConfig(row));
       if (
         config.planningWorkspaceId !== this.mapConfig(row).planningWorkspaceId ||
         config.plannerAgentRoleId !== this.mapConfig(row).plannerAgentRoleId
       ) {
-        this.persistConfig(config);
+        await this.persistConfig(config);
       }
       return config;
     }
@@ -131,12 +138,15 @@ export class StrategicPlannerService {
       createdAt: now,
       updatedAt: now,
     };
-    this.insertConfig(config);
+    await this.insertConfig(config);
     return config;
   }
 
-  updateConfig(companyId: string, updates: StrategicPlannerConfigUpdate): StrategicPlannerConfig {
-    const existing = this.getConfig(companyId);
+  async updateConfig(
+    companyId: string,
+    updates: StrategicPlannerConfigUpdate,
+  ): Promise<StrategicPlannerConfig> {
+    const existing = await this.getConfig(companyId);
     const next: StrategicPlannerConfig = {
       ...existing,
       ...(typeof updates.enabled === "boolean" ? { enabled: updates.enabled } : {}),
@@ -169,70 +179,49 @@ export class StrategicPlannerService {
       updatedAt: Date.now(),
     };
 
-    const sanitized = this.sanitizeConfigReferences(next);
-    this.persistConfig(sanitized);
+    const sanitized = await this.sanitizeConfigReferences(next);
+    await this.persistConfig(sanitized);
     return this.getConfig(companyId);
   }
 
-  private persistConfig(config: StrategicPlannerConfig): void {
-    this.deps.db
-      .prepare(
-        `
-          UPDATE strategic_planner_configs
-          SET enabled = ?, interval_minutes = ?, planning_workspace_id = ?, planner_agent_role_id = ?,
-              auto_dispatch = ?, approval_preset = ?, max_issues_per_run = ?, stale_issue_days = ?,
-              last_run_at = ?, updated_at = ?
-          WHERE company_id = ?
-        `,
-      )
-      .run(
-        config.enabled ? 1 : 0,
-        config.intervalMinutes,
-        config.planningWorkspaceId || null,
-        config.plannerAgentRoleId || null,
-        config.autoDispatch ? 1 : 0,
-        config.approvalPreset,
-        config.maxIssuesPerRun,
-        config.staleIssueDays,
-        config.lastRunAt ?? null,
-        config.updatedAt,
-        config.companyId,
-      );
+  private async persistConfig(config: StrategicPlannerConfig): Promise<void> {
+    await this.sql.run("planner_persistConfig_1", [
+      config.enabled ? 1 : 0,
+      config.intervalMinutes,
+      config.planningWorkspaceId || null,
+      config.plannerAgentRoleId || null,
+      config.autoDispatch ? 1 : 0,
+      config.approvalPreset,
+      config.maxIssuesPerRun,
+      config.staleIssueDays,
+      config.lastRunAt ?? null,
+      config.updatedAt,
+      config.companyId,
+    ]);
   }
 
-  listRuns(input?: { companyId?: string; limit?: number; offset?: number }): StrategicPlannerRun[] {
-    const clauses: string[] = ["1 = 1"];
-    const args: Any[] = [];
-    if (input?.companyId) {
-      clauses.push("company_id = ?");
-      args.push(input.companyId);
-    }
+  async listRuns(input?: {
+    companyId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<StrategicPlannerRun[]> {
     const limit = Math.min(Math.max(input?.limit || 50, 1), 500);
     const offset = Math.max(input?.offset || 0, 0);
-    args.push(limit, offset);
-    const rows = this.deps.db
-      .prepare(
-        `
-          SELECT * FROM strategic_planner_runs
-          WHERE ${clauses.join(" AND ")}
-          ORDER BY created_at DESC
-          LIMIT ? OFFSET ?
-        `,
-      )
-      .all(...args) as Any[];
+    const companyId = input?.companyId || null;
+    const rows = await this.sql.all<Any>("planner_listRuns", [companyId, companyId, limit, offset]);
     return rows.map((row) => this.mapRun(row));
   }
 
   async runNow(request: StrategicPlannerRunRequest): Promise<StrategicPlannerRun> {
     const trigger = request.trigger || "manual";
-    const company = this.core.getCompany(request.companyId);
+    const company = await this.core.getCompany(request.companyId);
     if (!company) {
       throw new Error(`Company not found: ${request.companyId}`);
     }
     if (!this.isPlanningEligibleCompany(company)) {
       throw new Error(`Company is not active: ${request.companyId}`);
     }
-    const config = this.getConfig(request.companyId);
+    const config = await this.getConfig(request.companyId);
     if (this.activeRuns.has(request.companyId)) {
       throw new Error(`Planner run already active for company: ${request.companyId}`);
     }
@@ -240,16 +229,7 @@ export class StrategicPlannerService {
 
     const runId = randomUUID();
     const now = Date.now();
-    this.deps.db
-      .prepare(
-        `
-          INSERT INTO strategic_planner_runs (
-            id, company_id, status, trigger, summary, error, created_issue_count, updated_issue_count,
-            dispatched_task_count, metadata, created_at, updated_at, completed_at
-          ) VALUES (?, ?, 'running', ?, NULL, NULL, 0, 0, 0, NULL, ?, ?, NULL)
-        `,
-      )
-      .run(runId, request.companyId, trigger, now, now);
+    await this.sql.run("planner_runNow_1", [runId, request.companyId, trigger, now, now]);
 
     try {
       const outcome = await this.executePlanningRun(company, config);
@@ -264,60 +244,51 @@ export class StrategicPlannerService {
         `${outcome.updatedIssueIds.length} issue(s) updated`,
         `${outcome.dispatchedTaskIds.length} task(s) dispatched`,
       ];
-      this.deps.db
-        .prepare(
-          `
-            UPDATE strategic_planner_runs
-            SET status = 'completed', summary = ?, created_issue_count = ?, updated_issue_count = ?,
-                dispatched_task_count = ?, metadata = ?, updated_at = ?, completed_at = ?
-            WHERE id = ?
-          `,
-        )
-        .run(
-          summaryParts.join(", "),
-          outcome.createdIssueIds.length,
-          outcome.updatedIssueIds.length,
-          outcome.dispatchedTaskIds.length,
-          JSON.stringify({
-            createdIssueIds: outcome.createdIssueIds,
-            updatedIssueIds: outcome.updatedIssueIds,
-            dispatchedTaskIds: outcome.dispatchedTaskIds,
-            suppressedOutputs: outcome.suppressedOutputs,
-            outputContract: {
-              companyId: company.id,
-              operatorRoleId: config.plannerAgentRoleId,
-              loopType: "work_generation" as CompanyLoopType,
-              outputType,
-              valueReason:
-                outcome.createdIssueIds.length > 0 || outcome.updatedIssueIds.length > 0
-                  ? `Planner refreshed ${outcome.createdIssueIds.length + outcome.updatedIssueIds.length} issue(s)`
-                  : "Planner found no high-confidence work to dispatch",
-              reviewRequired: outputType !== "issue_batch",
-              reviewReason:
-                outputType !== "issue_batch" ? ("strategy" as CompanyReviewReason) : undefined,
-              evidenceRefs: [
-                ...outcome.createdIssueIds.map((id) => ({ type: "issue", id, label: "created" })),
-                ...outcome.updatedIssueIds.map((id) => ({ type: "issue", id, label: "updated" })),
-                ...outcome.dispatchedTaskIds.map((id) => ({
-                  type: "task",
-                  id,
-                  label: "dispatched",
-                })),
-              ],
-              companyPriority:
-                outcome.createdIssueIds.length > 0 || outcome.dispatchedTaskIds.length > 0
-                  ? "high"
-                  : "normal",
-              triggerReason: `planner:${trigger}`,
-              expectedOutputType: outputType,
-            } satisfies CompanyOutputContract,
-          }),
-          Date.now(),
-          Date.now(),
-          runId,
-        );
-      this.recordSuccessfulRunConfigUpdate(request.companyId, Date.now());
-      const completedRun = this.getRunOrThrow(runId);
+      await this.sql.run("planner_runNow_2", [
+        summaryParts.join(", "),
+        outcome.createdIssueIds.length,
+        outcome.updatedIssueIds.length,
+        outcome.dispatchedTaskIds.length,
+        JSON.stringify({
+          createdIssueIds: outcome.createdIssueIds,
+          updatedIssueIds: outcome.updatedIssueIds,
+          dispatchedTaskIds: outcome.dispatchedTaskIds,
+          suppressedOutputs: outcome.suppressedOutputs,
+          outputContract: {
+            companyId: company.id,
+            operatorRoleId: config.plannerAgentRoleId,
+            loopType: "work_generation" as CompanyLoopType,
+            outputType,
+            valueReason:
+              outcome.createdIssueIds.length > 0 || outcome.updatedIssueIds.length > 0
+                ? `Planner refreshed ${outcome.createdIssueIds.length + outcome.updatedIssueIds.length} issue(s)`
+                : "Planner found no high-confidence work to dispatch",
+            reviewRequired: outputType !== "issue_batch",
+            reviewReason:
+              outputType !== "issue_batch" ? ("strategy" as CompanyReviewReason) : undefined,
+            evidenceRefs: [
+              ...outcome.createdIssueIds.map((id) => ({ type: "issue", id, label: "created" })),
+              ...outcome.updatedIssueIds.map((id) => ({ type: "issue", id, label: "updated" })),
+              ...outcome.dispatchedTaskIds.map((id) => ({
+                type: "task",
+                id,
+                label: "dispatched",
+              })),
+            ],
+            companyPriority:
+              outcome.createdIssueIds.length > 0 || outcome.dispatchedTaskIds.length > 0
+                ? "high"
+                : "normal",
+            triggerReason: `planner:${trigger}`,
+            expectedOutputType: outputType,
+          } satisfies CompanyOutputContract,
+        }),
+        Date.now(),
+        Date.now(),
+        runId,
+      ]);
+      await this.recordSuccessfulRunConfigUpdate(request.companyId, Date.now());
+      const completedRun = await this.getRunOrThrow(runId);
       await this.recordAutomatedRunOutcome({
         company,
         config,
@@ -328,15 +299,7 @@ export class StrategicPlannerService {
       return completedRun;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.deps.db
-        .prepare(
-          `
-            UPDATE strategic_planner_runs
-            SET status = 'failed', error = ?, updated_at = ?, completed_at = ?
-            WHERE id = ?
-          `,
-        )
-        .run(message, Date.now(), Date.now(), runId);
+      await this.sql.run("planner_runNow_3", [message, Date.now(), Date.now(), runId]);
       await this.recordAutomatedRunFailure(company, config, trigger, message);
       throw error;
     } finally {
@@ -406,10 +369,10 @@ export class StrategicPlannerService {
   }
 
   private async tick(): Promise<void> {
-    for (const config of this.listConfigs()) {
+    for (const config of await this.listConfigs()) {
       if (!config.enabled) continue;
       if (this.activeRuns.has(config.companyId)) continue;
-      const company = this.core.getCompany(config.companyId);
+      const company = await this.core.getCompany(config.companyId);
       if (!company || !this.isPlanningEligibleCompany(company)) continue;
       const lastRunAt = config.lastRunAt || 0;
       const intervalMs = config.intervalMinutes * 60 * 1000;
@@ -429,9 +392,12 @@ export class StrategicPlannerService {
     return company.status === "active";
   }
 
-  private recordSuccessfulRunConfigUpdate(companyId: string, completedAt: number): void {
+  private async recordSuccessfulRunConfigUpdate(
+    companyId: string,
+    completedAt: number,
+  ): Promise<void> {
     try {
-      this.updateConfig(companyId, { lastRunAt: completedAt });
+      await this.updateConfig(companyId, { lastRunAt: completedAt });
       return;
     } catch (error) {
       this.log(
@@ -442,35 +408,11 @@ export class StrategicPlannerService {
     }
 
     try {
-      this.deps.db
-        .prepare(
-          `
-            UPDATE strategic_planner_configs
-            SET last_run_at = ?,
-                updated_at = ?,
-                planning_workspace_id = CASE
-                  WHEN planning_workspace_id IS NULL
-                    OR EXISTS (
-                      SELECT 1 FROM workspaces
-                      WHERE workspaces.id = strategic_planner_configs.planning_workspace_id
-                    )
-                  THEN planning_workspace_id
-                  ELSE NULL
-                END,
-                planner_agent_role_id = CASE
-                  WHEN planner_agent_role_id IS NULL
-                    OR EXISTS (
-                      SELECT 1 FROM agent_roles
-                      WHERE agent_roles.id = strategic_planner_configs.planner_agent_role_id
-                        AND agent_roles.is_active != 0
-                    )
-                  THEN planner_agent_role_id
-                  ELSE NULL
-                END
-            WHERE company_id = ?
-          `,
-        )
-        .run(completedAt, completedAt, companyId);
+      await this.sql.run("planner_recordSuccessfulRunConfigUpdate_1", [
+        completedAt,
+        completedAt,
+        companyId,
+      ]);
     } catch (error) {
       this.log("Failed to repair planner config after successful run", companyId, error);
     }
@@ -486,12 +428,17 @@ export class StrategicPlannerService {
     suppressedOutputs: Array<{ seedTitle: string; summary: string; outputType: CompanyOutputType }>;
   }> {
     const runStartedAt = Date.now();
-    const activeGoals = this.core.listGoals(company.id).filter((goal) => goal.status === "active");
-    const projects = this.core.listProjects({ companyId: company.id, includeArchived: false });
-    const issues = this.core.listIssues({ companyId: company.id, limit: 5000 });
+    const activeGoals = (await this.core.listGoals(company.id)).filter(
+      (goal) => goal.status === "active",
+    );
+    const projects = await this.core.listProjects({
+      companyId: company.id,
+      includeArchived: false,
+    });
+    const issues = await this.core.listIssues({ companyId: company.id, limit: 5000 });
     const openIssues = issues.filter((issue) => !["done", "cancelled"].includes(issue.status));
     const companyWorkspaceId = company.defaultWorkspaceId;
-    const plannerAgent = this.pickPlannerAgent(config);
+    const plannerAgent = await this.pickPlannerAgent(config);
     const createdIssueIds: string[] = [];
     const updatedIssueIds: string[] = [];
     const suppressedOutputs: Array<{
@@ -523,8 +470,9 @@ export class StrategicPlannerService {
 
     for (const project of projects.filter((entry) => entry.status === "active")) {
       const linkedWorkspaceId =
-        this.core.listProjectWorkspaces(project.id).find((link) => link.isPrimary)?.workspaceId ||
-        this.core.listProjectWorkspaces(project.id)[0]?.workspaceId ||
+        (await this.core.listProjectWorkspaces(project.id)).find((link) => link.isPrimary)
+          ?.workspaceId ||
+        (await this.core.listProjectWorkspaces(project.id))[0]?.workspaceId ||
         companyWorkspaceId;
       const projectIssues = openIssues.filter((issue) => issue.projectId === project.id);
       const blockedIssues = projectIssues.filter((issue) => issue.status === "blocked");
@@ -627,7 +575,7 @@ export class StrategicPlannerService {
             score,
             existing.id,
           );
-          this.core.updateIssue(existing.id, {
+          await this.core.updateIssue(existing.id, {
             priority: nextPriority,
             assigneeAgentRoleId: seed.assigneeAgentRoleId || existing.assigneeAgentRoleId,
             metadata: {
@@ -647,7 +595,7 @@ export class StrategicPlannerService {
       }
 
       const outputContract = this.buildIssueOutputContract(company, plannerAgent, seed, score);
-      const created = this.core.createIssue({
+      const created = await this.core.createIssue({
         companyId: company.id,
         goalId: seed.goalId,
         projectId: seed.projectId,
@@ -717,16 +665,16 @@ export class StrategicPlannerService {
       issue.workspaceId ||
       company.defaultWorkspaceId ||
       config.planningWorkspaceId ||
-      this.pickDefaultWorkspaceId();
+      (await this.pickDefaultWorkspaceId());
     if (!workspaceId) return null;
 
     const assigneeAgentRoleId = issue.assigneeAgentRoleId || plannerAgent?.id;
     const dispatchAgent = assigneeAgentRoleId
-      ? this.agentRoleRepo.findById(assigneeAgentRoleId)
+      ? await this.agentRoleRepo.findById(assigneeAgentRoleId)
       : plannerAgent;
     if (!dispatchAgent) return null;
 
-    const checkout = this.core.checkoutIssue({
+    const checkout = await this.core.checkoutIssue({
       issueId: issue.id,
       agentRoleId: dispatchAgent.id,
       workspaceId,
@@ -747,11 +695,11 @@ export class StrategicPlannerService {
       },
     });
 
-    this.taskRepo.update(task.id, {
+    await this.taskRepo.update(task.id, {
       assignedAgentRoleId: dispatchAgent.id,
       boardColumn: "todo",
     });
-    this.core.attachTaskToRun(checkout.run.id, task.id);
+    await this.core.attachTaskToRun(checkout.run.id, task.id);
     return task.id;
   }
 
@@ -806,13 +754,15 @@ export class StrategicPlannerService {
     return ageMs >= staleIssueDays * 24 * 60 * 60 * 1000;
   }
 
-  private pickPlannerAgent(config: StrategicPlannerConfig): AgentRole | undefined {
+  private async pickPlannerAgent(config: StrategicPlannerConfig): Promise<AgentRole | undefined> {
     if (config.plannerAgentRoleId) {
-      const configured = this.agentRoleRepo.findById(config.plannerAgentRoleId);
+      const configured = await this.agentRoleRepo.findById(config.plannerAgentRoleId);
       if (configured?.isActive !== false) return configured;
     }
 
-    const activeRoles = this.agentRoleRepo.findAll().filter((role) => role.isActive !== false);
+    const activeRoles = (await this.agentRoleRepo.findAll()).filter(
+      (role) => role.isActive !== false,
+    );
     const namedLead =
       activeRoles.find((role) => role.name === "project_manager") ||
       activeRoles.find((role) => role.name === "product_manager") ||
@@ -821,9 +771,9 @@ export class StrategicPlannerService {
     return activeRoles.find((role) => role.autonomyLevel === "lead");
   }
 
-  private pickDefaultWorkspaceId(): string | undefined {
-    const workspaces = this.workspaceRepo
-      .findAll()
+  private async pickDefaultWorkspaceId(): Promise<string | undefined> {
+    const workspaces = (await this.workspaceRepo
+      .findAll())
       .filter(
         (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id) && workspace.path,
       );
@@ -921,37 +871,25 @@ export class StrategicPlannerService {
     };
   }
 
-  private insertConfig(config: StrategicPlannerConfig): void {
-    this.deps.db
-      .prepare(
-        `
-          INSERT INTO strategic_planner_configs (
-            company_id, enabled, interval_minutes, planning_workspace_id, planner_agent_role_id,
-            auto_dispatch, approval_preset, max_issues_per_run, stale_issue_days,
-            created_at, updated_at, last_run_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-      )
-      .run(
-        config.companyId,
-        config.enabled ? 1 : 0,
-        config.intervalMinutes,
-        config.planningWorkspaceId || null,
-        config.plannerAgentRoleId || null,
-        config.autoDispatch ? 1 : 0,
-        config.approvalPreset,
-        config.maxIssuesPerRun,
-        config.staleIssueDays,
-        config.createdAt,
-        config.updatedAt,
-        config.lastRunAt ?? null,
-      );
+  private async insertConfig(config: StrategicPlannerConfig): Promise<void> {
+    await this.sql.run("planner_insertConfig_1", [
+      config.companyId,
+      config.enabled ? 1 : 0,
+      config.intervalMinutes,
+      config.planningWorkspaceId || null,
+      config.plannerAgentRoleId || null,
+      config.autoDispatch ? 1 : 0,
+      config.approvalPreset,
+      config.maxIssuesPerRun,
+      config.staleIssueDays,
+      config.createdAt,
+      config.updatedAt,
+      config.lastRunAt ?? null,
+    ]);
   }
 
-  private getRunOrThrow(runId: string): StrategicPlannerRun {
-    const row = this.deps.db
-      .prepare("SELECT * FROM strategic_planner_runs WHERE id = ?")
-      .get(runId) as Any;
+  private async getRunOrThrow(runId: string): Promise<StrategicPlannerRun> {
+    const row = (await this.sql.get("planner_getRunOrThrow_1", [runId])) as Any;
     if (!row) throw new Error(`Planner run not found: ${runId}`);
     return this.mapRun(row);
   }
@@ -973,18 +911,20 @@ export class StrategicPlannerService {
     };
   }
 
-  private sanitizeConfigReferences(config: StrategicPlannerConfig): StrategicPlannerConfig {
+  private async sanitizeConfigReferences(
+    config: StrategicPlannerConfig,
+  ): Promise<StrategicPlannerConfig> {
     const next = { ...config };
 
     if (next.plannerAgentRoleId) {
-      const role = this.agentRoleRepo.findById(next.plannerAgentRoleId);
+      const role = await this.agentRoleRepo.findById(next.plannerAgentRoleId);
       if (!role || role.isActive === false) {
         next.plannerAgentRoleId = undefined;
       }
     }
 
     if (next.planningWorkspaceId) {
-      const workspace = this.workspaceRepo.findById(next.planningWorkspaceId);
+      const workspace = await this.workspaceRepo.findById(next.planningWorkspaceId);
       if (!workspace) {
         next.planningWorkspaceId = undefined;
       }
@@ -1070,3 +1010,6 @@ export function setStrategicPlannerService(service: StrategicPlannerService | nu
 export function getStrategicPlannerService(): StrategicPlannerService | null {
   return strategicPlannerServiceInstance;
 }
+
+// Each call is one control-plane operation for the statement burst gate (DB6).
+bindStatementContext(StrategicPlannerService.prototype, "StrategicPlannerService");

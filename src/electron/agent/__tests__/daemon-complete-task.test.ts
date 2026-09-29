@@ -30,7 +30,7 @@ function createDaemonLike() {
       findByTaskId: vi.fn().mockReturnValue([]),
       updatePayloadById: vi.fn(),
     },
-    approvalRepo: {
+    approvalStore: {
       update: vi.fn(),
     },
     clearRetryState: vi.fn(),
@@ -226,6 +226,7 @@ describe("AgentDaemon.completeTask", () => {
     const completion = AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done", {
       outputSummary,
     });
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
     await Promise.resolve();
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
@@ -235,6 +236,8 @@ describe("AgentDaemon.completeTask", () => {
         terminalStatus: "awaiting_verification",
       }),
     );
+    // Permission evaluation reads storage before the approval row is created (DB6).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
     expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
       "task-1",
       "task_completed",
@@ -285,7 +288,12 @@ describe("AgentDaemon.completeTask", () => {
     AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done");
 
     expect(daemonLike.pendingApprovals.size).toBe(0);
-    expect(daemonLike.approvalRepo.update).toHaveBeenCalledWith("approval-1", "denied");
+    expect(daemonLike.approvalStore.update).toHaveBeenCalledWith("approval-1", "denied");
+    // The denial commits on the host before the task's terminal update (storage slice A's
+    // ordering gap, closed by writing it through the daemon's store).
+    expect(daemonLike.approvalStore.update.mock.invocationCallOrder[0]).toBeLessThan(
+      Math.min(...daemonLike.taskRepo.update.mock.invocationCallOrder),
+    );
     expect(daemonLike.logEvent).toHaveBeenCalledWith("task-1", "approval_denied", {
       approvalId: "approval-1",
       reason: "task_ended",
@@ -361,7 +369,7 @@ describe("AgentDaemon.completeTask", () => {
     );
   });
 
-  it("ignores late failures after the task is already completed", () => {
+  it("ignores late failures after the task is already completed", async () => {
     const taskState: Any = {
       id: "task-1",
       title: "Task 1",
@@ -377,7 +385,7 @@ describe("AgentDaemon.completeTask", () => {
     });
 
     AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done");
-    AgentDaemon.prototype.failTask.call(daemonLike, "task-1", "late failure");
+    await AgentDaemon.prototype.failTask.call(daemonLike, "task-1", "late failure");
 
     expect(taskState.status).toBe("completed");
     expect(daemonLike.taskRepo.update).not.toHaveBeenCalledWith(

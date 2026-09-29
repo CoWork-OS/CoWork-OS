@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseManager } from "../../database/schema";
+import { serviceStatements } from "../../database/service-statements";
 import type { JevUsage } from "./types";
 
 export interface JevDecisionTelemetryContext {
@@ -78,49 +79,34 @@ export function recordJevCall(input: JevDecisionTelemetryInput): void {
   const success = status === "success" ? 1 : 0;
 
   try {
-    db.prepare(
-      `INSERT INTO jev_call_events (
-        id,
-        timestamp,
-        workspace_id,
-        task_id,
-        source_kind,
-        source_id,
-        provider_type,
-        model_id,
-        purpose,
-        input_tokens,
-        output_tokens,
-        cost,
-        latency_ms,
-        status,
-        from_cache,
-        success,
-        request_id,
-        error_code,
-        error_message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      randomUUID(),
-      input.timestamp ?? Date.now(),
-      input.workspaceId || null,
-      input.taskId || null,
-      sourceKind,
-      sourceId,
-      providerType,
-      modelId,
-      purpose,
-      inputTokens,
-      outputTokens,
-      cost,
-      latencyMs,
-      status,
-      fromCache ? 1 : 0,
-      success,
-      requestId,
-      boundedText(input.errorCode, 80),
-      safeErrorMessage(input.errorMessage),
-    );
+    // One services-domain unit, started without holding up the decision.
+    void serviceStatements(db)
+      .unit("usageTelemetry_insertJevCall", [
+        {
+          id: randomUUID(),
+          timestamp: input.timestamp ?? Date.now(),
+          workspaceId: input.workspaceId || null,
+          taskId: input.taskId || null,
+          sourceKind: sourceKind,
+          sourceId: sourceId,
+          providerType: providerType,
+          modelId: modelId,
+          purpose: purpose,
+          inputTokens: inputTokens,
+          outputTokens: outputTokens,
+          cost: cost,
+          latencyMs: latencyMs,
+          status: status,
+          fromCache: fromCache ? 1 : 0,
+          success: success,
+          requestId: requestId,
+          errorCode: boundedText(input.errorCode, 80),
+          errorMessage: safeErrorMessage(input.errorMessage),
+        },
+      ])
+      .catch(() => {
+        // Best-effort telemetry must never affect a decision or task execution.
+      });
   } catch {
     // Best-effort telemetry must never affect a decision or task execution.
   }

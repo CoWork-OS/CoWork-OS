@@ -1,4 +1,9 @@
+import {
+  bindStatementContext,
+  detachedStatementContext,
+} from "../database/statements/statement-burst";
 import type Database from "better-sqlite3";
+import { createMailboxStatementPort, type MailboxStatementPort } from "./mailbox-statement-port";
 import { randomUUID } from "crypto";
 import { computeNextRunAtMs } from "../cron/schedule";
 import { MailboxAutomationRegistry } from "./MailboxAutomationRegistry";
@@ -279,11 +284,16 @@ function buildForwardedMime(params: {
 
 export class MailboxForwardingService {
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private timerGeneration = 0;
   private started = false;
   private runningAutomationIds = new Set<string>();
 
+  /** Statements run through the mailbox port; `deps.db` only creates the schema. */
+  private readonly sql: MailboxStatementPort;
+
   constructor(private deps: MailboxForwardingServiceDeps) {
     this.ensureSchema();
+    this.sql = createMailboxStatementPort(deps.db);
   }
 
   start(): void {
@@ -301,11 +311,11 @@ export class MailboxForwardingService {
 
   async refresh(): Promise<void> {
     if (!this.started) return;
-    this.armTimer();
+    await this.armTimer();
   }
 
   async runNow(automationId: string): Promise<string> {
-    const automation = MailboxAutomationRegistry.listAutomations().find(
+    const automation = (await MailboxAutomationRegistry.listAutomations()).find(
       (item) => item.id === automationId && item.kind === "forward",
     );
     if (!automation?.forward) {
@@ -339,7 +349,9 @@ export class MailboxForwardingService {
     `);
   }
 
-  private armTimer(): void {
+  /** Arming reads the registry first; only the latest call sets the timer. */
+  private async armTimer(): Promise<void> {
+    const generation = ++this.timerGeneration;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -347,7 +359,7 @@ export class MailboxForwardingService {
     if (!this.started) return;
 
     const now = Date.now();
-    const automations = MailboxAutomationRegistry.listAutomations().filter(
+    const automations = (await MailboxAutomationRegistry.listAutomations()).filter(
       (item) => item.kind === "forward" && item.status === "active" && item.forward,
     );
 
@@ -356,7 +368,7 @@ export class MailboxForwardingService {
       const nextRunAt =
         automation.nextRunAt ?? computeNextRunAtMs(automation.forward!.schedule, now);
       if (nextRunAt !== automation.nextRunAt) {
-        MailboxAutomationRegistry.setForwardNextRun(automation.id, nextRunAt);
+        await MailboxAutomationRegistry.setForwardNextRun(automation.id, nextRunAt);
       }
       if (nextRunAt !== undefined && (earliest === undefined || nextRunAt < earliest)) {
         earliest = nextRunAt;
@@ -367,15 +379,21 @@ export class MailboxForwardingService {
       earliest === undefined
         ? TIMER_FALLBACK_MS
         : Math.max(0, Math.min(TIMER_FALLBACK_MS, earliest - now));
+    if (generation !== this.timerGeneration || !this.started) return;
+    if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
-      void this.processDueAutomations();
+      void detachedStatementContext("MailboxForwardingService.timer", () =>
+        this.processDueAutomations(),
+      ).catch((error: unknown) => {
+        console.warn("[MailboxForwardingService] Due automation pass failed:", error);
+      });
     }, delayMs);
   }
 
   private async processDueAutomations(): Promise<void> {
     if (!this.started) return;
     const now = Date.now();
-    const automations = MailboxAutomationRegistry.listAutomations().filter(
+    const automations = (await MailboxAutomationRegistry.listAutomations()).filter(
       (item) =>
         item.kind === "forward" &&
         item.status === "active" &&
@@ -411,7 +429,7 @@ export class MailboxForwardingService {
 
     this.runningAutomationIds.add(automation.id);
     const runAtMs = Date.now();
-    MailboxAutomationRegistry.markForwardRunStarted(automation.id, runAtMs);
+    await MailboxAutomationRegistry.markForwardRunStarted(automation.id, runAtMs);
 
     try {
       const summary = await this.executeForwardingRun(automation);
@@ -424,7 +442,7 @@ export class MailboxForwardingService {
           ? "paused"
           : "active"
         : automation.status;
-      MailboxAutomationRegistry.markForwardRunFinished(automation.id, {
+      await MailboxAutomationRegistry.markForwardRunFinished(automation.id, {
         status: nextStatus,
         latestOutcome: summary.summary,
         latestFireAt: runAtMs,
@@ -436,7 +454,7 @@ export class MailboxForwardingService {
       const nextRunAt = shouldRemainActive
         ? computeNextRunAtMs(automation.forward.schedule, Date.now())
         : automation.nextRunAt;
-      MailboxAutomationRegistry.markForwardRunFinished(automation.id, {
+      await MailboxAutomationRegistry.markForwardRunFinished(automation.id, {
         status: shouldRemainActive
           ? nextRunAt === undefined
             ? "paused"
@@ -470,7 +488,7 @@ export class MailboxForwardingService {
     }
 
     const labelMap = await this.getOrCreateLabels(settings, recipe);
-    const lastSuccessfulScanAt = this.getLastSuccessfulScanAt(automationId);
+    const lastSuccessfulScanAt = await this.getLastSuccessfulScanAt(automationId);
     const earliestTimestamp = this.computeEarliestTimestamp(automation, lastSuccessfulScanAt);
     const threadIds = await this.listCandidateThreadIds(settings, recipe, earliestTimestamp);
 
@@ -537,7 +555,7 @@ export class MailboxForwardingService {
     }
 
     if (!recipe.dryRun && failedMessages === 0) {
-      this.setLastSuccessfulScanAt(automationId, Date.now());
+      await this.setLastSuccessfulScanAt(automationId, Date.now());
     }
 
     const summary = recipe.dryRun
@@ -617,29 +635,20 @@ export class MailboxForwardingService {
     return threadIds;
   }
 
-  private getLastSuccessfulScanAt(automationId: string): number | undefined {
-    const row = this.deps.db
-      .prepare(
-        `SELECT last_successful_scan_at
-         FROM mailbox_forwarding_run_state
-         WHERE automation_id = ?`,
-      )
-      .get(automationId) as { last_successful_scan_at: number | null } | undefined;
+  private async getLastSuccessfulScanAt(automationId: string): Promise<number | undefined> {
+    const row = (await this.sql.get("forwarding_getLastSuccessfulScanAt_1", [automationId])) as
+      | { last_successful_scan_at: number | null }
+      | undefined;
     const timestamp = row?.last_successful_scan_at;
     return typeof timestamp === "number" && Number.isFinite(timestamp) ? timestamp : undefined;
   }
 
-  private setLastSuccessfulScanAt(automationId: string, timestamp: number): void {
-    this.deps.db
-      .prepare(
-        `INSERT INTO mailbox_forwarding_run_state
-           (automation_id, last_successful_scan_at, updated_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT(automation_id) DO UPDATE SET
-           last_successful_scan_at = excluded.last_successful_scan_at,
-           updated_at = excluded.updated_at`,
-      )
-      .run(automationId, timestamp, Date.now());
+  private async setLastSuccessfulScanAt(automationId: string, timestamp: number): Promise<void> {
+    await this.sql.run("forwarding_setLastSuccessfulScanAt_1", [
+      automationId,
+      timestamp,
+      Date.now(),
+    ]);
   }
 
   private evaluateThread(
@@ -785,11 +794,10 @@ export class MailboxForwardingService {
     recipe: MailboxForwardRecipe,
     message: ForwardingMessage,
   ): Promise<MessageForwardOutcome> {
-    const alreadyForwarded = this.deps.db
-      .prepare(
-        `SELECT status FROM mailbox_forwarding_message_runs WHERE automation_id = ? AND message_id = ?`,
-      )
-      .get(automationId, message.id) as { status: string } | undefined;
+    const alreadyForwarded = (await this.sql.get("forwarding_forwardMessage_1", [
+      automationId,
+      message.id,
+    ])) as { status: string } | undefined;
     if (alreadyForwarded?.status === "sent") {
       return { status: "already_sent", messageId: message.id };
     }
@@ -847,35 +855,29 @@ export class MailboxForwardingService {
       });
 
       const now = Date.now();
-      this.deps.db
-        .prepare(
-          `INSERT INTO mailbox_forwarding_message_runs
-             (automation_id, message_id, thread_id, status, error, created_at, updated_at)
-           VALUES (?, ?, ?, 'sent', NULL, ?, ?)
-           ON CONFLICT(automation_id, message_id) DO UPDATE SET
-             status = 'sent',
-             error = NULL,
-             thread_id = excluded.thread_id,
-             updated_at = excluded.updated_at`,
-        )
-        .run(automationId, message.id, message.threadId, now, now);
+      await this.sql.run("forwarding_forwardMessage_2", [
+        automationId,
+        message.id,
+        message.threadId,
+        now,
+        now,
+      ]);
       return { status: "sent", messageId: message.id };
     } catch (error) {
       const now = Date.now();
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.deps.db
-        .prepare(
-          `INSERT INTO mailbox_forwarding_message_runs
-             (automation_id, message_id, thread_id, status, error, created_at, updated_at)
-           VALUES (?, ?, ?, 'error', ?, ?, ?)
-           ON CONFLICT(automation_id, message_id) DO UPDATE SET
-             status = 'error',
-             error = excluded.error,
-             thread_id = excluded.thread_id,
-             updated_at = excluded.updated_at`,
-        )
-        .run(automationId, message.id, message.threadId, errorMessage, now, now);
+      await this.sql.run("forwarding_forwardMessage_3", [
+        automationId,
+        message.id,
+        message.threadId,
+        errorMessage,
+        now,
+        now,
+      ]);
       return { status: "failed", messageId: message.id, error: errorMessage };
     }
   }
 }
+
+// Each call is one mailbox operation for the statement burst gate (DB6).
+bindStatementContext(MailboxForwardingService.prototype, "MailboxForwardingService");

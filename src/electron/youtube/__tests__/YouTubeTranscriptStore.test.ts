@@ -40,16 +40,16 @@ afterEach(() => {
 });
 
 describeWithNativeDb("YouTubeTranscriptStore", () => {
-  it("saves videos and finds transcript segments with natural-language questions", () => {
+  it("saves videos and finds transcript segments with natural-language questions", async () => {
     YouTubeTranscriptStore.setDatabaseForTests(createDb());
-    YouTubeTranscriptStore.saveVideo("workspace-1", {
+    await YouTubeTranscriptStore.saveVideo("workspace-1", {
       videoId: "dQw4w9WgXcQ",
       url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       title: "Planning Demo",
       channel: "CoWork",
       fetchedAt: 1_700_000_000,
     });
-    YouTubeTranscriptStore.saveSegments("workspace-1", "dQw4w9WgXcQ", [
+    await YouTubeTranscriptStore.saveSegments("workspace-1", "dQw4w9WgXcQ", [
       {
         videoId: "dQw4w9WgXcQ",
         startMs: 12_000,
@@ -60,7 +60,7 @@ describeWithNativeDb("YouTubeTranscriptStore", () => {
       },
     ]);
 
-    const hits = YouTubeTranscriptStore.search({
+    const hits = await YouTubeTranscriptStore.search({
       query: "What is the implementation plan about APIs?",
       workspaceId: "workspace-1",
       limit: 5,
@@ -71,16 +71,16 @@ describeWithNativeDb("YouTubeTranscriptStore", () => {
     expect(hits[0]?.url).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=12s");
   });
 
-  it("limits searches to the requested videos", () => {
+  it("limits searches to the requested videos", async () => {
     YouTubeTranscriptStore.setDatabaseForTests(createDb());
     for (const videoId of ["dQw4w9WgXcQ", "abc123_DEF45"]) {
-      YouTubeTranscriptStore.saveVideo("workspace-1", {
+      await YouTubeTranscriptStore.saveVideo("workspace-1", {
         videoId,
         url: `https://www.youtube.com/watch?v=${videoId}`,
         title: videoId,
         fetchedAt: 1_700_000_000,
       });
-      YouTubeTranscriptStore.saveSegments("workspace-1", videoId, [
+      await YouTubeTranscriptStore.saveSegments("workspace-1", videoId, [
         {
           videoId,
           startMs: 0,
@@ -91,7 +91,7 @@ describeWithNativeDb("YouTubeTranscriptStore", () => {
       ]);
     }
 
-    const hits = YouTubeTranscriptStore.search({
+    const hits = await YouTubeTranscriptStore.search({
       query: "transcript implementation",
       workspaceId: "workspace-1",
       videoIds: ["abc123_DEF45"],
@@ -101,15 +101,15 @@ describeWithNativeDb("YouTubeTranscriptStore", () => {
     expect(hits.map((hit) => hit.videoId)).toEqual(["abc123_DEF45"]);
   });
 
-  it("does not leak videos or transcript hits across workspaces", () => {
+  it("does not leak videos or transcript hits across workspaces", async () => {
     YouTubeTranscriptStore.setDatabaseForTests(createDb());
-    YouTubeTranscriptStore.saveVideo("workspace-1", {
+    await YouTubeTranscriptStore.saveVideo("workspace-1", {
       videoId: "dQw4w9WgXcQ",
       url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       title: "Private Workspace Video",
       fetchedAt: 1_700_000_000,
     });
-    YouTubeTranscriptStore.saveSegments("workspace-1", "dQw4w9WgXcQ", [
+    await YouTubeTranscriptStore.saveSegments("workspace-1", "dQw4w9WgXcQ", [
       {
         videoId: "dQw4w9WgXcQ",
         startMs: 0,
@@ -119,9 +119,9 @@ describeWithNativeDb("YouTubeTranscriptStore", () => {
       },
     ]);
 
-    expect(YouTubeTranscriptStore.listVideos("workspace-2")).toEqual([]);
+    expect(await YouTubeTranscriptStore.listVideos("workspace-2")).toEqual([]);
     expect(
-      YouTubeTranscriptStore.search({
+      await YouTubeTranscriptStore.search({
         workspaceId: "workspace-2",
         query: "workspace scoped transcript",
       }),

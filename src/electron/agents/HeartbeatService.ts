@@ -1,4 +1,11 @@
-import Database from "better-sqlite3";
+import {
+  AgentRoleRepository,
+  AutomationProfileRepository,
+  HeartbeatRunRepository,
+  MentionRepository,
+  WorkingStateRepository,
+} from "./agent-repository-facades";
+import type Database from "better-sqlite3";
 import { EventEmitter } from "events";
 import {
   AgentMention,
@@ -19,17 +26,16 @@ import {
   type CreateAutomationRunOutcomeInput,
   type MemoryFeaturesSettings,
 } from "../../shared/types";
-import { AgentRoleRepository } from "./AgentRoleRepository";
-import { MentionRepository } from "./MentionRepository";
-import { ActivityRepository } from "../activity/ActivityRepository";
-import { WorkingStateRepository } from "./WorkingStateRepository";
+
+import { ActivityRepository } from "../activity/activity-repository-facades";
+
 import {
   HeartbeatMaintenanceStateStore,
   type HeartbeatChecklistItem,
   readHeartbeatChecklist,
 } from "./heartbeat-maintenance";
 import { HeartbeatSignalStore, type SubmitHeartbeatSignalInput } from "./HeartbeatSignalStore";
-import { HeartbeatRunRepository } from "./HeartbeatRunRepository";
+
 import {
   HeartbeatPulseEngine,
   getSignalStrength,
@@ -38,7 +44,7 @@ import {
 import { HeartbeatDispatchEngine } from "./HeartbeatDispatchEngine";
 import type { MemoryCaptureOptions } from "../memory/MemoryService";
 import { MemoryPressureService } from "../memory/MemoryPressureService";
-import { AutomationProfileRepository } from "./AutomationProfileRepository";
+
 import { CoreTraceService } from "../core/CoreTraceService";
 import { CoreMemoryCandidateService } from "../core/CoreMemoryCandidateService";
 import { CoreMemoryDistiller } from "../core/CoreMemoryDistiller";
@@ -112,7 +118,9 @@ export interface HeartbeatServiceDeps {
   getAwarenessSummary?: (workspaceId?: string) => AwarenessSummary | null;
   getAutonomyState?: (workspaceId?: string) => ChiefOfStaffWorldModel | null;
   getAutonomyDecisions?: (workspaceId?: string) => AutonomyDecision[];
-  listActiveSuggestions?: (workspaceId: string) => ProactiveSuggestion[];
+  listActiveSuggestions?: (
+    workspaceId: string,
+  ) => ProactiveSuggestion[] | Promise<ProactiveSuggestion[]>;
   createCompanionSuggestion?: (
     workspaceId: string,
     suggestion: {
@@ -275,19 +283,19 @@ export class HeartbeatService extends EventEmitter {
 
   private async finalizeCoreLearning(traceId?: string): Promise<void> {
     if (!traceId) return;
-    this.deps.coreMemoryCandidateService?.extractFromTrace(traceId);
-    this.deps.coreMemoryCandidateService?.autoAcceptHighSignalCandidates(traceId);
+    await this.deps.coreMemoryCandidateService?.extractFromTrace(traceId);
+    await this.deps.coreMemoryCandidateService?.autoAcceptHighSignalCandidates(traceId);
     await this.deps.coreMemoryDistiller?.runHotPath(traceId);
-    this.deps.coreLearningPipelineService?.processTrace(traceId);
+    await this.deps.coreLearningPipelineService?.processTrace(traceId);
   }
 
   async start(): Promise<void> {
     if (this.started) return;
     this.stopping = false;
     this.started = true;
-    this.runRepo.reconcileInterruptedAgentRuns();
-    this.reconcileLegacyMigratedRuns();
-    for (const agent of this.deps.agentRoleRepo.findHeartbeatEnabled()) {
+    await this.runRepo.reconcileInterruptedAgentRuns();
+    await this.reconcileLegacyMigratedRuns();
+    for (const agent of await this.deps.agentRoleRepo.findHeartbeatEnabled()) {
       this.scheduleHeartbeat(agent);
     }
   }
@@ -307,7 +315,7 @@ export class HeartbeatService extends EventEmitter {
 
   async triggerHeartbeat(agentRoleId: string): Promise<HeartbeatResult> {
     if (this.stopping) return this.stoppedResult(agentRoleId);
-    const agent = this.deps.agentRoleRepo.findById(agentRoleId);
+    const agent = await this.deps.agentRoleRepo.findById(agentRoleId);
     if (!agent) {
       return {
         agentRoleId,
@@ -318,7 +326,7 @@ export class HeartbeatService extends EventEmitter {
         error: "Agent role not found",
       };
     }
-    this.submitHeartbeatSignal({
+    await this.submitHeartbeatSignal({
       agentRoleId,
       signalFamily: "urgent_interrupt",
       source: "manual",
@@ -337,7 +345,7 @@ export class HeartbeatService extends EventEmitter {
       if (this.stopping) return this.stoppedResult(agentRoleId);
       const replay = this.runningPromises.get(agentRoleId);
       if (replay) return replay;
-      const refreshedAgent = this.deps.agentRoleRepo.findById(agentRoleId);
+      const refreshedAgent = await this.deps.agentRoleRepo.findById(agentRoleId);
       if (!refreshedAgent) {
         return {
           agentRoleId,
@@ -353,9 +361,9 @@ export class HeartbeatService extends EventEmitter {
     return this.executePulse(agent, true);
   }
 
-  submitHeartbeatSignal(input: SubmitHeartbeatSignalInput): HeartbeatSignal {
+  async submitHeartbeatSignal(input: SubmitHeartbeatSignalInput): Promise<HeartbeatSignal> {
     const result = this.signalStore.submit(input);
-    const agent = this.deps.agentRoleRepo.findById(input.agentRoleId);
+    const agent = await this.deps.agentRoleRepo.findById(input.agentRoleId);
     this.emitHeartbeatEvent({
       type: result.merged ? "signal_merged" : "signal_received",
       agentRoleId: input.agentRoleId,
@@ -366,11 +374,13 @@ export class HeartbeatService extends EventEmitter {
     return result.signal;
   }
 
-  submitSignalForAll(input: Omit<SubmitHeartbeatSignalInput, "agentRoleId">): HeartbeatSignal[] {
+  async submitSignalForAll(
+    input: Omit<SubmitHeartbeatSignalInput, "agentRoleId">,
+  ): Promise<HeartbeatSignal[]> {
     const signals: HeartbeatSignal[] = [];
-    for (const agent of this.deps.agentRoleRepo.findHeartbeatEnabled()) {
+    for (const agent of await this.deps.agentRoleRepo.findHeartbeatEnabled()) {
       signals.push(
-        this.submitHeartbeatSignal({
+        await this.submitHeartbeatSignal({
           ...input,
           agentRoleId: agent.id,
         }),
@@ -379,10 +389,10 @@ export class HeartbeatService extends EventEmitter {
     return signals;
   }
 
-  submitWakeRequest(
+  async submitWakeRequest(
     agentRoleId: string,
     request: { text?: string; mode?: HeartbeatWakeMode; source?: HeartbeatWakeSource },
-  ): void {
+  ): Promise<void> {
     const mode = request.mode === "now" ? "now" : "next-heartbeat";
     const source = request.source || "manual";
     const reason = normalizeWakeText(request.text);
@@ -390,7 +400,7 @@ export class HeartbeatService extends EventEmitter {
       mode === "now" && source === "manual"
         ? `manual:${agentRoleId}:${Date.now()}`
         : `${source}:${mode}:${agentRoleId}:${reason.toLowerCase()}`;
-    this.submitHeartbeatSignal({
+    await this.submitHeartbeatSignal({
       agentRoleId,
       signalFamily: deriveSignalFamily(mode, source),
       source,
@@ -401,19 +411,19 @@ export class HeartbeatService extends EventEmitter {
     });
   }
 
-  submitWakeForAll(request: {
+  async submitWakeForAll(request: {
     text?: string;
     mode?: HeartbeatWakeMode;
     source?: HeartbeatWakeSource;
-  }): void {
-    for (const agent of this.deps.agentRoleRepo.findHeartbeatEnabled()) {
-      this.submitWakeRequest(agent.id, request);
+  }): Promise<void> {
+    for (const agent of await this.deps.agentRoleRepo.findHeartbeatEnabled()) {
+      await this.submitWakeRequest(agent.id, request);
     }
   }
 
-  updateAgentConfig(agentRoleId: string, _config: HeartbeatConfig): void {
+  async updateAgentConfig(agentRoleId: string, _config: HeartbeatConfig): Promise<void> {
     this.cancelHeartbeat(agentRoleId);
-    const agent = this.deps.agentRoleRepo.findById(agentRoleId);
+    const agent = await this.deps.agentRoleRepo.findById(agentRoleId);
     if (agent?.heartbeatPolicy?.enabled || agent?.heartbeatEnabled) this.scheduleHeartbeat(agent);
   }
 
@@ -427,29 +437,32 @@ export class HeartbeatService extends EventEmitter {
     this.signalStore.clearDeferredState(agentRoleId);
   }
 
-  getAllStatus(): HeartbeatStatusSnapshot[] {
-    return this.deps.agentRoleRepo.findAll(true).map((agent) => this.buildStatus(agent));
+  async getAllStatus(): Promise<HeartbeatStatusSnapshot[]> {
+    return Promise.all(
+      (await this.deps.agentRoleRepo.findAll(true)).map((agent) => this.buildStatus(agent)),
+    );
   }
 
-  getStatus(agentRoleId: string):
+  async getStatus(agentRoleId: string): Promise<
     | (HeartbeatStatusSnapshot & {
         isRunning: boolean;
       })
-    | undefined {
-    const agent = this.deps.agentRoleRepo.findById(agentRoleId);
+    | undefined
+  > {
+    const agent = await this.deps.agentRoleRepo.findById(agentRoleId);
     if (!agent) return undefined;
     return {
-      ...this.buildStatus(agent),
+      ...(await this.buildStatus(agent)),
       isRunning: this.running.has(agentRoleId),
     };
   }
 
-  private buildStatus(agent: AgentRole): HeartbeatStatusSnapshot {
+  private async buildStatus(agent: AgentRole): Promise<HeartbeatStatusSnapshot> {
     const signals = this.signalStore.listAgentSignals(agent.id);
     const deferred = this.getDeferredStateForAgent(agent.id);
     const dueChecklistItems = this.getDueChecklistItems(agent);
     const dueProactiveTasks = this.getDueProactiveTasks(agent, signals);
-    const dispatchesToday = this.getDispatchesToday(agent.id);
+    const dispatchesToday = await this.getDispatchesToday(agent.id);
     const maxDispatchesPerDay =
       agent.heartbeatPolicy?.maxDispatchesPerDay || agent.maxDispatchesPerDay || 6;
     return {
@@ -465,7 +478,7 @@ export class HeartbeatService extends EventEmitter {
       compressedSignalCount: signals.reduce((sum, signal) => sum + signal.mergedCount, 0),
       dueProactiveCount: dueProactiveTasks.length,
       checklistDueCount: dueChecklistItems.length,
-      dispatchCooldownUntil: this.getDispatchCooldownUntil(agent),
+      dispatchCooldownUntil: await this.getDispatchCooldownUntil(agent),
       dispatchesToday,
       maxDispatchesPerDay,
     };
@@ -477,21 +490,23 @@ export class HeartbeatService extends EventEmitter {
     if (existing) clearTimeout(existing);
     const nextHeartbeatAt = this.getNextHeartbeatTime(agent) || Date.now() + 30_000;
     const delay = Math.max(1_000, nextHeartbeatAt - Date.now());
-    const timer = setTimeout(async () => {
+    const runScheduledPulse = async () => {
       if (!this.started) return;
       try {
-        const liveAgent = this.deps.agentRoleRepo.findById(agent.id);
+        const liveAgent = await this.deps.agentRoleRepo.findById(agent.id);
         if (liveAgent?.heartbeatPolicy?.enabled || liveAgent?.heartbeatEnabled) {
           await this.executePulse(liveAgent, false);
           if (!this.started) return;
-          const refreshed = this.deps.agentRoleRepo.findById(agent.id);
+          const refreshed = await this.deps.agentRoleRepo.findById(agent.id);
           if (refreshed?.heartbeatPolicy?.enabled || refreshed?.heartbeatEnabled)
             this.scheduleHeartbeat(refreshed);
         }
       } catch (error) {
         console.error("[HeartbeatService] Scheduled heartbeat failed:", error);
       }
-    }, delay);
+    };
+    // The pulse catches its own failures; the timer only starts it.
+    const timer = setTimeout(() => void runScheduledPulse(), delay);
     this.timers.set(agent.id, timer);
   }
 
@@ -523,7 +538,7 @@ export class HeartbeatService extends EventEmitter {
 
     const dueChecklistItems = this.getDueChecklistItems(agent);
     const pulseSignals = this.signalStore.listAgentSignals(agent.id);
-    const pulseMentions = this.deps.mentionRepo.getPendingForAgent(agent.id);
+    const pulseMentions = await this.deps.mentionRepo.getPendingForAgent(agent.id);
     const pulseTasks = this.deps.getTasksForAgent(agent.id);
     const workspaceId = this.resolveWorkspaceId(
       agent,
@@ -535,16 +550,16 @@ export class HeartbeatService extends EventEmitter {
     const scopedChecklistItems = workspaceId
       ? dueChecklistItems.filter((item) => !item.workspaceId || item.workspaceId === workspaceId)
       : [];
-    const pulseRun = this.runRepo.create({
+    const pulseRun = await this.runRepo.create({
       agentRoleId: agent.id,
       workspaceId,
       runType: "pulse",
       reason: manualOverride ? "manual_pulse" : "scheduled_pulse",
       status: "running",
     });
-    const profile = this.deps.automationProfileRepo?.findByAgentRoleId(agent.id);
+    const profile = await this.deps.automationProfileRepo?.findByAgentRoleId(agent.id);
     const coreTrace = profile
-      ? this.deps.coreTraceService?.startTrace({
+      ? await this.deps.coreTraceService?.startTrace({
           profileId: profile.id,
           workspaceId,
           targetKey: `agent_role:${agent.id}`,
@@ -556,7 +571,7 @@ export class HeartbeatService extends EventEmitter {
         })
       : undefined;
     if (coreTrace) {
-      this.deps.coreTraceService?.appendPhaseEvent(
+      await this.deps.coreTraceService?.appendPhaseEvent(
         coreTrace.id,
         "start",
         "heartbeat.pulse_started",
@@ -579,23 +594,24 @@ export class HeartbeatService extends EventEmitter {
 
     const promise = (async (): Promise<HeartbeatResult> => {
       this.running.add(agent.id);
-      this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "running");
+      await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "running");
       try {
         const pendingMentions = pulseMentions.length;
         const assignedTasks = pulseTasks.length;
         const relevantActivities = workspaceId
-          ? this.deps.activityRepo.list({ workspaceId, agentRoleId: agent.id, limit: 10 }).length
+          ? (await this.deps.activityRepo.list({ workspaceId, agentRoleId: agent.id, limit: 10 }))
+              .length
           : 0;
 
         if (!manualOverride && !isWithinActiveHours(agent)) {
           if (coreTrace) {
-            this.deps.coreTraceService?.appendPhaseEvent(
+            await this.deps.coreTraceService?.appendPhaseEvent(
               coreTrace.id,
               "gating",
               "heartbeat.gated",
               "Heartbeat pulse deferred because the operator is outside active hours.",
             );
-            this.deps.coreTraceService?.completeTrace(
+            await this.deps.coreTraceService?.completeTrace(
               coreTrace.id,
               "completed",
               "Outside active hours.",
@@ -612,16 +628,16 @@ export class HeartbeatService extends EventEmitter {
             pulseOutcome: "idle",
             triggerReason: "Outside active hours",
           };
-          this.runRepo.finish(pulseRun.id, {
+          await this.runRepo.finish(pulseRun.id, {
             status: "completed",
             summary: "Outside active hours",
           });
-          this.finishPulse(agent, result);
+          await this.finishPulse(agent, result);
           return result;
         }
 
         const dueProactiveTasks = this.getDueProactiveTasks(agent, pulseSignals);
-        const dispatchesToday = this.getDispatchesToday(agent.id);
+        const dispatchesToday = await this.getDispatchesToday(agent.id);
         const decision = this.pulseEngine.evaluate({
           agent,
           signals: pulseSignals,
@@ -633,11 +649,11 @@ export class HeartbeatService extends EventEmitter {
           manualOverride,
           dueChecklistItems: scopedChecklistItems,
           dueProactiveTasks,
-          cooldownUntil: this.getDispatchCooldownUntil(agent),
+          cooldownUntil: await this.getDispatchCooldownUntil(agent),
           dispatchesToday,
           maxDispatchesPerDay:
             agent.heartbeatPolicy?.maxDispatchesPerDay || agent.maxDispatchesPerDay || 6,
-          hasInFlightDispatch: this.runRepo.hasInFlightDispatch(agent.id, workspaceId),
+          hasInFlightDispatch: await this.runRepo.hasInFlightDispatch(agent.id, workspaceId),
         });
 
         let result: HeartbeatResult = {
@@ -675,7 +691,7 @@ export class HeartbeatService extends EventEmitter {
             reflectionOutcome: reflectionRun.outcome,
           };
           if (coreTrace) {
-            this.deps.coreTraceService?.appendPhaseEvent(
+            await this.deps.coreTraceService?.appendPhaseEvent(
               coreTrace.id,
               "decision",
               "heartbeat.reflection_triggered",
@@ -702,7 +718,7 @@ export class HeartbeatService extends EventEmitter {
             dreamingCandidateCount: dreamingRun.candidateCount,
           };
           if (coreTrace) {
-            this.deps.coreTraceService?.appendPhaseEvent(
+            await this.deps.coreTraceService?.appendPhaseEvent(
               coreTrace.id,
               "decision",
               "heartbeat.dreaming_triggered",
@@ -718,7 +734,7 @@ export class HeartbeatService extends EventEmitter {
 
         if (decision.kind === "deferred") {
           if (coreTrace) {
-            this.deps.coreTraceService?.appendPhaseEvent(
+            await this.deps.coreTraceService?.appendPhaseEvent(
               coreTrace.id,
               "gating",
               "heartbeat.deferred",
@@ -728,7 +744,11 @@ export class HeartbeatService extends EventEmitter {
                 signalCount: decision.signalCount,
               },
             );
-            this.deps.coreTraceService?.completeTrace(coreTrace.id, "completed", decision.reason);
+            await this.deps.coreTraceService?.completeTrace(
+              coreTrace.id,
+              "completed",
+              decision.reason,
+            );
             await this.finalizeCoreLearning(coreTrace.id);
           }
           this.signalStore.setDeferredState(
@@ -738,7 +758,7 @@ export class HeartbeatService extends EventEmitter {
               compressedSignalCount: 0,
             },
           );
-          this.runRepo.finish(pulseRun.id, { status: "completed", summary: decision.reason });
+          await this.runRepo.finish(pulseRun.id, { status: "completed", summary: decision.reason });
           result.deferred = true;
           result.deferredReason = decision.reason;
           this.emitHeartbeatEvent({
@@ -751,7 +771,7 @@ export class HeartbeatService extends EventEmitter {
             runType: "pulse",
             deferred: decision.deferred,
           });
-          this.finishPulse(agent, result);
+          await this.finishPulse(agent, result);
           return result;
         }
 
@@ -759,16 +779,20 @@ export class HeartbeatService extends EventEmitter {
 
         if (decision.kind === "idle" || !decision.dispatchKind) {
           if (coreTrace) {
-            this.deps.coreTraceService?.appendPhaseEvent(
+            await this.deps.coreTraceService?.appendPhaseEvent(
               coreTrace.id,
               "decision",
               "heartbeat.idle",
               decision.reason,
             );
-            this.deps.coreTraceService?.completeTrace(coreTrace.id, "completed", decision.reason);
+            await this.deps.coreTraceService?.completeTrace(
+              coreTrace.id,
+              "completed",
+              decision.reason,
+            );
             await this.finalizeCoreLearning(coreTrace.id);
           }
-          this.runRepo.finish(pulseRun.id, { status: "completed", summary: decision.reason });
+          await this.runRepo.finish(pulseRun.id, { status: "completed", summary: decision.reason });
           this.emitHeartbeatEvent({
             type: "pulse_completed",
             agentRoleId: agent.id,
@@ -778,19 +802,19 @@ export class HeartbeatService extends EventEmitter {
             runId: pulseRun.id,
             runType: "pulse",
           });
-          this.finishPulse(agent, result);
+          await this.finishPulse(agent, result);
           return result;
         }
 
         if (!workspaceId) {
           if (coreTrace) {
-            this.deps.coreTraceService?.appendPhaseEvent(
+            await this.deps.coreTraceService?.appendPhaseEvent(
               coreTrace.id,
               "decision",
               "heartbeat.no_workspace",
               "Heartbeat could not dispatch because no workspace was available.",
             );
-            this.deps.coreTraceService?.completeTrace(
+            await this.deps.coreTraceService?.completeTrace(
               coreTrace.id,
               "completed",
               "No workspace available for heartbeat dispatch.",
@@ -803,7 +827,7 @@ export class HeartbeatService extends EventEmitter {
             dispatchKind: undefined,
             triggerReason: "No workspace available for heartbeat dispatch",
           };
-          this.runRepo.finish(pulseRun.id, {
+          await this.runRepo.finish(pulseRun.id, {
             status: "completed",
             summary: "No workspace available for heartbeat dispatch",
           });
@@ -826,11 +850,11 @@ export class HeartbeatService extends EventEmitter {
             runId: pulseRun.id,
             runType: "pulse",
           });
-          this.finishPulse(agent, result);
+          await this.finishPulse(agent, result);
           return result;
         }
 
-        const dispatchRun = this.runRepo.create({
+        const dispatchRun = await this.runRepo.create({
           agentRoleId: agent.id,
           workspaceId,
           runType: "dispatch",
@@ -849,7 +873,7 @@ export class HeartbeatService extends EventEmitter {
           dispatchKind: decision.dispatchKind,
         });
         if (coreTrace) {
-          this.deps.coreTraceService?.appendPhaseEvent(
+          await this.deps.coreTraceService?.appendPhaseEvent(
             coreTrace.id,
             "dispatch",
             "heartbeat.dispatch_started",
@@ -877,12 +901,12 @@ export class HeartbeatService extends EventEmitter {
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          this.runRepo.recordEvent(dispatchRun.id, "dispatch.failed", {
+          await this.runRepo.recordEvent(dispatchRun.id, "dispatch.failed", {
             dispatchKind: decision.dispatchKind,
             triggerReason: decision.reason,
             error: message,
           });
-          this.runRepo.finish(dispatchRun.id, {
+          await this.runRepo.finish(dispatchRun.id, {
             status: "failed",
             summary: decision.reason,
             error: message,
@@ -891,11 +915,11 @@ export class HeartbeatService extends EventEmitter {
           throw error;
         }
 
-        this.runRepo.recordEvent(dispatchRun.id, "dispatch.completed", {
+        await this.runRepo.recordEvent(dispatchRun.id, "dispatch.completed", {
           dispatchKind: decision.dispatchKind,
           triggerReason: decision.reason,
         });
-        this.runRepo.finish(dispatchRun.id, {
+        await this.runRepo.finish(dispatchRun.id, {
           status: dispatchResult.status === "error" ? "failed" : "completed",
           summary: decision.reason,
           error: dispatchResult.error,
@@ -903,9 +927,9 @@ export class HeartbeatService extends EventEmitter {
           evidenceRefs: decision.evidenceRefs,
         });
         if (dispatchResult.taskCreated) {
-          this.runRepo.attachTask(dispatchRun.id, dispatchResult.taskCreated);
+          await this.runRepo.attachTask(dispatchRun.id, dispatchResult.taskCreated);
           if (coreTrace) {
-            this.deps.coreTraceService?.attachTask(coreTrace.id, dispatchResult.taskCreated);
+            await this.deps.coreTraceService?.attachTask(coreTrace.id, dispatchResult.taskCreated);
           }
         }
         if (dispatchResult.status !== "error") {
@@ -926,7 +950,7 @@ export class HeartbeatService extends EventEmitter {
               })),
           );
         }
-        this.deps.agentRoleRepo.updateHeartbeatRunTimestamps?.(agent.id, {
+        await this.deps.agentRoleRepo.updateHeartbeatRunTimestamps?.(agent.id, {
           lastDispatchAt: Date.now(),
           lastHeartbeatAt: Date.now(),
           lastDispatchKind: decision.dispatchKind,
@@ -939,12 +963,12 @@ export class HeartbeatService extends EventEmitter {
           runId: pulseRun.id,
         };
 
-        this.runRepo.finish(pulseRun.id, {
+        await this.runRepo.finish(pulseRun.id, {
           status: "completed",
           summary: `${decision.kind}: ${decision.reason}`,
         });
         if (coreTrace) {
-          this.deps.coreTraceService?.appendPhaseEvent(
+          await this.deps.coreTraceService?.appendPhaseEvent(
             coreTrace.id,
             "dispatch",
             "heartbeat.dispatch_completed",
@@ -955,7 +979,7 @@ export class HeartbeatService extends EventEmitter {
               status: dispatchResult.status,
             },
           );
-          this.deps.coreTraceService?.completeTrace(
+          await this.deps.coreTraceService?.completeTrace(
             coreTrace.id,
             dispatchResult.status === "error" ? "failed" : "completed",
             `${decision.kind}: ${decision.reason}`,
@@ -989,21 +1013,21 @@ export class HeartbeatService extends EventEmitter {
           runId: pulseRun.id,
           runType: "pulse",
         });
-        this.finishPulse(agent, result);
+        await this.finishPulse(agent, result);
         return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (coreTrace) {
-          this.deps.coreTraceService?.appendPhaseEvent(
+          await this.deps.coreTraceService?.appendPhaseEvent(
             coreTrace.id,
             "error",
             "heartbeat.error",
             message,
           );
-          this.deps.coreTraceService?.failTrace(coreTrace.id, message);
+          await this.deps.coreTraceService?.failTrace(coreTrace.id, message);
           await this.finalizeCoreLearning(coreTrace.id);
         }
-        this.runRepo.finish(pulseRun.id, { status: "failed", error: message });
+        await this.runRepo.finish(pulseRun.id, { status: "failed", error: message });
         const result: HeartbeatResult = {
           agentRoleId: agent.id,
           status: "error",
@@ -1014,7 +1038,7 @@ export class HeartbeatService extends EventEmitter {
           relevantActivities: 0,
           error: message,
         };
-        this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "error");
+        await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "error");
         this.emitHeartbeatEvent({
           type: "error",
           agentRoleId: agent.id,
@@ -1036,7 +1060,9 @@ export class HeartbeatService extends EventEmitter {
       } finally {
         this.running.delete(agent.id);
         this.runningPromises.delete(agent.id);
-        const refreshed = this.stopping ? undefined : this.deps.agentRoleRepo.findById(agent.id);
+        const refreshed = this.stopping
+          ? undefined
+          : await this.deps.agentRoleRepo.findById(agent.id);
         if (
           this.pendingManualOverrides.has(agent.id) &&
           (refreshed?.heartbeatPolicy?.enabled || refreshed?.heartbeatEnabled)
@@ -1044,10 +1070,15 @@ export class HeartbeatService extends EventEmitter {
           this.pendingManualOverrides.delete(agent.id);
           queueMicrotask(() => {
             if (this.stopping) return;
-            const replayAgent = this.deps.agentRoleRepo.findById(agent.id);
-            if (replayAgent?.heartbeatPolicy?.enabled || replayAgent?.heartbeatEnabled) {
-              void this.executePulse(replayAgent, true);
-            }
+            void Promise.resolve(this.deps.agentRoleRepo.findById(agent.id))
+              .then((replayAgent) => {
+                if (replayAgent?.heartbeatPolicy?.enabled || replayAgent?.heartbeatEnabled) {
+                  void this.executePulse(replayAgent, true);
+                }
+              })
+              .catch((error) => {
+                console.error("[HeartbeatService] Failed to replay a manual override:", error);
+              });
           });
         } else if (
           this.started &&
@@ -1062,10 +1093,10 @@ export class HeartbeatService extends EventEmitter {
     return promise;
   }
 
-  private finishPulse(agent: AgentRole, result: HeartbeatResult): void {
+  private async finishPulse(agent: AgentRole, result: HeartbeatResult): Promise<void> {
     const now = Date.now();
-    this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "idle", now);
-    this.deps.agentRoleRepo.updateHeartbeatRunTimestamps?.(agent.id, {
+    await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "idle", now);
+    await this.deps.agentRoleRepo.updateHeartbeatRunTimestamps?.(agent.id, {
       lastPulseAt: now,
       lastHeartbeatAt: now,
       lastPulseResult: result.pulseOutcome,
@@ -1210,14 +1241,14 @@ export class HeartbeatService extends EventEmitter {
     return this.signalStore.getDeferredState(agentRoleId);
   }
 
-  private getDispatchesToday(agentRoleId: string): number {
-    return this.runRepo
-      .listRecentDispatches(agentRoleId, getStartOfDay(Date.now()))
+  private async getDispatchesToday(agentRoleId: string): Promise<number> {
+    return (await this.runRepo
+      .listRecentDispatches(agentRoleId, getStartOfDay(Date.now())))
       .filter((run) => run.status !== "cancelled").length;
   }
 
-  private getDispatchCooldownUntil(agent: AgentRole): number | undefined {
-    const latestDispatch = this.runRepo.getLatestRun(agent.id, "dispatch");
+  private async getDispatchCooldownUntil(agent: AgentRole): Promise<number | undefined> {
+    const latestDispatch = await this.runRepo.getLatestRun(agent.id, "dispatch");
     if (!latestDispatch?.completedAt) return undefined;
     const cooldownMs =
       (agent.heartbeatPolicy?.dispatchCooldownMinutes || agent.dispatchCooldownMinutes || 120) *
@@ -1248,57 +1279,13 @@ export class HeartbeatService extends EventEmitter {
     return Date.now() + Math.max(5_000, staggerMs || 5_000);
   }
 
-  private reconcileLegacyMigratedRuns(): void {
-    const db = this.deps.db;
-    if (!db) return;
-
-    const staleRows = db
-      .prepare(
-        `SELECT r.id
-         FROM heartbeat_runs r
-         LEFT JOIN agent_roles a ON a.id = r.agent_role_id
-         LEFT JOIN issues i ON i.id = r.issue_id
-         LEFT JOIN tasks t ON t.id = r.task_id
-         WHERE r.status = 'running'
-           AND r.reason = 'migrated_v2_run'
-           AND r.issue_id IS NOT NULL
-           AND (
-             a.id IS NULL OR
-             i.active_run_id = r.id OR
-             t.status IN ('failed', 'completed', 'cancelled')
-           )`,
-      )
-      .all() as Array<{ id: string }>;
-
-    if (staleRows.length === 0) return;
-
-    const staleRunIds = staleRows.map((row) => row.id);
-    const placeholders = staleRunIds.map(() => "?").join(", ");
-    const now = Date.now();
-    const message = "Legacy v2 heartbeat run reconciled during v3 startup";
-
-    const tx = db.transaction(() => {
-      db.prepare(
-        `UPDATE heartbeat_runs
-         SET status = 'failed',
-             error = COALESCE(error, ?),
-             updated_at = ?,
-             completed_at = COALESCE(completed_at, ?)
-         WHERE id IN (${placeholders})`,
-      ).run(message, now, now, ...staleRunIds);
-
-      db.prepare(
-        `UPDATE issues
-         SET active_run_id = NULL,
-             updated_at = ?
-         WHERE active_run_id IN (${placeholders})`,
-      ).run(now, ...staleRunIds);
-    });
-
-    tx();
-    console.info(
-      `[HeartbeatService] Reconciled ${staleRunIds.length} legacy migrated heartbeat run(s)`,
+  private async reconcileLegacyMigratedRuns(): Promise<void> {
+    if (!this.deps.db) return;
+    const reconciled = await this.runRepo.reconcileLegacyMigratedRuns(
+      "Legacy v2 heartbeat run reconciled during v3 startup",
     );
+    if (reconciled === 0) return;
+    console.info(`[HeartbeatService] Reconciled ${reconciled} legacy migrated heartbeat run(s)`);
   }
 
   private getDueChecklistItems(agent: AgentRole): HeartbeatChecklistItem[] {

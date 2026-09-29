@@ -1,3 +1,4 @@
+import type Database from "better-sqlite3";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
 import type {
@@ -11,11 +12,11 @@ import type {
 import { getACPRegistry, type ACPAgentCard } from "../../acp";
 import { RemoteAgentInvoker } from "../../acp/remote-invoker";
 import {
-  OrchestrationGraphRepository,
   type OrchestrationDispatchClaim,
   type OrchestrationNodeCancellationAttempt,
   type OrchestrationGraphSnapshot,
 } from "./OrchestrationGraphRepository";
+import { OrchestrationGraphRepository } from "./orchestration-graph-repository-facades";
 
 const activeDispatchClaimIds = new Set<string>();
 const activeRunCancellationIds = new Set<string>();
@@ -152,7 +153,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
   private readonly runLocks = new Set<string>();
 
   constructor(
-    db: import("better-sqlite3").Database,
+    db: Database.Database,
     private readonly deps: OrchestrationGraphEngineDeps,
   ) {
     super();
@@ -163,10 +164,21 @@ export class OrchestrationGraphEngine extends EventEmitter {
     return this.repo;
   }
 
+  private reconciling = false;
+
   start(): void {
     if (this.reconcileTimer) return;
     this.reconcileTimer = setInterval(() => {
-      void this.resumeRunningRuns();
+      // One pass at a time: under backpressure a slow pass must not queue more reads.
+      if (this.reconciling) return;
+      this.reconciling = true;
+      void this.resumeRunningRuns()
+        .catch((error: unknown) => {
+          console.warn("[OrchestrationGraphEngine] Reconcile pass failed:", error);
+        })
+        .finally(() => {
+          this.reconciling = false;
+        });
     }, 1500);
   }
 
@@ -216,7 +228,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       if (!fromNodeId || !toNodeId) return [];
       return [{ fromNodeId, toNodeId }];
     });
-    const snapshot = this.repo.createRun({
+    const snapshot = await this.repo.createRun({
       run: {
         id: runId,
         rootTaskId: input.rootTaskId,
@@ -235,7 +247,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       nodeCount: snapshot.nodes.length,
     });
     await this.tickRun(snapshot.run.id);
-    return this.repo.findSnapshotByRunId(snapshot.run.id)!;
+    return (await this.repo.findSnapshotByRunId(snapshot.run.id))!;
   }
 
   async appendNodes(input: {
@@ -248,7 +260,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       toNodeKey?: string;
     }>;
   }): Promise<OrchestrationGraphSnapshot | undefined> {
-    const existing = this.repo.findSnapshotByRunId(input.runId);
+    const existing = await this.repo.findSnapshotByRunId(input.runId);
     if (!existing) return undefined;
     const nodeIdByKey = new Map(existing.nodes.map((node) => [node.key, node.id]));
     const nodes = input.nodes.map((node, index) => {
@@ -289,7 +301,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       if (!fromNodeId || !toNodeId) return [];
       return [{ fromNodeId, toNodeId }];
     });
-    const updated = this.repo.appendNodes({
+    const updated = await this.repo.appendNodes({
       runId: input.runId,
       nodes,
       edges,
@@ -301,19 +313,19 @@ export class OrchestrationGraphEngine extends EventEmitter {
   }
 
   async resumeRunningRuns(): Promise<void> {
-    const runs = this.repo.listRunningSnapshots();
+    const runs = await this.repo.listRunningSnapshots();
     for (const snapshot of runs) {
       await this.tickRun(snapshot.run.id);
     }
-    this.reconcileCancelledRuns();
+    await this.reconcileCancelledRuns();
   }
 
-  private reconcileCancelledRuns(): void {
-    for (const snapshot of this.repo.listCancelledSnapshots()) {
+  private async reconcileCancelledRuns(): Promise<void> {
+    for (const snapshot of await this.repo.listCancelledSnapshots()) {
       if (activeRunCancellationIds.has(snapshot.run.id)) continue;
       for (const node of snapshot.nodes) {
         if (node.status === "pending" || node.status === "ready") {
-          this.repo.cancelUnstartedNode(node.id, "Cancelled before dispatch");
+          await this.repo.cancelUnstartedNode(node.id, "Cancelled before dispatch");
           continue;
         }
         if (node.status !== "running") continue;
@@ -326,7 +338,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
           cancellation?.outcome === "in_flight"
             ? "Cancellation was interrupted before its outcome was persisted; task ownership is unresolved"
             : "Run admission closed before node cancellation was recorded; task ownership is unresolved";
-        const updated = this.repo.resolveInterruptedCancellation(
+        const updated = await this.repo.resolveInterruptedCancellation(
           node.id,
           claim?.id,
           cancellation?.requestId,
@@ -343,7 +355,12 @@ export class OrchestrationGraphEngine extends EventEmitter {
           error: updated.error,
           cancellation: updated.metadata?.cancellation,
         };
-        this.repo.createNodeEvent(snapshot.run.id, node.id, "orchestration_node_blocked", payload);
+        await this.repo.createNodeEvent(
+          snapshot.run.id,
+          node.id,
+          "orchestration_node_blocked",
+          payload,
+        );
         this.emitRootEvent(snapshot.run.rootTaskId, "orchestration_node_blocked", payload);
         this.emitBlockedNodeNotification(snapshot.run.id, updated);
       }
@@ -352,20 +369,20 @@ export class OrchestrationGraphEngine extends EventEmitter {
 
   async tickRun(runId: string): Promise<OrchestrationGraphSnapshot | undefined> {
     if (this.runLocks.has(runId)) {
-      return this.repo.findSnapshotByRunId(runId);
+      return await this.repo.findSnapshotByRunId(runId);
     }
     this.runLocks.add(runId);
     try {
-      let snapshot = this.repo.findSnapshotByRunId(runId);
+      let snapshot = await this.repo.findSnapshotByRunId(runId);
       if (!snapshot || snapshot.run.status !== "running") return snapshot;
 
       await this.reconcileActiveNodes(snapshot);
-      snapshot = this.repo.findSnapshotByRunId(runId);
+      snapshot = await this.repo.findSnapshotByRunId(runId);
       if (!snapshot || snapshot.run.status !== "running") return snapshot;
 
-      const readyNodes = this.computeReadyNodes(snapshot);
+      const readyNodes = await this.computeReadyNodes(snapshot);
       for (const node of readyNodes) {
-        if (!this.repo.markNodeReady(node.id)) continue;
+        if (!(await this.repo.markNodeReady(node.id))) continue;
         this.emitRootEvent(snapshot.run.rootTaskId, "orchestration_node_ready", {
           runId: snapshot.run.id,
           nodeId: node.id,
@@ -374,7 +391,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
         });
       }
 
-      snapshot = this.repo.findSnapshotByRunId(runId);
+      snapshot = await this.repo.findSnapshotByRunId(runId);
       if (!snapshot || snapshot.run.status !== "running") return snapshot;
 
       const activeCount = snapshot.nodes.filter((node) => node.status === "running").length;
@@ -386,18 +403,21 @@ export class OrchestrationGraphEngine extends EventEmitter {
         await this.dispatchNode(snapshot.run, node);
       }
 
-      snapshot = this.repo.findSnapshotByRunId(runId);
+      snapshot = await this.repo.findSnapshotByRunId(runId);
       if (!snapshot) return snapshot;
       if (snapshot.run.status !== "running") return snapshot;
       await this.finalizeRunIfTerminal(snapshot);
-      return this.repo.findSnapshotByRunId(runId);
+      return await this.repo.findSnapshotByRunId(runId);
     } finally {
       this.runLocks.delete(runId);
     }
   }
 
-  resolveHandle(rootTaskId: string, handle: string): OrchestrationGraphNode | undefined {
-    return this.repo.findNodeByHandle(rootTaskId, handle);
+  async resolveHandle(
+    rootTaskId: string,
+    handle: string,
+  ): Promise<OrchestrationGraphNode | undefined> {
+    return await this.repo.findNodeByHandle(rootTaskId, handle);
   }
 
   async waitForHandle(
@@ -414,7 +434,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
   }> {
     const deadline = Date.now() + timeoutSeconds * 1000;
     while (Date.now() < deadline) {
-      const node = this.resolveHandle(rootTaskId, handle);
+      const node = await this.resolveHandle(rootTaskId, handle);
       if (!node) {
         return {
           success: false,
@@ -423,11 +443,11 @@ export class OrchestrationGraphEngine extends EventEmitter {
           error: "TASK_NOT_FOUND",
         };
       }
-      const snapshot = this.repo.findSnapshotByRunId(node.runId);
+      const snapshot = await this.repo.findSnapshotByRunId(node.runId);
       if (snapshot?.run.status === "running") {
         await this.tickRun(node.runId);
       }
-      const refreshed = this.resolveHandle(rootTaskId, handle);
+      const refreshed = await this.resolveHandle(rootTaskId, handle);
       if (!refreshed) {
         return {
           success: false,
@@ -460,13 +480,13 @@ export class OrchestrationGraphEngine extends EventEmitter {
   }
 
   async cancelHandle(rootTaskId: string, handle: string): Promise<boolean> {
-    const node = this.resolveHandle(rootTaskId, handle);
+    const node = await this.resolveHandle(rootTaskId, handle);
     if (!node) return false;
     if (node.status === "completed" || node.status === "failed" || node.status === "cancelled") {
       return true;
     }
     if (node.status === "pending" || node.status === "ready") {
-      const cancelled = this.repo.cancelUnstartedNode(node.id, "Cancelled before dispatch");
+      const cancelled = await this.repo.cancelUnstartedNode(node.id, "Cancelled before dispatch");
       if (!cancelled || cancelled.status !== "cancelled") return false;
       await this.tickRun(node.runId);
       return true;
@@ -483,7 +503,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
     terminalNodeIds: string[];
     unresolvedNodeIds: string[];
   }> {
-    const runIds = this.repo.cancelRunningRunsForRootTask(rootTaskId);
+    const runIds = await this.repo.cancelRunningRunsForRootTask(rootTaskId);
     for (const runId of runIds) activeRunCancellationIds.add(runId);
     const result = {
       runIds,
@@ -495,10 +515,13 @@ export class OrchestrationGraphEngine extends EventEmitter {
       const nodesToStop: OrchestrationGraphNode[] = [];
 
       for (const runId of result.runIds) {
-        const closed = this.repo.findSnapshotByRunId(runId);
+        const closed = await this.repo.findSnapshotByRunId(runId);
         for (const node of closed?.nodes || []) {
           if (node.status === "pending" || node.status === "ready") {
-            const cancelled = this.repo.cancelUnstartedNode(node.id, "Cancelled before dispatch");
+            const cancelled = await this.repo.cancelUnstartedNode(
+              node.id,
+              "Cancelled before dispatch",
+            );
             if (cancelled?.status === "cancelled") result.acknowledgedNodeIds.push(node.id);
             continue;
           }
@@ -520,7 +543,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       for (let index = 0; index < stopResults.length; index += 1) {
         const stopped = stopResults[index];
         const nodeId = nodesToStop[index].id;
-        const latest = this.repo.findNodeById(nodeId);
+        const latest = await this.repo.findNodeById(nodeId);
         const cancellation = latest?.metadata?.cancellation as
           | OrchestrationNodeCancellationAttempt
           | undefined;
@@ -550,7 +573,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       ownership,
       outcome: "in_flight",
     };
-    const begun = this.repo.beginNodeCancellation(node.id, attempt);
+    const begun = await this.repo.beginNodeCancellation(node.id, attempt);
     if (!begun) return false;
     const dispatchClaimId = dispatchClaimForNode(begun)?.id;
     let status: OrchestrationGraphNode["status"] = "blocked";
@@ -613,7 +636,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       error = `${reason}; no task identity was persisted, so the dispatch outcome is unknown`;
     }
 
-    const current = this.repo.findNodeById(node.id);
+    const current = await this.repo.findNodeById(node.id);
     if (!current) return false;
     const currentClaim = dispatchClaimForNode(current);
     if ((currentClaim?.id || undefined) !== dispatchClaimId) return false;
@@ -637,7 +660,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       ...(current.metadata || {}),
       cancellation,
     };
-    const updated = this.repo.updateNodeForCancellation(node.id, requestId, dispatchClaimId, {
+    const updated = await this.repo.updateNodeForCancellation(node.id, requestId, dispatchClaimId, {
       status,
       error: status === "blocked" ? error || summary : error,
       summary,
@@ -645,7 +668,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       metadata,
     });
     if (!updated) return false;
-    this.repo.createNodeEvent(node.runId, node.id, `orchestration_node_${outcome}`, {
+    await this.repo.createNodeEvent(node.runId, node.id, `orchestration_node_${outcome}`, {
       runId: node.runId,
       nodeId: node.id,
       taskId: updated.taskId,
@@ -655,7 +678,8 @@ export class OrchestrationGraphEngine extends EventEmitter {
       error: updated.error,
       cancellation,
     });
-    const rootTaskId = this.repo.findSnapshotByRunId(node.runId)?.run.rootTaskId || node.runId;
+    const rootTaskId =
+      (await this.repo.findSnapshotByRunId(node.runId))?.run.rootTaskId || node.runId;
     this.emitRootEvent(rootTaskId, `orchestration_node_${outcome}`, {
       runId: node.runId,
       nodeId: node.id,
@@ -670,7 +694,9 @@ export class OrchestrationGraphEngine extends EventEmitter {
     return outcome === "acknowledged" || outcome === "already_terminal";
   }
 
-  private computeReadyNodes(snapshot: OrchestrationGraphSnapshot): OrchestrationGraphNode[] {
+  private async computeReadyNodes(
+    snapshot: OrchestrationGraphSnapshot,
+  ): Promise<OrchestrationGraphNode[]> {
     const terminalNodeIds = new Set(
       snapshot.nodes.filter((node) => node.status === "completed").map((node) => node.id),
     );
@@ -688,21 +714,23 @@ export class OrchestrationGraphEngine extends EventEmitter {
       existing.push(edge.fromNodeId);
       incomingByTarget.set(edge.toNodeId, existing);
     }
-    return snapshot.nodes.filter((node) => {
-      if (node.status !== "pending") return false;
+    const ready: OrchestrationGraphNode[] = [];
+    for (const node of snapshot.nodes) {
+      if (node.status !== "pending") continue;
       const incoming = incomingByTarget.get(node.id) || [];
       if (incoming.some((from) => blockedNodeIds.has(from))) {
-        const blocked = this.repo.updateNode(node.id, {
+        const blocked = await this.repo.updateNode(node.id, {
           status: "blocked",
           error: "Dependency failed or was cancelled",
           completedAt: Date.now(),
           summary: "Blocked by failed dependency",
         });
         if (blocked) this.emitBlockedNodeNotification(snapshot.run.id, blocked);
-        return false;
+        continue;
       }
-      return incoming.every((from) => terminalNodeIds.has(from));
-    });
+      if (incoming.every((from) => terminalNodeIds.has(from))) ready.push(node);
+    }
+    return ready;
   }
 
   private async dispatchNode(
@@ -710,7 +738,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
     node: OrchestrationGraphNode,
   ): Promise<void> {
     const claimId = uuidv4();
-    const claimed = this.repo.claimReadyNode(node.id, {
+    const claimed = await this.repo.claimReadyNode(node.id, {
       id: claimId,
       claimedAt: Date.now(),
       ownerPid: process.pid,
@@ -721,7 +749,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
     let effectBoundaryEntered = false;
 
     try {
-      const prompt = this.buildPromptWithDependencyContext(run.id, claimed);
+      const prompt = await this.buildPromptWithDependencyContext(run.id, claimed);
       if (claimed.dispatchTarget === "remote_acp") {
         const acpAgentId = claimed.acpAgentId;
         if (!acpAgentId) throw new Error("Remote ACP node is missing acpAgentId");
@@ -769,20 +797,20 @@ export class OrchestrationGraphEngine extends EventEmitter {
       await this.persistLocalDispatchResult(run, claimed, claimId, child);
     } catch (error: Any) {
       const message = error?.message || String(error);
-      this.recordDispatchFailure(run, claimed, claimId, message, effectBoundaryEntered);
+      await this.recordDispatchFailure(run, claimed, claimId, message, effectBoundaryEntered);
     } finally {
       activeDispatchClaimIds.delete(claimId);
     }
   }
 
-  private recordDispatchFailure(
+  private async recordDispatchFailure(
     run: OrchestrationGraphRun,
     node: OrchestrationGraphNode,
     claimId: string,
     message: string,
     effectBoundaryEntered: boolean,
-  ): void {
-    const current = this.repo.findNodeById(node.id);
+  ): Promise<void> {
+    const current = await this.repo.findNodeById(node.id);
     const claim = current && dispatchClaimForNode(current);
     if (!current || claim?.id !== claimId) return;
     const preserveStatus =
@@ -800,7 +828,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       },
       ...(effectBoundaryEntered ? { dispatchOutcome: "unknown" } : {}),
     };
-    const updated = this.repo.updateNodeForDispatchClaim(node.id, claimId, {
+    const updated = await this.repo.updateNodeForDispatchClaim(node.id, claimId, {
       status,
       error: message,
       summary: effectBoundaryEntered ? `Dispatch outcome is unknown: ${message}` : message,
@@ -818,7 +846,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       error: updated.error,
       dispatchClaim: metadata.dispatchClaim,
     };
-    this.repo.createNodeEvent(run.id, node.id, eventType, payload);
+    await this.repo.createNodeEvent(run.id, node.id, eventType, payload);
     this.emitRootEvent(run.rootTaskId, eventType, payload);
     // Only notify on a transition this call made; a preserved terminal status was already notified.
     if (!preserveStatus && (status === "failed" || status === "blocked")) {
@@ -832,10 +860,10 @@ export class OrchestrationGraphEngine extends EventEmitter {
     claimId: string,
     task: Task,
   ): Promise<void> {
-    const current = this.repo.findNodeById(node.id);
+    const current = await this.repo.findNodeById(node.id);
     const claim = current && dispatchClaimForNode(current);
     if (!current || claim?.id !== claimId) return;
-    const latestRun = this.repo.findSnapshotByRunId(run.id)?.run;
+    const latestRun = (await this.repo.findSnapshotByRunId(run.id))?.run;
     const terminalStatus = taskGraphStatus(task);
     const status =
       terminalStatus ||
@@ -850,7 +878,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       },
       dispatchReceipt: { claimId, taskId: task.id, recordedAt: Date.now() },
     };
-    const updated = this.repo.updateNodeForDispatchClaim(node.id, claimId, {
+    const updated = await this.repo.updateNodeForDispatchClaim(node.id, claimId, {
       status,
       taskId: task.id,
       publicHandle: task.id,
@@ -875,11 +903,11 @@ export class OrchestrationGraphEngine extends EventEmitter {
       return;
     }
     if (terminalStatus) {
-      this.emitTaskTerminalEvent(run, updated, terminalStatus);
+      await this.emitTaskTerminalEvent(run, updated, terminalStatus);
       return;
     }
     const notification = this.buildNotification(run.id, updated, "running");
-    this.repo.createNodeEvent(
+    await this.repo.createNodeEvent(
       run.id,
       node.id,
       "orchestration_node_dispatched",
@@ -906,10 +934,10 @@ export class OrchestrationGraphEngine extends EventEmitter {
     });
     const terminal =
       result.status === "completed" || result.status === "failed" || result.status === "cancelled";
-    const current = this.repo.findNodeById(node.id);
+    const current = await this.repo.findNodeById(node.id);
     const claim = current && dispatchClaimForNode(current);
     if (!current || claim?.id !== claimId) return;
-    const latestRun = this.repo.findSnapshotByRunId(run.id)?.run;
+    const latestRun = (await this.repo.findSnapshotByRunId(run.id))?.run;
     const identityKnown = Boolean(result.remoteTaskId);
     const knownTerminal = terminal;
     const interrupted = latestRun?.status !== "running" || current.status !== "running";
@@ -936,7 +964,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
           }
         : {}),
     };
-    const updated = this.repo.updateNodeForDispatchClaim(node.id, claimId, {
+    const updated = await this.repo.updateNodeForDispatchClaim(node.id, claimId, {
       status,
       remoteTaskId: result.remoteTaskId,
       publicHandle: result.remoteTaskId,
@@ -977,7 +1005,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       return;
     }
     if (terminal) {
-      this.emitTaskTerminalEvent(
+      await this.emitTaskTerminalEvent(
         run,
         updated,
         updated.status as OrchestrationNodeNotification["status"],
@@ -985,7 +1013,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       return;
     }
     const notification = this.buildNotification(run.id, updated, "running");
-    this.repo.createNodeEvent(
+    await this.repo.createNodeEvent(
       run.id,
       node.id,
       "orchestration_node_dispatched",
@@ -999,15 +1027,20 @@ export class OrchestrationGraphEngine extends EventEmitter {
     );
   }
 
-  private emitTaskTerminalEvent(
+  private async emitTaskTerminalEvent(
     run: OrchestrationGraphRun,
     node: OrchestrationGraphNode,
     status: OrchestrationNodeNotification["status"],
-  ): void {
+  ): Promise<void> {
     const notification = this.buildNotification(run.id, node, status);
     const eventType =
       status === "completed" ? "orchestration_node_completed" : "orchestration_node_failed";
-    this.repo.createNodeEvent(run.id, node.id, eventType, notificationToPayload(notification));
+    await this.repo.createNodeEvent(
+      run.id,
+      node.id,
+      eventType,
+      notificationToPayload(notification),
+    );
     this.emit("node_notification", notification);
     this.emitRootEvent(run.rootTaskId, eventType, notificationToPayload(notification));
   }
@@ -1018,7 +1051,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       if (!node.taskId && !node.remoteTaskId) {
         const claim = dispatchClaimForNode(node);
         if (claim && activeDispatchClaimIds.has(claim.id)) continue;
-        this.blockUnknownDispatch(
+        await this.blockUnknownDispatch(
           snapshot.run,
           node,
           claim,
@@ -1029,7 +1062,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       if (node.taskId) {
         const task = await this.deps.getTaskById(node.taskId);
         if (!task) {
-          this.blockUnknownDispatch(
+          await this.blockUnknownDispatch(
             snapshot.run,
             node,
             dispatchClaimForNode(node),
@@ -1048,7 +1081,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
               : task.status === "cancelled"
                 ? "cancelled"
                 : "failed";
-          const updated = this.repo.updateNode(node.id, {
+          const updated = await this.repo.updateNode(node.id, {
             status: nextStatus,
             summary: summarizeTask(task),
             output: task.resultSummary,
@@ -1057,7 +1090,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
           });
           const effectiveNode = updated || node;
           const notification = this.buildNotification(snapshot.run.id, effectiveNode, nextStatus);
-          this.repo.createNodeEvent(
+          await this.repo.createNodeEvent(
             snapshot.run.id,
             node.id,
             nextStatus === "completed"
@@ -1087,7 +1120,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
             : result.status === "cancelled"
               ? "cancelled"
               : "failed";
-        const updated = this.repo.updateNode(node.id, {
+        const updated = await this.repo.updateNode(node.id, {
           status: nextStatus,
           summary: result.result || result.error || `Remote ACP task ${result.status}`,
           output: result.result,
@@ -1096,7 +1129,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
         });
         const effectiveNode = updated || node;
         const notification = this.buildNotification(snapshot.run.id, effectiveNode, nextStatus);
-        this.repo.createNodeEvent(
+        await this.repo.createNodeEvent(
           snapshot.run.id,
           node.id,
           nextStatus === "completed" ? "orchestration_node_completed" : "orchestration_node_failed",
@@ -1112,13 +1145,13 @@ export class OrchestrationGraphEngine extends EventEmitter {
     }
   }
 
-  private blockUnknownDispatch(
+  private async blockUnknownDispatch(
     run: OrchestrationGraphRun,
     node: OrchestrationGraphNode,
     claim: OrchestrationDispatchClaim | undefined,
     message: string,
-  ): void {
-    const current = this.repo.findNodeById(node.id);
+  ): Promise<void> {
+    const current = await this.repo.findNodeById(node.id);
     if (!current || current.status !== "running") return;
     const currentClaim = dispatchClaimForNode(current);
     if ((currentClaim?.id || undefined) !== (claim?.id || undefined)) return;
@@ -1135,8 +1168,8 @@ export class OrchestrationGraphEngine extends EventEmitter {
       metadata,
     };
     const updated = claim
-      ? this.repo.updateNodeForDispatchClaim(node.id, claim.id, updates)
-      : this.repo.updateNode(node.id, updates);
+      ? await this.repo.updateNodeForDispatchClaim(node.id, claim.id, updates)
+      : await this.repo.updateNode(node.id, updates);
     if (!updated) return;
     const payload = {
       runId: run.id,
@@ -1148,7 +1181,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       error: message,
       dispatchClaim: claim,
     };
-    this.repo.createNodeEvent(run.id, node.id, "orchestration_node_blocked", payload);
+    await this.repo.createNodeEvent(run.id, node.id, "orchestration_node_blocked", payload);
     this.emitRootEvent(run.rootTaskId, "orchestration_node_blocked", payload);
     this.emitBlockedNodeNotification(run.id, updated);
   }
@@ -1169,7 +1202,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
         node.status === "failed" || node.status === "cancelled" || node.status === "blocked",
     );
     const status = hasFailure ? "failed" : "completed";
-    const updated = this.repo.finishRunIfRunning(snapshot.run.id, status);
+    const updated = await this.repo.finishRunIfRunning(snapshot.run.id, status);
     if (!updated || updated.status === "cancelled") return;
     const summary = {
       runId: snapshot.run.id,
@@ -1221,8 +1254,11 @@ export class OrchestrationGraphEngine extends EventEmitter {
     this.deps.emitRootEvent?.(rootTaskId, eventType, payload);
   }
 
-  private buildPromptWithDependencyContext(runId: string, node: OrchestrationGraphNode): string {
-    const snapshot = this.repo.findSnapshotByRunId(runId);
+  private async buildPromptWithDependencyContext(
+    runId: string,
+    node: OrchestrationGraphNode,
+  ): Promise<string> {
+    const snapshot = await this.repo.findSnapshotByRunId(runId);
     if (!snapshot) return node.prompt;
     const predecessorIds = snapshot.edges
       .filter((edge) => edge.toNodeId === node.id)

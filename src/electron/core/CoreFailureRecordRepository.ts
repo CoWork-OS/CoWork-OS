@@ -4,7 +4,7 @@ import type { CoreFailureRecord, ListCoreFailureRecordsRequest } from "../../sha
 
 type Any = any;
 
-export class CoreFailureRecordRepository {
+export class CoreFailureRecordStore {
   constructor(private readonly db: Database.Database) {}
 
   create(input: Omit<CoreFailureRecord, "id"> & { id?: string }): CoreFailureRecord {

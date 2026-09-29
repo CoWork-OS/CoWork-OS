@@ -47,7 +47,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
       import("../../database/repositories"),
       import("../../agents/bot-team"),
     ]);
-    const workspace = new repositories.WorkspaceRepository(manager.getDatabase()).create(
+    const workspace = new repositories.WorkspaceStore(manager.getDatabase()).create(
       "Bot recovery workspace",
       tempDir,
       { read: true, write: true, delete: true, network: true, shell: false },
@@ -57,10 +57,10 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     const role = seeded!.roles.find((candidate) => candidate.name === "scribe")!;
     const memberRepo = new (
       await import("../../agents/AgentTeamMemberRepository")
-    ).AgentTeamMemberRepository(manager.getDatabase());
+    ).AgentTeamMemberStore(manager.getDatabase());
     expect(memberRepo.removeByTeamAndRole(seeded!.team.id, role.id)).toBe(true);
 
-    const taskRepo = new repositories.TaskRepository(manager.getDatabase());
+    const taskRepo = new repositories.TaskStore(manager.getDatabase());
     const oldTask = taskRepo.create({
       title: role.displayName,
       prompt: "Old bot conversation",
@@ -127,7 +127,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
       import("../../database/repositories"),
       import("../../agents/bot-team"),
     ]);
-    const sourceWorkspace = new repositories.WorkspaceRepository(manager.getDatabase()).create(
+    const sourceWorkspace = new repositories.WorkspaceStore(manager.getDatabase()).create(
       "Source workspace",
       `${tempDir}/source`,
       { read: true, write: true, delete: true, network: true, shell: false },
@@ -150,7 +150,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     const sourceTeam = botTeam.ensureDefaultBotTeam(manager.getDatabase(), sourceWorkspace.id)!;
     const targetTeam = botTeam.ensureDefaultBotTeam(manager.getDatabase(), targetWorkspaceId)!;
     const role = sourceTeam.roles.find((candidate) => candidate.name === "scribe")!;
-    const taskRepo = new repositories.TaskRepository(manager.getDatabase());
+    const taskRepo = new repositories.TaskStore(manager.getDatabase());
     const source = taskRepo.create({
       title: role.displayName,
       prompt: "Source transcript",
@@ -188,7 +188,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     expect(taskRepo.findById(source.id)?.workspaceId).toBe(sourceWorkspace.id);
     expect(taskRepo.findById(source.id)?.agentConfig?.botTeamId).toBe(sourceTeam.team.id);
 
-    const customTeam = new (await import("../../agents/AgentTeamRepository")).AgentTeamRepository(
+    const customTeam = new (await import("../../agents/AgentTeamRepository")).AgentTeamStore(
       manager.getDatabase(),
     ).create({
       workspaceId: sourceWorkspace.id,
@@ -220,7 +220,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
       import("../../database/repositories"),
       import("../../agents/bot-team"),
     ]);
-    const workspace = new repositories.WorkspaceRepository(manager.getDatabase()).create(
+    const workspace = new repositories.WorkspaceStore(manager.getDatabase()).create(
       "Bot peer workspace",
       tempDir,
       { read: true, write: true, delete: true, network: true, shell: false },
@@ -228,7 +228,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     const seeded = botTeam.ensureDefaultBotTeam(manager.getDatabase(), workspace.id)!;
     const atlas = seeded.roles.find((candidate) => candidate.name === "atlas-your-chief-of-staff")!;
     const forge = seeded.roles.find((candidate) => candidate.name === "forge")!;
-    const taskRepo = new repositories.TaskRepository(manager.getDatabase());
+    const taskRepo = new repositories.TaskStore(manager.getDatabase());
     const sender = taskRepo.create({
       title: atlas.displayName,
       prompt: "Atlas",
@@ -262,17 +262,17 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
       import("../../agents/bot-team"),
       import("../../agents/AgentTeamMemberRepository"),
     ]);
-    const workspace = new repositories.WorkspaceRepository(manager.getDatabase()).create(
+    const workspace = new repositories.WorkspaceStore(manager.getDatabase()).create(
       "Bot roster repair workspace",
       tempDir,
       { read: true, write: true, delete: true, network: true, shell: false },
     );
     const seeded = botTeam.ensureDefaultBotTeam(manager.getDatabase(), workspace.id)!;
     const cco = seeded.roles.find((candidate) => candidate.name === "chief-community-officer")!;
-    const memberRepo = new memberModule.AgentTeamMemberRepository(manager.getDatabase());
+    const memberRepo = new memberModule.AgentTeamMemberStore(manager.getDatabase());
     expect(memberRepo.removeByTeamAndRole(seeded.team.id, cco.id)).toBe(true);
 
-    const taskRepo = new repositories.TaskRepository(manager.getDatabase());
+    const taskRepo = new repositories.TaskStore(manager.getDatabase());
     const task = taskRepo.create({
       title: cco.displayName,
       prompt: "Find community opportunities",
@@ -325,7 +325,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     const atlas = previousTeam.roles.find(
       (candidate) => candidate.name === "atlas-your-chief-of-staff",
     )!;
-    const taskRepo = new repositories.TaskRepository(manager.getDatabase());
+    const taskRepo = new repositories.TaskStore(manager.getDatabase());
     const sender = taskRepo.create({
       title: atlas.displayName,
       prompt: "Coordinate the current workspace",
@@ -363,7 +363,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
 
     expect(resolved).toMatchObject({ ok: true });
     const updatedSender = taskRepo.findById(sender.id)!;
-    const currentTeam = new (await import("../../agents/AgentTeamRepository")).AgentTeamRepository(
+    const currentTeam = new (await import("../../agents/AgentTeamRepository")).AgentTeamStore(
       manager.getDatabase(),
     ).findByName(currentWorkspaceId, botTeam.DEFAULT_BOT_TEAM_NAME);
     expect(currentTeam).toBeTruthy();

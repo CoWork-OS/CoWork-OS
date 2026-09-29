@@ -697,61 +697,63 @@ export class WorkSessionContractRepository {
       const existing = this.findArtifactRevisionByIdempotency(sessionId, idempotencyKey);
       if (existing) return existing;
     }
-    return this.db.transaction(() => {
-      const latest = this.findLatestArtifactRevision(sessionId, path);
-      const requestedRevision =
-        input.revision === undefined
-          ? (latest?.revision || 0) + 1
-          : Math.max(1, Math.floor(boundedNumber(input.revision, 1)));
-      const parentRevisionId = optionalId(input.parentRevisionId) || latest?.id || undefined;
-      const id = randomUUID();
-      const status = normalizeArtifactStatus(input.status);
-      const now = this.now();
-      try {
-        this.db
-          .prepare(
-            `
+    return this.db
+      .transaction(() => {
+        const latest = this.findLatestArtifactRevision(sessionId, path);
+        const requestedRevision =
+          input.revision === undefined
+            ? (latest?.revision || 0) + 1
+            : Math.max(1, Math.floor(boundedNumber(input.revision, 1)));
+        const parentRevisionId = optionalId(input.parentRevisionId) || latest?.id || undefined;
+        const id = randomUUID();
+        const status = normalizeArtifactStatus(input.status);
+        const now = this.now();
+        try {
+          this.db
+            .prepare(
+              `
               INSERT INTO work_session_artifact_revisions (
                 id, session_id, task_id, artifact_id, revision, path, mime_type, sha256,
                 size, parent_revision_id, status, created_by, metadata_json, idempotency_key, created_at
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
-          )
-          .run(
-            id,
-            sessionId,
-            taskId,
-            optionalId(input.artifactId) || null,
-            requestedRevision,
-            path,
-            optionalText(input.mimeType, 256) || "application/octet-stream",
-            optionalText(input.sha256, 256) || "",
-            Math.max(0, Math.floor(boundedNumber(input.size, 0))),
-            parentRevisionId || null,
-            status,
-            optionalText(input.createdBy, 256) || "agent",
-            input.metadata ? JSON.stringify(sanitizeMetadata(input.metadata)) : null,
-            idempotencyKey || null,
-            now,
-          );
-      } catch (error) {
-        if (idempotencyKey) {
-          const retry = this.findArtifactRevisionByIdempotency(sessionId, idempotencyKey);
-          if (retry) return retry;
+            )
+            .run(
+              id,
+              sessionId,
+              taskId,
+              optionalId(input.artifactId) || null,
+              requestedRevision,
+              path,
+              optionalText(input.mimeType, 256) || "application/octet-stream",
+              optionalText(input.sha256, 256) || "",
+              Math.max(0, Math.floor(boundedNumber(input.size, 0))),
+              parentRevisionId || null,
+              status,
+              optionalText(input.createdBy, 256) || "agent",
+              input.metadata ? JSON.stringify(sanitizeMetadata(input.metadata)) : null,
+              idempotencyKey || null,
+              now,
+            );
+        } catch (error) {
+          if (idempotencyKey) {
+            const retry = this.findArtifactRevisionByIdempotency(sessionId, idempotencyKey);
+            if (retry) return retry;
+          }
+          throw error;
         }
-        throw error;
-      }
-      if (status === "committed") {
-        this.db
-          .prepare(
-            `UPDATE work_session_artifact_revisions
+        if (status === "committed") {
+          this.db
+            .prepare(
+              `UPDATE work_session_artifact_revisions
              SET status = 'superseded'
              WHERE session_id = ? AND path = ? AND id <> ? AND status = 'committed'`,
-          )
-          .run(sessionId, path, id);
-      }
-      return this.findArtifactRevisionById(id)!;
-    })();
+            )
+            .run(sessionId, path, id);
+        }
+        return this.findArtifactRevisionById(id)!;
+      })
+      .immediate();
   }
 
   listArtifactRevisions(

@@ -8,6 +8,8 @@
  * Remote agents register via the acp.agent.register method.
  */
 
+import { serviceStatements } from "../database/service-statements";
+import { createLogger } from "../utils/logger";
 import { randomUUID } from "crypto";
 import type Database from "better-sqlite3";
 import type {
@@ -17,6 +19,8 @@ import type {
   ACPAgentRegisterParams,
 } from "./types";
 import { validateRemoteAgentEndpoint } from "./remote-invoker";
+
+const logger = createLogger("ACPAgentRegistry");
 
 /**
  * Minimal interface for the AgentRoleRepository dependency.
@@ -45,57 +49,40 @@ export class ACPAgentRegistry {
   /** Maximum messages per inbox before oldest are dropped */
   private maxInboxSize = 100;
 
+  /** Resolves once persisted remote agents are loaded (DB6). */
+  readonly ready: Promise<void>;
+
   constructor(private db?: Database.Database) {
-    this.loadRemoteAgents();
+    this.ready = this.loadRemoteAgents();
   }
 
-  private loadRemoteAgents(): void {
+  private async loadRemoteAgents(): Promise<void> {
     if (!this.db) return;
-    const rows = this.db
-      .prepare(
-        "SELECT id, card_json FROM acp_agents WHERE origin = 'remote' ORDER BY registered_at DESC",
-      )
-      .all() as Array<{ id: string; card_json: string }>;
+    const rows = await serviceStatements(this.db).unit("acp_remoteAgentRows", []);
     for (const row of rows) {
       try {
         const card = JSON.parse(row.card_json) as ACPAgentCard;
-        this.remoteAgents.set(card.id, card);
+        // A registration made while loading is newer than the persisted one.
+        if (!this.remoteAgents.has(card.id)) this.remoteAgents.set(card.id, card);
       } catch {
         // Ignore malformed persisted registrations.
       }
     }
   }
 
+  /** Persist without holding up the caller; the registration stays in memory either way. */
   private persistRemoteAgent(card: ACPAgentCard): void {
     if (!this.db) return;
-    this.db
-      .prepare(
-        `INSERT INTO acp_agents (id, origin, endpoint, name, provider, status, registered_at, updated_at, card_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           endpoint = excluded.endpoint,
-           name = excluded.name,
-           provider = excluded.provider,
-           status = excluded.status,
-           updated_at = excluded.updated_at,
-           card_json = excluded.card_json`,
-      )
-      .run(
-        card.id,
-        card.origin,
-        card.endpoint || null,
-        card.name,
-        card.provider || null,
-        card.status,
-        card.registeredAt,
-        Date.now(),
-        JSON.stringify(card),
-      );
+    void serviceStatements(this.db)
+      .unit("acp_persistRemoteAgent", [card, Date.now()])
+      .catch((error: unknown) => logger.warn("Failed to persist ACP agent:", error));
   }
 
   private deleteRemoteAgentFromDb(agentId: string): void {
     if (!this.db) return;
-    this.db.prepare("DELETE FROM acp_agents WHERE id = ?").run(agentId);
+    void serviceStatements(this.db)
+      .unit("acp_deleteRemoteAgent", [agentId])
+      .catch((error: unknown) => logger.warn("Failed to delete ACP agent:", error));
   }
 
   /**

@@ -78,7 +78,7 @@ export class EvolutionMetricsService {
     }
 
     // 2. Correction rate trend
-    metrics.push(this.computeCorrectionRate(workspaceId));
+    metrics.push(await this.computeCorrectionRate(workspaceId));
 
     // 3. Adaptation velocity
     metrics.push(this.computeAdaptationVelocity());
@@ -87,7 +87,7 @@ export class EvolutionMetricsService {
     metrics.push(await this.computeKnowledgeGrowth(workspaceId));
 
     // 5. Task success rate
-    metrics.push(this.computeTaskSuccessRate(workspaceId));
+    metrics.push(await this.computeTaskSuccessRate(workspaceId));
 
     // 6. Style alignment score
     metrics.push(this.computeStyleAlignment());
@@ -130,9 +130,9 @@ export class EvolutionMetricsService {
    * Correction rate: ratio of user corrections in recent vs. older playbook entries.
    * Lower correction rate = agent is improving.
    */
-  private static computeCorrectionRate(workspaceId: string): EvolutionMetric {
+  private static async computeCorrectionRate(workspaceId: string): Promise<EvolutionMetric> {
     try {
-      const results = MemoryService.searchByContentMarker(
+      const results = await MemoryService.searchByContentMarker(
         workspaceId,
         "[PLAYBOOK] Task failed",
         100,
@@ -220,7 +220,7 @@ export class EvolutionMetricsService {
   private static async computeKnowledgeGrowth(workspaceId: string): Promise<EvolutionMetric> {
     try {
       const { KnowledgeGraphService } = await import("../knowledge-graph/KnowledgeGraphService");
-      const stats = KnowledgeGraphService.getStats(workspaceId);
+      const stats = await KnowledgeGraphService.getStats(workspaceId);
 
       return {
         id: "knowledge_growth",
@@ -245,9 +245,13 @@ export class EvolutionMetricsService {
   /**
    * Task success rate: ratio of successful vs. failed playbook entries.
    */
-  private static computeTaskSuccessRate(workspaceId: string): EvolutionMetric {
+  private static async computeTaskSuccessRate(workspaceId: string): Promise<EvolutionMetric> {
     try {
-      const results = MemoryService.searchByContentMarker(workspaceId, "[PLAYBOOK] Task", 100);
+      const results = await MemoryService.searchByContentMarker(
+        workspaceId,
+        "[PLAYBOOK] Task",
+        100,
+      );
       const playbook = results.filter(
         (r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"),
       );

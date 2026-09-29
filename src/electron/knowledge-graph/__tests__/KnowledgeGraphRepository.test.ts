@@ -1,6 +1,6 @@
 import { createRequire } from "module";
 import { afterEach, describe, expect, it } from "vitest";
-import { KnowledgeGraphRepository } from "../KnowledgeGraphRepository";
+import { KnowledgeGraphStore } from "../knowledge-graph-sql";
 
 const require = createRequire(import.meta.url);
 const BetterSqlite3Module = (() => {
@@ -25,7 +25,7 @@ const BetterSqlite3 = (() => {
 const describeWithNativeDb = BetterSqlite3 ? describe : describe.skip;
 const databases: Array<import("better-sqlite3").Database> = [];
 
-function createRepository(): KnowledgeGraphRepository {
+function createRepository(): KnowledgeGraphStore {
   if (!BetterSqlite3) {
     throw new Error("better-sqlite3 unavailable");
   }
@@ -77,7 +77,7 @@ function createRepository(): KnowledgeGraphRepository {
       ON kg_edges(workspace_id, source_entity_id, target_entity_id, edge_type)
       WHERE valid_to IS NULL;
   `);
-  return new KnowledgeGraphRepository(db);
+  return new KnowledgeGraphStore(db);
 }
 
 afterEach(() => {
@@ -86,7 +86,7 @@ afterEach(() => {
   }
 });
 
-describeWithNativeDb("KnowledgeGraphRepository temporal edges", () => {
+describeWithNativeDb("KnowledgeGraphStore temporal edges", () => {
   it("invalidates current edges and supports historical asOf traversal", () => {
     const repo = createRepository();
     const workspaceId = "ws-temporal";

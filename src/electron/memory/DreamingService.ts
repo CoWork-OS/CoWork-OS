@@ -45,7 +45,9 @@ export interface DreamingServiceDeps {
     limit?: number,
     readGuard?: TranscriptReadGuard,
   ) => Promise<TranscriptSpanRecord[]>;
-  listCuratedEntries?: (workspaceId: string) => CuratedMemoryEntry[];
+  listCuratedEntries?: (
+    workspaceId: string,
+  ) => CuratedMemoryEntry[] | Promise<CuratedMemoryEntry[]>;
   applyCuratedMemory?: typeof CuratedMemoryService.curate;
   now?: () => number;
 }
@@ -152,7 +154,7 @@ export class DreamingService {
     request: RunDreamingRequest,
   ): Promise<{ run: DreamingRun; candidates: DreamingCandidate[] }> {
     const now = this.deps.now?.() ?? Date.now();
-    const run = this.repo.createRun({
+    const run = await this.repo.createRun({
       workspaceId: request.workspaceId,
       scopeKind: request.scopeKind || "workspace",
       scopeRef: request.scopeRef || request.workspaceId,
@@ -169,8 +171,8 @@ export class DreamingService {
     try {
       const evidence = await this.gatherEvidence(request);
       const candidateInputs = this.proposeCandidates(run, evidence);
-      const candidates = this.repo.bulkCreateCandidates(candidateInputs);
-      const completed = this.repo.updateRun(run.id, {
+      const candidates = await this.repo.bulkCreateCandidates(candidateInputs);
+      const completed = await this.repo.updateRun(run.id, {
         status:
           evidence.observations.length ||
           evidence.transcriptHits.length ||
@@ -187,7 +189,7 @@ export class DreamingService {
       });
       return { run: completed || run, candidates };
     } catch (error) {
-      const failed = this.repo.updateRun(run.id, {
+      const failed = await this.repo.updateRun(run.id, {
         status: "failed",
         error: error instanceof Error ? error.message : String(error),
         completedAt: this.deps.now?.() ?? Date.now(),
@@ -200,7 +202,7 @@ export class DreamingService {
     candidateId: string,
     workspaceId: string,
   ): Promise<DreamingCandidate | undefined> {
-    const candidate = this.repo.findCandidateById(candidateId);
+    const candidate = await this.repo.findCandidateById(candidateId);
     if (!candidate || candidate.workspaceId !== workspaceId || candidate.status !== "accepted") {
       return candidate;
     }
@@ -313,7 +315,7 @@ export class DreamingService {
       observations,
       transcriptHits,
       recentSpans,
-      curatedEntries: listCuratedEntries(request.workspaceId),
+      curatedEntries: await listCuratedEntries(request.workspaceId),
     };
   }
 

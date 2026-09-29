@@ -188,7 +188,7 @@ describe("AgentDaemon.cancelTask graph coordination", () => {
       3000,
     );
 
-    const runsWhileRemoteCancelIsPending = graph
+    const runsWhileRemoteCancelIsPending = await graph
       .getRepository()
       .listSnapshotsByRootTaskId(rootTask.id);
     expect(runsWhileRemoteCancelIsPending).toHaveLength(2);
@@ -211,7 +211,8 @@ describe("AgentDaemon.cancelTask graph coordination", () => {
       ],
     });
     expect(
-      graph.getRepository().findSnapshotByRunId(runsWhileRemoteCancelIsPending[0].run.id)?.nodes,
+      (await graph.getRepository().findSnapshotByRunId(runsWhileRemoteCancelIsPending[0].run.id))
+        ?.nodes,
     ).toHaveLength(1);
 
     for (const pending of pendingCancelResponses) {
@@ -226,7 +227,7 @@ describe("AgentDaemon.cancelTask graph coordination", () => {
     }
     await withDeadline(cancelPromise, 5000);
 
-    const settled = graph.getRepository().listSnapshotsByRootTaskId(rootTask.id);
+    const settled = await graph.getRepository().listSnapshotsByRootTaskId(rootTask.id);
     expect(settled.every((snapshot) => snapshot.run.status === "cancelled")).toBe(true);
     expect(settled.every((snapshot) => snapshot.nodes[0].status === "blocked")).toBe(true);
     expect(daemonLike.pendingContinuationTaskIds.has(rootTask.id)).toBe(false);
@@ -328,8 +329,8 @@ describe("AgentDaemon.cancelTask graph coordination", () => {
       );
     }
 
-    await vi.waitFor(() => {
-      const snapshot = graph.getRepository().findSnapshotByRootTaskId(rootTask.id);
+    await vi.waitFor(async () => {
+      const snapshot = await graph.getRepository().findSnapshotByRootTaskId(rootTask.id);
       expect(snapshot?.run.status).toBe("cancelled");
       expect(snapshot?.nodes[0]).toMatchObject({
         status: "cancelled",

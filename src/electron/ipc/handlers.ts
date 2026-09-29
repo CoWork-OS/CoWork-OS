@@ -1,3 +1,26 @@
+import {
+  AgentRoleRepository,
+  AgentTeamItemRepository,
+  AgentTeamMemberRepository,
+  AgentTeamRepository,
+  AgentTeamRunRepository,
+  AgentTeamThoughtRepository,
+  MentionRepository,
+  WorkingStateRepository,
+} from "../agents/agent-repository-facades";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import {
+  ApprovalRepository,
+  ArtifactRepository,
+  BotNotificationPreferenceRepository,
+  ChannelSpecializationRepository,
+  ComposerDraftRepository,
+  LLMModelRepository,
+  SkillRepository,
+  TaskLabelRepository,
+  TaskSessionMetadataRepository,
+  WorkspacePermissionRuleRepository,
+} from "../database/repository-facades";
 import { estimateTaskCost } from "../agent/llm/usage-telemetry";
 import {
   ipcMain,
@@ -12,7 +35,7 @@ import { RELEASE_BRIEF_PROMPT, checkReleaseBriefRuntime, seedReleaseBriefWorkspa
 import { probeFirstTaskModel } from "../first-task/model-preflight";
 import { applyRevisionContract } from "../first-task/revision-contract";
 import { ensureFirstTaskTables } from "../first-task/attempt-schema";
-import { readLocalRealWork, recordLocalRealWorkInspection, recordLocalRealWorkUseful } from "../first-task/real-work-state";
+import { FirstTaskRepository } from "../first-task/first-task-repository-facades";
 import { reconcilePendingSampleAttempts } from "../first-task/reconcile-attempts";
 import { verifyReleaseBrief } from "../first-task/verify-release-brief";
 import { randomUUID } from "node:crypto";
@@ -57,12 +80,13 @@ import { DocumentEditorSessionService } from "../documents/DocumentEditorSession
 import { MailboxService } from "../mailbox/MailboxService";
 import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { AgentMailRealtimeService } from "../agentmail/AgentMailRealtimeService";
+import { createMailboxStatementPort } from "../mailbox/mailbox-statement-port";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
 import { ManagedSessionRequirementCorrectionRequestSchema } from "../../shared/managed-session-schemas";
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
-import { EverydayAgentService } from "../everyday-agent/EverydayAgentService";
+import { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
 import { setupEverydayAgentHandlers } from "./everyday-agent-handlers";
 import { setupVoiceActionHandlers } from "./voice-handlers";
 import { rendererPerfLogLevel, stringifyRendererPerfPayload } from "./renderer-perf-log";
@@ -157,42 +181,33 @@ function validateComposerDraft(
 
 import { DatabaseManager } from "../database/schema";
 import {
-  WorkspaceRepository,
-  TaskRepository,
   TaskEventRepository,
-  TaskSessionMetadataRepository,
-  BotNotificationPreferenceRepository,
+  TaskSessionMetadataStore,
+  TaskStore,
   TaskTraceRepository,
-  ArtifactRepository,
-  SkillRepository,
-  LLMModelRepository,
-  WorkspacePermissionRuleRepository,
-  ChannelSpecializationRepository,
-  ApprovalRepository,
+  WorkspaceStore,
 } from "../database/repositories";
-import { ComposerDraftRepository } from "../database/composer-draft-repository";
+
 import { ComposerDraftAttachmentStore } from "../agent/runtime/composer-draft-attachment-store";
 import { SessionRetentionService } from "../sessions/SessionRetentionService";
-import { AgentRoleRepository } from "../agents/AgentRoleRepository";
-import { ActivityRepository } from "../activity/ActivityRepository";
-import { MentionRepository } from "../agents/MentionRepository";
+
+import { ActivityRepository } from "../activity/activity-repository-facades";
+
 import { extractMentionedRoles } from "../agents/mentions";
-import { AgentTeamRepository } from "../agents/AgentTeamRepository";
-import { AgentTeamMemberRepository } from "../agents/AgentTeamMemberRepository";
-import { AgentTeamRunRepository } from "../agents/AgentTeamRunRepository";
-import { AgentTeamItemRepository } from "../agents/AgentTeamItemRepository";
-import { AgentTeamThoughtRepository } from "../agents/AgentTeamThoughtRepository";
+
 import { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
 import { MultitaskLanePlanner } from "../agents/MultitaskLanePlanner";
 import { buildSubagentDisplayName } from "../agents/subagent-display-names";
 import { selectAgentsForTask } from "../agents/capabilityMatcher";
 import { createDecisionService } from "../agent/decisions";
-import { TaskLabelRepository } from "../database/TaskLabelRepository";
-import { WorkingStateRepository } from "../agents/WorkingStateRepository";
-import { WorkContextService } from "../workspaces/WorkContextService";
-import { SessionMembershipService } from "../workspaces/SessionMembershipService";
-import { RecurringApprovalService } from "../security/recurring-approval-service";
+
+import {
+  SessionMembershipService,
+  WorkContextService,
+} from "../workspaces/workspaces-repository-facades";
+import { RecurringApprovalService } from "../security/recurring-approval-repository-facades";
 import { ProtectedCredentialService } from "../security/protected-credential-service";
+import { authorizeProtectedCredentialResolution } from "../security/protected-credential-authorization";
 import { openExternalIfSafe } from "../security/safe-external-url";
 import {
   isLoopbackAddress,
@@ -202,7 +217,7 @@ import {
 import { getLocalPreviewProcessService } from "../preview/LocalPreviewProcessService";
 import { getBrowserWorkbenchService } from "../browser/browser-workbench-service";
 import type { LocalPreviewStartRequest } from "../../shared/local-preview";
-import { ContextPolicyManager } from "../gateway/context-policy";
+import { ContextPolicyManager } from "../gateway/context-policy-repository-facades";
 import { OnboardingProfileService } from "../onboarding/OnboardingProfileService";
 import type { ApplyOnboardingProfileRequest } from "../../shared/onboarding";
 import {
@@ -502,7 +517,7 @@ import type { MemorySettings } from "../database/repositories";
 import { VoiceSettingsManager } from "../voice/voice-settings-manager";
 import { getVoiceService } from "../voice/VoiceService";
 import { AgentPerformanceReviewService } from "../reports/AgentPerformanceReviewService";
-import { EvalService } from "../eval/EvalService";
+import { EvalService } from "../eval/eval-repository-facades";
 import { getCronService } from "../cron";
 import type { CronJobCreate } from "../cron/types";
 import { getXMentionBridgeService, getXMentionTriggerStatus } from "../x-mentions";
@@ -1522,28 +1537,32 @@ export async function setupIpcHandlers(
   const db = dbManager.getDatabase();
   const workspaceRepo = new WorkspaceRepository(db);
   const taskRepo = new TaskRepository(db);
+  // Host-connection stores for synchronous work: services that share code with the
+  // worker, host transactions and startup reconciliation (storage slice C).
+  const taskStore = new TaskStore(db);
+  const workspaceStore = new WorkspaceStore(db);
   const taskEventRepo = new TaskEventRepository(db);
   const composerDraftRepo = new ComposerDraftRepository(db);
   const composerDraftAttachmentStore = new ComposerDraftAttachmentStore(
     path.join(getUserDataDir(), "composer-draft-attachments"),
   );
-  const expiredComposerDrafts = composerDraftRepo.listExpired();
-  composerDraftRepo.pruneExpired();
+  const expiredComposerDrafts = await composerDraftRepo.listExpired();
+  await composerDraftRepo.pruneExpired();
   await Promise.all(
     expiredComposerDrafts.map((draft) =>
       composerDraftAttachmentStore.releaseDraft(draft.draftKey, draft.workspaceId),
     ),
   );
-  await composerDraftAttachmentStore.reconcile(composerDraftRepo.listLiveAttachmentRefs());
-  const assertComposerDraftOwner = (
+  await composerDraftAttachmentStore.reconcile(await composerDraftRepo.listLiveAttachmentRefs());
+  const assertComposerDraftOwner = async (
     owner: import("../../shared/composer-drafts").ComposerDraftGetRequest,
-  ): void => {
+  ): Promise<void> => {
     if (owner.scope !== "local") return;
-    if (!workspaceRepo.findById(owner.workspaceId)) {
+    if (!(await workspaceRepo.findById(owner.workspaceId))) {
       throw new Error("Composer draft workspace does not exist.");
     }
     if (owner.taskId) {
-      const task = taskRepo.findById(owner.taskId);
+      const task = await taskRepo.findById(owner.taskId);
       if (!task || task.workspaceId !== owner.workspaceId) {
         throw new Error("Composer draft task does not belong to its workspace.");
       }
@@ -1557,13 +1576,14 @@ export async function setupIpcHandlers(
   const recurringApprovalService = new RecurringApprovalService(db);
   const protectedCredentialService = new ProtectedCredentialService(db);
   const localPreviewService = getLocalPreviewProcessService();
+  // Synchronous like the task repositories it gets (storage slice C).
   const sessionRetentionService = new SessionRetentionService(
-    taskRepo,
+    taskStore,
     taskEventRepo,
-    taskSessionMetadataRepo,
-    workspaceRepo,
+    new TaskSessionMetadataStore(db),
+    workspaceStore,
   );
-  const taskTraceRepo = new TaskTraceRepository(taskRepo, taskEventRepo);
+  const taskTraceRepo = new TaskTraceRepository(taskStore, taskEventRepo);
   const artifactRepo = new ArtifactRepository(db);
   const skillRepo = new SkillRepository(db);
   const llmModelRepo = new LLMModelRepository(db);
@@ -1589,17 +1609,23 @@ export async function setupIpcHandlers(
   const mailboxService = new MailboxService(db, {
     autoSync: !shouldDisableBackgroundAutostart(),
   });
-  const agentMailRealtimeService = new AgentMailRealtimeService(db, mailboxService);
-  const agentMailAdminService = new AgentMailAdminService(db, () =>
+  const mailboxStatements = createMailboxStatementPort(db);
+  const agentMailRealtimeService = new AgentMailRealtimeService(mailboxStatements, mailboxService);
+  const agentMailAdminService = new AgentMailAdminService(mailboxStatements, () =>
     agentMailRealtimeService.getRuntimeStatus(),
   );
-  agentMailRealtimeService.start();
+  void agentMailRealtimeService
+    .start()
+    .catch((error) => logger.warn("AgentMail realtime failed to start", error));
   const contextPolicyManager = new ContextPolicyManager(db);
   const channelSpecializationRepo = new ChannelSpecializationRepository(db);
-  const resolveTerminalTask = (workspace: Workspace, taskId?: string): Task | undefined => {
+  const resolveTerminalTask = async (
+    workspace: Workspace,
+    taskId?: string,
+  ): Promise<Task | undefined> => {
     const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
     if (!normalizedTaskId) return undefined;
-    const task = taskRepo.findById(normalizedTaskId);
+    const task = await taskRepo.findById(normalizedTaskId);
     if (!task) throw new Error("Task not found for terminal access.");
     if (task.workspaceId !== workspace.id) {
       throw new Error("Terminal task does not belong to the selected workspace.");
@@ -1641,11 +1667,11 @@ export async function setupIpcHandlers(
         // A user rename wins over the asynchronous metadata helper. Compare
         // against the title that was committed with the task before applying
         // the generated name.
-        const currentTask = taskRepo.findById(task.id);
+        const currentTask = await taskRepo.findById(task.id);
         if (!currentTask || currentTask.title !== task.title) return;
 
-        taskRepo.update(currentTask.id, { title: generatedTitle });
-        const updatedTask = taskRepo.findById(currentTask.id);
+        await taskRepo.update(currentTask.id, { title: generatedTitle });
+        const updatedTask = await taskRepo.findById(currentTask.id);
         if (updatedTask?.title === generatedTitle) {
           agentDaemon.emitTaskTitleUpdated(updatedTask.id, updatedTask.title);
         }
@@ -1666,19 +1692,19 @@ export async function setupIpcHandlers(
     capability: "view" | "contribute" | "review" | "approve" | "manage",
   ) => sessionMembershipService.authorizeTaskAction(taskId, capability, principalForEvent(event));
 
-  const protectedCredentialTaskId = (requestId: string): string | undefined => {
-    const row = db
-      .prepare("SELECT task_id FROM protected_credential_requests WHERE id = ?")
-      .get(requestId) as { task_id?: string } | undefined;
-    return row?.task_id || undefined;
-  };
+  const protectedCredentialTaskId = (requestId: string): string | undefined =>
+    protectedCredentialService.requestTaskId(requestId);
 
-  const authorizeProtectedCredentialRequest = (
+  const authorizeProtectedCredentialRequest = async (
     event: IpcMainInvokeEvent,
     requestId: string,
-  ): void => {
-    const taskId = protectedCredentialTaskId(requestId);
-    if (taskId) authorizeTaskForEvent(event, taskId, "approve");
+  ): Promise<void> => {
+    await authorizeProtectedCredentialResolution({
+      taskId: protectedCredentialTaskId(requestId),
+      principalId: principalForEvent(event),
+      localPrincipalId: sessionMembershipService.getLocalPrincipal().principalId,
+      authorizeTask: (taskId) => authorizeTaskForEvent(event, taskId, "approve"),
+    });
   };
 
   const teamOrchestrator = new AgentTeamOrchestrator({
@@ -1692,20 +1718,20 @@ export async function setupIpcHandlers(
       agentDaemon.appendOrchestrationGraphNodes(params as Any),
     findOrchestrationGraphByTeamRunId: (teamRunId: string) =>
       agentDaemon.findOrchestrationGraphByTeamRunId(teamRunId),
-    completeRootTask: (taskId, status, summary) => {
+    completeRootTask: async (taskId, status, summary) => {
       if (status === "failed") {
         agentDaemon.failTask(taskId, summary, {
           resultSummary: summary,
         });
         return;
       }
-      agentDaemon.completeTask(taskId, summary);
+      await agentDaemon.completeTask(taskId, summary);
     },
   });
   agentDaemon.setTeamOrchestrator(teamOrchestrator);
 
   // Seed default agent roles if none exist
-  agentRoleRepo.seedDefaults();
+  await agentRoleRepo.seedDefaults();
   setupTaskTraceHandlers({ taskTraceRepo });
 
   // Helper to validate path is within workspace (prevent path traversal attacks).
@@ -1732,7 +1758,7 @@ export async function setupIpcHandlers(
    * checks whose contract is a boolean, and an exception there escapes loops
    * that are written to fall through to the next candidate.
    */
-  const resolveRegisteredWorkspaceRoot = (workspacePath: string): string | null => {
+  const resolveRegisteredWorkspaceRoot = async (workspacePath: string): Promise<string | null> => {
     const trimmed = String(workspacePath || "").trim();
     if (!trimmed) return null;
     const requested = path.resolve(trimmed);
@@ -1741,8 +1767,8 @@ export async function setupIpcHandlers(
       return cached.root;
     }
 
-    const match = workspaceRepo
-      .findAll()
+    const match = (await workspaceRepo
+      .findAll())
       .find((workspace) => path.resolve(workspace.path) === requested);
     if (!match) {
       registeredWorkspaceRootCache.delete(requested);
@@ -1754,13 +1780,16 @@ export async function setupIpcHandlers(
     return resolved;
   };
 
-  const isPathWithinWorkspace = (filePath: string, workspacePath: string): boolean => {
+  const isPathWithinWorkspace = async (
+    filePath: string,
+    workspacePath: string,
+  ): Promise<boolean> => {
     // Resolve against a verified workspace root, not the caller's claim.
     // Without this, containment is self-referential: the caller picks both the
     // file and the root it is checked against, so passing `workspacePath: "/"`
     // (or any ancestor of the target) satisfies containment for any file on
     // disk. An unregistered root is simply "not contained".
-    const normalizedWorkspace = resolveRegisteredWorkspaceRoot(workspacePath);
+    const normalizedWorkspace = await resolveRegisteredWorkspaceRoot(workspacePath);
     if (!normalizedWorkspace) return false;
     const normalizedFile = path.resolve(normalizedWorkspace, filePath);
     const relative = path.relative(normalizedWorkspace, normalizedFile);
@@ -1872,7 +1901,7 @@ export async function setupIpcHandlers(
 
     for (const candidate of candidates) {
       if (requireWorkspaceContainment && workspaceRoot) {
-        if (!isPathWithinWorkspace(candidate, workspaceRoot)) {
+        if (!(await isPathWithinWorkspace(candidate, workspaceRoot))) {
           sawOutOfWorkspaceCandidate = true;
           continue;
         }
@@ -1952,7 +1981,7 @@ export async function setupIpcHandlers(
     };
   };
 
-  const collectLlmWikiVaultSummary = (workspacePath: string, requestedVaultPath?: string) => {
+  const collectLlmWikiVaultSummary = async (workspacePath: string, requestedVaultPath?: string) => {
     const workspaceRoot = path.resolve(normalizePotentialPath(workspacePath));
     const rawVaultPath =
       typeof requestedVaultPath === "string" && requestedVaultPath.trim().length > 0
@@ -1962,7 +1991,7 @@ export async function setupIpcHandlers(
       ? path.resolve(normalizePotentialPath(rawVaultPath))
       : path.resolve(workspaceRoot, normalizePotentialPath(rawVaultPath));
 
-    if (!isPathWithinWorkspace(vaultPath, workspaceRoot)) {
+    if (!(await isPathWithinWorkspace(vaultPath, workspaceRoot))) {
       throw new Error("Access denied: vault path is outside the workspace");
     }
 
@@ -2160,23 +2189,14 @@ export async function setupIpcHandlers(
     const lastUsedAt = Date.now();
     const permissions = normalizeTempPermissions(existing);
 
-    const stmt = db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        path = excluded.path,
-        last_used_at = excluded.last_used_at,
-        permissions = excluded.permissions
-    `);
-    stmt.run(
-      workspaceId,
-      TEMP_WORKSPACE_NAME,
-      safeWorkspacePath,
+    await workspaceRepo.upsertWithId({
+      id: workspaceId,
+      name: TEMP_WORKSPACE_NAME,
+      path: safeWorkspacePath,
       createdAt,
       lastUsedAt,
-      JSON.stringify(permissions),
-    );
+      permissions,
+    });
 
     return {
       id: workspaceId,
@@ -2198,8 +2218,8 @@ export async function setupIpcHandlers(
     let workspace: Workspace;
 
     if (!createNew) {
-      const existingTemp = workspaceRepo
-        .findAll()
+      const existingTemp = (await workspaceRepo
+        .findAll())
         .find((workspace) => isTempWorkspaceInScope(workspace.id, "ui"));
       if (existingTemp) {
         workspace = await ensureTempWorkspace(existingTemp.id, existingTemp.path, existingTemp);
@@ -2215,7 +2235,7 @@ export async function setupIpcHandlers(
     touchTempWorkspaceLease(workspace.id);
 
     try {
-      pruneTempWorkspaces({
+      await pruneTempWorkspaces({
         db,
         tempWorkspaceRoot,
         currentWorkspaceId: workspace.id,
@@ -2323,12 +2343,12 @@ export async function setupIpcHandlers(
     },
   );
 
-  const getValidatedYoutubeWorkspace = (
+  const getValidatedYoutubeWorkspace = async (
     workspaceId: unknown,
     options: { requireNetwork?: boolean } = {},
-  ): Workspace => {
+  ): Promise<Workspace> => {
     const id = validateInput(WorkspaceIdSchema, workspaceId, "workspace id");
-    const workspace = workspaceRepo.findById(id);
+    const workspace = await workspaceRepo.findById(id);
     if (!workspace) throw new Error(`Workspace not found: ${id}`);
     if (workspace.permissions.accessProfileUnavailable === true) {
       throw new Error("The selected access profile is unavailable.");
@@ -2343,17 +2363,17 @@ export async function setupIpcHandlers(
     return workspace;
   };
 
-  const getValidatedYoutubeWorkspacePath = (
+  const getValidatedYoutubeWorkspacePath = async (
     workspaceId: unknown,
     options: { requireNetwork?: boolean } = {},
-  ): string => getValidatedYoutubeWorkspace(workspaceId, options).path;
+  ): Promise<string> => (await getValidatedYoutubeWorkspace(workspaceId, options)).path;
 
-  const getValidatedYoutubeIngestionWorkspace = (
+  const getValidatedYoutubeIngestionWorkspace = async (
     workspaceId: unknown,
     url: string,
     toolName: string,
   ) => {
-    const workspace = getValidatedYoutubeWorkspace(workspaceId, { requireNetwork: true });
+    const workspace = await getValidatedYoutubeWorkspace(workspaceId, { requireNetwork: true });
     assertYouTubeIngestionAccess(workspace, url, toolName);
     return workspace;
   };
@@ -2372,7 +2392,7 @@ export async function setupIpcHandlers(
         data,
         "YouTube ingest request",
       );
-      const workspace = getValidatedYoutubeIngestionWorkspace(
+      const workspace = await getValidatedYoutubeIngestionWorkspace(
         payload.workspaceId,
         payload.url,
         "youtube_ingest_video",
@@ -2414,12 +2434,12 @@ export async function setupIpcHandlers(
         "YouTube ask request",
       );
       const workspace = payload.url
-        ? getValidatedYoutubeIngestionWorkspace(
+        ? await getValidatedYoutubeIngestionWorkspace(
             payload.workspaceId,
             payload.url,
             "youtube_ask_or_ingest_video",
           )
-        : getValidatedYoutubeWorkspace(payload.workspaceId);
+        : await getValidatedYoutubeWorkspace(payload.workspaceId);
       return new YouTubeQuestionService(
         payload.workspaceId,
         workspace.path,
@@ -2445,10 +2465,10 @@ export async function setupIpcHandlers(
         data,
         "YouTube transcript search request",
       );
-      getValidatedYoutubeWorkspacePath(payload.workspaceId);
+      await getValidatedYoutubeWorkspacePath(payload.workspaceId);
       return {
         ok: true,
-        results: YouTubeTranscriptStore.search(payload),
+        results: await YouTubeTranscriptStore.search(payload),
       };
     },
   );
@@ -2465,10 +2485,10 @@ export async function setupIpcHandlers(
         data,
         "YouTube list videos request",
       );
-      getValidatedYoutubeWorkspacePath(payload.workspaceId);
+      await getValidatedYoutubeWorkspacePath(payload.workspaceId);
       return {
         ok: true,
-        videos: YouTubeTranscriptStore.listVideos(payload.workspaceId, payload.limit ?? 50),
+        videos: await YouTubeTranscriptStore.listVideos(payload.workspaceId, payload.limit ?? 50),
       };
     },
   );
@@ -3039,9 +3059,9 @@ export async function setupIpcHandlers(
           ? path.resolve(normalizePotentialPath(data.workspacePath))
           : "";
       const workspace = requestedWorkspaceId
-        ? workspaceRepo.findById(requestedWorkspaceId)
-        : workspaceRepo
-            .findAll()
+        ? await workspaceRepo.findById(requestedWorkspaceId)
+        : (await workspaceRepo
+            .findAll())
             .find(
               (item) => path.resolve(normalizePotentialPath(item.path)) === requestedWorkspacePath,
             );
@@ -3318,7 +3338,7 @@ export async function setupIpcHandlers(
     IPC_CHANNELS.FILE_IMPORT_TO_WORKSPACE,
     async (_, data: { workspaceId: string; files: string[] }) => {
       const validated = validateInput(FileImportSchema, data, "file import");
-      const workspace = workspaceRepo.findById(validated.workspaceId);
+      const workspace = await workspaceRepo.findById(validated.workspaceId);
 
       if (!workspace) {
         throw new Error(`Workspace not found: ${validated.workspaceId}`);
@@ -3380,7 +3400,7 @@ export async function setupIpcHandlers(
 
         const mimeType = (mime.lookup(absolutePath) || undefined) as string | undefined;
 
-        if (isPathWithinWorkspace(absolutePath, workspace.path)) {
+        if (await isPathWithinWorkspace(absolutePath, workspace.path)) {
           results.push({
             relativePath: path.relative(workspace.path, absolutePath),
             fileName: path.basename(absolutePath),
@@ -3433,7 +3453,7 @@ export async function setupIpcHandlers(
       },
     ) => {
       const validated = validateInput(FileImportDataSchema, data, "file import data");
-      const workspace = workspaceRepo.findById(validated.workspaceId);
+      const workspace = await workspaceRepo.findById(validated.workspaceId);
 
       if (!workspace) {
         throw new Error(`Workspace not found: ${validated.workspaceId}`);
@@ -4316,7 +4336,7 @@ export async function setupIpcHandlers(
     }
 
     // Check if workspace with this path already exists
-    if (workspaceRepo.existsByPath(resolvedPath)) {
+    if (await workspaceRepo.existsByPath(resolvedPath)) {
       throw new Error(
         `A workspace with path "${resolvedPath}" already exists. Please choose a different folder.`,
       );
@@ -4339,7 +4359,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_LIST, async () => {
     // Filter out temp workspaces from user workspace lists.
-    const allWorkspaces = workspaceRepo.findAll();
+    const allWorkspaces = await workspaceRepo.findAll();
     return allWorkspaces.filter(
       (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
     );
@@ -4360,10 +4380,10 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_SELECT, async (_, id: string) => {
-    const workspace = workspaceRepo.findById(id);
+    const workspace = await workspaceRepo.findById(id);
     if (workspace) {
       try {
-        workspaceRepo.updateLastUsedAt(workspace.id);
+        await workspaceRepo.updateLastUsedAt(workspace.id);
         if (isTempWorkspaceId(workspace.id)) {
           touchTempWorkspaceLease(workspace.id);
         }
@@ -4386,7 +4406,7 @@ export async function setupIpcHandlers(
         delete?: boolean;
       },
     ) => {
-      const workspace = workspaceRepo.findById(id);
+      const workspace = await workspaceRepo.findById(id);
       if (!workspace) {
         throw new Error(`Workspace not found: ${id}`);
       }
@@ -4395,11 +4415,11 @@ export async function setupIpcHandlers(
   );
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_TOUCH, async (_, id: string) => {
-    const workspace = workspaceRepo.findById(id);
+    const workspace = await workspaceRepo.findById(id);
     if (!workspace) {
       throw new Error(`Workspace not found: ${id}`);
     }
-    workspaceRepo.updateLastUsedAt(id);
+    await workspaceRepo.updateLastUsedAt(id);
     if (isTempWorkspaceId(id)) {
       touchTempWorkspaceLease(id);
     }
@@ -4462,7 +4482,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.TERMINAL_TAB_LIST,
     async (_, data?: { workspaceId?: string; taskId?: string }): Promise<ShellSessionInfo[]> => {
-      const workspace = workspaceRepo.findById(data?.workspaceId || "");
+      const workspace = await workspaceRepo.findById(data?.workspaceId || "");
       if (!workspace) throw new Error("Workspace not found.");
       return TerminalPtyManager.getInstance().listTabs(workspace.id);
     },
@@ -4479,9 +4499,9 @@ export async function setupIpcHandlers(
         title?: string;
       },
     ): Promise<ShellSessionInfo> => {
-      const workspace = workspaceRepo.findById(data?.workspaceId);
+      const workspace = await workspaceRepo.findById(data?.workspaceId);
       if (!workspace) throw new Error("Workspace not found.");
-      assertTerminalShellAllowed(workspace, resolveTerminalTask(workspace, data?.taskId));
+      assertTerminalShellAllowed(workspace, await resolveTerminalTask(workspace, data?.taskId));
       const cwd = await resolveWorkspaceContainedCwd(workspace.path, data.cwd);
       return TerminalPtyManager.getInstance().createTab({
         workspaceId: workspace.id,
@@ -4505,13 +4525,13 @@ export async function setupIpcHandlers(
         timeoutMs?: number;
       },
     ): Promise<TerminalTabRunResult> => {
-      const workspace = workspaceRepo.findById(data?.workspaceId);
+      const workspace = await workspaceRepo.findById(data?.workspaceId);
       if (!workspace) throw new Error("Workspace not found.");
       if (!data?.tabId || !data?.command?.trim()) {
         throw new Error("Terminal tab id and command are required.");
       }
       const taskId = typeof data.taskId === "string" ? data.taskId.trim() : "";
-      const task = taskId ? taskRepo.findById(taskId) : undefined;
+      const task = taskId ? await taskRepo.findById(taskId) : undefined;
       if (!taskId || !task) {
         throw new Error("A valid task id is required to run terminal tab commands.");
       }
@@ -4564,9 +4584,9 @@ export async function setupIpcHandlers(
       event,
       data: { tabId: string; workspaceId: string; taskId?: string; input: string },
     ): Promise<ShellSessionInfo> => {
-      const workspace = workspaceRepo.findById(data?.workspaceId);
+      const workspace = await workspaceRepo.findById(data?.workspaceId);
       if (!workspace) throw new Error("Workspace not found.");
-      assertTerminalShellAllowed(workspace, resolveTerminalTask(workspace, data?.taskId));
+      assertTerminalShellAllowed(workspace, await resolveTerminalTask(workspace, data?.taskId));
       const manager = TerminalPtyManager.getInstance();
       const tab = manager.listTabs(workspace.id).find((session) => session.id === data.tabId);
       if (!tab) throw new Error("Terminal tab not found for workspace.");
@@ -4596,9 +4616,9 @@ export async function setupIpcHandlers(
       _,
       data: { tabId: string; workspaceId: string; taskId?: string; cols: number; rows: number },
     ): Promise<ShellSessionInfo> => {
-      const workspace = workspaceRepo.findById(data?.workspaceId);
+      const workspace = await workspaceRepo.findById(data?.workspaceId);
       if (!workspace) throw new Error("Workspace not found.");
-      assertTerminalShellAllowed(workspace, resolveTerminalTask(workspace, data?.taskId));
+      assertTerminalShellAllowed(workspace, await resolveTerminalTask(workspace, data?.taskId));
       const manager = TerminalPtyManager.getInstance();
       const tab = manager.listTabs(workspace.id).find((session) => session.id === data.tabId);
       if (!tab) throw new Error("Terminal tab not found for workspace.");
@@ -4619,9 +4639,9 @@ export async function setupIpcHandlers(
         cwd?: string;
       },
     ): Promise<TerminalTabCompletionResult> => {
-      const workspace = workspaceRepo.findById(data?.workspaceId);
+      const workspace = await workspaceRepo.findById(data?.workspaceId);
       if (!workspace) throw new Error("Workspace not found.");
-      assertTerminalShellAllowed(workspace, resolveTerminalTask(workspace, data?.taskId));
+      assertTerminalShellAllowed(workspace, await resolveTerminalTask(workspace, data?.taskId));
       const manager = TerminalPtyManager.getInstance();
       const tab = manager.listTabs(workspace.id).find((session) => session.id === data.tabId);
       if (!tab) throw new Error("Terminal tab not found for workspace.");
@@ -4645,7 +4665,7 @@ export async function setupIpcHandlers(
       _,
       data: { tabId: string; workspaceId: string; taskId?: string },
     ): Promise<ShellSessionInfo | null> => {
-      const workspace = workspaceRepo.findById(data?.workspaceId);
+      const workspace = await workspaceRepo.findById(data?.workspaceId);
       if (!workspace) throw new Error("Workspace not found.");
       const manager = TerminalPtyManager.getInstance();
       const tab = manager.listTabs(workspace.id).find((session) => session.id === data.tabId);
@@ -4660,7 +4680,7 @@ export async function setupIpcHandlers(
       _,
       data: { tabId: string; workspaceId: string; taskId?: string },
     ): Promise<ShellSessionInfo | null> => {
-      const workspace = workspaceRepo.findById(data?.workspaceId);
+      const workspace = await workspaceRepo.findById(data?.workspaceId);
       if (!workspace) throw new Error("Workspace not found.");
       const manager = TerminalPtyManager.getInstance();
       const tab = manager.listTabs(workspace.id).find((session) => session.id === data.tabId);
@@ -4671,42 +4691,52 @@ export async function setupIpcHandlers(
 
   // Task handlers
   ensureFirstTaskTables(db);
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_GET, () => {
-    const row = db.prepare("SELECT schema_version, choice, updated_at, model_ready_at FROM first_task_setup WHERE id = 1")
-      .get() as { schema_version: number; choice: "ready" | "skipped" | "browsing_without_ai" | "connecting"; updated_at: number; model_ready_at: number | null } | undefined;
+  const firstTaskRepo = new FirstTaskRepository(db);
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_GET, async () => {
+    const row = await firstTaskRepo.getSetup();
     return row ? { schemaVersion: row.schema_version, choice: row.choice, updatedAt: row.updated_at, modelReadyAt: row.model_ready_at } : null;
   });
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_SET, (_event, choice: string) => {
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_SET, async (_event, choice: string) => {
     if (!["ready", "skipped", "browsing_without_ai", "connecting"].includes(choice)) throw new Error("Invalid first-task setup choice");
-    db.prepare("INSERT INTO first_task_setup (id, schema_version, choice, updated_at) VALUES (1, 1, ?, ?) ON CONFLICT(id) DO UPDATE SET choice = excluded.choice, updated_at = excluded.updated_at")
-      .run(choice, Date.now());
+    await firstTaskRepo.setSetupChoice(choice as "ready", Date.now());
   });
-  reconcilePendingSampleAttempts(
-    db,
-    (taskId) => taskRepo.findById(taskId),
-    (taskId, error, completedAt) => taskRepo.update(taskId, { status: "failed", error, completedAt }),
-  );
-  const requireRealWorkTask = (taskId: string) => {
+  void firstTaskRepo
+    .attemptTaskIds()
+    .then(async (taskIds) => {
+      const tasks = new Map<string, Awaited<ReturnType<typeof taskRepo.findById>>>();
+      for (const taskId of taskIds) tasks.set(taskId, await taskRepo.findById(taskId));
+      const failures: Array<Promise<void>> = [];
+      reconcilePendingSampleAttempts(
+        taskIds,
+        (taskId) => tasks.get(taskId),
+        (taskId, error, completedAt) => {
+          failures.push(taskRepo.update(taskId, { status: "failed", error, completedAt }));
+        },
+      );
+      await Promise.all(failures);
+    })
+    .catch((error: unknown) => logger.warn("Failed to reconcile sample attempts:", error));
+  const requireRealWorkTask = async (taskId: string) => {
     if (!/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
-    const task = taskRepo.findById(taskId);
+    const task = await taskRepo.findById(taskId);
     if (!task || task.source === "sample" || task.parentTaskId || task.evalCaseId) throw new Error("Real-work task not found");
     return task;
   };
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_GET, (_event, taskId: string) => {
-    requireRealWorkTask(taskId);
-    return readLocalRealWork(db, taskId);
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_GET, async (_event, taskId: string) => {
+    await requireRealWorkTask(taskId);
+    return firstTaskRepo.readRealWork(taskId);
   });
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_INSPECT, (_event, taskId: string) => {
-    const task = requireRealWorkTask(taskId);
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_INSPECT, async (_event, taskId: string) => {
+    const task = await requireRealWorkTask(taskId);
     if (task.status !== "completed") throw new Error("Finish the task before inspecting its result");
-    return recordLocalRealWorkInspection(db, taskId);
+    return firstTaskRepo.recordRealWorkInspection(taskId, Date.now());
   });
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_USEFUL, (_event, taskId: string) => {
-    const task = requireRealWorkTask(taskId);
+  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_USEFUL, async (_event, taskId: string) => {
+    const task = await requireRealWorkTask(taskId);
     if (task.status !== "completed" || task.terminalStatus === "failed") {
       throw new Error("Only a completed real-work task can be marked useful");
     }
-    return recordLocalRealWorkUseful(db, taskId);
+    return firstTaskRepo.recordRealWorkUseful(taskId, Date.now());
   });
   const firstTaskStarts = new Map<string, Promise<unknown>>();
   const firstTaskPreflights = new Map<string, { routeKey: string; createdAt: number }>();
@@ -4714,16 +4744,11 @@ export async function setupIpcHandlers(
     const selection = LLMProviderFactory.resolveTaskModelSelection();
     return { selection, routeKey: `${selection.providerType}:${selection.modelId}` };
   };
-  const readFirstTaskAttempt = (attemptId?: string, taskId?: string) => {
-    const row = attemptId
-      ? db.prepare("SELECT * FROM first_task_attempts WHERE attempt_id = ?").get(attemptId)
-      : taskId
-        ? db.prepare("SELECT * FROM first_task_attempts WHERE task_id = ?").get(taskId)
-        : db.prepare("SELECT * FROM first_task_attempts ORDER BY created_at DESC LIMIT 1").get();
-    if (!row || typeof row !== "object") return null;
-    const record = row as { attempt_id: string; mission_id: string; workspace_id: string; task_id: string; checked_at?: number; check_json?: string; inspected_at?: number; revision_requested_at?: number; revision_base_hashes_json?: string; revision_inspected_at?: number };
-    const task = taskRepo.findById(record.task_id);
-    const workspace = workspaceRepo.findById(record.workspace_id);
+  const readFirstTaskAttempt = async (attemptId?: string, taskId?: string) => {
+    const record = await firstTaskRepo.findAttempt(attemptId, taskId);
+    if (!record) return null;
+    const task = await taskRepo.findById(record.task_id);
+    const workspace = await workspaceRepo.findById(record.workspace_id);
     if (!task || !workspace) return null;
     return { attemptId: record.attempt_id, missionId: record.mission_id, task, workspace,
       check: record.check_json ? JSON.parse(record.check_json) : null,
@@ -4736,13 +4761,13 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_GET, async (_event, attemptId?: string, taskId?: string) => {
     if (attemptId && !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
     if (taskId && !/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
-    const attempt = readFirstTaskAttempt(attemptId, taskId);
+    const attempt = await readFirstTaskAttempt(attemptId, taskId);
     if (!attempt?.check?.passed) return attempt;
     const current = attempt.task.status === "completed"
       ? await verifyReleaseBrief(attempt.workspace.path).catch(() => null)
       : null;
     if (current?.passed && JSON.stringify(current.artifactHashes) === JSON.stringify(attempt.check.artifactHashes)) return attempt;
-    db.prepare("UPDATE first_task_attempts SET checked_at = NULL, check_json = NULL WHERE attempt_id = ?").run(attempt.attemptId);
+    await firstTaskRepo.clearCheck(attempt.attemptId);
     return readFirstTaskAttempt(attempt.attemptId);
   });
 
@@ -4778,7 +4803,7 @@ export async function setupIpcHandlers(
     const token = result.toolCalls === "pass" ? randomUUID() : null;
     if (token) {
       firstTaskPreflights.set(token, { routeKey, createdAt: Date.now() });
-      db.prepare("UPDATE first_task_setup SET model_ready_at = ? WHERE id = 1").run(Date.now());
+      await firstTaskRepo.markModelReady(Date.now());
     }
     return { ...result, workspace: workspace.status, token,
       providerType: selection.providerType, modelId: selection.modelId };
@@ -4788,7 +4813,7 @@ export async function setupIpcHandlers(
     if (typeof attemptId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)) {
       throw new Error("Invalid attempt ID");
     }
-    const existing = readFirstTaskAttempt(attemptId);
+    const existing = await readFirstTaskAttempt(attemptId);
     if (existing) return existing;
     const inFlight = firstTaskStarts.get(attemptId);
     if (inFlight) return inFlight;
@@ -4802,8 +4827,13 @@ export async function setupIpcHandlers(
       await checkReleaseBriefRuntime(tempWorkspaceRoot);
       const workspace = await getOrCreateTempWorkspace({ createNew: true });
       await seedReleaseBriefWorkspace(workspace.path);
-      const task = db.transaction(() => {
-        const created = taskRepo.create({
+      // The sample task and its attempt row are created in one unit.
+      const task = await firstTaskRepo.createSampleAttempt({
+        attemptId,
+        missionId: "release-brief-v1",
+        workspaceId: workspace.id,
+        now: Date.now(),
+        task: {
           title: "Turn a messy release folder into a launch brief",
           prompt: RELEASE_BRIEF_PROMPT,
           status: "pending",
@@ -4816,11 +4846,8 @@ export async function setupIpcHandlers(
             allowedTools: ["list_directory", "read_file", "write_file", "edit_file"],
             executionMode: "execute",
           },
-        });
-        db.prepare("INSERT INTO first_task_attempts (attempt_id, mission_id, workspace_id, task_id, created_at) VALUES (?, ?, ?, ?, ?)")
-          .run(attemptId, "release-brief-v1", workspace.id, created.id, Date.now());
-        return created;
-      })();
+        } as never,
+      });
       try {
         await agentDaemon.startTask(task);
       } catch (error) {
@@ -4834,7 +4861,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_VERIFY, async (_event, attemptId: string) => {
     if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
-    const attempt = readFirstTaskAttempt(attemptId);
+    const attempt = await readFirstTaskAttempt(attemptId);
     if (!attempt) throw new Error("Sample attempt not found");
     if (attempt.task.status === "cancelled") throw new Error("Cancelled attempts cannot pass checks");
     if (attempt.task.status !== "completed") throw new Error("Wait for the task to finish before checking outputs");
@@ -4842,35 +4869,34 @@ export async function setupIpcHandlers(
     const check = attempt.revisionRequestedAt
       ? applyRevisionContract(verified, attempt.revisionBaseHashes)
       : verified;
-    db.prepare("UPDATE first_task_attempts SET checked_at = ?, check_json = ? WHERE attempt_id = ?")
-      .run(Date.now(), JSON.stringify(check), attemptId);
+    await firstTaskRepo.recordCheck(attemptId, JSON.stringify(check), Date.now());
     return check;
   });
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_INSPECT, async (_event, attemptId: string) => {
     if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
-    const attempt = readFirstTaskAttempt(attemptId);
+    const attempt = await readFirstTaskAttempt(attemptId);
     if (!attempt || !attempt.check?.passed) throw new Error("No checked sample output to inspect");
     if (attempt.task.status !== "completed") throw new Error("Sample task is not complete");
     const current = await verifyReleaseBrief(attempt.workspace.path);
     if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)) {
-      db.prepare("UPDATE first_task_attempts SET checked_at = NULL, check_json = NULL WHERE attempt_id = ?").run(attemptId);
+      await firstTaskRepo.clearCheck(attemptId);
       throw new Error("Sample output changed since the last check. Run checks again.");
     }
     if (attempt.revisionRequestedAt) {
       if (current.artifactHashes["release-brief.html"] === attempt.revisionBaseHashes?.["release-brief.html"]) {
         throw new Error("The release brief has not changed since the revision request.");
       }
-      db.prepare("UPDATE first_task_attempts SET revision_inspected_at = ? WHERE attempt_id = ?").run(Date.now(), attemptId);
+      await firstTaskRepo.markInspected(attemptId, true, Date.now());
     } else {
-      db.prepare("UPDATE first_task_attempts SET inspected_at = ? WHERE attempt_id = ?").run(Date.now(), attemptId);
+      await firstTaskRepo.markInspected(attemptId, false, Date.now());
     }
     return true;
   });
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REQUEST_REVISION, async (_event, attemptId: string) => {
     if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
-    const attempt = readFirstTaskAttempt(attemptId);
+    const attempt = await readFirstTaskAttempt(attemptId);
     if (!attempt || attempt.task.status !== "completed" || !attempt.check?.passed || !attempt.inspectedAt) {
       throw new Error("Open a checked sample result before requesting a revision.");
     }
@@ -4878,19 +4904,21 @@ export async function setupIpcHandlers(
     if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)) {
       throw new Error("Sample output changed. Run checks again before revising.");
     }
-    db.prepare("UPDATE first_task_attempts SET revision_requested_at = ?, revision_base_hashes_json = ?, revision_inspected_at = NULL, checked_at = NULL, check_json = NULL WHERE attempt_id = ?")
-      .run(Date.now(), JSON.stringify(current.artifactHashes), attemptId);
+    await firstTaskRepo.requestRevision(
+      attemptId,
+      JSON.stringify(current.artifactHashes),
+      Date.now(),
+    );
     return true;
   });
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_CANCEL_REVISION, async (_event, attemptId: string) => {
     if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
-    const attempt = readFirstTaskAttempt(attemptId);
+    const attempt = await readFirstTaskAttempt(attemptId);
     if (!attempt?.revisionRequestedAt || attempt.task.status !== "completed") return false;
     const current = await verifyReleaseBrief(attempt.workspace.path);
     if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.revisionBaseHashes)) return false;
-    db.prepare("UPDATE first_task_attempts SET revision_requested_at = NULL, revision_base_hashes_json = NULL, revision_inspected_at = NULL, checked_at = ?, check_json = ? WHERE attempt_id = ?")
-      .run(Date.now(), JSON.stringify(current), attemptId);
+    await firstTaskRepo.cancelRevision(attemptId, JSON.stringify(current), Date.now());
     return true;
   });
 
@@ -4920,7 +4948,7 @@ export async function setupIpcHandlers(
         }
       : undefined;
 
-    const task = taskRepo.create({
+    const task = await taskRepo.create({
       title,
       prompt,
       status: "pending",
@@ -4936,14 +4964,14 @@ export async function setupIpcHandlers(
     }
 
     try {
-      workContextService.ensureForTask(task);
+      await workContextService.ensureForTask(task);
     } catch (error) {
       logger.warn("Failed to register task WorkContext:", error);
     }
 
     if (!isTempWorkspaceId(workspaceId)) {
       try {
-        workspaceRepo.updateLastUsedAt(workspaceId);
+        await workspaceRepo.updateLastUsedAt(workspaceId);
       } catch (error) {
         logger.warn("Failed to update workspace last used time:", error);
       }
@@ -4951,17 +4979,17 @@ export async function setupIpcHandlers(
 
     // Capture mentioned agent roles for deferred dispatch (after main plan is created)
     try {
-      const activeRoles = agentRoleRepo.findAll(false).filter((role) => role.isActive);
+      const activeRoles = (await agentRoleRepo.findAll(false)).filter((role) => role.isActive);
       const mentionedRoles = extractMentionedRoles(`${title}\n${prompt}`, activeRoles);
       const mentionedAgentRoleIds = mentionedRoles.map((role) => role.id);
       if (mentionedAgentRoleIds.length > 0) {
-        taskRepo.update(task.id, { mentionedAgentRoleIds });
+        await taskRepo.update(task.id, { mentionedAgentRoleIds });
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       logger.error("Failed to record mentioned agents:", error);
       // Notify user of dispatch failure via activity feed
-      const errorActivity = activityRepo.create({
+      const errorActivity = await activityRepo.create({
         workspaceId: task.workspaceId,
         taskId: task.id,
         actorType: "system",
@@ -4977,7 +5005,7 @@ export async function setupIpcHandlers(
 
     // Auto-collaborative mode: return task immediately, set up team in background
     if (normalizedAgentConfig?.collaborativeMode) {
-      taskRepo.update(task.id, { status: "executing" });
+      await taskRepo.update(task.id, { status: "executing" });
       task.status = "executing";
       task.updatedAt = Date.now();
       emitTaskStatusEvent(task.id, "executing");
@@ -4985,7 +5013,7 @@ export async function setupIpcHandlers(
       // Run the collaborative setup asynchronously so the UI gets the task instantly
       void (async () => {
         try {
-          const activeRoles = agentRoleRepo.findAll(false);
+          const activeRoles = await agentRoleRepo.findAll(false);
           const fullText = `${title}\n${prompt}`;
           const requestedCount = parseSpawnAgentCount(fullText);
           const isMultitask = normalizedAgentConfig?.multitaskMode === true;
@@ -5027,7 +5055,7 @@ export async function setupIpcHandlers(
           });
 
           if (isMultitask && looksLikeCodeMultitaskRequest(fullText)) {
-            const workspace = workspaceRepo.findById(workspaceId);
+            const workspace = await workspaceRepo.findById(workspaceId);
             if (workspace) {
               const canUseWorktree = await agentDaemon
                 .getWorktreeManager()
@@ -5042,7 +5070,7 @@ export async function setupIpcHandlers(
           }
 
           // Create ephemeral team
-          const team = teamRepo.create({
+          const team = await teamRepo.create({
             workspaceId,
             name: `${isMultitask ? "Multitask" : "Collab"}-${Date.now()}`,
             description: `${isMultitask ? "Multitask" : "Auto-collaborative"} team for: ${title}`,
@@ -5054,7 +5082,7 @@ export async function setupIpcHandlers(
 
           // Add members
           for (let i = 0; i < members.length; i++) {
-            teamMemberRepo.add({
+            await teamMemberRepo.add({
               teamId: team.id,
               agentRoleId: members[i].id,
               memberOrder: (i + 1) * 10,
@@ -5063,7 +5091,7 @@ export async function setupIpcHandlers(
           }
 
           // Create collaborative run
-          const run = teamRunRepo.create({
+          const run = await teamRunRepo.create({
             teamId: team.id,
             rootTaskId: task.id,
             status: "running",
@@ -5074,7 +5102,7 @@ export async function setupIpcHandlers(
             const lanes = await planMultitaskLanes(prompt, multitaskLaneCount || members.length);
             for (let i = 0; i < lanes.length; i++) {
               const owner = members[i % members.length];
-              teamItemRepo.create({
+              await teamItemRepo.create({
                 teamRunId: run.id,
                 title: lanes[i].title,
                 description: lanes[i].description,
@@ -5091,7 +5119,7 @@ export async function setupIpcHandlers(
             for (let i = 0; i < members.length; i++) {
               const m = members[i];
               if (m.displayName === "Synthesis") continue;
-              teamItemRepo.create({
+              await teamItemRepo.create({
                 teamRunId: run.id,
                 title: buildSubagentDisplayName({
                   role: m,
@@ -5132,7 +5160,7 @@ export async function setupIpcHandlers(
 
     // Multi-LLM mode: send same task to multiple LLM providers in parallel
     if (normalizedAgentConfig?.multiLlmMode && normalizedAgentConfig?.multiLlmConfig) {
-      taskRepo.update(task.id, { status: "executing" });
+      await taskRepo.update(task.id, { status: "executing" });
       task.status = "executing";
       task.updatedAt = Date.now();
       emitTaskStatusEvent(task.id, "executing");
@@ -5143,11 +5171,11 @@ export async function setupIpcHandlers(
           const participants = config.participants;
 
           // Use the first default agent role as sentinel for FK references
-          const allRoles = agentRoleRepo.findAll(false);
+          const allRoles = await agentRoleRepo.findAll(false);
           const sentinelRoleId = allRoles.length > 0 ? allRoles[0].id : "multi-llm-system";
 
           // Create ephemeral team
-          const team = teamRepo.create({
+          const team = await teamRepo.create({
             workspaceId,
             name: `MultiLLM-${Date.now()}`,
             description: `Multi-LLM comparison for: ${title}`,
@@ -5156,7 +5184,7 @@ export async function setupIpcHandlers(
           });
 
           // Create multi-LLM run
-          const run = teamRunRepo.create({
+          const run = await teamRunRepo.create({
             teamId: team.id,
             rootTaskId: task.id,
             status: "running",
@@ -5167,7 +5195,7 @@ export async function setupIpcHandlers(
           // One item per LLM participant
           for (let i = 0; i < participants.length; i++) {
             const p = participants[i];
-            teamItemRepo.create({
+            await teamItemRepo.create({
               teamRunId: run.id,
               title: `${p.displayName}`,
               description: prompt,
@@ -5221,7 +5249,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.TASK_GET, async (_, id: string) => {
     const startedAt = Date.now();
-    const task = taskRepo.findById(id);
+    const task = await taskRepo.findById(id);
     const dbMs = Date.now() - startedAt;
     const jsonStartedAt = Date.now();
     const serializedBytes = getSerializedByteSize(task);
@@ -5237,7 +5265,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_GET, async (_, request: unknown) => {
     const owner = validateComposerDraftOwner(request);
-    assertComposerDraftOwner(owner);
+    await assertComposerDraftOwner(owner);
     return composerDraftRepo.get(owner.draftKey, owner);
   });
 
@@ -5254,21 +5282,21 @@ export async function setupIpcHandlers(
     if (!composerDraftMatchesOwner(draft, owner)) {
       throw new Error("Composer draft ownership validation failed.");
     }
-    assertComposerDraftOwner(owner);
-    const accepted = composerDraftRepo.upsertIfNewer(draft);
-    return { accepted, draft: composerDraftRepo.get(draft.draftKey, owner) };
+    await assertComposerDraftOwner(owner);
+    const accepted = await composerDraftRepo.upsertIfNewer(draft);
+    return { accepted, draft: await composerDraftRepo.get(draft.draftKey, owner) };
   });
 
   ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_CLEAR, async (_, request: unknown) => {
     const owner = validateComposerDraftOwner(request);
-    assertComposerDraftOwner(owner);
+    await assertComposerDraftOwner(owner);
     const revision =
       request &&
       typeof request === "object" &&
       typeof (request as { revision?: unknown }).revision === "number"
         ? (request as { revision: number }).revision
         : undefined;
-    const cleared = composerDraftRepo.clear(owner.draftKey, revision);
+    const cleared = await composerDraftRepo.clear(owner.draftKey, revision);
     const releasedAttachments = cleared
       ? await composerDraftAttachmentStore.releaseDraft(owner.draftKey, owner.workspaceId)
       : 0;
@@ -5277,7 +5305,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_REKEY, async (_, request: unknown) => {
     const owner = validateComposerDraftOwner(request);
-    assertComposerDraftOwner(owner);
+    await assertComposerDraftOwner(owner);
     const value = (request && typeof request === "object" ? request : {}) as {
       nextDraftKey?: unknown;
       nextTaskId?: unknown;
@@ -5299,14 +5327,14 @@ export async function setupIpcHandlers(
     if (nextDraftKey !== expectedNextKey) {
       throw new Error("Composer draft rekey must stay within the same workspace and surface.");
     }
-    assertComposerDraftOwner({
+    await assertComposerDraftOwner({
       ...owner,
       taskId: nextTaskId,
       ...(nextRemoteDeviceId ? { remoteDeviceId: nextRemoteDeviceId } : {}),
     });
     if (
-      !composerDraftRepo.get(owner.draftKey, owner) ||
-      !composerDraftRepo.canRekey(owner.draftKey, nextDraftKey)
+      !(await composerDraftRepo.get(owner.draftKey, owner)) ||
+      !(await composerDraftRepo.canRekey(owner.draftKey, nextDraftKey))
     ) {
       return { rekeyed: false, rekeyedAttachmentCount: 0 };
     }
@@ -5316,7 +5344,7 @@ export async function setupIpcHandlers(
       owner.workspaceId,
     );
     try {
-      const rekeyed = composerDraftRepo.rekey(owner.draftKey, nextDraftKey, {
+      const rekeyed = await composerDraftRepo.rekey(owner.draftKey, nextDraftKey, {
         taskId: nextTaskId,
         ...(nextRemoteDeviceId ? { remoteDeviceId: nextRemoteDeviceId } : {}),
       });
@@ -5346,7 +5374,7 @@ export async function setupIpcHandlers(
       import("../../shared/composer-drafts").ComposerDraftAttachmentPutRequest
     >;
     const owner = validateComposerDraftOwner(value);
-    assertComposerDraftOwner(owner);
+    await assertComposerDraftOwner(owner);
     const usage = await composerDraftAttachmentStore.getDraftUsage(
       owner.draftKey,
       owner.workspaceId,
@@ -5379,7 +5407,7 @@ export async function setupIpcHandlers(
       import("../../shared/composer-drafts").ComposerDraftAttachmentResolveRequest
     >;
     const owner = validateComposerDraftOwner(value);
-    assertComposerDraftOwner(owner);
+    await assertComposerDraftOwner(owner);
     const refId = requireString(value.refId, "refId");
     return composerDraftAttachmentStore.resolve(owner.draftKey, owner.workspaceId, refId);
   });
@@ -5389,7 +5417,7 @@ export async function setupIpcHandlers(
       import("../../shared/composer-drafts").ComposerDraftAttachmentReleaseRequest
     >;
     const owner = validateComposerDraftOwner(value);
-    assertComposerDraftOwner(owner);
+    await assertComposerDraftOwner(owner);
     const refId = requireString(value.refId, "refId");
     return {
       released: await composerDraftAttachmentStore.release(
@@ -5403,6 +5431,8 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.SESSION_PROGRESS_GET, async (_, taskId: string) => {
     const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
     if (!normalizedTaskId || normalizedTaskId.length > 128) return undefined;
+    // Progress is projected state; give pending projections a moment, then read anyway.
+    await agentDaemon.flushTimelineProjections(normalizedTaskId, 500).catch(() => undefined);
     return agentDaemon.getSessionProgress(normalizedTaskId);
   });
 
@@ -5455,7 +5485,7 @@ export async function setupIpcHandlers(
               "bot conversation filter",
             );
       const startedAt = Date.now();
-      const tasks = taskRepo.findAll(limit, offset, {
+      const tasks = await taskRepo.findAll(limit, offset, {
         prioritizeSidebar: opts?.prioritizeSidebar === true,
         includeArchivedSessions: opts?.includeArchivedSessions !== false,
         botConversation,
@@ -5500,7 +5530,7 @@ export async function setupIpcHandlers(
       const limit = typeof opts?.limit === "number" && opts.limit > 0 ? opts.limit : 100;
       const offset = typeof opts?.offset === "number" && opts.offset >= 0 ? opts.offset : 0;
       const startedAt = Date.now();
-      const tasks = taskRepo.findSidebarSummaries(limit, offset, {
+      const tasks = await taskRepo.findSidebarSummaries(limit, offset, {
         prioritizeSidebar: opts?.prioritizeSidebar === true,
         includeArchivedSessions: opts?.includeArchivedSessions === true,
         excludeBotConversations: opts?.excludeBotConversations !== false,
@@ -5596,12 +5626,14 @@ export async function setupIpcHandlers(
     let tasks: Task[] = [];
 
     if (query.taskIds && query.taskIds.length > 0) {
-      tasks = query.taskIds.map((id) => taskRepo.findById(id)).filter((t): t is Task => !!t);
+      tasks = (await Promise.all(query.taskIds.map((id) => taskRepo.findById(id)))).filter(
+        (t): t is Task => !!t,
+      );
     } else if (query.workspaceId) {
-      const all = taskRepo.findByWorkspace(query.workspaceId);
+      const all = await taskRepo.findByWorkspace(query.workspaceId);
       tasks = all.slice(offset, offset + limit);
     } else {
-      tasks = taskRepo.findAll(limit, offset);
+      tasks = await taskRepo.findAll(limit, offset);
     }
 
     const taskIds = tasks.map((task) => task.id);
@@ -5616,9 +5648,9 @@ export async function setupIpcHandlers(
         : [];
 
     const workspaceIds = Array.from(new Set(tasks.map((task) => task.workspaceId)));
-    const workspaces = workspaceIds
-      .map((id) => workspaceRepo.findById(id))
-      .filter((ws): ws is Workspace => !!ws);
+    const workspaces = (
+      await Promise.all(workspaceIds.map((id) => workspaceRepo.findById(id)))
+    ).filter((ws): ws is Workspace => !!ws);
 
     return buildTaskExportJson({
       query: {
@@ -5633,17 +5665,17 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_CANCEL, async (event, id: string) => {
-    const authorization = authorizeTaskForEvent(event, id, "manage");
+    const authorization = await authorizeTaskForEvent(event, id, "manage");
     try {
       await agentDaemon.cancelTask(id);
     } finally {
-      const current = taskRepo.findById(id);
+      const current = await taskRepo.findById(id);
       if (current && !isTerminalTaskStatus(current.status)) {
         // Fallback if daemon-side cancellation failed before persisting terminal state.
         agentDaemon.cancelTaskRecord(id, "Task was stopped by user");
       }
     }
-    sessionMembershipService.recordTaskAction(
+    await sessionMembershipService.recordTaskAction(
       id,
       "manage",
       "task_cancelled",
@@ -5656,9 +5688,9 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_WRAP_UP, async (event, id: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_WRAP_UP);
     const validated = validateInput(UUIDSchema, id, "task ID");
-    const authorization = authorizeTaskForEvent(event, validated, "manage");
+    const authorization = await authorizeTaskForEvent(event, validated, "manage");
     await agentDaemon.wrapUpTask(validated);
-    sessionMembershipService.recordTaskAction(
+    await sessionMembershipService.recordTaskAction(
       validated,
       "manage",
       "task_wrapped_up",
@@ -5670,11 +5702,11 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.TASK_PAUSE, async (event, id: string) => {
     const validated = validateInput(UUIDSchema, id, "task ID");
-    const authorization = authorizeTaskForEvent(event, validated, "manage");
+    const authorization = await authorizeTaskForEvent(event, validated, "manage");
     // Pause daemon first - if it fails, exception propagates and status won't be updated
     await agentDaemon.pauseTask(validated);
-    taskRepo.update(validated, { status: "paused" });
-    sessionMembershipService.recordTaskAction(
+    await taskRepo.update(validated, { status: "paused" });
+    await sessionMembershipService.recordTaskAction(
       validated,
       "manage",
       "task_paused",
@@ -5686,7 +5718,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.TASK_RESUME, async (event, id: string) => {
     const validated = validateInput(UUIDSchema, id, "task ID");
-    const authorization = authorizeTaskForEvent(event, validated, "manage");
+    const authorization = await authorizeTaskForEvent(event, validated, "manage");
     // Resume daemon first. The daemon owns lifecycle transitions and may finish the
     // task before this call returns, so do not force a stale "executing" write here.
     const resumed = await agentDaemon.resumeTask(validated);
@@ -5695,7 +5727,7 @@ export async function setupIpcHandlers(
         `[IPC] TASK_RESUME ignored for task ${validated}: no active executor available to resume`,
       );
     }
-    sessionMembershipService.recordTaskAction(
+    await sessionMembershipService.recordTaskAction(
       validated,
       "manage",
       "task_resume_requested",
@@ -5708,9 +5740,9 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_CONTINUE, async (event, id: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_CONTINUE);
     const validated = validateInput(UUIDSchema, id, "task ID");
-    const authorization = authorizeTaskForEvent(event, validated, "manage");
+    const authorization = await authorizeTaskForEvent(event, validated, "manage");
     await agentDaemon.continueTask(validated);
-    sessionMembershipService.recordTaskAction(
+    await sessionMembershipService.recordTaskAction(
       validated,
       "manage",
       "task_continued",
@@ -5754,7 +5786,7 @@ export async function setupIpcHandlers(
       });
       if (forkedTask) {
         try {
-          workContextService.attachForkedTask(forkedTask, validated.taskId);
+          await workContextService.attachForkedTask(forkedTask, validated.taskId);
         } catch (error) {
           logger.warn("Failed to register forked task WorkContext:", error);
         }
@@ -5790,7 +5822,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.TASK_RENAME, async (_, data) => {
     const validated = validateInput(TaskRenameSchema, data, "task rename");
-    taskRepo.update(validated.id, { title: validated.title });
+    await taskRepo.update(validated.id, { title: validated.title });
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, async (_, data) => {
@@ -5802,7 +5834,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_PIN, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_PIN);
     const validated = validateInput(UUIDSchema, id, "task ID");
-    const task = taskRepo.togglePin(validated);
+    const task = await taskRepo.togglePin(validated);
     if (!task) {
       throw new Error(`Task not found: ${validated}`);
     }
@@ -5811,7 +5843,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.TASK_ARCHIVE, async (_, id: string) => {
     const validated = validateInput(UUIDSchema, id, "task ID");
-    const task = taskRepo.findById(validated);
+    const task = await taskRepo.findById(validated);
     if (!task) {
       throw new Error(`Task not found: ${validated}`);
     }
@@ -5819,7 +5851,7 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, id: string) => {
-    const existingTask = taskRepo.findById(id);
+    const existingTask = await taskRepo.findById(id);
     // Capture only validated durable refs while the receipt events still
     // exist. Release them after the DB delete succeeds so a failed delete
     // leaves the task and its attachments retryable.
@@ -5838,7 +5870,7 @@ export async function setupIpcHandlers(
     }
 
     // Delete from database
-    taskRepo.delete(id);
+    await taskRepo.delete(id);
     agentDaemon.releaseCapturedQueuedAttachmentRefs(id, queuedAttachmentRefs);
   });
 
@@ -5876,9 +5908,9 @@ export async function setupIpcHandlers(
     const events = taskEventRepo.findRecentByTaskId(taskId, maxEvents);
 
     // Include child task file events for collaborative/multi-LLM roots
-    const task = taskRepo.findById(taskId);
+    const task = await taskRepo.findById(taskId);
     if (task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode) {
-      const childTasks = taskRepo.findByParent(taskId);
+      const childTasks = await taskRepo.findByParent(taskId);
       if (childTasks.length > 0) {
         const childIds = childTasks.map((c) => c.id);
         const fileTypes = ["file_created", "file_modified", "file_deleted", "artifact_created"];
@@ -5917,10 +5949,10 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_TIMELINE_PAGE, async (_, request: TaskTimelinePageRequest) => {
     const startedAt = Date.now();
     const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
-    const task = taskId ? taskRepo.findById(taskId) : undefined;
+    const task = taskId ? await taskRepo.findById(taskId) : undefined;
     const childTaskIds =
       task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode
-        ? taskRepo.findByParent(taskId).map((child) => child.id)
+        ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
         : [];
     const page = taskEventRepo.findTimelinePage({
       taskId,
@@ -5969,10 +6001,10 @@ export async function setupIpcHandlers(
       const startedAt = Date.now();
       const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
       const eventId = typeof request?.eventId === "string" ? request.eventId.trim() : "";
-      const task = taskId ? taskRepo.findById(taskId) : undefined;
+      const task = taskId ? await taskRepo.findById(taskId) : undefined;
       const childTaskIds =
         task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode
-          ? taskRepo.findByParent(taskId).map((child) => child.id)
+          ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
           : [];
       const result = taskEventRepo.findEventDetailById(eventId, {
         taskId,
@@ -6064,7 +6096,9 @@ export async function setupIpcHandlers(
         typeof query?.workspaceId === "string" && query.workspaceId.trim().length > 0
           ? query.workspaceId.trim()
           : undefined;
-      const workspacePath = workspaceId ? workspaceRepo.findById(workspaceId)?.path : undefined;
+      const workspacePath = workspaceId
+        ? (await workspaceRepo.findById(workspaceId))?.path
+        : undefined;
       return RuntimeVisibilityService.collectUnifiedRecall(
         {
           taskRepo,
@@ -6178,7 +6212,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_SEND_MESSAGE, async (event, data) => {
     checkRateLimit(IPC_CHANNELS.TASK_SEND_MESSAGE);
     const validated = validateInput(TaskMessageSchema, data, "task message");
-    const authorization = authorizeTaskForEvent(event, validated.taskId, "contribute");
+    const authorization = await authorizeTaskForEvent(event, validated.taskId, "contribute");
     const validatedImages = validated.images;
     try {
       const result = await agentDaemon.sendMessage(
@@ -6206,7 +6240,7 @@ export async function setupIpcHandlers(
       if (!result.queued || result.duplicate) {
         await cleanupTaskImageTempFiles(validatedImages);
       }
-      sessionMembershipService.recordTaskAction(
+      await sessionMembershipService.recordTaskAction(
         validated.taskId,
         "contribute",
         "task_message_sent",
@@ -6224,9 +6258,9 @@ export async function setupIpcHandlers(
   // Approval handlers
   ipcMain.handle(IPC_CHANNELS.APPROVAL_RESPOND, async (event, data) => {
     const validated = validateInput(ApprovalResponseSchema, data, "approval response");
-    const approval = approvalRepo.findById(validated.approvalId);
+    const approval = await approvalRepo.findById(validated.approvalId);
     if (!approval) throw new Error("Approval request not found.");
-    const authorization = authorizeTaskForEvent(event, approval.taskId, "approve");
+    const authorization = await authorizeTaskForEvent(event, approval.taskId, "approve");
     const result = await agentDaemon.respondToApproval(
       validated.approvalId,
       validated.approved ?? validated.action?.startsWith("allow_") === true,
@@ -6234,7 +6268,7 @@ export async function setupIpcHandlers(
       authorization.actor,
     );
     if (result === "handled") {
-      sessionMembershipService.recordTaskAction(
+      await sessionMembershipService.recordTaskAction(
         approval.taskId,
         "approve",
         "approval_resolved",
@@ -6294,7 +6328,7 @@ export async function setupIpcHandlers(
 
   // Agents Hub handlers
   const toManagedRoutinePayload = (
-    input: ReturnType<ManagedSessionService["buildManagedAgentRoutineDefinition"]>,
+    input: Awaited<ReturnType<ManagedSessionService["buildManagedAgentRoutineDefinition"]>>,
     agentId: string,
   ): RoutineCreate => {
     const triggerId = input.trigger.id || `managed:${input.trigger.type}:${Date.now()}`;
@@ -6396,7 +6430,7 @@ export async function setupIpcHandlers(
     return managedSessionService.listAgents(params);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_GET_IPC, async (_, agentId: string) => {
-    return managedSessionService.getAgent(agentId) || null;
+    return (await managedSessionService.getAgent(agentId)) || null;
   });
   ipcMain.handle(
     IPC_CHANNELS.MANAGED_AGENT_RUNTIME_TOOL_CATALOG_IPC,
@@ -6426,17 +6460,18 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_CREATE_IPC, async (_, request: Any) => {
     const routineService = getRoutineService();
     if (!routineService) throw new Error("Routine service is not available");
-    const prepared = managedSessionService.buildManagedAgentRoutineDefinition(request);
+    const prepared = await managedSessionService.buildManagedAgentRoutineDefinition(request);
     const routine = await routineService.create(toManagedRoutinePayload(prepared, request.agentId));
-    managedSessionService.syncManagedAgentRoutineRefs(request.agentId);
-    const created = managedSessionService
-      .listManagedAgentRoutines(request.agentId)
+    await managedSessionService.syncManagedAgentRoutineRefs(request.agentId);
+    const created = (await managedSessionService
+      .listManagedAgentRoutines(request.agentId))
       .find((entry) => entry.id === routine.id);
     if (!created) throw new Error("Failed to create managed agent routine");
-    const workspaceId = managedSessionService.getEnvironment(prepared.environmentId)?.config
+    const workspaceId = (await managedSessionService.getEnvironment(prepared.environmentId))?.config
       .workspaceId;
     if (workspaceId) {
-      (managedSessionService as Any).appendAudit?.({
+      // appendAudit is async since the managed area moved to the storage worker (DB6).
+      await (managedSessionService as Any).appendAudit?.({
         agentId: request.agentId,
         workspaceId,
         action: "routine_created",
@@ -6449,16 +6484,16 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_ROUTINE_UPDATE_IPC, async (_, request: Any) => {
     const routineService = getRoutineService();
     if (!routineService) throw new Error("Routine service is not available");
-    const existing = routineService.get(request.routineId);
+    const existing = await routineService.get(request.routineId);
     if (!existing) throw new Error(`Routine not found: ${request.routineId}`);
-    const prepared = managedSessionService.buildManagedAgentRoutineDefinition(request);
+    const prepared = await managedSessionService.buildManagedAgentRoutineDefinition(request);
     await routineService.update(
       request.routineId,
       toManagedRoutinePayload(prepared, request.agentId),
     );
-    managedSessionService.syncManagedAgentRoutineRefs(request.agentId);
-    const updated = managedSessionService
-      .listManagedAgentRoutines(request.agentId)
+    await managedSessionService.syncManagedAgentRoutineRefs(request.agentId);
+    const updated = (await managedSessionService
+      .listManagedAgentRoutines(request.agentId))
       .find((entry) => entry.id === request.routineId);
     if (!updated) throw new Error("Failed to update managed agent routine");
     return updated;
@@ -6469,7 +6504,7 @@ export async function setupIpcHandlers(
       const routineService = getRoutineService();
       if (!routineService) throw new Error("Routine service is not available");
       const removed = await routineService.remove(payload.routineId);
-      managedSessionService.syncManagedAgentRoutineRefs(payload.agentId);
+      await managedSessionService.syncManagedAgentRoutineRefs(payload.agentId);
       return removed;
     },
   );
@@ -6487,48 +6522,48 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_CONVERT_ROLE_IPC, async (_, request: Any) => {
     const routineService = getRoutineService();
-    const converted = managedSessionService.convertAgentRoleToManagedAgent(request);
+    const converted = await managedSessionService.convertAgentRoleToManagedAgent(request);
     const routines = routineService
       ? await Promise.all(
-          converted.routineDrafts.map((draft) =>
+          converted.routineDrafts.map(async (draft) =>
             routineService.create(
               toManagedRoutinePayload(
-                managedSessionService.buildManagedAgentRoutineDefinition(draft),
+                await managedSessionService.buildManagedAgentRoutineDefinition(draft),
                 draft.agentId,
               ),
             ),
           ),
         )
       : [];
-    managedSessionService.syncManagedAgentRoutineRefs(converted.agent.id);
+    await managedSessionService.syncManagedAgentRoutineRefs(converted.agent.id);
     return {
       agent: converted.agent,
       version: converted.version,
       environment: converted.environment,
-      routines: managedSessionService.listManagedAgentRoutines(converted.agent.id),
+      routines: await managedSessionService.listManagedAgentRoutines(converted.agent.id),
       sourceType: converted.sourceType,
       sourceId: converted.sourceId,
     };
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_CONVERT_AUTOMATION_IPC, async (_, request: Any) => {
     const routineService = getRoutineService();
-    const converted = managedSessionService.convertAutomationProfileToManagedAgent(request);
+    const converted = await managedSessionService.convertAutomationProfileToManagedAgent(request);
     if (routineService) {
       for (const draft of converted.routineDrafts) {
         await routineService.create(
           toManagedRoutinePayload(
-            managedSessionService.buildManagedAgentRoutineDefinition(draft),
+            await managedSessionService.buildManagedAgentRoutineDefinition(draft),
             draft.agentId,
           ),
         );
       }
     }
-    managedSessionService.syncManagedAgentRoutineRefs(converted.agent.id);
+    await managedSessionService.syncManagedAgentRoutineRefs(converted.agent.id);
     return {
       agent: converted.agent,
       version: converted.version,
       environment: converted.environment,
-      routines: managedSessionService.listManagedAgentRoutines(converted.agent.id),
+      routines: await managedSessionService.listManagedAgentRoutines(converted.agent.id),
       sourceType: converted.sourceType,
       sourceId: converted.sourceId,
     };
@@ -6537,23 +6572,23 @@ export async function setupIpcHandlers(
     return managedSessionService.listEnvironments(params);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_ENVIRONMENT_GET_IPC, async (_, environmentId: string) => {
-    return managedSessionService.getEnvironment(environmentId) || null;
+    return (await managedSessionService.getEnvironment(environmentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_ENVIRONMENT_CREATE_IPC, async (_, request: Any) => {
     return managedSessionService.createEnvironment(request);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_ENVIRONMENT_UPDATE_IPC, async (_, request: Any) => {
     if (!request?.environmentId) throw new Error("environmentId is required");
-    return managedSessionService.updateEnvironment(request.environmentId, request) || null;
+    return (await managedSessionService.updateEnvironment(request.environmentId, request)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_ENVIRONMENT_ARCHIVE_IPC, async (_, environmentId: string) => {
-    return managedSessionService.archiveEnvironment(environmentId) || null;
+    return (await managedSessionService.archiveEnvironment(environmentId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_LIST_IPC, async (_, params?: Any) => {
     return managedSessionService.listSessions(params);
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_GET_IPC, async (_, sessionId: string) => {
-    return managedSessionService.getSession(sessionId) || null;
+    return (await managedSessionService.getSession(sessionId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_CREATE_IPC, async (_, request: Any) => {
     return managedSessionService.createSession(request);
@@ -6587,16 +6622,16 @@ export async function setupIpcHandlers(
     return workContextService.list(params || {});
   });
   ipcMain.handle(IPC_CHANNELS.WORK_CONTEXT_GET_IPC, async (_, contextId: string) => {
-    return workContextService.get(contextId) || null;
+    return (await workContextService.get(contextId)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.WORK_CONTEXT_CREATE_IPC, async (_, request: Any) => {
     return workContextService.create(request);
   });
   ipcMain.handle(IPC_CHANNELS.WORK_CONTEXT_UPDATE_IPC, async (_, request: Any) => {
-    return workContextService.update(request) || null;
+    return (await workContextService.update(request)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.WORK_CONTEXT_MEMBER_ADD_IPC, async (_, request: Any) => {
-    return workContextService.addMember(request) || null;
+    return (await workContextService.addMember(request)) || null;
   });
   ipcMain.handle(IPC_CHANNELS.SESSION_MEMBERS_GET_IPC, async (event, request: Any) => {
     const principalId = sessionMembershipService.principalForClient(event.sender.id);
@@ -6617,7 +6652,7 @@ export async function setupIpcHandlers(
     return sessionMembershipService.updateMember(request, principalId);
   });
   ipcMain.handle(IPC_CHANNELS.SESSION_INVITE_ACCEPT_IPC, async (event, request: Any) => {
-    const result = sessionMembershipService.acceptInvite({
+    const result = await sessionMembershipService.acceptInvite({
       token: requireString(request?.token, "token"),
       displayName: requireString(request?.displayName, "displayName"),
     });
@@ -6637,7 +6672,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_CREATE, async (event, request: Any) => {
     const taskId = optionalString(request?.taskId);
-    if (taskId) authorizeTaskForEvent(event, taskId, "contribute");
+    if (taskId) await authorizeTaskForEvent(event, taskId, "contribute");
     return protectedCredentialService.createRequest({
       ...(taskId ? { taskId } : {}),
       name: requireString(request?.name, "name"),
@@ -6649,7 +6684,7 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_LIST, async (event, request?: Any) => {
     const taskId = optionalString(request?.taskId);
-    if (taskId) authorizeTaskForEvent(event, taskId, "view");
+    if (taskId) await authorizeTaskForEvent(event, taskId, "view");
     return protectedCredentialService.listRequests({
       ...(taskId ? { taskId } : {}),
       includeResolved: request?.includeResolved === true,
@@ -6657,7 +6692,7 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_FULFILL, async (event, request: Any) => {
     const requestId = requireString(request?.requestId, "requestId");
-    authorizeProtectedCredentialRequest(event, requestId);
+    await authorizeProtectedCredentialRequest(event, requestId);
     return protectedCredentialService.fulfillRequest(
       requestId,
       typeof request?.value === "string" ? request.value : "",
@@ -6667,7 +6702,7 @@ export async function setupIpcHandlers(
     IPC_CHANNELS.PROTECTED_CREDENTIAL_REQUEST_DENY,
     async (event, requestId: string) => {
       const id = requireString(requestId, "requestId");
-      authorizeProtectedCredentialRequest(event, id);
+      await authorizeProtectedCredentialRequest(event, id);
       return protectedCredentialService.denyRequest(id);
     },
   );
@@ -6678,10 +6713,10 @@ export async function setupIpcHandlers(
     return protectedCredentialService.revokeCredential(requireString(credentialId, "credentialId"));
   });
 
-  const previewForTask = (previewId: string) => {
+  const previewForTask = async (previewId: string) => {
     const info = localPreviewService.get(requireString(previewId, "previewId"));
     if (!info) throw new Error("Local preview process not found.");
-    const task = taskRepo.findById(info.taskId);
+    const task = await taskRepo.findById(info.taskId);
     if (!task || task.workspaceId !== info.workspaceId) {
       throw new Error("Local preview task is no longer available.");
     }
@@ -6693,10 +6728,10 @@ export async function setupIpcHandlers(
   );
   ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_START, async (event, request: Any) => {
     const taskId = requireString(request?.taskId, "taskId");
-    authorizeTaskForEvent(event, taskId, "contribute");
-    const task = taskRepo.findById(taskId);
+    await authorizeTaskForEvent(event, taskId, "contribute");
+    const task = await taskRepo.findById(taskId);
     if (!task) throw new Error("Task not found for local preview.");
-    const workspace = workspaceRepo.findById(task.workspaceId);
+    const workspace = await workspaceRepo.findById(task.workspaceId);
     if (!workspace) throw new Error("Workspace not found for local preview.");
     if (request?.workspaceId !== workspace.id) {
       throw new Error("Local preview workspace does not match the task workspace.");
@@ -6714,38 +6749,44 @@ export async function setupIpcHandlers(
     return localPreviewService.start(startRequest);
   });
   ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_STOP, async (event, previewId: string) => {
-    const info = previewForTask(previewId);
-    authorizeTaskForEvent(event, info.taskId, "contribute");
+    const info = await previewForTask(previewId);
+    await authorizeTaskForEvent(event, info.taskId, "contribute");
     return localPreviewService.stop(info.id);
   });
   ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_RESTART, async (event, previewId: string) => {
-    const info = previewForTask(previewId);
-    authorizeTaskForEvent(event, info.taskId, "contribute");
+    const info = await previewForTask(previewId);
+    await authorizeTaskForEvent(event, info.taskId, "contribute");
     return localPreviewService.restart(info.id);
   });
   ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_GET, async (event, previewId: string) => {
-    const info = previewForTask(previewId);
-    authorizeTaskForEvent(event, info.taskId, "view");
+    const info = await previewForTask(previewId);
+    await authorizeTaskForEvent(event, info.taskId, "view");
     return info;
   });
   ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_LIST, async (event, workspaceId?: string) => {
-    return localPreviewService.list(optionalString(workspaceId)).filter((info) => {
-      try {
-        authorizeTaskForEvent(event, info.taskId, "view");
-        return true;
-      } catch {
-        return false;
-      }
-    });
+    // Authorization reads the task through the async storage facade: keep a preview only
+    // when its check resolves.
+    const previews = localPreviewService.list(optionalString(workspaceId));
+    const allowed = await Promise.all(
+      previews.map((info) =>
+        Promise.resolve()
+          .then(() => authorizeTaskForEvent(event, info.taskId, "view"))
+          .then(
+            () => true,
+            () => false,
+          ),
+      ),
+    );
+    return previews.filter((_info, index) => allowed[index]);
   });
   ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_HEALTH, async (event, previewId: string) => {
-    const info = previewForTask(previewId);
-    authorizeTaskForEvent(event, info.taskId, "view");
+    const info = await previewForTask(previewId);
+    await authorizeTaskForEvent(event, info.taskId, "view");
     return localPreviewService.health(info.id);
   });
   ipcMain.handle(IPC_CHANNELS.LOCAL_PREVIEW_OPEN, async (event, previewId: string) => {
-    const info = previewForTask(previewId);
-    authorizeTaskForEvent(event, info.taskId, "view");
+    const info = await previewForTask(previewId);
+    await authorizeTaskForEvent(event, info.taskId, "view");
     if (info.status === "stopped" || info.status === "failed") {
       throw new Error("Local preview is not running.");
     }
@@ -7062,9 +7103,11 @@ export async function setupIpcHandlers(
           ? pluginRegistry.getPluginsByType("pack")
           : [],
       mcpServers: MCPSettingsManager.getSettingsForDisplay().servers,
-      channels: gateway ? gateway.getChannels().map((channel) => toPublicChannel(channel)) : [],
-      workspaces: workspaceRepo.findAll(),
-      agentRoles: agentRoleRepo.findAll(false),
+      channels: gateway
+        ? (await gateway.getChannels()).map((channel) => toPublicChannel(channel))
+        : [],
+      workspaces: await workspaceRepo.findAll(),
+      agentRoles: await agentRoleRepo.findAll(false),
       runtimeToolFamilies: [
         "communication",
         "search",
@@ -7502,7 +7545,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_MODELS, async () => {
     // Get models from database
-    const dbModels = llmModelRepo.findAll();
+    const dbModels = await llmModelRepo.findAll();
     return dbModels.map((m) => ({
       key: m.key,
       displayName: m.displayName,
@@ -8371,7 +8414,7 @@ export async function setupIpcHandlers(
       "agentmail settings",
     ) as AgentMailSettingsData;
     agentMailAdminService.saveSettings(validated);
-    agentMailRealtimeService.refreshSubscriptions();
+    await agentMailRealtimeService.refreshSubscriptions();
     return { success: true };
   });
 
@@ -8414,7 +8457,7 @@ export async function setupIpcHandlers(
       validated.workspaceId,
       validated.podId,
     );
-    agentMailRealtimeService.refreshSubscriptions();
+    await agentMailRealtimeService.refreshSubscriptions();
     return result;
   });
 
@@ -8432,7 +8475,7 @@ export async function setupIpcHandlers(
       validated.workspaceId,
       validated.podName,
     );
-    agentMailRealtimeService.refreshSubscriptions();
+    await agentMailRealtimeService.refreshSubscriptions();
     return result;
   });
 
@@ -8466,7 +8509,7 @@ export async function setupIpcHandlers(
       clientId?: string;
     };
     const result = await agentMailAdminService.createInbox(validated.workspaceId, validated);
-    agentMailRealtimeService.refreshSubscriptions();
+    await agentMailRealtimeService.refreshSubscriptions();
     return result;
   });
 
@@ -8500,7 +8543,7 @@ export async function setupIpcHandlers(
       validated.workspaceId,
       validated.inboxId,
     );
-    agentMailRealtimeService.refreshSubscriptions();
+    await agentMailRealtimeService.refreshSubscriptions();
     return result;
   });
 
@@ -8683,7 +8726,7 @@ export async function setupIpcHandlers(
       "agentmail refresh workspaceId",
     ) as string;
     const result = await agentMailAdminService.refreshWorkspace(validatedWorkspaceId);
-    agentMailRealtimeService.refreshSubscriptions();
+    await agentMailRealtimeService.refreshSubscriptions();
     return result;
   });
 
@@ -8772,11 +8815,11 @@ export async function setupIpcHandlers(
   // Gateway / Channel handlers
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GET_CHANNELS, async () => {
     if (!gateway) return [];
-    return gateway.getChannels().map((ch) => toPublicChannel(ch));
+    return (await gateway.getChannels()).map((ch) => toPublicChannel(ch));
   });
 
   ipcMain.handle(IPC_CHANNELS.INTEGRATION_MENTION_OPTIONS, async () => {
-    const channels = gateway ? gateway.getChannels().map((ch) => toPublicChannel(ch)) : [];
+    const channels = gateway ? (await gateway.getChannels()).map((ch) => toPublicChannel(ch)) : [];
     return listIntegrationMentionOptions(
       channels as Parameters<typeof listIntegrationMentionOptions>[0],
     );
@@ -9184,7 +9227,7 @@ export async function setupIpcHandlers(
     if (!gateway) throw new Error("Gateway not initialized");
 
     const validated = validateInput(UpdateChannelSchema, data, "channel update");
-    const channel = gateway.getChannel(validated.id);
+    const channel = await gateway.getChannel(validated.id);
     if (!channel) throw new Error("Channel not found");
 
     const updates: Record<string, unknown> = {};
@@ -9234,7 +9277,7 @@ export async function setupIpcHandlers(
       }
     }
 
-    gateway.updateChannel(validated.id, updates);
+    await gateway.updateChannel(validated.id, updates);
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_REMOVE_CHANNEL, async (_, id: string) => {
@@ -9265,7 +9308,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GET_USERS, async (_, channelId: string) => {
     if (!gateway) return [];
-    return gateway.getChannelUsers(channelId).map((u) => ({
+    return (await gateway.getChannelUsers(channelId)).map((u) => ({
       id: u.id,
       channelId: u.channelId,
       channelUserId: u.channelUserId,
@@ -9288,7 +9331,7 @@ export async function setupIpcHandlers(
       // Resolve channel type from DB ID if provided
       let resolvedType = data.channelType;
       if (data.channelDbId) {
-        const ch = gateway.getChannel(data.channelDbId);
+        const ch = await gateway.getChannel(data.channelDbId);
         if (ch) resolvedType = ch.type;
       }
       await gateway.sendMessage(resolvedType as Any, data.chatId, "Test delivery from CoWork OS", {
@@ -9302,13 +9345,13 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, async (_, data) => {
     if (!gateway) throw new Error("Gateway not initialized");
     const validated = validateInput(GrantAccessSchema, data, "grant access");
-    gateway.grantUserAccess(validated.channelId, validated.userId, validated.displayName);
+    await gateway.grantUserAccess(validated.channelId, validated.userId, validated.displayName);
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_REVOKE_ACCESS, async (_, data) => {
     if (!gateway) throw new Error("Gateway not initialized");
     const validated = validateInput(RevokeAccessSchema, data, "revoke access");
-    gateway.revokeUserAccess(validated.channelId, validated.userId);
+    await gateway.revokeUserAccess(validated.channelId, validated.userId);
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, async (_, data) => {
@@ -9404,14 +9447,14 @@ export async function setupIpcHandlers(
         payload.ruleId,
         "workspace permission rule ID",
       );
-      const deleted = workspacePermissionRuleRepo.deleteByWorkspaceAndId(
+      const deleted = await workspacePermissionRuleRepo.deleteByWorkspaceAndId(
         validatedWorkspaceId,
         validatedRuleId,
       );
       if (!deleted) {
         return { success: false, removed: false };
       }
-      const workspace = workspaceRepo.findById(validatedWorkspaceId);
+      const workspace = await workspaceRepo.findById(validatedWorkspaceId);
       const manifestResult = workspace
         ? removeWorkspacePermissionManifestRule(workspace.path, deleted)
         : { success: true, manifestPath: "", removed: false };
@@ -9552,8 +9595,10 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.BOT_NOTIFICATION_GET, async (_, rawRoleId: string) => {
     const agentRoleId = validateInput(UUIDSchema, rawRoleId, "agent role ID");
-    if (!agentRoleRepo.findById(agentRoleId)) throw new Error("Agent role not found");
-    return botNotificationPreferenceRepo.findByAgentRoleId(agentRoleId) as BotNotificationPolicy;
+    if (!(await agentRoleRepo.findById(agentRoleId))) throw new Error("Agent role not found");
+    return (await botNotificationPreferenceRepo.findByAgentRoleId(
+      agentRoleId,
+    )) as BotNotificationPolicy;
   });
 
   ipcMain.handle(
@@ -9561,14 +9606,14 @@ export async function setupIpcHandlers(
     async (_, request: UpdateBotNotificationPolicyRequest) => {
       checkRateLimit(IPC_CHANNELS.BOT_NOTIFICATION_UPDATE);
       const agentRoleId = validateInput(UUIDSchema, request?.agentRoleId, "agent role ID");
-      if (!agentRoleRepo.findById(agentRoleId)) throw new Error("Agent role not found");
+      if (!(await agentRoleRepo.findById(agentRoleId))) throw new Error("Agent role not found");
       const onFinish = request?.onFinish === undefined ? undefined : Boolean(request.onFinish);
       const onInputRequired =
         request?.onInputRequired === undefined ? undefined : Boolean(request.onInputRequired);
-      return botNotificationPreferenceRepo.upsert(agentRoleId, {
+      return (await botNotificationPreferenceRepo.upsert(agentRoleId, {
         onFinish,
         onInputRequired,
-      }) as BotNotificationPolicy;
+      })) as BotNotificationPolicy;
     },
   );
 
@@ -9579,7 +9624,7 @@ export async function setupIpcHandlers(
       throw new Error("Agent role name must be lowercase alphanumeric with hyphens only");
     }
     // Check for duplicate name
-    if (agentRoleRepo.findByName(request.name)) {
+    if (await agentRoleRepo.findByName(request.name)) {
       throw new Error(`Agent role with name "${request.name}" already exists`);
     }
     if (request.companyId !== undefined && request.companyId !== null) {
@@ -9599,7 +9644,7 @@ export async function setupIpcHandlers(
         "company ID",
       );
     }
-    const result = agentRoleRepo.update(normalizedRequest);
+    const result = await agentRoleRepo.update(normalizedRequest);
     if (!result) {
       throw new Error("Agent role not found");
     }
@@ -9609,7 +9654,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.AGENT_ROLE_DELETE);
     const validated = validateInput(UUIDSchema, id, "agent role ID");
-    const success = agentRoleRepo.delete(validated);
+    const success = await agentRoleRepo.delete(validated);
     if (!success) {
       throw new Error("Agent role not found or cannot be deleted");
     }
@@ -9623,7 +9668,7 @@ export async function setupIpcHandlers(
       const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
       if (agentRoleId !== null) {
         const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-        const role = agentRoleRepo.findById(validatedRoleId);
+        const role = await agentRoleRepo.findById(validatedRoleId);
         if (!role) {
           throw new Error("Agent role not found");
         }
@@ -9631,12 +9676,12 @@ export async function setupIpcHandlers(
       const taskUpdate: Partial<Task> = {
         assignedAgentRoleId: agentRoleId ?? undefined,
       };
-      taskRepo.update(validatedTaskId, taskUpdate);
-      const task = taskRepo.findById(validatedTaskId);
+      await taskRepo.update(validatedTaskId, taskUpdate);
+      const task = await taskRepo.findById(validatedTaskId);
       if (task) {
         if (agentRoleId) {
-          const role = agentRoleRepo.findById(agentRoleId);
-          const activity = activityRepo.create({
+          const role = await agentRoleRepo.findById(agentRoleId);
+          const activity = await activityRepo.create({
             workspaceId: task.workspaceId,
             taskId: task.id,
             agentRoleId,
@@ -9650,7 +9695,7 @@ export async function setupIpcHandlers(
             activity,
           });
         } else {
-          const activity = activityRepo.create({
+          const activity = await activityRepo.create({
             workspaceId: task.workspaceId,
             taskId: task.id,
             actorType: "system",
@@ -9696,7 +9741,7 @@ export async function setupIpcHandlers(
       request.workspaceId,
       "workspace ID",
     );
-    const activity = activityRepo.create({
+    const activity = await activityRepo.create({
       ...request,
       workspaceId: validatedWorkspaceId,
     });
@@ -9711,7 +9756,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_MARK_READ, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.ACTIVITY_MARK_READ);
     const validated = validateInput(UUIDSchema, id, "activity ID");
-    const success = activityRepo.markRead(validated);
+    const success = await activityRepo.markRead(validated);
     if (success) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
         type: "read",
@@ -9724,7 +9769,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_MARK_ALL_READ, async (_, workspaceId: string) => {
     checkRateLimit(IPC_CHANNELS.ACTIVITY_MARK_ALL_READ);
     const validated = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
-    const count = activityRepo.markAllRead(validated);
+    const count = await activityRepo.markAllRead(validated);
     getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
       type: "all_read",
       workspaceId: validated,
@@ -9735,7 +9780,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_PIN, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.ACTIVITY_PIN);
     const validated = validateInput(UUIDSchema, id, "activity ID");
-    const activity = activityRepo.togglePin(validated);
+    const activity = await activityRepo.togglePin(validated);
     if (activity) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
         type: "pinned",
@@ -9748,7 +9793,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.ACTIVITY_DELETE);
     const validated = validateInput(UUIDSchema, id, "activity ID");
-    const success = activityRepo.delete(validated);
+    const success = await activityRepo.delete(validated);
     if (success) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
         type: "deleted",
@@ -9766,7 +9811,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.MENTION_CREATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.MENTION_CREATE);
     const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
-    const mention = mentionRepo.create({
+    const mention = await mentionRepo.create({
       ...request,
       workspaceId: validatedWorkspaceId,
     });
@@ -9777,10 +9822,10 @@ export async function setupIpcHandlers(
     });
     // Also create an activity entry for the mention
     const fromAgent = request.fromAgentRoleId
-      ? agentRoleRepo.findById(request.fromAgentRoleId)
+      ? await agentRoleRepo.findById(request.fromAgentRoleId)
       : null;
-    const toAgent = agentRoleRepo.findById(request.toAgentRoleId);
-    activityRepo.create({
+    const toAgent = await agentRoleRepo.findById(request.toAgentRoleId);
+    await activityRepo.create({
       workspaceId: validatedWorkspaceId,
       taskId: request.taskId,
       agentRoleId: request.toAgentRoleId,
@@ -9796,7 +9841,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.MENTION_ACKNOWLEDGE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.MENTION_ACKNOWLEDGE);
     const validated = validateInput(UUIDSchema, id, "mention ID");
-    const mention = mentionRepo.acknowledge(validated);
+    const mention = await mentionRepo.acknowledge(validated);
     if (mention) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, {
         type: "acknowledged",
@@ -9809,7 +9854,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.MENTION_COMPLETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.MENTION_COMPLETE);
     const validated = validateInput(UUIDSchema, id, "mention ID");
-    const mention = mentionRepo.complete(validated);
+    const mention = await mentionRepo.complete(validated);
     if (mention) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, {
         type: "completed",
@@ -9822,7 +9867,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.MENTION_DISMISS, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.MENTION_DISMISS);
     const validated = validateInput(UUIDSchema, id, "mention ID");
-    const mention = mentionRepo.dismiss(validated);
+    const mention = await mentionRepo.dismiss(validated);
     if (mention) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.MENTION_EVENT, {
         type: "dismissed",
@@ -9890,10 +9935,10 @@ export async function setupIpcHandlers(
     );
     const name = typeof request.name === "string" ? request.name.trim() : "";
     if (!name) throw new Error("Team name is required");
-    if (!agentRoleRepo.findById(leadAgentRoleId)) {
+    if (!(await agentRoleRepo.findById(leadAgentRoleId))) {
       throw new Error("Lead agent role not found");
     }
-    const created = teamRepo.create({
+    const created = await teamRepo.create({
       workspaceId,
       name,
       description: typeof request.description === "string" ? request.description.trim() : undefined,
@@ -9935,7 +9980,7 @@ export async function setupIpcHandlers(
     }
     if (request.leadAgentRoleId !== undefined) {
       const leadId = validateInput(UUIDSchema, request.leadAgentRoleId, "lead agent role ID");
-      if (!agentRoleRepo.findById(leadId)) throw new Error("Lead agent role not found");
+      if (!(await agentRoleRepo.findById(leadId))) throw new Error("Lead agent role not found");
       updates.leadAgentRoleId = leadId;
     }
     if (request.maxParallelAgents !== undefined)
@@ -9945,7 +9990,7 @@ export async function setupIpcHandlers(
     if (request.defaultPersonality !== undefined)
       updates.defaultPersonality = request.defaultPersonality;
     if (request.isActive !== undefined) updates.isActive = !!request.isActive;
-    const updated = teamRepo.update(updates);
+    const updated = await teamRepo.update(updates);
     if (updated) {
       emitTeamEvent({
         type: "team_updated",
@@ -9959,7 +10004,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TEAM_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.TEAM_DELETE);
     const validated = validateInput(UUIDSchema, id, "team ID");
-    const success = teamRepo.delete(validated);
+    const success = await teamRepo.delete(validated);
     if (success) {
       emitTeamEvent({
         type: "team_deleted",
@@ -9979,8 +10024,8 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_ADD);
     const teamId = validateInput(UUIDSchema, request.teamId, "team ID");
     const agentRoleId = validateInput(UUIDSchema, request.agentRoleId, "agent role ID");
-    if (!agentRoleRepo.findById(agentRoleId)) throw new Error("Agent role not found");
-    const member = teamMemberRepo.add({
+    if (!(await agentRoleRepo.findById(agentRoleId))) throw new Error("Agent role not found");
+    const member = await teamMemberRepo.add({
       teamId,
       agentRoleId,
       memberOrder: typeof request.memberOrder === "number" ? request.memberOrder : undefined,
@@ -9994,7 +10039,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TEAM_MEMBER_UPDATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_UPDATE);
     const id = validateInput(UUIDSchema, request.id, "team member ID");
-    const updated = teamMemberRepo.update({
+    const updated = await teamMemberRepo.update({
       id,
       memberOrder: typeof request.memberOrder === "number" ? request.memberOrder : undefined,
       isRequired: request.isRequired !== undefined ? !!request.isRequired : undefined,
@@ -10021,7 +10066,7 @@ export async function setupIpcHandlers(
       checkRateLimit(IPC_CHANNELS.TEAM_MEMBER_REMOVE);
       const teamId = validateInput(UUIDSchema, data.teamId, "team ID");
       const agentRoleId = validateInput(UUIDSchema, data.agentRoleId, "agent role ID");
-      const success = teamMemberRepo.removeByTeamAndRole(teamId, agentRoleId);
+      const success = await teamMemberRepo.removeByTeamAndRole(teamId, agentRoleId);
       if (success) {
         emitTeamEvent({
           type: "team_member_removed",
@@ -10043,7 +10088,7 @@ export async function setupIpcHandlers(
       const normalized = ordered
         .map((id) => (typeof id === "string" ? id.trim() : ""))
         .filter(Boolean);
-      const updated = teamMemberRepo.reorder(teamId, normalized);
+      const updated = await teamMemberRepo.reorder(teamId, normalized);
       emitTeamEvent({
         type: "team_members_reordered",
         timestamp: Date.now(),
@@ -10069,9 +10114,9 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.TEAM_RUN_CREATE);
     const teamId = validateInput(UUIDSchema, request.teamId, "team ID");
     const rootTaskId = validateInput(UUIDSchema, request.rootTaskId, "root task ID");
-    const rootTask = taskRepo.findById(rootTaskId);
+    const rootTask = await taskRepo.findById(rootTaskId);
     if (!rootTask) throw new Error("Root task not found");
-    const created = teamRunRepo.create({
+    const created = await teamRunRepo.create({
       teamId,
       rootTaskId,
       status: request.status,
@@ -10092,7 +10137,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TEAM_RUN_RESUME, async (_, runId: string) => {
     checkRateLimit(IPC_CHANNELS.TEAM_RUN_RESUME);
     const validated = validateInput(UUIDSchema, runId, "team run ID");
-    const updated = teamRunRepo.update(validated, { status: "running" });
+    const updated = await teamRunRepo.update(validated, { status: "running" });
     if (updated) {
       emitTeamEvent({
         type: "team_run_updated",
@@ -10107,7 +10152,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TEAM_RUN_PAUSE, async (_, runId: string) => {
     checkRateLimit(IPC_CHANNELS.TEAM_RUN_PAUSE);
     const validated = validateInput(UUIDSchema, runId, "team run ID");
-    const updated = teamRunRepo.update(validated, { status: "paused" });
+    const updated = await teamRunRepo.update(validated, { status: "paused" });
     if (updated) {
       emitTeamEvent({
         type: "team_run_updated",
@@ -10142,7 +10187,7 @@ export async function setupIpcHandlers(
     const teamRunId = validateInput(UUIDSchema, request.teamRunId, "team run ID");
     const title = typeof request.title === "string" ? request.title.trim() : "";
     if (!title) throw new Error("Item title is required");
-    const created = teamItemRepo.create({
+    const created = await teamItemRepo.create({
       teamRunId,
       parentItemId: request.parentItemId || undefined,
       title,
@@ -10161,7 +10206,7 @@ export async function setupIpcHandlers(
       timestamp: Date.now(),
       item: created,
     });
-    const run = teamRunRepo.findById(teamRunId);
+    const run = await teamRunRepo.findById(teamRunId);
     if (run?.status === "running") {
       void teamOrchestrator.tickRun(teamRunId, "item_created");
     }
@@ -10171,7 +10216,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_UPDATE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_ITEM_UPDATE);
     const id = validateInput(UUIDSchema, request.id, "team item ID");
-    const updated = teamItemRepo.update({
+    const updated = await teamItemRepo.update({
       id,
       parentItemId: request.parentItemId,
       title: request.title,
@@ -10189,7 +10234,7 @@ export async function setupIpcHandlers(
         teamRunId: updated.teamRunId,
         item: updated,
       });
-      const run = teamRunRepo.findById(updated.teamRunId);
+      const run = await teamRunRepo.findById(updated.teamRunId);
       if (run?.status === "running") {
         void teamOrchestrator.tickRun(updated.teamRunId, "item_updated");
       }
@@ -10200,8 +10245,8 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.TEAM_ITEM_DELETE);
     const validated = validateInput(UUIDSchema, id, "team item ID");
-    const existing = teamItemRepo.findById(validated);
-    const success = teamItemRepo.delete(validated);
+    const existing = await teamItemRepo.findById(validated);
+    const success = await teamItemRepo.delete(validated);
     if (success && existing) {
       emitTeamEvent({
         type: "team_item_deleted",
@@ -10209,7 +10254,7 @@ export async function setupIpcHandlers(
         teamRunId: existing.teamRunId,
         itemId: validated,
       });
-      const run = teamRunRepo.findById(existing.teamRunId);
+      const run = await teamRunRepo.findById(existing.teamRunId);
       if (run?.status === "running") {
         void teamOrchestrator.tickRun(existing.teamRunId, "item_deleted");
       }
@@ -10220,7 +10265,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TEAM_ITEM_MOVE, async (_, request: Any) => {
     checkRateLimit(IPC_CHANNELS.TEAM_ITEM_MOVE);
     const id = validateInput(UUIDSchema, request.id, "team item ID");
-    const updated = teamItemRepo.update({
+    const updated = await teamItemRepo.update({
       id,
       parentItemId: request.parentItemId,
       sortOrder: request.sortOrder,
@@ -10231,7 +10276,7 @@ export async function setupIpcHandlers(
         timestamp: Date.now(),
         item: updated,
       });
-      const run = teamRunRepo.findById(updated.teamRunId);
+      const run = await teamRunRepo.findById(updated.teamRunId);
       if (run?.status === "running") {
         void teamOrchestrator.tickRun(updated.teamRunId, "item_moved");
       }
@@ -10255,7 +10300,7 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.REVIEW_GENERATE);
     const workspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
     const agentRoleId = validateInput(UUIDSchema, request.agentRoleId, "agent role ID");
-    if (!agentRoleRepo.findById(agentRoleId)) {
+    if (!(await agentRoleRepo.findById(agentRoleId))) {
       throw new Error("Agent role not found");
     }
     const periodDays = request.periodDays !== undefined ? Number(request.periodDays) : undefined;
@@ -10283,7 +10328,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.REVIEW_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.REVIEW_DELETE);
     const validated = validateInput(UUIDSchema, id, "review ID");
-    const success = reviewService.delete(validated);
+    const success = await reviewService.delete(validated);
     return { success };
   });
 
@@ -10294,8 +10339,8 @@ export async function setupIpcHandlers(
         ? options.windowDays
         : 30;
     return {
-      suites: evalService.listSuites(),
-      metrics: evalService.getBaselineMetrics(windowDays),
+      suites: await evalService.listSuites(),
+      metrics: await evalService.getBaselineMetrics(windowDays),
     };
   });
 
@@ -10462,6 +10507,8 @@ export async function setupIpcHandlers(
     ) => {
       checkRateLimit(IPC_CHANNELS.WORK_SESSION_REPLAY_EVALUATE);
       const taskId = validateInput(UUIDSchema, request?.taskId, "task ID");
+      // Replay reads projected session items; wait for this task's pending projections.
+      await agentDaemon.flushTimelineProjections(taskId);
       const protocol = agentDaemon.getWorkSessionProtocolService().getRepository();
       const sessionId = protocol.findSessionIdForTask(taskId);
       const items = sessionId ? protocol.listAllItems(sessionId) : [];
@@ -10496,6 +10543,11 @@ export async function setupIpcHandlers(
       const clampedPeriod = Math.min(Math.max(Math.round(periodDays ?? 7), 1), 365);
       const { UsageInsightsService } = await import("../reports/UsageInsightsService");
       const service = new UsageInsightsService(db);
+      // DB4: with the reporting reader the scans run off the main thread; a reader
+      // failure rejects this call rather than returning an empty or host-computed report.
+      const { getReportingReader } = await import("../database/async/runtime");
+      const reader = await getReportingReader();
+      if (reader) return service.generateInReader(reader, validatedWorkspaceId, clampedPeriod);
       return service.generate(validatedWorkspaceId, clampedPeriod);
     },
   );
@@ -10504,9 +10556,9 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.USAGE_INSIGHTS_EARLIEST);
     const validatedWorkspaceId =
       workspaceId === "__all__" ? null : validateInput(UUIDSchema, workspaceId, "workspace ID");
-    const { UsageInsightsService } = await import("../reports/UsageInsightsService");
-    const service = new UsageInsightsService(db);
-    return service.getEarliestActivityMs(validatedWorkspaceId);
+    const { reportsStatements } = await import("../reports/reports-statement-port");
+    // DB6: a report unit, on the reporting reader when one is running.
+    return reportsStatements(db).unit("usage_getEarliestActivityMs", [validatedWorkspaceId]);
   });
 
   // CoWork Pulse. The service never receives renderer-provided identifiers or payloads;
@@ -10556,41 +10608,42 @@ export async function setupIpcHandlers(
         : validateInput(UUIDSchema, workspaceId, "workspace ID");
     const allMode = normalizedWorkspaceId === ALL_WORKSPACES_ID;
     const briefingWorkspaceIds = allMode
-      ? workspaceRepo
-          .findAll()
+      ? (await workspaceRepo.findAll())
           .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id))
           .map((workspace) => workspace.id)
       : [normalizedWorkspaceId];
     const workspaceById = new Map(
-      workspaceRepo.findAll().map((workspace) => [workspace.id, workspace] as const),
+      (await workspaceRepo.findAll()).map((workspace) => [workspace.id, workspace] as const),
     );
     const labelForWorkspace = (id: string) => workspaceById.get(id)?.name || id;
     const service = new DailyBriefingService(
       {
-        getRecentTasks: (_workspaceId, sinceMs) => {
-          const tasks = briefingWorkspaceIds.flatMap((id) =>
-            (
-              taskRepo.findByCreatedAtRange({
-                startMs: sinceMs,
-                endMs: Date.now(),
-                limit: 100,
-                workspaceId: id,
-              }) || []
-            ).map((task) => ({
-              ...task,
-              workspaceName: labelForWorkspace(id),
-            })),
+        getRecentTasks: async (_workspaceId, sinceMs) => {
+          const perWorkspace = await Promise.all(
+            briefingWorkspaceIds.map(async (id) =>
+              (
+                (await taskRepo.findByCreatedAtRange({
+                  startMs: sinceMs,
+                  endMs: Date.now(),
+                  limit: 100,
+                  workspaceId: id,
+                })) || []
+              ).map((task) => ({
+                ...task,
+                workspaceName: labelForWorkspace(id),
+              })),
+            ),
           );
+          const tasks = perWorkspace.flat();
           return tasks.sort((a: Any, b: Any) => (b.createdAt || 0) - (a.createdAt || 0));
         },
-        searchMemory: (_currentWorkspaceId, query, limit) => {
-          const results = briefingWorkspaceIds.flatMap((id) =>
-            MemoryService.search(id, query, limit).map((memory) => ({
-              ...memory,
-              workspaceId: id,
-              workspaceName: labelForWorkspace(id),
-            })),
-          );
+        searchMemory: async (_currentWorkspaceId, query, limit) => {
+          const results: Any[] = [];
+          for (const id of briefingWorkspaceIds) {
+            for (const memory of await MemoryService.searchAsync(id, query, limit)) {
+              results.push({ ...memory, workspaceId: id, workspaceName: labelForWorkspace(id) });
+            }
+          }
           return results
             .sort(
               (a: Any, b: Any) =>
@@ -10616,15 +10669,15 @@ export async function setupIpcHandlers(
             briefingWorkspaceIds.map((id) => ProactiveSuggestionsService.generateAll(id)),
           );
         },
-        getActiveSuggestions: (currentWorkspaceId, limit = 5) => {
+        getActiveSuggestions: async (currentWorkspaceId, limit = 5) => {
           if (!allMode) {
             return ProactiveSuggestionsService.getTopForBriefing(currentWorkspaceId, limit);
           }
-          return ProactiveSuggestionsService.getTopForBriefingForWorkspaces(
+          return (await ProactiveSuggestionsService.getTopForBriefingForWorkspaces(
             currentWorkspaceId,
             briefingWorkspaceIds,
             limit,
-          )
+          ))
             .map((suggestion) => ({
               ...suggestion,
               workspaceId: suggestion.workspaceId || currentWorkspaceId,
@@ -10633,14 +10686,14 @@ export async function setupIpcHandlers(
             .sort((a: Any, b: Any) => (b.confidence || 0) - (a.confidence || 0))
             .slice(0, limit);
         },
-        getPriorities: (currentWorkspaceId) => {
+        getPriorities: async (currentWorkspaceId) => {
           if (!allMode) {
-            const workspacePath = workspaceRepo.findById(currentWorkspaceId)?.path;
+            const workspacePath = (await workspaceRepo.findById(currentWorkspaceId))?.path;
             return readWorkspacePriorities(workspacePath);
           }
           const blocks = briefingWorkspaceIds
             .map((id) => {
-              const workspacePath = workspaceRepo.findById(id)?.path;
+              const workspacePath = workspaceById.get(id)?.path;
               const raw = readWorkspacePriorities(workspacePath);
               if (!raw) return "";
               const lines = raw
@@ -10658,13 +10711,13 @@ export async function setupIpcHandlers(
           return blocks.join("\n");
         },
         getUpcomingJobs: async () => [],
-        getOpenLoops: (currentWorkspaceId) => {
+        getOpenLoops: async (currentWorkspaceId) => {
           if (!allMode) {
-            const workspacePath = workspaceRepo.findById(currentWorkspaceId)?.path;
+            const workspacePath = (await workspaceRepo.findById(currentWorkspaceId))?.path;
             return readWorkspaceOpenLoops(workspacePath);
           }
           return briefingWorkspaceIds.flatMap((id) => {
-            const workspacePath = workspaceRepo.findById(id)?.path;
+            const workspacePath = workspaceById.get(id)?.path;
             const raw = readWorkspaceOpenLoops(workspacePath);
             return raw.map((line) => `- [${labelForWorkspace(id)}] ${line}`);
           });
@@ -10828,7 +10881,7 @@ export async function setupIpcHandlers(
     const uniqueWorkspaceIds = [...new Set(normalizedWorkspaceIds)];
     if (uniqueWorkspaceIds.length === 0) return [];
     const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
-    const allSuggestions = ProactiveSuggestionsService.listActive(
+    const allSuggestions = await ProactiveSuggestionsService.listActive(
       uniqueWorkspaceIds[0],
       undefined,
       uniqueWorkspaceIds,
@@ -10877,7 +10930,7 @@ export async function setupIpcHandlers(
       const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
       const validatedSuggestionId = validateInput(UUIDSchema, suggestionId, "suggestion ID");
       const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
-      const success = ProactiveSuggestionsService.dismiss(
+      const success = await ProactiveSuggestionsService.dismiss(
         validatedWorkspaceId,
         validatedSuggestionId,
       );
@@ -10896,7 +10949,7 @@ export async function setupIpcHandlers(
           ? Math.max(Date.now(), snoozedUntil)
           : Date.now() + 24 * 60 * 60 * 1000;
       const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
-      const success = ProactiveSuggestionsService.snooze(
+      const success = await ProactiveSuggestionsService.snooze(
         validatedWorkspaceId,
         validatedSuggestionId,
         validatedSnoozedUntil,
@@ -10917,7 +10970,7 @@ export async function setupIpcHandlers(
         "edited suggestion prompt",
       );
       const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
-      const success = ProactiveSuggestionsService.recordEditedAction(
+      const success = await ProactiveSuggestionsService.recordEditedAction(
         validatedWorkspaceId,
         validatedSuggestionId,
         validatedEditedPrompt,
@@ -10933,7 +10986,7 @@ export async function setupIpcHandlers(
       const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
       const validatedSuggestionId = validateInput(UUIDSchema, suggestionId, "suggestion ID");
       const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
-      const actionPrompt = ProactiveSuggestionsService.actOn(
+      const actionPrompt = await ProactiveSuggestionsService.actOn(
         validatedWorkspaceId,
         validatedSuggestionId,
       );
@@ -10945,7 +10998,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_MOVE_COLUMN, async (_, taskId: string, column: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_MOVE_COLUMN);
     const validatedId = validateInput(UUIDSchema, taskId, "task ID");
-    const task = taskRepo.moveToColumn(validatedId, column);
+    const task = await taskRepo.moveToColumn(validatedId, column);
     if (task) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, {
         type: "moved",
@@ -10959,7 +11012,7 @@ export async function setupIpcHandlers(
         review: "Review",
         done: "Done",
       };
-      const activity = activityRepo.create({
+      const activity = await activityRepo.create({
         workspaceId: task.workspaceId,
         taskId: task.id,
         agentRoleId: task.assignedAgentRoleId,
@@ -10979,7 +11032,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_SET_PRIORITY, async (_, taskId: string, priority: number) => {
     checkRateLimit(IPC_CHANNELS.TASK_SET_PRIORITY);
     const validatedId = validateInput(UUIDSchema, taskId, "task ID");
-    const task = taskRepo.setPriority(validatedId, priority);
+    const task = await taskRepo.setPriority(validatedId, priority);
     if (task) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, {
         type: "priority_changed",
@@ -10994,7 +11047,7 @@ export async function setupIpcHandlers(
     async (_, taskId: string, dueDate: number | null) => {
       checkRateLimit(IPC_CHANNELS.TASK_SET_DUE_DATE);
       const validatedId = validateInput(UUIDSchema, taskId, "task ID");
-      const task = taskRepo.setDueDate(validatedId, dueDate);
+      const task = await taskRepo.setDueDate(validatedId, dueDate);
       if (task) {
         getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, {
           type: "due_date_changed",
@@ -11010,7 +11063,7 @@ export async function setupIpcHandlers(
     async (_, taskId: string, minutes: number | null) => {
       checkRateLimit(IPC_CHANNELS.TASK_SET_ESTIMATE);
       const validatedId = validateInput(UUIDSchema, taskId, "task ID");
-      const task = taskRepo.setEstimate(validatedId, minutes);
+      const task = await taskRepo.setEstimate(validatedId, minutes);
       if (task) {
         getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, {
           type: "estimate_changed",
@@ -11025,7 +11078,7 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.TASK_ADD_LABEL);
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
     const validatedLabelId = validateInput(UUIDSchema, labelId, "label ID");
-    const task = taskRepo.addLabel(validatedTaskId, validatedLabelId);
+    const task = await taskRepo.addLabel(validatedTaskId, validatedLabelId);
     if (task) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, {
         type: "label_added",
@@ -11040,7 +11093,7 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.TASK_REMOVE_LABEL);
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
     const validatedLabelId = validateInput(UUIDSchema, labelId, "label ID");
-    const task = taskRepo.removeLabel(validatedTaskId, validatedLabelId);
+    const task = await taskRepo.removeLabel(validatedTaskId, validatedLabelId);
     if (task) {
       getMainWindow()?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, {
         type: "label_removed",
@@ -11084,7 +11137,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TASK_LABEL_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.TASK_LABEL_DELETE);
     const validated = validateInput(UUIDSchema, id, "label ID");
-    return { success: taskLabelRepo.delete(validated) };
+    return { success: await taskLabelRepo.delete(validated) };
   });
 
   // Working State handlers
@@ -11138,7 +11191,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.WORKING_STATE_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.WORKING_STATE_DELETE);
     const validated = validateInput(UUIDSchema, id, "working state ID");
-    return { success: workingStateRepo.delete(validated) };
+    return { success: await workingStateRepo.delete(validated) };
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKING_STATE_LIST_FOR_TASK, async (_, taskId: string) => {
@@ -11183,12 +11236,12 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_DELETE, async (_, channelId: string) => {
     checkRateLimit(IPC_CHANNELS.CONTEXT_POLICY_DELETE);
-    return { count: contextPolicyManager.deleteByChannel(channelId) };
+    return { count: await contextPolicyManager.deleteByChannel(channelId) };
   });
 
   ipcMain.handle(IPC_CHANNELS.CONTEXT_POLICY_CREATE_DEFAULTS, async (_, channelId: string) => {
     checkRateLimit(IPC_CHANNELS.CONTEXT_POLICY_CREATE_DEFAULTS);
-    contextPolicyManager.createDefaultPolicies(channelId);
+    await contextPolicyManager.createDefaultPolicies(channelId);
     return { success: true };
   });
 
@@ -11196,7 +11249,7 @@ export async function setupIpcHandlers(
     IPC_CHANNELS.CONTEXT_POLICY_IS_TOOL_ALLOWED,
     async (_, channelId: string, contextType: string, toolName: string, toolGroups: string[]) => {
       return {
-        allowed: contextPolicyManager.isToolAllowed(
+        allowed: await contextPolicyManager.isToolAllowed(
           channelId,
           contextType as "dm" | "group",
           toolName,
@@ -11218,13 +11271,13 @@ export async function setupIpcHandlers(
       data,
       "channel specialization create",
     );
-    if (!gateway?.getChannel(validated.channelId)) {
+    if (!(await gateway?.getChannel(validated.channelId))) {
       throw new Error("Channel not found");
     }
-    if (validated.workspaceId && !workspaceRepo.findById(validated.workspaceId)) {
+    if (validated.workspaceId && !(await workspaceRepo.findById(validated.workspaceId))) {
       throw new Error("Workspace not found");
     }
-    if (validated.agentRoleId && !agentRoleRepo.findById(validated.agentRoleId)) {
+    if (validated.agentRoleId && !(await agentRoleRepo.findById(validated.agentRoleId))) {
       throw new Error("Agent role not found");
     }
     return channelSpecializationRepo.upsert(validated);
@@ -11237,13 +11290,13 @@ export async function setupIpcHandlers(
       data,
       "channel specialization update",
     );
-    if (validated.workspaceId && !workspaceRepo.findById(validated.workspaceId)) {
+    if (validated.workspaceId && !(await workspaceRepo.findById(validated.workspaceId))) {
       throw new Error("Workspace not found");
     }
-    if (validated.agentRoleId && !agentRoleRepo.findById(validated.agentRoleId)) {
+    if (validated.agentRoleId && !(await agentRoleRepo.findById(validated.agentRoleId))) {
       throw new Error("Agent role not found");
     }
-    const updated = channelSpecializationRepo.update(validated);
+    const updated = await channelSpecializationRepo.update(validated);
     if (!updated) throw new Error("Channel specialization not found");
     return updated;
   });
@@ -11251,7 +11304,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.CHANNEL_SPECIALIZATION_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.CHANNEL_SPECIALIZATION_DELETE);
     const validatedId = validateInput(UUIDSchema, id, "channel specialization delete");
-    return { success: channelSpecializationRepo.delete(validatedId) };
+    return { success: await channelSpecializationRepo.delete(validatedId) };
   });
 
   ipcMain.handle(IPC_CHANNELS.CHANNEL_SPECIALIZATION_RESOLVE, async (_, data: unknown) => {
@@ -11260,7 +11313,7 @@ export async function setupIpcHandlers(
       data,
       "channel specialization resolve",
     );
-    return channelSpecializationRepo.resolve(validated) || null;
+    return (await channelSpecializationRepo.resolve(validated)) || null;
   });
 
   // Queue handlers
@@ -11732,7 +11785,7 @@ function setupMCPHandlers(): void {
         limit?: number;
       },
     ) => {
-      const workspace = new WorkspaceRepository(
+      const workspace = await new WorkspaceRepository(
         DatabaseManager.getInstance().getDatabase(),
       ).findById(String(input?.workspaceId || ""));
       if (!workspace) return [];
@@ -11749,7 +11802,7 @@ function setupMCPHandlers(): void {
         observationId: string;
       },
     ) => {
-      const workspace = new WorkspaceRepository(
+      const workspace = await new WorkspaceRepository(
         DatabaseManager.getInstance().getDatabase(),
       ).findById(String(input?.workspaceId || ""));
       if (!workspace) return { success: false };
@@ -11757,7 +11810,7 @@ function setupMCPHandlers(): void {
         (entry) => entry.id === input?.observationId,
       );
       if (record?.memoryId) {
-        MemoryService.deleteEntries(workspace.id, [record.memoryId]);
+        await MemoryService.deleteEntries(workspace.id, [record.memoryId]);
       }
       const success = await ChronicleObservationRepository.deleteObservation(
         workspace.path,
@@ -11770,14 +11823,14 @@ function setupMCPHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS,
     async (_, input: { workspaceId: string }) => {
-      const workspace = new WorkspaceRepository(
+      const workspace = await new WorkspaceRepository(
         DatabaseManager.getInstance().getDatabase(),
       ).findById(String(input?.workspaceId || ""));
       if (!workspace) return { success: false };
       const observations = ChronicleObservationRepository.listSync(workspace.path, 10_000);
       const memoryIds = observations.map((entry) => entry.memoryId).filter(Boolean) as string[];
       if (memoryIds.length > 0) {
-        MemoryService.deleteEntries(workspace.id, memoryIds);
+        await MemoryService.deleteEntries(workspace.id, memoryIds);
       }
       await ChronicleObservationRepository.clearWorkspace(workspace.path);
       return { success: true, deleted: observations.length };
@@ -11834,7 +11887,7 @@ function setupMCPHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.TRAY_SAVE_SETTINGS, async (_, settings) => {
     const { trayManager } = await import("../tray");
-    trayManager.saveSettings(settings);
+    await trayManager.saveSettings(settings);
     return { success: true, settings: trayManager.getSettings() };
   });
 
@@ -12242,7 +12295,7 @@ function setupCouncilHandlers(): void {
     const service = getCouncilService();
     if (!service) return null;
     const validatedId = validateInput(StringIdSchema, id, "council ID");
-    return service.get(validatedId) ?? null;
+    return (await service.get(validatedId)) ?? null;
   });
 
   ipcMain.handle(IPC_CHANNELS.COUNCIL_CREATE, async (_, payload: Any) => {
@@ -12305,13 +12358,13 @@ function setupCouncilHandlers(): void {
     if (!service) return null;
     const validated = validateInput(CouncilMemoQuerySchema, payload, "council memo request");
     if (typeof validated === "string") {
-      return service.getMemo(validated) ?? null;
+      return (await service.getMemo(validated)) ?? null;
     }
     if (validated.id) {
-      return service.getMemo(validated.id) ?? null;
+      return (await service.getMemo(validated.id)) ?? null;
     }
     if (validated.councilConfigId) {
-      return service.getLatestMemo(validated.councilConfigId) ?? null;
+      return (await service.getLatestMemo(validated.councilConfigId)) ?? null;
     }
     return null;
   });
@@ -13049,15 +13102,15 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
     return `${frontmatter}${normalized}`;
   };
 
-  const getWorkspacePath = (workspaceId: string): string => {
-    const ws = workspaceRepo.findById(workspaceId);
+  const getWorkspacePath = async (workspaceId: string): Promise<string> => {
+    const ws = await workspaceRepo.findById(workspaceId);
     if (!ws) throw new Error("Workspace not found");
     if (!ws.path) throw new Error("Workspace path not set");
     return ws.path;
   };
 
   const computeStatus = async (workspaceId: string): Promise<WorkspaceKitStatus> => {
-    const workspacePath = getWorkspacePath(workspaceId);
+    const workspacePath = await getWorkspacePath(workspaceId);
     // Ensure lifecycle state is current (covers bootstrap deletion → onboardingCompletedAt)
     // before the pure status read so the returned onboarding timestamps are always accurate.
     await ensureBootstrapLifecycleState(workspacePath);
@@ -13777,7 +13830,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
     checkRateLimit(IPC_CHANNELS.KIT_INIT, RATE_LIMIT_CONFIGS.limited);
     const mode = request?.mode === "overwrite" ? "overwrite" : "missing";
     const preset = request?.templatePreset === "venture_operator" ? "venture_operator" : "default";
-    const workspacePath = getWorkspacePath(request.workspaceId);
+    const workspacePath = await getWorkspacePath(request.workspaceId);
     const workspaceStateBefore = await readWorkspaceKitState(workspacePath);
 
     await ensureDir(workspacePath, path.join(kitDirName, "memory"));
@@ -13839,7 +13892,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
         return { success: true };
       }
 
-      const workspacePath = getWorkspacePath(request.workspaceId);
+      const workspacePath = await getWorkspacePath(request.workspaceId);
       await OnboardingProfileService.applyWorkspaceProfile(
         request.workspaceId,
         workspacePath,
@@ -13857,7 +13910,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
     IPC_CHANNELS.KIT_PROJECT_CREATE,
     async (_event, request: WorkspaceKitProjectCreateRequest) => {
       checkRateLimit(IPC_CHANNELS.KIT_PROJECT_CREATE, RATE_LIMIT_CONFIGS.limited);
-      const workspacePath = getWorkspacePath(request.workspaceId);
+      const workspacePath = await getWorkspacePath(request.workspaceId);
 
       const rawId = (request.projectId || "").trim();
       if (!rawId) throw new Error("Project id is required");
@@ -13903,7 +13956,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
     IPC_CHANNELS.KIT_OPEN_FILE,
     async (_event, args: { workspaceId: string; relPath: string }) => {
       checkRateLimit(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
-      const workspacePath = getWorkspacePath(args.workspaceId);
+      const workspacePath = await getWorkspacePath(args.workspaceId);
 
       // Sanitize relPath: must start with .cowork/ and not escape it
       const relPath = (args.relPath || "").replace(/\\/g, "/").trim();
@@ -13986,7 +14039,7 @@ function setupMemoryHandlers(): void {
   // Get memory settings for a workspace
   ipcMain.handle(IPC_CHANNELS.MEMORY_GET_SETTINGS, async (_, workspaceId: string) => {
     try {
-      return MemoryService.getSettings(workspaceId);
+      return await MemoryService.getSettings(workspaceId);
     } catch (error) {
       logger.error("[Memory] Failed to get settings:", error);
       // Return default settings if service not initialized
@@ -14009,7 +14062,7 @@ function setupMemoryHandlers(): void {
     async (_, data: { workspaceId: string; settings: Partial<MemorySettings> }) => {
       checkRateLimit(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
       try {
-        MemoryService.updateSettings(data.workspaceId, data.settings);
+        await MemoryService.updateSettings(data.workspaceId, data.settings);
         return { success: true };
       } catch (error) {
         logger.error("[Memory] Failed to save settings:", error);
@@ -14057,19 +14110,20 @@ function setupMemoryHandlers(): void {
         const previewDb = DatabaseManager.getInstance().getDatabase();
         const previewWorkspaceRepo = new WorkspaceRepository(previewDb);
         const previewTaskRepo = new TaskRepository(previewDb);
-        const workspace = previewWorkspaceRepo.findById(workspaceId);
+        const workspace = await previewWorkspaceRepo.findById(workspaceId);
         if (!workspace?.path) {
           return null;
         }
-        const recentTask = previewTaskRepo.findByWorkspace(workspaceId, 1)[0];
+        const recentTask = (await previewTaskRepo.findByWorkspace(workspaceId, 1))[0];
         const taskPrompt =
           typeof recentTask?.prompt === "string" && recentTask.prompt.trim().length > 0
             ? recentTask.prompt
             : "Current workspace memory preview";
-        return MemorySynthesizer.buildLayerPreview(workspaceId, workspace.path, taskPrompt, {
+        return await MemorySynthesizer.buildLayerPreview(workspaceId, workspace.path, taskPrompt, {
           tokenBudget: 1800,
           includeWorkspaceKit: true,
           agentRoleId: recentTask?.assignedAgentRoleId || null,
+          boxBrainHits: await MemorySynthesizer.prefetchBoxBrainHits(workspaceId, taskPrompt),
         });
       } catch (error) {
         logger.error("[MemoryFeatures] Failed to build layer preview:", error);
@@ -14082,7 +14136,7 @@ function setupMemoryHandlers(): void {
     IPC_CHANNELS.MEMORY_WRITE_APPROVALS_LIST,
     async (_event, data?: { workspaceId?: string; limit?: number }) => {
       try {
-        return MemoryWriteGate.listPendingForDisplay(
+        return await MemoryWriteGate.listPendingForDisplay(
           typeof data?.workspaceId === "string" ? data.workspaceId : undefined,
           Math.max(1, Math.min(200, Number(data?.limit || 100))),
         );
@@ -14096,7 +14150,7 @@ function setupMemoryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_GET, async (_event, id: string) => {
     try {
       if (typeof id !== "string" || !id.trim()) return null;
-      return MemoryWriteGate.findPendingForDisplay(id.trim()) || null;
+      return (await MemoryWriteGate.findPendingForDisplay(id.trim())) || null;
     } catch (error) {
       logger.error("[MemoryWriteApprovals] Failed to get pending write:", error);
       return null;
@@ -14135,7 +14189,7 @@ function setupMemoryHandlers(): void {
     async (_event, workspaceId?: string) => {
       try {
         return {
-          pending: MemoryWriteGate.pendingCount(
+          pending: await MemoryWriteGate.pendingCount(
             typeof workspaceId === "string" ? workspaceId : undefined,
           ),
         };
@@ -14209,7 +14263,7 @@ function setupMemoryHandlers(): void {
     IPC_CHANNELS.MEMORY_GET_TIMELINE,
     async (_, data: { memoryId: string; windowSize?: number }) => {
       try {
-        return MemoryService.getTimelineContext(data.memoryId, data.windowSize);
+        return await MemoryService.getTimelineContext(data.memoryId, data.windowSize);
       } catch (error) {
         logger.error("[Memory] Failed to get timeline:", error);
         return [];
@@ -14220,7 +14274,7 @@ function setupMemoryHandlers(): void {
   // Get full details (Layer 3)
   ipcMain.handle(IPC_CHANNELS.MEMORY_GET_DETAILS, async (_, ids: string[]) => {
     try {
-      return MemoryService.getFullDetails(ids);
+      return await MemoryService.getFullDetails(ids);
     } catch (error) {
       logger.error("[Memory] Failed to get details:", error);
       return [];
@@ -14231,7 +14285,7 @@ function setupMemoryHandlers(): void {
     IPC_CHANNELS.MEMORY_OBSERVATIONS_SEARCH,
     async (_, data: MemoryObservationSearchQuery) => {
       try {
-        return MemoryObservationService.search(data);
+        return await MemoryObservationService.search(data);
       } catch (error) {
         logger.error("[MemoryObservations] Failed to search:", error);
         return [];
@@ -14246,7 +14300,7 @@ function setupMemoryHandlers(): void {
       data: { workspaceId: string; memoryId?: string; query?: string; windowSize?: number },
     ) => {
       try {
-        return MemoryObservationService.timeline(data);
+        return await MemoryObservationService.timeline(data);
       } catch (error) {
         logger.error("[MemoryObservations] Failed to load timeline:", error);
         return [];
@@ -14261,7 +14315,7 @@ function setupMemoryHandlers(): void {
         data,
         "memory observation details",
       );
-      return MemoryObservationService.details(validated.ids, validated.workspaceId);
+      return await MemoryObservationService.details(validated.ids, validated.workspaceId);
     } catch (error) {
       logger.error("[MemoryObservations] Failed to get details:", error);
       return [];
@@ -14289,7 +14343,9 @@ function setupMemoryHandlers(): void {
       data,
       "memory observation delete",
     );
-    return { success: MemoryObservationService.delete(validated.workspaceId, validated.memoryId) };
+    return {
+      success: await MemoryObservationService.delete(validated.workspaceId, validated.memoryId),
+    };
   });
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_OBSERVATIONS_REDACT, async (_, data: unknown) => {
@@ -14313,7 +14369,9 @@ function setupMemoryHandlers(): void {
       data,
       "memory observation promote",
     );
-    const detail = MemoryObservationService.details([validated.memoryId], validated.workspaceId)[0];
+    const detail = (
+      await MemoryObservationService.details([validated.memoryId], validated.workspaceId)
+    )[0];
     if (!detail) return { success: false, error: "Memory observation not found" };
     return CuratedMemoryService.curate({
       workspaceId: detail.workspaceId,
@@ -14351,7 +14409,7 @@ function setupMemoryHandlers(): void {
     IPC_CHANNELS.MEMORY_GET_RECENT,
     async (_, data: { workspaceId: string; limit?: number }) => {
       try {
-        return MemoryService.getRecent(data.workspaceId, data.limit);
+        return await MemoryService.getRecent(data.workspaceId, data.limit);
       } catch (error) {
         logger.error("[Memory] Failed to get recent:", error);
         return [];
@@ -14362,7 +14420,7 @@ function setupMemoryHandlers(): void {
   // Get memory statistics
   ipcMain.handle(IPC_CHANNELS.MEMORY_GET_STATS, async (_, workspaceId: string) => {
     try {
-      return MemoryService.getStats(workspaceId);
+      return await MemoryService.getStats(workspaceId);
     } catch (error) {
       logger.error("[Memory] Failed to get stats:", error);
       return {
@@ -14378,8 +14436,8 @@ function setupMemoryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MEMORY_CLEAR, async (_, workspaceId: string) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_CLEAR, RATE_LIMIT_CONFIGS.limited);
     try {
-      MemoryService.clearWorkspace(workspaceId);
-      DurableContextService.clearWorkspace(workspaceId);
+      await MemoryService.clearWorkspace(workspaceId);
+      await DurableContextService.clearWorkspace(workspaceId);
       return { success: true };
     } catch (error) {
       logger.error("[Memory] Failed to clear:", error);
@@ -14390,7 +14448,7 @@ function setupMemoryHandlers(): void {
   // Get imported memory stats
   ipcMain.handle(IPC_CHANNELS.MEMORY_GET_IMPORTED_STATS, async (_, workspaceId: string) => {
     try {
-      return MemoryService.getImportedStats(workspaceId);
+      return await MemoryService.getImportedStats(workspaceId);
     } catch (error) {
       logger.error("[Memory] Failed to get imported stats:", error);
       return { count: 0, totalTokens: 0 };
@@ -14401,7 +14459,11 @@ function setupMemoryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MEMORY_FIND_IMPORTED, async (_, data: unknown) => {
     const validated = validateInput(FindImportedSchema, data, "find imported memories");
     try {
-      return MemoryService.findImported(validated.workspaceId, validated.limit, validated.offset);
+      return await MemoryService.findImported(
+        validated.workspaceId,
+        validated.limit,
+        validated.offset,
+      );
     } catch (error) {
       logger.error("[Memory] Failed to find imported:", error);
       return [];
@@ -14412,7 +14474,7 @@ function setupMemoryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE_IMPORTED, async (_, workspaceId: string) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_DELETE_IMPORTED, RATE_LIMIT_CONFIGS.limited);
     try {
-      const deleted = MemoryService.deleteImported(workspaceId);
+      const deleted = await MemoryService.deleteImported(workspaceId);
       return { success: true, deleted };
     } catch (error) {
       logger.error("[Memory] Failed to delete imported:", error);
@@ -14428,7 +14490,10 @@ function setupMemoryHandlers(): void {
       "delete imported memory entry",
     );
     try {
-      const success = MemoryService.deleteImportedEntry(validated.workspaceId, validated.memoryId);
+      const success = await MemoryService.deleteImportedEntry(
+        validated.workspaceId,
+        validated.memoryId,
+      );
       return { success };
     } catch (error) {
       logger.error("[Memory] Failed to delete imported entry:", error);
@@ -14444,7 +14509,7 @@ function setupMemoryHandlers(): void {
       "set imported memory prompt-recall ignored state",
     );
     try {
-      const memory = MemoryService.setImportedPromptRecallIgnored(
+      const memory = await MemoryService.setImportedPromptRecallIgnored(
         validated.workspaceId,
         validated.memoryId,
         validated.ignored,
@@ -14752,7 +14817,7 @@ function setupMemoryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.AUTONOMY_TRIGGER_EVALUATION, async (_, workspaceId?: string) => {
     checkRateLimit(IPC_CHANNELS.AUTONOMY_TRIGGER_EVALUATION, RATE_LIMIT_CONFIGS.standard);
     try {
-      return getAutonomyEngine().triggerEvaluation(workspaceId);
+      return await getAutonomyEngine().triggerEvaluation(workspaceId);
     } catch (error) {
       logger.error("[Autonomy] Failed to trigger evaluation:", error);
       throw error;
@@ -14808,7 +14873,7 @@ function setupMemoryHandlers(): void {
     checkRateLimit(IPC_CHANNELS.MEMORY_IMPORT_TEXT, RATE_LIMIT_CONFIGS.limited);
     const validated = validateInput(TextMemoryImportSchema, options, "text memory import");
     try {
-      return MemoryService.importFromText(validated);
+      return await MemoryService.importFromText(validated);
     } catch (error) {
       logger.error("[Memory] Text import failed:", error);
       throw error;

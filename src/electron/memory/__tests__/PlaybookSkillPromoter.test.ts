@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { PlaybookEvidenceLedger } from "../PlaybookEvidenceLedger";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PlaybookSkillPromoter } from "../PlaybookSkillPromoter";
 import { PlaybookService } from "../PlaybookService";
@@ -58,7 +59,7 @@ describe("PlaybookSkillPromoter", () => {
       "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT, is_private INTEGER NOT NULL DEFAULT 0)",
     );
     store = new PlaybookEvidenceStore(db);
-    PlaybookService.setEvidenceStoreForTesting(store);
+    PlaybookService.setEvidenceStoreForTesting(PlaybookEvidenceLedger.open(db));
   });
 
   afterEach(() => {
@@ -67,16 +68,16 @@ describe("PlaybookSkillPromoter", () => {
   });
 
   describe("findCandidates", () => {
-    it("returns empty when there is no evidence", () => {
-      expect(PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
+    it("returns empty when there is no evidence", async () => {
+      expect(await PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
     });
 
-    it("counts distinct linked executions that share an approach", () => {
+    it("counts distinct linked executions that share an approach", async () => {
       const records = ["a", "b", "c"].map((id) =>
         addSuccess("ws1", id, "Generate weekly report", ["web_search", "write_file"]),
       );
       chain(records.map((record) => record.id));
-      const [candidate] = PlaybookSkillPromoter.findCandidates("ws1");
+      const [candidate] = await PlaybookSkillPromoter.findCandidates("ws1");
       expect(candidate.executionCount).toBe(3);
       expect(candidate.pattern).toBe("Generate weekly report");
       expect(candidate.toolsUsed).toEqual(expect.arrayContaining(["web_search", "write_file"]));
@@ -87,34 +88,34 @@ describe("PlaybookSkillPromoter", () => {
       expect(candidate.requestExcerpts).toHaveLength(3);
     });
 
-    it("does not count unlinked successes, even with similar titles", () => {
+    it("does not count unlinked successes, even with similar titles", async () => {
       ["a", "b", "c"].forEach((id) => addSuccess("ws1", id, "Generate weekly report", ["shell"]));
-      expect(PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
+      expect(await PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
     });
 
-    it("does not join executions whose approaches differ", () => {
+    it("does not join executions whose approaches differ", async () => {
       const a = addSuccess("ws1", "a", "Run tests", ["shell"]);
       const b = addSuccess("ws1", "b", "Run tests", ["browser_navigate"]);
       const c = addSuccess("ws1", "c", "Run tests", ["shell"]);
       store.link(b.id, a.id);
       store.link(c.id, b.id);
-      expect(PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
+      expect(await PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
     });
 
-    it("excludes invalidated evidence and evidence whose memory was deleted", () => {
+    it("excludes invalidated evidence and evidence whose memory was deleted", async () => {
       const records = ["a", "b", "c"].map((id) => addSuccess("ws1", id, "Deploy", ["shell"]));
       chain(records.map((record) => record.id));
       store.invalidate(records[0].id, "corrected_by_user");
-      expect(PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
+      expect(await PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
       db.prepare("DELETE FROM memories").run();
-      expect(PlaybookSkillPromoter.findCandidates("ws1", 1)).toEqual([]);
+      expect(await PlaybookSkillPromoter.findCandidates("ws1", 1)).toEqual([]);
     });
 
-    it("respects the threshold", () => {
+    it("respects the threshold", async () => {
       const records = ["a", "b"].map((id) => addSuccess("ws1", id, "Deploy", ["shell"]));
       chain(records.map((record) => record.id));
-      expect(PlaybookSkillPromoter.findCandidates("ws1", 3)).toEqual([]);
-      expect(PlaybookSkillPromoter.findCandidates("ws1", 2)).toHaveLength(1);
+      expect(await PlaybookSkillPromoter.findCandidates("ws1", 3)).toEqual([]);
+      expect(await PlaybookSkillPromoter.findCandidates("ws1", 2)).toHaveLength(1);
     });
   });
 

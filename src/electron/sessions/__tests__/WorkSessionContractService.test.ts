@@ -5,10 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  ApprovalRepository,
-  InputRequestRepository,
+  ApprovalStore,
+  InputRequestStore,
   TaskEventRepository,
-  TaskRepository,
+  TaskStore,
 } from "../../database/repositories";
 import { DatabaseManager } from "../../database/schema";
 import { WorkSessionContractService } from "../WorkSessionContractService";
@@ -32,10 +32,10 @@ describeWithSqlite("WorkSessionContractService", () => {
   let previousUserDataDir: string | undefined;
   let manager: DatabaseManager;
   let db: Database.Database;
-  let taskRepo: TaskRepository;
+  let taskRepo: TaskStore;
   let eventRepo: TaskEventRepository;
-  let approvalRepo: ApprovalRepository;
-  let inputRequestRepo: InputRequestRepository;
+  let approvalRepo: ApprovalStore;
+  let inputRequestRepo: InputRequestStore;
   let protocol: WorkSessionProtocolService;
   let service: WorkSessionContractService;
 
@@ -45,10 +45,10 @@ describeWithSqlite("WorkSessionContractService", () => {
     process.env.COWORK_USER_DATA_DIR = tempDir;
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     eventRepo = new TaskEventRepository(db);
-    approvalRepo = new ApprovalRepository(db);
-    inputRequestRepo = new InputRequestRepository(db);
+    approvalRepo = new ApprovalStore(db);
+    inputRequestRepo = new InputRequestStore(db);
     protocol = new WorkSessionProtocolService(db);
     service = new WorkSessionContractService(db, protocol);
     const workspacePath = path.join(tempDir, "workspace");
@@ -80,7 +80,7 @@ describeWithSqlite("WorkSessionContractService", () => {
       workspaceId: "workspace-1",
       source: "manual",
       ...overrides,
-    } as Parameters<TaskRepository["create"]>[0]);
+    } as Parameters<TaskStore["create"]>[0]);
   }
 
   function addEvent(taskId: string, id: string, type: string, payload: Record<string, unknown>) {

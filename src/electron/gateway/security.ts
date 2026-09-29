@@ -11,12 +11,13 @@
  * in pairing operations.
  */
 
+import { ChannelUserRepository } from "../database/repository-facades";
 import * as crypto from "crypto";
-import Database from "better-sqlite3";
-import { ChannelUserRepository, ChannelUser, Channel } from "../database/repositories";
+import type Database from "better-sqlite3";
+import { ChannelUser, Channel } from "../database/repositories";
 import { IncomingMessage } from "./channels/types";
 import { pairingMutex, IdempotencyManager } from "../security/concurrency";
-import { ContextPolicyManager } from "./context-policy";
+import { ContextPolicyManager } from "./context-policy-repository-facades";
 import { ContextType, SecurityMode } from "../../shared/types";
 
 export interface AccessCheckResult {
@@ -85,7 +86,7 @@ export class SecurityManager {
     }
 
     // Get context-specific policy (creates default if doesn't exist)
-    const contextPolicy = this.contextPolicyManager.getPolicy(channel.id, contextType);
+    const contextPolicy = await this.contextPolicyManager.getPolicy(channel.id, contextType);
 
     // Email authorization is handled by mailbox ownership and optional sender filters,
     // not chat-style pairing or user allowlists.
@@ -95,23 +96,13 @@ export class SecurityManager {
     // Get denied tools for this context
     const deniedTools = contextPolicy.toolRestrictions || [];
 
-    // Get or create user record
-    let user = this.userRepo.findByChannelUserId(channel.id, message.userId);
-
-    if (!user) {
-      // Create new user record
-      user = this.userRepo.create({
-        channelId: channel.id,
-        channelUserId: message.userId,
-        displayName: message.userName,
-        allowed: mode === "open", // Auto-allow in open mode
-      });
-    } else {
-      // Update display name if changed
-      if (user.displayName !== message.userName) {
-        this.userRepo.update(user.id, { displayName: message.userName });
-      }
-    }
+    // Get or create user record (refreshing a changed display name) in one unit
+    let user = await this.userRepo.findOrCreateByChannelUser({
+      channelId: channel.id,
+      channelUserId: message.userId,
+      displayName: message.userName,
+      allowed: mode === "open", // Auto-allow in open mode
+    });
 
     // Check based on security mode
     switch (mode) {
@@ -128,7 +119,7 @@ export class SecurityManager {
         const allowedUsers = securityConfig.allowedUsers || [];
         if (allowedUsers.includes(message.userId)) {
           // Add to allowed users
-          this.userRepo.update(user.id, { allowed: true });
+          await this.userRepo.update(user.id, { allowed: true });
           return {
             allowed: true,
             user: { ...user, allowed: true },
@@ -174,12 +165,21 @@ export class SecurityManager {
    * Creates a placeholder entry that can be claimed by any user who enters the code
    * Uses mutex to prevent race conditions in concurrent code generation
    */
-  generatePairingCode(channel: Channel, _userId?: string, _displayName?: string): string {
-    // Use synchronous mutex key for this channel to prevent concurrent generation issues
-    const _mutexKey = `pairing:generate:${channel.id}`;
+  async generatePairingCode(
+    channel: Channel,
+    _userId?: string,
+    _displayName?: string,
+  ): Promise<string> {
+    // Channel users are read and written through the async storage facade, so share the
+    // verification lock: generating a code must not interleave with a verification.
+    return await pairingMutex.withLock(`pairing:verify:${channel.id}`, () =>
+      this.createPendingPairingCode(channel),
+    );
+  }
 
+  private async createPendingPairingCode(channel: Channel): Promise<string> {
     // Clear any stale or existing pending entries so only the newest code remains.
-    this.userRepo.deletePendingByChannel(channel.id);
+    await this.userRepo.deletePendingByChannel(channel.id);
 
     // Generate code (synchronous operation, but we track idempotency)
     const code = this.createPairingCode();
@@ -190,7 +190,7 @@ export class SecurityManager {
     // Use a unique placeholder ID so multiple codes can exist
     const placeholderId = `pending_${code}_${Date.now()}`;
 
-    this.userRepo.create({
+    await this.userRepo.create({
       channelId: channel.id,
       channelUserId: placeholderId,
       displayName: "Pending User",
@@ -260,7 +260,7 @@ export class SecurityManager {
     code: string,
   ): Promise<PairingResult> {
     // First check if user is already allowed
-    const existingUser = this.userRepo.findByChannelUserId(channel.id, userId);
+    const existingUser = await this.userRepo.findByChannelUserId(channel.id, userId);
     if (existingUser?.allowed) {
       return { success: true, user: existingUser };
     }
@@ -277,14 +277,14 @@ export class SecurityManager {
         };
       }
       // Lockout expired - reset attempts (keep pairingExpiresAt unchanged)
-      this.userRepo.update(existingUser.id, {
+      await this.userRepo.update(existingUser.id, {
         pairingAttempts: 0,
         lockoutUntil: undefined,
       });
     }
 
     // Look up the pairing code across all users in the channel
-    const codeOwner = this.userRepo.findByPairingCode(channel.id, code.toUpperCase());
+    const codeOwner = await this.userRepo.findByPairingCode(channel.id, code.toUpperCase());
 
     if (!codeOwner) {
       // Code not found - increment attempts on the requesting user if they exist
@@ -297,7 +297,7 @@ export class SecurityManager {
         if (newAttempts >= SecurityManager.MAX_PAIRING_ATTEMPTS) {
           updates.lockoutUntil = Date.now() + SecurityManager.PAIRING_LOCKOUT_MS;
         }
-        this.userRepo.update(existingUser.id, updates);
+        await this.userRepo.update(existingUser.id, updates);
 
         // Warn user about remaining attempts
         const remaining = SecurityManager.MAX_PAIRING_ATTEMPTS - newAttempts;
@@ -320,10 +320,10 @@ export class SecurityManager {
     if (codeOwner.pairingExpiresAt && Date.now() > codeOwner.pairingExpiresAt) {
       // Remove expired pending placeholders entirely
       if (codeOwner.channelUserId.startsWith("pending_")) {
-        this.userRepo.delete(codeOwner.id);
+        await this.userRepo.delete(codeOwner.id);
       } else {
         // Clear expired code for real users
-        this.userRepo.update(codeOwner.id, {
+        await this.userRepo.update(codeOwner.id, {
           pairingCode: undefined,
           pairingExpiresAt: undefined,
         });
@@ -334,7 +334,7 @@ export class SecurityManager {
     // Code is valid! Grant access to the requesting user
     if (existingUser) {
       // Update existing user to be allowed
-      this.userRepo.update(existingUser.id, {
+      await this.userRepo.update(existingUser.id, {
         allowed: true,
         pairingCode: undefined,
         pairingExpiresAt: undefined,
@@ -344,9 +344,9 @@ export class SecurityManager {
       // Clear the code from wherever it was stored
       if (codeOwner.id !== existingUser.id) {
         if (codeOwner.channelUserId.startsWith("pending_")) {
-          this.userRepo.delete(codeOwner.id);
+          await this.userRepo.delete(codeOwner.id);
         } else {
-          this.userRepo.update(codeOwner.id, {
+          await this.userRepo.update(codeOwner.id, {
             pairingCode: undefined,
             pairingExpiresAt: undefined,
           });
@@ -362,23 +362,23 @@ export class SecurityManager {
   /**
    * Revoke a user's access
    */
-  revokeAccess(channelId: string, userId: string): void {
-    const user = this.userRepo.findByChannelUserId(channelId, userId);
+  async revokeAccess(channelId: string, userId: string): Promise<void> {
+    const user = await this.userRepo.findByChannelUserId(channelId, userId);
     if (user) {
-      this.userRepo.update(user.id, { allowed: false });
+      await this.userRepo.update(user.id, { allowed: false });
     }
   }
 
   /**
    * Grant a user access directly (for allowlist management)
    */
-  grantAccess(channelId: string, userId: string, displayName?: string): void {
-    let user = this.userRepo.findByChannelUserId(channelId, userId);
+  async grantAccess(channelId: string, userId: string, displayName?: string): Promise<void> {
+    let user = await this.userRepo.findByChannelUserId(channelId, userId);
 
     if (user) {
-      this.userRepo.update(user.id, { allowed: true });
+      await this.userRepo.update(user.id, { allowed: true });
     } else if (displayName) {
-      this.userRepo.create({
+      await this.userRepo.create({
         channelId,
         channelUserId: userId,
         displayName,
@@ -391,9 +391,9 @@ export class SecurityManager {
    * Get all users for a channel
    * Automatically cleans up expired pending pairing entries before returning
    */
-  getChannelUsers(channelId: string): ChannelUser[] {
+  async getChannelUsers(channelId: string): Promise<ChannelUser[]> {
     // Cleanup expired pending entries first
-    this.cleanupExpiredPending(channelId);
+    await this.cleanupExpiredPending(channelId);
     return this.userRepo.findByChannelId(channelId);
   }
 
@@ -402,14 +402,14 @@ export class SecurityManager {
    * These are placeholder entries created when generating pairing codes that have expired
    * Returns the number of deleted entries
    */
-  cleanupExpiredPending(channelId: string): number {
+  async cleanupExpiredPending(channelId: string): Promise<number> {
     return this.userRepo.deleteExpiredPending(channelId);
   }
 
   /**
    * Get allowed users for a channel
    */
-  getAllowedUsers(channelId: string): ChannelUser[] {
+  async getAllowedUsers(channelId: string): Promise<ChannelUser[]> {
     return this.userRepo.findAllowedByChannelId(channelId);
   }
 

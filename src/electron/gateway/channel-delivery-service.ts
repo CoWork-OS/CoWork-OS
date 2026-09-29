@@ -11,7 +11,10 @@ export interface ChannelDeliveryRecord {
 
 export interface ChannelDeliveryServiceDeps {
   getAdapter(channelType: ChannelType, channelId?: string): ChannelAdapter | undefined;
-  getChannel(channelType: ChannelType, channelId?: string): ChannelDeliveryRecord | undefined;
+  getChannel(
+    channelType: ChannelType,
+    channelId?: string,
+  ): Promise<ChannelDeliveryRecord | undefined> | ChannelDeliveryRecord | undefined;
   cleanupIdempotencyCache(): void;
   getIdempotencyCacheKey(
     channelType: ChannelType,
@@ -65,7 +68,7 @@ export class ChannelDeliveryService {
     }
 
     try {
-      const channel = this.deps.getChannel(channelType, channelId);
+      const channel = await this.deps.getChannel(channelType, channelId);
       if (channel) {
         this.deps.logOutgoingMessage({
           channelId: channel.id,

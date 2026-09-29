@@ -15,7 +15,7 @@ const describeWithSqlite = sqlite ? describe : describe.skip;
 
 describeWithSqlite("OrchestrationGraphRepository.isTeamWorkItemTask", () => {
   let db: import("better-sqlite3").Database;
-  let repo: import("../OrchestrationGraphRepository").OrchestrationGraphRepository;
+  let repo: import("../OrchestrationGraphRepository").OrchestrationGraphStore;
 
   const insertNode = (id: string, kind: string, taskId: string, teamItemId: string | null) =>
     db
@@ -25,12 +25,12 @@ describeWithSqlite("OrchestrationGraphRepository.isTeamWorkItemTask", () => {
       .run(id, kind, taskId, teamItemId);
 
   beforeEach(async () => {
-    const { OrchestrationGraphRepository } = await import("../OrchestrationGraphRepository");
+    const { OrchestrationGraphStore } = await import("../OrchestrationGraphRepository");
     db = new sqlite!(":memory:");
     db.exec(
       "CREATE TABLE orchestration_graph_nodes (id TEXT PRIMARY KEY, kind TEXT NOT NULL, task_id TEXT, team_item_id TEXT)",
     );
-    repo = new OrchestrationGraphRepository(db);
+    repo = new OrchestrationGraphStore(db);
   });
 
   afterEach(() => db.close());

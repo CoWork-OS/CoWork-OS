@@ -1,3 +1,9 @@
+import {
+  CoreEvalCaseRepository,
+  CoreFailureClusterRepository,
+  CoreHarnessExperimentRepository,
+} from "./core-repository-facades";
+import { AutomationProfileRepository } from "../agents/agent-repository-facades";
 import type {
   CoreHarnessExperiment,
   CoreHarnessExperimentRun,
@@ -5,11 +11,9 @@ import type {
   ReviewCoreExperimentRequest,
   RunCoreExperimentRequest,
 } from "../../shared/types";
-import { AutomationProfileRepository } from "../agents/AutomationProfileRepository";
+
 import { SubconsciousSettingsManager } from "../subconscious/SubconsciousSettingsManager";
-import { CoreEvalCaseRepository } from "./CoreEvalCaseRepository";
-import { CoreFailureClusterRepository } from "./CoreFailureClusterRepository";
-import { CoreHarnessExperimentRepository } from "./CoreHarnessExperimentRepository";
+
 import { CoreHarnessExperimentService } from "./CoreHarnessExperimentService";
 import { CoreLearningsService } from "./CoreLearningsService";
 import { CoreRegressionGateService } from "./CoreRegressionGateService";
@@ -25,27 +29,27 @@ export class CoreHarnessExperimentRunner {
     private readonly learnings: CoreLearningsService,
   ) {}
 
-  run(request: RunCoreExperimentRequest): {
+  async run(request: RunCoreExperimentRequest): Promise<{
     experiment: CoreHarnessExperiment;
     run: CoreHarnessExperimentRun;
     gate: CoreRegressionGateResult;
-  } {
-    const experiment = this.resolveExperiment(request);
+  }> {
+    const experiment = await this.resolveExperiment(request);
     if (!experiment) {
       throw new Error("No core harness experiment available for the requested target");
     }
-    const cluster = this.clusterRepo.findById(experiment.clusterId);
+    const cluster = await this.clusterRepo.findById(experiment.clusterId);
     if (!cluster) {
       throw new Error("Core failure cluster not found");
     }
-    const linkedEval = this.evalRepo.findByClusterId(cluster.id);
-    const otherEvals = this.evalRepo.list({
+    const linkedEval = await this.evalRepo.findByClusterId(cluster.id);
+    const otherEvals = await this.evalRepo.list({
       profileId: cluster.profileId,
       workspaceId: cluster.workspaceId,
       limit: 100,
     });
     const now = Date.now();
-    const run = this.experimentRepo.createRun({
+    const run = await this.experimentRepo.createRun({
       experimentId: experiment.id,
       status: "running",
       baseline: {
@@ -56,7 +60,7 @@ export class CoreHarnessExperimentRunner {
       createdAt: now,
       startedAt: now,
     });
-    const gate = this.gateService.evaluate({
+    const gate = await this.gateService.evaluate({
       experimentRunId: run.id,
       cluster,
       experiment,
@@ -67,26 +71,26 @@ export class CoreHarnessExperimentRunner {
       regressionsDetected: gate.regressionsDetected,
       passed: gate.passed,
     };
-    const completedRun = this.experimentRepo.updateRun(run.id, {
+    const completedRun = (await this.experimentRepo.updateRun(run.id, {
       status: gate.passed ? "passed" : "failed",
       outcome,
       gateResultId: gate.id,
       summary: gate.summary,
       completedAt: Date.now(),
-    })!;
-    const updatedExperiment = this.experimentRepo.updateExperiment(experiment.id, {
+    }))!;
+    const updatedExperiment = (await this.experimentRepo.updateExperiment(experiment.id, {
       status: gate.passed ? "passed_gate" : "failed_gate",
       summary: gate.summary,
       updatedAt: Date.now(),
-    })!;
+    }))!;
     if (linkedEval) {
-      this.evalRepo.recordRun(linkedEval.id, {
+      await this.evalRepo.recordRun(linkedEval.id, {
         passed: gate.passed,
         summary: gate.summary,
         details: outcome,
       });
     }
-    this.learnings.append({
+    await this.learnings.append({
       profileId: updatedExperiment.profileId,
       workspaceId: updatedExperiment.workspaceId,
       kind: gate.passed ? "experiment" : "gate_rejection",
@@ -97,23 +101,23 @@ export class CoreHarnessExperimentRunner {
       createdAt: Date.now(),
     });
     if (request.autoPromote && gate.passed) {
-      this.promote({ id: updatedExperiment.id, action: "promote" });
+      await this.promote({ id: updatedExperiment.id, action: "promote" });
     }
     return {
-      experiment: this.experimentRepo.findExperimentById(updatedExperiment.id)!,
+      experiment: (await this.experimentRepo.findExperimentById(updatedExperiment.id))!,
       run: completedRun,
       gate,
     };
   }
 
-  review(request: ReviewCoreExperimentRequest): CoreHarnessExperiment | undefined {
+  async review(request: ReviewCoreExperimentRequest): Promise<CoreHarnessExperiment | undefined> {
     if (request.action === "reject") {
-      const updated = this.experimentRepo.updateExperiment(request.id, {
+      const updated = await this.experimentRepo.updateExperiment(request.id, {
         status: "rejected",
         updatedAt: Date.now(),
       });
       if (updated) {
-        this.learnings.append({
+        await this.learnings.append({
           profileId: updated.profileId,
           workspaceId: updated.workspaceId,
           kind: "gate_rejection",
@@ -128,14 +132,16 @@ export class CoreHarnessExperimentRunner {
     return this.promote(request);
   }
 
-  private promote(request: ReviewCoreExperimentRequest): CoreHarnessExperiment | undefined {
-    const experiment = this.experimentRepo.findExperimentById(request.id);
+  private async promote(
+    request: ReviewCoreExperimentRequest,
+  ): Promise<CoreHarnessExperiment | undefined> {
+    const experiment = await this.experimentRepo.findExperimentById(request.id);
     if (!experiment) return undefined;
     if (experiment.status !== "passed_gate") {
       throw new Error("Only passed-gate experiments can be promoted");
     }
     if (experiment.changeKind === "automation_profile") {
-      this.automationProfileRepo.update({
+      await this.automationProfileRepo.update({
         id: experiment.profileId,
         ...(experiment.proposal as Record<string, unknown>),
       } as any);
@@ -148,13 +154,13 @@ export class CoreHarnessExperimentRunner {
     } else {
       throw new Error("Memory-policy experiments are review-only in the current phase");
     }
-    const updated = this.experimentRepo.updateExperiment(experiment.id, {
+    const updated = await this.experimentRepo.updateExperiment(experiment.id, {
       status: "promoted",
       promotedAt: Date.now(),
       updatedAt: Date.now(),
     });
     if (updated) {
-      this.learnings.append({
+      await this.learnings.append({
         profileId: updated.profileId,
         workspaceId: updated.workspaceId,
         kind: "promotion",
@@ -167,18 +173,20 @@ export class CoreHarnessExperimentRunner {
     return updated;
   }
 
-  private resolveExperiment(request: RunCoreExperimentRequest): CoreHarnessExperiment | undefined {
+  private async resolveExperiment(
+    request: RunCoreExperimentRequest,
+  ): Promise<CoreHarnessExperiment | undefined> {
     if (request.experimentId) {
       return this.experimentRepo.findExperimentById(request.experimentId);
     }
     if (!request.clusterId) return undefined;
-    const existing = this.experimentRepo.listExperiments({
+    const existing = await this.experimentRepo.listExperiments({
       clusterId: request.clusterId,
       limit: 20,
     });
     if (existing.length > 0) {
       return existing[0];
     }
-    return this.experimentService.proposeExperimentsForCluster(request.clusterId)[0];
+    return (await this.experimentService.proposeExperimentsForCluster(request.clusterId))[0];
   }
 }

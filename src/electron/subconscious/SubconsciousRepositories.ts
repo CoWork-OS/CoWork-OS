@@ -42,7 +42,7 @@ function normalizeOutcome(value: unknown): SubconsciousRunOutcome | undefined {
   return undefined;
 }
 
-export class SubconsciousTargetRepository {
+export class SubconsciousTargetStore {
   constructor(private readonly db: Database.Database) {}
 
   upsert(summary: SubconsciousTargetSummary): SubconsciousTargetSummary {
@@ -196,7 +196,7 @@ export class SubconsciousTargetRepository {
   }
 }
 
-export class SubconsciousRunRepository {
+export class SubconsciousRunStore {
   constructor(private readonly db: Database.Database) {}
 
   create(
@@ -392,7 +392,7 @@ class JsonListRepository<T extends { id: string }> {
   }
 }
 
-export class SubconsciousHypothesisRepository {
+export class SubconsciousHypothesisStore {
   constructor(private readonly db: Database.Database) {}
 
   replaceForRun(runId: string, hypotheses: SubconsciousHypothesis[]): void {
@@ -440,7 +440,7 @@ export class SubconsciousHypothesisRepository {
   }
 }
 
-export class SubconsciousCritiqueRepository {
+export class SubconsciousCritiqueStore {
   constructor(private readonly db: Database.Database) {}
 
   replaceForRun(runId: string, critiques: SubconsciousCritique[]): void {
@@ -486,7 +486,7 @@ export class SubconsciousCritiqueRepository {
   }
 }
 
-export class SubconsciousDecisionRepository {
+export class SubconsciousDecisionStore {
   constructor(private readonly db: Database.Database) {}
 
   upsert(decision: SubconsciousDecision): SubconsciousDecision {
@@ -560,7 +560,7 @@ export class SubconsciousDecisionRepository {
   }
 }
 
-export class SubconsciousBacklogRepository {
+export class SubconsciousBacklogStore {
   constructor(private readonly db: Database.Database) {}
 
   private static normalizeDuplicateKeyPart(value: string | undefined): string {
@@ -768,15 +768,15 @@ export class SubconsciousBacklogRepository {
     executorKind?: SubconsciousBacklogItem["executorKind"],
   ): string {
     return [
-      SubconsciousBacklogRepository.normalizeDuplicateKeyPart(targetKey),
-      SubconsciousBacklogRepository.normalizeDuplicateKeyPart(title),
-      SubconsciousBacklogRepository.normalizeDuplicateKeyPart(summary),
-      SubconsciousBacklogRepository.normalizeDuplicateKeyPart(executorKind),
+      SubconsciousBacklogStore.normalizeDuplicateKeyPart(targetKey),
+      SubconsciousBacklogStore.normalizeDuplicateKeyPart(title),
+      SubconsciousBacklogStore.normalizeDuplicateKeyPart(summary),
+      SubconsciousBacklogStore.normalizeDuplicateKeyPart(executorKind),
     ].join("::");
   }
 }
 
-export class SubconsciousDispatchRepository {
+export class SubconsciousDispatchStore {
   constructor(private readonly db: Database.Database) {}
 
   create(
@@ -879,8 +879,8 @@ export function clearSubconsciousHistoryData(db: Database.Database): {
 export function clearSubconsciousTargetData(db: Database.Database, targetKeys: string[]): void {
   if (!targetKeys.length) return;
   const placeholders = targetKeys.map(() => "?").join(", ");
-  db.exec("BEGIN");
-  try {
+  // A savepoint when it runs inside a unit's transaction (DB6), a transaction otherwise.
+  db.transaction(() => {
     for (const table of [
       "subconscious_dispatch_records",
       "subconscious_backlog_items",
@@ -892,9 +892,5 @@ export function clearSubconsciousTargetData(db: Database.Database, targetKeys: s
     ]) {
       db.prepare(`DELETE FROM ${table} WHERE target_key IN (${placeholders})`).run(...targetKeys);
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  })();
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { OrchestrationRepository } from "../OrchestrationRepository";
+import { OrchestrationRepository } from "../orchestration-repository-facades";
 import type { OrchestrationTask } from "../OrchestrationRepository";
 import { SubAgentOrchestrator } from "../SubAgentOrchestrator";
 
@@ -7,6 +7,8 @@ import { SubAgentOrchestrator } from "../SubAgentOrchestrator";
 function makeDb() {
   const store = new Map<string, unknown>();
   return {
+    // Units run in a transaction (DB6); the mock runs the body directly.
+    transaction: <T>(fn: T) => fn,
     prepare: (sql: string) => ({
       run: (...args: unknown[]) => {
         if (sql.includes("INSERT INTO orchestration_runs")) {
@@ -44,8 +46,8 @@ describe("OrchestrationRepository", () => {
     repo = new OrchestrationRepository(db);
   });
 
-  it("creates a run and retrieves it by id", () => {
-    const run = repo.create({
+  it("creates a run and retrieves it by id", async () => {
+    const run = await repo.create({
       rootTaskId: "root-1",
       workspaceId: "ws-1",
       tasks: [],
@@ -56,12 +58,12 @@ describe("OrchestrationRepository", () => {
     expect(run.rootTaskId).toBe("root-1");
     expect(run.status).toBe("running");
 
-    const found = repo.findById(run.id);
+    const found = await repo.findById(run.id);
     expect(found?.id).toBe(run.id);
   });
 
-  it("allows custom id", () => {
-    const run = repo.create({
+  it("allows custom id", async () => {
+    const run = await repo.create({
       id: "custom-id",
       rootTaskId: "root-2",
       workspaceId: "ws-1",

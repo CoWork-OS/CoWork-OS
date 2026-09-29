@@ -1,8 +1,8 @@
+import { CoreMemoryCandidateRepository, CoreTraceRepository } from "./core-repository-facades";
 import type { CoreMemoryCandidate, CoreMemoryCandidateType, CoreTrace } from "../../shared/types";
 import type { SubconsciousTargetRef } from "../../shared/subconscious";
-import { CoreMemoryCandidateRepository } from "./CoreMemoryCandidateRepository";
+
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";
-import { CoreTraceRepository } from "./CoreTraceRepository";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -15,13 +15,13 @@ export class CoreMemoryCandidateService {
     private readonly scopeResolver: CoreMemoryScopeResolver,
   ) {}
 
-  extractFromTrace(
+  async extractFromTrace(
     traceId: string,
     params?: { target?: SubconsciousTargetRef; sourceRunId?: string },
-  ): CoreMemoryCandidate[] {
-    const trace = this.traceRepo.findById(traceId);
+  ): Promise<CoreMemoryCandidate[]> {
+    const trace = await this.traceRepo.findById(traceId);
     if (!trace) return [];
-    const events = this.traceRepo.listEvents(traceId);
+    const events = await this.traceRepo.listEvents(traceId);
     const candidates: Array<Omit<CoreMemoryCandidate, "id" | "createdAt">> = [];
 
     const normalized =
@@ -164,13 +164,13 @@ export class CoreMemoryCandidateService {
     return this.candidateRepo.bulkCreate(this.dedupeCandidates(candidates));
   }
 
-  autoAcceptHighSignalCandidates(traceId: string): CoreMemoryCandidate[] {
+  async autoAcceptHighSignalCandidates(traceId: string): Promise<CoreMemoryCandidate[]> {
     const accepted: CoreMemoryCandidate[] = [];
-    for (const candidate of this.candidateRepo.listForTrace(traceId)) {
+    for (const candidate of await this.candidateRepo.listForTrace(traceId)) {
       if (candidate.status !== "proposed") continue;
       if (candidate.confidence < 0.75) continue;
       if (candidate.stabilityScore < 0.55) continue;
-      const reviewed = this.candidateRepo.review({
+      const reviewed = await this.candidateRepo.review({
         id: candidate.id,
         status: "accepted",
         resolution: "Auto-accepted by hot-path learning threshold.",

@@ -3,6 +3,7 @@
  * and cloud storage providers into a unified interface.
  */
 
+import { serviceStatements } from "../database/service-statements";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -160,9 +161,9 @@ export class FileHubService {
     // Load from DB
     if (this.db) {
       try {
-        const rows = this.db
-          .prepare("SELECT * FROM file_hub_recent ORDER BY accessed_at DESC LIMIT ?")
-          .all(limit) as Any[];
+        const rows = (await serviceStatements(this.db).unit("fileHub_recentRows", [
+          limit,
+        ])) as Any[];
 
         return rows.map((r: Any) => ({
           id: r.id,
@@ -192,23 +193,22 @@ export class FileHubService {
     // Persist to DB
     if (this.db) {
       try {
-        this.db
-          .prepare(
-            `INSERT OR REPLACE INTO file_hub_recent
-           (id, source, source_file_id, name, path, mime_type, size, accessed_at, metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            key,
-            file.source,
-            file.id,
-            file.name,
-            file.path,
-            file.mimeType,
-            file.size,
-            Date.now(),
-            file.metadata ? JSON.stringify(file.metadata) : null,
-          );
+        // Recorded without holding up the caller; the in-memory entry is already set.
+        void serviceStatements(this.db)
+          .unit("fileHub_trackRecent", [
+            {
+              key,
+              source: file.source,
+              sourceFileId: file.id,
+              name: file.name,
+              path: file.path,
+              mimeType: file.mimeType,
+              size: file.size,
+              accessedAt: Date.now(),
+              metadataJson: file.metadata ? JSON.stringify(file.metadata) : null,
+            },
+          ])
+          .catch(() => undefined);
       } catch {
         // ignore
       }

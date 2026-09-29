@@ -5,6 +5,7 @@
  * Leverages the existing WebSocket frame protocol and authentication.
  */
 
+import { serviceStatements } from "../database/service-statements";
 import { randomUUID } from "crypto";
 import type Database from "better-sqlite3";
 import { ErrorCodes } from "../control-plane/protocol";
@@ -42,7 +43,15 @@ export interface ACPHandlerDeps {
     icon: string;
     capabilities: string[];
     isActive: boolean;
-  }>;
+  }> | Promise<Array<{
+    id: string;
+    name: string;
+    displayName: string;
+    description?: string;
+    icon: string;
+    capabilities: string[];
+    isActive: boolean;
+  }>>;
   /** Function to create a CoWork task for local agent delegation */
   createTask?: (params: {
     title: string;
@@ -65,7 +74,7 @@ export interface ACPHandlerDeps {
     result?: string;
     error?: string;
   }>;
-  getDelegatedGraphStatus?: (acpTaskId: string) =>
+  getDelegatedGraphStatus?: (acpTaskId: string) => Promise<
     | {
         status: string;
         coworkTaskId?: string;
@@ -73,10 +82,16 @@ export interface ACPHandlerDeps {
         result?: string;
         error?: string;
       }
-    | undefined;
+    | undefined
+  >;
   cancelDelegatedGraphTask?: (acpTaskId: string) => Promise<void>;
   /** Function to get a task by ID */
-  getTask?: (taskId: string) => { id: string; status: string; error?: string } | undefined;
+  getTask?: (
+    taskId: string,
+  ) =>
+    | { id: string; status: string; error?: string }
+    | undefined
+    | Promise<{ id: string; status: string; error?: string } | undefined>;
   /** Function to cancel a task by ID */
   cancelTask?: (taskId: string) => Promise<void>;
 }
@@ -155,17 +170,11 @@ function mapRowToTask(row: Record<string, unknown>): ACPTask {
   };
 }
 
-function loadPersistedTasks(db?: Database.Database): void {
+/** Load persisted ACP tasks into memory; method handlers wait for this. */
+async function loadPersistedTasks(db?: Database.Database): Promise<void> {
   acpTasks.clear();
   if (!db) return;
-  const rows = db
-    .prepare(
-      `SELECT id, requester_id, assignee_id, title, prompt, status, result, error,
-              cowork_task_id, remote_task_id, workspace_id, created_at, updated_at, completed_at
-       FROM acp_tasks
-       ORDER BY created_at DESC`,
-    )
-    .all() as Record<string, unknown>[];
+  const rows = await serviceStatements(db).unit("acp_taskRows", []);
   for (const row of rows) {
     const task = mapRowToTask(row);
     if (task.id) {
@@ -174,42 +183,12 @@ function loadPersistedTasks(db?: Database.Database): void {
   }
 }
 
+/** Persist a task without holding up the caller; the task stays in memory either way. */
 function persistTask(db: Database.Database | undefined, task: ACPTask): void {
   if (!db) return;
-  db.prepare(
-    `INSERT INTO acp_tasks (
-      id, requester_id, assignee_id, title, prompt, status, result, error,
-      cowork_task_id, remote_task_id, workspace_id, created_at, updated_at, completed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      requester_id = excluded.requester_id,
-      assignee_id = excluded.assignee_id,
-      title = excluded.title,
-      prompt = excluded.prompt,
-      status = excluded.status,
-      result = excluded.result,
-      error = excluded.error,
-      cowork_task_id = excluded.cowork_task_id,
-      remote_task_id = excluded.remote_task_id,
-      workspace_id = excluded.workspace_id,
-      updated_at = excluded.updated_at,
-      completed_at = excluded.completed_at`,
-  ).run(
-    task.id,
-    task.requesterId,
-    task.assigneeId,
-    task.title,
-    task.prompt,
-    task.status,
-    task.result || null,
-    task.error || null,
-    task.coworkTaskId || null,
-    task.remoteTaskId || null,
-    task.workspaceId || null,
-    task.createdAt,
-    task.updatedAt,
-    task.completedAt || null,
-  );
+  void serviceStatements(db)
+    .unit("acp_persistTask", [task])
+    .catch((error: unknown) => logger.warn("Failed to persist ACP task:", error));
 }
 
 async function syncTaskStatus(
@@ -218,7 +197,7 @@ async function syncTaskStatus(
   reg: ACPAgentRegistry,
 ): Promise<ACPTask> {
   if (deps.getDelegatedGraphStatus) {
-    const graphStatus = deps.getDelegatedGraphStatus(task.id);
+    const graphStatus = await deps.getDelegatedGraphStatus(task.id);
     if (graphStatus) {
       task.status = graphStatus.status as ACPTask["status"];
       task.result = graphStatus.result;
@@ -234,7 +213,7 @@ async function syncTaskStatus(
     }
   }
   if (task.coworkTaskId && deps.getTask) {
-    const coworkTask = deps.getTask(task.coworkTaskId);
+    const coworkTask = await deps.getTask(task.coworkTaskId);
     if (coworkTask) {
       const statusMap: Record<string, ACPTask["status"]> = {
         pending: "pending",
@@ -257,7 +236,7 @@ async function syncTaskStatus(
       persistTask(deps.db, task);
     }
   } else if (task.remoteTaskId) {
-    const roles = deps.getActiveRoles();
+    const roles = await deps.getActiveRoles();
     const assignee = reg.getAgent(task.assigneeId, roles);
     if (assignee?.origin === "remote" && assignee.endpoint) {
       try {
@@ -303,23 +282,31 @@ function requireString(value: unknown, field: string): string {
  */
 export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerDeps): void {
   const reg = getACPRegistry(deps.db);
-  loadPersistedTasks(deps.db);
+  // Handlers run once the persisted tasks and remote agents are loaded.
+  const loaded = Promise.all([loadPersistedTasks(deps.db), reg.ready]).catch((error: unknown) => {
+    logger.warn("Failed to load persisted ACP state:", error);
+  });
+  const registerMethod: typeof server.registerMethod = (name, handler) =>
+    server.registerMethod(name, async (client, params) => {
+      await loaded;
+      return handler(client, params);
+    });
 
   // ----- acp.discover -----
-  server.registerMethod(ACPMethods.DISCOVER, async (client, params) => {
+  registerMethod(ACPMethods.DISCOVER, async (client, params) => {
     requireScopedAuth(client, deps, "read");
     const p = (params || {}) as ACPDiscoverParams;
-    const roles = deps.getActiveRoles();
+    const roles = await deps.getActiveRoles();
     const agents = reg.discover(p, roles);
     return { agents };
   });
 
   // ----- acp.agent.get -----
-  server.registerMethod(ACPMethods.AGENT_GET, async (client, params) => {
+  registerMethod(ACPMethods.AGENT_GET, async (client, params) => {
     requireScopedAuth(client, deps, "read");
     const p = params as { agentId?: string } | undefined;
     const agentId = requireString(p?.agentId, "agentId");
-    const roles = deps.getActiveRoles();
+    const roles = await deps.getActiveRoles();
     const agent = reg.getAgent(agentId, roles);
     if (!agent) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Agent not found: ${agentId}` };
@@ -328,7 +315,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
   });
 
   // ----- acp.agent.register -----
-  server.registerMethod(ACPMethods.AGENT_REGISTER, async (client, params) => {
+  registerMethod(ACPMethods.AGENT_REGISTER, async (client, params) => {
     requireScopedAuth(client, deps, "admin");
     const p = (params || {}) as ACPAgentRegisterParams;
     requireString(p.name, "name");
@@ -343,7 +330,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
   });
 
   // ----- acp.agent.unregister -----
-  server.registerMethod(ACPMethods.AGENT_UNREGISTER, async (client, params) => {
+  registerMethod(ACPMethods.AGENT_UNREGISTER, async (client, params) => {
     requireScopedAuth(client, deps, "admin");
     const p = params as { agentId?: string } | undefined;
     const agentId = requireString(p?.agentId, "agentId");
@@ -364,7 +351,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
   });
 
   // ----- acp.message.send -----
-  server.registerMethod(ACPMethods.MESSAGE_SEND, async (client, params) => {
+  registerMethod(ACPMethods.MESSAGE_SEND, async (client, params) => {
     requireScopedAuth(client, deps, "write");
     const p = (params || {}) as ACPMessageSendParams & { from?: string };
     const to = requireString(p.to, "to");
@@ -377,7 +364,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
     }
 
     // Validate target agent exists
-    const roles = deps.getActiveRoles();
+    const roles = await deps.getActiveRoles();
     const targetAgent = reg.getAgent(to, roles);
     if (!targetAgent) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Target agent not found: ${to}` };
@@ -428,7 +415,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
   });
 
   // ----- acp.message.list -----
-  server.registerMethod(ACPMethods.MESSAGE_LIST, async (client, params) => {
+  registerMethod(ACPMethods.MESSAGE_LIST, async (client, params) => {
     requireScopedAuth(client, deps, "read");
     const p = (params || {}) as { agentId?: string; drain?: boolean };
     const agentId = requireString(p.agentId, "agentId");
@@ -444,7 +431,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
   });
 
   // ----- acp.task.create -----
-  server.registerMethod(ACPMethods.TASK_CREATE, async (client, params) => {
+  registerMethod(ACPMethods.TASK_CREATE, async (client, params) => {
     requireScopedAuth(client, deps, "write");
     const p = (params || {}) as ACPTaskCreateParams & { requesterId?: string };
     const assigneeId = requireString(p.assigneeId, "assigneeId");
@@ -458,7 +445,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
     }
 
     // Validate assignee exists
-    const roles = deps.getActiveRoles();
+    const roles = await deps.getActiveRoles();
     const assignee = reg.getAgent(assigneeId, roles);
     if (!assignee) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Assignee agent not found: ${assigneeId}` };
@@ -558,7 +545,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
   });
 
   // ----- acp.task.get -----
-  server.registerMethod(ACPMethods.TASK_GET, async (client, params) => {
+  registerMethod(ACPMethods.TASK_GET, async (client, params) => {
     requireScopedAuth(client, deps, "read");
     const p = params as { taskId?: string } | undefined;
     const taskId = requireString(p?.taskId, "taskId");
@@ -574,7 +561,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
   });
 
   // ----- acp.task.list -----
-  server.registerMethod(ACPMethods.TASK_LIST, async (client, params) => {
+  registerMethod(ACPMethods.TASK_LIST, async (client, params) => {
     requireScopedAuth(client, deps, "read");
     const p = (params || {}) as { assigneeId?: string; requesterId?: string; status?: string };
 
@@ -607,7 +594,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
   });
 
   // ----- acp.task.cancel -----
-  server.registerMethod(ACPMethods.TASK_CANCEL, async (client, params) => {
+  registerMethod(ACPMethods.TASK_CANCEL, async (client, params) => {
     requireScopedAuth(client, deps, "write");
     const p = params as { taskId?: string } | undefined;
     const taskId = requireString(p?.taskId, "taskId");
@@ -629,7 +616,7 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
       // Cancel the underlying CoWork task if it exists
       await deps.cancelTask(acpTask.coworkTaskId);
     } else if (acpTask.remoteTaskId) {
-      const roles = deps.getActiveRoles();
+      const roles = await deps.getActiveRoles();
       const assignee = reg.getAgent(acpTask.assigneeId, roles);
       if (assignee?.origin === "remote" && assignee.endpoint) {
         const result = await remoteInvoker.cancel(assignee, acpTask.remoteTaskId);

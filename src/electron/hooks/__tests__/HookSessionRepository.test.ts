@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { HookSessionRepository } from "../HookSessionRepository";
+import { HookSessionRepository } from "../hook-session-repository-facades";
 
 describe("HookSessionRepository", () => {
   let nowMs = 1_700_000_000_000;
@@ -13,11 +13,14 @@ describe("HookSessionRepository", () => {
       ) => { session_key: string; task_id: string; created_at: number } | undefined;
       run?: (...args: Any[]) => { changes: number };
     };
+    transaction: <T>(fn: T) => T;
   };
 
   beforeEach(() => {
     nowMs = 1_700_000_000_000;
     db = {
+      // Units run in a transaction (DB6); the double runs the body directly.
+      transaction: (fn) => fn,
       sessions: new Map(),
       locks: new Map(),
       prepare(sql: string) {
@@ -85,37 +88,37 @@ describe("HookSessionRepository", () => {
     repo = new HookSessionRepository(db as Any);
   });
 
-  it("creates and finds a session mapping", () => {
-    const created = repo.create("xmention:123", "task-1");
+  it("creates and finds a session mapping", async () => {
+    const created = await repo.create("xmention:123", "task-1");
     expect(created).toBe(true);
 
-    const found = repo.findBySessionKey("xmention:123");
+    const found = await repo.findBySessionKey("xmention:123");
     expect(found).not.toBeNull();
     expect(found?.taskId).toBe("task-1");
   });
 
-  it("is idempotent for duplicate session keys", () => {
-    const first = repo.create("xmention:dup", "task-1");
-    const second = repo.create("xmention:dup", "task-2");
+  it("is idempotent for duplicate session keys", async () => {
+    const first = await repo.create("xmention:dup", "task-1");
+    const second = await repo.create("xmention:dup", "task-2");
     expect(first).toBe(true);
     expect(second).toBe(false);
 
-    const found = repo.findBySessionKey("xmention:dup");
+    const found = await repo.findBySessionKey("xmention:dup");
     expect(found?.taskId).toBe("task-1");
   });
 
-  it("acquires and releases lock keys", () => {
+  it("acquires and releases lock keys", async () => {
     const realDateNow = Date.now;
     Date.now = () => nowMs;
     let first = false;
     let second = false;
     let third = false;
     try {
-      first = repo.acquireLock("xmention:lock");
-      second = repo.acquireLock("xmention:lock");
-      repo.releaseLock("xmention:lock");
+      first = await repo.acquireLock("xmention:lock");
+      second = await repo.acquireLock("xmention:lock");
+      await repo.releaseLock("xmention:lock");
       Date.now = () => nowMs + 10_000;
-      third = repo.acquireLock("xmention:lock");
+      third = await repo.acquireLock("xmention:lock");
     } finally {
       Date.now = realDateNow;
     }

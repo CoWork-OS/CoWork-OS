@@ -1,6 +1,7 @@
+import { TaskRepository } from "../database/repository-facades";
 import type Database from "better-sqlite3";
-import { EvalService } from "../eval/EvalService";
-import { TaskEventRepository, TaskRepository } from "../database/repositories";
+import { EvalService } from "../eval/eval-repository-facades";
+import { TaskEventRepository } from "../database/repositories";
 import type {
   EvalBaselineMetrics,
   ImprovementCampaign,
@@ -23,18 +24,20 @@ export class ExperimentEvaluationService {
     this.eventRepo = new TaskEventRepository(db);
   }
 
-  snapshot(windowDays: number): EvalBaselineMetrics {
+  async snapshot(windowDays: number): Promise<EvalBaselineMetrics> {
     return this.evalService.getBaselineMetrics(windowDays);
   }
 
-  evaluateVariant(params: {
+  async evaluateVariant(params: {
     variant: ImprovementVariantRun;
     baselineMetrics: EvalBaselineMetrics;
     evalWindowDays: number;
     replayCases: ImprovementReplayCase[];
     maxPatchFiles?: number;
-  }): ImprovementVariantEvaluation {
-    const task = params.variant.taskId ? this.taskRepo.findById(params.variant.taskId) : undefined;
+  }): Promise<ImprovementVariantEvaluation> {
+    const task = params.variant.taskId
+      ? await this.taskRepo.findById(params.variant.taskId)
+      : undefined;
     const events = task ? this.eventRepo.findByTaskId(task.id) : [];
     const artifactSummary = extractArtifactSummary(task, params.maxPatchFiles || 8);
 
@@ -139,24 +142,28 @@ export class ExperimentEvaluationService {
     };
   }
 
-  evaluateCampaign(params: {
+  async evaluateCampaign(params: {
     campaign: ImprovementCampaign;
     variants: ImprovementVariantRun[];
     evalWindowDays: number;
-  }): {
+  }): Promise<{
     verdict: ImprovementJudgeVerdict;
     outcomeMetrics: EvalBaselineMetrics;
     winner?: ImprovementVariantEvaluation;
     evaluations: ImprovementVariantEvaluation[];
-  } {
-    const evaluations = params.variants.map((variant) =>
-      this.evaluateVariant({
-        variant,
-        baselineMetrics: params.campaign.baselineMetrics || this.snapshot(params.evalWindowDays),
-        evalWindowDays: params.evalWindowDays,
-        replayCases: params.campaign.replayCases,
-        maxPatchFiles: 8,
-      }),
+  }> {
+    const baselineMetrics =
+      params.campaign.baselineMetrics || (await this.snapshot(params.evalWindowDays));
+    const evaluations = await Promise.all(
+      params.variants.map((variant) =>
+        this.evaluateVariant({
+          variant,
+          baselineMetrics,
+          evalWindowDays: params.evalWindowDays,
+          replayCases: params.campaign.replayCases,
+          maxPatchFiles: 8,
+        }),
+      ),
     );
     evaluations.sort((a, b) => b.score - a.score);
 
@@ -193,7 +200,7 @@ export class ExperimentEvaluationService {
 
     return {
       verdict,
-      outcomeMetrics: this.snapshot(params.evalWindowDays),
+      outcomeMetrics: await this.snapshot(params.evalWindowDays),
       winner,
       evaluations,
     };

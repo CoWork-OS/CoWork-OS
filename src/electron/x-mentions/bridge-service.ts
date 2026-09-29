@@ -12,7 +12,7 @@ import {
 import { getXMentionTriggerStatusStore } from "./status";
 
 interface XMentionBridgeServiceOptions {
-  isNativeXChannelEnabled?: () => boolean;
+  isNativeXChannelEnabled?: () => boolean | Promise<boolean>;
 }
 
 export class XMentionBridgeService {
@@ -25,7 +25,7 @@ export class XMentionBridgeService {
   private suppressedFailureLogCount = 0;
   private readonly ingress: HookAgentIngress;
   private readonly statusStore = getXMentionTriggerStatusStore();
-  private readonly isNativeXChannelEnabled: () => boolean;
+  private readonly isNativeXChannelEnabled: () => boolean | Promise<boolean>;
   private readonly FAILURE_BACKOFF_MIN_MS = 2 * 60 * 1000;
   private readonly FAILURE_BACKOFF_MAX_MS = 30 * 60 * 1000;
   private readonly CLI_FAILURE_BACKOFF_MS = 10 * 60 * 1000;
@@ -123,7 +123,7 @@ export class XMentionBridgeService {
         return;
       }
 
-      if (this.isNativeXChannelEnabled()) {
+      if (await this.isNativeXChannelEnabled()) {
         this.statusStore.setMode("disabled", false);
         return;
       }

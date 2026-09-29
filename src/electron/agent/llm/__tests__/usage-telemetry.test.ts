@@ -8,7 +8,8 @@ import { recordLlmCallError, recordLlmCallSuccess } from "../usage-telemetry";
 describe("usage telemetry provider registration", () => {
   const run = vi.fn();
   const prepare = vi.fn(() => ({ run }));
-  const db = { prepare } as Any;
+  // Inserts run as units, in a transaction (DB6); the fake runs the body directly.
+  const db = { prepare, transaction: (fn: unknown) => fn } as Any;
 
   beforeEach(() => {
     vi.spyOn(DatabaseManager, "getInstance").mockReturnValue({
@@ -70,10 +71,11 @@ describe("usage telemetry provider registration", () => {
       new Error("401 Bearer sk_test_secret apiKey=super-secret-token"),
     );
 
+    // Shared 16-column insert: error_code and error_message are the last two parameters.
     const args = run.mock.calls.at(-1);
-    expect(args?.[9]).toBe("Error");
-    expect(args?.[10]).not.toContain("sk_test_secret");
-    expect(args?.[10]).not.toContain("super-secret-token");
-    expect(args?.[10]).toContain("[REDACTED]");
+    expect(args?.[14]).toBe("Error");
+    expect(args?.[15]).not.toContain("sk_test_secret");
+    expect(args?.[15]).not.toContain("super-secret-token");
+    expect(args?.[15]).toContain("[REDACTED]");
   });
 });

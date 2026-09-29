@@ -5,6 +5,7 @@
  * Can be scheduled via CronService or triggered on-demand.
  */
 
+import { serviceStatements } from "../database/service-statements";
 import { randomUUID } from "crypto";
 import {
   Briefing,
@@ -72,7 +73,7 @@ export class DailyBriefingService {
     workspaceId: string,
     configOverride?: Partial<BriefingConfig>,
   ): Promise<Briefing> {
-    const config = { ...this.getConfig(workspaceId), ...configOverride };
+    const config = { ...(await this.getConfig(workspaceId)), ...configOverride };
     const sections: BriefingSection[] = [];
 
     try {
@@ -118,7 +119,7 @@ export class DailyBriefingService {
     };
 
     this.latestBriefings.set(workspaceId, briefing);
-    this.saveBriefingToDB(briefing);
+    await this.saveBriefingToDB(briefing);
 
     // Auto-deliver if configured
     if (config.deliveryChannelType && config.deliveryChannelId && this.deps.deliverToChannel) {
@@ -130,7 +131,7 @@ export class DailyBriefingService {
           text,
         });
         briefing.delivered = true;
-        this.saveBriefingToDB(briefing);
+        await this.saveBriefingToDB(briefing);
       } catch (err) {
         this.log("[DailyBriefing] Failed to deliver:", err);
       }
@@ -143,8 +144,8 @@ export class DailyBriefingService {
     return this.formatBriefingAsText(briefing);
   }
 
-  getLatestBriefing(workspaceId: string): Briefing | undefined {
-    return this.latestBriefings.get(workspaceId) || this.loadLatestFromDB(workspaceId);
+  async getLatestBriefing(workspaceId: string): Promise<Briefing | undefined> {
+    return this.latestBriefings.get(workspaceId) || (await this.loadLatestFromDB(workspaceId));
   }
 
   // ── Section builders ────────────────────────────────────────────
@@ -406,9 +407,9 @@ export class DailyBriefingService {
     return [...map.values()].slice(0, limit ?? map.size);
   }
 
-  private buildTaskSummary(workspaceId: string): BriefingSection {
+  private async buildTaskSummary(workspaceId: string): Promise<BriefingSection> {
     const since = Date.now() - TWENTY_FOUR_HOURS_MS;
-    const tasks = this.deps.getRecentTasks(workspaceId, since);
+    const tasks = await this.deps.getRecentTasks(workspaceId, since);
 
     const completed = tasks.filter((t: Any) => t.status === "completed");
     const failed = tasks.filter((t: Any) => t.status === "failed");
@@ -469,14 +470,17 @@ export class DailyBriefingService {
     return { type: "task_summary", title: "Executive Summary", items, enabled: true };
   }
 
-  private buildMemoryHighlights(workspaceId: string): BriefingSection {
+  private async buildMemoryHighlights(workspaceId: string): Promise<BriefingSection> {
+    const queries = [
+      "recent learning insight",
+      "workflow pattern",
+      "preference correction",
+      "constraint",
+    ];
+    const searched: Any[][] = [];
+    for (const query of queries) searched.push(await this.deps.searchMemory(workspaceId, query, 5));
     const memories = this.dedupeBriefingItems(
-      [
-        ...this.deps.searchMemory(workspaceId, "recent learning insight", 5),
-        ...this.deps.searchMemory(workspaceId, "workflow pattern", 5),
-        ...this.deps.searchMemory(workspaceId, "preference correction", 5),
-        ...this.deps.searchMemory(workspaceId, "constraint", 5),
-      ].filter((memory: Any) => {
+      searched.flat().filter((memory: Any) => {
         const type = String(memory?.type || "");
         if (
           ![
@@ -514,8 +518,9 @@ export class DailyBriefingService {
     return { type: "memory_highlights", title: "Durable Changes", items, enabled: true };
   }
 
-  private buildSuggestions(workspaceId: string): BriefingSection {
-    const suggestions = [...this.deps.getActiveSuggestions(workspaceId)].sort((a: Any, b: Any) => {
+  private async buildSuggestions(workspaceId: string): Promise<BriefingSection> {
+    const activeSuggestions = await this.deps.getActiveSuggestions(workspaceId);
+    const suggestions = [...activeSuggestions].sort((a: Any, b: Any) => {
       const urgencyScore = (value: string | undefined) =>
         value === "high" ? 3 : value === "medium" ? 2 : value === "low" ? 1 : 0;
       const deliveryScore = (value: string | undefined) =>
@@ -587,8 +592,8 @@ export class DailyBriefingService {
     }
   }
 
-  private buildPriorities(workspaceId: string): BriefingSection {
-    const raw = this.deps.getPriorities(workspaceId);
+  private async buildPriorities(workspaceId: string): Promise<BriefingSection> {
+    const raw = await this.deps.getPriorities(workspaceId);
     if (!raw) return { type: "priority_review", title: "Priorities", items: [], enabled: true };
     const lines = this.parsePriorityLines(raw);
     const ranked = lines
@@ -635,8 +640,8 @@ export class DailyBriefingService {
     return { type: "upcoming_jobs", title: "Upcoming Scheduled Jobs", items, enabled: true };
   }
 
-  private buildOpenLoops(workspaceId: string): BriefingSection {
-    const loops = this.deps.getOpenLoops(workspaceId);
+  private async buildOpenLoops(workspaceId: string): Promise<BriefingSection> {
+    const loops = await this.deps.getOpenLoops(workspaceId);
     const items: BriefingItem[] = this.dedupeBriefingItems(
       loops.slice(0, 20).map((line: string) => ({
         label: line.replace(/^[-*]+\s*/, "").trim(),
@@ -839,10 +844,10 @@ export class DailyBriefingService {
 
   // ── Config management ───────────────────────────────────────────
 
-  getConfig(workspaceId: string): BriefingConfig {
+  async getConfig(workspaceId: string): Promise<BriefingConfig> {
     const cached = this.configs.get(workspaceId);
     if (cached) return cached;
-    const loaded = this.loadConfigFromDB(workspaceId);
+    const loaded = await this.loadConfigFromDB(workspaceId);
     if (loaded) {
       this.configs.set(workspaceId, loaded);
       return loaded;
@@ -850,9 +855,15 @@ export class DailyBriefingService {
     return { ...DEFAULT_BRIEFING_CONFIG };
   }
 
-  saveConfig(workspaceId: string, config: BriefingConfig): void {
+  /** Workspaces with a stored briefing config. */
+  async configuredWorkspaceIds(): Promise<string[]> {
+    if (!this.db) return [];
+    return serviceStatements(this.db).unit("briefing_configuredWorkspaceIds", []);
+  }
+
+  async saveConfig(workspaceId: string, config: BriefingConfig): Promise<void> {
     this.configs.set(workspaceId, config);
-    this.saveConfigToDB(workspaceId, config);
+    await this.saveConfigToDB(workspaceId, config);
   }
 
   // ── Text formatting ─────────────────────────────────────────────
@@ -913,84 +924,41 @@ export class DailyBriefingService {
     }
   }
 
-  private saveBriefingToDB(briefing: Briefing): void {
+  private async saveBriefingToDB(briefing: Briefing): Promise<void> {
     if (!this.db) return;
     try {
-      this.db
-        .prepare(
-          `INSERT OR REPLACE INTO briefings (id, workspace_id, generated_at, sections, delivered)
-         VALUES (?, ?, ?, ?, ?)`,
-        )
-        .run(
-          briefing.id,
-          briefing.workspaceId,
-          briefing.generatedAt,
-          JSON.stringify(briefing.sections),
-          briefing.delivered ? 1 : 0,
-        );
+      await serviceStatements(this.db).unit("briefing_saveBriefing", [briefing]);
     } catch (err) {
       this.log("[DailyBriefing] DB save error:", err);
     }
   }
 
-  private loadLatestFromDB(workspaceId: string): Briefing | undefined {
+  private async loadLatestFromDB(workspaceId: string): Promise<Briefing | undefined> {
     if (!this.db) return undefined;
     try {
-      const row = this.db
-        .prepare(
-          "SELECT * FROM briefings WHERE workspace_id = ? ORDER BY generated_at DESC LIMIT 1",
-        )
-        .get(workspaceId) as Any;
-      if (!row) return undefined;
-      return {
-        id: row.id,
-        workspaceId: row.workspace_id,
-        generatedAt: row.generated_at,
-        sections: JSON.parse(row.sections || "[]"),
-        delivered: !!row.delivered,
-      };
+      return await serviceStatements(this.db).unit("briefing_latestBriefing", [workspaceId]);
     } catch {
       return undefined;
     }
   }
 
-  private saveConfigToDB(workspaceId: string, config: BriefingConfig): void {
+  private async saveConfigToDB(workspaceId: string, config: BriefingConfig): Promise<void> {
     if (!this.db) return;
     try {
-      this.db
-        .prepare(
-          `INSERT OR REPLACE INTO briefing_config
-         (workspace_id, schedule_time, enabled_sections, delivery_channel_type, delivery_channel_id, enabled, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          workspaceId,
-          config.scheduleTime,
-          JSON.stringify(config.enabledSections),
-          config.deliveryChannelType || null,
-          config.deliveryChannelId || null,
-          config.enabled ? 1 : 0,
-          Date.now(),
-        );
+      await serviceStatements(this.db).unit("briefing_saveConfig", [
+        workspaceId,
+        config,
+        Date.now(),
+      ]);
     } catch (err) {
       this.log("[DailyBriefing] Config save error:", err);
     }
   }
 
-  private loadConfigFromDB(workspaceId: string): BriefingConfig | null {
+  private async loadConfigFromDB(workspaceId: string): Promise<BriefingConfig | null> {
     if (!this.db) return null;
     try {
-      const row = this.db
-        .prepare("SELECT * FROM briefing_config WHERE workspace_id = ?")
-        .get(workspaceId) as Any;
-      if (!row) return null;
-      return {
-        scheduleTime: row.schedule_time || "08:00",
-        enabledSections: JSON.parse(row.enabled_sections || "{}"),
-        deliveryChannelType: row.delivery_channel_type || undefined,
-        deliveryChannelId: row.delivery_channel_id || undefined,
-        enabled: !!row.enabled,
-      };
+      return await serviceStatements(this.db).unit("briefing_config", [workspaceId]);
     } catch {
       return null;
     }

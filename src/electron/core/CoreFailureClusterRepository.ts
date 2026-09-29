@@ -4,7 +4,7 @@ import type { CoreFailureCluster, ListCoreFailureClustersRequest } from "../../s
 
 type Any = any;
 
-export class CoreFailureClusterRepository {
+export class CoreFailureClusterStore {
   constructor(private readonly db: Database.Database) {}
 
   create(input: Omit<CoreFailureCluster, "id"> & { id?: string }): CoreFailureCluster {

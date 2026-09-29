@@ -26,7 +26,7 @@ const nativeSqliteAvailable = await import("better-sqlite3")
 
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
-describeWithSqlite("ChannelSpecializationRepository", () => {
+describeWithSqlite("ChannelSpecializationStore", () => {
   let tmpDir: string;
   let previousUserDataDir: string | undefined;
   let manager: import("../schema").DatabaseManager;
@@ -57,9 +57,9 @@ describeWithSqlite("ChannelSpecializationRepository", () => {
 
   function seed() {
     const db = manager.getDatabase();
-    const workspaceRepo = new repos.WorkspaceRepository(db);
-    const channelRepo = new repos.ChannelRepository(db);
-    const specializationRepo = new repos.ChannelSpecializationRepository(db);
+    const workspaceRepo = new repos.WorkspaceStore(db);
+    const channelRepo = new repos.ChannelStore(db);
+    const specializationRepo = new repos.ChannelSpecializationStore(db);
     const workspace = workspaceRepo.create("Workspace", path.join(tmpDir, "workspace"), {
       read: true,
       write: true,

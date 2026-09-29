@@ -17,7 +17,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-export class CoreHarnessExperimentRepository {
+export class CoreHarnessExperimentStore {
   constructor(private readonly db: Database.Database) {}
 
   createExperiment(

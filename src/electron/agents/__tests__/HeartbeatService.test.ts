@@ -258,18 +258,18 @@ describe("HeartbeatService v3", () => {
     });
   });
 
-  it("merges repeated identical hook signals into one compressed ledger entry", () => {
+  it("merges repeated identical hook signals into one compressed ledger entry", async () => {
     createAgent("agent-1");
     const service = createService();
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "awareness_signal",
       source: "hook",
       fingerprint: "same-signal",
       reason: "Files changed",
     });
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "awareness_signal",
       source: "hook",
@@ -277,7 +277,7 @@ describe("HeartbeatService v3", () => {
       reason: "Files changed",
     });
 
-    const status = service.getStatus("agent-1");
+    const status = await service.getStatus("agent-1");
     expect(status?.compressedSignalCount).toBe(2);
     expect(status?.deferred?.active).toBeUndefined();
     expect(heartbeatEvents.map((event) => event.type)).toContain("signal_merged");
@@ -289,7 +289,7 @@ describe("HeartbeatService v3", () => {
       hasActiveForegroundTask: () => true,
     });
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "mentions",
       source: "hook",
@@ -302,7 +302,7 @@ describe("HeartbeatService v3", () => {
     await service.start();
     await vi.advanceTimersByTimeAsync(6_000);
 
-    const status = service.getStatus("agent-1");
+    const status = await service.getStatus("agent-1");
     expect(createdTasks).toHaveLength(0);
     expect(status?.deferred?.active).toBe(true);
     expect((status?.deferred?.compressedSignalCount || 0) >= 1).toBe(true);
@@ -378,7 +378,7 @@ describe("HeartbeatService v3", () => {
     createAgent("agent-1", { heartbeatProfile: "observer" });
     const service = createService();
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "awareness_signal",
       source: "hook",
@@ -404,7 +404,7 @@ describe("HeartbeatService v3", () => {
     await service.start();
     await vi.advanceTimersByTimeAsync(6_000);
 
-    const status = service.getStatus("agent-1");
+    const status = await service.getStatus("agent-1");
     expect(status?.checklistDueCount).toBe(0);
     expect(recordedActivities).toHaveLength(0);
     expect(createdTasks).toHaveLength(0);
@@ -434,7 +434,7 @@ describe("HeartbeatService v3", () => {
     await service.start();
     await vi.advanceTimersByTimeAsync(6_000);
 
-    const status = service.getStatus("agent-1");
+    const status = await service.getStatus("agent-1");
     expect(status?.checklistDueCount).toBe(1);
     expect(
       recordedActivities.some(
@@ -451,7 +451,7 @@ describe("HeartbeatService v3", () => {
     });
     const service = createService();
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "urgent_interrupt",
       source: "hook",
@@ -465,7 +465,7 @@ describe("HeartbeatService v3", () => {
     await vi.advanceTimersByTimeAsync(6_000);
     expect(createdTasks).toHaveLength(1);
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "urgent_interrupt",
       source: "hook",
@@ -482,11 +482,13 @@ describe("HeartbeatService v3", () => {
   it("preserves signals that are refreshed while a dispatch is still in flight", async () => {
     createAgent("agent-1", { heartbeatProfile: "dispatcher" });
     let releaseTask: (() => void) | null = null;
+    let dispatchStarted = false;
     const taskGate = new Promise<void>((resolve) => {
       releaseTask = resolve;
     });
     const service = createService({
       createTask: async (workspaceId, prompt, title, agentRoleId, options) => {
+        dispatchStarted = true;
         await taskGate;
         const task: Task = {
           id: `task-${createdTasks.length + 1}`,
@@ -505,7 +507,7 @@ describe("HeartbeatService v3", () => {
       },
     });
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "urgent_interrupt",
       source: "hook",
@@ -516,9 +518,11 @@ describe("HeartbeatService v3", () => {
     });
 
     const firstDispatch = service.triggerHeartbeat("agent-1");
-    await Promise.resolve();
+    // The dispatch reads the agent through the async storage facade before it creates the
+    // task; submit the refresh once the dispatch is in flight.
+    await vi.waitFor(() => expect(dispatchStarted).toBe(true));
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "urgent_interrupt",
       source: "hook",
@@ -531,7 +535,7 @@ describe("HeartbeatService v3", () => {
     releaseTask?.();
     await firstDispatch;
 
-    const status = service.getStatus("agent-1");
+    const status = await service.getStatus("agent-1");
     expect((status?.compressedSignalCount || 0) >= 1).toBe(true);
   });
 
@@ -574,7 +578,7 @@ describe("HeartbeatService v3", () => {
       }),
     );
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "urgent_interrupt",
       source: "hook",
@@ -588,7 +592,7 @@ describe("HeartbeatService v3", () => {
     await vi.advanceTimersByTimeAsync(6_000);
 
     expect(createdTasks).toHaveLength(0);
-    expect(service.getStatus("agent-1")?.dispatchesToday).toBe(1);
+    expect((await service.getStatus("agent-1"))?.dispatchesToday).toBe(1);
   });
 
   it("does not leave a stale in-flight dispatch after a thrown dispatch failure", async () => {
@@ -640,7 +644,7 @@ describe("HeartbeatService v3", () => {
     expect(result.pulseOutcome).toBe("idle");
     expect(result.taskCreated).toBeUndefined();
     expect(createdTasks).toHaveLength(0);
-    expect(service.getStatus("agent-1")?.lastPulseResult).toBe("idle");
+    expect((await service.getStatus("agent-1"))?.lastPulseResult).toBe("idle");
     expect(heartbeatEvents.some((event) => event.type === "dispatch_skipped")).toBe(true);
   });
 
@@ -656,7 +660,7 @@ describe("HeartbeatService v3", () => {
       },
     });
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       workspaceId: "workspace-1",
       signalFamily: "memory_drift",
@@ -684,7 +688,7 @@ describe("HeartbeatService v3", () => {
       runMemoryDreaming,
     });
 
-    service.submitHeartbeatSignal({
+    await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       workspaceId: "workspace-1",
       signalFamily: "memory_drift",
@@ -712,16 +716,16 @@ describe("HeartbeatService v3", () => {
         workspaceId?: string;
         runType: "pulse" | "dispatch";
         status?: "running" | "queued" | "completed" | "failed" | "cancelled";
-      }) => { id: string };
-      get: (runId: string) => { status?: string; error?: string; completedAt?: number };
+      }) => Promise<{ id: string }>;
+      get: (runId: string) => Promise<{ status?: string; error?: string; completedAt?: number }>;
     };
-    const staleRun = runRepo.create({
+    const staleRun = await runRepo.create({
       agentRoleId: "agent-1",
       workspaceId: "workspace-1",
       runType: "dispatch",
       status: "running",
     });
-    const issueRun = runRepo.create({
+    const issueRun = await runRepo.create({
       issueId: "issue-1",
       agentRoleId: "agent-1",
       workspaceId: "workspace-1",
@@ -731,8 +735,8 @@ describe("HeartbeatService v3", () => {
 
     await service.start();
 
-    const updatedStaleRun = runRepo.get(staleRun.id);
-    const updatedIssueRun = runRepo.get(issueRun.id);
+    const updatedStaleRun = await runRepo.get(staleRun.id);
+    const updatedIssueRun = await runRepo.get(issueRun.id);
 
     expect(updatedStaleRun.status).toBe("failed");
     expect(updatedStaleRun.error).toContain("restarted");
@@ -740,17 +744,17 @@ describe("HeartbeatService v3", () => {
     expect(updatedIssueRun.status).toBe("running");
   });
 
-  it("persists merged signal state across service restarts", () => {
+  it("persists merged signal state across service restarts", async () => {
     createAgent("agent-1");
     const first = createService();
-    first.submitHeartbeatSignal({
+    await first.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "awareness_signal",
       source: "hook",
       fingerprint: "persisted",
       reason: "Persistent signal",
     });
-    first.submitHeartbeatSignal({
+    await first.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       signalFamily: "awareness_signal",
       source: "hook",
@@ -759,7 +763,7 @@ describe("HeartbeatService v3", () => {
     });
 
     const second = createService();
-    const status = second.getStatus("agent-1");
+    const status = await second.getStatus("agent-1");
     expect((status?.compressedSignalCount || 0) >= 2).toBe(true);
   });
 });

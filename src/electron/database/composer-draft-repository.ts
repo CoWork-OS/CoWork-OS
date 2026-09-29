@@ -19,7 +19,7 @@ type ComposerDraftRow = {
   expires_at: number | null;
 };
 
-export class ComposerDraftRepository {
+export class ComposerDraftStore {
   constructor(private readonly db: Database.Database) {}
 
   get(draftKey: string, owner?: ComposerDraftGetRequest): ComposerDraft | null {

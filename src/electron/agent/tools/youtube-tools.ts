@@ -91,8 +91,10 @@ export class YouTubeTools {
     return result;
   }
 
-  searchSegments(input: { query: string; videoIds?: string[]; limit?: number }) {
-    const result = new YouTubeQuestionService(this.workspaceId, this.workspacePath).search(input);
+  async searchSegments(input: { query: string; videoIds?: string[]; limit?: number }) {
+    const result = await new YouTubeQuestionService(this.workspaceId, this.workspacePath).search(
+      input,
+    );
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "youtube_search_ingested_segments",
       resultCount: result.length,
@@ -100,10 +102,10 @@ export class YouTubeTools {
     return { ok: true, results: result };
   }
 
-  listVideos(input: { limit?: number } = {}) {
+  async listVideos(input: { limit?: number } = {}) {
     return {
       ok: true,
-      videos: YouTubeTranscriptStore.listVideos(this.workspaceId, input.limit ?? 50),
+      videos: await YouTubeTranscriptStore.listVideos(this.workspaceId, input.limit ?? 50),
     };
   }
 

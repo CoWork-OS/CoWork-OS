@@ -7,7 +7,7 @@ import type {
   WorkContextState,
   WorkContextUpdateInput,
 } from "../../shared/types";
-import { WorkspaceRepository } from "../database/repositories";
+
 import { WorkContextRepository, workContextMemberRole } from "./WorkContextRepository";
 import Database from "better-sqlite3";
 
@@ -23,12 +23,16 @@ function normalizeId(value: unknown, label: string): string {
   return id;
 }
 
-export class WorkContextService {
-  private readonly workspaceRepo: WorkspaceRepository;
+/**
+ * WorkContexts (async SQLite migration plan, DB6): synchronous logic over the connection,
+ * run as services-domain units behind the async `WorkContextService` facade
+ * (`workspaces-repository-facades.ts`). Each method's checks and writes share one unit, so
+ * `ensureForTask` and `ensureForManagedSession` cannot create a context twice.
+ */
+export class WorkContextStore {
   private readonly repo: WorkContextRepository;
 
   constructor(private readonly db: Database.Database) {
-    this.workspaceRepo = new WorkspaceRepository(db);
     this.repo = new WorkContextRepository(db);
   }
 
@@ -41,6 +45,10 @@ export class WorkContextService {
 
   get(contextId: string): WorkContext | undefined {
     return this.repo.findById(normalizeId(contextId, "contextId"));
+  }
+
+  findByTaskId(taskId: string): WorkContext | undefined {
+    return this.repo.findByTaskId(taskId);
   }
 
   create(input: WorkContextCreateInput): WorkContext {
@@ -147,7 +155,7 @@ export class WorkContextService {
   }
 
   private assertWorkspace(workspaceId: string): void {
-    if (!this.workspaceRepo.findById(workspaceId))
+    if (!this.db.prepare("SELECT id FROM workspaces WHERE id = ?").get(workspaceId))
       throw new Error(`Workspace not found: ${workspaceId}`);
   }
 

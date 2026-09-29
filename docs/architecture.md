@@ -273,6 +273,34 @@ inspection. This is application-profile isolation, not an operating-system sandb
 scripted-provider smoke exercises native file tools without measuring model quality. Commands,
 prerequisites and rendering limits are documented in [Disposable evaluation battery](harness-eval-battery.md).
 
+## Database Ownership
+
+SQLite is owned by worker threads by default in the desktop app, the daemon and the CLI.
+
+- **Write worker:**
+  - One per runtime (`src/electron/database/async/`). It runs every mutation for the timeline, reports, settings, storage, services, memory, mailbox and control-plane domains.
+  - A write is a catalogued unit: one IMMEDIATE transaction, so a read-then-write is never interleaved with another writer.
+  - A reply means the write committed. If the worker exits before replying, the outcome is reported as `unknown`, and the caller reconciles against durable state instead of replaying the write.
+- **Read workers:**
+  - The reporting reader runs heavy reports and the mailbox reads.
+  - The memory FTS worker runs lexical recall.
+  - Neither falls back to host SQL or returns an empty success.
+- **Host thread:**
+  - The host bootstraps and migrates the schema, then starts the workers.
+  - It keeps only the reviewed exceptions listed in `scripts/qa/sqlite-audit-rules.json`, each with an owner: the daemon hot path, synchronous settings saves and the vault commit, service schema DDL, and one-time startup migrations.
+  - The daemon's milestone and timeline commits go through `TimelineWriter`, which commits in the worker.
+- **Backend choice:**
+  - The backend is chosen once per run (`DATABASE_WORKER_ROLLOUT`, `src/electron/database/async/runtime.ts`).
+  - `COWORK_DB_WORKER=0` restarts on the host backend. Setting a domain flag (for example `COWORK_DB_WORKER_SERVICES=0`) to `0` keeps only that domain on the host.
+  - Nothing switches backend mid-run. After a worker failure, operations fail explicitly.
+- **Rollback:**
+  - Both backends use the same schema.
+  - To roll back: quit the app so the worker drains, then restart it with the kill switch.
+  - Never delete the profile database to recover.
+- **Enforcement:** `npm run qa:db:ratchet` and `npm run qa:db:audit` fail on new host SQL outside unit stores, on files covered only by backstop rules, and on rules without an owner.
+
+Design, phases and evidence: [async SQLite migration plan](async-sqlite-migration-plan-2026-09-27.md) and [baseline](async-sqlite-db0-baseline-2026-09-27.md).
+
 ## Update Rule
 
 If defaults, behavior, or architecture change, update this file in the same PR.

@@ -1,6 +1,22 @@
+import { serviceStatements } from "../database/service-statements";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
+import {
+  SecureSettingsRepository,
+  SecureSettingsWriteRefusedError,
+} from "../database/SecureSettingsRepository";
+import type { SecureSettingsRecord } from "../database/secure-settings-sql";
+import { settingsCommitClientFor } from "../database/secure-settings-commit-route";
+import {
+  ensurePulseSchema,
+  pulseClaim,
+  type PulseClaimRequest,
+  type PulseClaimResult,
+  pulseCommit,
+  type PulseCommitRequest,
+  type PulseCommitResult,
+  type PulseOp,
+} from "./pulse-store-sql";
 import {
   DEFAULT_PULSE_ENDPOINT,
   PULSE_CONSENT_VERSION,
@@ -55,11 +71,21 @@ export interface PulsePrivateSettings {
   pendingDeletion?: PulsePendingDeletion;
 }
 
-/** Storage for the encrypted Pulse settings record. Injected in tests. */
+/**
+ * The Pulse settings record: read and encoded on the host (DB5). Commits go through the
+ * service's backend, together with the consent windows and outbox, under the
+ * settings row revision the read returned. Injected in tests.
+ */
 export interface PulseSettingsStore {
-  load(): PulsePrivateSettings | null | undefined;
-  /** Throws PulseSettingsWriteRefusedError when the write cannot be persisted. */
-  save(settings: PulsePrivateSettings): void;
+  /** The stored settings and the settings row revision they were read at. */
+  read(): {
+    settings: PulsePrivateSettings | null | undefined;
+    revision: number | null;
+    /** Set when the stored row exists but cannot be read; a write backs it up. */
+    unreadableStatus?: string;
+  };
+  /** Encrypt settings for storage. Throws PulseSettingsWriteRefusedError when refused. */
+  encode(settings: PulsePrivateSettings): SecureSettingsRecord;
   /** Whether saves are currently refused, so a send is not attempted it cannot record. */
   refusesWrites?(): boolean;
 }
@@ -102,17 +128,32 @@ class PulseClosedError extends Error {
  * transaction and is reported to the caller instead.
  */
 export class PulseSettingsWriteRefusedError extends Error {
+  readonly code = SETTINGS_WRITE_REFUSED;
   constructor() {
     super(SETTINGS_WRITE_REFUSED);
   }
 }
 
 const secureSettingsStore: PulseSettingsStore = {
-  load: () => SecureSettingsRepository.getInstance().load<PulsePrivateSettings>("pulse"),
-  save: (settings) => {
-    const repository = SecureSettingsRepository.getInstance();
-    if (repository.refusesWrites()) throw new PulseSettingsWriteRefusedError();
-    repository.save("pulse", settings);
+  read: () => {
+    const record = SecureSettingsRepository.getInstance().readRecord<PulsePrivateSettings>("pulse");
+    return {
+      settings: record.data,
+      revision: record.revision,
+      ...(record.status !== "success" && record.status !== "not_found"
+        ? { unreadableStatus: record.status }
+        : {}),
+    };
+  },
+  encode: (settings) => {
+    try {
+      return SecureSettingsRepository.getInstance().encryptRecord(settings);
+    } catch (error) {
+      if (error instanceof SecureSettingsWriteRefusedError) {
+        throw new PulseSettingsWriteRefusedError();
+      }
+      throw error;
+    }
   },
   refusesWrites: () => {
     try {
@@ -122,6 +163,40 @@ const secureSettingsStore: PulseSettingsStore = {
     }
   },
 };
+
+/** The settings and table state one decision was read from. */
+interface PulseRead {
+  settings: PulsePrivateSettings;
+  revision: number | null;
+  /** The read applied the one-time upgrade in memory; it still has to be persisted. */
+  upgraded: boolean;
+  unreadableStatus?: string;
+}
+
+/** What a decision wants to change: new settings, table ops, and whether it is a decision. */
+interface PulseDecision<T> {
+  outcome: T;
+  next?: PulsePrivateSettings;
+  ops?: PulseOp[];
+  /** A user decision: increments the consent revision. */
+  bump?: boolean;
+}
+
+const MAX_COMMIT_ATTEMPTS = 5;
+const SETTINGS_CONFLICT = "settings_conflict";
+
+/** A decision that could not run: settings refused the write, or kept conflicting. */
+interface SettingsFailure {
+  settingsFailure: string;
+}
+
+function isSettingsFailure(value: unknown): value is SettingsFailure {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as SettingsFailure).settingsFailure === "string"
+  );
+}
 
 function clampCount(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value || 0);
@@ -297,74 +372,68 @@ export class PulseService {
     this.closed = true;
   }
 
-  getSettings(): PulsePublicSettings {
+  getSettings(): Promise<PulsePublicSettings> {
     return this.toPublic(this.readState());
   }
 
   async setEnabled(enabled: boolean): Promise<PulseMutationResult> {
-    const outcome = this.transactDecision(() => {
-      const settings = this.loadState();
-      if (enabled && settings.pendingDeletion) return "deletion_pending" as const;
+    const outcome = await this.decide((settings, now) => {
+      if (enabled && settings.pendingDeletion) return { outcome: "deletion_pending" as const };
       if ((settings.consentState === "enabled") === enabled && settings.consentState !== "unset") {
-        return "unchanged" as const;
+        return { outcome: "unchanged" as const };
       }
-      const now = this.now();
+      const ops: PulseOp[] = [{ kind: "closeConsentWindows", now }];
       if (enabled) {
         settings.consentState = "enabled";
-        if (!settings.installationId || !settings.deletionToken) this.createIdentity(settings, now);
+        if (!settings.installationId || !settings.deletionToken) {
+          ops.push(this.createIdentity(settings, now));
+        }
         settings.enabledAt = now;
         settings.disabledAt = undefined;
-        this.closeConsentWindows(now);
-        this.db.prepare("INSERT INTO pulse_consent_windows (started_at) VALUES (?)").run(now);
+        ops.push({ kind: "openConsentWindow", now });
       } else {
         settings.consentState = "disabled";
         settings.disabledAt = now;
-        this.closeConsentWindows(now);
         // Disabling is an immediate stop: do not retain an unsent package for a
         // later re-enable decision.
-        this.db.prepare("DELETE FROM pulse_outbox").run();
+        ops.push({ kind: "clearOutbox" });
       }
-      this.commitDecision(settings);
-      return "changed" as const;
+      return { outcome: "changed" as const, next: settings, ops, bump: true };
     });
-    if (outcome === SETTINGS_WRITE_REFUSED) {
-      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    if (isSettingsFailure(outcome)) {
+      return { success: false, settings: await this.safePublic(), error: outcome.settingsFailure };
     }
     if (!enabled) this.abortActiveDelivery();
+    this.previewCache = null;
     if (outcome === "deletion_pending") {
-      return { success: false, settings: this.getSettings(), error: "deletion_pending" };
+      return { success: false, settings: await this.getSettings(), error: "deletion_pending" };
     }
     if (outcome === "changed" && enabled) void this.flushSafely();
-    return { success: true, settings: this.getSettings() };
+    return { success: true, settings: await this.getSettings() };
   }
 
   async resetIdentity(): Promise<PulseMutationResult> {
-    const outcome = this.transactDecision(() => {
-      const settings = this.loadState();
-      if (settings.pendingDeletion) return "deletion_pending" as const;
-      const now = this.now();
-      this.createIdentity(settings, now);
+    const outcome = await this.decide((settings, now) => {
+      if (settings.pendingDeletion) return { outcome: "deletion_pending" as const };
+      const ops: PulseOp[] = [this.createIdentity(settings, now), { kind: "clearOutbox" }];
       settings.lastSentAt = undefined;
       settings.lastAttemptAt = undefined;
       settings.lastErrorCode = undefined;
-      this.db.prepare("DELETE FROM pulse_outbox").run();
       // A new identity starts its own consent window: days consented under the old
       // identity must never be reported under the new one.
-      this.closeConsentWindows(now);
-      if (settings.consentState === "enabled") {
-        this.db.prepare("INSERT INTO pulse_consent_windows (started_at) VALUES (?)").run(now);
-      }
-      this.commitDecision(settings);
-      return "changed" as const;
+      ops.push({ kind: "closeConsentWindows", now });
+      if (settings.consentState === "enabled") ops.push({ kind: "openConsentWindow", now });
+      return { outcome: "changed" as const, next: settings, ops, bump: true };
     });
-    if (outcome === SETTINGS_WRITE_REFUSED) {
-      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    if (isSettingsFailure(outcome)) {
+      return { success: false, settings: await this.safePublic(), error: outcome.settingsFailure };
     }
     this.abortActiveDelivery();
+    this.previewCache = null;
     if (outcome === "deletion_pending") {
-      return { success: false, settings: this.getSettings(), error: "deletion_pending" };
+      return { success: false, settings: await this.getSettings(), error: "deletion_pending" };
     }
-    return { success: true, settings: this.getSettings() };
+    return { success: true, settings: await this.getSettings() };
   }
 
   /**
@@ -421,11 +490,11 @@ export class PulseService {
     this.activeAbort = controller;
     let context: DeliveryContext | null = null;
     try {
-      const prepared = this.transactDecision(() => this.prepareDelivery());
-      if (prepared === SETTINGS_WRITE_REFUSED) {
-        return this.sendResult("error", SETTINGS_WRITE_REFUSED);
+      const prepared = await this.prepareDelivery();
+      if (isSettingsFailure(prepared)) {
+        return await this.sendResult("error", prepared.settingsFailure);
       }
-      if (typeof prepared === "string") return this.sendResult(prepared);
+      if (typeof prepared === "string") return await this.sendResult(prepared);
       context = prepared;
 
       if (!context.enrolled) {
@@ -444,10 +513,10 @@ export class PulseService {
           controller.signal,
         );
         if (!enrolled.ok && enrolled.status !== 409) throw new Error(`http_${enrolled.status}`);
-        const recorded = this.commitIfCurrent(context, (settings) => {
+        const recorded = await this.commitIfCurrent(context, (settings) => {
           settings.enrolled = true;
         });
-        if (!recorded) return this.sendResult("cancelled_by_state_change");
+        if (!recorded) return await this.sendResult("cancelled_by_state_change");
       }
 
       const response = await this.request(
@@ -465,116 +534,142 @@ export class PulseService {
       );
       if (!response.ok) throw new Error(`http_${response.status}`);
       const delivered = context;
-      const recorded = this.commitIfCurrent(delivered, (settings) => {
+      const recorded = await this.commitIfCurrent(delivered, (settings) => {
         const now = this.now();
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO pulse_sent_days
-             (package_id, installation_id, period_start, acknowledged_at) VALUES (?, ?, ?, ?)`,
-          )
-          .run(delivered.packageId, delivered.installationId, delivered.periodStart, now);
-        this.db.prepare("DELETE FROM pulse_outbox WHERE package_id = ?").run(delivered.packageId);
         settings.lastSentAt = now;
         settings.lastAttemptAt = now;
         settings.lastErrorCode = undefined;
+        return [
+          {
+            kind: "recordDelivered",
+            packageId: delivered.packageId,
+            installationId: delivered.installationId,
+            periodStart: delivered.periodStart,
+            now,
+          },
+        ];
       });
-      return this.sendResult(recorded ? "sent" : "cancelled_by_state_change");
+      return await this.sendResult(recorded ? "sent" : "cancelled_by_state_change");
     } catch (error) {
       if (!context) throw error;
       // Aborted by a decision or by shutdown: the outcome belongs to that change.
-      if (controller.signal.aborted) return this.sendResult("cancelled_by_state_change");
+      if (controller.signal.aborted) return await this.sendResult("cancelled_by_state_change");
       const code = this.errorCode(error);
       const failed = context;
       // An ambiguous failure (e.g. a timeout after the server committed) keeps the
       // package queued; the collector deduplicates the identical retry.
-      const recorded = this.commitIfCurrent(failed, (settings) => {
+      const recorded = await this.commitIfCurrent(failed, (settings) => {
         settings.lastErrorCode = code;
         settings.lastAttemptAt = this.now();
         if (code === "http_409") settings.enrolled = false;
-        this.db
-          .prepare("UPDATE pulse_outbox SET attempt_count = attempt_count + 1 WHERE package_id = ?")
-          .run(failed.packageId);
+        return [{ kind: "incrementAttempt", packageId: failed.packageId }];
       });
       return recorded
-        ? this.sendResult("error", code)
-        : this.sendResult("cancelled_by_state_change");
+        ? await this.sendResult("error", code)
+        : await this.sendResult("cancelled_by_state_change");
     } finally {
       if (this.activeAbort === controller) this.activeAbort = null;
     }
   }
 
-  /** Runs inside a transaction. Queues the eligible day and captures what to send. */
-  private prepareDelivery(): DeliveryContext | PulseSendOutcome {
-    const settings = this.loadState();
-    if (
-      settings.pendingDeletion ||
-      settings.consentState !== "enabled" ||
-      !settings.installationId ||
-      !settings.deletionToken
-    ) {
-      return "no_eligible_day";
+  /**
+   * Queue the eligible day and capture what to send. The package is built from the
+   * profile's aggregates before the claim, outside any transaction; the claim queues it
+   * only if the day is still unsent and the settings are unchanged since they were read.
+   */
+  private async prepareDelivery(): Promise<DeliveryContext | PulseSendOutcome | SettingsFailure> {
+    try {
+      return await this.claimDelivery();
+    } catch (error) {
+      if (error instanceof PulseSettingsWriteRefusedError) return { settingsFailure: error.code };
+      throw error;
     }
-    const installationId = settings.installationId;
-    const day = utcDayBounds(this.now());
-    const periodStart = new Date(day.start).toISOString();
-    const dayPackageId = packageIdFor(installationId, periodStart);
+  }
 
-    // Rows from another identity, or already acknowledged, are never sendable.
-    this.db
-      .prepare(
-        `DELETE FROM pulse_outbox WHERE installation_id IS NOT ?
-         OR package_id IN (SELECT package_id FROM pulse_sent_days)`,
-      )
-      .run(installationId);
-    if (!this.receiptFor(dayPackageId) && this.hasFullDayConsent(settings, day)) {
-      const pulsePackage = this.buildPackage(installationId);
-      this.db
-        .prepare(
-          `INSERT OR IGNORE INTO pulse_outbox
-           (package_id, installation_id, period_start, payload_json, created_at, attempt_count)
-           VALUES (?, ?, ?, ?, ?, 0)`,
-        )
-        .run(
-          pulsePackage.packageId,
-          installationId,
-          pulsePackage.period.start,
-          JSON.stringify(pulsePackage),
-          this.now(),
-        );
+  private async claimDelivery(): Promise<DeliveryContext | PulseSendOutcome | SettingsFailure> {
+    for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt += 1) {
+      const read = this.readPulse();
+      if (read.upgraded) {
+        // Persist the one-time upgrade first, then decide from the stored record.
+        const persisted = await this.commitRead(read, read.settings, []);
+        if (isSettingsFailure(persisted)) return persisted;
+        continue;
+      }
+      const settings = read.settings;
+      if (
+        settings.pendingDeletion ||
+        settings.consentState !== "enabled" ||
+        !settings.installationId ||
+        !settings.deletionToken
+      ) {
+        return "no_eligible_day";
+      }
+      const installationId = settings.installationId;
+      const now = this.now();
+      const day = utcDayBounds(now);
+      const periodStart = new Date(day.start).toISOString();
+      const dayPackageId = packageIdFor(installationId, periodStart);
+      let candidate: PulseClaimRequest["candidate"];
+      if (
+        !(await this.reports().unit("pulseReport_receiptFor", [dayPackageId])) &&
+        (await this.hasFullDayConsent(settings, day))
+      ) {
+        const pulsePackage = await this.buildPackage(installationId);
+        candidate = {
+          packageId: pulsePackage.packageId,
+          periodStart: pulsePackage.period.start,
+          payloadJson: JSON.stringify(pulsePackage),
+          createdAt: now,
+        };
+      }
+      const claimed = await this.backendClaim({
+        expectedRevision: read.revision,
+        installationId,
+        candidate,
+        dayPackageId,
+      });
+      if (claimed.status === "conflict") continue;
+      if (claimed.status !== "claimed") return claimed.status;
+      return {
+        revision: settings.revision ?? 0,
+        installationId,
+        deletionToken: settings.deletionToken,
+        endpoint: this.identityEndpoint(settings),
+        enrolled: Boolean(settings.enrolled),
+        packageId: claimed.head.package_id,
+        periodStart: claimed.head.period_start,
+        payload: claimed.head.payload_json,
+      };
     }
-    const head = this.queueHead(installationId);
-    if (!head) return this.receiptFor(dayPackageId) ? "already_sent" : "no_eligible_day";
-
-    return {
-      revision: settings.revision ?? 0,
-      installationId,
-      deletionToken: settings.deletionToken,
-      endpoint: this.identityEndpoint(settings),
-      enrolled: Boolean(settings.enrolled),
-      packageId: head.package_id,
-      periodStart: head.period_start,
-      payload: head.payload_json,
-    };
+    return { settingsFailure: SETTINGS_CONFLICT };
   }
 
   /**
    * Apply a delivery result to the latest settings, but only while the captured state
    * still holds. Returns false (writing nothing) when the user changed their decision,
-   * the identity rotated, or the service closed.
+   * the identity rotated, or the service closed. `apply`
+   * edits fields on a fresh copy and returns the table changes to commit with them.
    */
-  private commitIfCurrent(
+  private async commitIfCurrent(
     context: DeliveryContext,
-    apply: (settings: PulsePrivateSettings) => void,
-  ): boolean {
+    apply: (settings: PulsePrivateSettings) => PulseOp[] | void,
+  ): Promise<boolean> {
     if (this.stopping || this.closed) return false;
     try {
-      return this.transact(() => {
-        if (!this.stillAuthorized(context)) return false;
-        const settings = this.loadState();
-        apply(settings);
-        this.store.save(settings);
-        return true;
-      });
+      for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt += 1) {
+        const read = this.readPulse();
+        if (!this.stillAuthorized(read.settings, context)) return false;
+        const settings = read.settings;
+        const ops = apply(settings) ?? [];
+        const result = await this.backendCommit({
+          expectedRevision: read.revision,
+          record: this.store.encode(settings),
+          ops,
+          ...(read.unreadableStatus ? { backupUnreadableAs: read.unreadableStatus } : {}),
+        });
+        if (result.status === "committed") return true;
+      }
+      return false;
     } catch (error) {
       if (error instanceof PulseClosedError || error instanceof PulseSettingsWriteRefusedError) {
         return false;
@@ -583,26 +678,23 @@ export class PulseService {
     }
   }
 
-  /** Runs inside a transaction. */
-  private stillAuthorized(context: DeliveryContext): boolean {
-    const settings = this.loadState();
-    return (
-      settings.consentState === "enabled" &&
-      !settings.pendingDeletion &&
-      (settings.revision ?? 0) === context.revision &&
-      settings.installationId === context.installationId &&
-      settings.deletionToken === context.deletionToken &&
-      this.identityEndpoint(settings) === context.endpoint
+  /** Whether `settings` still describe the delivery `context` captured. */
+  private stillAuthorized(settings: PulsePrivateSettings, context: DeliveryContext): boolean {
+    return !(
+      settings.consentState !== "enabled" ||
+      settings.pendingDeletion ||
+      (settings.revision ?? 0) !== context.revision ||
+      settings.installationId !== context.installationId ||
+      settings.deletionToken !== context.deletionToken ||
+      this.identityEndpoint(settings) !== context.endpoint
     );
   }
 
   private async runDeletion(): Promise<PulseMutationResult> {
     if (this.stopping || this.closed) {
-      return { success: false, settings: this.safePublic(), error: "shutting_down" };
+      return { success: false, settings: await this.safePublic(), error: "shutting_down" };
     }
-    const target = this.transactDecision(() => {
-      const settings = this.loadState();
-      const now = this.now();
+    const target = await this.decide((settings, now) => {
       const captured: PulsePendingDeletion | null =
         settings.pendingDeletion ||
         (settings.installationId && settings.deletionToken
@@ -616,19 +708,18 @@ export class PulseService {
         settings.disabledAt = now;
       }
       settings.consentState = "disabled";
-      this.closeConsentWindows(now);
-      this.db.prepare("DELETE FROM pulse_outbox").run();
-      // Without an identity there is nothing remote to delete, only local consent history.
       if (captured) settings.pendingDeletion = captured;
-      else this.db.prepare("DELETE FROM pulse_consent_windows").run();
-      this.commitDecision(settings);
-      return captured;
+      const ops: PulseOp[] = [{ kind: "closeConsentWindows", now }, { kind: "clearOutbox" }];
+      // Without an identity there is nothing remote to delete, only local consent history.
+      if (!captured) ops.push({ kind: "deleteConsentWindows" });
+      return { outcome: captured, next: settings, ops, bump: true };
     });
-    if (target === SETTINGS_WRITE_REFUSED) {
-      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+    if (isSettingsFailure(target)) {
+      return { success: false, settings: await this.safePublic(), error: target.settingsFailure };
     }
     this.abortActiveDelivery();
-    if (!target) return { success: true, settings: this.getSettings() };
+    this.previewCache = null;
+    if (!target) return { success: true, settings: await this.getSettings() };
 
     try {
       const response = await this.request(`${target.endpoint}/v1/installations`, {
@@ -642,19 +733,20 @@ export class PulseService {
       if (!response.ok && response.status !== 404) throw new Error(`http_${response.status}`);
     } catch (error) {
       const code = this.errorCode(error);
-      if (this.closed) return { success: false, settings: this.safePublic(), error: code };
-      this.transactDecision(() => {
-        const settings = this.loadState();
-        if (settings.pendingDeletion?.installationId !== target.installationId) return;
+      if (this.closed) return { success: false, settings: await this.safePublic(), error: code };
+      await this.decide((settings) => {
+        if (settings.pendingDeletion?.installationId !== target.installationId) {
+          return { outcome: null };
+        }
         settings.pendingDeletion.lastErrorCode = code;
-        this.store.save(settings);
+        return { outcome: null, next: settings };
       });
-      return { success: false, settings: this.getSettings(), error: code };
+      return { success: false, settings: await this.getSettings(), error: code };
     }
 
-    if (this.closed) return { success: true, settings: this.safePublic() };
-    const finalized = this.transactDecision(() => {
-      const settings = this.loadState();
+    if (this.closed) return { success: true, settings: await this.safePublic() };
+    const finalized = await this.decide((settings) => {
+      const ops: PulseOp[] = [];
       if (settings.pendingDeletion?.installationId === target.installationId) {
         delete settings.pendingDeletion;
       }
@@ -669,43 +761,34 @@ export class PulseService {
         delete settings.lastSentAt;
         delete settings.lastAttemptAt;
         delete settings.lastErrorCode;
-        this.db.prepare("DELETE FROM pulse_consent_windows").run();
+        ops.push({ kind: "deleteConsentWindows" });
       }
-      this.db
-        .prepare("DELETE FROM pulse_sent_days WHERE installation_id = ?")
-        .run(target.installationId);
-      this.commitDecision(settings);
+      ops.push({ kind: "deleteSentDaysFor", installationId: target.installationId });
+      return { outcome: null, next: settings, ops, bump: true };
     });
-    if (finalized === SETTINGS_WRITE_REFUSED) {
+    if (isSettingsFailure(finalized)) {
       // The server deleted the data, but the local record could not be updated; keep
       // reporting off and deletion pending so a retry (404/200) completes it later.
-      return { success: false, settings: this.safePublic(), error: SETTINGS_WRITE_REFUSED };
+      return {
+        success: false,
+        settings: await this.safePublic(),
+        error: finalized.settingsFailure,
+      };
     }
-    return { success: true, settings: this.getSettings() };
+    return { success: true, settings: await this.getSettings() };
   }
 
-  /** Runs inside a transaction: rotate to a fresh identity pinned to today's endpoint. */
-  private createIdentity(settings: PulsePrivateSettings, now: number): void {
+  /**
+   * Rotate to a fresh identity pinned to today's endpoint. Returns the table change that
+   * must commit with it: sent-day receipts of other identities are dropped.
+   */
+  private createIdentity(settings: PulsePrivateSettings, now: number): PulseOp {
     settings.installationId = randomUUID();
     settings.deletionToken = randomBytes(32).toString("base64url");
     settings.enrolled = false;
     settings.identityStartedAt = now;
     settings.identityEndpoint = this.configuredEndpoint(settings);
-    this.db
-      .prepare("DELETE FROM pulse_sent_days WHERE installation_id <> ?")
-      .run(settings.installationId);
-  }
-
-  private closeConsentWindows(now: number): void {
-    this.db
-      .prepare("UPDATE pulse_consent_windows SET ended_at = ? WHERE ended_at IS NULL")
-      .run(now);
-  }
-
-  /** Runs inside a transaction: record a user decision. */
-  private commitDecision(settings: PulsePrivateSettings): void {
-    settings.revision = (settings.revision ?? 0) + 1;
-    this.store.save(settings);
+    return { kind: "deleteSentDaysExcept", installationId: settings.installationId };
   }
 
   private abortActiveDelivery(): void {
@@ -723,56 +806,167 @@ export class PulseService {
   }
 
   /**
-   * Like transact, but a refused settings write becomes a value instead of a throw. The
-   * whole transaction rolls back, so a refused decision changes nothing.
+   * Run one decision: read the settings (decrypting on the host), let `plan` edit a
+   * private copy and name its table changes, encrypt, and commit it all under the
+   * settings row revision that was read. If another writer (any process) changed the
+   * row meanwhile, the decision is re-planned from the newer state. No transaction ever
+   * waits on the keychain or the network. A refused or conflicting write becomes a
+   * value instead of a throw.
    */
-  private transactDecision<T>(fn: () => T): T | typeof SETTINGS_WRITE_REFUSED {
+  private async decide<T>(
+    plan: (settings: PulsePrivateSettings, now: number) => PulseDecision<T>,
+  ): Promise<T | SettingsFailure> {
     try {
-      return this.transact(fn);
+      for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt += 1) {
+        const read = this.readPulse();
+        const decision = plan(read.settings, this.now());
+        const next = decision.next ?? (read.upgraded ? read.settings : undefined);
+        if (!next && !decision.ops?.length) return decision.outcome;
+        if (next && decision.bump) next.revision = (next.revision ?? 0) + 1;
+        const committed = await this.commitRead(read, next, decision.ops ?? []);
+        if (isSettingsFailure(committed)) return committed;
+        if (committed) return decision.outcome;
+      }
+      return { settingsFailure: SETTINGS_CONFLICT };
     } catch (error) {
-      if (error instanceof PulseSettingsWriteRefusedError) return SETTINGS_WRITE_REFUSED;
+      if (error instanceof PulseSettingsWriteRefusedError) {
+        return { settingsFailure: error.code };
+      }
       throw error;
     }
   }
 
-  private transact<T>(fn: () => T): T {
-    if (this.closed) throw new PulseClosedError();
-    return this.db.transaction(fn).immediate();
+  /**
+   * Commit `next` (when given) and `ops` against the revision `read` saw. Returns true
+   * when committed, false on a revision conflict, or a settings failure.
+   */
+  private async commitRead(
+    read: PulseRead,
+    next: PulsePrivateSettings | undefined,
+    ops: PulseOp[],
+  ): Promise<boolean | SettingsFailure> {
+    try {
+      const result = await this.backendCommit({
+        expectedRevision: read.revision,
+        record: next ? this.store.encode(next) : null,
+        ops,
+        ...(next && read.unreadableStatus ? { backupUnreadableAs: read.unreadableStatus } : {}),
+      });
+      return result.status === "committed";
+    } catch (error) {
+      if (error instanceof PulseSettingsWriteRefusedError) {
+        return { settingsFailure: error.code };
+      }
+      throw error;
+    }
   }
 
   /**
-   * Read the stored settings. Records from before revisions existed are upgraded once:
-   * revision defaults to 0 and, because the start of the current identity's consent
-   * cannot be established, its eligibility starts conservatively at upgrade time.
+   * Commit through the database worker when this run routes settings there (DB5),
+   * otherwise in one IMMEDIATE transaction on this connection.
+   */
+  private async backendCommit(request: PulseCommitRequest): Promise<PulseCommitResult> {
+    this.assertCommittable();
+    const client = settingsCommitClientFor(this.db);
+    if (client) return client.execute("pulse.commit", request);
+    return this.db.transaction(() => pulseCommit(this.db, request)).immediate();
+  }
+
+  private async backendClaim(request: PulseClaimRequest): Promise<PulseClaimResult> {
+    this.assertCommittable();
+    const client = settingsCommitClientFor(this.db);
+    if (client) return client.execute("pulse.claim", request);
+    return this.db.transaction(() => pulseClaim(this.db, request)).immediate();
+  }
+
+  private assertCommittable(): void {
+    if (this.closed) throw new PulseClosedError();
+  }
+
+  /**
+   * Read the settings for display. A record from before revisions existed is upgraded
+   * once: revision defaults to 0 and, because the start of the current identity's
+   * consent cannot be established, its eligibility starts conservatively at upgrade
+   * time. The upgrade is shown only once it is stored; until then (refused writes, or
+   * a worker commit still in flight) the record is described as stored.
    */
   private readState(): PulsePrivateSettings {
-    const settings = this.rawSettings();
-    if (!this.needsUpgrade(settings)) return settings;
+    let read: PulseRead;
     try {
-      return this.transact(() => this.loadState());
+      read = this.readPulse();
     } catch (error) {
-      if (!(error instanceof PulseSettingsWriteRefusedError)) throw error;
-      // Cannot persist the upgrade: describe the record without pretending it changed.
-      return settings;
+      // Unreadable here (another process's keychain): no consent this process can see.
+      if (error instanceof PulseSettingsWriteRefusedError) {
+        return { consentState: "unset", revision: 0 };
+      }
+      throw error;
+    }
+    if (!read.upgraded) return read.settings;
+    const stored = this.store.read().settings;
+    const unchanged: PulsePrivateSettings = stored
+      ? structuredClone(stored)
+      : { consentState: "unset" };
+    unchanged.revision ??= 0;
+    if (this.store.refusesWrites?.()) return unchanged;
+    if (settingsCommitClientFor(this.db)) {
+      // Worker commits land asynchronously; the next read shows the upgrade.
+      void this.commitRead(read, read.settings, []).catch((error: unknown) => {
+        if (!(error instanceof PulseClosedError)) {
+          log.debug(`Could not persist the Pulse settings upgrade: ${this.errorCode(error)}`);
+        }
+      });
+      return unchanged;
+    }
+    try {
+      this.assertCommittable();
+      const record = this.store.encode(read.settings);
+      const result = this.db
+        .transaction(() =>
+          pulseCommit(this.db, {
+            expectedRevision: read.revision,
+            record,
+            ops: [],
+            ...(read.unreadableStatus ? { backupUnreadableAs: read.unreadableStatus } : {}),
+          }),
+        )
+        .immediate();
+      return result.status === "committed" ? read.settings : unchanged;
+    } catch (error) {
+      if (error instanceof PulseSettingsWriteRefusedError || error instanceof PulseClosedError) {
+        return unchanged;
+      }
+      throw error;
     }
   }
 
-  /** Runs inside a transaction; persists the one-time upgrade if needed. */
-  private loadState(): PulsePrivateSettings {
-    const settings = this.rawSettings();
-    if (!this.needsUpgrade(settings)) return settings;
-    settings.revision ??= 0;
-    if (settings.installationId) {
-      settings.identityStartedAt ??= this.now();
-      settings.identityEndpoint ??= this.configuredEndpoint(settings);
+  /**
+   * The stored settings as a private copy, with the one-time upgrade applied in memory.
+   * A record encrypted with an OS keychain this process cannot use (the daemon or CLI
+   * beside the desktop app) is never replaced from here: writes are refused.
+   */
+  private readPulse(): PulseRead {
+    const stored = this.store.read();
+    if (stored.unreadableStatus === "os_encryption_unavailable") {
+      throw new PulseSettingsWriteRefusedError();
     }
-    this.store.save(settings);
-    return settings;
-  }
-
-  private rawSettings(): PulsePrivateSettings {
-    const stored = this.store.load();
-    return stored ? { ...stored } : { consentState: "unset" };
+    const settings: PulsePrivateSettings = stored.settings
+      ? structuredClone(stored.settings)
+      : { consentState: "unset" };
+    let upgraded = false;
+    if (this.needsUpgrade(settings)) {
+      settings.revision ??= 0;
+      if (settings.installationId) {
+        settings.identityStartedAt ??= this.now();
+        settings.identityEndpoint ??= this.configuredEndpoint(settings);
+      }
+      upgraded = true;
+    }
+    return {
+      settings,
+      revision: stored.revision,
+      upgraded,
+      ...(stored.unreadableStatus ? { unreadableStatus: stored.unreadableStatus } : {}),
+    };
   }
 
   private needsUpgrade(settings: PulsePrivateSettings): boolean {
@@ -789,49 +983,34 @@ export class PulseService {
     return settings.identityEndpoint || this.configuredEndpoint(settings);
   }
 
-  private queueHead(
-    installationId: string,
-  ): { package_id: string; period_start: string; payload_json: string } | undefined {
-    // One selector for sending and for the preview: oldest eligible queued day first.
-    return this.db
-      .prepare(
-        `SELECT package_id, period_start, payload_json FROM pulse_outbox
-         WHERE installation_id = ?
-         AND package_id NOT IN (SELECT package_id FROM pulse_sent_days)
-         ORDER BY period_start, created_at LIMIT 1`,
-      )
-      .get(installationId) as
-      | { package_id: string; period_start: string; payload_json: string }
-      | undefined;
+  /** Pulse reads as services-domain units (DB6). */
+  private reports() {
+    return serviceStatements(this.db);
   }
 
-  private receiptFor(packageId: string): { acknowledged_at: number } | undefined {
-    return this.db
-      .prepare("SELECT acknowledged_at FROM pulse_sent_days WHERE package_id = ?")
-      .get(packageId) as { acknowledged_at: number } | undefined;
-  }
-
-  private computePreview(settings: PulsePrivateSettings): PulsePreviewState {
+  private async computePreview(settings: PulsePrivateSettings): Promise<PulsePreviewState> {
     if (settings.pendingDeletion) return { state: "ineligible", reason: "deletion_pending" };
     if (settings.consentState !== "enabled" || !settings.installationId) {
       return { state: "ineligible", reason: "disabled" };
     }
     const installationId = settings.installationId;
-    const head = this.queueHead(installationId);
+    const head = await this.reports().unit("pulseReport_queueHead", [installationId]);
     if (head) {
       return { state: "queued", package: JSON.parse(head.payload_json) as PulseDailyPackage };
     }
     const day = utcDayBounds(this.now());
     const periodStart = new Date(day.start).toISOString();
-    const receipt = this.receiptFor(packageIdFor(installationId, periodStart));
+    const receipt = await this.reports().unit("pulseReport_receiptFor", [
+      packageIdFor(installationId, periodStart),
+    ]);
     if (receipt) {
       return { state: "already_sent", periodStart, acknowledgedAt: receipt.acknowledged_at };
     }
-    if (!this.hasFullDayConsent(settings, day)) {
+    if (!(await this.hasFullDayConsent(settings, day))) {
       return {
         state: "ineligible",
         reason: "incomplete_consent_day",
-        eligibleFrom: this.eligibleFrom(settings),
+        eligibleFrom: await this.eligibleFrom(settings),
       };
     }
     const revision = settings.revision ?? 0;
@@ -845,13 +1024,13 @@ export class PulseService {
     ) {
       return { state: "candidate", package: cached.value };
     }
-    const value = this.buildPackage(installationId);
+    const value = await this.buildPackage(installationId);
     this.previewCache = { builtAt: this.now(), installationId, revision, periodStart, value };
     return { state: "candidate", package: value };
   }
 
-  private toPublic(settings: PulsePrivateSettings): PulsePublicSettings {
-    const preview = this.computePreview(settings);
+  private async toPublic(settings: PulsePrivateSettings): Promise<PulsePublicSettings> {
+    const preview = await this.computePreview(settings);
     const deletion = settings.pendingDeletion;
     const value: PulsePublicSettings = {
       consentState: settings.consentState,
@@ -876,10 +1055,10 @@ export class PulseService {
   }
 
   /** Public settings without touching a database that may already be closed. */
-  private safePublic(): PulsePublicSettings {
+  private async safePublic(): Promise<PulsePublicSettings> {
     if (!this.closed) {
       try {
-        return this.getSettings();
+        return await this.getSettings();
       } catch {
         // Fall through to the last known projection.
       }
@@ -903,41 +1082,16 @@ export class PulseService {
     );
   }
 
-  private sendResult(outcome: PulseSendOutcome, error?: string): PulseSendResult {
-    return { outcome, settings: this.safePublic(), ...(error ? { error } : {}) };
+  private async sendResult(outcome: PulseSendOutcome, error?: string): Promise<PulseSendResult> {
+    return { outcome, settings: await this.safePublic(), ...(error ? { error } : {}) };
   }
 
-  private buildPackage(installationId: string): PulseDailyPackage {
+  private async buildPackage(installationId: string): Promise<PulseDailyPackage> {
     const { start, end } = utcDayBounds(this.now());
-    const taskColumns = new Set(
-      (this.db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>).map(
-        (row) => row.name,
-      ),
+    const { created, terminal, eventRows, llm } = await this.reports().unit(
+      "pulseReport_dayAggregates",
+      [start, end],
     );
-    const rootClause = taskColumns.has("parent_task_id") ? "AND parent_task_id IS NULL" : "";
-    const evalClause = taskColumns.has("eval_case_id") ? "AND eval_case_id IS NULL" : "";
-    const sampleClause = taskColumns.has("source")
-      ? "AND COALESCE(source, 'manual') <> 'sample'"
-      : "";
-    const sessionExpr = taskColumns.has("session_id") ? "COALESCE(session_id, id)" : "id";
-    const created = this.db
-      .prepare(
-        `SELECT COUNT(*) AS tasks_started, COUNT(DISTINCT ${sessionExpr}) AS sessions_started
-       FROM tasks WHERE created_at >= ? AND created_at < ? ${rootClause} ${evalClause} ${sampleClause}`,
-      )
-      .get(start, end) as Record<string, number>;
-    const terminal = this.db
-      .prepare(
-        `SELECT
-         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS tasks_completed,
-         SUM(CASE WHEN status = 'completed' AND (terminal_status IS NULL OR terminal_status IN ('ok','partial_success')) THEN 1 ELSE 0 END) AS useful_tasks,
-         SUM(CASE WHEN status = 'failed' OR terminal_status = 'failed' THEN 1 ELSE 0 END) AS failed_tasks,
-         SUM(CASE WHEN status = 'cancelled' OR terminal_status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_tasks,
-         SUM(CASE WHEN status = 'completed' THEN COALESCE(last_run_duration_ms, 0) ELSE 0 END) AS active_ms
-       FROM tasks WHERE completed_at >= ? AND completed_at < ? ${rootClause} ${evalClause} ${sampleClause}`,
-      )
-      .get(start, end) as Record<string, number>;
-
     const tools: PulseToolCounts = {
       shell: 0,
       filesystem: 0,
@@ -946,17 +1100,6 @@ export class PulseService {
       code: 0,
       other: 0,
     };
-    const eventRows = this.db
-      .prepare(
-        `SELECT e.type, e.legacy_type, e.payload FROM task_events e
-       LEFT JOIN tasks t ON t.id = e.task_id
-       WHERE e.timestamp >= ? AND e.timestamp < ?
-       ${taskColumns.has("parent_task_id") ? "AND (t.parent_task_id IS NULL OR t.id IS NULL)" : ""}
-       ${taskColumns.has("eval_case_id") ? "AND (t.eval_case_id IS NULL OR t.id IS NULL)" : ""}
-       ${taskColumns.has("source") ? "AND (t.source IS NULL OR t.source <> 'sample')" : ""}
-       AND COALESCE(e.type, e.legacy_type) IN ('tool_call','tool_error','approval_requested','approval_denied')`,
-      )
-      .all(start, end) as Array<{ type: string; legacy_type?: string; payload: string }>;
     let toolErrors = 0;
     let approvalRequests = 0;
     let approvalDenials = 0;
@@ -976,14 +1119,6 @@ export class PulseService {
         tools.other++;
       }
     }
-    const llm = this.db
-      .prepare(
-        `SELECT COUNT(*) AS errors FROM llm_call_events l
-         LEFT JOIN tasks t ON t.id = l.task_id
-         WHERE l.timestamp >= ? AND l.timestamp < ? AND l.success = 0
-         ${taskColumns.has("source") ? "AND (t.source IS NULL OR t.source <> 'sample')" : ""}`,
-      )
-      .get(start, end) as { errors: number };
     for (const key of Object.keys(tools) as Array<keyof PulseToolCounts>)
       tools[key] = clampCount(tools[key]);
 
@@ -1018,75 +1153,25 @@ export class PulseService {
     };
   }
 
-  private hasFullDayConsent(
+  private async hasFullDayConsent(
     settings: PulsePrivateSettings,
     day: { start: number; end: number },
-  ): boolean {
+  ): Promise<boolean> {
     // Consent given under an older identity never counts for the current one.
     if (!settings.identityStartedAt || settings.identityStartedAt > day.start) return false;
-    return Boolean(
-      this.db
-        .prepare(
-          "SELECT 1 FROM pulse_consent_windows WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?) LIMIT 1",
-        )
-        .get(day.start, day.end),
-    );
+    return this.reports().unit("pulseReport_hasConsentWindow", [day.start, day.end]);
   }
 
   /** First UTC day that will be fully consented for the current identity, if known. */
-  private eligibleFrom(settings: PulsePrivateSettings): string | null {
-    const open = this.db
-      .prepare(
-        "SELECT MAX(started_at) AS started_at FROM pulse_consent_windows WHERE ended_at IS NULL",
-      )
-      .get() as { started_at: number | null } | undefined;
-    if (!open?.started_at || !settings.identityStartedAt) return null;
-    const from = nextUtcDayStart(Math.max(open.started_at, settings.identityStartedAt));
+  private async eligibleFrom(settings: PulsePrivateSettings): Promise<string | null> {
+    const openStartedAt = await this.reports().unit("pulseReport_openConsentStart", []);
+    if (!openStartedAt || !settings.identityStartedAt) return null;
+    const from = nextUtcDayStart(Math.max(openStartedAt, settings.identityStartedAt));
     return new Date(from).toISOString();
   }
 
   private ensureSchema(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS pulse_consent_windows (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        started_at INTEGER NOT NULL,
-        ended_at INTEGER
-      );
-      CREATE TABLE IF NOT EXISTS pulse_outbox (
-        package_id TEXT PRIMARY KEY,
-        period_start TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        attempt_count INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS pulse_sent_days (
-        package_id TEXT PRIMARY KEY,
-        installation_id TEXT NOT NULL,
-        period_start TEXT NOT NULL,
-        acknowledged_at INTEGER NOT NULL
-      );
-    `);
-    const outboxColumns = new Set(
-      (this.db.prepare("PRAGMA table_info(pulse_outbox)").all() as Array<{ name: string }>).map(
-        (row) => row.name,
-      ),
-    );
-    if (!outboxColumns.has("installation_id")) {
-      try {
-        this.db.exec("ALTER TABLE pulse_outbox ADD COLUMN installation_id TEXT");
-      } catch (error) {
-        // Another process sharing this profile may have added it first.
-        if (!/duplicate column/i.test(error instanceof Error ? error.message : String(error))) {
-          throw error;
-        }
-      }
-      // Queued rows from older builds carry their identity only inside the payload.
-      this.db
-        .prepare(
-          "UPDATE pulse_outbox SET installation_id = json_extract(payload_json, '$.installationId') WHERE installation_id IS NULL",
-        )
-        .run();
-    }
+    ensurePulseSchema(this.db);
   }
 
   /**

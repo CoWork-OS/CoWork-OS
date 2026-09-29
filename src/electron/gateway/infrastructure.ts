@@ -10,13 +10,15 @@
  * - Broadcast messaging
  */
 
-import Database from "better-sqlite3";
 import {
-  MessageQueueRepository,
-  ScheduledMessageRepository,
-  DeliveryTrackingRepository,
-  RateLimitRepository,
   AuditLogRepository,
+  DeliveryTrackingRepository,
+  MessageQueueRepository,
+  RateLimitRepository,
+  ScheduledMessageRepository,
+} from "../database/repository-facades";
+import type Database from "better-sqlite3";
+import {
   QueuedMessage,
   ScheduledMessage as ScheduledMessageRecord,
   DeliveryRecord,
@@ -96,7 +98,7 @@ export class GatewayInfrastructure {
   /**
    * Start the infrastructure services
    */
-  start(): void {
+  async start(): Promise<void> {
     // Process message queue
     this.queueInterval = setInterval(() => {
       this.processQueue().catch((err) => console.error("Queue processing error:", err));
@@ -115,13 +117,13 @@ export class GatewayInfrastructure {
       60 * 60 * 1000,
     );
 
-    this.audit("infrastructure:started", { severity: "info" });
+    await this.audit("infrastructure:started", { severity: "info" });
   }
 
   /**
    * Stop the infrastructure services
    */
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.queueInterval) {
       clearInterval(this.queueInterval);
       this.queueInterval = null;
@@ -135,7 +137,7 @@ export class GatewayInfrastructure {
       this.cleanupInterval = null;
     }
 
-    this.audit("infrastructure:stopped", { severity: "info" });
+    await this.audit("infrastructure:stopped", { severity: "info" });
   }
 
   // ============================================================================
@@ -145,13 +147,13 @@ export class GatewayInfrastructure {
   /**
    * Enqueue a message for reliable delivery
    */
-  enqueue(
+  async enqueue(
     channelType: ChannelType,
     chatId: string,
     message: OutgoingMessage,
     options: { priority?: number; maxAttempts?: number; scheduledAt?: number } = {},
-  ): QueuedMessage {
-    const item = this.queueRepo.enqueue({
+  ): Promise<QueuedMessage> {
+    const item = await this.queueRepo.enqueue({
       channelType,
       chatId,
       message: message as unknown as Record<string, unknown>,
@@ -160,7 +162,7 @@ export class GatewayInfrastructure {
       scheduledAt: options.scheduledAt,
     });
 
-    this.audit("message:queued", {
+    await this.audit("message:queued", {
       channelType,
       chatId,
       details: { queueId: item.id, priority: item.priority },
@@ -178,7 +180,7 @@ export class GatewayInfrastructure {
     this.isProcessing = true;
 
     try {
-      const pending = this.queueRepo.findPending(10);
+      const pending = await this.queueRepo.findPending(10);
 
       for (const item of pending) {
         const adapter = this.adapters.get(item.channelType as ChannelType);
@@ -187,7 +189,7 @@ export class GatewayInfrastructure {
         }
 
         // Mark as processing
-        this.queueRepo.update(item.id, {
+        await this.queueRepo.update(item.id, {
           status: "processing",
           attempts: item.attempts + 1,
           lastAttemptAt: Date.now(),
@@ -198,12 +200,12 @@ export class GatewayInfrastructure {
           const messageId = await adapter.sendMessage(message);
 
           // Mark as sent
-          this.queueRepo.update(item.id, { status: "sent" });
+          await this.queueRepo.update(item.id, { status: "sent" });
 
           // Track delivery
-          this.trackDelivery(item.channelType as ChannelType, item.chatId, messageId);
+          await this.trackDelivery(item.channelType as ChannelType, item.chatId, messageId);
 
-          this.audit("message:sent", {
+          await this.audit("message:sent", {
             channelType: item.channelType,
             chatId: item.chatId,
             details: { queueId: item.id, messageId },
@@ -214,12 +216,12 @@ export class GatewayInfrastructure {
 
           if (item.attempts + 1 >= item.maxAttempts) {
             // Mark as failed
-            this.queueRepo.update(item.id, {
+            await this.queueRepo.update(item.id, {
               status: "failed",
               error: errorMessage,
             });
 
-            this.audit("message:failed", {
+            await this.audit("message:failed", {
               channelType: item.channelType,
               chatId: item.chatId,
               details: { queueId: item.id, error: errorMessage, attempts: item.attempts + 1 },
@@ -227,7 +229,7 @@ export class GatewayInfrastructure {
             });
           } else {
             // Reset to pending for retry
-            this.queueRepo.update(item.id, {
+            await this.queueRepo.update(item.id, {
               status: "pending",
               error: errorMessage,
             });
@@ -242,8 +244,13 @@ export class GatewayInfrastructure {
   /**
    * Get queue status
    */
-  getQueueStatus(): { pending: number; processing: number; sent: number; failed: number } {
-    const pending = this.queueRepo.findPending(1000);
+  async getQueueStatus(): Promise<{
+    pending: number;
+    processing: number;
+    sent: number;
+    failed: number;
+  }> {
+    const pending = await this.queueRepo.findPending(1000);
     // This is a simplified status - in production you'd have separate count queries
     return {
       pending: pending.length,
@@ -260,22 +267,22 @@ export class GatewayInfrastructure {
   /**
    * Schedule a message for future delivery
    */
-  schedule(
+  async schedule(
     channelType: ChannelType,
     chatId: string,
     message: OutgoingMessage,
     scheduledAt: Date | number,
-  ): ScheduledMessageRecord {
+  ): Promise<ScheduledMessageRecord> {
     const timestamp = scheduledAt instanceof Date ? scheduledAt.getTime() : scheduledAt;
 
-    const item = this.scheduledRepo.create({
+    const item = await this.scheduledRepo.create({
       channelType,
       chatId,
       message: message as unknown as Record<string, unknown>,
       scheduledAt: timestamp,
     });
 
-    this.audit("message:scheduled", {
+    await this.audit("message:scheduled", {
       channelType,
       chatId,
       details: { scheduleId: item.id, scheduledAt: new Date(timestamp).toISOString() },
@@ -288,15 +295,15 @@ export class GatewayInfrastructure {
   /**
    * Cancel a scheduled message
    */
-  cancelScheduled(id: string): boolean {
-    const item = this.scheduledRepo.findById(id);
+  async cancelScheduled(id: string): Promise<boolean> {
+    const item = await this.scheduledRepo.findById(id);
     if (!item || item.status !== "pending") {
       return false;
     }
 
-    this.scheduledRepo.cancel(id);
+    await this.scheduledRepo.cancel(id);
 
-    this.audit("message:schedule_cancelled", {
+    await this.audit("message:schedule_cancelled", {
       channelType: item.channelType,
       chatId: item.chatId,
       details: { scheduleId: id },
@@ -309,7 +316,10 @@ export class GatewayInfrastructure {
   /**
    * Get scheduled messages for a chat
    */
-  getScheduledMessages(channelType: ChannelType, chatId: string): ScheduledMessageRecord[] {
+  async getScheduledMessages(
+    channelType: ChannelType,
+    chatId: string,
+  ): Promise<ScheduledMessageRecord[]> {
     return this.scheduledRepo.findByChatId(channelType, chatId);
   }
 
@@ -317,7 +327,7 @@ export class GatewayInfrastructure {
    * Process due scheduled messages
    */
   private async processScheduled(): Promise<void> {
-    const due = this.scheduledRepo.findDue(10);
+    const due = await this.scheduledRepo.findDue(10);
 
     for (const item of due) {
       const adapter = this.adapters.get(item.channelType as ChannelType);
@@ -329,12 +339,12 @@ export class GatewayInfrastructure {
         const message = item.message as unknown as OutgoingMessage;
         const messageId = await adapter.sendMessage(message);
 
-        this.scheduledRepo.update(item.id, {
+        await this.scheduledRepo.update(item.id, {
           status: "sent",
           sentMessageId: messageId,
         });
 
-        this.audit("message:scheduled_sent", {
+        await this.audit("message:scheduled_sent", {
           channelType: item.channelType,
           chatId: item.chatId,
           details: { scheduleId: item.id, messageId },
@@ -343,12 +353,12 @@ export class GatewayInfrastructure {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
-        this.scheduledRepo.update(item.id, {
+        await this.scheduledRepo.update(item.id, {
           status: "failed",
           error: errorMessage,
         });
 
-        this.audit("message:scheduled_failed", {
+        await this.audit("message:scheduled_failed", {
           channelType: item.channelType,
           chatId: item.chatId,
           details: { scheduleId: item.id, error: errorMessage },
@@ -365,7 +375,11 @@ export class GatewayInfrastructure {
   /**
    * Track a message delivery
    */
-  trackDelivery(channelType: ChannelType, chatId: string, messageId: string): DeliveryRecord {
+  async trackDelivery(
+    channelType: ChannelType,
+    chatId: string,
+    messageId: string,
+  ): Promise<DeliveryRecord> {
     return this.deliveryRepo.create({
       channelType,
       chatId,
@@ -378,12 +392,12 @@ export class GatewayInfrastructure {
   /**
    * Update delivery status
    */
-  updateDeliveryStatus(
+  async updateDeliveryStatus(
     messageId: string,
     status: "delivered" | "read" | "failed",
     error?: string,
-  ): void {
-    const record = this.deliveryRepo.findByMessageId(messageId);
+  ): Promise<void> {
+    const record = await this.deliveryRepo.findByMessageId(messageId);
     if (!record) return;
 
     const updates: Partial<DeliveryRecord> = { status };
@@ -396,20 +410,24 @@ export class GatewayInfrastructure {
       updates.error = error;
     }
 
-    this.deliveryRepo.update(record.id, updates);
+    await this.deliveryRepo.update(record.id, updates);
   }
 
   /**
    * Get delivery status for a message
    */
-  getDeliveryStatus(messageId: string): DeliveryRecord | undefined {
+  async getDeliveryStatus(messageId: string): Promise<DeliveryRecord | undefined> {
     return this.deliveryRepo.findByMessageId(messageId);
   }
 
   /**
    * Get delivery history for a chat
    */
-  getDeliveryHistory(channelType: ChannelType, chatId: string, limit = 50): DeliveryRecord[] {
+  async getDeliveryHistory(
+    channelType: ChannelType,
+    chatId: string,
+    limit = 50,
+  ): Promise<DeliveryRecord[]> {
     return this.deliveryRepo.findByChatId(channelType, chatId, limit);
   }
 
@@ -421,14 +439,14 @@ export class GatewayInfrastructure {
    * Check if a user is rate limited
    * Returns true if the user CAN send (not limited), false if limited
    */
-  checkRateLimit(channelType: ChannelType, userId: string, limit?: number): boolean {
+  async checkRateLimit(channelType: ChannelType, userId: string, limit?: number): Promise<boolean> {
     const effectiveLimit = limit ?? this.config.defaultRateLimit;
-    const record = this.rateLimitRepo.getOrCreate(channelType, userId);
+    const record = await this.rateLimitRepo.getOrCreate(channelType, userId);
     const now = Date.now();
 
     // Check if limit has expired
     if (record.isLimited && record.limitExpiresAt && now >= record.limitExpiresAt) {
-      this.rateLimitRepo.resetWindow(channelType, userId);
+      await this.rateLimitRepo.resetWindow(channelType, userId);
       return true;
     }
 
@@ -439,7 +457,7 @@ export class GatewayInfrastructure {
 
     // Check if window has expired
     if (now - record.windowStart >= this.config.rateLimitWindow) {
-      this.rateLimitRepo.resetWindow(channelType, userId);
+      await this.rateLimitRepo.resetWindow(channelType, userId);
       return true;
     }
 
@@ -451,28 +469,28 @@ export class GatewayInfrastructure {
    * Record a message for rate limiting
    * Returns true if message is allowed, false if rate limited
    */
-  recordMessage(channelType: ChannelType, userId: string, limit?: number): boolean {
+  async recordMessage(channelType: ChannelType, userId: string, limit?: number): Promise<boolean> {
     const effectiveLimit = limit ?? this.config.defaultRateLimit;
-    const record = this.rateLimitRepo.getOrCreate(channelType, userId);
+    const record = await this.rateLimitRepo.getOrCreate(channelType, userId);
     const now = Date.now();
 
     // Check if window has expired
     if (now - record.windowStart >= this.config.rateLimitWindow) {
-      this.rateLimitRepo.resetWindow(channelType, userId);
-      this.rateLimitRepo.update(channelType, userId, { messageCount: 1 });
+      await this.rateLimitRepo.resetWindow(channelType, userId);
+      await this.rateLimitRepo.update(channelType, userId, { messageCount: 1 });
       return true;
     }
 
     // Check if limit has expired
     if (record.isLimited && record.limitExpiresAt && now >= record.limitExpiresAt) {
-      this.rateLimitRepo.resetWindow(channelType, userId);
-      this.rateLimitRepo.update(channelType, userId, { messageCount: 1 });
+      await this.rateLimitRepo.resetWindow(channelType, userId);
+      await this.rateLimitRepo.update(channelType, userId, { messageCount: 1 });
       return true;
     }
 
     // If already limited, deny
     if (record.isLimited) {
-      this.audit("rate_limit:blocked", {
+      await this.audit("rate_limit:blocked", {
         channelType,
         userId,
         details: { messageCount: record.messageCount },
@@ -483,17 +501,17 @@ export class GatewayInfrastructure {
 
     // Increment count
     const newCount = record.messageCount + 1;
-    this.rateLimitRepo.update(channelType, userId, { messageCount: newCount });
+    await this.rateLimitRepo.update(channelType, userId, { messageCount: newCount });
 
     // Check if now over limit
     if (newCount >= effectiveLimit) {
       const limitExpiresAt = record.windowStart + this.config.rateLimitWindow;
-      this.rateLimitRepo.update(channelType, userId, {
+      await this.rateLimitRepo.update(channelType, userId, {
         isLimited: true,
         limitExpiresAt,
       });
 
-      this.audit("rate_limit:applied", {
+      await this.audit("rate_limit:applied", {
         channelType,
         userId,
         details: { messageCount: newCount, expiresAt: new Date(limitExpiresAt).toISOString() },
@@ -509,11 +527,11 @@ export class GatewayInfrastructure {
   /**
    * Get rate limit status for a user
    */
-  getRateLimitStatus(
+  async getRateLimitStatus(
     channelType: ChannelType,
     userId: string,
-  ): { isLimited: boolean; remaining: number; resetsAt?: Date } {
-    const record = this.rateLimitRepo.getOrCreate(channelType, userId);
+  ): Promise<{ isLimited: boolean; remaining: number; resetsAt?: Date }> {
+    const record = await this.rateLimitRepo.getOrCreate(channelType, userId);
     const now = Date.now();
 
     // Check if window has expired
@@ -548,7 +566,7 @@ export class GatewayInfrastructure {
     const results: BroadcastResult["results"] = [];
     const delay = config.delayBetweenSends ?? 100;
 
-    this.audit("broadcast:started", {
+    await this.audit("broadcast:started", {
       channelType: config.channel,
       details: { chatCount: config.chatIds.length },
       severity: "info",
@@ -575,7 +593,7 @@ export class GatewayInfrastructure {
     const sent = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
 
-    this.audit("broadcast:completed", {
+    await this.audit("broadcast:completed", {
       channelType: config.channel,
       details: { total: config.chatIds.length, sent, failed },
       severity: failed > 0 ? "warn" : "info",
@@ -596,7 +614,7 @@ export class GatewayInfrastructure {
   /**
    * Log an audit entry
    */
-  audit(
+  async audit(
     action: string,
     options: {
       channelType?: ChannelType | string;
@@ -605,7 +623,7 @@ export class GatewayInfrastructure {
       details?: Record<string, unknown>;
       severity?: AuditLogEntry["severity"];
     } = {},
-  ): AuditLogEntry {
+  ): Promise<AuditLogEntry> {
     return this.auditRepo.log({
       action,
       channelType: options.channelType,
@@ -619,7 +637,7 @@ export class GatewayInfrastructure {
   /**
    * Search audit logs
    */
-  searchAuditLogs(options: {
+  async searchAuditLogs(options: {
     action?: string;
     channelType?: string;
     userId?: string;
@@ -629,7 +647,7 @@ export class GatewayInfrastructure {
     severity?: AuditLogEntry["severity"];
     limit?: number;
     offset?: number;
-  }): AuditLogEntry[] {
+  }): Promise<AuditLogEntry[]> {
     return this.auditRepo.find(options);
   }
 
@@ -641,9 +659,11 @@ export class GatewayInfrastructure {
    * Clean up old records
    */
   private async cleanup(): Promise<void> {
-    const queueDeleted = this.queueRepo.deleteOld(this.config.messageQueueRetention);
-    const deliveryDeleted = this.deliveryRepo.deleteOld(this.config.deliveryTrackingRetention);
-    const auditDeleted = this.auditRepo.deleteOld(this.config.auditLogRetention);
+    const queueDeleted = await this.queueRepo.deleteOld(this.config.messageQueueRetention);
+    const deliveryDeleted = await this.deliveryRepo.deleteOld(
+      this.config.deliveryTrackingRetention,
+    );
+    const auditDeleted = await this.auditRepo.deleteOld(this.config.auditLogRetention);
 
     if (queueDeleted > 0 || deliveryDeleted > 0 || auditDeleted > 0) {
       console.log(

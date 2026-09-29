@@ -5074,12 +5074,12 @@ export class TaskExecutor {
 
   private recordDurableConversationHistory(messages: LLMMessage[]): void {
     try {
-      DurableContextService.recordHistory({
+      void DurableContextService.recordHistory({
         workspaceId: this.workspace.id,
         taskId: this.task.id,
         messages,
         source: "executor_history",
-      });
+      }).catch(() => undefined);
     } catch {
       // Durable context is experimental; history capture must never block task execution.
     }
@@ -5196,13 +5196,13 @@ export class TaskExecutor {
     if (!trimmed) return "";
 
     try {
-      const settings = MemoryService.getSettings(workspaceId);
+      const settings = await MemoryService.getSettings(workspaceId);
       if (!settings.enabled) return "";
 
       const limit = 10;
       const recentLimit = 4;
       const maxLines = 14;
-      const recent = MemoryService.getRecentForPromptRecall(workspaceId, recentLimit);
+      const recent = await MemoryService.getRecentForPromptRecall(workspaceId, recentLimit);
       const search = await MemoryService.searchForPromptRecallFastAsync(
         workspaceId,
         trimmed,
@@ -5248,7 +5248,7 @@ export class TaskExecutor {
             fs.existsSync(kitRoot) &&
             fs.statSync(kitRoot).isDirectory()
           ) {
-            const kitMatches = MemoryService.searchWorkspaceMarkdown(
+            const kitMatches = await MemoryService.searchWorkspaceMarkdown(
               workspaceId,
               kitRoot,
               trimmed,
@@ -9101,6 +9101,8 @@ ${transcript}
       fallbackText?: string;
     },
   ): Promise<Any> {
+    // Pace model calls while timeline projections in the database worker catch up.
+    await this.daemon?.waitForTimelineCapacity?.();
     this.refreshProviderIfSettingsChanged();
     const parentSignal = this.abortController.signal;
     const requestAbort = new AbortController();
@@ -14602,38 +14604,42 @@ ${transcript}
     if (citations?.length) {
       this.emitEvent("citations_collected", { citations });
     }
-    this.daemon.completeTask(this.task.id, summary, {
-      terminalStatus,
-      failureClass: this.task.failureClass,
-      ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
-      ...runtimeProjection,
-      outputSummary,
-      bestKnownOutcome: this.bestKnownOutcome,
-      waiveFailedStepIds: waivableFailedStepIds,
-      failedMutationRequiredStepIds,
-      waivedVerificationStepIds,
-      ...(this.getResolvedRecoveredFailureStepIds().length > 0
-        ? { recoveredFailedStepIds: this.getResolvedRecoveredFailureStepIds() }
-        : {}),
-      terminalStatusReason: this.task.failureClass
-        ? `executor_terminal_${terminalStatus}_with_${this.task.failureClass}`
-        : `executor_terminal_${terminalStatus}`,
-      ...(this.verificationOutcomeV2Enabled && nonBlockingFailedStepIds.length > 0
-        ? { nonBlockingFailedStepIds }
-        : {}),
-      ...verificationMetadata,
-      ...(this.getEffectiveExecutionMode() === "verified"
-        ? {
-            verificationEvidenceBundle: {
-              entries: [...this.getVerificationState().verificationEvidenceEntries],
-            } satisfies TaskVerificationEvidenceBundle,
-          }
-        : {}),
-      ...this.getCompletionProjectionFields(),
-    });
+    void Promise.resolve(
+      this.daemon.completeTask(this.task.id, summary, {
+        terminalStatus,
+        failureClass: this.task.failureClass,
+        ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
+        ...runtimeProjection,
+        outputSummary,
+        bestKnownOutcome: this.bestKnownOutcome,
+        waiveFailedStepIds: waivableFailedStepIds,
+        failedMutationRequiredStepIds,
+        waivedVerificationStepIds,
+        ...(this.getResolvedRecoveredFailureStepIds().length > 0
+          ? { recoveredFailedStepIds: this.getResolvedRecoveredFailureStepIds() }
+          : {}),
+        terminalStatusReason: this.task.failureClass
+          ? `executor_terminal_${terminalStatus}_with_${this.task.failureClass}`
+          : `executor_terminal_${terminalStatus}`,
+        ...(this.verificationOutcomeV2Enabled && nonBlockingFailedStepIds.length > 0
+          ? { nonBlockingFailedStepIds }
+          : {}),
+        ...verificationMetadata,
+        ...(this.getEffectiveExecutionMode() === "verified"
+          ? {
+              verificationEvidenceBundle: {
+                entries: [...this.getVerificationState().verificationEvidenceEntries],
+              } satisfies TaskVerificationEvidenceBundle,
+            }
+          : {}),
+        ...this.getCompletionProjectionFields(),
+      }),
+    ).catch((error: unknown) => logger.error("Failed to complete task:", error));
     this.emitRunSummary("completed", terminalStatus);
     if (terminalStatus === "ok") {
-      this.capturePlaybookOutcome("success");
+      void Promise.resolve(this.capturePlaybookOutcome("success")).catch(() => {
+        // Best-effort playbook learning.
+      });
     }
     // Fire-and-forget: generate a markdown report for deep work / workflow tasks
     this.autoGenerateReport().catch(() => {
@@ -14759,45 +14765,47 @@ ${transcript}
         failedStepIds: explicitTerminalState.failedStepIds,
       });
     }
-    this.daemon.completeTask(this.task.id, summary, {
-      terminalStatus: this.task.terminalStatus,
-      failureClass: this.task.failureClass,
-      ...(explicitTerminalState
-        ? {
-            terminalKind: explicitTerminalState.terminalKind,
-            ...(explicitTerminalState.failedStepIds
-              ? { failedStepIds: explicitTerminalState.failedStepIds }
-              : {}),
-            ...(explicitTerminalState.incompleteStepIds
-              ? { incompleteStepIds: explicitTerminalState.incompleteStepIds }
-              : {}),
-          }
-        : {}),
-      ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
-      ...runtimeProjection,
-      outputSummary,
-      bestKnownOutcome: this.bestKnownOutcome,
-      waiveFailedStepIds: waivableFailedStepIds,
-      failedMutationRequiredStepIds,
-      waivedVerificationStepIds,
-      ...(this.getResolvedRecoveredFailureStepIds().length > 0
-        ? { recoveredFailedStepIds: this.getResolvedRecoveredFailureStepIds() }
-        : {}),
-      terminalStatusReason:
-        explicitTerminalState?.reason || reason || "executor_best_effort_finalized",
-      ...(this.verificationOutcomeV2Enabled && nonBlockingFailedStepIds.length > 0
-        ? { nonBlockingFailedStepIds }
-        : {}),
-      ...verificationMetadata,
-      ...(this.getEffectiveExecutionMode() === "verified"
-        ? {
-            verificationEvidenceBundle: {
-              entries: [...this.getVerificationState().verificationEvidenceEntries],
-            } satisfies TaskVerificationEvidenceBundle,
-          }
-        : {}),
-      ...this.getCompletionProjectionFields(),
-    });
+    void Promise.resolve(
+      this.daemon.completeTask(this.task.id, summary, {
+        terminalStatus: this.task.terminalStatus,
+        failureClass: this.task.failureClass,
+        ...(explicitTerminalState
+          ? {
+              terminalKind: explicitTerminalState.terminalKind,
+              ...(explicitTerminalState.failedStepIds
+                ? { failedStepIds: explicitTerminalState.failedStepIds }
+                : {}),
+              ...(explicitTerminalState.incompleteStepIds
+                ? { incompleteStepIds: explicitTerminalState.incompleteStepIds }
+                : {}),
+            }
+          : {}),
+        ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
+        ...runtimeProjection,
+        outputSummary,
+        bestKnownOutcome: this.bestKnownOutcome,
+        waiveFailedStepIds: waivableFailedStepIds,
+        failedMutationRequiredStepIds,
+        waivedVerificationStepIds,
+        ...(this.getResolvedRecoveredFailureStepIds().length > 0
+          ? { recoveredFailedStepIds: this.getResolvedRecoveredFailureStepIds() }
+          : {}),
+        terminalStatusReason:
+          explicitTerminalState?.reason || reason || "executor_best_effort_finalized",
+        ...(this.verificationOutcomeV2Enabled && nonBlockingFailedStepIds.length > 0
+          ? { nonBlockingFailedStepIds }
+          : {}),
+        ...verificationMetadata,
+        ...(this.getEffectiveExecutionMode() === "verified"
+          ? {
+              verificationEvidenceBundle: {
+                entries: [...this.getVerificationState().verificationEvidenceEntries],
+              } satisfies TaskVerificationEvidenceBundle,
+            }
+          : {}),
+        ...this.getCompletionProjectionFields(),
+      }),
+    ).catch((error: unknown) => logger.error("Failed to complete task:", error));
     this.emitRunSummary(reason || "best_effort_finalized", this.task.terminalStatus || "ok");
     // Best-effort finalization — don't record as "success" in the playbook
     // since the task may have been partially completed or timed out.
@@ -14817,9 +14825,11 @@ ${transcript}
     this.task.bestKnownOutcome = undefined;
     this.task.resultSummary = undefined;
 
-    this.daemon.completeTask(this.task.id, reason || "Chat turn completed", {
-      ...runtimeProjection,
-    });
+    void Promise.resolve(
+      this.daemon.completeTask(this.task.id, reason || "Chat turn completed", {
+        ...runtimeProjection,
+      }),
+    ).catch((error: unknown) => logger.error("Failed to complete task:", error));
     void this.closeAcpxRuntimeSession("chat completion");
   }
 
@@ -15015,7 +15025,7 @@ ${transcript}
         | undefined;
       if (outcome === "success") {
         if (capture.status === "recorded" && capture.evidenceId) {
-          const reinforcement = PlaybookService.reinforceFromEvidence(
+          const reinforcement = await PlaybookService.reinforceFromEvidence(
             this.workspace.id,
             capture.evidenceId,
           );
@@ -15034,7 +15044,7 @@ ${transcript}
         // Extract entities/relationships from task results into the knowledge graph.
         try {
           const resultSummary = this.task.resultSummary || this.buildResultSummary() || "";
-          KnowledgeGraphService.extractEntitiesFromTaskResult(
+          await KnowledgeGraphService.extractEntitiesFromTaskResult(
             this.workspace.id,
             this.task.id,
             this.getExecutionTaskPrompt(),
@@ -15049,7 +15059,7 @@ ${transcript}
           const resultSummary = this.task.resultSummary || this.buildResultSummary() || "";
           import("./ProactiveSuggestionsService")
             .then(({ ProactiveSuggestionsService }) => {
-              ProactiveSuggestionsService.generateFollowUpSuggestions(
+              return ProactiveSuggestionsService.generateFollowUpSuggestions(
                 this.workspace.id,
                 this.task.id,
                 this.task.title,
@@ -16596,10 +16606,8 @@ ${transcript}
 
     if (options?.includePlaybook !== false) {
       try {
-        const playbookContext = PlaybookService.getPlaybookForContext(
-          this.workspace.id,
-          taskPrompt,
-          2,
+        const playbookContext = (
+          await PlaybookService.getPlaybookForContext(this.workspace.id, taskPrompt, 2)
         ).trim();
         if (playbookContext) {
           lines.push("");
@@ -27433,7 +27441,7 @@ You are continuing a previous conversation. The context from the previous conver
                 }
               }
 
-              const completedWorkflow = this.daemon.getOrchestrationGraphSnapshot(
+              const completedWorkflow = await this.daemon.getOrchestrationGraphSnapshot(
                 workflowSnapshot.run.id,
               );
               if (completedWorkflow?.run.status === "completed") {
@@ -27783,7 +27791,11 @@ You are continuing a previous conversation. The context from the previous conver
       logger.error(`Task execution failed:`, error);
       // Save conversation snapshot even on failure for potential recovery
       this.saveConversationSnapshot();
-      this.capturePlaybookOutcome("failure", error?.message || String(error));
+      void Promise.resolve(
+        this.capturePlaybookOutcome("failure", error?.message || String(error)),
+      ).catch(() => {
+        // Best-effort playbook learning.
+      });
       const failureClass = this.classifyFailure(error);
       const rawError = error?.message || String(error);
       this.persistBestKnownOutcome(
@@ -30067,7 +30079,20 @@ Return ONLY a JSON object:
     if (allowMemoryInjection) {
       try {
         const includeWorkspaceKit = gatewayContext === "private" && contextPackInjectionEnabled;
-        const synthesized = MemorySynthesizer.synthesize(
+        // DB4: the Box Brain memory search runs async (in the FTS worker when it runs).
+        let boxBrainHits: Awaited<ReturnType<typeof MemorySynthesizer.prefetchBoxBrainHits>> = [];
+        try {
+          boxBrainHits = await MemorySynthesizer.prefetchBoxBrainHits(
+            this.workspace.id,
+            this.getExecutionTaskPrompt(),
+          );
+        } catch (boxBrainError) {
+          logger.warn(
+            "[Executor] Box Brain recall unavailable; continuing without it:",
+            (boxBrainError as Error)?.message ?? boxBrainError,
+          );
+        }
+        const synthesized = await MemorySynthesizer.synthesize(
           this.workspace.id,
           this.workspace.path,
           this.getExecutionTaskPrompt(),
@@ -30081,6 +30106,7 @@ Return ONLY a JSON object:
             agentRoleId: this.task.assignedAgentRoleId || null,
             filesystemReadGuard: (candidatePath: string) =>
               this.canReadWorkspacePath(candidatePath),
+            boxBrainHits,
           },
         );
         synthesizedMemoryBlock = synthesized.text;
@@ -30097,7 +30123,10 @@ Return ONLY a JSON object:
             this.workspace.id,
             executionPrompt,
           );
-          const pbCtx = PlaybookService.getPlaybookForContext(this.workspace.id, executionPrompt);
+          const pbCtx = await PlaybookService.getPlaybookForContext(
+            this.workspace.id,
+            executionPrompt,
+          );
           synthesizedMemoryBlock = [memCtx, pbCtx].filter(Boolean).join("\n");
         } catch {
           // best-effort
@@ -40798,7 +40827,11 @@ Return ONLY a JSON object:
 
       logger.error("sendMessage failed:", error);
       if (resumeAttempted) {
-        this.capturePlaybookOutcome("failure", error?.message || String(error));
+        void Promise.resolve(
+          this.capturePlaybookOutcome("failure", error?.message || String(error)),
+        ).catch(() => {
+          // Best-effort playbook learning.
+        });
         this.finalizeFollowUpFailure(error);
         const errorPayload: Record<string, unknown> = {
           message: error.message,

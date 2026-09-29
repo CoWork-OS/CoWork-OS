@@ -1,15 +1,13 @@
+import { AgentRoleStore as AgentRoleRepository } from "../../agents/AgentRoleRepository";
+import { TaskStore } from "../../database/repositories";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentRoleRepository } from "../../agents/AgentRoleRepository";
+
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../../shared/access-profiles";
-import {
-  ChannelRepository,
-  TaskEventRepository,
-  TaskRepository,
-} from "../../database/repositories";
+import { ChannelStore, TaskEventRepository } from "../../database/repositories";
 import { DatabaseManager } from "../../database/schema";
 import { MCPSettingsManager } from "../../mcp/settings";
 import { RoutineService } from "../../routines/service";
@@ -44,9 +42,9 @@ describeWithSqlite("ManagedSessionService", () => {
   let previousUserDataDir: string | undefined;
   let manager: DatabaseManager;
   let db: ReturnType<DatabaseManager["getDatabase"]>;
-  let taskRepo: TaskRepository;
+  let taskRepo: TaskStore;
   let taskEventRepo: TaskEventRepository;
-  let channelRepo: ChannelRepository;
+  let channelRepo: ChannelStore;
   let roleRepo: AgentRoleRepository;
   let service: ManagedSessionService;
   let daemon: Any;
@@ -82,9 +80,9 @@ describeWithSqlite("ManagedSessionService", () => {
 
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     taskEventRepo = new TaskEventRepository(db);
-    channelRepo = new ChannelRepository(db);
+    channelRepo = new ChannelStore(db);
     roleRepo = new AgentRoleRepository(db);
 
     daemon = {
@@ -131,14 +129,14 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("pins managed sessions to the agent version used at creation time", async () => {
     const workspace = insertWorkspace();
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Local env",
       config: {
         workspaceId: workspace.id,
         enableShell: true,
       },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Pinned agent",
       systemPrompt: "You are version one.",
       executionMode: "solo",
@@ -154,7 +152,7 @@ describeWithSqlite("ManagedSessionService", () => {
       },
     });
 
-    const updated = service.updateAgent(created.agent.id, {
+    const updated = await service.updateAgent(created.agent.id, {
       name: "Pinned agent v2",
       systemPrompt: "You are version two.",
       executionMode: "solo",
@@ -172,18 +170,18 @@ describeWithSqlite("ManagedSessionService", () => {
 
     expect(daemon.startTask).toHaveBeenCalledTimes(2);
     expect(firstSession.agentVersion).toBe(1);
-    expect(service.getSession(firstSession.id)?.agentVersion).toBe(1);
+    expect((await service.getSession(firstSession.id))?.agentVersion).toBe(1);
     expect(updated.agent.currentVersion).toBe(2);
     expect(secondSession.agentVersion).toBe(2);
   });
 
   it("creates, corrects, and re-verifies a user requirement through the managed-session event route", async () => {
     const workspace = insertWorkspace("requirement-correction");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Correction env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Correction agent",
       systemPrompt: "Work on the requested output.",
       executionMode: "solo",
@@ -208,7 +206,7 @@ describeWithSqlite("ManagedSessionService", () => {
       filePaths: ["initial-report.txt"],
     });
     contractService.ensureForTask(task);
-    const createRead = service.getSessionRequirementEvidenceManifest(session.id)!;
+    const createRead = (await service.getSessionRequirementEvidenceManifest(session.id))!;
     expect(createRead.requirements).toHaveLength(1);
     const requirementId = createRead.requirements[0].requirementId;
     taskRepo.update(task.id, {
@@ -255,7 +253,7 @@ describeWithSqlite("ManagedSessionService", () => {
     manager.close();
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     contractService = new WorkSessionContractService(db);
     daemon.getWorkSessionContractService = vi.fn(() => contractService);
     service = new ManagedSessionService(db, daemon);
@@ -266,7 +264,7 @@ describeWithSqlite("ManagedSessionService", () => {
     ).toEqual([expect.objectContaining({ status: "stale" })]);
 
     fs.writeFileSync(path.join(workspace.path, "approved-report.txt"), "approved output");
-    const refreshedManifest = service.getSessionRequirementEvidenceManifest(session.id)!;
+    const refreshedManifest = (await service.getSessionRequirementEvidenceManifest(session.id))!;
     expect(refreshedManifest.contractVersion).toBe(2);
     expect(refreshedManifest.requirements[0]).toMatchObject({
       requirementId,
@@ -289,9 +287,9 @@ describeWithSqlite("ManagedSessionService", () => {
     await service.sendEvent(session.id, correction);
     expect(contractService.getForTask(task.id)?.contract?.version).toBe(2);
     expect(
-      service
-        .listSessionEvents(session.id)
-        .filter((event) => event.type === "requirement.corrected"),
+      (await service.listSessionEvents(session.id)).filter(
+        (event) => event.type === "requirement.corrected",
+      ),
     ).toHaveLength(1);
 
     const otherSession = await service.createSession({
@@ -309,9 +307,9 @@ describeWithSqlite("ManagedSessionService", () => {
       /Outcome requirement not found/,
     );
     expect(
-      service
-        .listSessionEvents(otherSession.id)
-        .some((event) => event.type === "requirement.corrected"),
+      (await service.listSessionEvents(otherSession.id)).some(
+        (event) => event.type === "requirement.corrected",
+      ),
     ).toBe(false);
     await expect(
       service.sendEvent(otherSession.id, {
@@ -324,11 +322,11 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("creates agent-panel sessions with isolated backing tasks and follow-up messages", async () => {
     const workspace = insertWorkspace("agent-panel-session");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Panel env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Panel tester",
       systemPrompt: "Answer panel tests.",
       executionMode: "solo",
@@ -355,11 +353,11 @@ describeWithSqlite("ManagedSessionService", () => {
     });
 
     expect(panelSession.surface).toBe("agent_panel");
-    expect(service.getSession(panelSession.id)?.surface).toBe("agent_panel");
+    expect((await service.getSession(panelSession.id))?.surface).toBe("agent_panel");
     expect(taskRepo.findById(panelSession.backingTaskId!)?.source).toBe("managed_agent_panel");
     expect(
-      service
-        .listSessions({ agentId: created.agent.id, surface: "agent_panel" })
+      (await service
+        .listSessions({ agentId: created.agent.id, surface: "agent_panel" }))
         .map((session) => session.id),
     ).toEqual([panelSession.id]);
 
@@ -372,8 +370,8 @@ describeWithSqlite("ManagedSessionService", () => {
       "Follow up from the panel",
     );
     expect(
-      service
-        .listSessionEvents(panelSession.id)
+      (await service
+        .listSessionEvents(panelSession.id))
         .filter((event) => event.type === "user.message")
         .map((event) => event.payload),
     ).toEqual([
@@ -384,14 +382,14 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("creates sessions and reports missing MCP requirements when environment MCP refs are stale", async () => {
     const workspace = insertWorkspace("missing-mcp-session");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Missing MCP env",
       config: {
         workspaceId: workspace.id,
         allowedMcpServerIds: ["missing-finance-server"],
       },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Missing MCP tester",
       systemPrompt: "Use configured tools when they are available.",
       executionMode: "solo",
@@ -405,7 +403,7 @@ describeWithSqlite("ManagedSessionService", () => {
     vi.spyOn(MCPSettingsManager, "loadSettings").mockReturnValue({ toolNamePrefix: "mcp_" } as Any);
     vi.spyOn(MCPSettingsManager, "getServer").mockReturnValue(undefined);
 
-    const catalog = service.getRuntimeToolCatalog(created.agent.id);
+    const catalog = await service.getRuntimeToolCatalog(created.agent.id);
     expect(catalog.missingConnections).toMatchObject([
       {
         id: "missing-finance-server",
@@ -623,14 +621,14 @@ describeWithSqlite("ManagedSessionService", () => {
       workspace.id,
     );
 
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Scoped shell env",
       config: {
         workspaceId: workspace.id,
         enableShell: true,
       },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Scoped shell agent",
       systemPrompt: "Use shell only for this session.",
       executionMode: "solo",
@@ -664,14 +662,14 @@ describeWithSqlite("ManagedSessionService", () => {
       workspace.id,
     );
 
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Profile environment",
       config: {
         workspaceId: workspace.id,
         accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
       },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Profile agent",
       systemPrompt: "Use the selected access profile.",
       executionMode: "solo",
@@ -696,9 +694,9 @@ describeWithSqlite("ManagedSessionService", () => {
     });
   });
 
-  it("assigns the configured access profile to new environments without a shell flag", () => {
+  it("assigns the configured access profile to new environments without a shell flag", async () => {
     const workspace = insertWorkspace("profile-default");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Default profile environment",
       config: { workspaceId: workspace.id },
     });
@@ -707,8 +705,8 @@ describeWithSqlite("ManagedSessionService", () => {
     expect(environment.config.enableShell).toBeUndefined();
   });
 
-  it("supports partial managed agent updates by carrying forward unspecified version fields", () => {
-    const created = service.createAgent({
+  it("supports partial managed agent updates by carrying forward unspecified version fields", async () => {
+    const created = await service.createAgent({
       name: "Partial update agent",
       systemPrompt: "Version one system prompt.",
       executionMode: "solo",
@@ -718,7 +716,7 @@ describeWithSqlite("ManagedSessionService", () => {
       },
     });
 
-    const updated = service.updateAgent(created.agent.id, {
+    const updated = await service.updateAgent(created.agent.id, {
       name: "Renamed partial agent",
     });
 
@@ -731,13 +729,13 @@ describeWithSqlite("ManagedSessionService", () => {
     });
   });
 
-  it("reuses the managed agent mirror when saved metadata omits the mirror link", () => {
+  it("reuses the managed agent mirror when saved metadata omits the mirror link", async () => {
     const workspace = insertWorkspace("mirror-link-save");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Mirror link env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Mirror Link Agent",
       systemPrompt: "Version one.",
       executionMode: "solo",
@@ -751,7 +749,7 @@ describeWithSqlite("ManagedSessionService", () => {
     const originalStudio = created.version.metadata?.studio as Any;
     const { legacyMirror: _legacyMirror, ...studioWithoutLegacyMirror } = originalStudio;
 
-    const updated = service.updateAgent(created.agent.id, {
+    const updated = await service.updateAgent(created.agent.id, {
       systemPrompt: "Version two.",
       metadata: {
         studio: {
@@ -773,9 +771,9 @@ describeWithSqlite("ManagedSessionService", () => {
     expect(mirroredRoles[0]?.systemPrompt).toBe("Version two.");
   });
 
-  it("allocates a unique legacy mirror role name when a non-managed role already uses the slug", () => {
+  it("allocates a unique legacy mirror role name when a non-managed role already uses the slug", async () => {
     const workspace = insertWorkspace("mirror-name-collision");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Mirror collision env",
       config: { workspaceId: workspace.id },
     });
@@ -787,7 +785,7 @@ describeWithSqlite("ManagedSessionService", () => {
       capabilities: [],
     });
 
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Collision Agent",
       systemPrompt: "Create a managed mirror.",
       executionMode: "solo",
@@ -808,31 +806,32 @@ describeWithSqlite("ManagedSessionService", () => {
     expect(soul.managedAgentId).toBe(created.agent.id);
   });
 
-  it("reuses a concurrently created legacy mirror role after a role-name constraint race", () => {
+  it("reuses a concurrently created legacy mirror role after a role-name constraint race", async () => {
     const workspace = insertWorkspace("mirror-role-race");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Mirror race env",
       config: { workspaceId: workspace.id },
     });
-    const originalCreate = AgentRoleRepository.prototype.create;
+    // Another writer commits the role between the service's lookup and its insert. Role
+    // writes run as transactional units, so the race is injected at the service's facade:
+    // the other writer's row is committed through the store before this insert fails.
+    const facade = (service as Any).agentRoleRepo as { create: (request: Any) => Promise<Any> };
+    const facadeCreate = facade.create;
     let injectedConstraint = false;
-    vi.spyOn(AgentRoleRepository.prototype, "create").mockImplementation(function (
-      this: AgentRoleRepository,
-      request,
-    ) {
+    facade.create = async (request: Any) => {
       if (!injectedConstraint && request.name === "managed-race-agent") {
         injectedConstraint = true;
-        originalCreate.call(this, request);
+        roleRepo.create(request);
         const error = new Error("UNIQUE constraint failed: agent_roles.name") as Error & {
           code: string;
         };
         error.code = "SQLITE_CONSTRAINT_UNIQUE";
         throw error;
       }
-      return originalCreate.call(this, request);
-    });
+      return facadeCreate(request);
+    };
 
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Race Agent",
       systemPrompt: "Create a managed mirror without hard failing.",
       executionMode: "solo",
@@ -857,11 +856,11 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("sanitizes bridged task event payloads before persisting managed session events", async () => {
     const workspace = insertWorkspace();
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Local env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Sanitizer",
       systemPrompt: "Keep things safe.",
       executionMode: "solo",
@@ -886,7 +885,7 @@ describeWithSqlite("ManagedSessionService", () => {
       },
     });
 
-    const events = service.listSessionEvents(session.id);
+    const events = await service.listSessionEvents(session.id);
     const bridged = events.find((event) => event.type === "tool.call");
 
     expect(bridged?.payload.prompt).toBe("[REDACTED]");
@@ -907,14 +906,14 @@ describeWithSqlite("ManagedSessionService", () => {
       tools: [],
     } as Any);
 
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Locked env",
       config: {
         workspaceId: workspace.id,
         allowedMcpServerIds: ["server-1"],
       },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Fail closed agent",
       systemPrompt: "Only use approved tools.",
       executionMode: "solo",
@@ -944,11 +943,11 @@ describeWithSqlite("ManagedSessionService", () => {
       displayName: "Managed Team Lead",
       capabilities: [],
     });
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Team env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Team agent",
       systemPrompt: "Coordinate the team.",
       executionMode: "team",
@@ -973,7 +972,7 @@ describeWithSqlite("ManagedSessionService", () => {
     expect(daemon.startTask).toHaveBeenCalledTimes(1);
     expect(session.backingTaskId).toBeTruthy();
     expect(session.backingTeamRunId).toBeTruthy();
-    expect(service.getSession(session.id)?.status).toBe("running");
+    expect((await service.getSession(session.id))?.status).toBe("running");
 
     await expect(
       service.sendEvent(session.id, {
@@ -1000,11 +999,11 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("enforces managed approval policy on direct sessions and mirrored agent roles", async () => {
     const workspace = insertWorkspace("approval-session");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Approval env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Approval agent",
       systemPrompt: "Handle approvals carefully.",
       executionMode: "solo",
@@ -1048,10 +1047,10 @@ describeWithSqlite("ManagedSessionService", () => {
     });
   });
 
-  it("does not mint admin access for arbitrary principals when reading workspace permissions", () => {
+  it("does not mint admin access for arbitrary principals when reading workspace permissions", async () => {
     const workspace = insertWorkspace("rbac");
 
-    const snapshot = service.getMyWorkspacePermissions(workspace.id, "attacker-user");
+    const snapshot = await service.getMyWorkspacePermissions(workspace.id, "attacker-user");
     const attackerMembership = db
       .prepare(
         `SELECT role
@@ -1068,7 +1067,7 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("preserves authored Slack targets when suspending an agent while removing live routing", async () => {
     const workspace = insertWorkspace("suspend-slack");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Slack env",
       config: { workspaceId: workspace.id },
     });
@@ -1080,7 +1079,7 @@ describeWithSqlite("ManagedSessionService", () => {
       config: {},
       securityConfig: { mode: "pairing" },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Slacky",
       systemPrompt: "Handle Slack work.",
       executionMode: "solo",
@@ -1105,7 +1104,7 @@ describeWithSqlite("ManagedSessionService", () => {
     await service.publishAgent(created.agent.id);
     await service.suspendAgent(created.agent.id);
 
-    const suspended = service.getAgent(created.agent.id);
+    const suspended = await service.getAgent(created.agent.id);
     const studio = suspended?.currentVersion?.metadata?.studio as Any;
     const updatedChannel = channelRepo.findById(channel.id);
 
@@ -1119,11 +1118,11 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("uses the routine service when suspending managed agent routines", async () => {
     const workspace = insertWorkspace("suspend-routine-sync");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Routine env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Routine agent",
       systemPrompt: "Run scheduled work.",
       executionMode: "solo",
@@ -1207,11 +1206,11 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("returns workpapers to viewers without requiring audit permission", async () => {
     const workspace = insertWorkspace("viewer-workpaper");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Viewer env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Viewer agent",
       systemPrompt: "Generate a workpaper.",
       executionMode: "solo",
@@ -1227,19 +1226,19 @@ describeWithSqlite("ManagedSessionService", () => {
       title: "Viewer session",
     });
 
-    service.updateWorkspaceMembership({
+    await service.updateWorkspaceMembership({
       workspaceId: workspace.id,
       principalId: "local-user",
       role: "viewer",
     });
 
-    const workpaper = service.getSessionWorkpaper(session.id);
+    const workpaper = await service.getSessionWorkpaper(session.id);
 
     expect(workpaper.sessionId).toBe(session.id);
     expect(workpaper.auditTrail).toEqual([]);
   });
 
-  it("reuses the source agent role when converting personas into managed agents", () => {
+  it("reuses the source agent role when converting personas into managed agents", async () => {
     const workspace = insertWorkspace("convert-role");
     const role = roleRepo.create({
       name: "support-pilot",
@@ -1250,11 +1249,11 @@ describeWithSqlite("ManagedSessionService", () => {
       systemPrompt: "Help customers.",
     });
 
-    const converted = service.convertAgentRoleToManagedAgent({
+    const converted = await service.convertAgentRoleToManagedAgent({
       agentRoleId: role.id,
       workspaceId: workspace.id,
     });
-    const detail = service.getAgent(converted.agent.id);
+    const detail = await service.getAgent(converted.agent.id);
     const studio = detail?.currentVersion?.metadata?.studio as Any;
     const managedRoles = roleRepo.findAll(true).filter((candidate) => {
       const soul = JSON.parse(candidate.soul || "{}");
@@ -1268,7 +1267,7 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("only reports Slack deployment run health from Slack-backed routine runs", async () => {
     const workspace = insertWorkspace("slack-health");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Slack health env",
       config: { workspaceId: workspace.id },
     });
@@ -1280,7 +1279,7 @@ describeWithSqlite("ManagedSessionService", () => {
       config: {},
       securityConfig: { mode: "pairing" },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Health agent",
       systemPrompt: "Do health checks.",
       executionMode: "solo",
@@ -1310,7 +1309,7 @@ describeWithSqlite("ManagedSessionService", () => {
       "UPDATE managed_sessions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?",
     ).run("completed", Date.now(), Date.now(), manualSession.id);
 
-    const health = service.getSlackDeploymentHealth(created.agent.id);
+    const health = await service.getSlackDeploymentHealth(created.agent.id);
 
     expect(health.lastSuccessfulRoutedRunId).toBeUndefined();
     expect(health.lastSuccessfulRoutedRunAt).toBeUndefined();
@@ -1319,11 +1318,11 @@ describeWithSqlite("ManagedSessionService", () => {
 
   it("derives unique agent users from recorded requester identities instead of hard-coding one", async () => {
     const workspace = insertWorkspace("agent-insights");
-    const environment = service.createEnvironment({
+    const environment = await service.createEnvironment({
       name: "Insights env",
       config: { workspaceId: workspace.id },
     });
-    const created = service.createAgent({
+    const created = await service.createAgent({
       name: "Insights agent",
       systemPrompt: "Track usage.",
       executionMode: "solo",
@@ -1358,7 +1357,7 @@ describeWithSqlite("ManagedSessionService", () => {
       payload: { requestingUserId: "bob" },
     });
 
-    const insights = service.getAgentInsights(created.agent.id);
+    const insights = await service.getAgentInsights(created.agent.id);
 
     expect(insights.uniqueUsers).toBe(2);
   });

@@ -338,7 +338,7 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     tasks.set("child-late", makeTask("child-late", "queued", "root-cancel-race"));
     await createRun;
 
-    const snapshot = engine.getRepository().findSnapshotByRootTaskId("root-cancel-race");
+    const snapshot = await engine.getRepository().findSnapshotByRootTaskId("root-cancel-race");
     expect(deps.cancelTask).toHaveBeenCalledWith("child-late");
     expect(snapshot?.run.status).toBe("cancelled");
     expect(snapshot?.nodes[0]).toMatchObject({ status: "cancelled", taskId: "child-late" });
@@ -367,7 +367,7 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     });
 
     const cancelled = await engine.cancelHandle("root-remote-cancel", "remote-task-1");
-    const snapshot = engine.getRepository().findSnapshotByRootTaskId("root-remote-cancel");
+    const snapshot = await engine.getRepository().findSnapshotByRootTaskId("root-remote-cancel");
 
     expect(cancelled).toBe(false);
     expect(remote.requests).toEqual(["tasks/send", "tasks/cancel"]);
@@ -397,7 +397,7 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
 
     const outcome = await engine.cancelRunForRootTask("root-parent-remote-cancel");
     await engine.appendNodes({ runId: snapshot.run.id, nodes: [makeNode("late-node")] });
-    const after = engine.getRepository().findSnapshotByRunId(snapshot.run.id);
+    const after = await engine.getRepository().findSnapshotByRunId(snapshot.run.id);
 
     expect(outcome.unresolvedNodeIds).toContain(snapshot.nodes[0].id);
     expect(after?.run.status).toBe("cancelled");
@@ -428,7 +428,8 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     getACPRegistry().unregisterRemoteAgent(agent.id);
 
     expect(await engine.cancelHandle("root-missing-agent", "remote-task-1")).toBe(false);
-    const node = engine.getRepository().findSnapshotByRootTaskId("root-missing-agent")?.nodes[0];
+    const node = (await engine.getRepository().findSnapshotByRootTaskId("root-missing-agent"))
+      ?.nodes[0];
     expect(node).toMatchObject({ status: "blocked", remoteTaskId: "remote-task-1" });
     expect(node?.error).toMatch(/unavailable|missing/i);
     expect(remote.requests).toEqual(["tasks/send"]);
@@ -457,11 +458,11 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     });
 
     // Model process loss after run admission closes but before cancellation metadata is written.
-    engine.getRepository().cancelRunningRunsForRootTask("root-closed-before-cancel-attempt");
+    await engine.getRepository().cancelRunningRunsForRootTask("root-closed-before-cancel-attempt");
     const recovered = new OrchestrationGraphEngine(db, makeDeps().deps);
     await recovered.resumeRunningRuns();
 
-    const after = recovered.getRepository().findSnapshotByRunId(snapshot.run.id);
+    const after = await recovered.getRepository().findSnapshotByRunId(snapshot.run.id);
     expect(after?.run.status).toBe("cancelled");
     expect(after?.nodes[0]).toMatchObject({ status: "blocked", remoteTaskId: "remote-task-1" });
     expect(after?.nodes[0].metadata).toMatchObject({
@@ -495,14 +496,14 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     const cancellation = engine.cancelRunForRootTask("root-active-cancel-recovery");
     await remote.cancelStarted;
     await engine.resumeRunningRuns();
-    const during = engine.getRepository().findSnapshotByRunId(snapshot.run.id);
+    const during = await engine.getRepository().findSnapshotByRunId(snapshot.run.id);
     expect(during?.nodes[0]).toMatchObject({ status: "running", remoteTaskId: "remote-task-1" });
     expect(during?.nodes[0].metadata).toMatchObject({ cancellation: { outcome: "in_flight" } });
     expect(remote.requests).toEqual(["tasks/send", "tasks/cancel"]);
 
     remote.resolveCancel("running");
     await cancellation;
-    const after = engine.getRepository().findSnapshotByRunId(snapshot.run.id);
+    const after = await engine.getRepository().findSnapshotByRunId(snapshot.run.id);
     expect(after?.nodes[0]).toMatchObject({ status: "blocked", remoteTaskId: "remote-task-1" });
     expect(after?.nodes[0].metadata).toMatchObject({ cancellation: { outcome: "unresolved" } });
   });
@@ -536,7 +537,7 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
       });
 
       expect(await engine.cancelHandle(`root-${responseStatus}`, "remote-task-1")).toBe(true);
-      const node = engine.getRepository().findSnapshotByRootTaskId(`root-${responseStatus}`)
+      const node = (await engine.getRepository().findSnapshotByRootTaskId(`root-${responseStatus}`))
         ?.nodes[0];
       expect(node).toMatchObject({ status: expectedStatus, remoteTaskId: "remote-task-1" });
       expect(node?.metadata).toMatchObject({
@@ -568,7 +569,7 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
 
     expect(notifications).toEqual([expect.objectContaining({ nodeId: node.id, status: "blocked" })]);
 
-    const after = recovered.getRepository().findSnapshotByRunId(snapshot.run.id);
+    const after = await recovered.getRepository().findSnapshotByRunId(snapshot.run.id);
     expect(deps.deps.createChildTask).not.toHaveBeenCalled();
     expect(after?.nodes[0]).toMatchObject({ status: "blocked" });
     expect(after?.nodes[0].metadata).toMatchObject({ dispatchOutcome: "unknown" });
@@ -616,7 +617,7 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     const recovered = new OrchestrationGraphEngine(db, deps);
     await recovered.resumeRunningRuns();
 
-    const afterRecovery = recovered.getRepository().findSnapshotByRunId(snapshot.run.id);
+    const afterRecovery = await recovered.getRepository().findSnapshotByRunId(snapshot.run.id);
     expect(afterRecovery?.nodes.find((node) => node.key === "first")?.status).toBe("completed");
     expect(afterRecovery?.nodes.find((node) => node.key === "second")?.status).toBe("running");
     expect(deps.createChildTask).toHaveBeenCalledTimes(2);

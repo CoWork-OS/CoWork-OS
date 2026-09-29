@@ -26,8 +26,8 @@ describeWithSqlite("StrategicPlannerService", () => {
   let db: ReturnType<import("../../database/schema").DatabaseManager["getDatabase"]>;
   let core: import("../ControlPlaneCoreService").ControlPlaneCoreService;
   let planner: import("../StrategicPlannerService").StrategicPlannerService;
-  let taskRepo: import("../../database/repositories").TaskRepository;
-  let agentRoleRepo: import("../../agents/AgentRoleRepository").AgentRoleRepository;
+  let taskRepo: import("../../database/repositories").TaskStore;
+  let agentRoleRepo: import("../../agents/AgentRoleRepository").AgentRoleStore;
 
   const insertWorkspace = (name = "main") => {
     const workspace = {
@@ -62,8 +62,8 @@ describeWithSqlite("StrategicPlannerService", () => {
       { DatabaseManager },
       { ControlPlaneCoreService },
       { StrategicPlannerService },
-      { TaskRepository },
-      { AgentRoleRepository },
+      { TaskStore: TaskRepository },
+      { AgentRoleStore: AgentRoleRepository },
     ] = await Promise.all([
       import("../../database/schema"),
       import("../ControlPlaneCoreService"),
@@ -97,30 +97,30 @@ describeWithSqlite("StrategicPlannerService", () => {
 
   it("creates planner-managed issues for uncovered goals and projects", async () => {
     const workspace = insertWorkspace();
-    const company = core.getDefaultCompany();
-    const goal = core.createGoal({
+    const company = await core.getDefaultCompany();
+    const goal = await core.createGoal({
       companyId: company.id,
       title: "Launch autonomous venture pilot",
     });
-    const project = core.createProject({
+    const project = await core.createProject({
       companyId: company.id,
       goalId: goal.id,
       name: "Growth Engine",
     });
-    core.linkProjectWorkspace({
+    await core.linkProjectWorkspace({
       projectId: project.id,
       workspaceId: workspace.id,
       isPrimary: true,
     });
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       maxIssuesPerRun: 5,
       autoDispatch: false,
     });
 
     const run = await planner.runNow({ companyId: company.id, trigger: "manual" });
-    const issues = core.listIssues({ companyId: company.id, limit: 20 });
+    const issues = await core.listIssues({ companyId: company.id, limit: 20 });
 
     expect(run.status).toBe("completed");
     expect(run.createdIssueCount).toBeGreaterThan(0);
@@ -143,13 +143,13 @@ describeWithSqlite("StrategicPlannerService", () => {
         outcomes.push(outcome);
       },
     });
-    const company = core.getDefaultCompany();
-    core.createProject({
+    const company = await core.getDefaultCompany();
+    await core.createProject({
       companyId: company.id,
       name: "Lifecycle Signals",
     });
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       maxIssuesPerRun: 2,
       autoDispatch: false,
@@ -168,23 +168,23 @@ describeWithSqlite("StrategicPlannerService", () => {
   });
 
   it("uses the company default workspace instead of creating workspace-link issues", async () => {
-    const company = core.createCompany({
+    const company = await core.createCompany({
       name: "Planner Workspace Co",
       slug: "planner-workspace-co",
     });
-    core.createProject({
+    await core.createProject({
       companyId: company.id,
       name: "Growth Engine",
     });
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       maxIssuesPerRun: 5,
       autoDispatch: false,
     });
 
     const run = await planner.runNow({ companyId: company.id, trigger: "manual" });
-    const issues = core.listIssues({ companyId: company.id, limit: 20 });
+    const issues = await core.listIssues({ companyId: company.id, limit: 20 });
 
     expect(run.status).toBe("completed");
     expect(
@@ -192,24 +192,24 @@ describeWithSqlite("StrategicPlannerService", () => {
     ).toBe(false);
     expect(
       issues.some(
-        (issue) =>
+        async (issue) =>
           issue.title === "Define next deliverable for project: Growth Engine" &&
-          issue.workspaceId === core.getCompany(company.id)?.defaultWorkspaceId,
+          issue.workspaceId === (await core.getCompany(company.id))?.defaultWorkspaceId,
       ),
     ).toBe(true);
     expect(
-      core.listProjectWorkspaces(core.listProjects({ companyId: company.id })[0]!.id),
+      await core.listProjectWorkspaces((await core.listProjects({ companyId: company.id }))[0]!.id),
     ).toHaveLength(1);
   });
 
   it("auto-dispatches planner-managed issues into task runs when enabled", async () => {
     const workspace = insertWorkspace();
-    const company = core.getDefaultCompany();
-    const project = core.createProject({
+    const company = await core.getDefaultCompany();
+    const project = await core.createProject({
       companyId: company.id,
       name: "Customer Ops",
     });
-    core.linkProjectWorkspace({
+    await core.linkProjectWorkspace({
       projectId: project.id,
       workspaceId: workspace.id,
       isPrimary: true,
@@ -248,7 +248,7 @@ describeWithSqlite("StrategicPlannerService", () => {
       } as Any,
     });
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       autoDispatch: true,
       maxIssuesPerRun: 2,
@@ -270,13 +270,13 @@ describeWithSqlite("StrategicPlannerService", () => {
 
   it("uses the control-plane workspace link tool instructions for project workspace issues", async () => {
     const workspace = insertWorkspace();
-    const company = core.getDefaultCompany();
-    const project = core.createProject({
+    const company = await core.getDefaultCompany();
+    const project = await core.createProject({
       companyId: company.id,
       name: "Docs Workspace Mapping",
     });
-    for (const link of core.listProjectWorkspaces(project.id)) {
-      core.unlinkProjectWorkspace(project.id, link.workspaceId);
+    for (const link of await core.listProjectWorkspaces(project.id)) {
+      await core.unlinkProjectWorkspace(project.id, link.workspaceId);
     }
     // Exercise the legacy/migrated state where neither the project nor its
     // company has a workspace available for planner dispatch.
@@ -314,7 +314,7 @@ describeWithSqlite("StrategicPlannerService", () => {
       } as Any,
     });
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       autoDispatch: true,
       maxIssuesPerRun: 1,
@@ -332,12 +332,12 @@ describeWithSqlite("StrategicPlannerService", () => {
 
   it("does not redispatch the same planner-managed issue on the next run when it already has a task", async () => {
     const workspace = insertWorkspace();
-    const company = core.getDefaultCompany();
-    const project = core.createProject({
+    const company = await core.getDefaultCompany();
+    const project = await core.createProject({
       companyId: company.id,
       name: "Repeat Dispatch Guard",
     });
-    core.linkProjectWorkspace({
+    await core.linkProjectWorkspace({
       projectId: project.id,
       workspaceId: workspace.id,
       isPrimary: true,
@@ -376,7 +376,7 @@ describeWithSqlite("StrategicPlannerService", () => {
       } as Any,
     });
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       autoDispatch: true,
       maxIssuesPerRun: 2,
@@ -394,7 +394,7 @@ describeWithSqlite("StrategicPlannerService", () => {
   });
 
   it("repairs stale planner role references instead of failing on config writes", async () => {
-    const company = core.getDefaultCompany();
+    const company = await core.getDefaultCompany();
     const plannerAgent =
       agentRoleRepo.findByName("project_manager") ||
       agentRoleRepo.create({
@@ -404,7 +404,7 @@ describeWithSqlite("StrategicPlannerService", () => {
         heartbeatEnabled: true,
       });
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       plannerAgentRoleId: plannerAgent.id,
     });
@@ -413,18 +413,18 @@ describeWithSqlite("StrategicPlannerService", () => {
     db.prepare("DELETE FROM agent_roles WHERE id = ?").run(plannerAgent.id);
     db.exec("PRAGMA foreign_keys = ON");
 
-    expect(() =>
+    await expect(
       planner.updateConfig(company.id, {
         lastRunAt: Date.now(),
       }),
-    ).not.toThrow();
+    ).resolves.toBeDefined();
 
-    const repaired = planner.getConfig(company.id);
+    const repaired = await planner.getConfig(company.id);
     expect(repaired.plannerAgentRoleId).toBeUndefined();
   });
 
   it("keeps successful planner runs completed when stale config role references are repaired", async () => {
-    const company = core.getDefaultCompany();
+    const company = await core.getDefaultCompany();
     const plannerAgent =
       agentRoleRepo.findByName("project_manager") ||
       agentRoleRepo.create({
@@ -434,7 +434,7 @@ describeWithSqlite("StrategicPlannerService", () => {
         heartbeatEnabled: true,
       });
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       plannerAgentRoleId: plannerAgent.id,
     });
@@ -447,7 +447,7 @@ describeWithSqlite("StrategicPlannerService", () => {
 
     expect(run.status).toBe("completed");
     expect(run.error).toBeUndefined();
-    expect(planner.getConfig(company.id).plannerAgentRoleId).toBeUndefined();
+    expect((await planner.getConfig(company.id)).plannerAgentRoleId).toBeUndefined();
     expect(
       db
         .prepare(
@@ -458,7 +458,7 @@ describeWithSqlite("StrategicPlannerService", () => {
   });
 
   it("does not create planner runs or configs for inactive companies", async () => {
-    const company = core.createCompany({
+    const company = await core.createCompany({
       name: "Inactive Planner Company",
       status: "inactive",
     });
@@ -467,7 +467,7 @@ describeWithSqlite("StrategicPlannerService", () => {
       `Company is not active: ${company.id}`,
     );
 
-    expect(planner.listRuns({ companyId: company.id })).toHaveLength(0);
+    expect(await planner.listRuns({ companyId: company.id })).toHaveLength(0);
     expect(
       db
         .prepare("SELECT COUNT(*) AS count FROM strategic_planner_configs WHERE company_id = ?")
@@ -477,12 +477,12 @@ describeWithSqlite("StrategicPlannerService", () => {
 
   it("creates a linked planner follow-up for stale inbox-originated issues without taking ownership of the original", async () => {
     const workspace = insertWorkspace("handoff");
-    const company = core.getDefaultCompany();
-    const project = core.createProject({
+    const company = await core.getDefaultCompany();
+    const project = await core.createProject({
       companyId: company.id,
       name: "Customer Escalations",
     });
-    core.linkProjectWorkspace({
+    await core.linkProjectWorkspace({
       projectId: project.id,
       workspaceId: workspace.id,
       isPrimary: true,
@@ -494,7 +494,7 @@ describeWithSqlite("StrategicPlannerService", () => {
         .find((role) => /customer ops|founder office|growth|planner/i.test(role.displayName)) ||
       agentRoleRepo.findByCompanyId(company.id, false)[0];
 
-    const inboxIssue = core.createIssue({
+    const inboxIssue = await core.createIssue({
       companyId: company.id,
       projectId: project.id,
       workspaceId: workspace.id,
@@ -514,7 +514,7 @@ describeWithSqlite("StrategicPlannerService", () => {
       inboxIssue.id,
     );
 
-    planner.updateConfig(company.id, {
+    await planner.updateConfig(company.id, {
       enabled: true,
       maxIssuesPerRun: 5,
       autoDispatch: false,
@@ -523,7 +523,7 @@ describeWithSqlite("StrategicPlannerService", () => {
 
     await planner.runNow({ companyId: company.id, trigger: "manual" });
 
-    const issues = core.listIssues({ companyId: company.id, limit: 20 });
+    const issues = await core.listIssues({ companyId: company.id, limit: 20 });
     const followUp = issues.find(
       (issue) =>
         issue.parentIssueId === inboxIssue.id &&
@@ -534,7 +534,7 @@ describeWithSqlite("StrategicPlannerService", () => {
     expect(followUp).toBeTruthy();
     expect(followUp?.title).toContain("Planner follow-up for inbox issue");
 
-    const reloadedOriginal = core.getIssue(inboxIssue.id);
+    const reloadedOriginal = await core.getIssue(inboxIssue.id);
     expect(reloadedOriginal?.metadata?.source).toBe("mailbox_handoff");
     expect(reloadedOriginal?.metadata?.plannerManaged).toBe(false);
     expect(reloadedOriginal?.parentIssueId).toBeUndefined();

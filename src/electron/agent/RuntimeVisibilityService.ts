@@ -1,9 +1,6 @@
-import {
-  type TaskEventRepository,
-  type TaskRepository,
-  type WorkspaceRepository,
-} from "../database/repositories";
-import { type ActivityRepository } from "../activity/ActivityRepository";
+import type { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import { type TaskEventRepository } from "../database/repositories";
+import { type ActivityRepository } from "../activity/activity-repository-facades";
 import { MemoryService } from "../memory/MemoryService";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
@@ -216,10 +213,10 @@ export class RuntimeVisibilityService {
     };
   }
 
-  static collectUnifiedRecall(
+  static async collectUnifiedRecall(
     deps: RecallRepositories,
     query: UnifiedRecallQuery & { workspacePath?: string },
-  ): UnifiedRecallResponse {
+  ): Promise<UnifiedRecallResponse> {
     const workspaceId = normalizeText(query.workspaceId) || undefined;
     const normalizedQuery = normalizeText(query.query);
     const limit = Math.min(Math.max(query.limit || 20, 1), 100);
@@ -242,16 +239,18 @@ export class RuntimeVisibilityService {
     };
 
     if (workspaceId && sourceAllowed("memory")) {
-      for (const mem of MemoryService.searchForPromptRecall(
+      for (const mem of await MemoryService.searchForPromptRecall(
         workspaceId,
         normalizedQuery,
         limit * 2,
       )) {
         const snippet = truncate(mem.snippet || "", 260);
         if (!matchesQuery(snippet)) continue;
-        let observation: ReturnType<typeof MemoryObservationService.details>[number] | undefined;
+        let observation:
+          | Awaited<ReturnType<typeof MemoryObservationService.details>>[number]
+          | undefined;
         try {
-          observation = MemoryObservationService.details([mem.id], workspaceId)[0];
+          observation = (await MemoryObservationService.details([mem.id], workspaceId))[0];
         } catch {
           observation = undefined;
         }
@@ -280,7 +279,7 @@ export class RuntimeVisibilityService {
     }
 
     if (workspaceId && query.workspacePath && sourceAllowed("workspace_note")) {
-      for (const note of MemoryService.searchWorkspaceMarkdown(
+      for (const note of await MemoryService.searchWorkspaceMarkdown(
         workspaceId,
         query.workspacePath,
         normalizedQuery,
@@ -306,7 +305,11 @@ export class RuntimeVisibilityService {
     }
 
     if (workspaceId && sourceAllowed("knowledge_graph")) {
-      for (const entity of KnowledgeGraphService.search(workspaceId, normalizedQuery, limit * 2)) {
+      for (const entity of await KnowledgeGraphService.search(
+        workspaceId,
+        normalizedQuery,
+        limit * 2,
+      )) {
         const snippet = truncate(
           `${entity.entity.name}${entity.entity.description ? ` - ${entity.entity.description}` : ""}`,
           260,
@@ -372,7 +375,7 @@ export class RuntimeVisibilityService {
       }
     }
 
-    const taskCandidates = deps.taskRepo.findByCreatedAtRange({
+    const taskCandidates = await deps.taskRepo.findByCreatedAtRange({
       startMs: Date.now() - 90 * 24 * 60 * 60 * 1000,
       endMs: Date.now(),
       limit: limit * 2,
@@ -463,7 +466,7 @@ export class RuntimeVisibilityService {
     }
 
     if (workspaceId) {
-      for (const activity of deps.activityRepo.list({ workspaceId, limit: limit * 2 })) {
+      for (const activity of await deps.activityRepo.list({ workspaceId, limit: limit * 2 })) {
         const text = `${activity.title}\n${activity.description || ""}`;
         if (!matchesQuery(text)) continue;
         addResult({

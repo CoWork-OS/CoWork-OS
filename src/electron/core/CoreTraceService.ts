@@ -1,3 +1,4 @@
+import { CoreMemoryCandidateRepository, CoreTraceRepository } from "./core-repository-facades";
 import type {
   CoreTrace,
   CoreTraceEvent,
@@ -5,8 +6,6 @@ import type {
   CoreTraceStatus,
   ListCoreTracesRequest,
 } from "../../shared/types";
-import { CoreMemoryCandidateRepository } from "./CoreMemoryCandidateRepository";
-import { CoreTraceRepository } from "./CoreTraceRepository";
 
 export class CoreTraceService {
   constructor(
@@ -14,10 +13,10 @@ export class CoreTraceService {
     private readonly candidateRepo: CoreMemoryCandidateRepository,
   ) {}
 
-  startTrace(
+  async startTrace(
     input: Omit<CoreTrace, "id" | "createdAt"> & { id?: string; createdAt?: number },
-  ): CoreTrace {
-    const existing = this.traceRepo.findOpenTrace({
+  ): Promise<CoreTrace> {
+    const existing = await this.traceRepo.findOpenTrace({
       profileId: input.profileId,
       sourceSurface: input.sourceSurface,
       targetKey: input.targetKey,
@@ -30,13 +29,13 @@ export class CoreTraceService {
     return this.traceRepo.create(input);
   }
 
-  appendPhaseEvent(
+  async appendPhaseEvent(
     traceId: string,
     phase: CoreTracePhase,
     eventType: string,
     summary: string,
     details?: Record<string, unknown>,
-  ): CoreTraceEvent {
+  ): Promise<CoreTraceEvent> {
     return this.traceRepo.appendEvent({
       traceId,
       phase,
@@ -46,23 +45,29 @@ export class CoreTraceService {
     });
   }
 
-  attachHeartbeatRun(traceId: string, heartbeatRunId: string): CoreTrace | undefined {
+  async attachHeartbeatRun(
+    traceId: string,
+    heartbeatRunId: string,
+  ): Promise<CoreTrace | undefined> {
     return this.traceRepo.update(traceId, { heartbeatRunId });
   }
 
-  attachSubconsciousRun(traceId: string, subconsciousRunId: string): CoreTrace | undefined {
+  async attachSubconsciousRun(
+    traceId: string,
+    subconsciousRunId: string,
+  ): Promise<CoreTrace | undefined> {
     return this.traceRepo.update(traceId, { subconsciousRunId });
   }
 
-  attachTask(traceId: string, taskId: string): CoreTrace | undefined {
+  async attachTask(traceId: string, taskId: string): Promise<CoreTrace | undefined> {
     return this.traceRepo.update(traceId, { taskId });
   }
 
-  completeTrace(
+  async completeTrace(
     traceId: string,
     status: Exclude<CoreTraceStatus, "running">,
     summary?: string,
-  ): CoreTrace | undefined {
+  ): Promise<CoreTrace | undefined> {
     return this.traceRepo.update(traceId, {
       status,
       summary,
@@ -70,7 +75,7 @@ export class CoreTraceService {
     });
   }
 
-  failTrace(traceId: string, error: string): CoreTrace | undefined {
+  async failTrace(traceId: string, error: string): Promise<CoreTrace | undefined> {
     return this.traceRepo.update(traceId, {
       status: "failed",
       error,
@@ -78,13 +83,13 @@ export class CoreTraceService {
     });
   }
 
-  getTrace(id: string) {
-    const trace = this.traceRepo.findById(id);
+  async getTrace(id: string) {
+    const trace = await this.traceRepo.findById(id);
     if (!trace) return undefined;
     return {
       trace,
-      events: this.traceRepo.listEvents(id),
-      candidates: this.candidateRepo.listForTrace(id),
+      events: await this.traceRepo.listEvents(id),
+      candidates: await this.candidateRepo.listForTrace(id),
     };
   }
 

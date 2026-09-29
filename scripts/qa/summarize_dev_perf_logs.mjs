@@ -55,6 +55,7 @@ const perfMarksByTask = new Map();
 const ipc = new Map();
 const ipcRenderer = new Map();
 const startupLanes = new Map();
+const hostPerf = new Map();
 
 for (const row of rows) {
   const message = String(row.message ?? row.rawLine ?? "");
@@ -125,6 +126,26 @@ for (const row of rows) {
       if (Number.isFinite(value)) bucket[key].push(value);
     }
     ipcRenderer.set(ipcRendererMetrics.channel, bucket);
+  }
+
+  const hostSample = extractTrailingJson(message, "[HostPerf]");
+  if (hostSample?.runtime && hostSample.eventLoop && hostSample.sqlite) {
+    const bucket = hostPerf.get(hostSample.runtime) ?? {
+      eventLoopP99Ms: [],
+      eventLoopMaxMs: [],
+      sqliteHostShare: [],
+      timelinePersistP95Ms: [],
+    };
+    const values = {
+      eventLoopP99Ms: hostSample.eventLoop.p99Ms,
+      eventLoopMaxMs: hostSample.eventLoop.maxMs,
+      sqliteHostShare: hostSample.sqlite.hostShare,
+      timelinePersistP95Ms: hostSample.sqlite.hostOperations?.["timeline.persist"]?.p95Ms,
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (Number.isFinite(Number(value))) bucket[key].push(Number(value));
+    }
+    hostPerf.set(hostSample.runtime, bucket);
   }
 
   const lane = extractTrailingJson(message, "[StartupLane]");
@@ -210,4 +231,16 @@ for (const [channel, bucket] of [...ipcRenderer.entries()].sort()) {
       `    serialized: n=${bucket.serializedBytes.length} p50=${percentile(bucket.serializedBytes, 0.5).toFixed(0)}B p95=${percentile(bucket.serializedBytes, 0.95).toFixed(0)}B max=${Math.max(...bucket.serializedBytes).toFixed(0)}B`,
     );
   }
+}
+
+console.log("");
+console.log("Host event loop and SQLite ([HostPerf] windows)");
+for (const [runtime, bucket] of hostPerf) {
+  const shares = bucket.sqliteHostShare;
+  const maxShare = shares.length > 0 ? Math.max(...shares) : 0;
+  console.log(`  ${runtime}`);
+  console.log(`    event-loop p99: ${summarize(bucket.eventLoopP99Ms)}`);
+  console.log(`    event-loop max: ${summarize(bucket.eventLoopMaxMs)}`);
+  console.log(`    timeline persist p95: ${summarize(bucket.timelinePersistP95Ms)}`);
+  console.log(`    SQLite share of window: n=${shares.length} max=${(maxShare * 100).toFixed(1)}%`);
 }

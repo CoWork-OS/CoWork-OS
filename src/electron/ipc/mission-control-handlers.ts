@@ -1,3 +1,18 @@
+import { SubconsciousRunRepository } from "../subconscious/subconscious-repository-facades";
+import {
+  CoreFailureClusterRepository,
+  CoreFailureRecordRepository,
+  CoreMemoryCandidateRepository,
+  CoreMemoryDistillRunRepository,
+  CoreTraceRepository,
+} from "../core/core-repository-facades";
+import {
+  AgentRoleRepository,
+  AutomationProfileRepository,
+  HeartbeatRunRepository,
+  TaskSubscriptionRepository,
+} from "../agents/agent-repository-facades";
+import { TaskRepository } from "../database/repository-facades";
 import type Database from "better-sqlite3";
 import { ipcMain, BrowserWindow } from "electron";
 import {
@@ -25,15 +40,10 @@ import {
   MissionControlScopeRequest,
 } from "../../shared/types";
 import type { Issue } from "../../shared/types";
-import { AgentRoleRepository } from "../agents/AgentRoleRepository";
-import { AutomationProfileRepository } from "../agents/AutomationProfileRepository";
-import { HeartbeatRunRepository } from "../agents/HeartbeatRunRepository";
-import {
-  TaskSubscriptionRepository,
-  SubscriptionReason,
-} from "../agents/TaskSubscriptionRepository";
-import { ActivityRepository } from "../activity/ActivityRepository";
-import { TaskRepository } from "../database/repositories";
+
+import { SubscriptionReason } from "../agents/TaskSubscriptionRepository";
+import { ActivityRepository } from "../activity/activity-repository-facades";
+
 import { StandupReportService } from "../reports/StandupReportService";
 import { HeartbeatService } from "../agents/HeartbeatService";
 import { rateLimiter } from "../utils/rate-limiter";
@@ -41,22 +51,18 @@ import { validateInput, UUIDSchema } from "../utils/validation";
 import { createLogger } from "../utils/logger";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
 import { StrategicPlannerService } from "../control-plane/StrategicPlannerService";
-import { SubconsciousRunRepository } from "../subconscious/SubconsciousRepositories";
-import { CoreMemoryCandidateRepository } from "../core/CoreMemoryCandidateRepository";
-import { CoreMemoryDistillRunRepository } from "../core/CoreMemoryDistillRunRepository";
-import { CoreTraceRepository } from "../core/CoreTraceRepository";
+
 import { CoreTraceService } from "../core/CoreTraceService";
 import { CoreMemoryDistiller } from "../core/CoreMemoryDistiller";
-import { CoreFailureRecordRepository } from "../core/CoreFailureRecordRepository";
-import { CoreFailureClusterRepository } from "../core/CoreFailureClusterRepository";
+
 import { CoreFailureMiningService } from "../core/CoreFailureMiningService";
 import { CoreFailureClusterService } from "../core/CoreFailureClusterService";
 import { CoreEvalCaseService } from "../core/CoreEvalCaseService";
 import { CoreHarnessExperimentService } from "../core/CoreHarnessExperimentService";
 import { CoreHarnessExperimentRunner } from "../core/CoreHarnessExperimentRunner";
 import { CoreLearningsService } from "../core/CoreLearningsService";
-import { MissionControlIntelligenceService } from "../mission-control/MissionControlIntelligenceService";
-import { AutomationRunOutcomeRepository } from "../automation/AutomationRunOutcomeRepository";
+import { MissionControlIntelligenceService } from "../mission-control/mission-control-repository-facades";
+import { AutomationRunOutcomeRepository } from "../automation/automation-outcome-repository-facades";
 import { AutomationOutcomeService } from "../automation/AutomationOutcomeService";
 import {
   AutomationProfileAttachRequestSchema,
@@ -306,7 +312,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   ipcMain.handle(IPC_CHANNELS.HEARTBEAT_GET_CONFIG, async (_, agentRoleId: string) => {
     const validated = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-    const role = agentRoleRepo.findById(validated);
+    const role = await agentRoleRepo.findById(validated);
     if (!role) {
       throw new Error("Agent role not found");
     }
@@ -334,9 +340,9 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         config,
         "heartbeat configuration",
       );
-      const result = agentRoleRepo.updateHeartbeatConfig(validated, validatedConfig);
+      const result = await agentRoleRepo.updateHeartbeatConfig(validated, validatedConfig);
       if (result) {
-        heartbeatService.updateAgentConfig(validated, validatedConfig);
+        await heartbeatService.updateAgentConfig(validated, validatedConfig);
         getMainWindow()?.webContents.send(IPC_CHANNELS.HEARTBEAT_EVENT, {
           type: "config_updated",
           agentRoleId: validated,
@@ -385,7 +391,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       "automation profile create request",
     );
     const agentRoleId = validatedRequest.agentRoleId;
-    const role = agentRoleRepo.findById(agentRoleId);
+    const role = await agentRoleRepo.findById(agentRoleId);
     if (!role) {
       throw new Error("Agent role not found");
     }
@@ -427,7 +433,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_DELETE);
     const validated = validateInput(UUIDSchema, id, "automation profile ID");
-    automationProfileRepo.deleteById(validated);
+    await automationProfileRepo.deleteById(validated);
   });
 
   ipcMain.handle(
@@ -440,7 +446,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         request ?? {},
         "automation profile attach request",
       );
-      const role = agentRoleRepo.findById(validatedRoleId);
+      const role = await agentRoleRepo.findById(validatedRoleId);
       if (!role) {
         throw new Error("Agent role not found");
       }
@@ -463,18 +469,18 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   ipcMain.handle(IPC_CHANNELS.AUTOMATION_PROFILE_DETACH, async (_, agentRoleId: string) => {
     checkRateLimit(IPC_CHANNELS.AUTOMATION_PROFILE_DETACH);
     const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-    automationProfileRepo.deleteByAgentRoleId(validatedRoleId);
+    await automationProfileRepo.deleteByAgentRoleId(validatedRoleId);
   });
 
   ipcMain.handle(
     IPC_CHANNELS.AUTOMATION_PROFILE_LIST_HEARTBEAT_RUNS,
     async (_, payload: { profileId: string; limit?: number }) => {
       const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
-      const profile = automationProfileRepo.findById(profileId);
+      const profile = await automationProfileRepo.findById(profileId);
       if (!profile) {
         throw new Error("Automation profile not found");
       }
-      const all = heartbeatRunRepo.listRecentDispatches(profile.agentRoleId, 0);
+      const all = await heartbeatRunRepo.listRecentDispatches(profile.agentRoleId, 0);
       return typeof payload?.limit === "number" ? all.slice(0, payload.limit) : all;
     },
   );
@@ -483,7 +489,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     IPC_CHANNELS.AUTOMATION_PROFILE_LIST_SUBCONSCIOUS_RUNS,
     async (_, payload: { profileId: string; limit?: number }) => {
       const profileId = validateInput(UUIDSchema, payload?.profileId, "automation profile ID");
-      const profile = automationProfileRepo.findById(profileId);
+      const profile = await automationProfileRepo.findById(profileId);
       if (!profile) {
         throw new Error("Automation profile not found");
       }
@@ -529,7 +535,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
           )
         : {};
       if (validated.traceId) {
-        deps.coreFailureMiningService.mineTrace(validated.traceId);
+        await deps.coreFailureMiningService.mineTrace(validated.traceId);
       }
       return coreFailureRecordRepo.list(validated);
     },
@@ -545,7 +551,10 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
             "core failure cluster list request",
           )
         : {};
-      deps.coreFailureClusterService.clusterFailures(validated.profileId, validated.workspaceId);
+      await deps.coreFailureClusterService.clusterFailures(
+        validated.profileId,
+        validated.workspaceId,
+      );
       return coreFailureClusterRepo.list(validated);
     },
   );
@@ -690,11 +699,10 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   // Forward heartbeat events to renderer
   heartbeatService.on("heartbeat", (event) => {
-    try {
-      missionControlIntelligence.recordHeartbeatEvent(event);
-    } catch (error) {
+    // Projection runs in its own unit; the event is forwarded without waiting for it.
+    void missionControlIntelligence.recordHeartbeatEvent(event).catch((error: unknown) => {
       logger.warn("Failed to project heartbeat event into Mission Control:", error);
-    }
+    });
     if (event.type === "no_work" && event.result?.silent) {
       return;
     }
@@ -723,7 +731,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       checkRateLimit(IPC_CHANNELS.SUBSCRIPTION_ADD);
       const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
       const validatedAgentRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-      const subscription = taskSubscriptionRepo.subscribe(
+      const subscription = await taskSubscriptionRepo.subscribe(
         validatedTaskId,
         validatedAgentRoleId,
         reason,
@@ -742,7 +750,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
       checkRateLimit(IPC_CHANNELS.SUBSCRIPTION_REMOVE);
       const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
       const validatedAgentRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-      const success = taskSubscriptionRepo.unsubscribe(validatedTaskId, validatedAgentRoleId);
+      const success = await taskSubscriptionRepo.unsubscribe(validatedTaskId, validatedAgentRoleId);
       if (success) {
         getMainWindow()?.webContents.send(IPC_CHANNELS.SUBSCRIPTION_EVENT, {
           type: "removed",
@@ -791,7 +799,7 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
         { reportId, channelType, channelId },
         "standup delivery request",
       );
-      const report = standupService.findById(delivery.reportId);
+      const report = await standupService.findById(delivery.reportId);
       if (!report) {
         throw new Error("Standup report not found");
       }
@@ -816,29 +824,30 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
 
   ipcMain.handle(IPC_CHANNELS.MC_COMMAND_CENTER_SUMMARY, async (_, companyId: string) => {
     const validated = validateInput(UUIDSchema, companyId, "company ID");
-    const company = core.getCompany(validated);
+    const company = await core.getCompany(validated);
     if (!company) {
       throw new Error("Company not found");
     }
 
-    const goals = core.listGoals(validated);
-    const projects = core.listProjects({ companyId: validated, includeArchived: false });
-    const issues = core.listIssues({ companyId: validated, limit: 5000 });
-    const runs = core.listRuns({ companyId: validated, limit: 100 });
-    const plannerRuns = requirePlannerService().listRuns({ companyId: validated, limit: 8 });
-    const automationOutcomes = automationOutcomeRepo.list({ companyId: validated, limit: 12 });
-    const automationOutcomeSummary = automationOutcomeRepo.summarize({ companyId: validated });
-    const operators = agentRoleRepo.findByCompanyId(validated, false);
+    const goals = await core.listGoals(validated);
+    const projects = await core.listProjects({ companyId: validated, includeArchived: false });
+    const issues = await core.listIssues({ companyId: validated, limit: 5000 });
+    const runs = await core.listRuns({ companyId: validated, limit: 100 });
+    const plannerRuns = await requirePlannerService().listRuns({ companyId: validated, limit: 8 });
+    const automationOutcomes = await automationOutcomeRepo.list({
+      companyId: validated,
+      limit: 12,
+    });
+    const automationOutcomeSummary = await automationOutcomeRepo.summarize({
+      companyId: validated,
+    });
+    const operators = await agentRoleRepo.findByCompanyId(validated, false);
     const activityWorkspaceId = company.defaultWorkspaceId;
     const activities = activityWorkspaceId
-      ? activityRepo.list({ workspaceId: activityWorkspaceId, limit: 100 })
+      ? await activityRepo.list({ workspaceId: activityWorkspaceId, limit: 100 })
       : [];
-    const taskIds = (
-      db
-        .prepare("SELECT id FROM tasks WHERE company_id = ? ORDER BY updated_at DESC LIMIT 200")
-        .all(validated) as Array<{ id: string }>
-    ).map((row) => row.id);
-    const tasks = taskIds.map((id) => taskRepo.findById(id)).filter(Boolean);
+    const taskIds = await taskRepo.findIdsByCompany(validated, 200);
+    const tasks = (await Promise.all(taskIds.map((id) => taskRepo.findById(id)))).filter(Boolean);
 
     const outputs: CompanyOutputFeedItem[] = [];
     const reviewQueue: CompanyReviewQueueItem[] = [];

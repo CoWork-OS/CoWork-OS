@@ -1,3 +1,10 @@
+import type Database from "better-sqlite3";
+import {
+  AgentTeamItemRepository,
+  AgentTeamRepository,
+  AgentTeamRunRepository,
+  AgentTeamThoughtRepository,
+} from "./agent-repository-facades";
 import type {
   AgentConfig,
   Task,
@@ -24,10 +31,7 @@ import {
 import { LLMProviderFactory } from "../agent/llm/provider-factory";
 import type { OrchestrationGraphNodeInput } from "../agent/orchestration/OrchestrationGraphEngine";
 import type { OrchestrationGraphSnapshot } from "../agent/orchestration/OrchestrationGraphRepository";
-import { AgentTeamRepository } from "./AgentTeamRepository";
-import { AgentTeamRunRepository } from "./AgentTeamRunRepository";
-import { AgentTeamItemRepository } from "./AgentTeamItemRepository";
-import { AgentTeamThoughtRepository } from "./AgentTeamThoughtRepository";
+
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("AgentTeamOrchestrator");
@@ -60,7 +64,7 @@ type AgentTeamItemRepositoryLike =
     };
 
 export type AgentTeamOrchestratorDeps = {
-  getDatabase: () => import("better-sqlite3").Database;
+  getDatabase: () => Database.Database;
   getTaskById: (taskId: string) => Promise<Task | undefined>;
   createChildTask: (params: {
     title: string;
@@ -97,7 +101,9 @@ export type AgentTeamOrchestratorDeps = {
       toNodeKey?: string;
     }>;
   }) => Promise<OrchestrationGraphSnapshot | undefined>;
-  findOrchestrationGraphByTeamRunId?: (teamRunId: string) => OrchestrationGraphSnapshot | undefined;
+  findOrchestrationGraphByTeamRunId?: (
+    teamRunId: string,
+  ) => Promise<OrchestrationGraphSnapshot | undefined>;
 };
 
 function getAllElectronWindows(): Any[] {
@@ -266,16 +272,16 @@ export class AgentTeamOrchestrator {
     if (this.runLocks.get(runId)) return;
     this.runLocks.set(runId, true);
     try {
-      const run = this.runRepo.findById(runId);
+      const run = await this.runRepo.findById(runId);
       if (!run) return;
       if (run.status !== "running") return;
 
-      const team = this.teamRepo.findById(run.teamId);
+      const team = await this.teamRepo.findById(run.teamId);
       if (!team) return;
 
       const rootTask = await this.deps.getTaskById(run.rootTaskId);
       if (!rootTask) {
-        const updated = this.runRepo.update(run.id, {
+        const updated = await this.runRepo.update(run.id, {
           status: "failed",
           error: `Root task not found: ${run.rootTaskId}`,
         });
@@ -286,7 +292,7 @@ export class AgentTeamOrchestrator {
       }
       const childAgentCollaborativeRun = this.isChildAgentCollaborativeRun(rootTask);
 
-      const items = this.itemRepo.listByRun(run.id);
+      const items = await this.itemRepo.listByRun(run.id);
 
       // Reconcile any in-progress items whose tasks are already terminal.
       for (const item of items) {
@@ -298,7 +304,7 @@ export class AgentTeamOrchestrator {
         await this.onTaskTerminal(item.sourceTaskId);
       }
 
-      const refreshedItems = this.itemRepo.listByRun(run.id);
+      const refreshedItems = await this.itemRepo.listByRun(run.id);
       const inProgress = refreshedItems.filter((i) => i.status === "in_progress");
 
       // If everything is terminal, complete or transition the run.
@@ -342,7 +348,7 @@ export class AgentTeamOrchestrator {
         const status = hasFailures ? "failed" : "completed";
         const summary = this.buildRunSummary(refreshedItems);
         const completedPhase = run.collaborativeMode ? "complete" : undefined;
-        const updated = this.runRepo.update(run.id, {
+        const updated = await this.runRepo.update(run.id, {
           status,
           summary,
           ...(completedPhase ? { phase: completedPhase } : {}),
@@ -469,7 +475,7 @@ export class AgentTeamOrchestrator {
             teamRunId: run.id,
             teamItemId: item.id,
           });
-          const updatedItem = this.itemRepo.update({
+          const updatedItem = await this.itemRepo.update({
             id: item.id,
             sourceTaskId: childTask.id,
             status: "in_progress",
@@ -488,7 +494,7 @@ export class AgentTeamOrchestrator {
         if (run.collaborativeMode && toSpawn.length > 0) {
           const currentPhase = run.phase || "dispatch";
           if (currentPhase === "dispatch") {
-            const updated = this.runRepo.update(run.id, { phase: "execute" });
+            const updated = await this.runRepo.update(run.id, { phase: "execute" });
             if (updated) {
               emitTeamEvent({
                 type: "team_run_updated",
@@ -502,7 +508,7 @@ export class AgentTeamOrchestrator {
         return;
       }
 
-      const existingGraph = this.deps.findOrchestrationGraphByTeamRunId?.(run.id);
+      const existingGraph = await this.deps.findOrchestrationGraphByTeamRunId?.(run.id);
       const graphSnapshot = existingGraph
         ? await this.deps.appendOrchestrationGraphNodes?.({
             runId: existingGraph.run.id,
@@ -532,7 +538,7 @@ export class AgentTeamOrchestrator {
               : node?.status === "cancelled" || node?.status === "blocked"
                 ? "blocked"
                 : "in_progress";
-        const updatedItem = this.itemRepo.update({
+        const updatedItem = await this.itemRepo.update({
           id: item.id,
           sourceTaskId: node?.taskId,
           status: nextStatus,
@@ -553,7 +559,7 @@ export class AgentTeamOrchestrator {
       if (run.collaborativeMode && toSpawn.length > 0) {
         const currentPhase = run.phase || "dispatch";
         if (currentPhase === "dispatch") {
-          const updated = this.runRepo.update(run.id, { phase: "execute" });
+          const updated = await this.runRepo.update(run.id, { phase: "execute" });
           if (updated) {
             emitTeamEvent({
               type: "team_run_updated",
@@ -577,7 +583,7 @@ export class AgentTeamOrchestrator {
   }
 
   async onTaskTerminal(taskId: string): Promise<void> {
-    const items = this.itemRepo.listBySourceTaskId(taskId);
+    const items = await this.itemRepo.listBySourceTaskId(taskId);
     if (items.length === 0) return;
 
     const task = await this.deps.getTaskById(taskId);
@@ -608,25 +614,25 @@ export class AgentTeamOrchestrator {
         !this.synthesisRetried.has(item.teamRunId)
       ) {
         this.synthesisRetried.add(item.teamRunId);
-        const run = this.runRepo.findById(item.teamRunId);
+        const run = await this.runRepo.findById(item.teamRunId);
         const rootTask = run ? await this.deps.getTaskById(run.rootTaskId) : null;
-        const team = run?.teamId ? this.teamRepo.findById(run.teamId) : null;
+        const team = run?.teamId ? await this.teamRepo.findById(run.teamId) : null;
         if (run && rootTask && team) {
           // Rename the old synthesis item so the guard in transitionToSynthesizePhase
           // does not block re-entry (it checks for items titled SYNTHESIS_ITEM_TITLE).
-          this.itemRepo.update({
+          await this.itemRepo.update({
             id: item.id,
             title: `${SYNTHESIS_ITEM_TITLE} (failed)`,
             status: "blocked" as AgentTeamItemStatus,
             resultSummary: "Synthesis failed — retrying with compacted prompt",
           });
-          const allItems = this.itemRepo.listByRun(run.id);
+          const allItems = await this.itemRepo.listByRun(run.id);
           await this.transitionToSynthesizePhaseCompact(run, team, rootTask, allItems);
           continue;
         }
       }
 
-      const updated = this.itemRepo.update({
+      const updated = await this.itemRepo.update({
         id: item.id,
         status: nextStatus,
         resultSummary,
@@ -644,10 +650,10 @@ export class AgentTeamOrchestrator {
   }
 
   async cancelRun(runId: string): Promise<void> {
-    const run = this.runRepo.findById(runId);
+    const run = await this.runRepo.findById(runId);
     if (!run) return;
 
-    const updatedRun = this.runRepo.update(runId, { status: "cancelled" });
+    const updatedRun = await this.runRepo.update(runId, { status: "cancelled" });
     if (updatedRun) {
       emitTeamEvent({
         type: "team_run_updated",
@@ -657,14 +663,14 @@ export class AgentTeamOrchestrator {
       });
     }
 
-    const items = this.itemRepo.listByRun(runId);
+    const items = await this.itemRepo.listByRun(runId);
     for (const item of items) {
       if (item.status === "in_progress" && item.sourceTaskId) {
         await this.deps.cancelTask(item.sourceTaskId).catch(() => {});
       }
 
       if (!isTerminalItemStatus(item.status)) {
-        const updated = this.itemRepo.update({
+        const updated = await this.itemRepo.update({
           id: item.id,
           status: "blocked",
           resultSummary: item.resultSummary || "Cancelled by user",
@@ -686,25 +692,25 @@ export class AgentTeamOrchestrator {
    * signal in-progress agents to wrap up, and fast-forward to synthesis.
    */
   async wrapUpRun(runId: string): Promise<void> {
-    const run = this.runRepo.findById(runId);
+    const run = await this.runRepo.findById(runId);
     if (!run || run.status !== "running") return;
 
     // Track that this run was user-initiated wrap-up so final status reflects intent.
     this.wrapUpRequestedRunIds.add(runId);
 
-    const team = this.teamRepo.findById(run.teamId);
+    const team = await this.teamRepo.findById(run.teamId);
     if (!team) return;
 
     const rootTask = await this.deps.getTaskById(run.rootTaskId);
     if (!rootTask) return;
     const childAgentCollaborativeRun = this.isChildAgentCollaborativeRun(rootTask);
 
-    const items = this.itemRepo.listByRun(runId);
+    const items = await this.itemRepo.listByRun(runId);
 
     // 1. Block all "todo" items so no new tasks are dispatched
     for (const item of items) {
       if (item.status === "todo") {
-        const updated = this.itemRepo.update({
+        const updated = await this.itemRepo.update({
           id: item.id,
           status: "blocked",
           resultSummary: "Skipped — user requested wrap-up",
@@ -734,13 +740,13 @@ export class AgentTeamOrchestrator {
     // 3. Fast-forward to synthesize phase if currently in dispatch/think
     const currentPhase = run.phase || "dispatch";
     if (currentPhase === "dispatch" || currentPhase === "think" || currentPhase === "execute") {
-      const refreshedItems = this.itemRepo.listByRun(runId);
+      const refreshedItems = await this.itemRepo.listByRun(runId);
       const stillInProgress = refreshedItems.filter((i) => i.status === "in_progress");
 
       if (childAgentCollaborativeRun) {
         if (stillInProgress.length === 0) {
           const status = refreshedItems.some((i) => i.status === "failed") ? "failed" : "completed";
-          const updated = this.runRepo.update(run.id, {
+          const updated = await this.runRepo.update(run.id, {
             status,
             phase: "complete",
             summary: this.buildRunSummary(refreshedItems),
@@ -762,7 +768,9 @@ export class AgentTeamOrchestrator {
         await this.transitionToSynthesizePhase(run, team, rootTask, refreshedItems);
       } else {
         // Some items still running — update phase; onTaskTerminal will finish transition
-        const updated = this.runRepo.update(run.id, { phase: "synthesize" as AgentTeamRunPhase });
+        const updated = await this.runRepo.update(run.id, {
+          phase: "synthesize" as AgentTeamRunPhase,
+        });
         if (updated) {
           emitTeamEvent({
             type: "team_run_updated",
@@ -874,41 +882,50 @@ export class AgentTeamOrchestrator {
 
     const timer = setTimeout(() => {
       this.synthesisWatchdogTimers.delete(runId);
-      try {
-        const run = this.runRepo.findById(runId);
-        if (!run || run.status !== "running") return;
-
-        const items = this.itemRepo.listByRun(runId);
-        const synthesisItem = items.find((item) => item.id === synthesisItemId);
-        if (synthesisItem && isTerminalItemStatus(synthesisItem.status)) return;
-
-        this.itemRepo.update({
-          id: synthesisItemId,
-          status: "blocked",
-          resultSummary: "Synthesis timed out before producing a final response.",
-        });
-        const refreshedItems = this.itemRepo.listByRun(runId);
-        const summary = `${this.buildRunSummary(refreshedItems)} Synthesis timed out; completing with available team outputs.`;
-        const updated = this.runRepo.update(runId, {
-          status: "completed",
-          phase: "complete",
-          summary,
-        });
-        if (updated) {
-          emitTeamEvent({
-            type: "team_run_updated",
-            timestamp: Date.now(),
-            run: updated,
-            reason: "synthesis_watchdog_timeout",
-          });
-        }
-        this.completeRootTaskBestEffort(rootTaskId, "completed", summary);
-      } catch (error) {
-        log.error("Synthesis watchdog failed:", error);
-      }
+      void this.runSynthesisWatchdog(runId, synthesisItemId, rootTaskId);
     }, SYNTHESIS_WATCHDOG_MS);
 
     this.synthesisWatchdogTimers.set(runId, timer);
+  }
+
+  /** The synthesis watchdog's timeout work; it reads and writes through the async facades. */
+  private async runSynthesisWatchdog(
+    runId: string,
+    synthesisItemId: string,
+    rootTaskId: string,
+  ): Promise<void> {
+    try {
+      const run = await this.runRepo.findById(runId);
+      if (!run || run.status !== "running") return;
+
+      const items = await this.itemRepo.listByRun(runId);
+      const synthesisItem = items.find((item) => item.id === synthesisItemId);
+      if (synthesisItem && isTerminalItemStatus(synthesisItem.status)) return;
+
+      await this.itemRepo.update({
+        id: synthesisItemId,
+        status: "blocked",
+        resultSummary: "Synthesis timed out before producing a final response.",
+      });
+      const refreshedItems = await this.itemRepo.listByRun(runId);
+      const summary = `${this.buildRunSummary(refreshedItems)} Synthesis timed out; completing with available team outputs.`;
+      const updated = await this.runRepo.update(runId, {
+        status: "completed",
+        phase: "complete",
+        summary,
+      });
+      if (updated) {
+        emitTeamEvent({
+          type: "team_run_updated",
+          timestamp: Date.now(),
+          run: updated,
+          reason: "synthesis_watchdog_timeout",
+        });
+      }
+      this.completeRootTaskBestEffort(rootTaskId, "completed", summary);
+    } catch (error) {
+      log.error("Synthesis watchdog failed:", error);
+    }
   }
 
   /**
@@ -922,11 +939,11 @@ export class AgentTeamOrchestrator {
     items: AgentTeamItem[],
   ): Promise<void> {
     // Guard against double-entry (wrapUpRun and tickRun can race at await boundaries)
-    const existingItems = this.itemRepo.listByRun(run.id);
+    const existingItems = await this.itemRepo.listByRun(run.id);
     if (existingItems.some((i) => i.title === SYNTHESIS_ITEM_TITLE)) return;
 
     // Update phase to synthesize
-    const updated = this.runRepo.update(run.id, { phase: "synthesize" });
+    const updated = await this.runRepo.update(run.id, { phase: "synthesize" });
     if (updated) {
       emitTeamEvent({
         type: "team_run_updated",
@@ -937,7 +954,7 @@ export class AgentTeamOrchestrator {
     }
 
     // Collect all thoughts from the run
-    const thoughts = this.thoughtRepo.listByRun(run.id);
+    const thoughts = await this.thoughtRepo.listByRun(run.id);
     const useProfileRouting = this.shouldUseProfileRouting(rootTask);
 
     // Build synthesis prompt with all member thoughts
@@ -970,7 +987,7 @@ export class AgentTeamOrchestrator {
       if (personalityId) agentConfig.personalityId = personalityId;
     }
 
-    const synthesisItem = this.itemRepo.create({
+    const synthesisItem = await this.itemRepo.create({
       teamRunId: run.id,
       title: SYNTHESIS_ITEM_TITLE,
       ownerAgentRoleId: team.leadAgentRoleId,
@@ -991,7 +1008,7 @@ export class AgentTeamOrchestrator {
         assignedAgentRoleId: team.leadAgentRoleId,
         workerRole: "synthesizer",
       });
-      this.itemRepo.update({
+      await this.itemRepo.update({
         id: synthesisItem.id,
         sourceTaskId: synthesisTask.id,
         status: "in_progress",
@@ -999,7 +1016,7 @@ export class AgentTeamOrchestrator {
       return;
     }
 
-    const existingGraph = this.deps.findOrchestrationGraphByTeamRunId?.(run.id);
+    const existingGraph = await this.deps.findOrchestrationGraphByTeamRunId?.(run.id);
     if (!existingGraph?.run?.id || !this.deps.appendOrchestrationGraphNodes) {
       return;
     }
@@ -1031,7 +1048,7 @@ export class AgentTeamOrchestrator {
       })),
     });
     const synthesisNode = appended?.nodes.find((node: Any) => node.teamItemId === synthesisItem.id);
-    this.itemRepo.update({
+    await this.itemRepo.update({
       id: synthesisItem.id,
       sourceTaskId: synthesisNode?.taskId,
       status:
@@ -1052,7 +1069,7 @@ export class AgentTeamOrchestrator {
     rootTask: Task,
     _items: AgentTeamItem[],
   ): Promise<void> {
-    const thoughts = this.thoughtRepo.listByRun(run.id);
+    const thoughts = await this.thoughtRepo.listByRun(run.id);
     const compactBudget = Math.floor(MAX_SYNTHESIS_PROMPT_CHARS / 2);
     const synthesisPrompt = [
       `You are the LEADER of team "${team.name}".`,
@@ -1070,7 +1087,7 @@ export class AgentTeamOrchestrator {
     ].join("\n");
 
     const depth = (typeof rootTask.depth === "number" ? rootTask.depth : 0) + 1;
-    const synthesisItem = this.itemRepo.create({
+    const synthesisItem = await this.itemRepo.create({
       teamRunId: run.id,
       title: SYNTHESIS_ITEM_TITLE,
       ownerAgentRoleId: team.leadAgentRoleId,
@@ -1097,7 +1114,7 @@ export class AgentTeamOrchestrator {
       assignedAgentRoleId: team.leadAgentRoleId,
       workerRole: "synthesizer",
     });
-    this.itemRepo.update({
+    await this.itemRepo.update({
       id: synthesisItem.id,
       sourceTaskId: synthesisTask.id,
       status: "in_progress",

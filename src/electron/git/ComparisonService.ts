@@ -1,10 +1,10 @@
-import Database from "better-sqlite3";
-import { AgentDaemon } from "../agent/daemon";
+import { TaskRepository } from "../database/repository-facades";
 import {
   ComparisonSessionRepository,
-  TaskRepository,
   WorktreeInfoRepository,
-} from "../database/repositories";
+} from "../database/repository-facades";
+import type Database from "better-sqlite3";
+import { AgentDaemon } from "../agent/daemon";
 import { GitService } from "./GitService";
 import { ComparisonSession, ComparisonAgentSpec, ComparisonResult } from "../../shared/types";
 
@@ -48,7 +48,7 @@ export class ComparisonService {
       throw new Error("Comparison mode requires at least 2 agents");
     }
 
-    const session = this.sessionRepo.create({
+    const session = await this.sessionRepo.create({
       title: params.title,
       prompt: params.prompt,
       workspaceId: params.workspaceId,
@@ -73,13 +73,13 @@ export class ComparisonService {
         taskIds.push(task.id);
 
         // Link task to the comparison session and agent role
-        this.taskRepo.update(task.id, {
+        await this.taskRepo.update(task.id, {
           comparisonSessionId: session.id,
           assignedAgentRoleId: spec.assignedAgentRoleId,
         });
       }
 
-      session.taskIds = this.sessionRepo.syncTaskIdsFromTasks(session.id);
+      session.taskIds = await this.sessionRepo.syncTaskIdsFromTasks(session.id);
 
       if (taskIds.length > 0) {
         this.daemon.logEvent(taskIds[0], "comparison_started", {
@@ -100,14 +100,15 @@ export class ComparisonService {
           // Best-effort rollback: task might already be terminal.
         }
         try {
-          this.db.prepare("UPDATE tasks SET comparison_session_id = NULL WHERE id = ?").run(taskId);
+          // null, not undefined: the update crosses the worker boundary as JSON.
+          await this.taskRepo.update(taskId, { comparisonSessionId: null as never });
         } catch {
           // Best-effort cleanup.
         }
       }
 
       try {
-        this.sessionRepo.delete(session.id);
+        await this.sessionRepo.delete(session.id);
       } catch {
         // Best-effort rollback.
       }
@@ -126,7 +127,7 @@ export class ComparisonService {
     if (!task?.comparisonSessionId) return;
 
     const sessionId = task.comparisonSessionId;
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     if (!session || session.status !== "running") return;
 
     // Guard: prevent concurrent processing of the same session
@@ -155,7 +156,7 @@ export class ComparisonService {
       // All tasks are terminal — generate comparison result
       try {
         const result = await this.generateComparisonResult(session.id);
-        this.sessionRepo.update(session.id, {
+        await this.sessionRepo.update(session.id, {
           status: anyFailed ? "partial" : "completed",
           completedAt: Date.now(),
           comparisonResult: result,
@@ -168,7 +169,7 @@ export class ComparisonService {
         });
       } catch (error: Any) {
         console.error(`[ComparisonService] Failed to generate comparison result:`, error);
-        this.sessionRepo.update(session.id, {
+        await this.sessionRepo.update(session.id, {
           status: "partial",
           completedAt: Date.now(),
         });
@@ -182,7 +183,7 @@ export class ComparisonService {
    * Generate comparison result by collecting stats from all worktree branches.
    */
   async generateComparisonResult(sessionId: string): Promise<ComparisonResult> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not found`);
 
     const taskResults: ComparisonResult["taskResults"] = [];
@@ -199,7 +200,7 @@ export class ComparisonService {
       let linesRemoved = 0;
 
       // Get diff stats from worktree if available
-      const worktreeInfo = this.worktreeInfoRepo.findByTaskId(taskId);
+      const worktreeInfo = await this.worktreeInfoRepo.findByTaskId(taskId);
       if (worktreeInfo && worktreeInfo.status !== "cleaned") {
         try {
           const stats = await GitService.getDiffStats(
@@ -234,7 +235,7 @@ export class ComparisonService {
    * Cancel a comparison session (cancels all running tasks).
    */
   async cancelSession(sessionId: string): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     if (!session) return;
 
     for (const taskId of session.taskIds) {
@@ -245,7 +246,7 @@ export class ComparisonService {
       }
     }
 
-    this.sessionRepo.update(sessionId, {
+    await this.sessionRepo.update(sessionId, {
       status: "cancelled",
       completedAt: Date.now(),
     });
@@ -254,14 +255,14 @@ export class ComparisonService {
   /**
    * Get a session by ID.
    */
-  getSession(sessionId: string): ComparisonSession | undefined {
+  async getSession(sessionId: string): Promise<ComparisonSession | undefined> {
     return this.sessionRepo.findById(sessionId);
   }
 
   /**
    * List sessions for a workspace.
    */
-  listSessions(workspaceId: string): ComparisonSession[] {
+  async listSessions(workspaceId: string): Promise<ComparisonSession[]> {
     return this.sessionRepo.findByWorkspaceId(workspaceId);
   }
 }

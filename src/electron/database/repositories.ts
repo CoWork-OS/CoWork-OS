@@ -1,5 +1,20 @@
 import Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
+import { buildImportedMemoryFilterSql } from "./fts-utils";
+import { PRUNE_TASK_EVENTS_BATCH_SQL } from "./maintenance-sql";
+import {
+  flushPendingTimelineEvent,
+  flushPendingTimelineTask,
+  pendingTimelineTaskRows,
+} from "./timeline-write-registry";
+import { DeferredEventMigrations } from "./deferred-event-migrations";
+import { applyMigratedEventParams, migratedEventParams } from "./migrated-event-sql";
+import { type MemoryEmbeddingRow, upsertMemoryEmbeddingRows } from "./memory-embedding-sql";
+import {
+  type CapturedMemoryWrite,
+  insertCapturedMemory,
+  insertMemoryRow,
+} from "../memory/memory-capture-sql";
 import {
   Task,
   TaskEvent,
@@ -185,7 +200,7 @@ interface SqliteTableInfoRow {
   pk?: number;
 }
 
-export class WorkspaceRepository {
+export class WorkspaceStore {
   constructor(private db: Database.Database) {}
 
   create(name: string, path: string, permissions: WorkspacePermissions): Workspace {
@@ -277,6 +292,40 @@ export class WorkspaceRepository {
   /**
    * Delete a workspace by ID
    */
+  /**
+   * Insert a workspace with a known id, or refresh its name, path, permissions and last use
+   * (the temp workspaces keep stable ids).
+   */
+  upsertWithId(input: {
+    id: string;
+    name: string;
+    path: string;
+    createdAt: number;
+    lastUsedAt: number;
+    permissions: WorkspacePermissions;
+  }): void {
+    this.db
+      .prepare(
+        `
+      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        path = excluded.path,
+        last_used_at = excluded.last_used_at,
+        permissions = excluded.permissions
+    `,
+      )
+      .run(
+        input.id,
+        input.name,
+        input.path,
+        input.createdAt,
+        input.lastUsedAt,
+        JSON.stringify(input.permissions),
+      );
+  }
+
   delete(id: string): void {
     const stmt = this.db.prepare("DELETE FROM workspaces WHERE id = ?");
     stmt.run(id);
@@ -330,7 +379,7 @@ export interface TaskSessionMetadata {
   updatedAt: number;
 }
 
-export class TaskSessionMetadataRepository {
+export class TaskSessionMetadataStore {
   constructor(private db: Database.Database) {}
 
   findBySessionId(sessionId: string): TaskSessionMetadata | undefined {
@@ -439,7 +488,7 @@ export class TaskSessionMetadataRepository {
   }
 }
 
-export class BotNotificationPreferenceRepository {
+export class BotNotificationPreferenceStore {
   constructor(private db: Database.Database) {}
 
   findByAgentRoleId(agentRoleId: string): import("../../shared/types").BotNotificationPolicy {
@@ -494,7 +543,55 @@ function normalizeOptionalSessionMetadataNumber(value: unknown): number | null {
   return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : null;
 }
 
-export class TaskRepository {
+/**
+ * Task rows read inside `withTaskRowReadScope` are cached for the rest of that
+ * synchronous scope. `AgentDaemon.logEvent` opens one per event, because its
+ * projections would otherwise re-read the same row about ten times.
+ *
+ * Raw rows are cached, never mapped `Task` objects, so every caller still gets its
+ * own object. Every statement that writes `tasks` must call `invalidateTaskRowReads`
+ * afterwards; tests/task-row-read-scope.test.ts checks the write sites. The scope
+ * must wrap synchronous work only: it closes when the callback returns.
+ */
+let taskRowReadScopeDepth = 0;
+const taskRowReadCache = new Map<
+  Database.Database,
+  Map<string, Record<string, unknown> | undefined>
+>();
+
+export function withTaskRowReadScope<T>(fn: () => T): T {
+  taskRowReadScopeDepth += 1;
+  try {
+    return fn();
+  } finally {
+    taskRowReadScopeDepth -= 1;
+    if (taskRowReadScopeDepth === 0) taskRowReadCache.clear();
+  }
+}
+
+/** Drop cached task rows for a connection after writing to `tasks`. */
+export function invalidateTaskRowReads(db: Database.Database): void {
+  taskRowReadCache.get(db)?.clear();
+}
+
+function readTaskRow(
+  db: Database.Database,
+  id: string,
+  read: () => Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (taskRowReadScopeDepth === 0) return read();
+  let rows = taskRowReadCache.get(db);
+  if (!rows) {
+    rows = new Map();
+    taskRowReadCache.set(db, rows);
+  }
+  if (rows.has(id)) return rows.get(id);
+  const row = read();
+  rows.set(id, row);
+  return row;
+}
+
+export class TaskStore {
   private static readonly UPDATE_FIELD_TO_COLUMN: Partial<Record<keyof Task, string>> = {
     prompt: "prompt",
     rawPrompt: "raw_prompt",
@@ -588,7 +685,7 @@ export class TaskRepository {
   }): { sql: string; args: Any[] } {
     if (!cursor?.id) return { sql: "", args: [] };
     const pinnedRank = cursor.pinned ? 0 : 1;
-    const activeRank = TaskRepository.SIDEBAR_ACTIVE_STATUSES.has(String(cursor.status || ""))
+    const activeRank = TaskStore.SIDEBAR_ACTIVE_STATUSES.has(String(cursor.status || ""))
       ? 0
       : 1;
     const updatedAt =
@@ -664,7 +761,7 @@ export class TaskRepository {
   }
 
   create(task: Omit<Task, "id" | "createdAt" | "updatedAt">): Task {
-    const normalizedTask = TaskRepository.normalizePromptFields(task);
+    const normalizedTask = TaskStore.normalizePromptFields(task);
     const newTask: Task = {
       ...normalizedTask,
       id: uuidv4(),
@@ -736,6 +833,7 @@ export class TaskRepository {
       newTask.semanticSummary || null,
       newTask.targetNodeId || null,
     );
+    invalidateTaskRowReads(this.db);
 
     UsageInsightsProjector.getIfInitialized()?.enqueueTaskCreate(newTask);
 
@@ -845,11 +943,11 @@ export class TaskRepository {
 
     Object.entries(normalizedUpdates).forEach(([key, value]) => {
       // Validate field name against whitelist
-      if (!TaskRepository.ALLOWED_UPDATE_FIELDS.has(key)) {
+      if (!TaskStore.ALLOWED_UPDATE_FIELDS.has(key)) {
         taskRepositoryLogger.warn(`Ignoring unknown field in task update: ${key}`);
         return;
       }
-      const dbKey = TaskRepository.UPDATE_FIELD_TO_COLUMN[key as keyof Task];
+      const dbKey = TaskStore.UPDATE_FIELD_TO_COLUMN[key as keyof Task];
       if (!dbKey) {
         taskRepositoryLogger.warn(`No database column mapping found for task field: ${key}`);
         return;
@@ -886,6 +984,7 @@ export class TaskRepository {
 
     const stmt = this.db.prepare(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`);
     stmt.run(...values);
+    invalidateTaskRowReads(this.db);
     const after = this.findById(id);
     UsageInsightsProjector.getIfInitialized()?.enqueueTaskUpdate(before, after);
   }
@@ -902,6 +1001,7 @@ export class TaskRepository {
       WHERE id = ?
     `)
       .run(Date.now(), id);
+    invalidateTaskRowReads(this.db);
 
     if (result.changes === 0) {
       return undefined;
@@ -915,6 +1015,7 @@ export class TaskRepository {
     const result = this.db
       .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
       .run(timestamp, id);
+    invalidateTaskRowReads(this.db);
 
     if (result.changes === 0) {
       return undefined;
@@ -926,8 +1027,14 @@ export class TaskRepository {
   }
 
   findById(id: string): Task | undefined {
-    const stmt = this.db.prepare("SELECT * FROM tasks WHERE id = ?");
-    const row = stmt.get(id) as Any;
+    const row = readTaskRow(
+      this.db,
+      id,
+      () =>
+        this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+          | Record<string, unknown>
+          | undefined,
+    );
     return row ? this.mapRowToTask(row) : undefined;
   }
 
@@ -965,7 +1072,7 @@ export class TaskRepository {
       : [];
     const includeArchivedSessions = options?.includeArchivedSessions !== false;
     const cursor = options?.prioritizeSidebar
-      ? TaskRepository.buildSidebarCursorPredicate(options.cursor)
+      ? TaskStore.buildSidebarCursorPredicate(options.cursor)
       : { sql: "", args: [] };
     const whereClauses = [
       ...(options?.botConversation
@@ -1141,7 +1248,7 @@ export class TaskRepository {
       : [];
     const includeArchivedSessions = options?.includeArchivedSessions !== false;
     const cursor = options?.prioritizeSidebar
-      ? TaskRepository.buildSidebarCursorPredicate(options.cursor)
+      ? TaskStore.buildSidebarCursorPredicate(options.cursor)
       : { sql: "", args: [] };
     const whereClauses = [
       ...(options?.excludeBotConversations
@@ -1401,6 +1508,8 @@ export class TaskRepository {
   }
 
   delete(id: string): void {
+    // Commit rows the database worker has not written yet, so none arrive after deletion.
+    flushPendingTimelineTask(this.db, id);
     // Use transaction to ensure atomic deletion
     const deleteTransaction = this.db.transaction((taskId: string) => {
       // Delete related records from all tables with foreign keys to tasks
@@ -1561,7 +1670,11 @@ export class TaskRepository {
       deleteTask.run(taskId);
     });
 
-    deleteTransaction(id);
+    try {
+      deleteTransaction(id);
+    } finally {
+      invalidateTaskRowReads(this.db);
+    }
   }
 
   private cleanupTaskForeignKeyReferences(taskId: string): void {
@@ -1932,6 +2045,15 @@ export class TaskRepository {
   /**
    * Find tasks by parent task ID
    */
+  /** Ids of a company's most recently updated tasks. */
+  findIdsByCompany(companyId: string, limit = 200): string[] {
+    return (
+      this.db
+        .prepare("SELECT id FROM tasks WHERE company_id = ? ORDER BY updated_at DESC LIMIT ?")
+        .all(companyId, limit) as Array<{ id: string }>
+    ).map((row) => row.id);
+  }
+
   findByParent(parentTaskId: string): Task[] {
     const stmt = this.db.prepare(`
       SELECT * FROM tasks
@@ -2059,7 +2181,44 @@ export class TaskRepository {
   }
 }
 
+export interface PreparedTaskEvent {
+  stored: TaskEvent;
+  /** Bound parameters for TASK_EVENT_INSERT_SQL, in column order. */
+  params: unknown[];
+}
+
+/** Stored task event columns, in insert parameter order. */
+export const TASK_EVENT_COLUMN_NAMES = [
+  "id",
+  "task_id",
+  "timestamp",
+  "type",
+  "payload",
+  "schema_version",
+  "event_id",
+  "seq",
+  "ts",
+  "status",
+  "step_id",
+  "group_id",
+  "actor",
+  "legacy_type",
+] as const;
+const TASK_EVENT_COLUMNS = TASK_EVENT_COLUMN_NAMES.join(", ");
+const TASK_EVENT_INSERT_SQL = `INSERT INTO task_events (${TASK_EVENT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const TASK_EVENT_INSERT_IF_ABSENT_SQL = `
+  INSERT OR IGNORE INTO task_events (${TASK_EVENT_COLUMNS})
+  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+  WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)
+`;
+
 export class TaskEventRepository {
+  /** Per connection: legacy events converted on read, written back after the read (DB4). */
+  private static readonly deferredMigrations = new WeakMap<
+    Database.Database,
+    DeferredEventMigrations
+  >();
+
   private static readonly RENDERER_NOISE_EVENT_TYPES = [
     "log",
     "llm_usage",
@@ -2093,7 +2252,12 @@ export class TaskEventRepository {
     return Math.min(max, Math.max(min, numeric));
   }
 
-  create(event: Omit<TaskEvent, "id"> & { id?: string }): TaskEvent {
+  /**
+   * Normalize and sanitize an event for storage without touching the database. The
+   * host prepares events this way when the database worker writes them (async SQLite
+   * plan, DB3), so the host can emit exactly the row that will be stored.
+   */
+  static prepareForInsert(event: Omit<TaskEvent, "id"> & { id?: string }): PreparedTaskEvent {
     const newEvent: TaskEvent = {
       ...event,
       id: event.id || uuidv4(),
@@ -2113,44 +2277,50 @@ export class TaskEventRepository {
     }
 
     const storedEvent = sanitizeTimelineEventForStorage(newEvent);
+    return {
+      stored: storedEvent,
+      params: [
+        storedEvent.id,
+        storedEvent.taskId,
+        storedEvent.timestamp,
+        storedEvent.type,
+        JSON.stringify(storedEvent.payload),
+        2,
+        storedEvent.eventId || storedEvent.id,
+        typeof storedEvent.seq === "number" ? storedEvent.seq : null,
+        typeof storedEvent.ts === "number" ? storedEvent.ts : storedEvent.timestamp,
+        typeof storedEvent.status === "string" ? storedEvent.status : null,
+        typeof storedEvent.stepId === "string" ? storedEvent.stepId : null,
+        typeof storedEvent.groupId === "string" ? storedEvent.groupId : null,
+        typeof storedEvent.actor === "string" ? storedEvent.actor : null,
+        typeof storedEvent.legacyType === "string" ? storedEvent.legacyType : null,
+      ],
+    };
+  }
 
-    const stmt = this.db.prepare(`
-      INSERT INTO task_events (
-        id,
-        task_id,
-        timestamp,
-        type,
-        payload,
-        schema_version,
-        event_id,
-        seq,
-        ts,
-        status,
-        step_id,
-        group_id,
-        actor,
-        legacy_type
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+  create(event: Omit<TaskEvent, "id"> & { id?: string }): TaskEvent {
+    const prepared = TaskEventRepository.prepareForInsert(event);
+    this.db.prepare(TASK_EVENT_INSERT_SQL).run(...prepared.params);
+    this.afterInsert(prepared.stored);
+    return prepared.stored;
+  }
 
-    stmt.run(
-      storedEvent.id,
-      storedEvent.taskId,
-      storedEvent.timestamp,
-      storedEvent.type,
-      JSON.stringify(storedEvent.payload),
-      2,
-      storedEvent.eventId || storedEvent.id,
-      typeof storedEvent.seq === "number" ? storedEvent.seq : null,
-      typeof storedEvent.ts === "number" ? storedEvent.ts : storedEvent.timestamp,
-      typeof storedEvent.status === "string" ? storedEvent.status : null,
-      typeof storedEvent.stepId === "string" ? storedEvent.stepId : null,
-      typeof storedEvent.groupId === "string" ? storedEvent.groupId : null,
-      typeof storedEvent.actor === "string" ? storedEvent.actor : null,
-      typeof storedEvent.legacyType === "string" ? storedEvent.legacyType : null,
-    );
+  /**
+   * Insert a prepared event unless it already exists or its task is gone. Both the
+   * database worker and a host flush-through may attempt the same event; exactly one
+   * insert takes effect. Returns whether this call inserted the row.
+   */
+  insertPreparedIfAbsent(prepared: PreparedTaskEvent): boolean {
+    return this.insertParamsIfAbsent(prepared.params, prepared.stored.taskId);
+  }
 
+  /** `insertPreparedIfAbsent` from bound parameters alone, as the worker receives them. */
+  insertParamsIfAbsent(params: unknown[], taskId: string): boolean {
+    return this.db.prepare(TASK_EVENT_INSERT_IF_ABSENT_SQL).run(...params, taskId).changes === 1;
+  }
+
+  /** Host-only effects of a committed event: usage-insight invalidation and telemetry. */
+  afterInsert(storedEvent: TaskEvent): void {
     const effectiveType = String(
       (typeof storedEvent.legacyType === "string" && storedEvent.legacyType) ||
         storedEvent.type ||
@@ -2180,8 +2350,61 @@ export class TaskEventRepository {
     } catch {
       // Best-effort telemetry only.
     }
+  }
 
-    return storedEvent;
+  private static rowOrder(row: Any): number {
+    return typeof row.seq === "number" && Number.isFinite(row.seq)
+      ? row.seq
+      : Number(row.timestamp) || 0;
+  }
+
+  /** Timeline order: `COALESCE(seq, timestamp)`, then timestamp, then id. */
+  private static compareRows(a: Any, b: Any): number {
+    const order = TaskEventRepository.rowOrder(a) - TaskEventRepository.rowOrder(b);
+    if (order !== 0) return order;
+    const timestamp = (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0);
+    if (timestamp !== 0) return timestamp;
+    const left = String(a.id ?? "");
+    const right = String(b.id ?? "");
+    // Code-unit order, like SQLite's binary collation.
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+
+  private static effectiveType(row: Any): string {
+    return String(row.legacy_type ?? row.type ?? "");
+  }
+
+  /**
+   * Merge the task's accepted-but-uncommitted rows (DB6) into rows read from the
+   * database, instead of committing them on the host first: a read never writes, so it
+   * never waits on another process's write lock. A committed row wins over its pending
+   * copy. `filter`, `direction` and `limit` mirror the query the rows came from, and the
+   * result keeps that query's order.
+   */
+  private withPendingRows(
+    taskId: string,
+    committed: Any[],
+    options: {
+      filter?: (row: Any) => boolean;
+      direction: "asc" | "desc";
+      limit?: number;
+      /** Give pending rows the extra columns the query computes. */
+      shape?: (row: Any) => Any;
+    },
+  ): Any[] {
+    const pending = pendingTimelineTaskRows(this.db, taskId);
+    if (pending.length === 0) return committed;
+    const committedIds = new Set(committed.map((row) => row.id));
+    const extra = pending
+      .filter((row) => !committedIds.has(row.id) && (!options.filter || options.filter(row)))
+      .map((row) => (options.shape ? options.shape(row) : row));
+    if (extra.length === 0) return committed;
+    const merged = [...committed, ...extra].sort((a, b) =>
+      options.direction === "asc"
+        ? TaskEventRepository.compareRows(a, b)
+        : TaskEventRepository.compareRows(b, a),
+    );
+    return options.limit ? merged.slice(0, options.limit) : merged;
   }
 
   findByTaskId(taskId: string): TaskEvent[] {
@@ -2190,7 +2413,7 @@ export class TaskEventRepository {
       WHERE task_id = ?
       ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC
     `);
-    const rows = stmt.all(taskId) as Any[];
+    const rows = this.withPendingRows(taskId, stmt.all(taskId) as Any[], { direction: "asc" });
     return this.mapRowsToEvents(rows).events;
   }
 
@@ -2212,7 +2435,16 @@ export class TaskEventRepository {
       LIMIT ?
     `);
 
-    const structuralRows = structuralRowsStmt.all(taskId, ...noiseTypes, safeLimit) as Any[];
+    const noise = new Set<string>(noiseTypes);
+    const structuralRows = this.withPendingRows(
+      taskId,
+      structuralRowsStmt.all(taskId, ...noiseTypes, safeLimit) as Any[],
+      {
+        filter: (row) => !noise.has(TaskEventRepository.effectiveType(row)),
+        direction: "desc",
+        limit: safeLimit,
+      },
+    );
     let rows = structuralRows;
 
     if (structuralRows.length < safeLimit) {
@@ -2224,7 +2456,15 @@ export class TaskEventRepository {
         ORDER BY COALESCE(seq, timestamp) DESC, timestamp DESC
         LIMIT ?
       `);
-      const noiseRows = noiseRowsStmt.all(taskId, ...noiseTypes, noiseBudget) as Any[];
+      const noiseRows = this.withPendingRows(
+        taskId,
+        noiseRowsStmt.all(taskId, ...noiseTypes, noiseBudget) as Any[],
+        {
+          filter: (row) => noise.has(TaskEventRepository.effectiveType(row)),
+          direction: "desc",
+          limit: noiseBudget,
+        },
+      );
       rows = [...structuralRows, ...noiseRows];
     }
 
@@ -2264,14 +2504,20 @@ export class TaskEventRepository {
         ${safeLimit ? "LIMIT ?" : ""}
       `)
       .all(normalizedTaskId, ...normalizedTypes, ...(safeLimit ? [safeLimit] : [])) as Any[];
-    if (safeLimit) rows.reverse();
-    return this.mapRowsToEvents(rows).events;
+    const wanted = new Set(normalizedTypes);
+    const merged = this.withPendingRows(normalizedTaskId, rows, {
+      filter: (row) => wanted.has(TaskEventRepository.effectiveType(row)),
+      direction: safeLimit ? "desc" : "asc",
+      ...(safeLimit ? { limit: safeLimit } : {}),
+    });
+    if (safeLimit) merged.reverse();
+    return this.mapRowsToEvents(merged).events;
   }
 
   findLatestConversationSnapshot(taskId: string): TaskEvent | null {
     const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
     if (!normalizedTaskId) return null;
-    const row = this.db
+    const committed = this.db
       .prepare(`
         SELECT * FROM task_events
         WHERE task_id = ?
@@ -2280,6 +2526,12 @@ export class TaskEventRepository {
         LIMIT 1
       `)
       .get(normalizedTaskId) as Any;
+    const [row] = this.withPendingRows(normalizedTaskId, committed ? [committed] : [], {
+      filter: (candidate) =>
+        TaskEventRepository.effectiveType(candidate) === "conversation_snapshot",
+      direction: "desc",
+      limit: 1,
+    });
     return row
       ? (this.mapRowsToEvents([row], { persistMigrations: false }).events[0] ?? null)
       : null;
@@ -2300,7 +2552,18 @@ export class TaskEventRepository {
       .get(normalizedTaskId, normalizedEventId, normalizedEventId) as
       | { id?: string; timeline_order?: number; timestamp?: number }
       | undefined;
-    if (!row?.id) return null;
+    if (!row?.id) {
+      const pending = pendingTimelineTaskRows(this.db, normalizedTaskId).find(
+        (candidate) =>
+          candidate.id === normalizedEventId || candidate.event_id === normalizedEventId,
+      );
+      if (!pending) return null;
+      return {
+        order: TaskEventRepository.rowOrder(pending),
+        timestamp: Number(pending.timestamp) || 0,
+        id: String(pending.id),
+      };
+    }
     return {
       order: Number(row.timeline_order) || Number(row.timestamp) || 0,
       timestamp: Number(row.timestamp) || 0,
@@ -2363,8 +2626,17 @@ export class TaskEventRepository {
         ...normalizedTypes,
         safeLimit,
       ) as Any[];
-    rows.reverse();
-    return this.mapRowsToEvents(rows, { persistMigrations: false }).events;
+    const wanted = new Set(normalizedTypes);
+    const boundary = { seq: boundaryOrder, timestamp: boundaryTimestamp, id: boundaryId };
+    const merged = this.withPendingRows(normalizedTaskId, rows, {
+      filter: (row) =>
+        wanted.has(TaskEventRepository.effectiveType(row)) &&
+        TaskEventRepository.compareRows(row, boundary) > 0,
+      direction: "desc",
+      limit: safeLimit,
+    });
+    merged.reverse();
+    return this.mapRowsToEvents(merged, { persistMigrations: false }).events;
   }
 
   findTimelinePage(request: TaskTimelinePageRequest): TaskTimelinePageResult {
@@ -2430,15 +2702,32 @@ export class TaskEventRepository {
       cursor && typeof cursor.id === "string" && cursor.id.trim().length > 0
         ? cursor.id.trim()
         : null;
+    // An id-anchored cursor re-resolves its position from the row itself, so a page
+    // sequence survives the row's order changing between requests: a legacy task's
+    // order is its raw timestamp until its deferred conversion lands, then seq 1..N
+    // (DB4). The lookup is folded into the page statement; if the anchor row is gone
+    // (or belongs to another task, as in merged pages) the cursor's own values apply.
+    const anchorOrder =
+      "COALESCE((SELECT COALESCE(a.seq, a.timestamp) FROM task_events a WHERE a.id = ? AND a.task_id = ?), ?)";
+    const anchorTimestamp =
+      "COALESCE((SELECT a.timestamp FROM task_events a WHERE a.id = ? AND a.task_id = ?), ?)";
     const cursorWhere =
       cursorOrder !== null && cursorTimestamp !== null && cursorId
-        ? "AND (COALESCE(seq, timestamp) < ? OR (COALESCE(seq, timestamp) = ? AND (timestamp < ? OR (timestamp = ? AND id < ?))))"
+        ? `AND (COALESCE(seq, timestamp) < ${anchorOrder} OR (COALESCE(seq, timestamp) = ${anchorOrder} AND (timestamp < ${anchorTimestamp} OR (timestamp = ${anchorTimestamp} AND id < ?))))`
         : cursorOrder !== null && cursorTimestamp !== null
           ? "AND (COALESCE(seq, timestamp) < ? OR (COALESCE(seq, timestamp) = ? AND timestamp < ?))"
           : "";
+    const anchoredOrderArgs = [cursorId, taskId, cursorOrder];
+    const anchoredTimestampArgs = [cursorId, taskId, cursorTimestamp];
     const cursorArgs: Any[] =
       cursorOrder !== null && cursorTimestamp !== null && cursorId
-        ? [cursorOrder, cursorOrder, cursorTimestamp, cursorTimestamp, cursorId]
+        ? [
+            ...anchoredOrderArgs,
+            ...anchoredOrderArgs,
+            ...anchoredTimestampArgs,
+            ...anchoredTimestampArgs,
+            cursorId,
+          ]
         : cursorOrder !== null && cursorTimestamp !== null
           ? [cursorOrder, cursorOrder, cursorTimestamp]
           : [];
@@ -2516,6 +2805,27 @@ export class TaskEventRepository {
         .slice(0, safeLimit + 1);
     } else {
       rows = selectRows("task_id = ?", [taskId]);
+    }
+    if (!cursor) {
+      // The latest page includes accepted rows not committed yet (DB6): merged here rather
+      // than committed on the host. Older pages sit behind their anchor, below any of them.
+      rows = this.withPendingRows(taskId, rows, {
+        direction: "desc",
+        limit: safeLimit + 1,
+        shape: (row) => {
+          const payload = String(row.payload ?? "");
+          const payloadBytes = Buffer.byteLength(payload, "utf8");
+          return {
+            ...row,
+            payload:
+              payloadBytes > singleEventByteLimit
+                ? payload.slice(0, TaskEventRepository.TRUNCATED_PAYLOAD_PREVIEW_CHARS)
+                : payload,
+            timeline_order: TaskEventRepository.rowOrder(row),
+            payload_bytes: payloadBytes,
+          };
+        },
+      });
     }
 
     const metadataRowCount = rows.length;
@@ -2741,6 +3051,10 @@ export class TaskEventRepository {
       additionalTaskEventTypes?: string[];
     },
   ): TaskEventDetailResult {
+    flushPendingTimelineEvent(this.db, eventId);
+    for (const scopedTaskId of [scope?.taskId, ...(scope?.additionalTaskIds ?? [])]) {
+      if (scopedTaskId) flushPendingTimelineTask(this.db, scopedTaskId);
+    }
     const normalizedEventId = typeof eventId === "string" ? eventId.trim() : "";
     if (!normalizedEventId) return { event: null, payloadBytes: 0 };
     const normalizedTaskId = typeof scope?.taskId === "string" ? scope.taskId.trim() : "";
@@ -2807,6 +3121,13 @@ export class TaskEventRepository {
     };
   }
 
+  /** One event by id, mapped as readers see it; no legacy migration is persisted. */
+  findById(id: string): TaskEvent | undefined {
+    flushPendingTimelineEvent(this.db, id);
+    const row = this.db.prepare("SELECT * FROM task_events WHERE id = ?").get(id) as Any;
+    return row ? this.mapRowsToEvents([row], { persistMigrations: false }).events[0] : undefined;
+  }
+
   findByTaskIds(taskIds: string[], types?: string[]): TaskEvent[] {
     if (!Array.isArray(taskIds) || taskIds.length === 0) {
       return [];
@@ -2849,10 +3170,23 @@ export class TaskEventRepository {
       allRows.push(...(stmt.all(...args) as Any[]));
     }
 
-    return this.mapRowsToEvents(allRows).events;
+    // Pending rows are merged per task, keeping the task-then-timeline order (DB6).
+    const wanted = new Set(normalizedTypes);
+    const byTask = new Map<string, Any[]>();
+    for (const taskId of normalizedTaskIds) byTask.set(taskId, []);
+    for (const row of allRows) byTask.get(String(row.task_id))?.push(row);
+    const merged = [...byTask.keys()].sort().flatMap((taskId) =>
+      this.withPendingRows(taskId, byTask.get(taskId) ?? [], {
+        filter: (row) =>
+          wanted.size === 0 || wanted.has(String(row.type)) || wanted.has(String(row.legacy_type)),
+        direction: "asc",
+      }),
+    );
+    return this.mapRowsToEvents(merged).events;
   }
 
   updatePayloadById(eventId: string, payload: Record<string, unknown>): void {
+    flushPendingTimelineEvent(this.db, eventId);
     const normalizedEventId = typeof eventId === "string" ? eventId.trim() : "";
     if (!normalizedEventId) return;
     const stmt = this.db.prepare(`
@@ -2951,7 +3285,8 @@ export class TaskEventRepository {
 
   private mapRowsToEvents(
     rows: Any[],
-    options: { persistMigrations?: boolean } = {},
+    /** `persistImmediately` writes conversions inside this call instead of after it. */
+    options: { persistMigrations?: boolean; persistImmediately?: boolean } = {},
   ): { events: TaskEvent[]; migratedCount: number } {
     const events: TaskEvent[] = [];
     const migratedRows: TaskEvent[] = [];
@@ -3038,52 +3373,40 @@ export class TaskEventRepository {
     }
 
     if (migratedRows.length > 0 && options.persistMigrations !== false) {
-      this.persistMigratedRows(migratedRows);
+      if (options.persistImmediately) this.persistMigratedRows(migratedRows);
+      else {
+        const byTask = new Map<string, TaskEvent[]>();
+        for (const event of migratedRows) {
+          const list = byTask.get(event.taskId) ?? [];
+          list.push(event);
+          byTask.set(event.taskId, list);
+        }
+        const queue = this.deferredMigrationsQueue();
+        for (const [taskId, events] of byTask) queue.add(taskId, events.map(migratedEventParams));
+      }
     }
 
     return { events, migratedCount: migratedRows.length };
   }
 
+  private deferredMigrationsQueue(): DeferredEventMigrations {
+    let queue = TaskEventRepository.deferredMigrations.get(this.db);
+    if (!queue) {
+      queue = new DeferredEventMigrations(this.db);
+      TaskEventRepository.deferredMigrations.set(this.db, queue);
+    }
+    return queue;
+  }
+
   private persistMigratedRows(rows: TaskEvent[]): void {
     if (rows.length === 0) return;
-    const stmt = this.db.prepare(`
-      UPDATE task_events
-      SET
-        type = ?,
-        payload = ?,
-        schema_version = 2,
-        event_id = ?,
-        seq = ?,
-        ts = ?,
-        status = ?,
-        step_id = ?,
-        group_id = ?,
-        actor = ?,
-        legacy_type = ?
-      WHERE id = ?
-    `);
-    const tx = this.db.transaction((items: TaskEvent[]) => {
-      for (const event of items) {
-        const storedEvent = sanitizeTimelineEventForStorage(event);
-        stmt.run(
-          storedEvent.type,
-          JSON.stringify(storedEvent.payload ?? {}),
-          storedEvent.eventId || storedEvent.id,
-          typeof storedEvent.seq === "number" ? storedEvent.seq : null,
-          typeof storedEvent.ts === "number" ? storedEvent.ts : storedEvent.timestamp,
-          typeof storedEvent.status === "string" ? storedEvent.status : null,
-          typeof storedEvent.stepId === "string" ? storedEvent.stepId : null,
-          typeof storedEvent.groupId === "string" ? storedEvent.groupId : null,
-          typeof storedEvent.actor === "string" ? storedEvent.actor : null,
-          typeof storedEvent.legacyType === "string" ? storedEvent.legacyType : null,
-          storedEvent.id,
-        );
-      }
-    });
-    tx(rows);
+    this.db.transaction(() => applyMigratedEventParams(this.db, rows.map(migratedEventParams)))();
   }
 
   getLatestSeq(taskId: string): number {
+    flushPendingTimelineTask(this.db, taskId);
+    // The next seq depends on converted rows: write any deferred conversion first.
+    TaskEventRepository.deferredMigrations.get(this.db)?.flushTask(taskId);
     const row = this.db
       .prepare("SELECT MAX(COALESCE(seq, 0)) as max_seq FROM task_events WHERE task_id = ?")
       .get(taskId) as { max_seq?: number } | undefined;
@@ -3092,6 +3415,8 @@ export class TaskEventRepository {
   }
 
   migrateLegacyEventsForTask(taskId: string): number {
+    flushPendingTimelineTask(this.db, taskId);
+    TaskEventRepository.deferredMigrations.get(this.db)?.flushTask(taskId);
     const legacyCountRow = this.db
       .prepare(
         `
@@ -3119,7 +3444,7 @@ export class TaskEventRepository {
       )
       .all(taskId) as Any[];
 
-    return this.mapRowsToEvents(rows).migratedCount;
+    return this.mapRowsToEvents(rows, { persistImmediately: true }).migratedCount;
   }
 
   migrateLegacyEventsForTasks(taskIds: string[]): number {
@@ -3136,6 +3461,7 @@ export class TaskEventRepository {
    * This prevents database bloat from accumulating snapshots over time.
    */
   pruneOldSnapshots(taskId: string): void {
+    flushPendingTimelineTask(this.db, taskId);
     // Find all conversation_snapshot events for this task, ordered by timestamp descending
     const findStmt = this.db.prepare(`
       SELECT id, timestamp FROM task_events
@@ -3166,24 +3492,35 @@ export class TaskEventRepository {
   }
 
   /**
-   * Delete events belonging to terminal tasks older than `retentionDays`.
-   * Returns the number of deleted rows.
+   * Delete events belonging to terminal tasks older than `retentionDays`, in batches of
+   * `batchSize` rows. Each batch commits on its own and the event loop runs between
+   * batches, so pruning a large history never blocks the host or holds the write lock
+   * for more than one batch. Returns the number of deleted rows.
    */
-  pruneOldEvents(retentionDays: number = 90): number {
+  async pruneOldEvents(
+    retentionDays: number = 90,
+    options: { batchSize?: number } = {},
+  ): Promise<number> {
     const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
-    const stmt = this.db.prepare(`
-      DELETE FROM task_events
-      WHERE task_id IN (
-        SELECT id FROM tasks WHERE status IN ('completed', 'failed', 'cancelled') AND created_at < ?
-      )
-    `);
-    const result = stmt.run(cutoff);
-    return result.changes;
+    const batchSize = Math.max(1, Math.floor(options.batchSize ?? 500));
+    const stmt = this.db.prepare(PRUNE_TASK_EVENTS_BATCH_SQL);
+    let deleted = 0;
+    while (this.db.open) {
+      const changes = stmt.run(cutoff, batchSize).changes;
+      deleted += changes;
+      if (changes < batchSize) break;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    return deleted;
   }
 
   /**
    * Run VACUUM if the SQLite freelist exceeds `thresholdMB` megabytes.
    * Returns true if a vacuum was performed.
+   *
+   * A full VACUUM cannot be chunked and holds the write lock throughout, blocking
+   * writers in every runtime on the profile. Background callers must only run it
+   * when no tasks are active (see `AgentDaemon.vacuumWhenIdle`).
    */
   vacuumIfNeeded(thresholdMB: number = 500): boolean {
     const freelistCount =
@@ -3198,7 +3535,7 @@ export class TaskEventRepository {
 
 export class TaskTraceRepository {
   constructor(
-    private readonly taskRepo: TaskRepository,
+    private readonly taskRepo: TaskStore,
     private readonly taskEventRepo: TaskEventRepository,
   ) {}
 
@@ -3252,7 +3589,7 @@ export class TaskTraceRepository {
   }
 }
 
-export class ArtifactRepository {
+export class ArtifactStore {
   constructor(private db: Database.Database) {}
 
   create(artifact: Omit<Artifact, "id">): Artifact {
@@ -3331,7 +3668,7 @@ function normalizeAnnotationStatus(
     : fallback;
 }
 
-export class AnnotationRepository {
+export class AnnotationStore {
   constructor(private db: Database.Database) {}
 
   create(input: AnnotationCreateInput): Annotation {
@@ -3567,7 +3904,7 @@ export class AnnotationRepository {
   }
 }
 
-export class ApprovalRepository {
+export class ApprovalStore {
   constructor(private db: Database.Database) {}
 
   create(approval: Omit<ApprovalRequest, "id">): ApprovalRequest {
@@ -3664,7 +4001,7 @@ export class ApprovalRepository {
   }
 }
 
-export class WorkspacePermissionRuleRepository {
+export class WorkspacePermissionRuleStore {
   constructor(private db: Database.Database) {}
 
   listByWorkspaceId(workspaceId: string): PersistedPermissionRule[] {
@@ -3811,7 +4148,7 @@ export class WorkspacePermissionRuleRepository {
   }
 }
 
-export class InputRequestRepository {
+export class InputRequestStore {
   constructor(private db: Database.Database) {}
 
   create(request: {
@@ -3953,7 +4290,7 @@ export class InputRequestRepository {
   }
 }
 
-export class SkillRepository {
+export class SkillStore {
   constructor(private db: Database.Database) {}
 
   create(skill: Omit<Skill, "id">): Skill {
@@ -4020,7 +4357,7 @@ export interface LLMModel {
   updatedAt: number;
 }
 
-export class LLMModelRepository {
+export class LLMModelStore {
   constructor(private db: Database.Database) {}
 
   findAll(): LLMModel[] {
@@ -4144,6 +4481,68 @@ function decryptChannelConfig(value: string): ChannelConfigReadResult {
   }
 }
 
+/**
+ * How `ChannelStore` turns a channel's config into the stored `channels.config` value and
+ * back. The default encrypts with OS secure storage. The storage domain's transaction
+ * units, which may run in the database worker where secure storage is unavailable, use
+ * `SEALED_CHANNEL_CONFIG_CODEC`: the host-side `ChannelRepository` facade encrypts before
+ * the unit runs and decrypts after, and the stored value crosses the worker boundary sealed.
+ */
+export interface ChannelConfigCodec {
+  encode(config: Record<string, unknown>): string;
+  decode(value: string): {
+    config: Record<string, unknown>;
+    encrypted: boolean;
+    readError?: string;
+  };
+}
+
+const SEALED_CHANNEL_CONFIG_KEY = "__coworkSealedChannelConfig";
+
+export const SAFE_STORAGE_CHANNEL_CONFIG_CODEC: ChannelConfigCodec = {
+  encode: (config) => encryptChannelConfig(JSON.stringify(config)),
+  decode: (value) => {
+    const state = decryptChannelConfig(value);
+    return {
+      config: safeJsonParse(state.json, {}, "channel.config"),
+      encrypted: state.encrypted,
+      readError: state.readError,
+    };
+  },
+};
+
+export const SEALED_CHANNEL_CONFIG_CODEC: ChannelConfigCodec = {
+  encode: (config) => {
+    const sealed = config[SEALED_CHANNEL_CONFIG_KEY];
+    if (typeof sealed !== "string") {
+      throw new Error("Channel config must be sealed on the host before it is stored.");
+    }
+    return sealed;
+  },
+  decode: (value) => ({
+    config: { [SEALED_CHANNEL_CONFIG_KEY]: value },
+    encrypted: value.startsWith(CHANNEL_CONFIG_ENCRYPTED_PREFIX),
+  }),
+};
+
+/** Encrypt a channel config on the host for a store that uses the sealed codec. */
+export function sealChannelConfig(config: Record<string, unknown>): Record<string, unknown> {
+  return { [SEALED_CHANNEL_CONFIG_KEY]: SAFE_STORAGE_CHANNEL_CONFIG_CODEC.encode(config) };
+}
+
+/** Decrypt, on the host, a channel read through a store that uses the sealed codec. */
+export function unsealChannel(channel: Channel): Channel {
+  const sealed = channel.config[SEALED_CHANNEL_CONFIG_KEY];
+  if (typeof sealed !== "string") return channel;
+  const state = SAFE_STORAGE_CHANNEL_CONFIG_CODEC.decode(sealed);
+  return {
+    ...channel,
+    config: state.config,
+    configEncrypted: state.encrypted,
+    configReadError: state.readError,
+  };
+}
+
 export interface Channel {
   id: string;
   type: string;
@@ -4215,8 +4614,11 @@ export interface ChannelMessage {
   timestamp: number;
 }
 
-export class ChannelRepository {
-  constructor(private db: Database.Database) {}
+export class ChannelStore {
+  constructor(
+    private db: Database.Database,
+    private readonly configCodec: ChannelConfigCodec = SAFE_STORAGE_CHANNEL_CONFIG_CODEC,
+  ) {}
 
   create(channel: Omit<Channel, "id" | "createdAt" | "updatedAt">): Channel {
     const now = Date.now();
@@ -4237,7 +4639,7 @@ export class ChannelRepository {
       newChannel.type,
       newChannel.name,
       newChannel.enabled ? 1 : 0,
-      encryptChannelConfig(JSON.stringify(newChannel.config)),
+      this.configCodec.encode(newChannel.config),
       JSON.stringify(newChannel.securityConfig),
       newChannel.status,
       newChannel.botUsername || null,
@@ -4246,6 +4648,17 @@ export class ChannelRepository {
     );
 
     return newChannel;
+  }
+
+  /**
+   * Create the channel unless one of its type exists (then `undefined`). As a storage unit
+   * the check and the insert share one transaction.
+   */
+  createIfTypeAbsent(
+    channel: Omit<Channel, "id" | "createdAt" | "updatedAt">,
+  ): Channel | undefined {
+    if (this.findByType(channel.type)) return undefined;
+    return this.create(channel);
   }
 
   update(id: string, updates: Partial<Channel>): void {
@@ -4267,7 +4680,7 @@ export class ChannelRepository {
     }
     if (updates.config !== undefined) {
       fields.push("config = ?");
-      values.push(encryptChannelConfig(JSON.stringify(updates.config)));
+      values.push(this.configCodec.encode(updates.config));
     }
     if (updates.securityConfig !== undefined) {
       fields.push("security_config = ?");
@@ -4419,13 +4832,13 @@ export class ChannelRepository {
 
   private mapRowToChannel(row: Record<string, unknown>): Channel {
     const defaultSecurityConfig = { mode: "pairing" as const };
-    const configState = decryptChannelConfig(row.config as string);
+    const configState = this.configCodec.decode(row.config as string);
     return {
       id: row.id as string,
       type: row.type as string,
       name: row.name as string,
       enabled: row.enabled === 1,
-      config: safeJsonParse(configState.json, {}, "channel.config"),
+      config: configState.config,
       configEncrypted: configState.encrypted,
       configReadError: configState.readError,
       securityConfig: safeJsonParse(
@@ -4441,8 +4854,24 @@ export class ChannelRepository {
   }
 }
 
-export class ChannelUserRepository {
+export class ChannelUserStore {
   constructor(private db: Database.Database) {}
+
+  /**
+   * The channel user's record, refreshing a changed display name, or a new record. As a
+   * storage unit this runs in one transaction, so two concurrent first messages from a
+   * user cannot both create one.
+   */
+  findOrCreateByChannelUser(
+    user: Omit<ChannelUser, "id" | "createdAt" | "lastSeenAt" | "pairingAttempts">,
+  ): ChannelUser {
+    const existing = this.findByChannelUserId(user.channelId, user.channelUserId);
+    if (!existing) return this.create(user);
+    if (existing.displayName !== user.displayName) {
+      this.update(existing.id, { displayName: user.displayName });
+    }
+    return existing;
+  }
 
   create(
     user: Omit<ChannelUser, "id" | "createdAt" | "lastSeenAt" | "pairingAttempts">,
@@ -4643,8 +5072,22 @@ export class ChannelUserRepository {
   }
 }
 
-export class ChannelSessionRepository {
+export class ChannelSessionStore {
   constructor(private db: Database.Database) {}
+
+  /**
+   * The chat's session with its activity touched, or a new one. As a storage unit this
+   * runs in one transaction, so concurrent messages in a chat cannot both create one.
+   */
+  findOrCreateByChat(
+    session: Omit<ChannelSession, "id" | "createdAt" | "lastActivityAt">,
+  ): ChannelSession {
+    const existing = this.findByChatId(session.channelId, session.chatId);
+    if (!existing) return this.create(session);
+    const now = Date.now();
+    this.update(existing.id, { lastActivityAt: now });
+    return { ...existing, lastActivityAt: now };
+  }
 
   create(session: Omit<ChannelSession, "id" | "createdAt" | "lastActivityAt">): ChannelSession {
     const now = Date.now();
@@ -4787,7 +5230,7 @@ export class ChannelSessionRepository {
   }
 }
 
-export class ChannelSpecializationRepository {
+export class ChannelSpecializationStore {
   constructor(private db: Database.Database) {}
 
   upsert(request: CreateChannelSpecializationRequest): ChannelSpecialization {
@@ -5026,7 +5469,7 @@ export class ChannelSpecializationRepository {
   }
 }
 
-export class ChannelMessageRepository {
+export class ChannelMessageStore {
   constructor(private db: Database.Database) {}
 
   create(message: Omit<ChannelMessage, "id">): ChannelMessage {
@@ -5183,7 +5626,7 @@ export interface AuditLogEntry {
   severity: "debug" | "info" | "warn" | "error";
 }
 
-export class MessageQueueRepository {
+export class MessageQueueStore {
   constructor(private db: Database.Database) {}
 
   enqueue(item: Omit<QueuedMessage, "id" | "createdAt" | "attempts" | "status">): QueuedMessage {
@@ -5296,7 +5739,7 @@ export class MessageQueueRepository {
   }
 }
 
-export class ScheduledMessageRepository {
+export class ScheduledMessageStore {
   constructor(private db: Database.Database) {}
 
   create(item: Omit<ScheduledMessage, "id" | "createdAt" | "status">): ScheduledMessage {
@@ -5410,7 +5853,7 @@ export class ScheduledMessageRepository {
   }
 }
 
-export class DeliveryTrackingRepository {
+export class DeliveryTrackingStore {
   constructor(private db: Database.Database) {}
 
   create(item: Omit<DeliveryRecord, "id" | "createdAt">): DeliveryRecord {
@@ -5513,7 +5956,7 @@ export class DeliveryTrackingRepository {
   }
 }
 
-export class RateLimitRepository {
+export class RateLimitStore {
   constructor(private db: Database.Database) {}
 
   getOrCreate(channelType: string, userId: string): RateLimitRecord {
@@ -5606,7 +6049,7 @@ export class RateLimitRepository {
   }
 }
 
-export class AuditLogRepository {
+export class AuditLogStore {
   constructor(private db: Database.Database) {}
 
   log(entry: Omit<AuditLogEntry, "id" | "timestamp">): AuditLogEntry {
@@ -5848,12 +6291,7 @@ export interface MemoryStats {
   compressionRatio: number;
 }
 
-// Imported memories can optionally carry a lightweight control header on the first line.
-const IMPORTED_PROMPT_RECALL_IGNORE_MARKER = "[cowork:prompt_recall=ignore]";
-const buildImportedMemoryFilterSql = (contentExpr: string): string =>
-  `(${contentExpr} LIKE '[Imported from %' OR ${contentExpr} LIKE '${IMPORTED_PROMPT_RECALL_IGNORE_MARKER}%[Imported from %')`;
-
-export class MemoryRepository {
+export class MemoryStore {
   constructor(private db: Database.Database) {}
 
   private static readonly MEMORY_FTS_RAW_MAX_CHARS = 160;
@@ -5928,6 +6366,11 @@ export class MemoryRepository {
     "help",
   ]);
 
+  /** One capture (memory, embedding, observation) in one transaction (DB6). */
+  insertCaptured(write: CapturedMemoryWrite): { observationStored: boolean } {
+    return this.db.transaction(() => insertCapturedMemory(this.db, write))();
+  }
+
   create(memory: Omit<Memory, "id" | "createdAt" | "updatedAt">): Memory {
     const now = Date.now();
     const newMemory: Memory = {
@@ -5937,24 +6380,19 @@ export class MemoryRepository {
       updatedAt: now,
     };
 
-    const stmt = this.db.prepare(`
-      INSERT INTO memories (id, workspace_id, task_id, type, content, summary, tokens, is_compressed, is_private, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      newMemory.id,
-      newMemory.workspaceId,
-      newMemory.taskId || null,
-      newMemory.type,
-      newMemory.content,
-      newMemory.summary || null,
-      newMemory.tokens,
-      newMemory.isCompressed ? 1 : 0,
-      newMemory.isPrivate ? 1 : 0,
-      newMemory.createdAt,
-      newMemory.updatedAt,
-    );
+    insertMemoryRow(this.db, {
+      id: newMemory.id,
+      workspaceId: newMemory.workspaceId,
+      taskId: newMemory.taskId || null,
+      type: newMemory.type,
+      content: newMemory.content,
+      summary: newMemory.summary || null,
+      tokens: newMemory.tokens,
+      isCompressed: Boolean(newMemory.isCompressed),
+      isPrivate: Boolean(newMemory.isPrivate),
+      createdAt: newMemory.createdAt,
+      updatedAt: newMemory.updatedAt,
+    });
 
     return newMemory;
   }
@@ -6259,7 +6697,7 @@ export class MemoryRepository {
 
       const tokenized = this.buildRelaxedFtsQuery(
         raw,
-        MemoryRepository.PROMPT_RECALL_FTS_MAX_TOKENS,
+        MemoryStore.PROMPT_RECALL_FTS_MAX_TOKENS,
       );
       const tryRaw = this.shouldTryRawFtsQuery(raw);
 
@@ -6310,7 +6748,7 @@ export class MemoryRepository {
 
     const tokens = this.tokenizeSearchQuery(raw);
     const likeTokens = (tokens.length > 0 ? tokens : [raw])
-      .slice(0, MemoryRepository.PROMPT_RECALL_FTS_MAX_TOKENS)
+      .slice(0, MemoryStore.PROMPT_RECALL_FTS_MAX_TOKENS)
       .filter(Boolean);
 
     const clauses: string[] = [];
@@ -6653,7 +7091,7 @@ export class MemoryRepository {
       .replace(/[^a-z0-9_\s-]/g, " ")
       .split(/\s+/)
       .map((t) => t.trim())
-      .filter((t) => t.length > 1 && !MemoryRepository.MEMORY_SEARCH_STOP_WORDS.has(t));
+      .filter((t) => t.length > 1 && !MemoryStore.MEMORY_SEARCH_STOP_WORDS.has(t));
   }
 
   private buildRelaxedFtsQuery(raw: string, maxTokens = 8): string | null {
@@ -6667,8 +7105,8 @@ export class MemoryRepository {
   }
 
   private shouldTryRawFtsQuery(raw: string): boolean {
-    if (raw.length > MemoryRepository.MEMORY_FTS_RAW_MAX_CHARS) return false;
-    return this.tokenizeSearchQuery(raw).length <= MemoryRepository.MEMORY_FTS_RAW_MAX_TOKENS;
+    if (raw.length > MemoryStore.MEMORY_FTS_RAW_MAX_CHARS) return false;
+    return this.tokenizeSearchQuery(raw).length <= MemoryStore.MEMORY_FTS_RAW_MAX_TOKENS;
   }
 
   private runMemoryFtsQuery<T>(
@@ -6684,7 +7122,7 @@ export class MemoryRepository {
       return result;
     } finally {
       const elapsedMs = Date.now() - startedAt;
-      if (elapsedMs >= MemoryRepository.MEMORY_FTS_SLOW_QUERY_MS) {
+      if (elapsedMs >= MemoryStore.MEMORY_FTS_SLOW_QUERY_MS) {
         const tokenCount = this.tokenizeSearchQuery(query).length;
         const rowCount = Array.isArray(result!) ? result!.length : -1;
         memoryRepositoryLogger.warn(
@@ -6715,7 +7153,7 @@ export class MemoryRepository {
   }
 }
 
-export class CuratedMemoryRepository {
+export class CuratedMemoryStore {
   constructor(private db: Database.Database) {}
 
   create(
@@ -6910,19 +7348,53 @@ export class CuratedMemoryRepository {
   }
 }
 
-export class MemoryEmbeddingRepository {
+/**
+ * A change to persisted memory embeddings, reported after the statement ran so a cache
+ * on another connection (the FTS worker's, DB4) can reload the affected rows.
+ */
+export type MemoryEmbeddingChange =
+  | { kind: "memories"; memoryIds: string[] }
+  | { kind: "workspace"; workspaceId: string };
+
+const memoryEmbeddingChangeListeners = new Set<(change: MemoryEmbeddingChange) => void>();
+
+export function onMemoryEmbeddingChange(
+  listener: (change: MemoryEmbeddingChange) => void,
+): () => void {
+  memoryEmbeddingChangeListeners.add(listener);
+  return () => memoryEmbeddingChangeListeners.delete(listener);
+}
+
+function notifyMemoryEmbeddingChange(change: MemoryEmbeddingChange): void {
+  for (const listener of memoryEmbeddingChangeListeners) {
+    try {
+      listener(change);
+    } catch {
+      // A cache listener must never fail the write.
+    }
+  }
+}
+
+export class MemoryEmbeddingStore {
   constructor(private db: Database.Database) {}
 
   upsert(workspaceId: string, memoryId: string, embedding: number[], updatedAt = Date.now()): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO memory_embeddings (memory_id, workspace_id, embedding, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(memory_id) DO UPDATE SET
-        workspace_id = excluded.workspace_id,
-        embedding = excluded.embedding,
-        updated_at = excluded.updated_at
-    `);
-    stmt.run(memoryId, workspaceId, JSON.stringify(embedding), updatedAt);
+    upsertMemoryEmbeddingRows(this.db, [{ memoryId, workspaceId, embedding, updatedAt }], {
+      ifCurrent: false,
+    });
+    notifyMemoryEmbeddingChange({ kind: "memories", memoryIds: [memoryId] });
+  }
+
+  /**
+   * Write a backfill batch in one transaction, skipping rows whose memory moved on
+   * (see `upsertMemoryEmbeddingRows`). Returns the ids written.
+   */
+  upsertBackfillBatch(rows: MemoryEmbeddingRow[]): string[] {
+    const written = this.db.transaction(() =>
+      upsertMemoryEmbeddingRows(this.db, rows, { ifCurrent: true }),
+    )();
+    if (written.length > 0) notifyMemoryEmbeddingChange({ kind: "memories", memoryIds: written });
+    return written;
   }
 
   getByWorkspace(workspaceId: string): MemoryEmbedding[] {
@@ -7068,6 +7540,7 @@ export class MemoryEmbeddingRepository {
   deleteByWorkspace(workspaceId: string): number {
     const stmt = this.db.prepare("DELETE FROM memory_embeddings WHERE workspace_id = ?");
     const result = stmt.run(workspaceId);
+    notifyMemoryEmbeddingChange({ kind: "workspace", workspaceId });
     return result.changes;
   }
 
@@ -7079,6 +7552,7 @@ export class MemoryEmbeddingRepository {
       WHERE memory_id IN (${placeholders})
     `);
     const result = stmt.run(...ids);
+    notifyMemoryEmbeddingChange({ kind: "memories", memoryIds: ids });
     return result.changes;
   }
 
@@ -7093,11 +7567,12 @@ export class MemoryEmbeddingRepository {
         )
     `);
     const result = stmt.run(workspaceId, workspaceId);
+    notifyMemoryEmbeddingChange({ kind: "workspace", workspaceId });
     return result.changes;
   }
 }
 
-export class MemorySummaryRepository {
+export class MemorySummaryStore {
   constructor(private db: Database.Database) {}
 
   create(summary: Omit<MemorySummary, "id" | "createdAt">): MemorySummary {
@@ -7174,7 +7649,7 @@ export class MemorySummaryRepository {
   }
 }
 
-export class MemorySettingsRepository {
+export class MemorySettingsStore {
   constructor(private db: Database.Database) {}
 
   getOrCreate(workspaceId: string): MemorySettings {
@@ -7281,7 +7756,7 @@ export class MemorySettingsRepository {
   }
 }
 
-export class PendingMemoryWriteRepository {
+export class PendingMemoryWriteStore {
   constructor(private db: Database.Database) {}
 
   create(input: {
@@ -7503,7 +7978,7 @@ export class PendingMemoryWriteRepository {
 
 // ============ Git Worktree Repository ============
 
-export class WorktreeInfoRepository {
+export class WorktreeInfoStore {
   constructor(private db: Database.Database) {}
 
   create(info: WorktreeInfo): WorktreeInfo {
@@ -7605,7 +8080,7 @@ export class WorktreeInfoRepository {
 
 // ============ Comparison Session Repository ============
 
-export class ComparisonSessionRepository {
+export class ComparisonSessionStore {
   constructor(private db: Database.Database) {}
 
   create(params: Omit<ComparisonSession, "id" | "createdAt">): ComparisonSession {

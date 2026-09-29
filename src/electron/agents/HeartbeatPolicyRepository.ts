@@ -61,7 +61,7 @@ function mergePolicy(
   };
 }
 
-export class HeartbeatPolicyRepository {
+export class HeartbeatPolicyStore {
   constructor(private db: Database.Database) {}
 
   private mapRow(row: Any): HeartbeatPolicy {

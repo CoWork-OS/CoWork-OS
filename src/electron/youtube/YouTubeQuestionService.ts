@@ -39,8 +39,12 @@ export class YouTubeQuestionService {
   async ensureIngested(input: { url: string; language?: string; force?: boolean }) {
     const videoId = extractYouTubeVideoId(input.url);
     if (!videoId) throw new Error("Expected a YouTube URL or 11-character video ID.");
-    const existing = YouTubeTranscriptStore.getVideo(this.workspaceId, videoId);
-    if (!input.force && existing && YouTubeTranscriptStore.hasSegments(this.workspaceId, videoId)) {
+    const existing = await YouTubeTranscriptStore.getVideo(this.workspaceId, videoId);
+    if (
+      !input.force &&
+      existing &&
+      (await YouTubeTranscriptStore.hasSegments(this.workspaceId, videoId))
+    ) {
       return { ok: true, video: existing, segments: [], warnings: [] };
     }
     return new YouTubeIngestionService(this.workspaceId, this.workspacePath, this.options).ingest({
@@ -50,7 +54,11 @@ export class YouTubeQuestionService {
     });
   }
 
-  search(input: { query: string; videoIds?: string[]; limit?: number }): YouTubeSearchHit[] {
+  async search(input: {
+    query: string;
+    videoIds?: string[];
+    limit?: number;
+  }): Promise<YouTubeSearchHit[]> {
     return YouTubeTranscriptStore.search({ ...input, workspaceId: this.workspaceId });
   }
 
@@ -106,7 +114,7 @@ export class YouTubeQuestionService {
       if (!videoIds.includes(videoId)) videoIds.push(videoId);
     }
 
-    const sources = this.search({
+    const sources = await this.search({
       query: question,
       videoIds,
       limit: input.limit ?? 8,

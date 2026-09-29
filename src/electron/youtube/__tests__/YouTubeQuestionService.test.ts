@@ -43,13 +43,13 @@ afterEach(() => {
 describeWithNativeDb("YouTubeQuestionService", () => {
   it("answers from already-ingested transcript segments without fetching the network", async () => {
     YouTubeTranscriptStore.setDatabaseForTests(createDb());
-    YouTubeTranscriptStore.saveVideo("workspace-1", {
+    await YouTubeTranscriptStore.saveVideo("workspace-1", {
       videoId: "dQw4w9WgXcQ",
       url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       title: "Local Video",
       fetchedAt: 1_700_000_000,
     });
-    YouTubeTranscriptStore.saveSegments("workspace-1", "dQw4w9WgXcQ", [
+    await YouTubeTranscriptStore.saveSegments("workspace-1", "dQw4w9WgXcQ", [
       {
         videoId: "dQw4w9WgXcQ",
         startMs: 2_000,

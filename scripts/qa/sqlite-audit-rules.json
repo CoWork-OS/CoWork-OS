@@ -1,0 +1,455 @@
+{
+  "description": "Explanations for every file in the SQLite ratchet register (async SQLite migration plan, DB6). Each remaining synchronous database access on an application thread must match a rule that names its domain, how it is reached, and where it is migrated. `node scripts/qa/sqlite-audit.mjs` fails on a register entry no rule explains.",
+  "rules": [
+    {
+      "pattern": "^src/electron/database/(async/statement-commands|post-startup-maintenance|secure-settings-sql|memory-embedding-sql|migrated-event-sql|llm-call-events)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Dual-use SQL modules: run in the database worker when enabled, on the host only as the no-worker fallback.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/telemetry/pulse-store-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Pulse transaction groups: worker when settings are routed there, host transaction otherwise.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/memory/memory-capture-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Memory capture writes: worker when enabled, one host transaction otherwise.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/(memory/([a-z-]+-sql|memory-units|PlaybookEvidenceStore)|knowledge-graph/knowledge-graph-sql)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Memory-domain stores and transaction units: each operation is one unit, run in the database worker when memory is routed there (COWORK_DB_WORKER_MEMORY) and in one host transaction otherwise.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/control-plane/control-plane-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Control-plane store: queries and the issue/run state machine run as units, in the worker when the control plane is routed there (COWORK_DB_WORKER_CONTROL_PLANE). Company creation and updates (workspace provisioning), template import/export and budget enforcement also call it on the host, because they need the storage layer's repositories and the file system.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/reports/[a-z-]+-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Report stores (standup, agent reviews, briefing counts) run as reports-domain units: reads on the reporting reader and writes in the worker when COWORK_DB_WORKER_REPORTS is set, one host transaction otherwise.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/reports/UsageInsights(Service|Projector)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Usage insights reports and rollup rebuilds run in the reporting reader and the write worker through the DB4 usage commands; the host runs them only without a worker, plus single-row projector state reads (backfill flags, watermarks).",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/acp/acp-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "ACP persistence (remote agent registrations, ACP tasks): synchronous SQL run as services-domain units (COWORK_DB_WORKER_SERVICES). The registry and the handler keep both in memory; ACP method handlers wait for the startup load.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/agents/agent-signal-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Agent kit rebuild reads (recent task events of a type) and the task event range scan behind the daily summary tool: services-domain read units. The range scan waits for accepted timeline rows to commit instead of committing them on the host.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/briefing/briefing-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Daily briefing store (briefings, per-workspace config): services-domain units; schema setup stays in DailyBriefingService on the host.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/file-hub/file-hub-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "File hub recent-files store: services-domain units; recording a file access does not hold up the caller.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/first-task/(first-task-sql|real-work-state)\\.ts$",
+      "domain": "shared SQL",
+      "access": "First-task flow store (setup choice, sample attempts, real-work state): services-domain units behind FirstTaskRepository. The sample task and its attempt row are created in one unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/hooks/HookSessionRepository\\.ts$",
+      "domain": "shared SQL",
+      "access": "Hook and mention session store (idempotent task creation, session locks): services-domain units behind the async HookSessionRepository facade; acquiring a lock clears expired locks in the same transaction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/improvement/ImprovementRepositories\\.ts$",
+      "domain": "shared SQL",
+      "access": "Improvement loop stores (candidates, runs, campaigns, variant runs, judge verdicts, history): services-domain units behind async facades. Merging a duplicate candidate, resetting history and reading recent signals are single units.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/utils/temp-workspace-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Temp workspace pruning's SQL (temp rows, active references, deleting a workspace with its dependent rows): services-domain units. The reference check and the delete share one unit; directory removal stays on the host.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/youtube/youtube-transcript-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Workspace YouTube videos and transcript segments with their FTS index: services-domain units behind the static YouTubeTranscriptStore, which creates the schema on the host first. Saving segments replaces a video's segments in one transaction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/agent/llm/usage-telemetry-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Usage telemetry rows (LLM calls, Jev decision calls) and the local task-cost history: services-domain units; rows are prepared on the host and inserted without holding up the call.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/agent/(orchestration/OrchestrationGraphRepository|OrchestrationRepository)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Orchestration graph (runs, nodes, edges, node events) and sub-agent orchestration run stores: services-domain units behind async facades. Creating a run with its graph and appending nodes are single transactions.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/agent/tools/channel-history-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Channel history reads for the channel tools (chat summaries, a chat's messages): services-domain read units.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/security/numbat/AgentSecurityRepository\\.ts$",
+      "domain": "shared SQL",
+      "access": "Agent security (Numbat) store: findings, enforcement decisions, diagnostics, inventory. Services-domain units behind the async AgentSecurityRepository facade; a record file's writes are one unit, and the ingestor advances its file cursor only after that unit commits.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/security/recurring-approval-service\\.ts$",
+      "domain": "shared SQL",
+      "access": "Recurring approval rules: services-domain units behind the async RecurringApprovalService facade. Every lookup is awaited before a tool is authorized (AST audit); a revocation after a decision wins over the late write.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/telemetry/pulse-report-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Pulse reads (outbox head, send receipts, consent windows, daily aggregates): services-domain read units. Consent decisions and delivery still commit through the settings-domain Pulse commands (DB5).",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/gateway/context-policy\\.ts$",
+      "domain": "shared SQL",
+      "access": "Per-channel, per-context security policies: services-domain units behind the async ContextPolicyManager facade. A context's default policy is created on first read, so tool checks are write units; every check is awaited (AST audit) and a corrupted restriction list still denies every tool.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/mailbox/mailbox-units\\.ts$",
+      "domain": "shared SQL",
+      "access": "Mailbox transaction units: a thread sync's snapshot of the rows it consults, and its writes in one transaction (best-effort search and embedding writes in savepoints). They run the mailbox catalog's statements, so a thread sync is two round trips on the worker backend.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "mailbox"
+    },
+    {
+      "pattern": "^src/electron/agent/daemon\\.ts$",
+      "domain": "daemon hot path",
+      "access": "The daemon keeps its synchronous task, workspace, approval and team stores. Its task SQL is WAL reads, which do not wait on writers; the lock stalls came from milestone commits, which run in the worker (slice C2). Its remaining getDatabase calls hand the connection to worker-backed facades.",
+      "plan": "reviewed exception (DB6): stays",
+      "owner": "agent runtime"
+    },
+    {
+      "pattern": "^src/electron/sessions/(SessionProgressService|WorkSessionProtocolService|WorkSessionRolloutService)\\.ts$",
+      "domain": "daemon hot path",
+      "access": "Work-session services run inside the daemon's synchronous event-recording path, beside its TaskStore: single-row session progress, session-id backfill on a task, and the one-row rollout config (schema setup at construction). The session stores they use are the storage-layer stores the daemon keeps.",
+      "plan": "reviewed exception (DB6): stays with the daemon hot path",
+      "owner": "agent runtime"
+    },
+    {
+      "pattern": "^src/electron/security/protected-credential-service\\.ts$",
+      "domain": "settings",
+      "access": "Protected credential requests and the vault. The vault is encrypted with the keychain on the host and committed with the request row in one IMMEDIATE host transaction (DB5 updateWithin), so a credential lands only while its request is pending. Moving it needs a combined settings-and-request worker command like Pulse's. The operations are rare and user-initiated.",
+      "plan": "reviewed exception (DB6); DB7 candidate: combined vault commit command",
+      "owner": "settings and security"
+    },
+    {
+      "pattern": "^src/electron/git/WorktreeManager\\.ts$",
+      "domain": "settings",
+      "access": "Worktree settings: the legacy settings-table fallback, read when secure settings are not initialized (tests and some CLI paths). One row.",
+      "plan": "reviewed exception (DB6): goes with the legacy settings table",
+      "owner": "settings and security"
+    },
+    {
+      "pattern": "^src/electron/(first-task/attempt-schema|routines/service)\\.ts$",
+      "domain": "lifecycle",
+      "access": "Service schema setup at construction (CREATE ... IF NOT EXISTS, column checks). Idempotent; nothing is written once the tables exist. The main schema bootstraps off the host thread in the schema bootstrap worker.",
+      "plan": "reviewed exception (DB6): stays",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/(subconscious/SubconsciousMigrationService|utils/mac-safe-storage-migration)\\.ts$",
+      "domain": "lifecycle",
+      "access": "One-time startup migrations: legacy improvement data into the subconscious, and macOS safe-storage records re-encrypted with the host keychain.",
+      "plan": "reviewed exception (DB6): stays; runs once per profile",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/cli/direct-run\\.ts$",
+      "domain": "runtime wiring",
+      "access": "Direct CLI run: one read-only status count per invocation, and connection handles passed to worker-backed facades.",
+      "plan": "stays: one read-only query per CLI invocation",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/(agents/AgentTeamOrchestrator|chronicle/ChronicleObservationRepository|hooks/agent-ingress|tray/TrayManager|youtube/YouTubeTranscriptStore|agent/decisions/decision-usage-telemetry|agent/llm/usage-telemetry|agent/tools/(mention-tools|registry|system-tools)|ipc/handlers|control-plane/handlers|main)\\.ts$|^src/daemon/(main|control-plane-methods)\\.ts$",
+      "domain": "runtime wiring",
+      "access": "Connection handles passed to worker-backed facades and statement ports, which key their routing by connection. No SQL runs here.",
+      "plan": "stays: handles only; the host backend behind them is the rollback path",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/database/profile-lifecycle\\.ts$",
+      "domain": "lifecycle",
+      "access": "Run records at startup and shutdown; a few single-row statements per run.",
+      "plan": "stays: runs before and after the worker exists",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/database/schema\\.ts$",
+      "domain": "lifecycle",
+      "access": "Schema initialization (in the bootstrap worker in the runtimes; in-thread for tests and the fallback) and post-startup maintenance fallback.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/database/(repositories|TaskLabelRepository|DeviceProfileRepository|composer-draft-repository|TimelineProjectionOutboxRepository|WorkSession[A-Za-z]+Repository)\\.ts$",
+      "domain": "storage layer",
+      "access": "Repositories. Slice A (25 leaf repositories: approvals, artifacts, annotations, input requests, permission rules, messaging queues, delivery, rate limits, audit log, curated memory, memory settings and pending writes, worktrees, comparisons, composer drafts, task labels, device profiles and others) and slice B (channels, channel users and sessions, memories, memory embeddings) are now synchronous XStore classes run as storage-domain units behind async XRepository facades (COWORK_DB_WORKER_STORAGE); the stores stay here because session services in the worker use them directly. Channel config is sealed: the host facade encrypts and decrypts it with secure storage and the units store the ciphertext. A few host reads stay synchronous on the stores: the tool catalog and mailbox availability checks, managed-agent Slack target sync (an encrypted-config read-modify-write), and tool descriptions. The work-session repositories stay synchronous stores shared by the session services on the host and in the worker; host-only readers use their read units. Slice C1 moved tasks and workspaces the same way (`TaskStore`, `WorkspaceStore`): deleting a task through the facade first commits the host timeline writer's pending rows for it. The daemon hot path, runtime wiring in `main.ts`, the subconscious loop's workspace paths, host transactions, timeline transports and the session services keep the stores for now. Task events stay a synchronous host repository: timeline writes go through the worker writer when enabled, and reads merge its pending rows instead of writing.",
+      "plan": "stays: the daemon hot path keeps the stores (reads do not wait on write locks; milestone commits are in the worker since slice C2); the host backend is the rollback path",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/database/SecureSettingsRepository\\.ts$",
+      "domain": "settings",
+      "access": "Secure settings: single indexed row reads decrypted with the host keychain, and plain single-row saves behind about 55 synchronous settings-manager APIs. Concurrency-sensitive groups (Pulse, protected credentials, keychain identity) use the revision-checked commit path, which runs in the worker when settings are routed there (DB5).",
+      "plan": "reviewed exception (DB6); DB7 candidate: async settings managers",
+      "owner": "settings and security"
+    },
+    {
+      "pattern": "^src/electron/(security|guardrails)/",
+      "domain": "security",
+      "access": "Policy, approval and credential decisions at action boundaries; single-row, revision-checked.",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "settings and security",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/electron/telemetry/",
+      "domain": "telemetry",
+      "access": "Pulse aggregate reads for package building, outside transactions.",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "database platform",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/electron/memory/",
+      "domain": "memory",
+      "access": "Memory services obtain the profile connection to build the memory statement port and the storage-layer memory facades (worker-backed since slice B); TranscriptStore also opens a per-workspace lock database as an OS-backed checkpoint lock.",
+      "plan": "stays: connection handles passed to worker-backed ports and facades; stays: the checkpoint lock file",
+      "owner": "memory"
+    },
+    {
+      "pattern": "^src/electron/knowledge-graph/",
+      "domain": "memory",
+      "access": "Knowledge graph reads and updates from memory and prompt building.",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "memory",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/electron/agents/[A-Za-z]+Repository\\.ts$",
+      "domain": "shared SQL",
+      "access": "Agent stores (roles, automation profiles, heartbeat policies and runs, teams, members, runs, items, thoughts, mentions, task subscriptions, working state): synchronous SQL run as services-domain units behind async facades (COWORK_DB_WORKER_SERVICES). The daemon hot path and the bot-team helpers it calls use the stores directly.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/routines/(routine-sql|workflow/repository)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Routine stores (routine and run rows, workflow versions, runs, steps, event inbox and samples): synchronous SQL run as services-domain units behind async facades (COWORK_DB_WORKER_SERVICES); the workflow units are clocked so injected clocks reach the worker. Schema setup and the one-time dedupe-key reconciliation run on the host connection at service construction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/core/Core[A-Za-z]+Repository\\.ts$",
+      "domain": "shared SQL",
+      "access": "Core learning stores (traces and events, failure records and clusters, eval cases, harness experiments and runs, regression gates, memory candidates, distill runs, scope state, learnings): synchronous SQL run as services-domain units behind async facades (COWORK_DB_WORKER_SERVICES).",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/subconscious/(SubconsciousRepositories|subconscious-sql)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Subconscious stores (targets, runs, hypotheses, critiques, decisions, backlog, dispatch records) and the loop's own SQL (the cross-domain evidence read as a reporting unit, target rekey, stale-target and history clears, legacy vocabulary cleanup): synchronous SQL run as services-domain units behind async facades (COWORK_DB_WORKER_SERVICES). The one-time legacy migration uses the stores on the host at startup.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/managed/(repositories|managed-sql)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Managed agent stores (agents, versions, environments, sessions, session events) and the managed session service's own SQL (workspace memberships with first-member seeding, audit trail, routine rows): synchronous SQL run as services-domain units behind async facades (COWORK_DB_WORKER_SERVICES). Governance schema setup runs on the host at construction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/identity/ContactIdentityService\\.ts$",
+      "domain": "shared SQL",
+      "access": "Contact identity store (identities, handles, candidates, audit, timeline): synchronous SQL run as services-domain units behind the async ContactIdentityService facade (COWORK_DB_WORKER_SERVICES). A mailbox contact's knowledge-graph person match is searched on the host first; the resolution itself is one unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/mission-control/(MissionControlIntelligenceService|MissionControlRepository)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Mission Control projection store (attention items and evidence projected from tasks, mentions, activities, heartbeat runs, core memory and subconscious state): synchronous SQL run as services-domain units behind the async MissionControlIntelligenceService facade (COWORK_DB_WORKER_SERVICES). A refresh re-projects every source and reads the brief in one unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/activity/ActivityRepository\\.ts$",
+      "domain": "shared SQL",
+      "access": "Activity feed store: synchronous SQL run as services-domain units behind the async ActivityRepository facade (COWORK_DB_WORKER_SERVICES). The facade passes the timeline writer's accepted, uncommitted activity rows; reads merge them and writes insert them first, so no write commits them on the host. The daemon hot path and the worker's timeline commands build the store directly.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/automation/AutomationRunOutcomeRepository\\.ts$",
+      "domain": "shared SQL",
+      "access": "Automation run outcome store: synchronous SQL run as services-domain units behind the async AutomationRunOutcomeRepository facade (COWORK_DB_WORKER_SERVICES). The facade ensures the table on the host at construction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/council/council-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Council config, run and memo stores: synchronous SQL run as services-domain units behind async facades (COWORK_DB_WORKER_SERVICES).",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/triggers/trigger-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Event trigger store (trigger rows, fire history, the durable event queue with an atomic claim): synchronous SQL run as services-domain units (COWORK_DB_WORKER_SERVICES). EventTriggerService keeps its triggers in memory and awaits each write; its schema setup runs on the host at construction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/supervisor/SupervisorExchangeRepository\\.ts$",
+      "domain": "shared SQL",
+      "access": "Discord supervisor exchange store: synchronous SQL run as services-domain units behind the async SupervisorExchangeRepository facade (COWORK_DB_WORKER_SERVICES).",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/everyday-agent/EverydayAgentService\\.ts$",
+      "domain": "shared SQL",
+      "access": "Everyday Agent store (profile, consent history, pause scopes, receipts, previews, trust patterns, data clearing): synchronous SQL run as services-domain units behind the async EverydayAgentService facade (COWORK_DB_WORKER_SERVICES). Admin policies are read from disk on the host and passed to each unit; the default managed agent is prepared through the managed repositories before consent is recorded. Schema setup runs on the host at construction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/eval/EvalService\\.ts$",
+      "domain": "shared SQL",
+      "access": "Eval store (cases, suites, runs, case runs, baseline metrics): synchronous SQL run as services-domain units behind the async EvalService facade (COWORK_DB_WORKER_SERVICES). Creating a case links it on its source task and adds it to the default suite in one unit; a suite run grades every case against its task's replay and records the results in one unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/workspaces/(WorkContextService|WorkContextRepository|SessionMembershipService)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Work context and session membership stores (contexts, task membership, human members, invites, audit): synchronous SQL run as services-domain units behind the async WorkContextService and SessionMembershipService facades (COWORK_DB_WORKER_SERVICES). Each authorization check shares its unit with the write it guards. The host keeps renderer client bindings and reads the one-row local principal once on its own connection.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/(agents|council|supervisor|mission-control|managed|automation|triggers|routines|everyday-agent|subconscious|improvement|core|eval|identity|workspaces|first-task|briefing|file-hub|git|youtube|chronicle|voice|activity|sessions|hooks|acp|gateway|tray|utils)/",
+      "domain": "background and domain services",
+      "access": "Scheduler, teams, heartbeats, automations, evaluation and other domain stores: reads and writes on their own timers or user actions, not per task event.",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "database platform",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/electron/reports/",
+      "domain": "reports",
+      "access": "User-triggered reports and exports; usage insights run in the reporting reader when enabled.",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "database platform",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/electron/agent/",
+      "domain": "agent runtime",
+      "access": "Daemon and tool setup reads, orchestration stores, usage telemetry fallback; per-event timeline writes go through the worker writer when enabled.",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "agent runtime",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/electron/control-plane/|^src/daemon/control-plane-methods\\.ts$",
+      "domain": "control plane",
+      "access": "Control-plane API handlers obtain the profile connection to build storage-layer repositories; their own statements run through the control-plane port.",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "database platform",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/electron/ipc/",
+      "domain": "IPC",
+      "access": "IPC handlers reading through repositories on user actions.",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "database platform",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/electron/main\\.ts$|^src/daemon/main\\.ts$|^src/cli/direct-run\\.ts$",
+      "domain": "runtime wiring",
+      "access": "Raw handle hand-off to services at startup (`getDatabase()`).",
+      "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
+      "owner": "database platform",
+      "backstop": true
+    },
+    {
+      "pattern": "^src/cli/local-control-plane-discovery\\.ts$",
+      "domain": "runtime wiring",
+      "access": "Read-only discovery of control plane settings before any runtime starts.",
+      "plan": "stays: one read-only query per CLI invocation",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/renderer/",
+      "domain": "renderer",
+      "access": "Type-only or test helper reference counted by the inventory.",
+      "plan": "stays",
+      "owner": "database platform"
+    }
+  ]
+}

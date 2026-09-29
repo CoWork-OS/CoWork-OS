@@ -60,7 +60,7 @@ describeWithSqlite("SecurityManager email channels", () => {
 
   it("treats email channels as open even when legacy security settings say pairing", async () => {
     const db = manager.getDatabase();
-    const channelRepo = new repos.ChannelRepository(db);
+    const channelRepo = new repos.ChannelStore(db);
     const security = new SecurityManagerCtor(db);
     const channel = channelRepo.create({
       type: "email",
@@ -88,7 +88,7 @@ describeWithSqlite("SecurityManager email channels", () => {
 
   it("ignores context allowlist policies for email authorization", async () => {
     const db = manager.getDatabase();
-    const channelRepo = new repos.ChannelRepository(db);
+    const channelRepo = new repos.ChannelStore(db);
     const security = new SecurityManagerCtor(db);
     const channel = channelRepo.create({
       type: "email",
@@ -98,7 +98,7 @@ describeWithSqlite("SecurityManager email channels", () => {
       securityConfig: { mode: "allowlist", allowedUsers: ["approved@example.com"] },
       status: "connected",
     });
-    security.getContextPolicyManager().create({
+    await security.getContextPolicyManager().create({
       channelId: channel.id,
       contextType: "dm",
       securityMode: "allowlist",

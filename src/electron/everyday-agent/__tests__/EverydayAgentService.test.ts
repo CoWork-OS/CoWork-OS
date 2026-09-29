@@ -48,7 +48,7 @@ vi.mock("../../admin/policies", () => ({
   loadPoliciesStrict: policyMocks.loadPoliciesStrict,
 }));
 
-import { EverydayAgentService } from "../EverydayAgentService";
+import { EverydayAgentService } from "../everyday-agent-repository-facades";
 
 type Row = Record<string, unknown>;
 
@@ -440,8 +440,8 @@ describe("EverydayAgentService", () => {
     service = new EverydayAgentService(db as unknown as Database.Database);
   });
 
-  it("starts disabled with review-first defaults", () => {
-    const result = service.getProfile();
+  it("starts disabled with review-first defaults", async () => {
+    const result = await service.getProfile();
 
     expect(result.profile.enabled).toBe(false);
     expect(result.profile.approvalPosture).toBe("review_first");
@@ -449,8 +449,8 @@ describe("EverydayAgentService", () => {
     expect(result.compiledPolicy.enabled).toBe(false);
   });
 
-  it("accepts consent and creates the default managed agent preset", () => {
-    const result = service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
+  it("accepts consent and creates the default managed agent preset", async () => {
+    const result = await service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
 
     expect(result.profile.enabled).toBe(true);
     expect(result.compiledPolicy.allowedCapabilities).toContain("inbox");
@@ -460,17 +460,17 @@ describe("EverydayAgentService", () => {
     ).toEqual({ name: "Everyday Agent" });
   });
 
-  it("fails closed when admin policies cannot be loaded", () => {
+  it("fails closed when admin policies cannot be loaded", async () => {
     policyMocks.loadPoliciesStrict.mockReturnValue(null);
 
-    expect(service.getProfile().compiledPolicy.adminPolicy.blocked).toBe(true);
-    expect(() => service.acceptConsent({ enabled: true, workspaceId: "ws-1" })).toThrow(
+    expect((await service.getProfile()).compiledPolicy.adminPolicy.blocked).toBe(true);
+    await expect(service.acceptConsent({ enabled: true, workspaceId: "ws-1" })).rejects.toThrow(
       /admin policies failed to load/i,
     );
   });
 
-  it("records declined consent without marking consent accepted", () => {
-    const result = service.acceptConsent({
+  it("records declined consent without marking consent accepted", async () => {
+    const result = await service.acceptConsent({
       enabled: false,
       accepted: false,
       workspaceId: "ws-1",
@@ -492,11 +492,11 @@ describe("EverydayAgentService", () => {
     expect(service.classifyActionRisk("read meeting notes")).toBe("read");
   });
 
-  it("requires approval for exports even when trusted patterns are enabled", () => {
-    service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
-    service.updateProfile({ approvalPosture: "trusted_patterns" });
+  it("requires approval for exports even when trusted patterns are enabled", async () => {
+    await service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
+    await service.updateProfile({ approvalPosture: "trusted_patterns" });
 
-    const preview = service.previewAction({
+    const preview = await service.previewAction({
       title: "Export inbox summary",
       action: "Export thread data to an external spreadsheet",
       capability: "inbox",
@@ -507,18 +507,18 @@ describe("EverydayAgentService", () => {
     expect(preview.approvalRequired).toBe(true);
   });
 
-  it("honors pause and revoke semantics", () => {
-    service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
-    const paused = service.pause({ kind: "global", reason: "test" });
+  it("honors pause and revoke semantics", async () => {
+    await service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
+    const paused = await service.pause({ kind: "global", reason: "test" });
     expect(paused.compiledPolicy.enabled).toBe(false);
 
-    const revoked = service.revokeCapability("browser");
+    const revoked = await service.revokeCapability("browser");
     expect(revoked.profile.capabilitySettings.browser.enabled).toBe(false);
     expect(revoked.profile.revokedCapabilities).toContain("browser");
   });
 
-  it("returns the same preview for duplicate side-effect proposals", () => {
-    service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
+  it("returns the same preview for duplicate side-effect proposals", async () => {
+    await service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
     const input = {
       title: "Schedule meeting",
       action: "Create event on calendar",
@@ -527,8 +527,8 @@ describe("EverydayAgentService", () => {
       destination: "primary",
     };
 
-    const first = service.previewAction(input);
-    const second = service.previewAction(input);
+    const first = await service.previewAction(input);
+    const second = await service.previewAction(input);
     const count = db
       .prepare("SELECT COUNT(*) as count FROM everyday_agent_action_previews")
       .get() as { count: number };
@@ -537,9 +537,9 @@ describe("EverydayAgentService", () => {
     expect(count.count).toBe(1);
   });
 
-  it("revalidates current policy before approving a preview", () => {
-    service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
-    const preview = service.previewAction({
+  it("revalidates current policy before approving a preview", async () => {
+    await service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
+    const preview = await service.previewAction({
       title: "Schedule meeting",
       action: "Create event on calendar",
       capability: "calendar",
@@ -554,16 +554,18 @@ describe("EverydayAgentService", () => {
       },
     }));
 
-    expect(() => service.approveAction({ previewId: preview.id })).toThrow(/calendar is disabled/i);
+    await expect(service.approveAction({ previewId: preview.id })).rejects.toThrow(
+      /calendar is disabled/i,
+    );
     expect(db.previews.find((row) => row.id === preview.id)).toMatchObject({
       status: "blocked",
     });
     expect(db.trustPatterns).toHaveLength(0);
   });
 
-  it("rejects expired previews before approval", () => {
-    service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
-    const preview = service.previewAction({
+  it("rejects expired previews before approval", async () => {
+    await service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
+    const preview = await service.previewAction({
       title: "Stage reply",
       action: "Draft email reply",
       capability: "inbox",
@@ -573,16 +575,18 @@ describe("EverydayAgentService", () => {
     const expiredPreview = { ...preview, expiresAt: Date.now() - 1 };
     if (row) row.preview_json = JSON.stringify(expiredPreview);
 
-    expect(() => service.approveAction({ previewId: preview.id })).toThrow(/preview expired/i);
+    await expect(service.approveAction({ previewId: preview.id })).rejects.toThrow(
+      /preview expired/i,
+    );
     expect(db.previews.find((item) => item.id === preview.id)).toMatchObject({
       status: "expired",
     });
     expect(db.trustPatterns).toHaveLength(0);
   });
 
-  it("clears owned retention stores without leaving a new receipt during full deletion", () => {
-    service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
-    const profileId = service.getProfile().profile.id;
+  it("clears owned retention stores without leaving a new receipt during full deletion", async () => {
+    await service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
+    const profileId = (await service.getProfile()).profile.id;
     db.taskLinks.push({ profile_id: profileId, task_id: "task-1" });
     db.connectorSummaries.push({ profile_id: profileId, connector_id: "gmail" });
     db.browserProfileMetadata.push({ profile_id: profileId, browser_profile_id: "visible" });
@@ -597,7 +601,7 @@ describe("EverydayAgentService", () => {
     });
     db.routineRuns.push({ routine_id: "routine-1" });
 
-    service.clearData();
+    await service.clearData();
 
     expect(db.receipts).toHaveLength(0);
     expect(db.taskLinks).toHaveLength(0);

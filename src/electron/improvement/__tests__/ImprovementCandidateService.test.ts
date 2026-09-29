@@ -54,7 +54,8 @@ vi.mock("../ImprovementSettingsManager", () => ({
   },
 }));
 
-vi.mock("../../database/repositories", () => ({
+// The services read tasks and workspaces through the storage facades (storage slice C).
+vi.mock("../../database/repository-facades", () => ({
   TaskRepository: class {
     findById(id: string) {
       return tasks.get(id);
@@ -67,7 +68,7 @@ vi.mock("../../database/repositories", () => ({
   },
 }));
 
-vi.mock("../ImprovementRepositories", () => ({
+vi.mock("../improvement-repository-facades", () => ({
   ImprovementCandidateRepository: class {
     create(input: Any) {
       const candidate = {
@@ -119,6 +120,21 @@ vi.mock("../ImprovementRepositories", () => ({
     reassignCandidate(fromCandidateId: string, toCandidateId: string) {
       runCandidateReassignments.push({ from: fromCandidateId, to: toCandidateId });
     }
+  },
+  improvementRecentSignalRows: async () => ({
+    taskIds: recentTaskRows.map((row: { id: string }) => row.id),
+    eventRows: recentEventRows,
+  }),
+  mergeImprovementCandidates: async (
+    _db: unknown,
+    duplicateId: string,
+    survivorId: string,
+    updates: Any,
+  ) => {
+    runCandidateReassignments.push({ from: duplicateId, to: survivorId });
+    const existing = candidates.get(survivorId);
+    if (existing) candidates.set(survivorId, { ...existing, ...updates });
+    candidates.delete(duplicateId);
   },
 }));
 
@@ -195,14 +211,14 @@ describe("ImprovementCandidateService", () => {
 
     const service = new ImprovementCandidateService(db);
     await service.refresh();
-    const firstPass = service.listCandidates("workspace-1");
+    const firstPass = await service.listCandidates("workspace-1");
 
     expect(firstPass.some((candidate) => candidate.source === "task_failure")).toBe(true);
     expect(firstPass.some((candidate) => candidate.source === "user_feedback")).toBe(true);
     expect(firstPass.some((candidate) => candidate.source === "dev_log")).toBe(true);
 
     await service.refresh();
-    const secondPass = service.listCandidates("workspace-1");
+    const secondPass = await service.listCandidates("workspace-1");
     const taskFailure = secondPass.find((candidate) => candidate.source === "task_failure");
     const userFeedback = secondPass.find((candidate) => candidate.source === "user_feedback");
 
@@ -229,8 +245,8 @@ describe("ImprovementCandidateService", () => {
     await service.refresh();
 
     expect(
-      service
-        .listCandidates("workspace-1")
+      (await service
+        .listCandidates("workspace-1"))
         .filter((candidate) => candidate.source === "task_failure"),
     ).toHaveLength(0);
   });
@@ -264,7 +280,9 @@ describe("ImprovementCandidateService", () => {
     await service.refresh();
 
     expect(
-      service.listCandidates("workspace-1").filter((candidate) => candidate.source !== "dev_log"),
+      (await service.listCandidates("workspace-1")).filter(
+        (candidate) => candidate.source !== "dev_log",
+      ),
     ).toHaveLength(0);
   });
 
@@ -284,7 +302,7 @@ describe("ImprovementCandidateService", () => {
 
     const service = new ImprovementCandidateService(db);
     await service.refresh();
-    const [candidate] = service.listCandidates("workspace-1");
+    const [candidate] = await service.listCandidates("workspace-1");
 
     expect(candidate?.fixabilityScore).toBe(0.35);
     expect(candidate?.priorityScore).toBeLessThan(0.65);
@@ -317,8 +335,8 @@ describe("ImprovementCandidateService", () => {
     await service.refresh();
 
     expect(
-      service
-        .listCandidates("workspace-1")
+      (await service
+        .listCandidates("workspace-1"))
         .filter((candidate) => candidate.source === "task_failure"),
     ).toHaveLength(2);
   });
@@ -341,7 +359,9 @@ describe("ImprovementCandidateService", () => {
     await service.refresh();
 
     expect(
-      service.listCandidates("workspace-1").filter((candidate) => candidate.source === "dev_log"),
+      (await service.listCandidates("workspace-1")).filter(
+        (candidate) => candidate.source === "dev_log",
+      ),
     ).toHaveLength(1);
   });
 
@@ -367,8 +387,8 @@ describe("ImprovementCandidateService", () => {
     const service = new ImprovementCandidateService(db);
     await service.refresh();
 
-    const [candidate] = service
-      .listCandidates("workspace-1")
+    const [candidate] = (await service
+      .listCandidates("workspace-1"))
       .filter((row) => row.source === "dev_log");
     expect(candidate?.summary).toContain("Structured failure from JSONL");
     expect(candidate?.summary).not.toContain("text fallback");
@@ -389,8 +409,8 @@ describe("ImprovementCandidateService", () => {
     const service = new ImprovementCandidateService(db);
     await service.refresh();
 
-    const [candidate] = service
-      .listCandidates("workspace-1")
+    const [candidate] = (await service
+      .listCandidates("workspace-1"))
       .filter((row) => row.source === "dev_log");
     expect(candidate?.summary).toContain("text fallback is still supported");
     expect(candidate?.evidence[0]?.metadata).toMatchObject({
@@ -430,7 +450,7 @@ describe("ImprovementCandidateService", () => {
     const service = new ImprovementCandidateService(db);
     await service.refresh();
 
-    expect(service.listCandidates("workspace-1")[0]?.status).toBe("resolved");
+    expect((await service.listCandidates("workspace-1"))[0]?.status).toBe("resolved");
   });
 
   it("reassigns historical runs before deleting merged duplicate candidates", async () => {
@@ -484,7 +504,7 @@ describe("ImprovementCandidateService", () => {
     expect(candidates.has("candidate-duplicate")).toBe(false);
   });
 
-  it("keeps runnable readiness while recording the latest skip reason", () => {
+  it("keeps runnable readiness while recording the latest skip reason", async () => {
     candidates.set("candidate-1", {
       id: "candidate-1",
       workspaceId: "workspace-1",
@@ -510,7 +530,7 @@ describe("ImprovementCandidateService", () => {
     });
 
     const service = new ImprovementCandidateService(db);
-    service.recordCandidateSkip(
+    await service.recordCandidateSkip(
       "candidate-1",
       "Skipped because no promotable worktree is available.",
     );
@@ -524,7 +544,7 @@ describe("ImprovementCandidateService", () => {
     );
   });
 
-  it("parks repeated provider failures with blocked_provider readiness", () => {
+  it("parks repeated provider failures with blocked_provider readiness", async () => {
     candidates.set("candidate-1", {
       id: "candidate-1",
       workspaceId: "workspace-1",
@@ -551,7 +571,7 @@ describe("ImprovementCandidateService", () => {
 
     const service = new ImprovementCandidateService(db);
     for (let i = 0; i < 3; i += 1) {
-      service.recordCampaignFailure("candidate-1", {
+      await service.recordCampaignFailure("candidate-1", {
         failureClass: "provider_rate_limited",
         attemptFingerprint: "candidate-1:fingerprint-1:promotion",
         reason: "429 Too Many Requests",

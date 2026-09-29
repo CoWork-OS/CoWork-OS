@@ -55,7 +55,7 @@ describe("RuntimeVisibilityService learning + recall", () => {
     expect(progress.steps[4]?.status).toBe("pending");
   });
 
-  it("collects unified recall results across sources in a stable ranking order", () => {
+  it("collects unified recall results across sources in a stable ranking order", async () => {
     vi.spyOn(MemoryService, "searchForPromptRecall").mockReturnValue([
       {
         id: "memory-1",
@@ -111,7 +111,7 @@ describe("RuntimeVisibilityService learning + recall", () => {
       },
     ] as Any);
 
-    const response = RuntimeVisibilityService.collectUnifiedRecall(
+    const response = await RuntimeVisibilityService.collectUnifiedRecall(
       {
         taskRepo: {
           findByCreatedAtRange: () => [

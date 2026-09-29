@@ -14,8 +14,11 @@ describe("sample restart reconciliation", () => {
       insert.run("a", "pending-task");
       insert.run("b", "completed-task");
       const fail = vi.fn();
+      const attemptTaskIds = (
+        db.prepare("SELECT task_id FROM first_task_attempts").all() as Array<{ task_id: string }>
+      ).map((row) => row.task_id);
       reconcilePendingSampleAttempts(
-        db,
+        attemptTaskIds,
         (id) => ({ source: "sample", status: id === "pending-task" ? "pending" : "completed" }),
         fail,
         42,

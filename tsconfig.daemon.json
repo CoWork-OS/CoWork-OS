@@ -21,6 +21,11 @@
       "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src/daemon/**/*"],
+  "include": [
+    "src/daemon/**/*",
+    "src/electron/database/fts-worker.ts",
+    "src/electron/database/async/database-worker.ts",
+    "src/electron/database/schema-bootstrap-worker.ts"
+  ],
   "exclude": ["node_modules", "dist", "**/__tests__/**", "**/*.test.ts"]
 }

@@ -1,10 +1,11 @@
+import { TaskStore } from "../../database/repositories";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { EvalService } from "../EvalService";
-import { TaskEventRepository, TaskRepository } from "../../database/repositories";
+import { EvalService } from "../eval-repository-facades";
+import { TaskEventRepository } from "../../database/repositories";
 import { DatabaseManager } from "../../database/schema";
 import { WorkSessionProtocolRepository } from "../../database/WorkSessionProtocolRepository";
 import { WorkSessionProtocolService } from "../../sessions/WorkSessionProtocolService";
@@ -46,8 +47,8 @@ describeWithSqlite("EvalService isolated replay", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("grades the isolated canonical replay instead of result_summary", () => {
-    const task = new TaskRepository(db).create({
+  it("grades the isolated canonical replay instead of result_summary", async () => {
+    const task = new TaskStore(db).create({
       title: "Replay case",
       prompt: "Produce the replay output",
       status: "executing",
@@ -73,7 +74,7 @@ describeWithSqlite("EvalService isolated replay", () => {
       schemaVersion: 2,
       payload: { resultSummary: "replay says 42" },
     });
-    new TaskRepository(db).update(task.id, {
+    new TaskStore(db).update(task.id, {
       status: "completed",
       terminalStatus: "ok",
       resultSummary: "stale snapshot text",
@@ -102,7 +103,7 @@ describeWithSqlite("EvalService isolated replay", () => {
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run("suite-replay", "Replay suite", "", JSON.stringify(["case-replay"]), now, now);
 
-    const run = evalService.runSuite("suite-replay");
+    const run = await evalService.runSuite("suite-replay");
     expect(run.status).toBe("completed");
     expect(run.passCount).toBe(1);
     expect(run.caseRuns[0]?.details).toContain("isolated replay passed");
@@ -112,7 +113,7 @@ describeWithSqlite("EvalService isolated replay", () => {
       JSON.stringify(["case-replay", "deleted-case"]),
       "suite-replay",
     );
-    const incompleteRun = evalService.runSuite("suite-replay");
+    const incompleteRun = await evalService.runSuite("suite-replay");
     expect(incompleteRun).toMatchObject({ status: "failed", passCount: 1, failCount: 1 });
     db.prepare("UPDATE eval_suites SET case_ids = ? WHERE id = ?").run(
       JSON.stringify(["case-replay"]),
@@ -123,14 +124,14 @@ describeWithSqlite("EvalService isolated replay", () => {
         assertions,
         "case-replay",
       );
-      const invalidRun = evalService.runSuite("suite-replay");
+      const invalidRun = await evalService.runSuite("suite-replay");
       expect(invalidRun).toMatchObject({ status: "failed", passCount: 0, failCount: 1 });
       expect(invalidRun.caseRuns[0]?.details).toMatch(/invalid_assertions|unsupported_assertion/);
     }
   });
 
-  it("falls back to complete legacy evidence while canonical backfill is partial", () => {
-    const task = new TaskRepository(db).create({
+  it("falls back to complete legacy evidence while canonical backfill is partial", async () => {
+    const task = new TaskStore(db).create({
       title: "Partial backfill case",
       prompt: "Use the complete event evidence",
       status: "executing",
@@ -165,7 +166,7 @@ describeWithSqlite("EvalService isolated replay", () => {
       schemaVersion: 2,
       payload: { resultSummary: "complete evidence" },
     });
-    new TaskRepository(db).update(task.id, {
+    new TaskStore(db).update(task.id, {
       status: "completed",
       terminalStatus: "ok",
       resultSummary: "stale snapshot",
@@ -200,14 +201,14 @@ describeWithSqlite("EvalService isolated replay", () => {
       now,
     );
 
-    const run = new EvalService(db).runSuite("suite-partial-backfill");
+    const run = await new EvalService(db).runSuite("suite-partial-backfill");
     expect(run.status).toBe("completed");
     expect(run.passCount).toBe(1);
     expect(run.caseRuns[0]?.details).toContain("2 items");
   });
 
-  it("does not grade a synthetic canonical root as replay evidence", () => {
-    const task = new TaskRepository(db).create({
+  it("does not grade a synthetic canonical root as replay evidence", async () => {
+    const task = new TaskStore(db).create({
       title: "Empty replay case",
       prompt: "Must have durable evidence",
       status: "pending",
@@ -249,7 +250,7 @@ describeWithSqlite("EvalService isolated replay", () => {
       now,
     );
 
-    const run = new EvalService(db).runSuite("suite-empty-replay");
+    const run = await new EvalService(db).runSuite("suite-empty-replay");
     expect(run.status).toBe("failed");
     expect(run.failCount).toBe(1);
     expect(run.caseRuns[0]?.details).toContain("missing_replay_items");

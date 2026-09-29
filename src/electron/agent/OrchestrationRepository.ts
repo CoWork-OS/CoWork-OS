@@ -5,7 +5,7 @@
  * Follows the same repository pattern as ImprovementCampaignRepository.
  */
 
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import type { ModelCapability } from "../../shared/types";
 
@@ -69,7 +69,12 @@ function rowToRun(row: RunRow): OrchestrationRun {
   };
 }
 
-export class OrchestrationRepository {
+/**
+ * Sub-agent orchestration runs (async SQLite migration plan, DB6). As services-domain
+ * units these run in the database worker when the domain is routed there; callers use
+ * the async OrchestrationRepository facade in orchestration-repository-facades.ts.
+ */
+export class OrchestrationStore {
   constructor(private db: Database.Database) {}
 
   create(

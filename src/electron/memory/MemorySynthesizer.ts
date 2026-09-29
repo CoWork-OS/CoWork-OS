@@ -11,6 +11,7 @@ import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { BoxSettingsManager } from "../settings/box-manager";
 import { BOX_BRAIN_IMPORT_HEADER } from "./BoxBrainService";
 import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
+import type { MemorySearchResult } from "../database/repositories";
 import type {
   MemoryLayerPreview,
   MemoryLayerPreviewPayload,
@@ -53,6 +54,12 @@ export interface SynthesizeOptions {
   includeKnowledgeGraph?: boolean;
   agentRoleId?: string | null;
   filesystemReadGuard?: MarkdownMemoryReadGuard;
+  /**
+   * Box Brain search results fetched ahead with `prefetchBoxBrainHits`, so the memory
+   * search runs asynchronously (off the host with the FTS worker) instead of inside
+   * this synchronous build. Without it, Box Brain falls back to the synchronous search.
+   */
+  boxBrainHits?: MemorySearchResult[];
 }
 
 interface LayeredContextResult extends SynthesizedContext {
@@ -147,9 +154,9 @@ function isReviewedOperatingManualFact(fact: {
   return fact.pinned === true || fact.source === "manual" || (fact.confidence ?? 0) >= 0.85;
 }
 
-function extractCuratedFragments(workspaceId: string): MemoryFragment[] {
+async function extractCuratedFragments(workspaceId: string): Promise<MemoryFragment[]> {
   try {
-    return CuratedMemoryService.getPromptEntries(workspaceId, 10).map((entry) => ({
+    return (await CuratedMemoryService.getPromptEntries(workspaceId, 10)).map((entry) => ({
       key: fingerprint(`curated:${entry.target}:${entry.kind}:${entry.content}`),
       source: "curated_memory" as const,
       text: `[${entry.target}/${entry.kind}] ${entry.content}`,
@@ -202,9 +209,12 @@ function extractRelationshipFragments(): MemoryFragment[] {
   }
 }
 
-function extractPlaybookFragments(workspaceId: string, taskPrompt: string): MemoryFragment[] {
+async function extractPlaybookFragments(
+  workspaceId: string,
+  taskPrompt: string,
+): Promise<MemoryFragment[]> {
   try {
-    const raw = PlaybookService.getPlaybookForContext(workspaceId, taskPrompt, 5);
+    const raw = await PlaybookService.getPlaybookForContext(workspaceId, taskPrompt, 5);
     return extractBulletLines(raw).map((line) => {
       const text = line.replace(/^-\s*/, "");
       return {
@@ -223,9 +233,12 @@ function extractPlaybookFragments(workspaceId: string, taskPrompt: string): Memo
   }
 }
 
-function extractArchiveFragments(workspaceId: string, taskPrompt: string): MemoryFragment[] {
+async function extractArchiveFragments(
+  workspaceId: string,
+  taskPrompt: string,
+): Promise<MemoryFragment[]> {
   try {
-    const recent = MemoryService.getRecentForPromptRecall(workspaceId, 4).map((memory) => ({
+    const recent = (await MemoryService.getRecentForPromptRecall(workspaceId, 4)).map((memory) => ({
       key: fingerprint(`archive:${memory.id}`),
       source: "memory" as const,
       text: `[${memory.type}] ${memory.summary || memory.content.slice(0, 180)}`,
@@ -241,16 +254,34 @@ function extractArchiveFragments(workspaceId: string, taskPrompt: string): Memor
   }
 }
 
-function extractBoxBrainFragments(workspaceId: string, taskPrompt: string): MemoryFragment[] {
+function isBoxBrainRecallEnabled(taskPrompt: string): boolean {
+  const settings = BoxSettingsManager.loadSettings();
+  return settings.enabled && settings.brain?.enabled === true && Boolean(taskPrompt.trim());
+}
+
+const BOX_BRAIN_QUERY_CHARS = 2500;
+const BOX_BRAIN_RESULT_LIMIT = 8;
+
+async function extractBoxBrainFragments(
+  workspaceId: string,
+  taskPrompt: string,
+  prefetched?: MemorySearchResult[],
+): Promise<MemoryFragment[]> {
   try {
-    const settings = BoxSettingsManager.loadSettings();
-    if (!settings.enabled || settings.brain?.enabled !== true || !taskPrompt.trim()) return [];
+    if (!isBoxBrainRecallEnabled(taskPrompt)) return [];
 
     // MemoryService.search intentionally includes private local memories and
     // imported-global memories. Box Brain entries are marked as imported so a
     // single selected workspace can still serve company-wide recall without
     // mirroring document bodies to an external memory provider.
-    return MemoryService.search(workspaceId, taskPrompt.slice(0, 2500), 8)
+    const hits =
+      prefetched ??
+      (await MemoryService.search(
+        workspaceId,
+        taskPrompt.slice(0, BOX_BRAIN_QUERY_CHARS),
+        BOX_BRAIN_RESULT_LIMIT,
+      ));
+    return hits
       .filter((result) => result.snippet.trimStart().startsWith(BOX_BRAIN_IMPORT_HEADER))
       .map((result) => ({
         key: fingerprint(`box-brain:${result.id}`),
@@ -267,10 +298,13 @@ function extractBoxBrainFragments(workspaceId: string, taskPrompt: string): Memo
   }
 }
 
-function extractKnowledgeGraphFragments(workspaceId: string, taskPrompt: string): MemoryFragment[] {
+async function extractKnowledgeGraphFragments(
+  workspaceId: string,
+  taskPrompt: string,
+): Promise<MemoryFragment[]> {
   try {
     return extractBulletLines(
-      KnowledgeGraphService.buildContextForTask(workspaceId, taskPrompt),
+      await KnowledgeGraphService.buildContextForTask(workspaceId, taskPrompt),
     ).map((line) => {
       const text = line.replace(/^-\s*/, "");
       return {
@@ -361,11 +395,14 @@ function groupBySource(fragments: MemoryFragment[]): Record<MemorySourceKind, Me
 }
 
 export class MemorySynthesizer {
-  static buildHotMemoryContext(workspaceId: string, tokenBudget = 900): SynthesizedContext {
+  static async buildHotMemoryContext(
+    workspaceId: string,
+    tokenBudget = 900,
+  ): Promise<SynthesizedContext> {
     const now = Date.now();
     const fragments = dedupeAndRank(
       [
-        ...extractCuratedFragments(workspaceId),
+        ...(await extractCuratedFragments(workspaceId)),
         ...extractUserProfileFragments(),
         ...extractRelationshipFragments(),
       ],
@@ -426,7 +463,7 @@ export class MemorySynthesizer {
     };
   }
 
-  static buildStructuredMemoryContext(
+  static async buildStructuredMemoryContext(
     workspaceId: string,
     workspacePath: string,
     taskPrompt: string,
@@ -435,19 +472,20 @@ export class MemorySynthesizer {
       includeArchive?: boolean;
       tokenBudget?: number;
       filesystemReadGuard?: MarkdownMemoryReadGuard;
+      boxBrainHits?: MemorySearchResult[];
     } = {},
-  ): SynthesizedContext {
+  ): Promise<SynthesizedContext> {
     const now = Date.now();
     const fragments = [
-      ...extractPlaybookFragments(workspaceId, taskPrompt),
+      ...(await extractPlaybookFragments(workspaceId, taskPrompt)),
       ...extractDailySummaryFragments(workspacePath, taskPrompt, options.filesystemReadGuard),
-      ...extractBoxBrainFragments(workspaceId, taskPrompt),
+      ...(await extractBoxBrainFragments(workspaceId, taskPrompt, options.boxBrainHits)),
     ];
     if (options.includeKnowledgeGraph !== false) {
-      fragments.push(...extractKnowledgeGraphFragments(workspaceId, taskPrompt));
+      fragments.push(...(await extractKnowledgeGraphFragments(workspaceId, taskPrompt)));
     }
     if (options.includeArchive) {
-      fragments.push(...extractArchiveFragments(workspaceId, taskPrompt));
+      fragments.push(...(await extractArchiveFragments(workspaceId, taskPrompt)));
     }
     const ranked = dedupeAndRank(fragments, now);
     const { selected, droppedCount } = selectFragments(ranked, options.tokenBudget ?? 1000);
@@ -540,17 +578,17 @@ export class MemorySynthesizer {
       : "";
   }
 
-  private static buildWakeUpLayers(
+  private static async buildWakeUpLayers(
     workspaceId: string,
     workspacePath: string,
     taskPrompt: string,
     options: SynthesizeOptions,
     settings: ReturnType<typeof MemoryFeaturesManager.loadSettings>,
-  ): {
+  ): Promise<{
     l0: LayeredContextResult;
     l1: LayeredContextResult;
     recallHints: string;
-  } {
+  }> {
     const budget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
     const includeWorkspaceKit = options.includeWorkspaceKit !== false;
     const kitBudget = includeWorkspaceKit ? Math.floor(budget * 0.3) : 0;
@@ -567,7 +605,7 @@ export class MemorySynthesizer {
             sourceAttribution: emptySourceAttribution(),
             droppedCount: 0,
           }
-        : this.buildHotMemoryContext(workspaceId, l0Budget);
+        : await this.buildHotMemoryContext(workspaceId, l0Budget);
     let kitText = "";
     if (includeWorkspaceKit) {
       try {
@@ -604,11 +642,12 @@ export class MemorySynthesizer {
       injectedByDefault: true,
     };
 
-    const story = this.buildStructuredMemoryContext(workspaceId, workspacePath, taskPrompt, {
+    const story = await this.buildStructuredMemoryContext(workspaceId, workspacePath, taskPrompt, {
       includeKnowledgeGraph: false,
       includeArchive: false,
       tokenBudget: l1Budget,
       filesystemReadGuard: options.filesystemReadGuard,
+      boxBrainHits: options.boxBrainHits,
     });
     const l1: LayeredContextResult = {
       ...story,
@@ -625,18 +664,23 @@ export class MemorySynthesizer {
     };
   }
 
-  static buildLayerPreview(
+  static async buildLayerPreview(
     workspaceId: string,
     workspacePath: string,
     taskPrompt: string,
     options: SynthesizeOptions = {},
-  ): MemoryLayerPreviewPayload {
+  ): Promise<MemoryLayerPreviewPayload> {
     const settings = MemoryFeaturesManager.loadSettings();
     const wakeUpLayersEnabled = settings.wakeUpLayersEnabled !== false;
     const effectivePrompt = taskPrompt.trim() || "Current workspace memory preview";
 
     if (!wakeUpLayersEnabled) {
-      const synthesized = this.synthesize(workspaceId, workspacePath, effectivePrompt, options);
+      const synthesized = await this.synthesize(
+        workspaceId,
+        workspacePath,
+        effectivePrompt,
+        options,
+      );
       return {
         workspaceId,
         taskPrompt: effectivePrompt,
@@ -661,7 +705,7 @@ export class MemorySynthesizer {
       };
     }
 
-    const wakeUp = this.buildWakeUpLayers(
+    const wakeUp = await this.buildWakeUpLayers(
       workspaceId,
       workspacePath,
       effectivePrompt,
@@ -745,15 +789,31 @@ export class MemorySynthesizer {
     };
   }
 
-  static synthesize(
+  /**
+   * The Box Brain memory search for `synthesize`, run asynchronously; pass the result
+   * as `boxBrainHits`. Resolves to an empty list when Box Brain recall is off.
+   */
+  static async prefetchBoxBrainHits(
+    workspaceId: string,
+    taskPrompt: string,
+  ): Promise<MemorySearchResult[]> {
+    if (!isBoxBrainRecallEnabled(taskPrompt)) return [];
+    return MemoryService.searchAsync(
+      workspaceId,
+      taskPrompt.slice(0, BOX_BRAIN_QUERY_CHARS),
+      BOX_BRAIN_RESULT_LIMIT,
+    );
+  }
+
+  static async synthesize(
     workspaceId: string,
     workspacePath: string,
     taskPrompt: string,
     options: SynthesizeOptions = {},
-  ): SynthesizedContext {
+  ): Promise<SynthesizedContext> {
     const settings = MemoryFeaturesManager.loadSettings();
     if (settings.wakeUpLayersEnabled !== false) {
-      const layered = this.buildWakeUpLayers(
+      const layered = await this.buildWakeUpLayers(
         workspaceId,
         workspacePath,
         taskPrompt,
@@ -796,13 +856,19 @@ export class MemorySynthesizer {
             sourceAttribution: emptySourceAttribution(),
             droppedCount: 0,
           }
-        : this.buildHotMemoryContext(workspaceId, hotBudget);
-    const structured = this.buildStructuredMemoryContext(workspaceId, workspacePath, taskPrompt, {
-      includeKnowledgeGraph: options.includeKnowledgeGraph !== false,
-      includeArchive: settings.defaultArchiveInjectionEnabled === true,
-      tokenBudget: structuredBudget,
-      filesystemReadGuard: options.filesystemReadGuard,
-    });
+        : await this.buildHotMemoryContext(workspaceId, hotBudget);
+    const structured = await this.buildStructuredMemoryContext(
+      workspaceId,
+      workspacePath,
+      taskPrompt,
+      {
+        includeKnowledgeGraph: options.includeKnowledgeGraph !== false,
+        includeArchive: settings.defaultArchiveInjectionEnabled === true,
+        tokenBudget: structuredBudget,
+        filesystemReadGuard: options.filesystemReadGuard,
+        boxBrainHits: options.boxBrainHits,
+      },
+    );
 
     let kitText = "";
     if (options.includeWorkspaceKit !== false) {

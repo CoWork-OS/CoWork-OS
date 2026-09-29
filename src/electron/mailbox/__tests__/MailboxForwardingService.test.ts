@@ -60,7 +60,7 @@ describeWithSqlite("MailboxForwardingService", () => {
     const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
     const { MailboxForwardingService } = await import("../MailboxForwardingService");
 
-    const created = MailboxAutomationRegistry.createForward({
+    const created = await MailboxAutomationRegistry.createForward({
       name: "Forward vendor invoices",
       schedule: { kind: "every", everyMs: 15 * 60 * 1000 },
       targetEmail: "ops@example.com",
@@ -136,9 +136,9 @@ describeWithSqlite("MailboxForwardingService", () => {
       addLabelIds: ["label-3"],
     });
 
-    const refreshed = MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" }).find(
-      (item) => item.id === created.id,
-    );
+    const refreshed = (
+      await MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" })
+    ).find((item) => item.id === created.id);
     expect(refreshed?.latestOutcome).toContain("Dry run matched 1 message");
   });
 
@@ -146,7 +146,7 @@ describeWithSqlite("MailboxForwardingService", () => {
     const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
     const { MailboxForwardingService } = await import("../MailboxForwardingService");
 
-    const created = MailboxAutomationRegistry.createForward({
+    const created = await MailboxAutomationRegistry.createForward({
       name: "Forward one thread only",
       threadId: "gmail-thread:alpha",
       providerThreadId: "provider-thread-42",
@@ -227,7 +227,7 @@ describeWithSqlite("MailboxForwardingService", () => {
     let currentTime = Date.parse("2026-04-20T12:00:00.000Z");
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => currentTime);
 
-    const created = MailboxAutomationRegistry.createForward({
+    const created = await MailboxAutomationRegistry.createForward({
       name: "Forward invoices reliably",
       schedule: { kind: "every", everyMs: 15 * 60 * 1000 },
       targetEmail: "ops@example.com",
@@ -324,7 +324,7 @@ describeWithSqlite("MailboxForwardingService", () => {
 
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-04-23T12:00:00.000Z"));
 
-    const created = MailboxAutomationRegistry.createForward({
+    const created = await MailboxAutomationRegistry.createForward({
       name: "Forward invoices",
       schedule: { kind: "every", everyMs: 15 * 60 * 1000 },
       targetEmail: "ops@example.com",
@@ -333,7 +333,10 @@ describeWithSqlite("MailboxForwardingService", () => {
       attachmentExtensions: ["pdf"],
       dryRun: true,
     });
-    MailboxAutomationRegistry.setForwardNextRun(created.id, Date.parse("2026-04-23T11:00:00.000Z"));
+    await MailboxAutomationRegistry.setForwardNextRun(
+      created.id,
+      Date.parse("2026-04-23T11:00:00.000Z"),
+    );
 
     gmailRequestMock.mockImplementation(
       async (_settings: unknown, options: { path: string; method: string; body?: Any }) => {
@@ -353,9 +356,9 @@ describeWithSqlite("MailboxForwardingService", () => {
     const service = new MailboxForwardingService({ db });
     await service.runNow(created.id);
 
-    const refreshed = MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" }).find(
-      (item) => item.id === created.id,
-    );
+    const refreshed = (
+      await MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" })
+    ).find((item) => item.id === created.id);
     expect(refreshed?.nextRunAt).toBe(Date.parse("2026-04-23T12:15:00.000Z"));
 
     nowSpy.mockRestore();

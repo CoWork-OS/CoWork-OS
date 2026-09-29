@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 
+import { TaskRepository, WorkspaceRepository } from "../electron/database/repository-facades";
+import {
+  ApprovalRepository,
+  LLMModelRepository,
+  SkillRepository,
+  TaskSessionMetadataRepository,
+  WorkspacePermissionRuleRepository,
+} from "../electron/database/repository-facades";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -8,14 +16,10 @@ import type Database from "better-sqlite3";
 import { DatabaseManager } from "../electron/database/schema";
 import { SecureSettingsRepository } from "../electron/database/SecureSettingsRepository";
 import {
-  ApprovalRepository,
-  LLMModelRepository,
-  SkillRepository,
   TaskEventRepository,
-  TaskRepository,
-  TaskSessionMetadataRepository,
-  WorkspacePermissionRuleRepository,
-  WorkspaceRepository,
+  TaskSessionMetadataStore,
+  TaskStore,
+  WorkspaceStore,
 } from "../electron/database/repositories";
 import {
   SessionRetentionService,
@@ -50,6 +54,12 @@ import { requiresAgentSecurityConfirmation } from "./agent-security-confirmation
 import { PulseService } from "../electron/telemetry/pulse-service";
 import type { PulsePreviewState } from "../shared/pulse";
 import { shouldRunDirectRunEntrypoint } from "./direct-runtime";
+import { startDatabaseWorker, stopDatabaseWorker } from "../electron/database/async/runtime";
+import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
+import {
+  startHostPerfMonitor,
+  type HostPerfMonitorHandle,
+} from "../electron/utils/host-perf-monitor";
 
 type Any = Record<string, any>;
 
@@ -189,6 +199,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 
   let daemon: AgentDaemon | null = null;
+  let hostPerfMonitor: HostPerfMonitorHandle | null = null;
+  let ftsWorkerClient: FtsWorkerClient | null = null;
+  let openDbManager: DatabaseManager | null = null;
   let mcpClientManager: MCPClientManager | null = null;
   let taskRepo: TaskRepository | null = null;
   let activeTaskId: string | null = null;
@@ -199,7 +212,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const restoreConsole = installCliLogFilter();
 
   try {
-    const dbManager = new DatabaseManager();
+    // Schema initialization runs in a bootstrap worker (DB6).
+    const dbManager = await DatabaseManager.open();
+    openDbManager = dbManager;
+    dbManager.beginRun("cli");
+    hostPerfMonitor = startHostPerfMonitor({ runtime: "cli" });
+    // Opt-in database worker (async SQLite plan, DB2); starts after schema setup.
+    await startDatabaseWorker({ dbPath: dbManager.getDatabasePath(), runtime: "cli" });
     new SecureSettingsRepository(dbManager.getDatabase());
     taskRepo = new TaskRepository(dbManager.getDatabase());
 
@@ -223,6 +242,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (localResult !== null) return localResult;
 
     MemoryService.initialize(dbManager);
+    // Off-main-thread memory search, as on desktop; without it prompt recall returns nothing.
+    ftsWorkerClient = new FtsWorkerClient(dbManager.getDatabasePath());
+    MemoryService.initFtsWorker(ftsWorkerClient);
 
     daemon = new AgentDaemon(dbManager, { startupRecovery: false });
     process.once("SIGINT", onSignal);
@@ -330,6 +352,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
     stopCliHeartbeat();
+    hostPerfMonitor?.stop({ flush: true });
     await shutdownRuntime();
     restoreConsole();
   }
@@ -379,10 +402,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const taskId = activeTaskId;
     const runId = activeCliRunId;
     if (!taskRepo || !taskId || !runId) return;
-    const task = taskRepo.findById(taskId);
+    const task = await taskRepo.findById(taskId);
     const cli = getCliOwnership(task);
     if (!task || !cli || cli.runId !== runId) return;
-    taskRepo.update(taskId, {
+    await taskRepo.update(taskId, {
       agentConfig: {
         ...(task.agentConfig || {}),
         cli: {
@@ -404,6 +427,23 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     } catch {
       // Best-effort.
     }
+    // Worker threads keep the process alive until they are stopped.
+    ftsWorkerClient?.destroy();
+    ftsWorkerClient = null;
+    let drained = false;
+    try {
+      drained = (await stopDatabaseWorker()).drained;
+    } catch {
+      // Best-effort.
+    }
+    // Close the host connection too (DB6): an undrained worker leaves the run marked
+    // incomplete for the next start.
+    try {
+      openDbManager?.close({ clean: drained });
+    } catch {
+      // Best-effort.
+    }
+    openDbManager = null;
   }
 }
 
@@ -854,11 +894,12 @@ async function runLocalMetadataCommand(
   const workspaces = new WorkspaceRepository(db);
   const approvals = new ApprovalRepository(db);
   const sessionMetadata = new TaskSessionMetadataRepository(db);
+  // Synchronous like the task repositories it gets (storage slice C).
   const sessionRetention = new SessionRetentionService(
-    tasks,
+    new TaskStore(db),
     taskEvents,
-    sessionMetadata,
-    workspaces,
+    new TaskSessionMetadataStore(db),
+    new WorkspaceStore(db),
   );
 
   if (String(args.command).startsWith("sessions-")) {
@@ -893,7 +934,7 @@ async function runLocalMetadataCommand(
             );
           }
         }
-        const settings = service.getSettings();
+        const settings = await service.getSettings();
         writeEvent(
           args,
           { type: "pulse", action, ...(sendOutcome ? { sendOutcome } : {}), ...settings },
@@ -930,7 +971,7 @@ async function runLocalMetadataCommand(
     }
     case "doctor": {
       const providerStatus = LLMProviderFactory.getConfigStatus();
-      const allWorkspaces = workspaces.findAll();
+      const allWorkspaces = await workspaces.findAll();
       const payload = {
         type: "doctor",
         ok: true,
@@ -1005,7 +1046,7 @@ async function runLocalMetadataCommand(
       return 0;
     }
     case "workspace-list": {
-      const allWorkspaces = workspaces.findAll();
+      const allWorkspaces = await workspaces.findAll();
       const visibleWorkspaces = allWorkspaces.filter(
         (workspace) => !workspace.isTemp && !workspace.id.startsWith("__temp_workspace__"),
       );
@@ -1035,10 +1076,10 @@ async function runLocalMetadataCommand(
     case "workspace-create": {
       const workspacePath = path.resolve(args.cwd);
       await fs.mkdir(workspacePath, { recursive: true });
-      const existing = workspaces.findByPath(workspacePath);
+      const existing = await workspaces.findByPath(workspacePath);
       const workspace =
         existing ||
-        workspaces.create(
+        (await workspaces.create(
           args.workspaceName || path.basename(workspacePath) || "Workspace",
           workspacePath,
           {
@@ -1048,7 +1089,7 @@ async function runLocalMetadataCommand(
             network: true,
             shell: false,
           },
-        );
+        ));
       writeEvent(
         args,
         { type: "workspace", workspace, created: !existing },
@@ -1058,7 +1099,7 @@ async function runLocalMetadataCommand(
     }
     case "tail": {
       if (!args.taskId) throw new Error("Usage: cowork tail <taskId> [--limit <n>]");
-      const task = tasks.findById(args.taskId);
+      const task = await tasks.findById(args.taskId);
       if (!task) throw new Error(`Task not found: ${args.taskId}`);
       const events = taskEvents.findRecentByTaskId(args.taskId, args.limit || 200);
       writeEvent(
@@ -1071,7 +1112,7 @@ async function runLocalMetadataCommand(
       return 0;
     }
     case "approvals-list": {
-      const rows = approvals.findPending(args.limit || 100);
+      const rows = await approvals.findPending(args.limit || 100);
       writeEvent(
         args,
         { type: "approvals", approvals: rows },
@@ -1092,8 +1133,8 @@ async function runLocalMetadataCommand(
       const mcpSettings = MCPSettingsManager.loadSettings();
       const toolSettings = BuiltinToolsSettingsManager.loadSettings();
       const taskCounts = countTasksByStatus(db);
-      const workspaceCount = workspaces.findAll().length;
-      const pendingApprovals = approvals.findPending(1000).length;
+      const workspaceCount = (await workspaces.findAll()).length;
+      const pendingApprovals = (await approvals.findPending(1000)).length;
       const enabledToolCategories = Object.entries(toolSettings.categories)
         .filter(([, value]) => value.enabled)
         .map(([key]) => key);
@@ -1224,14 +1265,14 @@ function listSessions(sessionRetention: SessionRetentionService, args: DirectRun
   return 0;
 }
 
-function showSession(
+async function showSession(
   sessionRetention: SessionRetentionService,
   sessionMetadata: TaskSessionMetadataRepository,
   args: DirectRunArgs,
-): number {
+): Promise<number> {
   const sessionId = requireSessionId(args);
   const rows = sessionRetention.tasksForSession(sessionId, args.limit || 200);
-  const metadata = sessionMetadata.findBySessionId(sessionId);
+  const metadata = await sessionMetadata.findBySessionId(sessionId);
   if (rows.length === 0) throw new Error(`Session not found: ${sessionId}`);
   writeEvent(
     args,
@@ -1393,9 +1434,8 @@ async function pruneSessions(
   return 0;
 }
 
-function listCliTasks(taskRepo: TaskRepository, args: DirectRunArgs): number {
-  const rows = taskRepo
-    .findAll(args.limit || 1000)
+async function listCliTasks(taskRepo: TaskRepository, args: DirectRunArgs): Promise<number> {
+  const rows = (await taskRepo.findAll(args.limit || 1000))
     .filter((task) => !args.activeOnly || !isTerminalTaskStatus(task.status))
     .filter((task) => !args.cliOnly || Boolean(getCliOwnership(task)))
     .slice(0, args.limit || 50);
@@ -1407,14 +1447,14 @@ function listCliTasks(taskRepo: TaskRepository, args: DirectRunArgs): number {
   return 0;
 }
 
-function cancelCliTask(
+async function cancelCliTask(
   taskRepo: TaskRepository,
   eventRepo: TaskEventRepository,
   args: DirectRunArgs,
-): number {
+): Promise<number> {
   const taskId = (args.taskId || args.name || args.prompt || "").trim();
   if (!taskId) throw new Error("Usage: cowork tasks cancel <taskId>");
-  const task = taskRepo.findById(taskId);
+  const task = await taskRepo.findById(taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
   if (isTerminalTaskStatus(task.status)) {
     writeEvent(
@@ -1430,7 +1470,7 @@ function cancelCliTask(
     );
   }
   terminateCliOwner(task);
-  markTaskCancelled(taskRepo, eventRepo, task, "Task was stopped by CLI command", 130);
+  await markTaskCancelled(taskRepo, eventRepo, task, "Task was stopped by CLI command", 130);
   writeEvent(args, { type: "task_cancelled", taskId: task.id }, `Cancelled task ${task.id}.`);
   return 0;
 }
@@ -1442,7 +1482,7 @@ async function attachCliTask(
 ): Promise<number> {
   const taskId = (args.taskId || args.name || args.prompt || "").trim();
   if (!taskId) throw new Error("Usage: cowork tasks attach <taskId>");
-  const task = taskRepo.findById(taskId);
+  const task = await taskRepo.findById(taskId);
   if (!task) throw new Error(`Task not found: ${taskId}`);
   const seen = new Set<string>();
   const printNewEvents = () => {
@@ -1462,11 +1502,15 @@ async function attachCliTask(
   return await new Promise((resolve) => {
     const interval = setInterval(() => {
       printNewEvents();
-      const latest = taskRepo.findById(taskId);
-      if (!latest || isTerminalTaskStatus(latest.status)) {
-        clearInterval(interval);
-        resolve(!latest || latest.status === "failed" || latest.status === "cancelled" ? 1 : 0);
-      }
+      void taskRepo.findById(taskId).then(
+        (latest) => {
+          if (!latest || isTerminalTaskStatus(latest.status)) {
+            clearInterval(interval);
+            resolve(!latest || latest.status === "failed" || latest.status === "cancelled" ? 1 : 0);
+          }
+        },
+        () => undefined,
+      );
     }, 1000);
     const onSignal = () => {
       clearInterval(interval);
@@ -1477,8 +1521,8 @@ async function attachCliTask(
   });
 }
 
-function listStaleCliTasks(taskRepo: TaskRepository, args: DirectRunArgs): number {
-  const rows = findStaleCliTasks(taskRepo, args.limit || 1000);
+async function listStaleCliTasks(taskRepo: TaskRepository, args: DirectRunArgs): Promise<number> {
+  const rows = await findStaleCliTasks(taskRepo, args.limit || 1000);
   writeEvent(
     args,
     { type: "stale_cli_tasks", tasks: rows },
@@ -1487,15 +1531,15 @@ function listStaleCliTasks(taskRepo: TaskRepository, args: DirectRunArgs): numbe
   return rows.length ? 1 : 0;
 }
 
-function cleanupStaleCliTasks(
+async function cleanupStaleCliTasks(
   taskRepo: TaskRepository,
   eventRepo: TaskEventRepository,
   args: DirectRunArgs,
-): number {
+): Promise<number> {
   if (!args.interruptedCli) {
     throw new Error("Usage: cowork tasks cleanup --interrupted-cli --yes");
   }
-  const rows = findStaleCliTasks(taskRepo, args.limit || 1000);
+  const rows = await findStaleCliTasks(taskRepo, args.limit || 1000);
   if (!args.yes) {
     writeEvent(
       args,
@@ -1507,7 +1551,13 @@ function cleanupStaleCliTasks(
     return rows.length ? 1 : 0;
   }
   for (const task of rows) {
-    markTaskCancelled(taskRepo, eventRepo, task, "CLI task owner exited before completion", 130);
+    await markTaskCancelled(
+      taskRepo,
+      eventRepo,
+      task,
+      "CLI task owner exited before completion",
+      130,
+    );
   }
   writeEvent(
     args,
@@ -1714,7 +1764,7 @@ async function mcpTestCommand(args: DirectRunArgs): Promise<number> {
 }
 
 async function skillsCommand(skillRepo: SkillRepository, args: DirectRunArgs): Promise<number> {
-  const dbSkills = skillRepo.findAll();
+  const dbSkills = await skillRepo.findAll();
   const status = await readOnlySkillStatus(args);
   const skills = status.skills;
   if (args.command === "skills-list") {
@@ -1759,10 +1809,10 @@ async function skillsCommand(skillRepo: SkillRepository, args: DirectRunArgs): P
   return invalid.length ? 1 : 0;
 }
 
-function modelsCommand(modelRepo: LLMModelRepository, args: DirectRunArgs): number {
+async function modelsCommand(modelRepo: LLMModelRepository, args: DirectRunArgs): Promise<number> {
   const status = LLMProviderFactory.getConfigStatus();
   const configuredModels = status.models;
-  const dbModels = modelRepo.findAll();
+  const dbModels = await modelRepo.findAll();
   writeEvent(
     args,
     {
@@ -1848,13 +1898,13 @@ async function createBackup(dbManager: DatabaseManager, args: DirectRunArgs): Pr
     includeSecrets: Boolean(args.includeSecrets),
     contentMode: args.includeSecrets ? "full_sensitive" : "redacted_metadata",
     userData: getUserDataDir(),
-    workspaces: new WorkspaceRepository(db).findAll(),
+    workspaces: await new WorkspaceRepository(db).findAll(),
     tasks: sanitizeTasksForBackup(
-      new TaskRepository(db).findAll(args.limit || 500),
+      await new TaskRepository(db).findAll(args.limit || 500),
       Boolean(args.includeSecrets),
     ),
     approvals: sanitizeApprovalsForBackup(
-      new ApprovalRepository(db).findPending(1000),
+      await new ApprovalRepository(db).findPending(1000),
       Boolean(args.includeSecrets),
     ),
     providers: redactObject(LLMProviderFactory.loadSettings(), !args.includeSecrets),
@@ -1865,7 +1915,7 @@ async function createBackup(dbManager: DatabaseManager, args: DirectRunArgs): Pr
         : MCPSettingsManager.getSettingsForDisplay(),
       Boolean(args.includeSecrets),
     ),
-    skills: new SkillRepository(db).findAll(),
+    skills: await new SkillRepository(db).findAll(),
   };
   const output =
     args.output ||
@@ -1925,12 +1975,14 @@ async function restoreBackup(args: DirectRunArgs): Promise<number> {
   return 0;
 }
 
-function securityAuditCommand(db: Database.Database, args: DirectRunArgs): number {
+async function securityAuditCommand(db: Database.Database, args: DirectRunArgs): Promise<number> {
   const providerStatus = LLMProviderFactory.getConfigStatus();
   const tools = BuiltinToolsSettingsManager.loadSettings();
-  const workspaces = new WorkspaceRepository(db).findAll();
+  const workspaces = await new WorkspaceRepository(db).findAll();
   const permissionRepo = new WorkspacePermissionRuleRepository(db);
-  const rules = workspaces.flatMap((workspace) => permissionRepo.listByWorkspaceId(workspace.id));
+  const rules = (
+    await Promise.all(workspaces.map((workspace) => permissionRepo.listByWorkspaceId(workspace.id)))
+  ).flat();
   const warnings: string[] = [];
   if (providerStatus.providers.filter((provider) => provider.configured).length === 0)
     warnings.push("No configured LLM provider.");
@@ -1959,17 +2011,26 @@ function securityAuditCommand(db: Database.Database, args: DirectRunArgs): numbe
   return warnings.length ? 1 : 0;
 }
 
-function securityRulesListCommand(db: Database.Database, args: DirectRunArgs): number {
+async function securityRulesListCommand(
+  db: Database.Database,
+  args: DirectRunArgs,
+): Promise<number> {
   const repo = new WorkspacePermissionRuleRepository(db);
-  const workspaces = new WorkspaceRepository(db).findAll();
+  const workspaces = await new WorkspaceRepository(db).findAll();
   const workspaceRows = args.workspaceId
     ? workspaces.filter((workspace) => workspace.id === args.workspaceId)
     : workspaces;
-  const rules = workspaceRows.flatMap((workspace) =>
-    repo
-      .listByWorkspaceId(workspace.id)
-      .map((rule) => ({ ...rule, workspaceName: workspace.name, workspacePath: workspace.path })),
-  );
+  const rules = (
+    await Promise.all(
+      workspaceRows.map(async (workspace) =>
+        (await repo.listByWorkspaceId(workspace.id)).map((rule) => ({
+          ...rule,
+          workspaceName: workspace.name,
+          workspacePath: workspace.path,
+        })),
+      ),
+    )
+  ).flat();
   writeEvent(
     args,
     { type: "security_rules", rules },
@@ -1982,7 +2043,10 @@ function securityRulesListCommand(db: Database.Database, args: DirectRunArgs): n
   return 0;
 }
 
-function securityRulesRemoveCommand(db: Database.Database, args: DirectRunArgs): number {
+async function securityRulesRemoveCommand(
+  db: Database.Database,
+  args: DirectRunArgs,
+): Promise<number> {
   const id = args.ruleId || args.name || args.prompt || "";
   if (!id) throw new Error("Usage: cowork security rules remove <ruleId> --yes");
   if (!args.yes) {
@@ -1994,7 +2058,7 @@ function securityRulesRemoveCommand(db: Database.Database, args: DirectRunArgs):
     return 1;
   }
   const repo = new WorkspacePermissionRuleRepository(db);
-  const removed = repo.deleteById(id);
+  const removed = await repo.deleteById(id);
   writeEvent(
     args,
     { type: "security_rule_removed", id, removed },
@@ -2028,7 +2092,7 @@ async function agentSecurityCommand(db: Database.Database, args: DirectRunArgs):
     return status.enabled && status.health === "unavailable" ? 1 : 0;
   }
   if (args.command === "agent-security-findings") {
-    const findings = service.listFindings({
+    const findings = await service.listFindings({
       taskId: args.taskId,
       limit: args.limit || 100,
     });
@@ -2054,7 +2118,7 @@ async function agentSecurityCommand(db: Database.Database, args: DirectRunArgs):
         "Usage: cowork security finding <findingId> open|acknowledged|resolved|false_positive",
       );
     }
-    const finding = service.updateFindingStatus(findingId, status);
+    const finding = await service.updateFindingStatus(findingId, status);
     if (!finding) throw new Error(`Agent security finding not found: ${findingId}`);
     writeEvent(
       args,
@@ -2064,7 +2128,7 @@ async function agentSecurityCommand(db: Database.Database, args: DirectRunArgs):
     return 0;
   }
   if (args.command === "agent-security-decisions") {
-    const decisions = service.listDecisions(args.taskId, args.limit || 100);
+    const decisions = await service.listDecisions(args.taskId, args.limit || 100);
     writeEvent(
       args,
       { type: "agent_security_decisions", decisions },
@@ -2080,7 +2144,7 @@ async function agentSecurityCommand(db: Database.Database, args: DirectRunArgs):
     return 0;
   }
   if (args.command === "agent-security-inventory") {
-    const inventory = service.listInventory();
+    const inventory = await service.listInventory();
     writeEvent(
       args,
       { type: "agent_security_inventory", inventory },
@@ -2116,7 +2180,7 @@ async function agentSecurityCommand(db: Database.Database, args: DirectRunArgs):
     return 0;
   }
   if (args.command === "agent-security-prune") {
-    const result = service.prune();
+    const result = await service.prune();
     writeEvent(
       args,
       { type: "agent_security_prune", ...result },
@@ -2170,7 +2234,7 @@ async function agentSecurityCommand(db: Database.Database, args: DirectRunArgs):
 }
 
 function formatAgentSecurityInventory(
-  inventory: ReturnType<NumbatService["listInventory"]>,
+  inventory: Awaited<ReturnType<NumbatService["listInventory"]>>,
 ): string {
   return inventory.length
     ? inventory
@@ -2343,9 +2407,9 @@ function getCliOwnership(task: Task | undefined | null): CliTaskOwnership | unde
   return cli;
 }
 
-function findStaleCliTasks(taskRepo: TaskRepository, limit: number): Task[] {
+async function findStaleCliTasks(taskRepo: TaskRepository, limit: number): Promise<Task[]> {
   const now = Date.now();
-  return taskRepo.findAll(limit).filter((task) => {
+  return (await taskRepo.findAll(limit)).filter((task) => {
     if (isTerminalTaskStatus(task.status)) return false;
     const cli = getCliOwnership(task);
     if (!cli || cli.mode !== "attached") return false;
@@ -2356,16 +2420,16 @@ function findStaleCliTasks(taskRepo: TaskRepository, limit: number): Task[] {
   });
 }
 
-function markTaskCancelled(
+async function markTaskCancelled(
   taskRepo: TaskRepository,
   eventRepo: TaskEventRepository,
   task: Task,
   message: string,
   exitCode: number,
-): void {
+): Promise<void> {
   const completedAt = Date.now();
   const cli = getCliOwnership(task);
-  taskRepo.update(task.id, {
+  await taskRepo.update(task.id, {
     status: "cancelled",
     completedAt,
     lastRunDurationMs: Math.max(0, completedAt - (task.createdAt || completedAt)),
@@ -2451,8 +2515,8 @@ async function migrateLegacySessionMetadata(
 
   let imported = 0;
   for (const [sessionId, value] of entries) {
-    if (!sessionId || metadataRepo.findBySessionId(sessionId)) continue;
-    metadataRepo.upsert(sessionId, {
+    if (!sessionId || (await metadataRepo.findBySessionId(sessionId))) continue;
+    await metadataRepo.upsert(sessionId, {
       name: value?.name,
       archivedAt: value?.archivedAt,
     });

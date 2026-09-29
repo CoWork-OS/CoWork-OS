@@ -1,8 +1,9 @@
+import { WorktreeInfoRepository } from "../database/repository-facades";
 import * as path from "path";
 import * as fs from "fs";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { GitService } from "./GitService";
-import { WorktreeInfoRepository } from "../database/repositories";
+
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import {
   WorktreeSettings,
@@ -186,7 +187,7 @@ export class WorktreeManager {
       createdAt: Date.now(),
     };
 
-    this.worktreeInfoRepo.create(info);
+    await this.worktreeInfoRepo.create(info);
     return info;
   }
 
@@ -198,7 +199,7 @@ export class WorktreeManager {
     taskId: string,
     message?: string,
   ): Promise<{ sha: string; filesChanged: number } | null> {
-    const info = this.worktreeInfoRepo.findByTaskId(taskId);
+    const info = await this.worktreeInfoRepo.findByTaskId(taskId);
     if (!info) throw new Error(`No worktree found for task ${taskId}`);
 
     const settings = this.getSettings();
@@ -206,7 +207,7 @@ export class WorktreeManager {
 
     const result = await GitService.commitAll(info.worktreePath, commitMessage);
     if (result) {
-      this.worktreeInfoRepo.update(taskId, {
+      await this.worktreeInfoRepo.update(taskId, {
         lastCommitSha: result.sha,
         lastCommitMessage: commitMessage,
       });
@@ -218,7 +219,7 @@ export class WorktreeManager {
    * Merge a task's branch back to its base branch.
    */
   async mergeToBase(taskId: string): Promise<MergeResult> {
-    const info = this.worktreeInfoRepo.findByTaskId(taskId);
+    const info = await this.worktreeInfoRepo.findByTaskId(taskId);
     if (!info) {
       return { success: false, error: `No worktree found for task ${taskId}` };
     }
@@ -236,7 +237,7 @@ export class WorktreeManager {
     // Resolve repo path from persisted metadata or git.
     const repoPath = await this.resolveRepoPath(info);
 
-    this.worktreeInfoRepo.update(taskId, { status: "merging" });
+    await this.worktreeInfoRepo.update(taskId, { status: "merging" });
 
     const result = await GitService.mergeToBase(
       repoPath,
@@ -245,7 +246,7 @@ export class WorktreeManager {
       `Merge ${info.branchName} into ${info.baseBranch}`,
     );
 
-    this.worktreeInfoRepo.update(taskId, {
+    await this.worktreeInfoRepo.update(taskId, {
       status: result.success ? "merged" : "conflict",
       mergeResult: result,
     });
@@ -269,7 +270,7 @@ export class WorktreeManager {
     options: { title: string; body: string },
   ): Promise<PullRequestResult> {
     try {
-      const info = this.worktreeInfoRepo.findByTaskId(taskId);
+      const info = await this.worktreeInfoRepo.findByTaskId(taskId);
       if (!info) {
         return { success: false, error: `No worktree found for task ${taskId}` };
       }
@@ -302,7 +303,7 @@ export class WorktreeManager {
    * Clean up a worktree (remove directory and optionally delete branch).
    */
   async cleanup(taskId: string, deleteBranch?: boolean): Promise<void> {
-    const info = this.worktreeInfoRepo.findByTaskId(taskId);
+    const info = await this.worktreeInfoRepo.findByTaskId(taskId);
     if (!info) return;
 
     const repoPath = await this.resolveRepoPath(info);
@@ -332,20 +333,20 @@ export class WorktreeManager {
       }
     }
 
-    this.worktreeInfoRepo.update(taskId, { status: "cleaned" });
+    await this.worktreeInfoRepo.update(taskId, { status: "cleaned" });
   }
 
   /**
    * Get worktree info for a task.
    */
-  getWorktreeInfo(taskId: string): WorktreeInfo | undefined {
+  async getWorktreeInfo(taskId: string): Promise<WorktreeInfo | undefined> {
     return this.worktreeInfoRepo.findByTaskId(taskId);
   }
 
   /**
    * List all worktrees for a workspace.
    */
-  listForWorkspace(workspaceId: string): WorktreeInfo[] {
+  async listForWorkspace(workspaceId: string): Promise<WorktreeInfo[]> {
     return this.worktreeInfoRepo.findByWorkspaceId(workspaceId);
   }
 
@@ -353,7 +354,7 @@ export class WorktreeManager {
    * Get diff stats between worktree branch and base.
    */
   async getDiffStats(taskId: string) {
-    const info = this.worktreeInfoRepo.findByTaskId(taskId);
+    const info = await this.worktreeInfoRepo.findByTaskId(taskId);
     if (!info) return null;
 
     try {
@@ -367,7 +368,7 @@ export class WorktreeManager {
    * Get full diff output for a task's worktree.
    */
   async getFullDiff(taskId: string): Promise<string | null> {
-    const info = this.worktreeInfoRepo.findByTaskId(taskId);
+    const info = await this.worktreeInfoRepo.findByTaskId(taskId);
     if (!info) return null;
 
     try {
@@ -425,7 +426,7 @@ export class WorktreeManager {
 
     try {
       const repoPath = await GitService.getRepoRoot(info.worktreePath);
-      this.worktreeInfoRepo.update(info.taskId, { repoPath });
+      await this.worktreeInfoRepo.update(info.taskId, { repoPath });
       return repoPath;
     } catch {
       // Backward-compatible fallback for older records.

@@ -11,7 +11,7 @@ import {
 /**
  * Repository for managing agent @mentions in the database
  */
-export class MentionRepository {
+export class MentionStore {
   constructor(private db: Database.Database) {}
 
   /**

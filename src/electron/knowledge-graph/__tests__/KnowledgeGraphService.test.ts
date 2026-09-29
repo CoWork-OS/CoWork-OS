@@ -98,26 +98,26 @@ afterEach(() => {
 });
 
 describeWithNativeDb("KnowledgeGraphService", () => {
-  it("returns the existing current edge when creating the same open-ended relation twice", () => {
+  it("returns the existing current edge when creating the same open-ended relation twice", async () => {
     const db = createDb();
     KnowledgeGraphService.initialize(db);
 
     const workspaceId = "ws-service";
-    const alpha = KnowledgeGraphService.createEntity(workspaceId, {
+    const alpha = await KnowledgeGraphService.createEntity(workspaceId, {
       entityType: "project",
       name: "Alpha",
     });
-    const beta = KnowledgeGraphService.createEntity(workspaceId, {
+    const beta = await KnowledgeGraphService.createEntity(workspaceId, {
       entityType: "project",
       name: "Beta",
     });
 
-    const first = KnowledgeGraphService.createEdge(workspaceId, {
+    const first = await KnowledgeGraphService.createEdge(workspaceId, {
       sourceEntityId: alpha.id,
       targetEntityId: beta.id,
       edgeType: "depends_on",
     });
-    const second = KnowledgeGraphService.createEdge(workspaceId, {
+    const second = await KnowledgeGraphService.createEdge(workspaceId, {
       sourceEntityId: alpha.id,
       targetEntityId: beta.id,
       edgeType: "depends_on",

@@ -82,8 +82,23 @@ describe("SecureSettingsRepository", () => {
     };
 
     // Create mock database
+    // The revision clock (DB5) answers on its own; everything else uses mockStmt.
+    let clock = 0;
+    const clockStmt = {
+      run: vi.fn(),
+      all: vi.fn(() => []),
+      get: vi.fn(() => ({ value: ++clock })),
+    };
     mockDb = {
-      prepare: vi.fn(() => mockStmt),
+      prepare: vi.fn((sql: string) =>
+        sql.includes("secure_settings_revision_clock") ? clockStmt : mockStmt,
+      ),
+      // Pass-through transactions: this suite checks statements, not atomicity.
+      transaction: vi.fn((fn: (...args: unknown[]) => unknown) =>
+        Object.assign((...args: unknown[]) => fn(...args), {
+          immediate: (...args: unknown[]) => fn(...args),
+        }),
+      ),
     } as unknown as Database.Database;
 
     // Default: OS encryption available
@@ -169,12 +184,13 @@ describe("SecureSettingsRepository", () => {
 
       expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO"));
       expect(mockStmt.run).toHaveBeenCalledWith(
-        "test-uuid-1234",
+        expect.any(String), // id
         "voice",
         expect.stringContaining("os:"), // OS encryption prefix
         expect.any(String), // checksum
         expect.any(Number), // created_at
         expect.any(Number), // updated_at
+        expect.any(Number), // revision
       );
     });
 
@@ -197,12 +213,18 @@ describe("SecureSettingsRepository", () => {
       const testSettings = { provider: "elevenlabs" };
       repository.save("voice", testSettings);
 
-      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("UPDATE"));
+      // One upsert carries the new revision (DB5).
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        expect.stringContaining("ON CONFLICT(category) DO UPDATE"),
+      );
       expect(mockStmt.run).toHaveBeenCalledWith(
+        expect.any(String),
+        "voice",
         expect.stringContaining("os:"), // encrypted data
         expect.any(String), // checksum
-        expect.any(Number), // updated_at
-        "voice",
+        expect.any(Number),
+        expect.any(Number),
+        expect.any(Number), // revision
       );
     });
 
@@ -224,21 +246,21 @@ describe("SecureSettingsRepository", () => {
       expect(mockDb.prepare).toHaveBeenCalledWith(
         expect.stringContaining("INSERT INTO secure_settings_unreadable_backup"),
       );
+      // The stored row is copied aside by SQL, in the same transaction as the write.
       expect(mockStmt.run).toHaveBeenCalledWith(
         expect.any(String),
-        "voice",
-        "os:unreadable-ciphertext",
-        "stored-checksum",
         "decryption_failed",
-        1000,
-        1000,
         expect.any(Number),
+        "voice",
       );
       expect(mockStmt.run).toHaveBeenLastCalledWith(
+        expect.any(String),
+        "voice",
         expect.stringContaining("os:"),
         expect.any(String),
         expect.any(Number),
-        "voice",
+        expect.any(Number),
+        expect.any(Number),
       );
     });
 
@@ -254,11 +276,17 @@ describe("SecureSettingsRepository", () => {
 
       repository.save("voice", { provider: "recovered" }, { allowUnreadableOverwrite: true });
 
+      expect(mockDb.prepare).not.toHaveBeenCalledWith(
+        expect.stringContaining("INSERT INTO secure_settings_unreadable_backup"),
+      );
       expect(mockStmt.run).toHaveBeenCalledWith(
+        expect.any(String),
+        "voice",
         expect.stringContaining("os:"),
         expect.any(String),
         expect.any(Number),
-        "voice",
+        expect.any(Number),
+        expect.any(Number),
       );
     });
 
@@ -289,6 +317,7 @@ describe("SecureSettingsRepository", () => {
         expect.any(String),
         expect.any(Number),
         expect.any(Number),
+        expect.any(Number),
       );
     });
 
@@ -303,10 +332,11 @@ describe("SecureSettingsRepository", () => {
       repository.save("plugin:my-plugin", { apiKey: "super-secret" });
 
       expect(mockStmt.run).toHaveBeenCalledWith(
-        "test-uuid-1234",
+        expect.any(String),
         "plugin:my-plugin",
         expect.stringContaining("os:"),
         expect.any(String),
+        expect.any(Number),
         expect.any(Number),
         expect.any(Number),
       );
@@ -612,11 +642,11 @@ describe("SecureSettingsRepository", () => {
 
       expect(repository.load("voice")).toEqual({ provider: "test" });
 
-      // The record was re-saved. It already exists, so save() takes the UPDATE
-      // path: (encrypted_data, checksum, updated_at, category).
+      // The record was re-saved through the upsert:
+      // (id, category, encrypted_data, checksum, created_at, updated_at, revision).
       const rewrite = mockStmt.run.mock.calls.at(-1) as unknown[] | undefined;
       expect(rewrite).toBeDefined();
-      const [rewrittenCiphertext, rewrittenChecksum] = rewrite as unknown[];
+      const [, , rewrittenCiphertext, rewrittenChecksum] = rewrite as unknown[];
       expect(String(rewrittenCiphertext)).toMatch(/^os:/);
       expect(rewrittenChecksum).toBe(
         crypto.createHash("sha256").update(String(rewrittenCiphertext)).digest("hex"),
@@ -687,6 +717,10 @@ describe("SecureSettingsRepository", () => {
       vi.clearAllMocks();
       mockStmt.get.mockReturnValue(undefined);
 
+      // A fresh repository, so the second save is not checked against the first one's
+      // revision (this suite's mock statements do not model revisions).
+      (SecureSettingsRepositoryClass as Any).instance = null;
+      repository = new SecureSettingsRepositoryClass(mockDb);
       repository.save("voice", { test: "value" });
       const secondChecksum = mockStmt.run.mock.calls[0][3];
 
@@ -742,6 +776,7 @@ describe("SecureSettingsRepository", () => {
         category,
         expect.any(String),
         expect.any(String),
+        expect.any(Number),
         expect.any(Number),
         expect.any(Number),
       );

@@ -1,3 +1,4 @@
+import { TaskStore } from "../database/repositories";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import type {
@@ -15,9 +16,9 @@ import type {
   SessionPrincipal,
   SessionShareSnapshot,
 } from "../../shared/types";
-import { TaskRepository } from "../database/repositories";
+
 import { WorkContextRepository } from "./WorkContextRepository";
-import { WorkContextService } from "./WorkContextService";
+import { WorkContextStore } from "./WorkContextService";
 
 type Any = any;
 type InviteRole = Exclude<SessionHumanRole, "owner">;
@@ -37,7 +38,7 @@ const CAPABILITIES_BY_ROLE: Record<SessionHumanRole, ReadonlySet<SessionHumanCap
   viewer: new Set(["view"]),
 };
 
-function normalizeRequired(value: unknown, label: string, maxLength = 200): string {
+export function normalizeRequired(value: unknown, label: string, maxLength = 200): string {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized) throw new Error(`${label} is required.`);
   if (normalized.length > maxLength) throw new Error(`${label} is too long.`);
@@ -78,16 +79,22 @@ function normalizeMetadata(metadata?: Metadata): Metadata | undefined {
   );
 }
 
-export class SessionMembershipService {
+/**
+ * Session membership, invites, audit and authorization (async SQLite migration plan,
+ * DB6): synchronous logic over the connection, run as services-domain units behind the
+ * async `SessionMembershipService` facade (`workspaces-repository-facades.ts`). Each public
+ * method is one unit, so an authorization check shares a transaction with the write it
+ * guards and a single-use invite cannot be accepted twice.
+ */
+export class SessionMembershipStore {
   private readonly contextRepo: WorkContextRepository;
-  private readonly taskRepo: TaskRepository;
-  private readonly workContextService: WorkContextService;
-  private readonly clientPrincipals = new Map<number, string>();
+  private readonly taskRepo: TaskStore;
+  private readonly workContextService: WorkContextStore;
 
   constructor(private readonly db: Database.Database) {
     this.contextRepo = new WorkContextRepository(db);
-    this.taskRepo = new TaskRepository(db);
-    this.workContextService = new WorkContextService(db);
+    this.taskRepo = new TaskStore(db);
+    this.workContextService = new WorkContextStore(db);
   }
 
   getLocalPrincipal(displayName?: string): SessionPrincipal {
@@ -110,12 +117,8 @@ export class SessionMembershipService {
     return principal;
   }
 
-  principalForClient(clientId: number): string {
-    return this.clientPrincipals.get(clientId) || this.getLocalPrincipal().principalId;
-  }
-
-  principalDetailsForClient(clientId: number): SessionPrincipal {
-    const principalId = this.principalForClient(clientId);
+  /** A principal's display name, falling back to the local principal (host-side lookup). */
+  principalDetails(principalId: string): SessionPrincipal {
     const local = this.getLocalPrincipal();
     if (principalId === local.principalId) return local;
     const row = this.db
@@ -128,10 +131,6 @@ export class SessionMembershipService {
       principalId,
       displayName: row?.display_name || "Session participant",
     };
-  }
-
-  registerClientPrincipal(clientId: number, principalId: string): void {
-    this.clientPrincipals.set(clientId, normalizeRequired(principalId, "principalId", 160));
   }
 
   ensureOwner(contextId: string): SessionHumanMember {
@@ -475,6 +474,17 @@ export class SessionMembershipService {
     this.recordAudit(authorized.contextId, member, action, targetId, metadata);
     this.touchPresence(authorized.contextId, authorized.actor.principalId);
     return authorized.actor;
+  }
+
+  /** Authorize an action on the work context a managed session is bound to. */
+  authorizeManagedSessionAction(
+    sessionId: string,
+    capability: SessionHumanCapability,
+    principalId?: string,
+  ): SessionActionAttribution {
+    const context = this.contextRepo.findByManagedSessionId(sessionId);
+    if (!context) throw new Error("Managed session is not bound to a governed work context.");
+    return this.authorizeContextAction(context.id, capability, principalId);
   }
 
   private requireContext(contextId: string) {

@@ -276,6 +276,54 @@ async function validateNumbatRuntime(resourcesRoot, targetKey) {
   );
 }
 
+/**
+ * The database workers (async SQLite plan, DB7: on by default) load from the app archive,
+ * and better-sqlite3's native binary must be unpacked beside it for a worker to open.
+ */
+async function validateDatabaseWorkerAssets(resourcesRoot, targetKey) {
+  const { listPackage } = await import("@electron/asar");
+  const archive = path.join(resourcesRoot, "app.asar");
+  const entries = new Set(listPackage(archive).map((entry) => entry.split(path.sep).join("/")));
+  const workers = [
+    "/dist/electron/electron/database/async/database-worker.js",
+    "/dist/electron/electron/database/fts-worker.js",
+    "/dist/electron/electron/database/schema-bootstrap-worker.js",
+  ];
+  const missing = workers.filter((entry) => !entries.has(entry));
+  if (missing.length > 0) {
+    throw new Error(`Database worker assets missing from ${archive}: ${missing.join(", ")}`);
+  }
+  // The module ships per-platform prebuilds, or a local build when rebuilt from source.
+  const moduleRoot = path.join(
+    resourcesRoot,
+    "app.asar.unpacked",
+    "node_modules",
+    "better-sqlite3",
+  );
+  const candidates = [
+    path.join(moduleRoot, "prebuilds", `${targetKey}.node`),
+    path.join(moduleRoot, "build", "Release", "better_sqlite3.node"),
+  ];
+  const present = await Promise.all(
+    candidates.map((file) =>
+      fs.access(file).then(
+        () => true,
+        () => false,
+      ),
+    ),
+  );
+  if (!present.some(Boolean)) {
+    throw new Error(
+      `better-sqlite3 native binary for ${targetKey} is not unpacked: ${candidates.join(", ")}`,
+    );
+  }
+}
+
+/** A disposable profile for launch smokes: a packaged launch must never open the user's. */
+async function disposableProfile() {
+  return fs.mkdtemp(path.join(os.tmpdir(), "cowork-desktop-smoke-profile-"));
+}
+
 async function validateStarterMission(resourcesRoot) {
   const missionRoot = path.join(resourcesRoot, "starter-missions", "release-brief-v1");
   const manifestPath = path.join(missionRoot, "manifest.json");
@@ -398,10 +446,12 @@ function assertMacCodeSignature(appPath, allowUnsigned) {
 async function smokeLaunchMac(executablePath) {
   let spawnError = null;
   let output = "";
+  const profile = await disposableProfile();
   const child = spawn(executablePath, [], {
     env: {
       ...process.env,
       COWORK_DESKTOP_SMOKE: "1",
+      COWORK_USER_DATA_DIR: profile,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -434,6 +484,7 @@ async function smokeLaunchMac(executablePath) {
   if (child.exitCode === null) {
     child.kill("SIGKILL");
   }
+  await fs.rm(profile, { recursive: true, force: true }).catch(() => undefined);
 }
 
 async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
@@ -508,6 +559,10 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
       `darwin-${process.arch}`,
     );
     await validateStarterMission(path.join(appPath, "Contents", "Resources"));
+    await validateDatabaseWorkerAssets(
+      path.join(appPath, "Contents", "Resources"),
+      `darwin-${process.arch}`,
+    );
     await assertNoRetiredHealthBridge(path.join(appPath, "Contents", "Resources"));
     assertMacCodeSignature(appPath, allowUnsigned);
     await smokeLaunchMac(executablePath);
@@ -632,6 +687,10 @@ Write-Output $item.VersionInfo.ProductVersion
       `win32-${process.arch}`,
     );
     await validateStarterMission(path.join(path.dirname(appExe), "resources"));
+    await validateDatabaseWorkerAssets(
+      path.join(path.dirname(appExe), "resources"),
+      `win32-${process.arch}`,
+    );
     await assertNoRetiredHealthBridge(path.join(path.dirname(appExe), "resources"));
 
     if (!skipLaunch) {
@@ -641,6 +700,7 @@ Write-Output $item.VersionInfo.ProductVersion
         env: {
           ...process.env,
           COWORK_DESKTOP_SMOKE: "1",
+          COWORK_USER_DATA_DIR: await disposableProfile(),
         },
         stdio: "ignore",
       });

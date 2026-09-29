@@ -1,9 +1,11 @@
+import { recentTaskEventsOfType } from "./agent-signal-reads";
+import { AgentRoleRepository } from "./agent-repository-facades";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import fs from "fs";
 import path from "path";
 import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
-import { AgentRoleRepository } from "./AgentRoleRepository";
-import { TaskRepository, WorkspaceRepository } from "../database/repositories";
+
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 
 type Any = any;
@@ -173,7 +175,9 @@ export class CrossSignalService {
               ? evt.content
               : "";
         if (taskId && content) {
-          this.ingestTaskMessage(taskId, content, Date.now());
+          void this.ingestTaskMessage(taskId, content, Date.now()).catch(() => {
+            // ignore
+          });
         }
       } catch {
         // ignore
@@ -197,8 +201,12 @@ export class CrossSignalService {
     return created;
   }
 
-  private ingestTaskMessage(taskId: string, content: string, timestampMs: number): void {
-    const task = this.taskRepo.findById(taskId);
+  private async ingestTaskMessage(
+    taskId: string,
+    content: string,
+    timestampMs: number,
+  ): Promise<void> {
+    const task = await this.taskRepo.findById(taskId);
     if (!task) return;
 
     const gatewayContext = task.agentConfig?.gatewayContext;
@@ -252,13 +260,13 @@ export class CrossSignalService {
     }
   }
 
-  private formatRoleName(roleId: string): string {
+  private async formatRoleName(roleId: string): Promise<string> {
     if (!roleId || roleId === "main") return "Main";
-    const role = this.agentRoleRepo.findById(roleId);
+    const role = await this.agentRoleRepo.findById(roleId);
     return role?.displayName || role?.name || roleId.slice(0, 8);
   }
 
-  private buildSignalsSection(workspaceId: string, nowMs: number): string[] {
+  private async buildSignalsSection(workspaceId: string, nowMs: number): Promise<string[]> {
     const state = this.stateByWorkspace.get(workspaceId);
     if (!state) {
       return ["- (none)"];
@@ -270,7 +278,9 @@ export class CrossSignalService {
     for (const mention of state.mentions.values()) {
       if (mention.lastSeenAt < cutoff) continue;
       if (mention.roles.size < 2) continue;
-      const roles = Array.from(mention.roles).map((id) => this.formatRoleName(id));
+      const roles = await Promise.all(
+        Array.from(mention.roles).map((id) => this.formatRoleName(id)),
+      );
       candidates.push({ mention, roles });
     }
 
@@ -294,14 +304,14 @@ export class CrossSignalService {
   }
 
   private async flushWorkspace(workspaceId: string): Promise<void> {
-    const workspace = this.workspaceRepo.findById(workspaceId);
+    const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace?.path) return;
 
     const absPath = path.join(workspace.path, CROSS_SIGNALS_PATH);
     if (!fs.existsSync(absPath)) return;
 
     const nowMs = Date.now();
-    const sectionLines = this.buildSignalsSection(workspaceId, nowMs);
+    const sectionLines = await this.buildSignalsSection(workspaceId, nowMs);
 
     // Prune stale mentions outside the time window
     const state = this.stateByWorkspace.get(workspaceId);
@@ -338,20 +348,13 @@ export class CrossSignalService {
 
   private async rebuildFromRecentAssistantMessages(): Promise<void> {
     const sinceMs = Date.now() - WINDOW_MS;
-    const stmt = this.db.prepare(`
-      SELECT e.task_id as taskId, e.timestamp as timestamp, e.payload as payload
-      FROM task_events e
-      WHERE (e.type = 'assistant_message' OR e.legacy_type = 'assistant_message')
-        AND e.timestamp >= ?
-      ORDER BY e.timestamp DESC
-      LIMIT ?
-    `);
-
-    const rows = stmt.all(sinceMs, STARTUP_REBUILD_LIMIT) as Array<{
-      taskId: string;
-      timestamp: number;
-      payload: string;
-    }>;
+    const rows = await recentTaskEventsOfType(
+      this.db,
+      "assistant_message",
+      sinceMs,
+      STARTUP_REBUILD_LIMIT,
+      "desc",
+    );
     for (const row of rows) {
       const payload = row?.payload;
       if (!payload) continue;
@@ -368,7 +371,7 @@ export class CrossSignalService {
             ? parsed.message
             : "";
       if (!content) continue;
-      this.ingestTaskMessage(row.taskId, content, row.timestamp);
+      await this.ingestTaskMessage(row.taskId, content, row.timestamp);
     }
   }
 }

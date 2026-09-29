@@ -254,74 +254,76 @@ export class WorkSessionProtocolRepository {
     const taskId = optionalId(input.taskId);
     const now = Date.now();
 
-    const create = this.db.transaction((): string => {
-      const existing =
-        this.findSessionRow(requestedSessionId) ||
-        (taskId ? this.findSessionRowByTaskId(taskId) : undefined);
-      if (existing) {
-        if (String(existing.workspace_id || "") !== workspaceId) {
-          throw new WorkSessionProtocolError(
-            `Session ${requestedSessionId} belongs to another workspace`,
-            "SESSION_WORKSPACE_CONFLICT",
-          );
+    const create = this.db
+      .transaction((): string => {
+        const existing =
+          this.findSessionRow(requestedSessionId) ||
+          (taskId ? this.findSessionRowByTaskId(taskId) : undefined);
+        if (existing) {
+          if (String(existing.workspace_id || "") !== workspaceId) {
+            throw new WorkSessionProtocolError(
+              `Session ${requestedSessionId} belongs to another workspace`,
+              "SESSION_WORKSPACE_CONFLICT",
+            );
+          }
+          if (taskId && existing.task_id && String(existing.task_id) !== taskId) {
+            throw new WorkSessionProtocolError(
+              `Session ${requestedSessionId} is already bound to another task`,
+              "SESSION_TASK_CONFLICT",
+            );
+          }
+          if (taskId) this.bindTaskSessionInTransaction(taskId, String(existing.id));
+          return String(existing.id);
         }
-        if (taskId && existing.task_id && String(existing.task_id) !== taskId) {
-          throw new WorkSessionProtocolError(
-            `Session ${requestedSessionId} is already bound to another task`,
-            "SESSION_TASK_CONFLICT",
-          );
-        }
-        if (taskId) this.bindTaskSessionInTransaction(taskId, String(existing.id));
-        return String(existing.id);
-      }
 
-      this.db
-        .prepare(
-          `
+        this.db
+          .prepare(
+            `
             INSERT INTO work_sessions (
               id, task_id, workspace_id, protocol_version, status,
               current_turn_id, last_sequence, created_at, updated_at
             ) VALUES (?, ?, ?, 1, ?, NULL, 0, ?, ?)
           `,
-        )
-        .run(
-          requestedSessionId,
-          taskId || null,
-          workspaceId,
-          normalizeSessionStatus(input.status),
-          now,
-          now,
-        );
+          )
+          .run(
+            requestedSessionId,
+            taskId || null,
+            workspaceId,
+            normalizeSessionStatus(input.status),
+            now,
+            now,
+          );
 
-      if (input.createInitialTurn !== false) {
-        const turn = this.createTurnInTransaction({
-          sessionId: requestedSessionId,
-          taskId,
-          actor: input.actor || "system",
-          idempotencyKey: input.idempotencyKey
-            ? `${input.idempotencyKey}:root-turn`
-            : `session:${requestedSessionId}:root-turn`,
-          status: input.status === "executing" ? "executing" : "pending",
-        });
-        this.appendItemInTransaction({
-          sessionId: requestedSessionId,
-          turnId: turn.id,
-          kind: "session",
-          actor: input.actor || "system",
-          payload: {
-            event: "session.created",
-            ...(input.source ? { source: boundedText(input.source) } : {}),
-          },
-          idempotencyKey: `session:${requestedSessionId}:created`,
-          redactionClass: "standard",
-          status: turn.status,
-        });
-      }
+        if (input.createInitialTurn !== false) {
+          const turn = this.createTurnInTransaction({
+            sessionId: requestedSessionId,
+            taskId,
+            actor: input.actor || "system",
+            idempotencyKey: input.idempotencyKey
+              ? `${input.idempotencyKey}:root-turn`
+              : `session:${requestedSessionId}:root-turn`,
+            status: input.status === "executing" ? "executing" : "pending",
+          });
+          this.appendItemInTransaction({
+            sessionId: requestedSessionId,
+            turnId: turn.id,
+            kind: "session",
+            actor: input.actor || "system",
+            payload: {
+              event: "session.created",
+              ...(input.source ? { source: boundedText(input.source) } : {}),
+            },
+            idempotencyKey: `session:${requestedSessionId}:created`,
+            redactionClass: "standard",
+            status: turn.status,
+          });
+        }
 
-      if (taskId) this.bindTaskSessionInTransaction(taskId, requestedSessionId);
+        if (taskId) this.bindTaskSessionInTransaction(taskId, requestedSessionId);
 
-      return requestedSessionId;
-    })();
+        return requestedSessionId;
+      })
+      .immediate();
 
     const aggregate = this.getAggregate(create);
     if (!aggregate) throw new WorkSessionProtocolError(`Failed to create session ${create}`);
@@ -371,56 +373,57 @@ export class WorkSessionProtocolRepository {
       workspaceId,
     });
 
-    this.db.transaction(() => {
-      // Keep the old session and transcript available for audit, but detach it
-      // from the task before the new session claims the task FK.
-      if (previousSessionId && String(existingRow?.task_id || "") === taskId) {
-        this.db
-          .prepare("UPDATE work_sessions SET task_id = NULL, updated_at = ? WHERE id = ?")
-          .run(now, previousSessionId);
-      }
+    this.db
+      .transaction(() => {
+        // Keep the old session and transcript available for audit, but detach it
+        // from the task before the new session claims the task FK.
+        if (previousSessionId && String(existingRow?.task_id || "") === taskId) {
+          this.db
+            .prepare("UPDATE work_sessions SET task_id = NULL, updated_at = ? WHERE id = ?")
+            .run(now, previousSessionId);
+        }
 
-      this.db
-        .prepare(
-          `INSERT INTO work_sessions (
+        this.db
+          .prepare(
+            `INSERT INTO work_sessions (
              id, task_id, workspace_id, protocol_version, status,
              current_turn_id, last_sequence, created_at, updated_at
            ) VALUES (?, ?, ?, 1, ?, NULL, 0, ?, ?)`,
-        )
-        .run(
-          replacementSessionId,
+          )
+          .run(
+            replacementSessionId,
+            taskId,
+            workspaceId,
+            normalizeSessionStatus(binding.status),
+            now,
+            now,
+          );
+
+        const turn = this.createTurnInTransaction({
+          sessionId: replacementSessionId,
           taskId,
-          workspaceId,
-          normalizeSessionStatus(binding.status),
-          now,
-          now,
-        );
+          actor: "system",
+          idempotencyKey: `session:${replacementSessionId}:root-turn`,
+          status: binding.status === "executing" ? "executing" : "pending",
+        });
+        this.appendItemInTransaction({
+          sessionId: replacementSessionId,
+          turnId: turn.id,
+          kind: "session",
+          actor: "system",
+          payload: {
+            event: "session.recovered",
+            recoveryCode: boundedText(recovery.code, "WORKSPACE_BOUNDARY_RECOVERY"),
+          },
+          idempotencyKey: `session:${replacementSessionId}:created`,
+          redactionClass: "standard",
+          status: turn.status,
+        });
 
-      const turn = this.createTurnInTransaction({
-        sessionId: replacementSessionId,
-        taskId,
-        actor: "system",
-        idempotencyKey: `session:${replacementSessionId}:root-turn`,
-        status: binding.status === "executing" ? "executing" : "pending",
-      });
-      this.appendItemInTransaction({
-        sessionId: replacementSessionId,
-        turnId: turn.id,
-        kind: "session",
-        actor: "system",
-        payload: {
-          event: "session.recovered",
-          recoveryCode: boundedText(recovery.code, "WORKSPACE_BOUNDARY_RECOVERY"),
-        },
-        idempotencyKey: `session:${replacementSessionId}:created`,
-        redactionClass: "standard",
-        status: turn.status,
-      });
-
-      const owner = "system";
-      this.db
-        .prepare(
-          `INSERT INTO work_session_task_bindings (
+        const owner = "system";
+        this.db
+          .prepare(
+            `INSERT INTO work_session_task_bindings (
              task_id, session_id, parent_session_id, isolation_key,
              inherited_policy_snapshot_json, owner, created_at, updated_at
            ) VALUES (?, ?, NULL, ?, NULL, ?, ?, ?)
@@ -429,28 +432,29 @@ export class WorkSessionProtocolRepository {
              isolation_key = excluded.isolation_key,
              owner = excluded.owner,
              updated_at = excluded.updated_at`,
-        )
-        .run(taskId, replacementSessionId, `session:${replacementSessionId}`, owner, now, now);
+          )
+          .run(taskId, replacementSessionId, `session:${replacementSessionId}`, owner, now, now);
 
-      this.db
-        .prepare(
-          `INSERT INTO work_session_recovery_records (
+        this.db
+          .prepare(
+            `INSERT INTO work_session_recovery_records (
              id, task_id, previous_session_id, replacement_session_id,
              previous_workspace_id, workspace_id, code, details_json, created_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          randomUUID(),
-          taskId,
-          previousSessionId || null,
-          replacementSessionId,
-          previousWorkspaceId || null,
-          workspaceId,
-          boundedText(recovery.code, "WORKSPACE_BOUNDARY_RECOVERY"),
-          JSON.stringify(details),
-          now,
-        );
-    })();
+          )
+          .run(
+            randomUUID(),
+            taskId,
+            previousSessionId || null,
+            replacementSessionId,
+            previousWorkspaceId || null,
+            workspaceId,
+            boundedText(recovery.code, "WORKSPACE_BOUNDARY_RECOVERY"),
+            JSON.stringify(details),
+            now,
+          );
+      })
+      .immediate();
 
     const aggregate = this.getAggregate(replacementSessionId);
     if (!aggregate) {
@@ -490,9 +494,11 @@ export class WorkSessionProtocolRepository {
         );
       }
       if (!boundSessionId) {
-        this.db.transaction(() => {
-          this.bindTaskSessionInTransaction(taskId, String(existingRow.id));
-        })();
+        this.db
+          .transaction(() => {
+            this.bindTaskSessionInTransaction(taskId, String(existingRow.id));
+          })
+          .immediate();
       }
       return this.mapSession(existingRow);
     }
@@ -558,7 +564,9 @@ export class WorkSessionProtocolRepository {
 
   createTurn(input: WorkSessionTurnCreateInput): WorkSessionTurn {
     const sessionId = requiredId(input.sessionId, "sessionId");
-    return this.db.transaction(() => this.createTurnInTransaction({ ...input, sessionId }))();
+    return this.db
+      .transaction(() => this.createTurnInTransaction({ ...input, sessionId }))
+      .immediate();
   }
 
   private createTurnInTransaction(input: WorkSessionTurnCreateInput): WorkSessionTurn {
@@ -619,9 +627,9 @@ export class WorkSessionProtocolRepository {
   appendItem(input: WorkSessionItemAppendInput): WorkSessionItem {
     const sessionId = requiredId(input.sessionId, "sessionId");
     const turnId = requiredId(input.turnId, "turnId");
-    return this.db.transaction(() =>
-      this.appendItemInTransaction({ ...input, sessionId, turnId }),
-    )();
+    return this.db
+      .transaction(() => this.appendItemInTransaction({ ...input, sessionId, turnId }))
+      .immediate();
   }
 
   private appendItemInTransaction(input: WorkSessionItemAppendInput): WorkSessionItem {
@@ -696,64 +704,67 @@ export class WorkSessionProtocolRepository {
     const message = boundedText(input.message);
     if (!message) throw new WorkSessionProtocolError("message is required", "INVALID_MESSAGE");
 
-    const result = this.db.transaction(() => {
-      const itemKey = optionalId(input.idempotencyKey);
-      const sourceEventId = optionalId(input.sourceEventId);
-      const existing = itemKey
-        ? this.findItemRowByIdempotency(sessionId, itemKey)
-        : sourceEventId
-          ? this.findItemRowBySourceEvent(sessionId, sourceEventId)
-          : undefined;
-      if (existing) {
-        const turn = this.getTurn(String(existing.turn_id));
-        if (!turn) throw new WorkSessionProtocolError(`Turn missing for item ${existing.id}`);
-        return { turn, item: this.mapItem(existing) };
-      }
-      const sessionRow = this.findSessionRow(sessionId);
-      if (!sessionRow) throw new WorkSessionProtocolError(`WorkSession not found: ${sessionId}`);
-      if (input.expectedTurnId !== undefined) {
-        const expected = requiredId(input.expectedTurnId, "expectedTurnId");
-        const current = optionalId(sessionRow.current_turn_id);
-        if (current !== expected) throw new StaleWorkSessionTurnError(sessionId, expected, current);
-      }
+    const result = this.db
+      .transaction(() => {
+        const itemKey = optionalId(input.idempotencyKey);
+        const sourceEventId = optionalId(input.sourceEventId);
+        const existing = itemKey
+          ? this.findItemRowByIdempotency(sessionId, itemKey)
+          : sourceEventId
+            ? this.findItemRowBySourceEvent(sessionId, sourceEventId)
+            : undefined;
+        if (existing) {
+          const turn = this.getTurn(String(existing.turn_id));
+          if (!turn) throw new WorkSessionProtocolError(`Turn missing for item ${existing.id}`);
+          return { turn, item: this.mapItem(existing) };
+        }
+        const sessionRow = this.findSessionRow(sessionId);
+        if (!sessionRow) throw new WorkSessionProtocolError(`WorkSession not found: ${sessionId}`);
+        if (input.expectedTurnId !== undefined) {
+          const expected = requiredId(input.expectedTurnId, "expectedTurnId");
+          const current = optionalId(sessionRow.current_turn_id);
+          if (current !== expected)
+            throw new StaleWorkSessionTurnError(sessionId, expected, current);
+        }
 
-      let turn = sessionRow.current_turn_id
-        ? this.getTurn(String(sessionRow.current_turn_id))
-        : undefined;
-      if (!turn || isTerminalTurnStatus(turn.status)) {
-        turn = this.createTurnInTransaction({
+        let turn = sessionRow.current_turn_id
+          ? this.getTurn(String(sessionRow.current_turn_id))
+          : undefined;
+        if (!turn || isTerminalTurnStatus(turn.status)) {
+          turn = this.createTurnInTransaction({
+            sessionId,
+            taskId: input.taskId,
+            actor: input.actor || "user",
+            idempotencyKey: itemKey ? `${itemKey}:turn` : undefined,
+            status: "executing",
+          });
+        } else if (turn.status === "pending" || turn.status === "waiting") {
+          this.db
+            .prepare("UPDATE work_session_turns SET status = ?, completed_at = NULL WHERE id = ?")
+            .run("executing", turn.id);
+          this.db
+            .prepare("UPDATE work_sessions SET status = 'executing', updated_at = ? WHERE id = ?")
+            .run(Date.now(), sessionId);
+          turn = this.getTurn(turn.id)!;
+        }
+
+        const previous = this.getLastItem(sessionId);
+        const item = this.appendItemInTransaction({
           sessionId,
-          taskId: input.taskId,
+          turnId: turn.id,
+          kind: "message",
           actor: input.actor || "user",
-          idempotencyKey: itemKey ? `${itemKey}:turn` : undefined,
+          payload: { role: "user", message },
+          causalParentItemId: previous?.id,
+          idempotencyKey: itemKey,
+          sourceEventId: input.sourceEventId,
+          policySnapshot: input.policySnapshot,
+          redactionClass: "standard",
           status: "executing",
         });
-      } else if (turn.status === "pending" || turn.status === "waiting") {
-        this.db
-          .prepare("UPDATE work_session_turns SET status = ?, completed_at = NULL WHERE id = ?")
-          .run("executing", turn.id);
-        this.db
-          .prepare("UPDATE work_sessions SET status = 'executing', updated_at = ? WHERE id = ?")
-          .run(Date.now(), sessionId);
-        turn = this.getTurn(turn.id)!;
-      }
-
-      const previous = this.getLastItem(sessionId);
-      const item = this.appendItemInTransaction({
-        sessionId,
-        turnId: turn.id,
-        kind: "message",
-        actor: input.actor || "user",
-        payload: { role: "user", message },
-        causalParentItemId: previous?.id,
-        idempotencyKey: itemKey,
-        sourceEventId: input.sourceEventId,
-        policySnapshot: input.policySnapshot,
-        redactionClass: "standard",
-        status: "executing",
-      });
-      return { turn, item };
-    })();
+        return { turn, item };
+      })
+      .immediate();
     return result;
   }
 
@@ -766,98 +777,102 @@ export class WorkSessionProtocolRepository {
   ): WorkSessionTurn {
     const normalizedSessionId = requiredId(sessionId, "sessionId");
     const normalizedTurnId = requiredId(turnId, "turnId");
-    return this.db.transaction(() => {
-      const session = this.getSession(normalizedSessionId);
-      if (!session)
-        throw new WorkSessionProtocolError(`WorkSession not found: ${normalizedSessionId}`);
-      if (expectedTurnId !== undefined) {
-        this.assertExpectedTurnInTransaction(session, expectedTurnId);
-      }
-      const existing = this.getTurn(normalizedTurnId);
-      if (!existing || existing.sessionId !== normalizedSessionId) {
-        throw new WorkSessionProtocolError(
-          `Turn ${normalizedTurnId} is not in session ${normalizedSessionId}`,
-        );
-      }
-      const nextStatus = normalizeTurnStatus(status);
-      if (isTerminalTurnStatus(existing.status) && existing.status !== nextStatus) {
-        throw new WorkSessionProtocolError(
-          `Turn ${normalizedTurnId} is already terminal (${existing.status})`,
-          "TURN_TERMINAL",
-        );
-      }
-      const completedAt = isTerminalTurnStatus(nextStatus) ? Date.now() : null;
-      this.db
-        .prepare(
-          `UPDATE work_session_turns
+    return this.db
+      .transaction(() => {
+        const session = this.getSession(normalizedSessionId);
+        if (!session)
+          throw new WorkSessionProtocolError(`WorkSession not found: ${normalizedSessionId}`);
+        if (expectedTurnId !== undefined) {
+          this.assertExpectedTurnInTransaction(session, expectedTurnId);
+        }
+        const existing = this.getTurn(normalizedTurnId);
+        if (!existing || existing.sessionId !== normalizedSessionId) {
+          throw new WorkSessionProtocolError(
+            `Turn ${normalizedTurnId} is not in session ${normalizedSessionId}`,
+          );
+        }
+        const nextStatus = normalizeTurnStatus(status);
+        if (isTerminalTurnStatus(existing.status) && existing.status !== nextStatus) {
+          throw new WorkSessionProtocolError(
+            `Turn ${normalizedTurnId} is already terminal (${existing.status})`,
+            "TURN_TERMINAL",
+          );
+        }
+        const completedAt = isTerminalTurnStatus(nextStatus) ? Date.now() : null;
+        this.db
+          .prepare(
+            `UPDATE work_session_turns
            SET status = ?, completed_at = ?, terminal_reason = ?
            WHERE id = ?`,
-        )
-        .run(nextStatus, completedAt, reason ? boundedText(reason) : null, normalizedTurnId);
-      this.db
-        .prepare(
-          "UPDATE work_sessions SET status = ?, current_turn_id = ?, updated_at = ? WHERE id = ?",
-        )
-        .run(sessionStatusForTurn(nextStatus), normalizedTurnId, Date.now(), normalizedSessionId);
-      return this.getTurn(normalizedTurnId)!;
-    })();
+          )
+          .run(nextStatus, completedAt, reason ? boundedText(reason) : null, normalizedTurnId);
+        this.db
+          .prepare(
+            "UPDATE work_sessions SET status = ?, current_turn_id = ?, updated_at = ? WHERE id = ?",
+          )
+          .run(sessionStatusForTurn(nextStatus), normalizedTurnId, Date.now(), normalizedSessionId);
+        return this.getTurn(normalizedTurnId)!;
+      })
+      .immediate();
   }
 
   completeTurn(input: WorkSessionTerminalInput): WorkSessionTurn {
     const normalizedSessionId = requiredId(input.sessionId, "sessionId");
     const normalizedTurnId = requiredId(input.turnId, "turnId");
-    return this.db.transaction(() => {
-      const session = this.getSession(normalizedSessionId);
-      if (!session)
-        throw new WorkSessionProtocolError(`WorkSession not found: ${normalizedSessionId}`);
-      if (input.expectedTurnId !== undefined) {
-        this.assertExpectedTurnInTransaction(session, input.expectedTurnId);
-      }
-      const turn = this.getTurn(normalizedTurnId);
-      if (!turn || turn.sessionId !== normalizedSessionId) {
-        throw new WorkSessionProtocolError(
-          `Turn ${normalizedTurnId} is not in session ${normalizedSessionId}`,
-        );
-      }
-      if (isTerminalTurnStatus(turn.status)) {
-        if (turn.status !== input.status) {
+    return this.db
+      .transaction(() => {
+        const session = this.getSession(normalizedSessionId);
+        if (!session)
+          throw new WorkSessionProtocolError(`WorkSession not found: ${normalizedSessionId}`);
+        if (input.expectedTurnId !== undefined) {
+          this.assertExpectedTurnInTransaction(session, input.expectedTurnId);
+        }
+        const turn = this.getTurn(normalizedTurnId);
+        if (!turn || turn.sessionId !== normalizedSessionId) {
           throw new WorkSessionProtocolError(
-            `Turn ${normalizedTurnId} is already terminal (${turn.status})`,
-            "TURN_TERMINAL",
+            `Turn ${normalizedTurnId} is not in session ${normalizedSessionId}`,
           );
         }
-        return turn;
-      }
-      const reason = input.reason ? boundedText(input.reason) : undefined;
-      this.db
-        .prepare(
-          `UPDATE work_session_turns
+        if (isTerminalTurnStatus(turn.status)) {
+          if (turn.status !== input.status) {
+            throw new WorkSessionProtocolError(
+              `Turn ${normalizedTurnId} is already terminal (${turn.status})`,
+              "TURN_TERMINAL",
+            );
+          }
+          return turn;
+        }
+        const reason = input.reason ? boundedText(input.reason) : undefined;
+        this.db
+          .prepare(
+            `UPDATE work_session_turns
            SET status = ?, completed_at = ?, terminal_reason = ?
            WHERE id = ?`,
-        )
-        .run(input.status, Date.now(), reason || null, normalizedTurnId);
-      this.db
-        .prepare(
-          "UPDATE work_sessions SET status = ?, current_turn_id = ?, updated_at = ? WHERE id = ?",
-        )
-        .run(input.status, normalizedTurnId, Date.now(), normalizedSessionId);
-      const previous = this.getLastItem(normalizedSessionId);
-      this.appendItemInTransaction({
-        sessionId: normalizedSessionId,
-        turnId: normalizedTurnId,
-        kind: "status",
-        actor: input.actor || "system",
-        payload: {
-          event: `turn.${input.status}`,
-          ...(reason ? { reason } : {}),
-        },
-        causalParentItemId: previous?.id,
-        idempotencyKey: `turn:${normalizedTurnId}:terminal:${input.status}`,
-        redactionClass: "standard",
-        status: input.status,
-      });
-      return this.getTurn(normalizedTurnId)!;
-    })();
+          )
+          .run(input.status, Date.now(), reason || null, normalizedTurnId);
+        this.db
+          .prepare(
+            "UPDATE work_sessions SET status = ?, current_turn_id = ?, updated_at = ? WHERE id = ?",
+          )
+          .run(input.status, normalizedTurnId, Date.now(), normalizedSessionId);
+        const previous = this.getLastItem(normalizedSessionId);
+        this.appendItemInTransaction({
+          sessionId: normalizedSessionId,
+          turnId: normalizedTurnId,
+          kind: "status",
+          actor: input.actor || "system",
+          payload: {
+            event: `turn.${input.status}`,
+            ...(reason ? { reason } : {}),
+          },
+          causalParentItemId: previous?.id,
+          idempotencyKey: `turn:${normalizedTurnId}:terminal:${input.status}`,
+          redactionClass: "standard",
+          status: input.status,
+        });
+        return this.getTurn(normalizedTurnId)!;
+      })
+      .immediate();
   }
 
   listItems(
@@ -1003,9 +1018,11 @@ export class WorkSessionProtocolRepository {
   bindTaskSession(taskId: string, sessionId: string): void {
     const normalizedTaskId = requiredId(taskId, "taskId");
     const normalizedSessionId = requiredId(sessionId, "sessionId");
-    this.db.transaction(() => {
-      this.bindTaskSessionInTransaction(normalizedTaskId, normalizedSessionId);
-    })();
+    this.db
+      .transaction(() => {
+        this.bindTaskSessionInTransaction(normalizedTaskId, normalizedSessionId);
+      })
+      .immediate();
   }
 
   updateTaskSessionBinding(

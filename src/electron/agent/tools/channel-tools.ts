@@ -1,7 +1,9 @@
-import Database from "better-sqlite3";
+import { ChannelRepository } from "../../database/repository-facades";
+import type Database from "better-sqlite3";
+import { serviceStatements } from "../../database/service-statements";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
-import { ChannelRepository } from "../../database/repositories";
+
 import { CHANNEL_TYPES, ChannelType } from "../../gateway/channels/types";
 import { getChannelLiveFetchProvider } from "../../gateway/channel-live-fetch";
 import { FileProvenanceRegistry } from "../../security/file-provenance-registry";
@@ -213,7 +215,7 @@ export class ChannelTools {
       throw new Error('Missing required "channel"');
     }
 
-    const channel = this.channelRepo.findByType(channelType);
+    const channel = await this.channelRepo.findByType(channelType);
     if (!channel) {
       return {
         success: false,
@@ -236,41 +238,12 @@ export class ChannelTools {
       };
     }
 
-    // Get most recent message per chat, plus count within window.
-    const whereParts: string[] = ["channel_id = ?"];
-    const params: Any[] = [channel.id];
-    if (typeof sinceMs === "number") {
-      whereParts.push("timestamp >= ?");
-      params.push(sinceMs);
-    }
-
-    const whereSql = whereParts.join(" AND ");
-
-    const sql = `
-      SELECT
-        m.chat_id AS chat_id,
-        m.timestamp AS timestamp,
-        m.direction AS direction,
-        m.content AS content,
-        latest.cnt AS message_count
-      FROM channel_messages m
-      INNER JOIN (
-        SELECT chat_id, MAX(timestamp) AS max_ts, COUNT(*) AS cnt
-        FROM channel_messages
-        WHERE ${whereSql}
-        GROUP BY chat_id
-        ORDER BY max_ts DESC
-        LIMIT ?
-      ) latest
-        ON latest.chat_id = m.chat_id AND latest.max_ts = m.timestamp
-      WHERE m.channel_id = ?
-      ORDER BY m.timestamp DESC
-      LIMIT ?;
-    `;
-
-    const rows = this.db.prepare(sql).all(...params, limit, channel.id, limit) as Array<
-      Record<string, unknown>
-    >;
+    // Most recent message per chat, plus count within window (one read unit, DB6).
+    const rows = await serviceStatements(this.db).unit("channelHistory_chatSummaries", [
+      channel.id,
+      typeof sinceMs === "number" ? sinceMs : null,
+      limit,
+    ]);
 
     const chats = rows.map((r) => {
       const chatId = String(r.chat_id ?? "");
@@ -358,7 +331,7 @@ export class ChannelTools {
       throw new Error('Missing required "chat_id"');
     }
 
-    const channel = this.channelRepo.findByType(channelType);
+    const channel = await this.channelRepo.findByType(channelType);
     if (!channel) {
       return {
         success: false,
@@ -381,38 +354,13 @@ export class ChannelTools {
       };
     }
 
-    const whereParts: string[] = ["m.channel_id = ?", "m.chat_id = ?"];
-    const params: Any[] = [channel.id, chatId];
-    if (typeof sinceMs === "number") {
-      whereParts.push("m.timestamp >= ?");
-      params.push(sinceMs);
-    }
-    if (direction !== "both") {
-      whereParts.push("m.direction = ?");
-      params.push(direction);
-    }
-
-    const sql = `
-      SELECT
-        m.id AS id,
-        m.channel_message_id AS channel_message_id,
-        m.chat_id AS chat_id,
-        m.user_id AS user_id,
-        m.direction AS direction,
-        m.content AS content,
-        m.attachments AS attachments,
-        m.timestamp AS timestamp,
-        u.channel_user_id AS channel_user_id,
-        u.display_name AS display_name
-      FROM channel_messages m
-      LEFT JOIN channel_users u
-        ON u.id = m.user_id
-      WHERE ${whereParts.join(" AND ")}
-      ORDER BY m.timestamp DESC
-      LIMIT ?;
-    `;
-
-    const rows = this.db.prepare(sql).all(...params, limit) as Array<Record<string, unknown>>;
+    const rows = await serviceStatements(this.db).unit("channelHistory_chatMessages", [
+      channel.id,
+      chatId,
+      typeof sinceMs === "number" ? sinceMs : null,
+      direction,
+      limit,
+    ]);
     const messages = rows
       .map((r) => {
         const ts = typeof r.timestamp === "number" ? r.timestamp : Number(r.timestamp ?? 0);

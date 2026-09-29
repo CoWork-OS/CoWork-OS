@@ -10,7 +10,7 @@ import {
 /**
  * Repository for managing agent team runs (execution sessions) in the database.
  */
-export class AgentTeamRunRepository {
+export class AgentTeamRunStore {
   constructor(private db: Database.Database) {}
 
   /**

@@ -29,7 +29,7 @@ describeWithSqlite("MailboxService", () => {
   let service: import("../MailboxService").MailboxService;
   let db: ReturnType<import("../../database/schema").DatabaseManager["getDatabase"]>;
   let core: import("../../control-plane/ControlPlaneCoreService").ControlPlaneCoreService;
-  let agentRoleRepo: import("../../agents/AgentRoleRepository").AgentRoleRepository;
+  let agentRoleRepo: import("../../agents/AgentRoleRepository").AgentRoleStore;
 
   const now = Date.now();
 
@@ -42,7 +42,7 @@ describeWithSqlite("MailboxService", () => {
       { DatabaseManager },
       { MailboxService },
       { ControlPlaneCoreService },
-      { AgentRoleRepository },
+      { AgentRoleStore: AgentRoleRepository },
     ] = await Promise.all([
       import("../../database/schema"),
       import("../MailboxService"),
@@ -263,7 +263,7 @@ describeWithSqlite("MailboxService", () => {
     );
 
     try {
-      service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
+      await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
       const draft = await service.createMailboxDraft({
         threadId: "gmail-thread:alpha",
         mode: "reply",
@@ -368,7 +368,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("can undo a queued compose send before the external provider send runs", async () => {
-    service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
+    await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
     const draft = await service.createMailboxDraft({
       threadId: "gmail-thread:alpha",
       mode: "reply",
@@ -396,7 +396,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("persists client settings and retries failed queued sends", async () => {
-    const settings = service.updateMailboxClientSettings({
+    const settings = await service.updateMailboxClientSettings({
       remoteContentPolicy: "block",
       sendDelaySeconds: 0,
       syncRecentDays: 14,
@@ -419,7 +419,7 @@ describeWithSqlite("MailboxService", () => {
       .mockResolvedValueOnce({ data: { id: "provider-message-retry" } } as never);
 
     try {
-      service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
+      await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
       const draft = await service.createMailboxDraft({
         threadId: "gmail-thread:alpha",
         mode: "reply",
@@ -809,7 +809,7 @@ describeWithSqlite("MailboxService", () => {
       now,
     );
     db.prepare(
-      `INSERT INTO mailbox_search_fts
+      `INSERT INTO mailbox_search_records
          (record_type, record_id, thread_id, message_id, attachment_id, subject, sender, body, attachment_filename, attachment_text)
        VALUES ('message', ?, ?, ?, NULL, ?, ?, ?, '', '')`,
     ).run(
@@ -1079,7 +1079,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("creates a follow-up task when a commitment is accepted and syncs done/dismissed states", async () => {
-    const workspaceId = core.getDefaultCompany().defaultWorkspaceId!;
+    const workspaceId = (await core.getDefaultCompany()).defaultWorkspaceId!;
 
     const commitmentId = randomUUID();
     db.prepare(
@@ -1100,7 +1100,7 @@ describeWithSqlite("MailboxService", () => {
       now,
     );
 
-    const { TaskRepository } = await import("../../database/repositories");
+    const { TaskStore: TaskRepository } = await import("../../database/repositories");
     const taskRepo = new TaskRepository(db);
 
     const accepted = await service.updateCommitmentState(commitmentId, "accepted");
@@ -1880,7 +1880,7 @@ describeWithSqlite("MailboxService", () => {
       now,
     );
 
-    (service as Any).upsertThread({
+    await (service as Any).upsertThread({
       id: "imap-thread:local-read-preserved",
       accountId: "imap:user@msn.com",
       provider: "imap",
@@ -2395,7 +2395,7 @@ describeWithSqlite("MailboxService", () => {
         },
       );
 
-      const classifiedUpsert = (service as any).upsertThread(changedThread);
+      const classifiedUpsert = await (service as any).upsertThread(changedThread);
       expect(classifiedUpsert.shouldClassify).toBe(false);
 
       const newThread = (service as any).normalizeGmailThread(
@@ -2429,7 +2429,7 @@ describeWithSqlite("MailboxService", () => {
         },
       );
 
-      const newThreadUpsert = (service as any).upsertThread(newThread);
+      const newThreadUpsert = await (service as any).upsertThread(newThread);
       expect(newThreadUpsert.shouldClassify).toBe(true);
 
       const row = db
@@ -2699,7 +2699,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("creates a Mission Control issue from a mailbox thread and deduplicates active handoffs", async () => {
-    const company = core.getDefaultCompany();
+    const company = await core.getDefaultCompany();
     const operator =
       agentRoleRepo
         .findByCompanyId(company.id, false)
@@ -2732,7 +2732,7 @@ describeWithSqlite("MailboxService", () => {
     expect(first.operatorRoleId).toBe(operator!.id);
     expect(first.issueStatus).toBe("open");
 
-    const createdIssue = core.getIssue(first.issueId);
+    const createdIssue = await core.getIssue(first.issueId);
     expect(createdIssue?.metadata?.source).toBe("mailbox_handoff");
     expect(createdIssue?.assigneeAgentRoleId).toBe(operator!.id);
     expect(createdIssue?.metadata?.plannerManaged).toBe(false);
@@ -2748,7 +2748,7 @@ describeWithSqlite("MailboxService", () => {
 
     expect(second.id).toBe(first.id);
 
-    const handoffs = service.listMissionControlHandoffs("gmail-thread:alpha");
+    const handoffs = await service.listMissionControlHandoffs("gmail-thread:alpha");
     expect(handoffs).toHaveLength(1);
   });
 
@@ -2914,10 +2914,10 @@ describeWithSqlite("MailboxService", () => {
     });
     expect(timeline.some((event) => event.source === "slack")).toBe(true);
 
-    const identity = service.getContactIdentity(resolution?.identity?.id || "");
+    const identity = await service.getContactIdentity(resolution?.identity?.id || "");
     const slackHandle = identity?.handles.find((handle) => handle.channelType === "slack");
     expect(slackHandle).toBeTruthy();
-    expect(service.unlinkIdentityHandle(slackHandle!.id)).toBe(true);
+    expect(await service.unlinkIdentityHandle(slackHandle!.id)).toBe(true);
 
     const signalChannelId = randomUUID();
     const signalUserDbId = randomUUID();
@@ -2956,7 +2956,7 @@ describeWithSqlite("MailboxService", () => {
       now,
       now,
     );
-    const linkedSignalHandle = service.linkIdentityHandle({
+    const linkedSignalHandle = await service.linkIdentityHandle({
       workspaceId: identity?.workspaceId || "workspace-a",
       contactIdentityId: resolution?.identity?.id || "",
       handleType: "signal_e164",
@@ -3132,7 +3132,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("hides threads from the main inbox when a saved view opts out, unless also linked to a show-in-inbox view", async () => {
-    const workspaceId = core.getDefaultCompany().defaultWorkspaceId!;
+    const workspaceId = (await core.getDefaultCompany()).defaultWorkspaceId!;
 
     const viewHide = randomUUID();
     db.prepare(
@@ -3160,7 +3160,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("keeps inbox counts aligned with hide-only saved view filtering", async () => {
-    const workspaceId = core.getDefaultCompany().defaultWorkspaceId!;
+    const workspaceId = (await core.getDefaultCompany()).defaultWorkspaceId!;
 
     const hiddenViewId = randomUUID();
     db.prepare(

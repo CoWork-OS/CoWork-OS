@@ -1,16 +1,16 @@
-import Database from "better-sqlite3";
+import {
+  ApprovalRepository,
+  ArtifactRepository,
+  InputRequestRepository,
+} from "../database/repository-facades";
+import type Database from "better-sqlite3";
 import type {
   SessionActionAttribution,
   SessionHumanCapability,
   SessionMembersRequest,
 } from "../../shared/types";
-import {
-  ApprovalRepository,
-  ArtifactRepository,
-  InputRequestRepository,
-} from "../database/repositories";
-import { SessionMembershipService } from "../workspaces/SessionMembershipService";
-import { WorkContextRepository } from "../workspaces/WorkContextRepository";
+
+import { SessionMembershipService } from "../workspaces/workspaces-repository-facades";
 
 /**
  * Transport-neutral authorization boundary.
@@ -24,7 +24,6 @@ export class PrincipalCapabilityMiddleware {
   private readonly approvals: ApprovalRepository;
   private readonly inputs: InputRequestRepository;
   private readonly artifacts: ArtifactRepository;
-  private readonly contexts: WorkContextRepository;
 
   constructor(
     private readonly db: Database.Database,
@@ -33,7 +32,6 @@ export class PrincipalCapabilityMiddleware {
     this.approvals = new ApprovalRepository(db);
     this.inputs = new InputRequestRepository(db);
     this.artifacts = new ArtifactRepository(db);
-    this.contexts = new WorkContextRepository(db);
   }
 
   get membership(): SessionMembershipService {
@@ -56,66 +54,73 @@ export class PrincipalCapabilityMiddleware {
     return this.memberships.principalForClient(clientId);
   }
 
-  authorizeTask(
+  async authorizeTask(
     taskId: string,
     capability: SessionHumanCapability,
     principalId: string,
-  ): { contextId: string; actor: SessionActionAttribution } {
+  ): Promise<{ contextId: string; actor: SessionActionAttribution }> {
     return this.memberships.authorizeTaskAction(taskId, capability, principalId);
   }
 
-  authorizeContext(
+  async authorizeContext(
     contextId: string,
     capability: SessionHumanCapability,
     principalId: string,
-  ): SessionActionAttribution {
+  ): Promise<SessionActionAttribution> {
     return this.memberships.authorizeContextAction(contextId, capability, principalId);
   }
 
-  authorizeApproval(approvalId: string, capability: SessionHumanCapability, principalId: string) {
-    const approval = this.approvals.findById(approvalId);
+  async authorizeApproval(
+    approvalId: string,
+    capability: SessionHumanCapability,
+    principalId: string,
+  ) {
+    const approval = await this.approvals.findById(approvalId);
     if (!approval) throw new Error("Approval request not found.");
-    this.authorizeTask(approval.taskId, capability, principalId);
+    await this.authorizeTask(approval.taskId, capability, principalId);
     return approval;
   }
 
-  authorizeInputRequest(
+  async authorizeInputRequest(
     requestId: string,
     capability: SessionHumanCapability,
     principalId: string,
   ) {
-    const request = this.inputs.findById(requestId);
+    const request = await this.inputs.findById(requestId);
     if (!request) throw new Error("Input request not found.");
-    this.authorizeTask(request.taskId, capability, principalId);
+    await this.authorizeTask(request.taskId, capability, principalId);
     return request;
   }
 
-  authorizeArtifact(artifactId: string, capability: SessionHumanCapability, principalId: string) {
-    const artifact = this.artifacts.findById(artifactId);
-    if (!artifact) throw new Error("Artifact not found.");
-    this.authorizeTask(artifact.taskId, capability, principalId);
-    return artifact;
-  }
-
-  authorizeManagedSession(
-    sessionId: string,
+  async authorizeArtifact(
+    artifactId: string,
     capability: SessionHumanCapability,
     principalId: string,
   ) {
-    const context = this.contexts.findByManagedSessionId(sessionId);
-    if (!context) throw new Error("Managed session is not bound to a governed work context.");
-    return this.authorizeContext(context.id, capability, principalId);
+    const artifact = await this.artifacts.findById(artifactId);
+    if (!artifact) throw new Error("Artifact not found.");
+    await this.authorizeTask(artifact.taskId, capability, principalId);
+    return artifact;
   }
 
-  authorizeTaskIds(
+  async authorizeManagedSession(
+    sessionId: string,
+    capability: SessionHumanCapability,
+    principalId: string,
+  ): Promise<SessionActionAttribution> {
+    // The context lookup and the check share one unit.
+    return this.memberships.authorizeManagedSessionAction(sessionId, capability, principalId);
+  }
+
+  async authorizeTaskIds(
     taskIds: string[],
     capability: SessionHumanCapability,
     principalId: string,
-  ): string[] {
+  ): Promise<string[]> {
     const authorized: string[] = [];
     for (const taskId of taskIds) {
       try {
-        this.authorizeTask(taskId, capability, principalId);
+        await this.authorizeTask(taskId, capability, principalId);
         authorized.push(taskId);
       } catch {
         // A list operation is intentionally filtered rather than leaking the
@@ -125,21 +130,24 @@ export class PrincipalCapabilityMiddleware {
     return authorized;
   }
 
-  filterTasks<T extends { id: string }>(
+  async filterTasks<T extends { id: string }>(
     tasks: T[],
     capability: SessionHumanCapability,
     principalId: string,
-  ): T[] {
+  ): Promise<T[]> {
     const local = this.memberships.getLocalPrincipal().principalId;
     if (principalId === local) return tasks;
-    return tasks.filter((task) => {
-      try {
-        this.authorizeTask(task.id, capability, principalId);
-        return true;
-      } catch {
-        return false;
-      }
-    });
+    // Authorization reads the task through the async storage facade: await each check,
+    // and keep a task only when its check resolves.
+    const allowed = await Promise.all(
+      tasks.map((task) =>
+        this.authorizeTask(task.id, capability, principalId).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    );
+    return tasks.filter((_task, index) => allowed[index]);
   }
 
   /**
@@ -149,13 +157,13 @@ export class PrincipalCapabilityMiddleware {
    * loader so ordering, cursors, and archive/source predicates remain
    * unchanged.
    */
-  filterAndPaginateTasks<T extends { id: string }>(
+  async filterAndPaginateTasks<T extends { id: string }>(
     loadPage: (limit: number, offset: number) => T[],
     capability: SessionHumanCapability,
     principalId: string,
     limit: number,
     offset: number,
-  ): { tasks: T[]; total?: number } {
+  ): Promise<{ tasks: T[]; total?: number }> {
     const safeLimit = Math.max(1, Math.floor(Number.isFinite(limit) ? limit : 100));
     const safeOffset = Math.max(0, Math.floor(Number.isFinite(offset) ? offset : 0));
     const local = this.memberships.getLocalPrincipal().principalId;
@@ -182,7 +190,7 @@ export class PrincipalCapabilityMiddleware {
         seen.add(task.id);
         newRows += 1;
         try {
-          this.authorizeTask(task.id, capability, principalId);
+          await this.authorizeTask(task.id, capability, principalId);
           visible.push(task);
         } catch {
           // Filtering is intentional: list operations must not disclose
@@ -202,16 +210,16 @@ export class PrincipalCapabilityMiddleware {
     };
   }
 
-  authorizeSessionRequest(
+  async authorizeSessionRequest(
     request: SessionMembersRequest,
     capability: SessionHumanCapability,
     principalId: string,
-  ): SessionActionAttribution {
+  ): Promise<SessionActionAttribution> {
     if ("contextId" in request && request.contextId) {
       return this.authorizeContext(request.contextId, capability, principalId);
     }
     if ("taskId" in request && request.taskId) {
-      return this.authorizeTask(request.taskId, capability, principalId).actor;
+      return (await this.authorizeTask(request.taskId, capability, principalId)).actor;
     }
     throw new Error("contextId or taskId is required");
   }

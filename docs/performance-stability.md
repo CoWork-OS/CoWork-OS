@@ -180,12 +180,24 @@ WAL (Write-Ahead Logging) enables concurrent reads during writes — critical fo
 
 **File:** `src/electron/database/schema.ts`
 
+### Database Workers
+
+SQL runs off the host event loop by default: in a write worker, a reporting reader and the memory FTS worker. Measured on the disposable workload (`npm run qa:db:workload -- --all-domains`):
+
+- **Host event-loop delay:** p99 fell from 36 to 19 ms at 1 task and from 141 to 30 ms at 8 tasks.
+- **Foreign lock:** a 2 s write lock held by another process stalls the host for at most 41 ms, down from 2.2 s.
+- **Throughput:** does not regress.
+
+Under saturation the worker queue rejects requests with `overloaded` instead of growing without bound; callers on timers must catch that rejection. To rule the workers out while diagnosing, restart with `COWORK_DB_WORKER=0` (the host backend) and compare. See [Architecture: Database Ownership](architecture.md#database-ownership).
+
+**Files:** `src/electron/database/async/runtime.ts`, `src/electron/database/async/DatabaseClient.ts`
+
 ### Automatic Maintenance
 
 Daily database maintenance (deferred 60 seconds after startup):
 
-- `pruneOldEvents(90)` — deletes events for terminal tasks older than 90 days
-- `vacuumIfNeeded(500)` — runs VACUUM when freelist exceeds 500 MB
+- `pruneOldEvents(90)` — deletes events for terminal tasks older than 90 days, in bounded batches in the write worker (`maintenance.pruneTaskEventsBatch`)
+- `vacuumIfNeeded(500)` — runs VACUUM when freelist exceeds 500 MB; it waits for an idle window and never runs while tasks are active
 
 **Files:** `src/electron/database/repositories.ts`, `src/electron/agent/daemon.ts`
 

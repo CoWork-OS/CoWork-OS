@@ -74,7 +74,7 @@ describe("ProactiveSuggestionsService", () => {
     memorySearch.mockReturnValue([makeSuggestion("s1", "Write tests")]);
     const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");
 
-    const suggestions = ProactiveSuggestionsService.listActive("ws-1");
+    const suggestions = await ProactiveSuggestionsService.listActive("ws-1");
     expect(suggestions).toHaveLength(1);
 
     const savedAfterSurface = repoSave.mock.calls.at(-1)?.[1];
@@ -84,7 +84,7 @@ describe("ProactiveSuggestionsService", () => {
       ),
     ).toBe(true);
 
-    ProactiveSuggestionsService.dismiss("ws-1", "s1");
+    await ProactiveSuggestionsService.dismiss("ws-1", "s1");
     const savedAfterDismiss = repoSave.mock.calls.at(-1)?.[1];
     expect(
       savedAfterDismiss.telemetryEvents.some(
@@ -112,8 +112,8 @@ describe("ProactiveSuggestionsService", () => {
 
     const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");
 
-    expect(ProactiveSuggestionsService.listActive("ws-1")).toHaveLength(0);
-    expect(ProactiveSuggestionsService.getTopForBriefing("ws-1", 3)).toHaveLength(1);
+    expect(await ProactiveSuggestionsService.listActive("ws-1")).toHaveLength(0);
+    expect(await ProactiveSuggestionsService.getTopForBriefing("ws-1", 3)).toHaveLength(1);
   });
 
   it("stores and parses companion suggestion metadata", async () => {
@@ -164,7 +164,7 @@ describe("ProactiveSuggestionsService", () => {
 
     const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");
 
-    const suggestions = ProactiveSuggestionsService.getTopForBriefingForWorkspaces(
+    const suggestions = await ProactiveSuggestionsService.getTopForBriefingForWorkspaces(
       "all",
       ["ws-1", "ws-2"],
       10,

@@ -1492,12 +1492,12 @@ export class SessionRuntime {
     this.state.transcript.conversationHistory = sanitized;
     this.historyGeneration += 1;
     try {
-      DurableContextService.recordHistory({
+      void DurableContextService.recordHistory({
         workspaceId: this.deps.getWorkspace().id,
         taskId: this.deps.getTask().id,
         messages: sanitized,
         source: "runtime_history",
-      });
+      }).catch(() => undefined);
     } catch {
       // Durable context is an experimental continuity layer; never block runtime turns.
     }
@@ -2551,27 +2551,25 @@ export class SessionRuntime {
     proactive?: boolean;
     allowMemoryInjection?: boolean;
   }): Promise<void> {
+    // Optional durable context must not block the replacement transcript. Both writes
+    // are queued in order and failures are ignored.
     try {
-      DurableContextService.recordHistory({
+      void DurableContextService.recordHistory({
         workspaceId: this.deps.getWorkspace().id,
         taskId: this.deps.getTask().id,
         messages: opts.removedMessages,
         source: opts.historySource || "compaction_source",
-      });
-    } catch {
-      // Optional durable context must not block the replacement transcript.
-    }
-    try {
-      DurableContextService.recordCompactionSummary({
+      }).catch(() => undefined);
+      void DurableContextService.recordCompactionSummary({
         workspaceId: this.deps.getWorkspace().id,
         taskId: this.deps.getTask().id,
         removedMessages: opts.removedMessages,
         summaryBlock: opts.summaryBlock,
         contextLabel: opts.contextLabel,
         proactive: opts.proactive === true,
-      });
+      }).catch(() => undefined);
     } catch {
-      // Optional durable context must not block the replacement transcript.
+      // Workspace or task not available yet.
     }
 
     if (!opts.allowMemoryInjection) return;

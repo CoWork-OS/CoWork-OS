@@ -126,7 +126,7 @@ export class GitTools {
     }
 
     const worktreeManager = this.daemon.getWorktreeManager();
-    const info = worktreeManager.getWorktreeInfo(this.taskId);
+    const info = await worktreeManager.getWorktreeInfo(this.taskId);
     if (!info) {
       return "No worktree info found for this task.";
     }

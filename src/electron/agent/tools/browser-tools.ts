@@ -1854,7 +1854,7 @@ export class BrowserTools {
               path: result.path,
               type: "screenshot",
             });
-            this.daemon.registerArtifact(this.taskId, fullPath, "image/png");
+            await this.daemon.registerArtifact(this.taskId, fullPath, "image/png");
             return { success: true, ...result, visible: true };
           }
         }
@@ -1908,7 +1908,7 @@ export class BrowserTools {
         });
 
         // Register as artifact so it can be sent back to the user
-        this.daemon.registerArtifact(this.taskId, fullPath, "image/png");
+        await this.daemon.registerArtifact(this.taskId, fullPath, "image/png");
 
         return result;
       }

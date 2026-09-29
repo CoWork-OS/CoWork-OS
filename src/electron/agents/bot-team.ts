@@ -1,8 +1,8 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { AgentRole, AgentTeam } from "../../shared/types";
-import { AgentRoleRepository } from "./AgentRoleRepository";
-import { AgentTeamMemberRepository } from "./AgentTeamMemberRepository";
-import { AgentTeamRepository } from "./AgentTeamRepository";
+import { AgentRoleStore } from "./AgentRoleRepository";
+import { AgentTeamMemberStore } from "./AgentTeamMemberRepository";
+import { AgentTeamStore } from "./AgentTeamRepository";
 
 /** The reserved team name used by the built-in Grok-style bot roster. */
 export const DEFAULT_BOT_TEAM_NAME = "CoWork Bot Team";
@@ -119,7 +119,7 @@ function roleMatchesDefinition(role: AgentRole, definition: BotTeamDefinition): 
 }
 
 function findRoleForDefinition(
-  roleRepo: AgentRoleRepository,
+  roleRepo: AgentRoleStore,
   definition: BotTeamDefinition,
 ): AgentRole | undefined {
   const exact = roleRepo.findByName(definition.name);
@@ -137,7 +137,7 @@ function findRoleForDefinition(
 
 /** Ensure the roster exists without overwriting user-edited role metadata. */
 export function ensureDefaultBotRoles(db: Database.Database): AgentRole[] {
-  const roleRepo = new AgentRoleRepository(db);
+  const roleRepo = new AgentRoleStore(db);
   const roles: AgentRole[] = [];
 
   for (const definition of DEFAULT_BOT_TEAM_DEFINITIONS) {
@@ -208,8 +208,8 @@ export function ensureDefaultBotTeam(
   const lead = roles.find((role) => role.name === "atlas-your-chief-of-staff") || roles[0];
   if (!lead) return undefined;
 
-  const teamRepo = new AgentTeamRepository(db);
-  const memberRepo = new AgentTeamMemberRepository(db);
+  const teamRepo = new AgentTeamStore(db);
+  const memberRepo = new AgentTeamMemberStore(db);
   let team = teamRepo.findByName(normalizedWorkspaceId, DEFAULT_BOT_TEAM_NAME);
   if (!team) {
     team = teamRepo.create({

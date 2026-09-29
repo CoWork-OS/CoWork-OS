@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import type {
   ProtectedCredentialRequestSummary,
@@ -39,6 +39,16 @@ export interface ProtectedCredentialRequestInput {
 export interface ProtectedCredentialStoreLike {
   load<T extends object>(category: SettingsCategory): T | undefined;
   save<T extends object>(category: SettingsCategory, settings: T): void;
+  /**
+   * Revision-checked read-modify-write, optionally together with one SQL change
+   * (`SecureSettingsRepository.updateWithin`, DB5). Stores without it fall back to
+   * load and save, which a concurrent writer can overwrite.
+   */
+  updateWithin?<T extends object>(
+    category: SettingsCategory,
+    mutate: (current: T | undefined) => T | undefined,
+    alsoApply: (db: Database.Database) => boolean,
+  ): { value: T | undefined; revision: number | null } | null;
 }
 
 function normalizeDestination(value: string): string {
@@ -63,6 +73,13 @@ function normalizeAllowlist(values: string[]): string[] {
     throw new Error("Credential destination allowlist must contain 1 to 20 hosts.");
   }
   return [...unique].sort();
+}
+
+function normalizeVault(stored: ProtectedCredentialVault | undefined): ProtectedCredentialVault {
+  if (!stored || stored.version !== 1 || !Array.isArray(stored.credentials)) {
+    return { version: 1, credentials: [] };
+  }
+  return stored;
 }
 
 function destinationHost(value: string): string {
@@ -127,29 +144,42 @@ export class ProtectedCredentialService {
         .run(now, requestId);
       throw new Error("Credential request has expired.");
     }
-    const vault = this.loadVault();
-    const existing = request.credential_id
-      ? vault.credentials.find((credential) => credential.id === request.credential_id)
-      : undefined;
-    const credential: ProtectedCredentialRecord = {
-      id: existing?.id || uuidv4(),
-      name: String(request.name),
-      value,
-      destinationAllowlist: this.parseAllowlist(request.destination_allowlist_json),
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-      ...(existing?.lastUsedAt ? { lastUsedAt: existing.lastUsedAt } : {}),
-    };
-    const nextCredentials = vault.credentials.filter((item) => item.id !== credential.id);
-    nextCredentials.push(credential);
-    this.saveVault({ version: 1, credentials: nextCredentials });
-    this.db
-      .prepare(
-        "UPDATE protected_credential_requests SET status = 'fulfilled', resolved_at = ?, credential_id = ? WHERE id = ?",
-      )
-      .run(now, credential.id, requestId);
-    this.recordAudit({ requestId, credentialId: credential.id, action: "fulfilled" }, now);
-    return this.toSummary(credential);
+    const newCredentialId = uuidv4();
+    let credential: ProtectedCredentialRecord | null = null;
+    // The vault and the request change together (DB5): the credential lands only
+    // while the request is still pending, and a concurrent vault edit is kept.
+    const applied = this.updateVault(
+      (vault) => {
+        const existing = request.credential_id
+          ? vault.credentials.find((item) => item.id === request.credential_id)
+          : undefined;
+        credential = {
+          id: existing?.id || newCredentialId,
+          name: String(request.name),
+          value,
+          destinationAllowlist: this.parseAllowlist(request.destination_allowlist_json),
+          createdAt: existing?.createdAt || now,
+          updatedAt: now,
+          ...(existing?.lastUsedAt ? { lastUsedAt: existing.lastUsedAt } : {}),
+        };
+        const fulfilled = credential;
+        return {
+          version: 1,
+          credentials: [...vault.credentials.filter((item) => item.id !== fulfilled.id), fulfilled],
+        };
+      },
+      (db) =>
+        db
+          .prepare(
+            `UPDATE protected_credential_requests SET status = 'fulfilled', resolved_at = ?, credential_id = ?
+             WHERE id = ? AND status = 'pending'`,
+          )
+          .run(now, credential!.id, requestId).changes > 0,
+    );
+    if (!applied || !credential) throw new Error("Credential request is no longer pending.");
+    const stored: ProtectedCredentialRecord = credential;
+    this.recordAudit({ requestId, credentialId: stored.id, action: "fulfilled" }, now);
+    return this.toSummary(stored);
   }
 
   denyRequest(requestId: string, now = Date.now()): boolean {
@@ -187,44 +217,94 @@ export class ProtectedCredentialService {
     return this.loadVault().credentials.map((credential) => this.toSummary(credential));
   }
 
+  /** Revoke under a revision check; throws when the write is refused (never a silent true). */
   revokeCredential(credentialId: string, now = Date.now()): boolean {
-    const vault = this.loadVault();
-    const credential = vault.credentials.find((item) => item.id === credentialId);
-    if (!credential || credential.revokedAt) return false;
-    credential.revokedAt = now;
-    credential.updatedAt = now;
-    this.saveVault(vault);
-    this.recordAudit({ credentialId, action: "revoked" }, now);
-    return true;
+    let revoked = false;
+    this.updateVault((vault) => {
+      revoked = false;
+      const credential = vault.credentials.find((item) => item.id === credentialId);
+      if (!credential || credential.revokedAt) return undefined;
+      credential.revokedAt = now;
+      credential.updatedAt = now;
+      revoked = true;
+      return vault;
+    });
+    if (revoked) this.recordAudit({ credentialId, action: "revoked" }, now);
+    return revoked;
   }
 
   /** Resolve only inside the main process immediately before a destination-bound request. */
   resolveForDestination(credentialId: string, destination: string, now = Date.now()): string {
     const host = destinationHost(destination);
-    const vault = this.loadVault();
-    const credential = vault.credentials.find((item) => item.id === credentialId);
-    if (!credential || credential.revokedAt) throw new Error("Credential is unavailable.");
-    if (!credential.destinationAllowlist.includes(host)) {
+    // Decided on the latest stored vault (DB5): a revocation by any writer applies
+    // here, and recording lastUsedAt can never write an older vault over it.
+    let outcome: { value: string } | "unavailable" | "blocked" = "unavailable";
+    const record = (vault: ProtectedCredentialVault) => {
+      const credential = vault.credentials.find((item) => item.id === credentialId);
+      if (!credential || credential.revokedAt) {
+        outcome = "unavailable";
+        return undefined;
+      }
+      if (!credential.destinationAllowlist.includes(host)) {
+        outcome = "blocked";
+        return undefined;
+      }
+      outcome = { value: credential.value };
+      credential.lastUsedAt = now;
+      credential.updatedAt = now;
+      return vault;
+    };
+    try {
+      this.updateVault(record);
+    } catch (error) {
+      // Usage bookkeeping cannot be written (the keychain key changed): the decision
+      // still comes from the current stored vault, read fresh.
+      if ((error as { code?: string })?.code !== "settings_write_refused") throw error;
+      record(this.loadVault());
+    }
+    const resolved = outcome as { value: string } | "unavailable" | "blocked";
+    if (resolved === "unavailable") throw new Error("Credential is unavailable.");
+    if (resolved === "blocked") {
       this.recordAudit({ credentialId, destination: host, action: "blocked_destination" }, now);
       throw new Error("Credential is not authorized for this destination.");
     }
-    credential.lastUsedAt = now;
-    credential.updatedAt = now;
-    this.saveVault(vault);
     this.recordAudit({ credentialId, destination: host, action: "resolved" }, now);
-    return credential.value;
+    return resolved.value;
   }
 
   private loadVault(): ProtectedCredentialVault {
-    const stored = this.secureStore.load<ProtectedCredentialVault>(CATEGORY);
-    if (!stored || stored.version !== 1 || !Array.isArray(stored.credentials)) {
-      return { version: 1, credentials: [] };
-    }
-    return stored;
+    return normalizeVault(this.secureStore.load<ProtectedCredentialVault>(CATEGORY));
   }
 
-  private saveVault(vault: ProtectedCredentialVault): void {
-    this.secureStore.save(CATEGORY, vault);
+  /**
+   * Apply `mutate` to the latest vault (it may run more than once on a conflict, so it
+   * must derive everything from its argument); `undefined` leaves the vault unchanged.
+   * With `alsoApply`, that SQL change commits in the same transaction and a false
+   * result aborts both (returns false).
+   */
+  private updateVault(
+    mutate: (vault: ProtectedCredentialVault) => ProtectedCredentialVault | undefined,
+    alsoApply: (db: Database.Database) => boolean = () => true,
+  ): boolean {
+    if (this.secureStore.updateWithin) {
+      return (
+        this.secureStore.updateWithin<ProtectedCredentialVault>(
+          CATEGORY,
+          (current) => mutate(normalizeVault(current)),
+          alsoApply,
+        ) !== null
+      );
+    }
+    const next = mutate(this.loadVault());
+    if (!alsoApply(this.db)) return false;
+    if (next) this.secureStore.save(CATEGORY, next);
+    return true;
+  }
+
+  /** The task a credential request belongs to, for authorizing actions on it. */
+  requestTaskId(requestId: string): string | undefined {
+    const row = this.getRequestRow(requestId);
+    return typeof row?.task_id === "string" && row.task_id ? row.task_id : undefined;
   }
 
   private getRequestRow(id: string): Record<string, unknown> | undefined {

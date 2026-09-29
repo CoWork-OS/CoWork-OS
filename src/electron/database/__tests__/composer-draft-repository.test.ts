@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createEmptyComposerDraft, type ComposerDraft } from "../../../shared/composer-drafts";
-import { ComposerDraftRepository } from "../composer-draft-repository";
+import { ComposerDraftStore } from "../composer-draft-repository";
 
 let db: Database.Database | null = null;
 
@@ -21,7 +21,7 @@ afterEach(() => {
   db = null;
 });
 
-describe("ComposerDraftRepository", () => {
+describe("ComposerDraftStore", () => {
   it("keeps the newest revision and rejects stale writes", () => {
     db = new Database(":memory:");
     db.exec(`
@@ -37,7 +37,7 @@ describe("ComposerDraftRepository", () => {
         expires_at INTEGER
       )
     `);
-    const repository = new ComposerDraftRepository(db);
+    const repository = new ComposerDraftStore(db);
 
     expect(repository.upsertIfNewer(makeDraft(2))).toBe(true);
     expect(repository.upsertIfNewer(makeDraft(1))).toBe(false);
@@ -59,7 +59,7 @@ describe("ComposerDraftRepository", () => {
         expires_at INTEGER
       )
     `);
-    const repository = new ComposerDraftRepository(db);
+    const repository = new ComposerDraftStore(db);
     const draft = makeDraft(4);
     repository.upsertIfNewer(draft);
     expect(repository.clear(draft.draftKey, 3)).toBe(false);
@@ -83,7 +83,7 @@ describe("ComposerDraftRepository", () => {
         expires_at INTEGER
       )
     `);
-    const repository = new ComposerDraftRepository(db);
+    const repository = new ComposerDraftStore(db);
     const draft = makeDraft(1);
     repository.upsertIfNewer(draft);
     expect(
@@ -112,7 +112,7 @@ describe("ComposerDraftRepository", () => {
         expires_at INTEGER
       )
     `);
-    const repository = new ComposerDraftRepository(db);
+    const repository = new ComposerDraftStore(db);
     const draft = {
       ...createEmptyComposerDraft({ scope: "local", workspaceId: "workspace-1" }),
       text: "kept across task creation",
@@ -143,7 +143,7 @@ describe("ComposerDraftRepository", () => {
         expires_at INTEGER
       )
     `);
-    const repository = new ComposerDraftRepository(db);
+    const repository = new ComposerDraftStore(db);
     const source = makeDraft(2, {
       draftKey: "local:workspace-1:new:main",
       taskId: null,
@@ -177,7 +177,7 @@ describe("ComposerDraftRepository", () => {
         expires_at INTEGER
       )
     `);
-    const repository = new ComposerDraftRepository(db);
+    const repository = new ComposerDraftStore(db);
     const live = makeDraft(1, {
       attachments: [
         {

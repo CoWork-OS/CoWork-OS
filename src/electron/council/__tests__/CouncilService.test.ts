@@ -25,7 +25,7 @@ describeWithSqlite("CouncilService", () => {
   let dbManager: import("../../database/schema").DatabaseManager;
   let db: ReturnType<import("../../database/schema").DatabaseManager["getDatabase"]>;
   let service: import("../CouncilService").CouncilService;
-  let taskRepo: import("../../database/repositories").TaskRepository;
+  let taskRepo: import("../../database/repositories").TaskStore;
   let taskEventRepo: import("../../database/repositories").TaskEventRepository;
   let notifications: Array<{ title: string; message: string; taskId?: string }>;
   let buildTrigger: (councilId: string) => string;
@@ -122,7 +122,7 @@ describeWithSqlite("CouncilService", () => {
         throw new Error("gateway unavailable");
       },
     });
-    taskRepo = new repositories.TaskRepository(db);
+    taskRepo = new repositories.TaskStore(db);
     taskEventRepo = new repositories.TaskEventRepository(db);
   });
 
@@ -152,7 +152,7 @@ describeWithSqlite("CouncilService", () => {
 
     expect(created.managedCronJobId).toBeTruthy();
     expect(fakeCronService.add).toHaveBeenCalledTimes(1);
-    expect(service.list(workspace.id)).toHaveLength(1);
+    expect(await service.list(workspace.id)).toHaveLength(1);
 
     const updated = await service.update({
       id: created.id,
@@ -167,7 +167,7 @@ describeWithSqlite("CouncilService", () => {
     const removed = await service.delete(created.id);
     expect(removed).toBe(true);
     expect(fakeCronService.remove).toHaveBeenCalledWith(created.managedCronJobId);
-    expect(service.list(workspace.id)).toHaveLength(0);
+    expect(await service.list(workspace.id)).toHaveLength(0);
   });
 
   it("rotates proposer seats and caps all-local councils to two concurrent participants", async () => {
@@ -202,12 +202,12 @@ describeWithSqlite("CouncilService", () => {
     expect(first?.agentConfig?.multiLlmConfig?.participants[0]?.isIdeaProposer).toBe(true);
     expect(first?.prompt).toContain("Roadmap");
 
-    const afterFirst = service.get(council.id);
+    const afterFirst = await service.get(council.id);
     expect(afterFirst?.nextIdeaSeatIndex).toBe(1);
 
     const second = await service.prepareTaskForTrigger(buildTrigger(council.id), workspace.id);
     expect(second?.agentConfig?.multiLlmConfig?.participants[1]?.isIdeaProposer).toBe(true);
-    expect(service.get(council.id)?.nextIdeaSeatIndex).toBe(2);
+    expect((await service.get(council.id))?.nextIdeaSeatIndex).toBe(2);
   });
 
   it("finalizes memo persistence and records delivery failure without dropping the memo", async () => {
@@ -245,7 +245,7 @@ describeWithSqlite("CouncilService", () => {
     });
     cronState.lastRunTaskId = task.id;
 
-    service.bindRunTask(prepared!.runId, task.id);
+    await service.bindRunTask(prepared!.runId, task.id);
     taskEventRepo.create({
       taskId: task.id,
       timestamp: Date.now(),
@@ -257,7 +257,7 @@ describeWithSqlite("CouncilService", () => {
     expect(completed?.memoId).toBeTruthy();
     expect(completed?.status).toBe("completed");
 
-    const memo = service.getMemo(completed!.memoId!);
+    const memo = await service.getMemo(completed!.memoId!);
     expect(memo?.content).toContain("Executive Summary");
     expect(memo?.delivered).toBe(false);
     expect(memo?.deliveryError).toContain("gateway unavailable");

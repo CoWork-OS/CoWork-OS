@@ -5,31 +5,31 @@
  * Handles capture, compression, search, and context injection.
  */
 
+import { WorkspaceRepository } from "../database/repository-facades";
+import { MemoryEmbeddingRepository, MemoryRepository } from "../database/repository-facades";
+import { MemorySettingsRepository, MemorySummaryRepository } from "../database/repository-facades";
+import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
 import { EventEmitter } from "events";
 import { isGeneratedPlaybookContent } from "./playbook-markers";
+import { randomUUID } from "crypto";
 import type { DatabaseManager } from "../database/schema";
 import {
-  MemoryRepository,
-  MemoryEmbeddingRepository,
-  MemorySummaryRepository,
-  MemorySettingsRepository,
-  WorkspaceRepository,
   Memory,
   MemorySettings,
   MemorySearchResult,
   MemoryTimelineEntry,
   MemoryType,
   MemoryStats,
+  onMemoryEmbeddingChange,
 } from "../database/repositories";
+import type { MemoryEmbeddingRow } from "../database/memory-embedding-sql";
+import type { CapturedMemoryWrite } from "./memory-capture-sql";
 import { LLMProviderFactory } from "../agent/llm";
 import { recordLlmCallError, recordLlmCallSuccess } from "../agent/llm/usage-telemetry";
 import { estimateTokens } from "../agent/context-manager";
 import { InputSanitizer } from "../agent/security";
-import {
-  cosineSimilarity,
-  createLocalEmbedding,
-  tokenizeForLocalEmbedding,
-} from "./local-embedding";
+import { createLocalEmbedding } from "./local-embedding";
+import { planHybridMemories, wantsSemanticStage } from "./memory-hybrid-rank";
 import {
   MarkdownMemoryIndexService,
   type MarkdownMemoryReadGuard,
@@ -171,6 +171,12 @@ export class MemoryService {
   private static importedEmbeddingsLoaded = false;
   private static importedEmbeddingBackfillInProgress = false;
   private static embeddingsLoadedForWorkspace = new Set<string>();
+  // Embedding cache loads read through the async storage facade: callers share an
+  // in-flight load, and a load merges into entries cached while it ran.
+  private static embeddingLoads = new Map<string, Promise<void>>();
+  private static importedEmbeddingsLoad: Promise<void> | null = null;
+  // Bumped when the caches are invalidated, so a load that started before drops its rows.
+  private static embeddingCacheGeneration = 0;
   private static embeddingBackfillInProgress = new Set<string>();
   private static initialized = false;
   private static compressionQueue: string[] = [];
@@ -188,8 +194,16 @@ export class MemoryService {
   private static sideChannelPolicyPaused = false;
   private static cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private static db?: import("better-sqlite3").Database;
+  /** The memory domain's statement port (DB6). */
+  private static sql?: MemoryStatementPort;
   private static workspaceRepo?: WorkspaceRepository;
   private static ftsWorker: import("../database/FtsWorkerClient").FtsWorkerClient | null = null;
+  private static storageEstimateByWorkspace = new Map<
+    string,
+    { bytes: number; measuredAt: number }
+  >();
+  private static readonly STORAGE_ESTIMATE_MAX_AGE_MS = 5 * 60 * 1000;
+  private static readonly STORAGE_ESTIMATE_HEADROOM = 0.8;
 
   private static promptRecallCache = new Map<
     string,
@@ -215,6 +229,7 @@ export class MemoryService {
 
     const db = dbManager.getDatabase();
     this.db = db;
+    this.sql = createMemoryStatementPort(db);
     MemoryWriteGate.initialize(dbManager);
     this.workspaceRepo = new WorkspaceRepository(db);
     this.memoryRepo = new MemoryRepository(db);
@@ -226,7 +241,10 @@ export class MemoryService {
     this.initialized = true;
 
     // Start periodic cleanup
-    this.cleanupIntervalHandle = setInterval(() => this.runCleanup(), CLEANUP_INTERVAL_MS);
+    // runCleanup handles and logs its own errors.
+    this.cleanupIntervalHandle = setInterval(() => {
+      void this.runCleanup();
+    }, CLEANUP_INTERVAL_MS);
 
     logger.info("[MemoryService] Initialized");
   }
@@ -236,9 +254,22 @@ export class MemoryService {
     return this.initialized ? this.db : undefined;
   }
 
+  /** The memory statement port, for services kept beside memories. */
+  static getStatements(): MemoryStatementPort | undefined {
+    return this.initialized ? this.sql : undefined;
+  }
+
   static initFtsWorker(worker: import("../database/FtsWorkerClient").FtsWorkerClient): void {
     this.ftsWorker = worker;
+    // The worker ranks with its own embedding cache (DB4); every persisted change
+    // reaches it through the repository.
+    this.unsubscribeEmbeddingChanges?.();
+    this.unsubscribeEmbeddingChanges = onMemoryEmbeddingChange((change) =>
+      worker.invalidateEmbeddings(change),
+    );
   }
+
+  private static unsubscribeEmbeddingChanges: (() => void) | null = null;
 
   /**
    * Sync workspace markdown index (kit notes, docs, etc.)
@@ -259,32 +290,37 @@ export class MemoryService {
    * Search indexed markdown within a workspace path (best-effort).
    * Intended for retrieving durable workspace notes such as `.cowork/` memory files.
    */
-  static searchWorkspaceMarkdown(
+  static async searchWorkspaceMarkdown(
     workspaceId: string,
     workspacePath: string,
     query: string,
     limit = 10,
     readGuard?: MarkdownMemoryReadGuard,
-  ): MemorySearchResult[] {
+  ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
     if (!this.markdownIndex) return [];
     try {
-      return this.markdownIndex.search(workspaceId, workspacePath, query, limit, readGuard);
+      return await this.markdownIndex.search(workspaceId, workspacePath, query, limit, readGuard);
     } catch {
       return [];
     }
   }
 
-  static getRecentWorkspaceMarkdownSnippets(
+  static async getRecentWorkspaceMarkdownSnippets(
     workspaceId: string,
     workspacePath: string,
     limit = 3,
     readGuard?: MarkdownMemoryReadGuard,
-  ): MemorySearchResult[] {
+  ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
     if (!this.markdownIndex) return [];
     try {
-      return this.markdownIndex.getRecentSnippets(workspaceId, workspacePath, limit, readGuard);
+      return await this.markdownIndex.getRecentSnippets(
+        workspaceId,
+        workspacePath,
+        limit,
+        readGuard,
+      );
     } catch {
       return [];
     }
@@ -318,7 +354,7 @@ export class MemoryService {
     }
 
     // Check settings
-    const settings = this.settingsRepo.getOrCreate(workspaceId);
+    const settings = await this.settingsRepo.getOrCreate(workspaceId);
     if (!settings.enabled || (!settings.autoCapture && !options?.forceCapture)) {
       return null;
     }
@@ -354,7 +390,7 @@ export class MemoryService {
 
     const compressionOrigin = options?.origin ?? (taskId ? "task" : "unknown");
     if (!options?.skipMemoryWriteGate) {
-      const gate = MemoryWriteGate.evaluate({
+      const gate = await MemoryWriteGate.evaluate({
         workspaceId,
         taskId,
         target: "archive",
@@ -375,8 +411,12 @@ export class MemoryService {
       }
     }
 
-    // Create memory
-    const memory = this.memoryRepo.create({
+    // Build the whole capture on the host (id, summary, embedding, observation), then
+    // write it in one transaction: in the database worker when this run uses it (DB6),
+    // otherwise on the host connection.
+    const createdAt = Date.now();
+    const memory: Memory = {
+      id: randomUUID(),
       workspaceId,
       taskId,
       type,
@@ -384,7 +424,9 @@ export class MemoryService {
       tokens,
       isCompressed: false,
       isPrivate: finalIsPrivate,
-    });
+      createdAt,
+      updatedAt: createdAt,
+    };
 
     this.recordCompressionCapture(workspaceId, compressionOrigin);
     const compressionPriority = this.deriveCompressionPriority(
@@ -406,13 +448,26 @@ export class MemoryService {
     // Best-effort: keep a concise local summary immediately so retrieval and prompts
     // do not need to consume the full raw payload for low-value entries.
     const localSummary = this.buildDeterministicSummary(truncatedContent);
-    if (localSummary) {
-      this.updateMemorySummary(memory, workspaceId, localSummary, true);
+    let embedding: { values: number[]; updatedAt: number } | undefined;
+    const finalSummary = localSummary ? this.buildDeterministicSummary(localSummary) : "";
+    if (finalSummary) {
+      memory.summary = finalSummary;
+      memory.tokens = estimateTokens(finalSummary);
+      memory.isCompressed = true;
+      try {
+        embedding = {
+          values: createLocalEmbedding(this.normalizeForEmbedding(finalSummary, finalSummary)),
+          updatedAt: memory.updatedAt,
+        };
+      } catch {
+        // The embedding backfill computes it later.
+      }
     }
 
+    let observation: ReturnType<typeof MemoryObservationService.buildMetadataFor> | undefined;
     if (MemoryFeaturesManager.loadSettings().structuredObservationsEnabled !== false) {
       try {
-        MemoryObservationService.createForMemory(
+        observation = MemoryObservationService.buildMetadataFor(
           {
             ...memory,
             summary: localSummary || memory.summary,
@@ -432,6 +487,27 @@ export class MemoryService {
       } catch {
         // Structured observations are an auxiliary index; memory capture should still succeed.
       }
+    }
+
+    await this.writeCapture({
+      memory: {
+        id: memory.id,
+        workspaceId,
+        taskId: taskId || null,
+        type,
+        content: truncatedContent,
+        summary: memory.summary || null,
+        tokens: memory.tokens,
+        isCompressed: memory.isCompressed,
+        isPrivate: finalIsPrivate,
+        createdAt: memory.createdAt,
+        updatedAt: memory.updatedAt,
+      },
+      ...(embedding ? { embedding } : {}),
+      ...(observation ? { observation } : {}),
+    });
+    if (embedding) {
+      this.cacheEmbedding(workspaceId, memory.id, embedding.values, embedding.updatedAt);
     }
 
     // Queue a batched LLM digest only when the signal is worth it. Routine entries
@@ -465,7 +541,7 @@ export class MemoryService {
     if (
       !finalIsPrivate &&
       options?.allowExternalMirror !== false &&
-      this.isExternalMemoryMirrorAllowed(workspaceId)
+      (await this.isExternalMemoryMirrorAllowed(workspaceId))
     ) {
       void SupermemoryService.mirrorMemory({
         workspace: {
@@ -483,7 +559,9 @@ export class MemoryService {
     }
 
     // Enforce per-workspace storage cap (best-effort).
-    this.enforceStorageLimit(workspaceId, settings.maxStorageMb);
+    await this.enforceStorageLimit(workspaceId, settings.maxStorageMb, {
+      addedBytes: truncatedContent.length + (memory.summary?.length ?? 0),
+    });
 
     return memory;
   }
@@ -508,29 +586,55 @@ export class MemoryService {
    * Search memories - Layer 1 of progressive retrieval
    * Returns IDs + brief snippets (~50 tokens each)
    */
-  static search(workspaceId: string, query: string, limit = 20): MemorySearchResult[] {
+  static async search(
+    workspaceId: string,
+    query: string,
+    limit = 20,
+  ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
-    const results = this.searchInternal(workspaceId, query, limit);
-    if (this.db && results.length > 0) {
-      MemoryTierService.recordReferenceBatch(
-        this.db,
+    const results = await this.searchInternal(workspaceId, query, limit);
+    if (this.sql && results.length > 0) {
+      // Best-effort bookkeeping; it logs its own failures and never delays the search.
+      void MemoryTierService.recordReferenceBatch(
+        this.sql,
         results.map((r) => r.id),
       );
     }
     return results;
   }
 
-  private static searchInternal(
+  private static async searchInternal(
     workspaceId: string,
     query: string,
     limit = 20,
-  ): MemorySearchResult[] {
+  ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
     // Include private memories — private means not shared externally, not hidden from the owner
-    const lexicalLimit = Math.min(Math.max(limit, 5), 50);
-    const lexicalLocal = this.memoryRepo.search(workspaceId, query, lexicalLimit, true);
-    const lexicalImportedGlobal = this.memoryRepo.searchImportedGlobal(query, lexicalLimit, true);
+    const lexicalLimit = this.lexicalLimitFor(limit);
+    const lexicalLocal = await this.memoryRepo.search(workspaceId, query, lexicalLimit, true);
+    const lexicalImportedGlobal = await this.memoryRepo.searchImportedGlobal(
+      query,
+      lexicalLimit,
+      true,
+    );
+    return this.rankHybrid(workspaceId, query, limit, lexicalLocal, lexicalImportedGlobal);
+  }
 
+  private static lexicalLimitFor(limit: number): number {
+    return Math.min(Math.max(limit, 5), 50);
+  }
+
+  /**
+   * Rank lexical candidates together with local embedding similarity. Runs no FTS
+   * itself, so async callers can supply lexical results from the FTS worker.
+   */
+  private static async rankHybrid(
+    workspaceId: string,
+    query: string,
+    limit: number,
+    lexicalLocal: MemorySearchResult[],
+    lexicalImportedGlobal: MemorySearchResult[],
+  ): Promise<MemorySearchResult[]> {
     // Kick off a background backfill for imported histories (and any other memories)
     // so semantic recall improves over time without requiring re-import.
     this.kickoffEmbeddingBackfill(workspaceId);
@@ -541,90 +645,23 @@ export class MemoryService {
     // - compute local embedding similarity as a second signal
     // - merge + rerank for better recall on imported memories and natural language prompts
     try {
-      const tokens = tokenizeForLocalEmbedding(query);
-      if (tokens.length < 2) {
+      if (!wantsSemanticStage(query)) {
         return this.mergeLexicalOnly(lexicalLocal, lexicalImportedGlobal, limit);
       }
-
-      this.ensureEmbeddingsLoaded(workspaceId);
-      const workspaceEmbeddings = this.memoryEmbeddingsByWorkspace.get(workspaceId);
-      this.ensureImportedEmbeddingsLoaded();
-
-      const candidateIds = new Set<string>();
-      for (const r of lexicalLocal) candidateIds.add(r.id);
-      for (const r of lexicalImportedGlobal) candidateIds.add(r.id);
-
-      const queryEmbedding = createLocalEmbedding(query);
-      if (queryEmbedding.every((v) => v === 0)) {
-        return this.mergeLexicalOnly(lexicalLocal, lexicalImportedGlobal, limit);
-      }
-
-      // Semantic candidate set: scan local embeddings and keep top K.
-      const semanticK = Math.min(Math.max(limit * 3, 30), 120);
-      const semanticCandidates: Array<{ id: string; score: number }> = [];
-      if (workspaceEmbeddings && workspaceEmbeddings.size > 0) {
-        for (const [memoryId, entry] of workspaceEmbeddings.entries()) {
-          const score = cosineSimilarity(queryEmbedding, entry.embedding);
-          if (!Number.isFinite(score) || score <= 0) continue;
-          semanticCandidates.push({ id: memoryId, score });
-        }
-      }
-
-      // Global semantic scan over imported-memory embeddings.
-      if (this.importedEmbeddings.size > 0) {
-        for (const [memoryId, entry] of this.importedEmbeddings.entries()) {
-          const score = cosineSimilarity(queryEmbedding, entry.embedding);
-          if (!Number.isFinite(score) || score <= 0) continue;
-          semanticCandidates.push({ id: memoryId, score });
-        }
-      }
-      semanticCandidates.sort((a, b) => b.score - a.score);
-      for (const cand of semanticCandidates.slice(0, semanticK)) {
-        candidateIds.add(cand.id);
-      }
-
-      const scored: Array<{ result: MemorySearchResult; score: number }> = [];
-
-      // Map lexical results for baseline score; keep stable if semantic is unavailable.
-      const lexicalRankLocal = new Map<string, number>();
-      lexicalLocal.forEach((r, idx) => lexicalRankLocal.set(r.id, idx));
-      const lexicalRankImported = new Map<string, number>();
-      lexicalImportedGlobal.forEach((r, idx) => lexicalRankImported.set(r.id, idx));
-
-      const semanticScoreById = new Map<string, number>();
-      for (const cand of semanticCandidates.slice(0, semanticK)) {
-        semanticScoreById.set(cand.id, cand.score);
-      }
-
-      // Pull full memory rows for candidates to generate snippets.
-      const candidates = this.memoryRepo.getFullDetails(Array.from(candidateIds));
-      for (const mem of candidates) {
-        const semantic = semanticScoreById.get(mem.id) ?? 0;
-        const idxLocal = lexicalRankLocal.get(mem.id);
-        const idxImported = lexicalRankImported.get(mem.id);
-        const baselineLocal = idxLocal === undefined ? 0 : 1 / (1 + idxLocal);
-        const baselineImported = idxImported === undefined ? 0 : 1 / (1 + idxImported);
-        const baseline = Math.max(baselineLocal, baselineImported);
-
-        // Weighted hybrid score. Favor lexical when present but allow semantic to lift matches.
-        const hybrid = 0.55 * semantic + 0.45 * baseline;
-
-        scored.push({
-          result: {
-            id: mem.id,
-            snippet: mem.summary || this.truncate(mem.content, 200),
-            type: mem.type,
-            relevanceScore: hybrid,
-            createdAt: mem.createdAt,
-            taskId: mem.taskId,
-            source: "db" as const,
-          },
-          score: hybrid,
-        });
-      }
-
-      scored.sort((a, b) => b.score - a.score || b.result.createdAt - a.result.createdAt);
-      return scored.slice(0, limit).map((s) => s.result);
+      await this.ensureEmbeddingsLoaded(workspaceId);
+      await this.ensureImportedEmbeddingsLoaded();
+      const plan = planHybridMemories({
+        query,
+        limit,
+        lexicalLocal,
+        lexicalImportedGlobal,
+        workspaceEmbeddings: this.memoryEmbeddingsByWorkspace.get(workspaceId)?.entries(),
+        importedEmbeddings: this.importedEmbeddings.entries(),
+      });
+      if ("results" in plan) return plan.results as MemorySearchResult[];
+      return plan.rank(
+        await this.memoryRepo.getFullDetails(plan.candidateIds),
+      ) as MemorySearchResult[];
     } catch {
       return this.mergeLexicalOnly(lexicalLocal, lexicalImportedGlobal, limit);
     }
@@ -689,14 +726,31 @@ export class MemoryService {
     return out;
   }
 
-  private static ensureEmbeddingsLoaded(workspaceId: string): void {
+  private static ensureEmbeddingsLoaded(workspaceId: string): Promise<void> {
+    if (this.embeddingsLoadedForWorkspace.has(workspaceId)) return Promise.resolve();
+    let load = this.embeddingLoads.get(workspaceId);
+    if (!load) {
+      load = this.loadEmbeddings(workspaceId).finally(() => {
+        this.embeddingLoads.delete(workspaceId);
+      });
+      this.embeddingLoads.set(workspaceId, load);
+    }
+    return load;
+  }
+
+  private static async loadEmbeddings(workspaceId: string): Promise<void> {
     // Lazy load persisted embeddings for a workspace into memory.
     // If the table doesn't exist yet (older DB), this will throw and be ignored by callers.
-    if (this.embeddingsLoadedForWorkspace.has(workspaceId)) return;
+    const generation = this.embeddingCacheGeneration;
     try {
-      const embeddings = this.embeddingRepo.getByWorkspace(workspaceId);
-      const map = new Map<string, { updatedAt: number; embedding: Float32Array }>();
+      const embeddings = await this.embeddingRepo.getByWorkspace(workspaceId);
+      if (generation !== this.embeddingCacheGeneration) return;
+      const map =
+        this.memoryEmbeddingsByWorkspace.get(workspaceId) ??
+        new Map<string, { updatedAt: number; embedding: Float32Array }>();
       for (const row of embeddings) {
+        const cached = map.get(row.memoryId);
+        if (cached && cached.updatedAt >= row.updatedAt) continue;
         if (Array.isArray(row.embedding) && row.embedding.length > 0) {
           map.set(row.memoryId, {
             updatedAt: row.updatedAt,
@@ -708,7 +762,9 @@ export class MemoryService {
     } catch {
       // ignore, feature will still work via in-memory embeddings computed on demand
     } finally {
-      this.embeddingsLoadedForWorkspace.add(workspaceId);
+      if (generation === this.embeddingCacheGeneration) {
+        this.embeddingsLoadedForWorkspace.add(workspaceId);
+      }
     }
   }
 
@@ -743,15 +799,22 @@ export class MemoryService {
     const maxBatchesPerRun = 200; // hard safety cap
     try {
       for (let batch = 0; batch < maxBatchesPerRun; batch++) {
-        const missing = this.embeddingRepo.findMissingOrStale(workspaceId, batchSize);
+        // DB4: with the FTS worker the scan runs there; embedding and upsert stay here.
+        const missing = this.ftsWorker
+          ? await this.ftsWorker.findMissingEmbeddings(workspaceId, batchSize)
+          : await this.embeddingRepo.findMissingOrStale(workspaceId, batchSize);
         if (missing.length === 0) break;
 
-        for (const mem of missing) {
-          const text = this.normalizeForEmbedding(mem.summary, mem.content);
-          const embedding = createLocalEmbedding(text);
-          // Persist and cache.
-          this.embeddingRepo.upsert(workspaceId, mem.memoryId, embedding, mem.updatedAt);
-          this.cacheEmbedding(workspaceId, mem.memoryId, embedding, mem.updatedAt);
+        const rows = missing.map((mem) => ({
+          memoryId: mem.memoryId,
+          workspaceId,
+          updatedAt: mem.updatedAt,
+          embedding: createLocalEmbedding(this.normalizeForEmbedding(mem.summary, mem.content)),
+        }));
+        const written = new Set(await this.writeBackfillBatch(rows));
+        for (const row of rows) {
+          if (!written.has(row.memoryId)) continue;
+          this.cacheEmbedding(workspaceId, row.memoryId, row.embedding, row.updatedAt);
         }
 
         // Yield to avoid monopolizing the event loop on large histories.
@@ -759,6 +822,42 @@ export class MemoryService {
       }
     } finally {
       this.embeddingBackfillInProgress.delete(workspaceId);
+    }
+  }
+
+  /**
+   * Persist one embedding-backfill batch: in the database worker when this run uses it
+   * (DB4), otherwise in one host transaction. Rows whose memory changed meanwhile are
+   * skipped. Returns the ids written. Worker writes bypass the repository's change
+   * notification, so the FTS worker's cache is told here.
+   */
+  private static async writeBackfillBatch(rows: MemoryEmbeddingRow[]): Promise<string[]> {
+    if (rows.length === 0) return [];
+    const { getDatabaseClient } = await import("../database/async/runtime");
+    const client = await getDatabaseClient();
+    if (!client) return this.embeddingRepo.upsertBackfillBatch(rows);
+    const { written } = await client.execute("memory.upsertEmbeddings", { rows });
+    if (written.length > 0) {
+      this.ftsWorker?.invalidateEmbeddings({ kind: "memories", memoryIds: written });
+    }
+    return written;
+  }
+
+  /**
+   * Commit one capture: in the database worker when this run uses it (DB6), otherwise in
+   * one host transaction. Neither path goes through the embedding repository, so the FTS
+   * worker's cache is told about the new embedding here.
+   */
+  private static async writeCapture(write: CapturedMemoryWrite): Promise<void> {
+    const { getDatabaseClient } = await import("../database/async/runtime");
+    const client = await getDatabaseClient();
+    if (client) {
+      await client.execute("memory.capture", { write });
+    } else {
+      await this.memoryRepo.insertCaptured(write);
+    }
+    if (write.embedding) {
+      this.ftsWorker?.invalidateEmbeddings({ kind: "memories", memoryIds: [write.memory.id] });
     }
   }
 
@@ -819,12 +918,23 @@ export class MemoryService {
     return entries;
   }
 
-  private static ensureImportedEmbeddingsLoaded(): void {
-    if (this.importedEmbeddingsLoaded) return;
+  private static ensureImportedEmbeddingsLoaded(): Promise<void> {
+    if (this.importedEmbeddingsLoaded) return Promise.resolve();
+    this.importedEmbeddingsLoad ??= this.loadImportedEmbeddings().finally(() => {
+      this.importedEmbeddingsLoad = null;
+    });
+    return this.importedEmbeddingsLoad;
+  }
+
+  private static async loadImportedEmbeddings(): Promise<void> {
+    const generation = this.embeddingCacheGeneration;
     try {
       // Load in one go; typical sizes are manageable (thousands to tens of thousands).
-      const rows = this.embeddingRepo.getImportedGlobal(200000, 0);
+      const rows = await this.embeddingRepo.getImportedGlobal(200000, 0);
+      if (generation !== this.embeddingCacheGeneration) return;
       for (const row of rows) {
+        const cached = this.importedEmbeddings.get(row.memoryId);
+        if (cached && cached.updatedAt >= row.updatedAt) continue;
         if (!Array.isArray(row.embedding) || row.embedding.length === 0) continue;
         this.importedEmbeddings.set(row.memoryId, {
           updatedAt: row.updatedAt,
@@ -835,7 +945,7 @@ export class MemoryService {
     } catch {
       // ignore
     } finally {
-      this.importedEmbeddingsLoaded = true;
+      if (generation === this.embeddingCacheGeneration) this.importedEmbeddingsLoaded = true;
     }
   }
 
@@ -854,16 +964,23 @@ export class MemoryService {
     const maxBatchesPerRun = 400;
     try {
       for (let batch = 0; batch < maxBatchesPerRun; batch++) {
-        const missing = this.embeddingRepo.findMissingOrStaleImportedGlobal(batchSize);
+        const missing = this.ftsWorker
+          ? await this.ftsWorker.findMissingEmbeddings(null, batchSize)
+          : await this.embeddingRepo.findMissingOrStaleImportedGlobal(batchSize);
         if (missing.length === 0) break;
-        for (const mem of missing) {
-          const text = this.normalizeForEmbedding(mem.summary, mem.content);
-          const embedding = createLocalEmbedding(text);
-          this.embeddingRepo.upsert(mem.workspaceId, mem.memoryId, embedding, mem.updatedAt);
-          this.importedEmbeddings.set(mem.memoryId, {
-            updatedAt: mem.updatedAt,
-            embedding: Float32Array.from(embedding),
-            workspaceId: mem.workspaceId,
+        const rows = missing.map((mem) => ({
+          memoryId: mem.memoryId,
+          workspaceId: mem.workspaceId,
+          updatedAt: mem.updatedAt,
+          embedding: createLocalEmbedding(this.normalizeForEmbedding(mem.summary, mem.content)),
+        }));
+        const written = new Set(await this.writeBackfillBatch(rows));
+        for (const row of rows) {
+          if (!written.has(row.memoryId)) continue;
+          this.importedEmbeddings.set(row.memoryId, {
+            updatedAt: row.updatedAt,
+            embedding: Float32Array.from(row.embedding),
+            workspaceId: row.workspaceId,
           });
         }
         await new Promise((r) => setTimeout(r, 10));
@@ -877,7 +994,10 @@ export class MemoryService {
    * Get timeline context - Layer 2 of progressive retrieval
    * Returns surrounding memories for context
    */
-  static getTimelineContext(memoryId: string, windowSize = 5): MemoryTimelineEntry[] {
+  static async getTimelineContext(
+    memoryId: string,
+    windowSize = 5,
+  ): Promise<MemoryTimelineEntry[]> {
     this.ensureInitialized();
     return this.memoryRepo.getTimelineContext(memoryId, windowSize);
   }
@@ -886,7 +1006,7 @@ export class MemoryService {
    * Get full details - Layer 3 of progressive retrieval
    * Only called for specific memories when needed
    */
-  static getFullDetails(ids: string[]): Memory[] {
+  static async getFullDetails(ids: string[]): Promise<Memory[]> {
     this.ensureInitialized();
     return this.memoryRepo.getFullDetails(ids);
   }
@@ -894,7 +1014,7 @@ export class MemoryService {
   /**
    * Get memories for a specific task
    */
-  static getByTask(taskId: string): Memory[] {
+  static async getByTask(taskId: string): Promise<Memory[]> {
     this.ensureInitialized();
     return this.memoryRepo.findByTask(taskId);
   }
@@ -902,40 +1022,41 @@ export class MemoryService {
   /**
    * Get recent memories for a workspace
    */
-  static getRecent(workspaceId: string, limit = 20): Memory[] {
+  static async getRecent(workspaceId: string, limit = 20): Promise<Memory[]> {
     this.ensureInitialized();
     return this.memoryRepo.getRecentForWorkspace(workspaceId, limit, true);
   }
 
-  static getRecentForPromptRecall(workspaceId: string, limit = 20): Memory[] {
+  static async getRecentForPromptRecall(workspaceId: string, limit = 20): Promise<Memory[]> {
     this.ensureInitialized();
-    return this.memoryRepo
-      .getRecentForWorkspace(workspaceId, limit, true)
-      .filter(
-        (memory) =>
-          !this.isPromptRecallIgnoredContent(memory.content) &&
-          !isGeneratedPlaybookContent(memory.content) &&
-          !MemoryObservationService.isPromptSuppressed(memory.id),
-      );
+    const recent = await this.memoryRepo.getRecentForWorkspace(workspaceId, limit, true);
+    const suppressed = await MemoryObservationService.suppressedIds(recent.map((m) => m.id));
+    return recent.filter(
+      (memory) =>
+        !this.isPromptRecallIgnoredContent(memory.content) &&
+        !isGeneratedPlaybookContent(memory.content) &&
+        !suppressed.has(memory.id),
+    );
   }
 
-  static searchForPromptRecall(
+  static async searchForPromptRecall(
     workspaceId: string,
     query: string,
     limit = 20,
-  ): MemorySearchResult[] {
+  ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
-    const results = this.search(workspaceId, query, limit);
+    const results = await this.search(workspaceId, query, limit);
     if (results.length === 0) return results;
 
-    const details = this.memoryRepo.getFullDetails(results.map((result) => result.id));
+    const details = await this.memoryRepo.getFullDetails(results.map((result) => result.id));
+    const suppressed = await MemoryObservationService.suppressedIds(details.map((m) => m.id));
     const ignoredIds = new Set(
       details
         .filter(
           (memory) =>
             this.isPromptRecallIgnoredContent(memory.content) ||
             isGeneratedPlaybookContent(memory.content) ||
-            MemoryObservationService.isPromptSuppressed(memory.id),
+            suppressed.has(memory.id),
         )
         .map((memory) => memory.id),
     );
@@ -947,11 +1068,11 @@ export class MemoryService {
    * Fast prompt-recall path: local-only BM25 with 5-token cap, no imported-global,
    * no hybrid semantic scoring, no tier tracking. Results are cached per workspace+prompt.
    */
-  static searchForPromptRecallFast(
+  static async searchForPromptRecallFast(
     workspaceId: string,
     query: string,
     limit = 5,
-  ): MemorySearchResult[] {
+  ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
     const cacheKey = this.getPromptRecallCacheKey(workspaceId, query);
     const cached = this.promptRecallCache.get(cacheKey);
@@ -959,9 +1080,13 @@ export class MemoryService {
       return cached.results;
     }
 
-    const rawResults = this.memoryRepo.searchLocalForPromptRecall(workspaceId, query, limit + 5);
+    const rawResults = await this.memoryRepo.searchLocalForPromptRecall(
+      workspaceId,
+      query,
+      limit + 5,
+    );
 
-    const results = this.filterPromptRecallRows(rawResults, limit);
+    const results = await this.filterPromptRecallRows(rawResults, limit);
     this.rememberPromptRecallResults(cacheKey, results);
 
     return results;
@@ -1000,7 +1125,7 @@ export class MemoryService {
         query,
         limit + 5,
       );
-      const results = this.filterPromptRecallRows(rawResults, limit);
+      const results = await this.filterPromptRecallRows(rawResults, limit);
       if (results.length > 0) {
         this.recordPromptRecallDiagnostic("workerHits");
         this.rememberPromptRecallResults(cacheKey, results);
@@ -1029,16 +1154,17 @@ export class MemoryService {
     return `${workspaceId}:${queryHash}:${query.length}`;
   }
 
-  private static filterPromptRecallRows(
+  private static async filterPromptRecallRows(
     rawResults: Array<MemorySearchResult & { content?: string }>,
     limit: number,
-  ): MemorySearchResult[] {
+  ): Promise<MemorySearchResult[]> {
+    const suppressed = await MemoryObservationService.suppressedIds(rawResults.map((r) => r.id));
     return rawResults
       .filter(
         (r) =>
           !this.isPromptRecallIgnoredContent(r.content || r.snippet || "") &&
           !isGeneratedPlaybookContent(r.content || r.snippet || "") &&
-          !MemoryObservationService.isPromptSuppressed(r.id),
+          !suppressed.has(r.id),
       )
       .slice(0, limit)
       .map((r) => ({
@@ -1087,11 +1213,11 @@ export class MemoryService {
    * content prefixes (e.g. "[SUGGESTION]", "[PLAYBOOK]"). Bypasses FTS
    * entirely — uses LIKE, no tier tracking, no hybrid scoring.
    */
-  static searchByContentMarker(
+  static async searchByContentMarker(
     workspaceId: string,
     marker: string,
     limit = 50,
-  ): MemorySearchResult[] {
+  ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
     return this.memoryRepo.searchByContentMarker(workspaceId, marker, limit);
   }
@@ -1103,12 +1229,9 @@ export class MemoryService {
   ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
     if (this.ftsWorker) {
-      try {
-        const results = await this.ftsWorker.searchByContentMarker(workspaceId, marker, limit);
-        if (results.length > 0) return results;
-      } catch {
-        // Fall through to the DB fallback below.
-      }
+      // The worker runs the host's LIKE query after its FTS attempt, so an empty result
+      // is final. Worker errors propagate instead of rerunning the scan on the host.
+      return this.ftsWorker.searchByContentMarker(workspaceId, marker, limit);
     }
     return this.searchByContentMarker(workspaceId, marker, limit);
   }
@@ -1119,21 +1242,28 @@ export class MemoryService {
     limit = 20,
   ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
-    if (this.ftsWorker) {
-      try {
-        const results = await this.ftsWorker.search(workspaceId, query, limit, true);
-        if (results.length > 0 && this.db) {
-          MemoryTierService.recordReferenceBatch(
-            this.db,
-            results.map((r) => r.id),
-          );
-        }
-        if (results.length > 0) return results;
-      } catch {
-        // Fall through to the existing hybrid search path.
-      }
+    if (!this.ftsWorker) return this.search(workspaceId, query, limit);
+
+    // The whole hybrid search runs in the worker (DB4): lexical FTS, the embedding scan,
+    // and the rerank. A worker failure is raised, not replaced by a host search or an
+    // empty result. Embedding backfills stay host-side writes; they only start here.
+    this.kickoffEmbeddingBackfill(workspaceId);
+    this.kickoffImportedEmbeddingBackfill();
+    let results: MemorySearchResult[];
+    try {
+      results = await this.ftsWorker.hybridSearch(workspaceId, query, limit, true);
+    } catch (error) {
+      throw new Error(
+        `Memory search is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    return this.search(workspaceId, query, limit);
+    if (results.length > 0 && this.sql) {
+      await MemoryTierService.recordReferenceBatch(
+        this.sql,
+        results.map((r) => r.id),
+      );
+    }
+    return results;
   }
 
   static async getContextForInjectionAsync(
@@ -1146,12 +1276,12 @@ export class MemoryService {
       return "";
     }
 
-    const settings = this.settingsRepo.getOrCreate(workspaceId);
+    const settings = await this.settingsRepo.getOrCreate(workspaceId);
     if (!settings.enabled) {
       return "";
     }
 
-    const recentMemories = this.getRecentForPromptRecall(workspaceId, 5);
+    const recentMemories = await this.getRecentForPromptRecall(workspaceId, 5);
 
     let relevantMemories: MemorySearchResult[] = [];
     if (taskPrompt && taskPrompt.length > 10) {
@@ -1236,28 +1366,28 @@ export class MemoryService {
    * Get context for injection at task start
    * Returns a formatted string suitable for system prompt
    */
-  static getContextForInjection(workspaceId: string, taskPrompt: string): string {
+  static async getContextForInjection(workspaceId: string, taskPrompt: string): Promise<string> {
     this.ensureInitialized();
     const featureSettings = MemoryFeaturesManager.loadSettings();
     if (featureSettings.defaultArchiveInjectionEnabled !== true) {
       return "";
     }
 
-    const settings = this.settingsRepo.getOrCreate(workspaceId);
+    const settings = await this.settingsRepo.getOrCreate(workspaceId);
     if (!settings.enabled) {
       return "";
     }
 
     // Get recent memories (summaries preferred)
     // Include private memories — they are private from external sharing, not from local agent context
-    const recentMemories = this.getRecentForPromptRecall(workspaceId, 5);
+    const recentMemories = await this.getRecentForPromptRecall(workspaceId, 5);
 
     // Search for relevant memories based on task prompt
     let relevantMemories: MemorySearchResult[] = [];
     if (taskPrompt && taskPrompt.length > 10) {
       try {
         const query = taskPrompt.slice(0, 2500);
-        relevantMemories = this.searchForPromptRecallFast(workspaceId, query, 10);
+        relevantMemories = await this.searchForPromptRecallFast(workspaceId, query, 10);
 
         // Filter out memories that are already in recent
         const recentIds = new Set(recentMemories.map((m) => m.id));
@@ -1305,7 +1435,7 @@ export class MemoryService {
   /**
    * Get or create settings for a workspace
    */
-  static getSettings(workspaceId: string): MemorySettings {
+  static async getSettings(workspaceId: string): Promise<MemorySettings> {
     this.ensureInitialized();
     return this.settingsRepo.getOrCreate(workspaceId);
   }
@@ -1313,19 +1443,19 @@ export class MemoryService {
   /**
    * Update settings for a workspace
    */
-  static updateSettings(
+  static async updateSettings(
     workspaceId: string,
     updates: Partial<Omit<MemorySettings, "workspaceId">>,
-  ): void {
+  ): Promise<void> {
     this.ensureInitialized();
-    this.settingsRepo.update(workspaceId, updates);
+    await this.settingsRepo.update(workspaceId, updates);
     memoryEvents.emit("memoryChanged", { type: "settingsUpdated", workspaceId });
   }
 
   /**
    * Get storage statistics for a workspace
    */
-  static getStats(workspaceId: string): MemoryStats {
+  static async getStats(workspaceId: string): Promise<MemoryStats> {
     this.ensureInitialized();
     return this.memoryRepo.getStats(workspaceId);
   }
@@ -1333,7 +1463,9 @@ export class MemoryService {
   /**
    * Get statistics for imported memories
    */
-  static getImportedStats(workspaceId: string): { count: number; totalTokens: number } {
+  static async getImportedStats(
+    workspaceId: string,
+  ): Promise<{ count: number; totalTokens: number }> {
     this.ensureInitialized();
     return this.memoryRepo.getImportedStats(workspaceId);
   }
@@ -1341,43 +1473,44 @@ export class MemoryService {
   /**
    * Find imported memories with pagination
    */
-  static findImported(workspaceId: string, limit = 50, offset = 0): Memory[] {
+  static async findImported(workspaceId: string, limit = 50, offset = 0): Promise<Memory[]> {
     this.ensureInitialized();
     return this.memoryRepo.findImported(workspaceId, limit, offset);
   }
 
-  static deleteImportedEntry(workspaceId: string, memoryId: string): boolean {
+  static async deleteImportedEntry(workspaceId: string, memoryId: string): Promise<boolean> {
     this.ensureInitialized();
 
-    const memory = this.memoryRepo.findById(memoryId);
+    const memory = await this.memoryRepo.findById(memoryId);
     if (!memory || memory.workspaceId !== workspaceId) return false;
     if (!this.isImportedMemoryContent(memory.content)) return false;
 
     try {
-      this.embeddingRepo.deleteByMemoryIds([memoryId]);
+      await this.embeddingRepo.deleteByMemoryIds([memoryId]);
     } catch {
       // ignore
     }
 
-    const deleted = this.memoryRepo.deleteByIds(workspaceId, [memoryId]);
+    const deleted = await this.memoryRepo.deleteByIds(workspaceId, [memoryId]);
     if (deleted <= 0) return false;
 
     this.importedEmbeddings.delete(memoryId);
     this.memoryEmbeddingsByWorkspace.delete(workspaceId);
     this.embeddingsLoadedForWorkspace.delete(workspaceId);
+    this.embeddingCacheGeneration += 1;
     this.embeddingBackfillInProgress.delete(workspaceId);
     memoryEvents.emit("memoryChanged", { type: "importedEntryDeleted", workspaceId });
     return true;
   }
 
-  static setImportedPromptRecallIgnored(
+  static async setImportedPromptRecallIgnored(
     workspaceId: string,
     memoryId: string,
     ignored: boolean,
-  ): Memory | null {
+  ): Promise<Memory | null> {
     this.ensureInitialized();
 
-    const memory = this.memoryRepo.findById(memoryId);
+    const memory = await this.memoryRepo.findById(memoryId);
     if (!memory || memory.workspaceId !== workspaceId) return null;
     if (!this.isImportedMemoryContent(memory.content)) return null;
 
@@ -1386,19 +1519,19 @@ export class MemoryService {
       : this.stripPromptRecallIgnoreMarker(memory.content);
     if (nextContent === memory.content) return memory;
 
-    this.memoryRepo.update(memoryId, {
+    await this.memoryRepo.update(memoryId, {
       content: nextContent,
       tokens: estimateTokens(nextContent),
     });
 
     try {
-      this.embeddingRepo.deleteByMemoryIds([memoryId]);
+      await this.embeddingRepo.deleteByMemoryIds([memoryId]);
     } catch {
       // ignore
     }
 
     this.importedEmbeddings.delete(memoryId);
-    const updated = this.memoryRepo.findById(memoryId);
+    const updated = await this.memoryRepo.findById(memoryId);
     if (updated) {
       memoryEvents.emit("memoryChanged", { type: "importedEntryUpdated", workspaceId });
       return updated;
@@ -1409,15 +1542,15 @@ export class MemoryService {
   /**
    * Delete all imported memories for a workspace
    */
-  static deleteImported(workspaceId: string): number {
+  static async deleteImported(workspaceId: string): Promise<number> {
     this.ensureInitialized();
     // Remove embeddings first (embeddings table references memories by id).
     try {
-      this.embeddingRepo.deleteImported(workspaceId);
+      await this.embeddingRepo.deleteImported(workspaceId);
     } catch {
       // ignore
     }
-    const deleted = this.memoryRepo.deleteImported(workspaceId);
+    const deleted = await this.memoryRepo.deleteImported(workspaceId);
     // Clear caches for this workspace (best-effort).
     for (const [memoryId, entry] of this.importedEmbeddings.entries()) {
       if (entry.workspaceId === workspaceId) {
@@ -1426,27 +1559,28 @@ export class MemoryService {
     }
     this.memoryEmbeddingsByWorkspace.delete(workspaceId);
     this.embeddingsLoadedForWorkspace.delete(workspaceId);
+    this.embeddingCacheGeneration += 1;
     this.embeddingBackfillInProgress.delete(workspaceId);
     memoryEvents.emit("memoryChanged", { type: "importedDeleted", workspaceId });
     return deleted;
   }
 
-  static importFromText(options: {
+  static async importFromText(options: {
     workspaceId: string;
     provider: string;
     pastedText: string;
     forcePrivate?: boolean;
-  }): {
+  }): Promise<{
     success: boolean;
     entriesDetected: number;
     memoriesCreated: number;
     duplicatesSkipped: number;
     truncated: number;
     errors: string[];
-  } {
+  }> {
     this.ensureInitialized();
 
-    const settings = this.settingsRepo.getOrCreate(options.workspaceId);
+    const settings = await this.settingsRepo.getOrCreate(options.workspaceId);
     if (!settings.enabled) {
       throw new Error("Memory system is disabled for this workspace. Enable it in settings first.");
     }
@@ -1493,7 +1627,7 @@ export class MemoryService {
 
         const content = `[Imported from ${providerLabel} — "Memory export (pasted)"]\n${bounded}`;
 
-        const memory = this.memoryRepo.create({
+        const memory = await this.memoryRepo.create({
           workspaceId: options.workspaceId,
           taskId: undefined,
           type: "insight",
@@ -1507,7 +1641,12 @@ export class MemoryService {
         try {
           const embedText = this.normalizeForEmbedding(memory.summary, memory.content);
           const embedding = createLocalEmbedding(embedText);
-          this.embeddingRepo.upsert(options.workspaceId, memory.id, embedding, memory.updatedAt);
+          await this.embeddingRepo.upsert(
+            options.workspaceId,
+            memory.id,
+            embedding,
+            memory.updatedAt,
+          );
           this.cacheEmbedding(options.workspaceId, memory.id, embedding, memory.updatedAt);
         } catch {
           // ignore
@@ -1515,7 +1654,7 @@ export class MemoryService {
 
         const importedSummary = this.buildDeterministicSummary(bounded);
         if (importedSummary) {
-          this.updateMemorySummary(memory, options.workspaceId, importedSummary, true);
+          await this.updateMemorySummary(memory, options.workspaceId, importedSummary, true);
         }
 
         memoriesCreated += 1;
@@ -1526,7 +1665,7 @@ export class MemoryService {
 
     if (memoriesCreated > 0) {
       memoryEvents.emit("memoryChanged", { type: "created", workspaceId: options.workspaceId });
-      this.enforceStorageLimit(options.workspaceId, settings.maxStorageMb);
+      await this.enforceStorageLimit(options.workspaceId, settings.maxStorageMb, { force: true });
     }
 
     return {
@@ -1542,28 +1681,25 @@ export class MemoryService {
   /**
    * Delete all memories for a workspace
    */
-  static clearWorkspace(workspaceId: string): void {
+  static async clearWorkspace(workspaceId: string): Promise<void> {
     this.ensureInitialized();
-    this.memoryRepo.deleteByWorkspace(workspaceId);
-    this.summaryRepo.deleteByWorkspace(workspaceId);
+    await this.memoryRepo.deleteByWorkspace(workspaceId);
+    await this.summaryRepo.deleteByWorkspace(workspaceId);
     try {
-      this.embeddingRepo.deleteByWorkspace(workspaceId);
+      await this.embeddingRepo.deleteByWorkspace(workspaceId);
     } catch {
       // ignore
     }
-    try {
-      this.markdownIndex?.clearWorkspace(workspaceId);
-    } catch {
-      // ignore
-    }
+    void this.markdownIndex?.clearWorkspace(workspaceId).catch(() => undefined);
     this.memoryEmbeddingsByWorkspace.delete(workspaceId);
     this.embeddingsLoadedForWorkspace.delete(workspaceId);
+    this.embeddingCacheGeneration += 1;
     this.embeddingBackfillInProgress.delete(workspaceId);
     this.clearCompressionStateForWorkspace(workspaceId);
     memoryEvents.emit("memoryChanged", { type: "cleared", workspaceId });
   }
 
-  static deleteEntries(workspaceId: string, ids: string[]): number {
+  static async deleteEntries(workspaceId: string, ids: string[]): Promise<number> {
     this.ensureInitialized();
     const uniqueIds = [
       ...new Set((ids || []).map((id) => String(id || "").trim()).filter(Boolean)),
@@ -1571,7 +1707,7 @@ export class MemoryService {
     let deleted = 0;
     for (const id of uniqueIds) {
       try {
-        deleted += this.memoryRepo.deleteByWorkspaceAndId(workspaceId, id);
+        deleted += await this.memoryRepo.deleteByWorkspaceAndId(workspaceId, id);
       } catch {
         // best-effort delete
       }
@@ -1590,18 +1726,18 @@ export class MemoryService {
    * changes. The workspace check prevents a source from mutating another
    * workspace's memory row.
    */
-  static replaceMemory(
+  static async replaceMemory(
     workspaceId: string,
     memoryId: string,
     content: string,
     summary?: string,
-  ): Memory | null {
+  ): Promise<Memory | null> {
     this.ensureInitialized();
 
-    const settings = this.settingsRepo.getOrCreate(workspaceId);
+    const settings = await this.settingsRepo.getOrCreate(workspaceId);
     if (!settings.enabled || settings.privacyMode === "disabled") return null;
 
-    const current = this.memoryRepo.findById(memoryId);
+    const current = await this.memoryRepo.findById(memoryId);
     if (!current || current.workspaceId !== workspaceId) return null;
 
     const privacyPrepared = this.applyInlinePrivacy(content);
@@ -1613,7 +1749,7 @@ export class MemoryService {
     const finalSummary = this.buildDeterministicSummary(summary || truncatedContent);
     const updatedAt = Date.now();
 
-    this.memoryRepo.update(memoryId, {
+    await this.memoryRepo.update(memoryId, {
       content: truncatedContent,
       summary: finalSummary || undefined,
       tokens: estimateTokens(truncatedContent),
@@ -1621,11 +1757,11 @@ export class MemoryService {
     });
 
     try {
-      this.embeddingRepo.deleteByMemoryIds([memoryId]);
+      await this.embeddingRepo.deleteByMemoryIds([memoryId]);
       const embedding = createLocalEmbedding(
         this.normalizeForEmbedding(finalSummary, truncatedContent),
       );
-      this.embeddingRepo.upsert(workspaceId, memoryId, embedding, updatedAt);
+      await this.embeddingRepo.upsert(workspaceId, memoryId, embedding, updatedAt);
       this.cacheEmbedding(workspaceId, memoryId, embedding, updatedAt);
       if (this.importedEmbeddingsLoaded) {
         this.importedEmbeddings.set(memoryId, {
@@ -1638,12 +1774,12 @@ export class MemoryService {
       // Search can fall back to lexical matching if local embedding refresh fails.
     }
 
-    const updated = this.memoryRepo.findById(memoryId);
+    const updated = await this.memoryRepo.findById(memoryId);
     if (!updated) return null;
 
     if (MemoryFeaturesManager.loadSettings().structuredObservationsEnabled !== false) {
       try {
-        MemoryObservationService.createForMemory(updated, {
+        await MemoryObservationService.createForMemory(updated, {
           origin: "import",
           captureReason: "box_brain_sync",
           privacyState: updated.isPrivate ? "private" : "normal",
@@ -1988,18 +2124,18 @@ export class MemoryService {
     return `${normalized.slice(0, maxChars - 3)}...`;
   }
 
-  private static updateMemorySummary(
+  private static async updateMemorySummary(
     memory: Memory,
     workspaceId: string,
     summary: string,
     compressed: boolean,
-  ): void {
+  ): Promise<void> {
     const finalSummary = this.buildDeterministicSummary(summary);
     if (!finalSummary) return;
 
     const summaryTokens = estimateTokens(finalSummary);
     const updatedAt = Date.now();
-    this.memoryRepo.update(memory.id, {
+    await this.memoryRepo.update(memory.id, {
       summary: finalSummary,
       tokens: summaryTokens,
       isCompressed: compressed,
@@ -2012,7 +2148,7 @@ export class MemoryService {
     try {
       const embedText = this.normalizeForEmbedding(finalSummary, finalSummary);
       const embedding = createLocalEmbedding(embedText);
-      this.embeddingRepo.upsert(workspaceId, memory.id, embedding, updatedAt);
+      await this.embeddingRepo.upsert(workspaceId, memory.id, embedding, updatedAt);
       this.cacheEmbedding(workspaceId, memory.id, embedding, updatedAt);
     } catch {
       // ignore
@@ -2125,9 +2261,9 @@ export class MemoryService {
           continue;
         }
 
-        const memories = group.memoryIds
-          .map((memoryId) => this.memoryRepo.findById(memoryId))
-          .filter((memory): memory is Memory => Boolean(memory));
+        const memories = (
+          await Promise.all(group.memoryIds.map((memoryId) => this.memoryRepo.findById(memoryId)))
+        ).filter((memory): memory is Memory => Boolean(memory));
 
         if (memories.length === 0) {
           for (const memoryId of group.memoryIds) {
@@ -2215,7 +2351,7 @@ export class MemoryService {
   ): Promise<void> {
     for (const memory of memories) {
       if (!memory.summary) {
-        this.updateMemorySummary(
+        await this.updateMemorySummary(
           memory,
           group.workspaceId,
           this.buildDeterministicSummary(memory.content),
@@ -2318,7 +2454,7 @@ export class MemoryService {
     const { summaryText, usedLlm } = await this.generateBatchSummaryText(group, memories);
     const storageSummary = this.normalizeSummaryStorageText(summaryText);
     if (memories.length === 1) {
-      this.updateMemorySummary(memories[0], group.workspaceId, storageSummary, true);
+      await this.updateMemorySummary(memories[0], group.workspaceId, storageSummary, true);
       this.recordCompressionDiagnostic(group.workspaceId, group.origin, "batchSummaries");
       if (usedLlm) {
         this.recordCompressionDiagnostic(group.workspaceId, group.origin, "llmCalls");
@@ -2445,7 +2581,7 @@ export class MemoryService {
     if (!summary) return;
 
     const taskId = this.extractSharedTaskId(memories);
-    const batchMemory = this.memoryRepo.create({
+    const batchMemory = await this.memoryRepo.create({
       workspaceId: group.workspaceId,
       taskId,
       type: "summary",
@@ -2456,7 +2592,7 @@ export class MemoryService {
       isPrivate: false,
     });
 
-    this.updateEmbeddingForMemory(batchMemory, group.workspaceId, summary);
+    await this.updateEmbeddingForMemory(batchMemory, group.workspaceId, summary);
   }
 
   private static extractSharedTaskId(memories: Memory[]): string | undefined {
@@ -2469,15 +2605,15 @@ export class MemoryService {
     return firstTaskId;
   }
 
-  private static updateEmbeddingForMemory(
+  private static async updateEmbeddingForMemory(
     memory: Memory,
     workspaceId: string,
     summary: string,
-  ): void {
+  ): Promise<void> {
     try {
       const embedText = this.normalizeForEmbedding(summary, summary);
       const embedding = createLocalEmbedding(embedText);
-      this.embeddingRepo.upsert(workspaceId, memory.id, embedding, memory.updatedAt);
+      await this.embeddingRepo.upsert(workspaceId, memory.id, embedding, memory.updatedAt);
       this.cacheEmbedding(workspaceId, memory.id, embedding, memory.updatedAt);
     } catch {
       // ignore
@@ -2525,44 +2661,66 @@ export class MemoryService {
 
     try {
       // Get all workspaces that have any memories (compressed or not).
-      const workspacesWithMemories = this.memoryRepo.listWorkspaceIds(5000);
+      const workspacesWithMemories = await this.memoryRepo.listWorkspaceIds(5000);
 
       // Process each workspace
       for (const workspaceId of workspacesWithMemories) {
-        const settings = this.settingsRepo.getOrCreate(workspaceId);
+        const settings = await this.settingsRepo.getOrCreate(workspaceId);
         const retentionMs = settings.retentionDays * 24 * 60 * 60 * 1000;
         const cutoff = Date.now() - retentionMs;
 
-        const deleted = this.memoryRepo.deleteOlderThan(workspaceId, cutoff);
+        const deleted = await this.memoryRepo.deleteOlderThan(workspaceId, cutoff);
         if (deleted > 0) {
           logger.info(
             `[MemoryService] Cleaned up ${deleted} old memories for workspace ${workspaceId}`,
           );
         }
 
-        this.enforceStorageLimit(workspaceId, settings.maxStorageMb);
+        await this.enforceStorageLimit(workspaceId, settings.maxStorageMb, { force: true });
       }
 
       // Tier promotion pass: promote short→medium→long, evict stale short-tier memories
-      if (this.db) {
-        MemoryTierService.runPromotionPass(this.db);
+      if (this.sql) {
+        await MemoryTierService.runPromotionPass(this.sql);
       }
     } catch (error) {
       logger.error("[MemoryService] Cleanup failed:", error);
     }
   }
 
-  private static enforceStorageLimit(workspaceId: string, maxStorageMb: number): void {
+  /**
+   * Keep a workspace under its storage cap. Measuring means scanning every memory in
+   * the workspace, so after a capture the last measurement plus the bytes added since
+   * is trusted while it stays below 80% of the cap and is under five minutes old.
+   * Deletes only lower the real size, and bulk imports and cleanup always measure.
+   */
+  private static async enforceStorageLimit(
+    workspaceId: string,
+    maxStorageMb: number,
+    options: { addedBytes?: number; force?: boolean } = {},
+  ): Promise<void> {
     const maxBytes = Math.max(0, Math.floor(maxStorageMb * 1024 * 1024));
     if (maxBytes <= 0) return;
 
-    let totalBytes = this.memoryRepo.getApproxStorageBytes(workspaceId);
+    const now = Date.now();
+    const estimate = this.storageEstimateByWorkspace.get(workspaceId);
+    if (
+      !options.force &&
+      estimate &&
+      now - estimate.measuredAt < MemoryService.STORAGE_ESTIMATE_MAX_AGE_MS
+    ) {
+      estimate.bytes += Math.max(0, options.addedBytes ?? 0);
+      if (estimate.bytes < maxBytes * MemoryService.STORAGE_ESTIMATE_HEADROOM) return;
+    }
+
+    let totalBytes = await this.memoryRepo.getApproxStorageBytes(workspaceId);
+    this.storageEstimateByWorkspace.set(workspaceId, { bytes: totalBytes, measuredAt: now });
     if (totalBytes <= maxBytes) return;
 
     let loopGuard = 0;
     while (totalBytes > maxBytes && loopGuard < 20) {
       loopGuard += 1;
-      const oldest = this.memoryRepo.getOldestForWorkspace(workspaceId, 200);
+      const oldest = await this.memoryRepo.getOldestForWorkspace(workspaceId, 200);
       if (!oldest.length) break;
 
       let reclaimed = 0;
@@ -2576,16 +2734,17 @@ export class MemoryService {
 
       if (!idsToDelete.length) break;
 
-      const deleted = this.memoryRepo.deleteByIds(workspaceId, idsToDelete);
+      const deleted = await this.memoryRepo.deleteByIds(workspaceId, idsToDelete);
       if (deleted > 0) {
-        this.embeddingRepo.deleteByMemoryIds(idsToDelete);
+        await this.embeddingRepo.deleteByMemoryIds(idsToDelete);
         memoryEvents.emit("memoryChanged", { type: "pruned", workspaceId });
       } else {
         break;
       }
 
-      totalBytes = this.memoryRepo.getApproxStorageBytes(workspaceId);
+      totalBytes = await this.memoryRepo.getApproxStorageBytes(workspaceId);
     }
+    this.storageEstimateByWorkspace.set(workspaceId, { bytes: totalBytes, measuredAt: now });
   }
 
   /**
@@ -2734,10 +2893,10 @@ export class MemoryService {
    * Test-only/in-memory callers may not initialize a workspace repository; in
    * that compatibility case the explicit caller option remains authoritative.
    */
-  private static isExternalMemoryMirrorAllowed(workspaceId: string): boolean {
+  private static async isExternalMemoryMirrorAllowed(workspaceId: string): Promise<boolean> {
     if (!this.workspaceRepo) return true;
     try {
-      const workspace = this.workspaceRepo.findById(workspaceId);
+      const workspace = await this.workspaceRepo.findById(workspaceId);
       if (!workspace?.permissions) return false;
       return (
         workspace.permissions.network === true &&
@@ -2780,12 +2939,14 @@ export class MemoryService {
       this.compressionDrainTimer = undefined;
     }
     memoryEvents.removeAllListeners();
+    this.storageEstimateByWorkspace.clear();
     this.memoryEmbeddingsByWorkspace.clear();
     this.importedEmbeddings.clear();
     this.markdownIndex = null;
     this.importedEmbeddingsLoaded = false;
     this.importedEmbeddingBackfillInProgress = false;
     this.embeddingsLoadedForWorkspace.clear();
+    this.embeddingCacheGeneration += 1;
     this.embeddingBackfillInProgress.clear();
     this.compressionQueue = [];
     this.compressionQueueEntries.clear();

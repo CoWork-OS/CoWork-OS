@@ -110,7 +110,7 @@ afterEach(() => {
 });
 
 describeWithNativeDb("MemoryObservationService", () => {
-  it("backfills legacy memories into structured observations", () => {
+  it("backfills legacy memories into structured observations", async () => {
     const db = createDb();
     db.prepare(`
       INSERT INTO memories (
@@ -131,9 +131,9 @@ describeWithNativeDb("MemoryObservationService", () => {
     );
 
     MemoryObservationService.initialize(db);
-    MemoryObservationService.startBackfill();
-    const status = MemoryObservationService.getBackfillStatus();
-    const details = MemoryObservationService.details(["mem-1"])[0];
+    await MemoryObservationService.startBackfill();
+    const status = await MemoryObservationService.getBackfillStatus();
+    const details = (await MemoryObservationService.details(["mem-1"]))[0];
 
     expect(status.processed).toBe(1);
     expect(details?.title).toContain("Updated");
@@ -142,7 +142,7 @@ describeWithNativeDb("MemoryObservationService", () => {
     expect(details?.migrationStatus).toBe("backfilled");
   });
 
-  it("searches metadata and returns compact index rows", () => {
+  it("searches metadata and returns compact index rows", async () => {
     const db = createDb();
     MemoryObservationService.initialize(db);
     const memory = {
@@ -174,9 +174,9 @@ describeWithNativeDb("MemoryObservationService", () => {
       memory.createdAt,
       memory.updatedAt,
     );
-    MemoryObservationService.createForMemory(memory);
+    await MemoryObservationService.createForMemory(memory);
 
-    const results = MemoryObservationService.search({
+    const results = await MemoryObservationService.search({
       workspaceId: "ws-1",
       query: "verifier",
       limit: 5,
@@ -187,7 +187,7 @@ describeWithNativeDb("MemoryObservationService", () => {
     expect(results[0]?.estimatedDetailTokens).toBeGreaterThan(0);
   });
 
-  it("marks redacted observations private and suppressible", () => {
+  it("marks redacted observations private and suppressible", async () => {
     const db = createDb();
     MemoryObservationService.initialize(db);
     db.prepare(`
@@ -195,9 +195,9 @@ describeWithNativeDb("MemoryObservationService", () => {
         id, workspace_id, task_id, type, content, summary, tokens, is_compressed, is_private, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run("mem-3", "ws-1", null, "observation", "Sensitive text", null, 5, 0, 0, 300, 300);
-    MemoryObservationService.startBackfill(true);
+    await MemoryObservationService.startBackfill(true);
 
-    const redacted = MemoryObservationService.redact("ws-1", "mem-3");
+    const redacted = await MemoryObservationService.redact("ws-1", "mem-3");
     const memoryRow = db
       .prepare("SELECT content, is_private FROM memories WHERE id = ?")
       .get("mem-3") as Any;
@@ -205,6 +205,9 @@ describeWithNativeDb("MemoryObservationService", () => {
     expect(redacted?.privacyState).toBe("redacted");
     expect(memoryRow.content).toBe("[redacted]");
     expect(memoryRow.is_private).toBe(1);
-    expect(MemoryObservationService.isPromptSuppressed("mem-3")).toBe(true);
+    expect(await MemoryObservationService.isPromptSuppressed("mem-3")).toBe(true);
+    expect([...(await MemoryObservationService.suppressedIds(["mem-3", "mem-missing"]))]).toEqual([
+      "mem-3",
+    ]);
   });
 });

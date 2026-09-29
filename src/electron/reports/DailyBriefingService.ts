@@ -1,4 +1,7 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
+import type { AsyncStore } from "../database/statements/store-units";
+import type { DailyBriefingStore } from "./daily-briefing-sql";
+import { reportsFacade } from "./reports-statement-port";
 import { UserProfileService } from "../memory/UserProfileService";
 import { MemoryService } from "../memory/MemoryService";
 
@@ -22,19 +25,32 @@ export interface DailyBriefing {
  * recent activity, goal-based suggestions, and proactive suggestions.
  */
 export class DailyBriefingService {
-  constructor(private db: Database.Database) {}
+  /** Task counts through the reports port (DB6); the connection also builds services. */
+  private readonly store: AsyncStore<DailyBriefingStore, "countTasks" | "countScheduledTasks">;
+
+  constructor(db: Database.Database) {
+    this.store = reportsFacade<DailyBriefingStore, "countTasks" | "countScheduledTasks">(
+      db,
+      "briefing_",
+      ["countTasks", "countScheduledTasks"],
+    );
+  }
 
   async generate(workspaceId: string): Promise<DailyBriefing> {
     const now = Date.now();
     const yesterdayStart = now - 24 * 60 * 60 * 1000;
 
     // Task stats from DB
-    const completedYesterday = this.countTasks(workspaceId, "completed", yesterdayStart);
-    const inProgress = this.countTasks(workspaceId, "executing");
-    const scheduledToday = this.countScheduledTasks(workspaceId);
+    const completedYesterday = await this.store.countTasks(
+      workspaceId,
+      "completed",
+      yesterdayStart,
+    );
+    const inProgress = await this.store.countTasks(workspaceId, "executing");
+    const scheduledToday = await this.store.countScheduledTasks(workspaceId);
 
     // Recent highlights from memory
-    const recentMemories = MemoryService.getRecent(workspaceId, 10);
+    const recentMemories = await MemoryService.getRecent(workspaceId, 10);
     const highlights = recentMemories
       .filter((m) => m.type === "insight" || m.type === "decision")
       .slice(0, 3)
@@ -57,7 +73,7 @@ export class DailyBriefingService {
     try {
       const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
       await ProactiveSuggestionsService.generateAll(workspaceId);
-      const topSuggestions = ProactiveSuggestionsService.getTopForBriefing(workspaceId, 3);
+      const topSuggestions = await ProactiveSuggestionsService.getTopForBriefing(workspaceId, 3);
       proactiveSuggestions = topSuggestions.map((s) => s.title);
     } catch {
       // best-effort
@@ -118,30 +134,5 @@ export class DailyBriefingService {
       proactiveSuggestions,
       formatted,
     };
-  }
-
-  private countTasks(workspaceId: string, status: string, afterMs?: number): number {
-    let sql = "SELECT COUNT(*) as count FROM tasks WHERE workspace_id = ? AND status = ?";
-    const params: (string | number)[] = [workspaceId, status];
-    if (afterMs) {
-      sql += " AND updated_at > ?";
-      params.push(afterMs);
-    }
-    const stmt = this.db.prepare(sql);
-    const row = stmt.get(...params) as { count: number } | undefined;
-    return row?.count ?? 0;
-  }
-
-  private countScheduledTasks(workspaceId: string): number {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT COUNT(*) as count FROM cron_jobs WHERE workspace_id = ? AND enabled = 1",
-      );
-      const row = stmt.get(workspaceId) as { count: number } | undefined;
-      return row?.count ?? 0;
-    } catch {
-      // Table may not exist; that's fine
-      return 0;
-    }
   }
 }

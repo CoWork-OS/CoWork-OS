@@ -23,6 +23,7 @@ vi.mock("../TranscriptStore", () => ({
 vi.mock("../MemoryService", () => ({
   MemoryService: {
     search: memoryServiceMocks.search,
+    searchAsync: async (...args: unknown[]) => memoryServiceMocks.search(...args),
     getFullDetails: memoryServiceMocks.getFullDetails,
     searchWorkspaceMarkdown: memoryServiceMocks.searchWorkspaceMarkdown,
   },

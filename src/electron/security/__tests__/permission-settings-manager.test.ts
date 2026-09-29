@@ -3,9 +3,25 @@ import { SecureSettingsRepository } from "../../database/SecureSettingsRepositor
 import { PermissionSettingsManager } from "../permission-settings-manager";
 
 describe("PermissionSettingsManager", () => {
+  // Revision-checked reads and updates (DB5), built on the load/save mocks so the
+  // tests keep asserting what was stored.
   const repository = {
     load: vi.fn(),
     save: vi.fn(),
+    getRevision: vi.fn(() => 1),
+    readRecord: vi.fn((category: string) => {
+      const data = repository.load(category);
+      return data
+        ? { status: "success", data, revision: 1 }
+        : { status: "not_found", revision: null };
+    }),
+    update: vi.fn((category: string, mutate: (current: unknown) => unknown) => {
+      const current = repository.load(category);
+      const next = mutate(current ? structuredClone(current) : undefined);
+      if (next === undefined) return { value: current, revision: 1 };
+      repository.save(category, next);
+      return { value: next, revision: 2 };
+    }),
   };
 
   beforeEach(() => {
@@ -78,8 +94,17 @@ describe("PermissionSettingsManager", () => {
     expect(settings.defaultPermissionAccess).toBe("full");
   });
 
+  /** Make load return whatever was last saved, like the real store. */
+  const statefulStore = (initial: unknown) => {
+    let stored = initial;
+    repository.load.mockImplementation(() => stored);
+    repository.save.mockImplementation((_category: string, next: unknown) => {
+      stored = next;
+    });
+  };
+
   it("appends deduplicated profile rules and persists them", () => {
-    repository.load.mockReturnValue({
+    statefulStore({
       version: 1,
       defaultMode: "default",
       rules: [],
@@ -102,9 +127,9 @@ describe("PermissionSettingsManager", () => {
       },
     });
 
-    // Loading the legacy record performs one durable v1 -> v2 migration,
-    // followed by the two explicit rule writes.
-    expect(repository.save).toHaveBeenCalledTimes(3);
+    // The first rule is applied to the latest stored record, so its write also
+    // carries the v1 -> v2 migration; the duplicate rule writes nothing.
+    expect(repository.save).toHaveBeenCalledTimes(1);
     const lastSaved = repository.save.mock.calls.at(-1)?.[1];
     expect(lastSaved.rules).toHaveLength(1);
     expect(lastSaved.rules[0]).toEqual(
@@ -327,16 +352,20 @@ describe("PermissionSettingsManager", () => {
       defaultPermissionAccess: "default",
       rules: [],
     } as const;
-    repository.load.mockReturnValueOnce(legacy);
+    statefulStore(legacy);
+    // Advance the clock on every read so any re-stamp of `migratedAt` is visible.
+    let now = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => (now += 1_000));
     const first = PermissionSettingsManager.loadSettings();
-    const saved = repository.save.mock.calls[0]?.[1];
 
     PermissionSettingsManager.clearCache();
-    repository.load.mockReturnValue(saved);
     const second = PermissionSettingsManager.loadSettings();
 
     expect(second).toEqual(first);
     expect(repository.save).toHaveBeenCalledTimes(1);
+    expect(repository.save.mock.calls[0]?.[1]).toMatchObject({
+      migration: { migratedAt: first.migration?.migratedAt },
+    });
   });
 
   it("does not rewrite a complete v2 record that has no diagnostic backup", () => {

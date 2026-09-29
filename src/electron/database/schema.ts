@@ -5,21 +5,63 @@ import { getUserDataDir } from "../utils/user-data-dir";
 import { removeLegacyHealthBridgeTempDirs } from "../utils/retired-feature-cleanup";
 import { createLogger } from "../utils/logger";
 import { ensureEverydayAgentSchema } from "../everyday-agent/schema";
+import type { DatabaseClient } from "./async/DatabaseClient";
+import { ensureSecureSettingsSchema } from "./secure-settings-sql";
+import { ensurePulseSchema } from "../telemetry/pulse-store-sql";
+import { runSchemaBootstrap } from "./schema-bootstrap";
 import {
-  sanitizeTimelinePayloadForStorage,
-  TIMELINE_PAYLOAD_STORAGE_BYTE_LIMIT,
-} from "../agent/timeline-payload-sanitizer";
+  acquireMigrationLock,
+  assertSupportedSchemaVersion,
+  beginRuntimeRun,
+  checkpointBounded,
+  endRuntimeRun,
+  CURRENT_SCHEMA_VERSION,
+  getMaintenanceStateValue,
+  type IncompleteRun,
+  readSchemaVersion,
+  type RuntimeName,
+  stampSchemaVersion,
+} from "./profile-lifecycle";
+import type { DatabaseCommandArgs, DatabaseCommandResult } from "./async/commands";
+import {
+  backfillTaskRunDurationsChunk,
+  deleteOrphanTaskEventsChunk,
+  repairControlPlaneOrphan,
+  sanitizeLargeTaskEventPayloadsRange,
+  setMaintenanceStateValue,
+} from "./post-startup-maintenance";
+import { instrumentDatabase } from "./sqlite-instrumentation";
+import { TimelineProjectionOutboxRepository } from "./TimelineProjectionOutboxRepository";
+import { applyConnectionPragmas, HOST_BUSY_TIMEOUT_MS, resolveDatabasePath } from "./connection";
+import { initializeMailboxSearchIndex } from "./mailbox-search-index-schema";
 
 const schemaLogger = createLogger("DatabaseManager");
 const STARTUP_PHASE_WARN_MS = 250;
 const TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY = "task_event_payload_sanitizer_v1_completed";
+const RUN_DURATION_BACKFILL_CHUNK = 100;
+const PAYLOAD_SANITIZER_RANGE = 5_000;
+const ORPHAN_EVENT_DELETE_CHUNK = 1_000;
+type MaintenanceChunkCommand =
+  | "maintenance.backfillRunDurationsChunk"
+  | "maintenance.sanitizePayloadsRange"
+  | "maintenance.setState"
+  | "maintenance.repairOrphan"
+  | "maintenance.deleteOrphanTaskEventsChunk";
 const RETIRED_HEALTH_CHECKPOINT_PENDING_KEY = "retired_health_checkpoint_pending";
 
 export class DatabaseManager {
   private static instance: DatabaseManager | null = null;
   private db: Database.Database;
+  private dbPath: string;
 
-  constructor() {
+  /**
+   * Open the profile database. By default this prepares the profile directory and
+   * initializes the schema in this thread. `dbPath` skips the filesystem preparation (a
+   * bootstrap worker, handed an absolute path by the host); `schemaInitialized` opens a
+   * database a bootstrap worker already brought to this build's schema version, without
+   * running initialization again (DB6).
+   */
+  constructor(options: { dbPath?: string; schemaInitialized?: boolean } = {}) {
     const constructorStartedAt = Date.now();
     const logStartupPhase = (name: string, startedAt: number): void => {
       const durationMs = Date.now() - startedAt;
@@ -32,43 +74,64 @@ export class DatabaseManager {
     };
 
     let phaseStartedAt = Date.now();
-    const userDataPath = getUserDataDir();
-    this.ensureRestrictedDirectory(userDataPath);
-    logStartupPhase("restrict-user-data-directory", phaseStartedAt);
-
-    // Run migration from old cowork-oss directory before opening database
-    phaseStartedAt = Date.now();
-    this.migrateFromLegacyDirectory(userDataPath);
-    logStartupPhase("legacy-directory-migration-check", phaseStartedAt);
-
-    phaseStartedAt = Date.now();
-    const dbPath = path.join(userDataPath, "cowork-os.db");
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("busy_timeout = 5000");
-    this.ensureRestrictedFile(dbPath);
-    logStartupPhase("open-database", phaseStartedAt);
-
-    phaseStartedAt = Date.now();
-    this.ensureMaintenanceStateTable();
-    logStartupPhase("maintenance-state-schema", phaseStartedAt);
-
-    phaseStartedAt = Date.now();
-    this.initializeSchema();
-    logStartupPhase("initialize-schema", phaseStartedAt);
-
-    phaseStartedAt = Date.now();
-    this.retirePersonalHealthSettings();
-    logStartupPhase("retire-personal-health-settings", phaseStartedAt);
-
-    try {
-      const removedTempDirs = removeLegacyHealthBridgeTempDirs();
-      if (removedTempDirs > 0) {
-        schemaLogger.info(`Removed ${removedTempDirs} legacy HealthKit bridge temp folder(s)`);
+    const dbPath = options.dbPath ?? DatabaseManager.prepareProfileFilesystem().dbPath;
+    logStartupPhase("prepare-profile-filesystem", phaseStartedAt);
+    this.dbPath = dbPath;
+    if (options.schemaInitialized) {
+      this.db = instrumentDatabase(new Database(dbPath, { fileMustExist: true }));
+      applyConnectionPragmas(this.db, { busyTimeoutMs: HOST_BUSY_TIMEOUT_MS });
+      const version = readSchemaVersion(this.db);
+      if (version !== CURRENT_SCHEMA_VERSION) {
+        this.db.close();
+        throw new Error(
+          `The database schema version is ${version} after bootstrap; expected ${CURRENT_SCHEMA_VERSION}`,
+        );
       }
-    } catch (error) {
-      schemaLogger.warn("Could not remove legacy HealthKit bridge temp folders", error);
+      this.db.pragma("foreign_keys = ON");
+      DatabaseManager.instance = this;
+      logStartupPhase("constructor-total", constructorStartedAt);
+      return;
     }
+    // DB6: one process at a time opens and initializes the schema (desktop, daemon and
+    // CLI may start together on one profile), and a schema from a newer build fails
+    // clearly before this build touches it.
+    phaseStartedAt = Date.now();
+    const releaseMigrationLock = acquireMigrationLock(dbPath);
+    logStartupPhase("migration-lock", phaseStartedAt);
+    let opened: Database.Database | null = null;
+    try {
+      phaseStartedAt = Date.now();
+      opened = instrumentDatabase(new Database(dbPath));
+      this.db = opened;
+      applyConnectionPragmas(this.db, { busyTimeoutMs: HOST_BUSY_TIMEOUT_MS });
+      this.ensureRestrictedFile(dbPath);
+      logStartupPhase("open-database", phaseStartedAt);
+
+      assertSupportedSchemaVersion(this.db);
+
+      phaseStartedAt = Date.now();
+      this.ensureMaintenanceStateTable();
+      logStartupPhase("maintenance-state-schema", phaseStartedAt);
+
+      phaseStartedAt = Date.now();
+      this.initializeSchema();
+      TimelineProjectionOutboxRepository.ensureSchema(this.db);
+      logStartupPhase("initialize-schema", phaseStartedAt);
+
+      phaseStartedAt = Date.now();
+      this.retirePersonalHealthSettings();
+      logStartupPhase("retire-personal-health-settings", phaseStartedAt);
+      stampSchemaVersion(this.db);
+    } catch (error) {
+      releaseMigrationLock();
+      try {
+        opened?.close();
+      } catch {
+        // Already closed.
+      }
+      throw error;
+    }
+    releaseMigrationLock();
 
     phaseStartedAt = Date.now();
     this.repairLegacyHeartbeatRunReferences();
@@ -83,13 +146,80 @@ export class DatabaseManager {
     logStartupPhase("constructor-total", constructorStartedAt);
   }
 
-  async runPostStartupMaintenance(): Promise<void> {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  /**
+   * Filesystem half of opening a profile (DB6): restrict the profile directory, migrate a
+   * legacy profile directory, remove retired temp folders, and resolve the absolute
+   * database path. Runs in the host; workers receive the resulting path and never
+   * rediscover Electron paths.
+   */
+  static prepareProfileFilesystem(): { userDataPath: string; dbPath: string } {
+    const userDataPath = getUserDataDir();
+    // Only filesystem helpers are used; no connection exists yet.
+    const helper = Object.create(DatabaseManager.prototype) as DatabaseManager;
+    helper.ensureRestrictedDirectory(userDataPath);
+    // Run migration from old cowork-oss directory before opening database
+    helper.migrateFromLegacyDirectory(userDataPath);
+    try {
+      const removedTempDirs = removeLegacyHealthBridgeTempDirs();
+      if (removedTempDirs > 0) {
+        schemaLogger.info(`Removed ${removedTempDirs} legacy HealthKit bridge temp folder(s)`);
+      }
+    } catch (error) {
+      schemaLogger.warn("Could not remove legacy HealthKit bridge temp folders", error);
+    }
+    return { userDataPath, dbPath: resolveDatabasePath(userDataPath) };
+  }
 
-    const runMaintenanceStep = (name: string, step: () => void): void => {
+  /**
+   * Open the profile with schema initialization in a bootstrap worker (DB6): the host
+   * prepares the filesystem and passes the absolute path; the worker takes the migration
+   * lock, checks the version, initializes and stamps the schema, and exits; the host then
+   * opens a connection without initializing. Errors keep their type (an unsupported
+   * version, a lock timeout). If the worker entry is missing from the build, the schema is
+   * initialized in this thread instead, with an error logged.
+   */
+  static async open(
+    options: { bootstrapWorkerPath?: string; timeoutMs?: number } = {},
+  ): Promise<DatabaseManager> {
+    const { dbPath } = DatabaseManager.prepareProfileFilesystem();
+    try {
+      await runSchemaBootstrap(dbPath, options);
+    } catch (error) {
+      if ((error as { code?: string }).code !== "bootstrap_unavailable") throw error;
+      schemaLogger.error(
+        "[DatabaseManager] Schema bootstrap worker unavailable; initializing the schema in this thread:",
+        error,
+      );
+      return new DatabaseManager({ dbPath });
+    }
+    return new DatabaseManager({ dbPath, schemaInitialized: true });
+  }
+
+  /**
+   * One-time and per-start repairs, run in bounded chunks (DB4). With the database worker
+   * every chunk runs there; otherwise each chunk is a short host transaction, with an
+   * event-loop yield between chunks so IPC and timers keep running.
+   */
+  async runPostStartupMaintenance(options: { client?: DatabaseClient | null } = {}): Promise<void> {
+    const client = options.client ?? null;
+    const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+    await yieldToEventLoop();
+
+    const runChunk = async <Name extends MaintenanceChunkCommand>(
+      name: Name,
+      args: DatabaseCommandArgs<Name>,
+      host: () => DatabaseCommandResult<Name>,
+    ): Promise<DatabaseCommandResult<Name>> => {
+      const result = client
+        ? await client.execute(name, args)
+        : this.db.transaction(host).immediate();
+      await yieldToEventLoop();
+      return result;
+    };
+    const runMaintenanceStep = async (name: string, step: () => Promise<void>): Promise<void> => {
       const startedAt = Date.now();
       try {
-        step();
+        await step();
         schemaLogger.info(
           `[DatabaseManager] Maintenance step "${name}" completed in ${Date.now() - startedAt} ms`,
         );
@@ -98,13 +228,76 @@ export class DatabaseManager {
       }
     };
 
-    runMaintenanceStep("backfillTaskLastRunDurations", () => this.backfillTaskLastRunDurations());
-    runMaintenanceStep("sanitizeLargeTaskEventPayloads", () =>
-      this.sanitizeLargeTaskEventPayloads(),
-    );
-    runMaintenanceStep("repairControlPlaneForeignKeyOrphans", () =>
-      this.repairControlPlaneForeignKeyOrphans(),
-    );
+    await runMaintenanceStep("backfillTaskLastRunDurations", async () => {
+      for (;;) {
+        const { done } = await runChunk(
+          "maintenance.backfillRunDurationsChunk",
+          { limit: RUN_DURATION_BACKFILL_CHUNK },
+          () => backfillTaskRunDurationsChunk(this.db, RUN_DURATION_BACKFILL_CHUNK),
+        );
+        if (done) return;
+      }
+    });
+    await runMaintenanceStep("sanitizeLargeTaskEventPayloads", async () => {
+      if (this.getMaintenanceState(TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY) === "1") return;
+      let afterRowid = 0;
+      let updated = 0;
+      for (;;) {
+        const result = await runChunk(
+          "maintenance.sanitizePayloadsRange",
+          { afterRowid, span: PAYLOAD_SANITIZER_RANGE },
+          () => sanitizeLargeTaskEventPayloadsRange(this.db, afterRowid, PAYLOAD_SANITIZER_RANGE),
+        );
+        updated += result.updated;
+        afterRowid = result.nextRowid;
+        if (result.done) break;
+      }
+      if (updated > 0) {
+        schemaLogger.info(
+          `[DatabaseManager] Sanitized ${updated} oversized task_event payload(s) during maintenance`,
+        );
+      }
+      await runChunk(
+        "maintenance.setState",
+        { key: TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY, value: "1" },
+        () => {
+          this.setMaintenanceState(TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY, "1");
+          return { ok: true as const };
+        },
+      );
+    });
+    await runMaintenanceStep("repairControlPlaneForeignKeyOrphans", async () => {
+      let repaired = 0;
+      for (let index = 0; ; index += 1) {
+        const result = await runChunk("maintenance.repairOrphan", { index }, () =>
+          repairControlPlaneOrphan(this.db, index),
+        );
+        if (result.changes > 0) {
+          repaired += result.changes;
+          schemaLogger.info(
+            `[DatabaseManager] Repaired ${result.changes} orphaned ${result.label}.`,
+          );
+        }
+        if (result.done) break;
+      }
+      let afterRowid = 0;
+      for (;;) {
+        const result = await runChunk(
+          "maintenance.deleteOrphanTaskEventsChunk",
+          { afterRowid, limit: ORPHAN_EVENT_DELETE_CHUNK },
+          () => deleteOrphanTaskEventsChunk(this.db, afterRowid, ORPHAN_EVENT_DELETE_CHUNK),
+        );
+        if (result.deleted > 0) {
+          repaired += result.deleted;
+          schemaLogger.info(`[DatabaseManager] Repaired ${result.deleted} orphaned task events.`);
+        }
+        afterRowid = result.nextRowid;
+        if (result.done) break;
+      }
+      if (repaired > 0) {
+        schemaLogger.info(`[DatabaseManager] Repaired ${repaired} control-plane FK orphan(s).`);
+      }
+    });
   }
 
   private ensureMaintenanceStateTable(): void {
@@ -185,24 +378,11 @@ export class DatabaseManager {
   }
 
   private getMaintenanceState(key: string): string | null {
-    const row = this.db.prepare("SELECT value FROM maintenance_state WHERE key = ?").get(key) as
-      | { value?: string }
-      | undefined;
-    return typeof row?.value === "string" ? row.value : null;
+    return getMaintenanceStateValue(this.db, key);
   }
 
   private setMaintenanceState(key: string, value: string): void {
-    this.db
-      .prepare(
-        `
-          INSERT INTO maintenance_state (key, value, updated_at)
-          VALUES (?, ?, ?)
-          ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = excluded.updated_at
-        `,
-      )
-      .run(key, value, Date.now());
+    setMaintenanceStateValue(this.db, key, value);
   }
 
   private repairLegacyHeartbeatRunReferences(): void {
@@ -259,302 +439,6 @@ export class DatabaseManager {
     }
   }
 
-  private repairControlPlaneForeignKeyOrphans(): void {
-    const statements: Array<{ label: string; tables: string[]; sql: string }> = [
-      {
-        label: "company default workspaces",
-        tables: ["companies", "workspaces"],
-        sql: `
-          UPDATE companies
-          SET default_workspace_id = NULL
-          WHERE default_workspace_id IS NOT NULL
-            AND NOT EXISTS (
-              SELECT 1 FROM workspaces WHERE workspaces.id = companies.default_workspace_id
-            )
-        `,
-      },
-      {
-        label: "strategic planner config references",
-        tables: ["strategic_planner_configs", "workspaces", "agent_roles"],
-        sql: `
-          UPDATE strategic_planner_configs
-          SET planning_workspace_id = CASE
-                WHEN planning_workspace_id IS NULL
-                  OR EXISTS (
-                    SELECT 1 FROM workspaces
-                    WHERE workspaces.id = strategic_planner_configs.planning_workspace_id
-                  )
-                THEN planning_workspace_id
-                ELSE NULL
-              END,
-              planner_agent_role_id = CASE
-                WHEN planner_agent_role_id IS NULL
-                  OR EXISTS (
-                    SELECT 1 FROM agent_roles
-                    WHERE agent_roles.id = strategic_planner_configs.planner_agent_role_id
-                  )
-                THEN planner_agent_role_id
-                ELSE NULL
-              END
-          WHERE (planning_workspace_id IS NOT NULL AND NOT EXISTS (
-                  SELECT 1 FROM workspaces
-                  WHERE workspaces.id = strategic_planner_configs.planning_workspace_id
-                ))
-             OR (planner_agent_role_id IS NOT NULL AND NOT EXISTS (
-                  SELECT 1 FROM agent_roles
-                  WHERE agent_roles.id = strategic_planner_configs.planner_agent_role_id
-                ))
-        `,
-      },
-      {
-        label: "issue references",
-        tables: [
-          "issues",
-          "goals",
-          "projects",
-          "workspaces",
-          "tasks",
-          "heartbeat_runs",
-          "agent_roles",
-        ],
-        sql: `
-          UPDATE issues
-          SET goal_id = CASE
-                WHEN goal_id IS NULL OR EXISTS (SELECT 1 FROM goals WHERE goals.id = issues.goal_id)
-                THEN goal_id ELSE NULL END,
-              project_id = CASE
-                WHEN project_id IS NULL OR EXISTS (SELECT 1 FROM projects WHERE projects.id = issues.project_id)
-                THEN project_id ELSE NULL END,
-              parent_issue_id = CASE
-                WHEN parent_issue_id IS NULL OR EXISTS (SELECT 1 FROM issues parent WHERE parent.id = issues.parent_issue_id)
-                THEN parent_issue_id ELSE NULL END,
-              workspace_id = CASE
-                WHEN workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces WHERE workspaces.id = issues.workspace_id)
-                THEN workspace_id ELSE NULL END,
-              task_id = CASE
-                WHEN task_id IS NULL OR EXISTS (SELECT 1 FROM tasks WHERE tasks.id = issues.task_id)
-                THEN task_id ELSE NULL END,
-              active_run_id = CASE
-                WHEN active_run_id IS NULL OR EXISTS (SELECT 1 FROM heartbeat_runs WHERE heartbeat_runs.id = issues.active_run_id)
-                THEN active_run_id ELSE NULL END,
-              assignee_agent_role_id = CASE
-                WHEN assignee_agent_role_id IS NULL
-                  OR EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = issues.assignee_agent_role_id)
-                THEN assignee_agent_role_id ELSE NULL END,
-              reporter_agent_role_id = CASE
-                WHEN reporter_agent_role_id IS NULL
-                  OR EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = issues.reporter_agent_role_id)
-                THEN reporter_agent_role_id ELSE NULL END
-          WHERE (goal_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM goals WHERE goals.id = issues.goal_id))
-             OR (project_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM projects WHERE projects.id = issues.project_id))
-             OR (parent_issue_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM issues parent WHERE parent.id = issues.parent_issue_id))
-             OR (workspace_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM workspaces WHERE workspaces.id = issues.workspace_id))
-             OR (task_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = issues.task_id))
-             OR (active_run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM heartbeat_runs WHERE heartbeat_runs.id = issues.active_run_id))
-             OR (assignee_agent_role_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = issues.assignee_agent_role_id))
-             OR (reporter_agent_role_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = issues.reporter_agent_role_id))
-        `,
-      },
-      {
-        label: "issue comment author references",
-        tables: ["issue_comments", "agent_roles"],
-        sql: `
-          UPDATE issue_comments
-          SET author_agent_role_id = NULL
-          WHERE author_agent_role_id IS NOT NULL
-            AND NOT EXISTS (
-              SELECT 1 FROM agent_roles
-              WHERE agent_roles.id = issue_comments.author_agent_role_id
-            )
-        `,
-      },
-      {
-        label: "heartbeat run references",
-        tables: ["heartbeat_runs", "issues", "tasks", "agent_roles", "workspaces"],
-        sql: `
-          UPDATE heartbeat_runs
-          SET issue_id = CASE
-                WHEN issue_id IS NULL OR EXISTS (SELECT 1 FROM issues WHERE issues.id = heartbeat_runs.issue_id)
-                THEN issue_id ELSE NULL END,
-              task_id = CASE
-                WHEN task_id IS NULL OR EXISTS (SELECT 1 FROM tasks WHERE tasks.id = heartbeat_runs.task_id)
-                THEN task_id ELSE NULL END,
-              agent_role_id = CASE
-                WHEN agent_role_id IS NULL OR EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = heartbeat_runs.agent_role_id)
-                THEN agent_role_id ELSE NULL END,
-              workspace_id = CASE
-                WHEN workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces WHERE workspaces.id = heartbeat_runs.workspace_id)
-                THEN workspace_id ELSE NULL END,
-              resumed_from_run_id = CASE
-                WHEN resumed_from_run_id IS NULL
-                  OR EXISTS (SELECT 1 FROM heartbeat_runs parent WHERE parent.id = heartbeat_runs.resumed_from_run_id)
-                THEN resumed_from_run_id ELSE NULL END
-          WHERE (issue_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM issues WHERE issues.id = heartbeat_runs.issue_id))
-             OR (task_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = heartbeat_runs.task_id))
-             OR (agent_role_id IS NOT NULL AND NOT EXISTS (
-                  SELECT 1 FROM agent_roles WHERE agent_roles.id = heartbeat_runs.agent_role_id
-                ))
-             OR (workspace_id IS NOT NULL AND NOT EXISTS (
-                  SELECT 1 FROM workspaces WHERE workspaces.id = heartbeat_runs.workspace_id
-                ))
-             OR (resumed_from_run_id IS NOT NULL AND NOT EXISTS (
-                  SELECT 1 FROM heartbeat_runs parent WHERE parent.id = heartbeat_runs.resumed_from_run_id
-                ))
-        `,
-      },
-      {
-        label: "orphan task events",
-        tables: ["task_events", "tasks"],
-        sql: `
-          DELETE FROM task_events
-          WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = task_events.task_id)
-        `,
-      },
-      {
-        label: "activity feed rows with missing workspaces",
-        tables: ["activity_feed", "workspaces"],
-        sql: `
-          DELETE FROM activity_feed
-          WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE workspaces.id = activity_feed.workspace_id)
-        `,
-      },
-      {
-        label: "activity feed nullable references",
-        tables: ["activity_feed", "tasks", "agent_roles"],
-        sql: `
-          UPDATE activity_feed
-          SET task_id = CASE
-                WHEN task_id IS NULL OR EXISTS (SELECT 1 FROM tasks WHERE tasks.id = activity_feed.task_id)
-                THEN task_id ELSE NULL END,
-              agent_role_id = CASE
-                WHEN agent_role_id IS NULL
-                  OR EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = activity_feed.agent_role_id)
-                THEN agent_role_id ELSE NULL END
-          WHERE (task_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = activity_feed.task_id))
-             OR (agent_role_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = activity_feed.agent_role_id))
-        `,
-      },
-      {
-        label: "agent teams with missing required references",
-        tables: ["agent_teams", "workspaces", "agent_roles"],
-        sql: `
-          DELETE FROM agent_teams
-          WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE workspaces.id = agent_teams.workspace_id)
-             OR NOT EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = agent_teams.lead_agent_role_id)
-        `,
-      },
-      {
-        label: "agent team members with missing required references",
-        tables: ["agent_team_members", "agent_teams", "agent_roles"],
-        sql: `
-          DELETE FROM agent_team_members
-          WHERE NOT EXISTS (SELECT 1 FROM agent_teams WHERE agent_teams.id = agent_team_members.team_id)
-             OR NOT EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = agent_team_members.agent_role_id)
-        `,
-      },
-      {
-        label: "agent team runs with missing required references",
-        tables: ["agent_team_runs", "agent_teams", "tasks"],
-        sql: `
-          DELETE FROM agent_team_runs
-          WHERE NOT EXISTS (SELECT 1 FROM agent_teams WHERE agent_teams.id = agent_team_runs.team_id)
-             OR NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = agent_team_runs.root_task_id)
-        `,
-      },
-      {
-        label: "agent team items with missing required references",
-        tables: ["agent_team_items", "agent_team_runs"],
-        sql: `
-          DELETE FROM agent_team_items
-          WHERE NOT EXISTS (
-            SELECT 1 FROM agent_team_runs
-            WHERE agent_team_runs.id = agent_team_items.team_run_id
-          )
-        `,
-      },
-      {
-        label: "agent team item nullable references",
-        tables: ["agent_team_items", "agent_roles", "tasks"],
-        sql: `
-          UPDATE agent_team_items
-          SET parent_item_id = CASE
-                WHEN parent_item_id IS NULL
-                  OR EXISTS (SELECT 1 FROM agent_team_items parent WHERE parent.id = agent_team_items.parent_item_id)
-                THEN parent_item_id ELSE NULL END,
-              owner_agent_role_id = CASE
-                WHEN owner_agent_role_id IS NULL
-                  OR EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = agent_team_items.owner_agent_role_id)
-                THEN owner_agent_role_id ELSE NULL END,
-              source_task_id = CASE
-                WHEN source_task_id IS NULL OR EXISTS (SELECT 1 FROM tasks WHERE tasks.id = agent_team_items.source_task_id)
-                THEN source_task_id ELSE NULL END
-          WHERE (parent_item_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM agent_team_items parent WHERE parent.id = agent_team_items.parent_item_id))
-             OR (owner_agent_role_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = agent_team_items.owner_agent_role_id))
-             OR (source_task_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = agent_team_items.source_task_id))
-        `,
-      },
-      {
-        label: "agent team thoughts with missing required references",
-        tables: ["agent_team_thoughts", "agent_team_runs", "agent_roles"],
-        sql: `
-          DELETE FROM agent_team_thoughts
-          WHERE NOT EXISTS (SELECT 1 FROM agent_team_runs WHERE agent_team_runs.id = agent_team_thoughts.team_run_id)
-             OR NOT EXISTS (SELECT 1 FROM agent_roles WHERE agent_roles.id = agent_team_thoughts.agent_role_id)
-        `,
-      },
-      {
-        label: "agent team thought nullable references",
-        tables: ["agent_team_thoughts", "agent_team_items", "tasks"],
-        sql: `
-          UPDATE agent_team_thoughts
-          SET team_item_id = CASE
-                WHEN team_item_id IS NULL
-                  OR EXISTS (SELECT 1 FROM agent_team_items WHERE agent_team_items.id = agent_team_thoughts.team_item_id)
-                THEN team_item_id ELSE NULL END,
-              source_task_id = CASE
-                WHEN source_task_id IS NULL
-                  OR EXISTS (SELECT 1 FROM tasks WHERE tasks.id = agent_team_thoughts.source_task_id)
-                THEN source_task_id ELSE NULL END
-          WHERE (team_item_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM agent_team_items WHERE agent_team_items.id = agent_team_thoughts.team_item_id))
-             OR (source_task_id IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = agent_team_thoughts.source_task_id))
-        `,
-      },
-    ];
-
-    try {
-      let repaired = 0;
-      for (const { label, tables, sql } of statements) {
-        if (tables.some((table) => !this.tableExists(table))) continue;
-        const result = this.db.prepare(sql).run();
-        if (result.changes > 0) {
-          repaired += result.changes;
-          schemaLogger.info(`[DatabaseManager] Repaired ${result.changes} orphaned ${label}.`);
-        }
-      }
-      if (repaired > 0) {
-        schemaLogger.info(`[DatabaseManager] Repaired ${repaired} control-plane FK orphan(s).`);
-      }
-    } catch (error) {
-      schemaLogger.error("Failed to repair control-plane FK orphans:", error);
-    }
-  }
-
-  private tableExists(name: string): boolean {
-    return Boolean(
-      this.db
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
-        .get(name),
-    );
-  }
-
   /**
    * Get the singleton instance of DatabaseManager.
    * Must be called after the instance has been created in main.ts.
@@ -566,230 +450,6 @@ export class DatabaseManager {
       );
     }
     return DatabaseManager.instance;
-  }
-
-  private static parseJsonObject(value: unknown): Record<string, unknown> {
-    if (typeof value !== "string" || value.trim().length === 0) return {};
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
-    } catch {
-      return {};
-    }
-  }
-
-  private static resolveTaskEventType(row: {
-    type?: unknown;
-    legacy_type?: unknown;
-    payload?: unknown;
-  }): string {
-    if (typeof row.legacy_type === "string" && row.legacy_type.trim().length > 0) {
-      return row.legacy_type.trim();
-    }
-    const payload = DatabaseManager.parseJsonObject(row.payload);
-    if (typeof payload.legacyType === "string" && payload.legacyType.trim().length > 0) {
-      return payload.legacyType.trim();
-    }
-    return typeof row.type === "string" ? row.type : "";
-  }
-
-  private static isRunTerminalEvent(row: {
-    type?: unknown;
-    legacy_type?: unknown;
-    payload?: unknown;
-  }): boolean {
-    const type = DatabaseManager.resolveTaskEventType(row);
-    if (type === "task_completed" || type === "task_cancelled") return true;
-    if (type !== "task_status") return false;
-    const payload = DatabaseManager.parseJsonObject(row.payload);
-    const status = payload.status;
-    return status === "completed" || status === "failed" || status === "cancelled";
-  }
-
-  private static isRunActivityEvent(row: {
-    type?: unknown;
-    legacy_type?: unknown;
-    payload?: unknown;
-  }): boolean {
-    const type = DatabaseManager.resolveTaskEventType(row);
-    return !(
-      type === "user_message" ||
-      type === "assistant_message" ||
-      type === "task_created" ||
-      type === "task_completed" ||
-      type === "task_cancelled" ||
-      type === "task_status"
-    );
-  }
-
-  private static calculateLastRunDurationMs(params: {
-    createdAt: number;
-    completedAt: number;
-    events: Array<{
-      timestamp?: unknown;
-      type?: unknown;
-      legacy_type?: unknown;
-      payload?: unknown;
-    }>;
-  }): number {
-    const end = Number.isFinite(params.completedAt) ? Math.floor(params.completedAt) : Date.now();
-
-    let previousTerminalAt: number | undefined;
-    for (const event of params.events) {
-      const ts =
-        typeof event.timestamp === "number" && Number.isFinite(event.timestamp)
-          ? event.timestamp
-          : undefined;
-      if (ts === undefined || ts >= end) continue;
-      if (!DatabaseManager.isRunTerminalEvent(event)) continue;
-      previousTerminalAt = Math.max(previousTerminalAt ?? 0, ts);
-    }
-
-    let latestUserMessageAt: number | undefined;
-    for (const event of params.events) {
-      const ts =
-        typeof event.timestamp === "number" && Number.isFinite(event.timestamp)
-          ? event.timestamp
-          : undefined;
-      if (ts === undefined || ts > end) continue;
-      if (previousTerminalAt !== undefined && ts <= previousTerminalAt) continue;
-      if (DatabaseManager.resolveTaskEventType(event) !== "user_message") continue;
-      latestUserMessageAt = Math.max(latestUserMessageAt ?? 0, ts);
-    }
-
-    const fallbackStart = Number.isFinite(params.createdAt) ? Math.floor(params.createdAt) : end;
-    let durationMs = Math.max(0, end - (latestUserMessageAt ?? fallbackStart));
-
-    if (durationMs < 1000) {
-      let firstActivityAt: number | undefined;
-      let lastActivityAt: number | undefined;
-      for (const event of params.events) {
-        const ts =
-          typeof event.timestamp === "number" && Number.isFinite(event.timestamp)
-            ? event.timestamp
-            : undefined;
-        if (ts === undefined || ts > end) continue;
-        if (previousTerminalAt !== undefined && ts <= previousTerminalAt) continue;
-        if (!DatabaseManager.isRunActivityEvent(event)) continue;
-        firstActivityAt = Math.min(firstActivityAt ?? ts, ts);
-        lastActivityAt = Math.max(lastActivityAt ?? ts, ts);
-      }
-      if (firstActivityAt !== undefined && lastActivityAt !== undefined) {
-        durationMs = Math.max(durationMs, lastActivityAt - firstActivityAt);
-      }
-    }
-
-    return Math.max(0, Math.floor(durationMs));
-  }
-
-  private backfillTaskLastRunDurations(): void {
-    const taskRows = this.db
-      .prepare(
-        `
-          SELECT id, created_at, updated_at, completed_at
-          FROM tasks
-          WHERE last_run_duration_ms IS NULL
-            AND completed_at IS NOT NULL
-        `,
-      )
-      .all() as Array<{
-      id: string;
-      created_at: number;
-      updated_at: number;
-      completed_at: number;
-    }>;
-    if (taskRows.length === 0) return;
-
-    const eventsStmt = this.db.prepare(`
-      SELECT timestamp, type, legacy_type, payload
-      FROM task_events
-      WHERE task_id = ?
-      ORDER BY COALESCE(seq, timestamp) ASC, timestamp ASC
-    `);
-    const updateStmt = this.db.prepare(`
-      UPDATE tasks
-      SET last_run_duration_ms = ?
-      WHERE id = ? AND last_run_duration_ms IS NULL
-    `);
-    const runBackfill = this.db.transaction(() => {
-      for (const row of taskRows) {
-        const completedAt =
-          typeof row.completed_at === "number" && Number.isFinite(row.completed_at)
-            ? row.completed_at
-            : typeof row.updated_at === "number" && Number.isFinite(row.updated_at)
-              ? row.updated_at
-              : row.created_at;
-        const events = eventsStmt.all(row.id) as Array<{
-          timestamp?: unknown;
-          type?: unknown;
-          legacy_type?: unknown;
-          payload?: unknown;
-        }>;
-        const durationMs = DatabaseManager.calculateLastRunDurationMs({
-          createdAt: row.created_at,
-          completedAt,
-          events,
-        });
-        updateStmt.run(durationMs, row.id);
-      }
-    });
-    runBackfill();
-  }
-
-  private sanitizeLargeTaskEventPayloads(): void {
-    if (this.getMaintenanceState(TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY) === "1") {
-      return;
-    }
-
-    const rows = this.db
-      .prepare(
-        `
-          SELECT id, payload
-          FROM task_events
-          WHERE payload IS NOT NULL
-            AND LENGTH(payload) > ?
-          ORDER BY LENGTH(payload) DESC
-          LIMIT 500
-        `,
-      )
-      .all(TIMELINE_PAYLOAD_STORAGE_BYTE_LIMIT) as Array<{ id: string; payload: string }>;
-    if (rows.length === 0) {
-      this.setMaintenanceState(TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY, "1");
-      return;
-    }
-
-    const updateStmt = this.db.prepare("UPDATE task_events SET payload = ? WHERE id = ?");
-    let updated = 0;
-    const tx = this.db.transaction(() => {
-      for (const row of rows) {
-        try {
-          const parsed = JSON.parse(row.payload);
-          const sanitized = sanitizeTimelinePayloadForStorage(parsed);
-          const nextPayload = JSON.stringify(sanitized ?? {});
-          if (nextPayload !== row.payload) {
-            updateStmt.run(nextPayload, row.id);
-            updated += 1;
-          }
-        } catch {
-          const sanitized = sanitizeTimelinePayloadForStorage({
-            message: "Malformed timeline payload omitted during storage hygiene migration",
-            originalPayloadBytes: Buffer.byteLength(String(row.payload || ""), "utf8"),
-          });
-          updateStmt.run(JSON.stringify(sanitized ?? {}), row.id);
-          updated += 1;
-        }
-      }
-    });
-    tx();
-
-    if (updated > 0) {
-      schemaLogger.info(
-        `[DatabaseManager] Sanitized ${updated} oversized task_event payload(s) during maintenance`,
-      );
-    }
-    this.setMaintenanceState(TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY, "1");
   }
 
   // Migration version - increment this to force re-migration for users with partial migrations
@@ -2845,6 +2505,9 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_mailbox_threads_priority ON mailbox_threads(priority_score DESC, urgency_score DESC, last_message_at DESC);
       CREATE INDEX IF NOT EXISTS idx_mailbox_threads_flags ON mailbox_threads(needs_reply, cleanup_candidate, stale_followup);
       CREATE INDEX IF NOT EXISTS idx_mailbox_messages_thread ON mailbox_messages(thread_id, received_at);
+      -- Sync reconciles each message by provider id; without this every message scanned the table.
+      CREATE INDEX IF NOT EXISTS idx_mailbox_messages_provider_message
+        ON mailbox_messages(provider_message_id);
       CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_thread ON mailbox_attachments(thread_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_message ON mailbox_attachments(message_id);
       CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_status ON mailbox_attachments(extraction_status, updated_at DESC);
@@ -3039,27 +2702,7 @@ export class DatabaseManager {
   }
 
   private initializeMailboxSearchFTS() {
-    try {
-      this.db.exec(`
-        CREATE VIRTUAL TABLE IF NOT EXISTS mailbox_search_fts USING fts5(
-          record_type UNINDEXED,
-          record_id UNINDEXED,
-          thread_id UNINDEXED,
-          message_id UNINDEXED,
-          attachment_id UNINDEXED,
-          subject,
-          sender,
-          body,
-          attachment_filename,
-          attachment_text
-        );
-      `);
-    } catch (error) {
-      schemaLogger.warn(
-        "[DatabaseManager] Mailbox FTS5 initialization failed, mailbox search will use fallback matching:",
-        error,
-      );
-    }
+    initializeMailboxSearchIndex(this.db, (message, error) => schemaLogger.warn(message, error));
   }
 
   private runMigrations() {
@@ -4496,23 +4139,11 @@ export class DatabaseManager {
     // ============ Secure Settings Table ============
     // All settings are encrypted using OS keychain (Electron safeStorage)
     // Only this app can decrypt the values
-    try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS secure_settings (
-          id TEXT PRIMARY KEY,
-          category TEXT NOT NULL,
-          encrypted_data TEXT NOT NULL,
-          checksum TEXT NOT NULL,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          UNIQUE(category)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_secure_settings_category ON secure_settings(category);
-      `);
-    } catch {
-      // Table already exists, ignore
-    }
+    // DB5: revisions, the revision clock, and the backup and canary tables are part of
+    // the schema, so settings commits (host or worker) never need DDL.
+    ensureSecureSettingsSchema(this.db);
+    // Pulse's tables commit together with its settings row, possibly in the worker.
+    ensurePulseSchema(this.db);
 
     // ============ Mission Control Migrations ============
 
@@ -8455,7 +8086,47 @@ export class DatabaseManager {
     return this.db;
   }
 
-  close() {
+  /** Absolute path of the profile database, for workers that open their own connection. */
+  getDatabasePath(): string {
+    return this.dbPath;
+  }
+
+  private runtime: RuntimeName | null = null;
+
+  /**
+   * Record this run (DB6) and return earlier runs whose shutdown did not complete; the
+   * caller reports them. Call once per runtime after construction.
+   */
+  beginRun(runtime: RuntimeName): IncompleteRun[] {
+    this.runtime = runtime;
+    const incomplete = beginRuntimeRun(this.db, runtime);
+    for (const run of incomplete) {
+      schemaLogger.warn(
+        `[DatabaseManager] The previous ${run.runtime} run (pid ${run.pid}) did not shut down cleanly (${run.state}); accepted writes are recovered from the database on this start.`,
+      );
+    }
+    return incomplete;
+  }
+
+  /**
+   * Close the host connection. `clean: false` (a shutdown step failed or the worker did
+   * not drain) leaves this run's record marked incomplete for the next start. A passive
+   * checkpoint runs first; it never waits on other connections.
+   */
+  close(options: { clean?: boolean } = {}) {
+    if (!this.db.open) return;
+    if (this.runtime) {
+      try {
+        endRuntimeRun(this.db, this.runtime, { clean: options.clean !== false });
+      } catch (error) {
+        schemaLogger.warn("[DatabaseManager] Could not record the end of this run:", error);
+      }
+    }
+    try {
+      checkpointBounded(this.db);
+    } catch (error) {
+      schemaLogger.debug("[DatabaseManager] Passive checkpoint at close failed:", error);
+    }
     this.db.close();
   }
 

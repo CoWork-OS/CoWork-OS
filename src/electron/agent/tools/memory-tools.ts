@@ -162,7 +162,7 @@ export class MemoryTools {
     });
 
     try {
-      const gate = MemoryWriteGate.evaluate({
+      const gate = await MemoryWriteGate.evaluate({
         workspaceId: this.workspace.id,
         taskId: this.taskId,
         target: "archive",
@@ -357,15 +357,17 @@ export class MemoryTools {
     const targets =
       !input.target || input.target === "all" ? (["user", "workspace"] as const) : [input.target];
     const limit = Math.max(1, input.limit ?? 20);
-    const entriesByTarget = targets.map((target) =>
-      CuratedMemoryService.list(this.workspace.id, {
-        target,
-        kind: input.kind,
-        status: "active",
-        limit,
-      }),
+    const entriesByTarget = await Promise.all(
+      targets.map((target) =>
+        CuratedMemoryService.list(this.workspace.id, {
+          target,
+          kind: input.kind,
+          status: "active",
+          limit,
+        }),
+      ),
     );
-    const entries: ReturnType<typeof CuratedMemoryService.list> = [];
+    const entries: Awaited<ReturnType<typeof CuratedMemoryService.list>> = [];
     for (let index = 0; entries.length < limit; index += 1) {
       let added = false;
       for (const bucket of entriesByTarget) {

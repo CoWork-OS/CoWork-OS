@@ -8,13 +8,13 @@ export function attachControlPlaneTaskLifecycleSync(options: {
   log?: (...args: unknown[]) => void;
 }): () => void {
   const core = new ControlPlaneCoreService(options.db);
+  // Listeners stay synchronous: the sync is queued and its failure is logged.
   const sync = (event: { taskId?: string }) => {
-    if (!event?.taskId) return;
-    try {
-      core.syncTaskLifecycle(event.taskId);
-    } catch (error) {
-      options.log?.("[ControlPlaneTaskSync] Failed to sync task lifecycle", event.taskId, error);
-    }
+    const taskId = event?.taskId;
+    if (!taskId) return;
+    void core.syncTaskLifecycle(taskId).catch((error: unknown) => {
+      options.log?.("[ControlPlaneTaskSync] Failed to sync task lifecycle", taskId, error);
+    });
   };
 
   const syncStatus = (event: { taskId?: string; payload?: { status?: string } }) => {

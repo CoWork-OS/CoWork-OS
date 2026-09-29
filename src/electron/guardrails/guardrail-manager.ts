@@ -103,6 +103,8 @@ export function containsShellControlOperator(command: string): boolean {
 export class GuardrailManager {
   private static legacySettingsPath: string;
   private static cachedSettings: GuardrailSettings | null = null;
+  /** Stored revision behind the cache; compared on every load (DB5). */
+  private static cachedRevision: number | null | undefined = undefined;
   private static migrationCompleted = false;
 
   /**
@@ -177,16 +179,27 @@ export class GuardrailManager {
    * Load settings from encrypted database (with caching)
    */
   static loadSettings(): GuardrailSettings {
-    if (this.cachedSettings) {
+    let repository: SecureSettingsRepository | null = null;
+    let revision: number | null | undefined;
+    try {
+      if (SecureSettingsRepository.isInitialized()) {
+        repository = SecureSettingsRepository.getInstance();
+        // One indexed read: an edit by any process applies to the next check.
+        revision = repository.getRevision("guardrails");
+      }
+    } catch (error) {
+      console.error("[GuardrailManager] Failed to check settings revision:", error);
+    }
+    if (this.cachedSettings && this.cachedRevision === revision) {
       return this.cachedSettings;
     }
 
     try {
-      if (SecureSettingsRepository.isInitialized()) {
-        const repository = SecureSettingsRepository.getInstance();
-        const stored = repository.load<GuardrailSettings>("guardrails");
-        if (stored) {
-          this.cachedSettings = { ...DEFAULT_SETTINGS, ...stored };
+      if (repository) {
+        const record = repository.readRecord<GuardrailSettings>("guardrails");
+        if (record.data) {
+          this.cachedSettings = { ...DEFAULT_SETTINGS, ...record.data };
+          this.cachedRevision = record.revision;
           return this.cachedSettings;
         }
       }
@@ -195,6 +208,7 @@ export class GuardrailManager {
     }
 
     this.cachedSettings = { ...DEFAULT_SETTINGS };
+    this.cachedRevision = revision;
     return this.cachedSettings;
   }
 
@@ -207,9 +221,13 @@ export class GuardrailManager {
         throw new Error("SecureSettingsRepository not initialized");
       }
 
-      const repository = SecureSettingsRepository.getInstance();
-      repository.save("guardrails", settings);
-      this.cachedSettings = settings;
+      // A checked write: throws when refused instead of reporting it saved (DB5).
+      const result = SecureSettingsRepository.getInstance().update<GuardrailSettings>(
+        "guardrails",
+        () => settings,
+      );
+      this.cachedSettings = { ...DEFAULT_SETTINGS, ...settings };
+      this.cachedRevision = result.revision;
       console.log("[GuardrailManager] Settings saved to encrypted database");
     } catch (error) {
       console.error("[GuardrailManager] Failed to save settings:", error);
@@ -222,6 +240,7 @@ export class GuardrailManager {
    */
   static clearCache(): void {
     this.cachedSettings = null;
+    this.cachedRevision = undefined;
   }
 
   /**

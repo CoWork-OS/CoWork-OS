@@ -1,14 +1,19 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import {
   PulseService,
   PulseSettingsWriteRefusedError,
   type PulsePrivateSettings,
   type PulseSettingsStore,
 } from "../pulse-service";
+import {
+  commitSecureSettingsWrites,
+  ensureSecureSettingsSchema,
+} from "../../database/secure-settings-sql";
 
 // Synthetic identities, in-memory or temp-file SQLite and mocked HTTP only. Nothing
 // here reads a real profile or contacts a collector.
@@ -30,20 +35,41 @@ interface Request {
   authorization?: string;
 }
 
-/** Settings store in the same SQLite connection, so the service's transactions cover it. */
-function tableStore(db: Database.Database): PulseSettingsStore {
-  db.exec("CREATE TABLE IF NOT EXISTS test_settings (id INTEGER PRIMARY KEY, json TEXT)");
+type TestPulseStore = PulseSettingsStore & {
+  /** Test seeding and inspection, outside the service. */
+  save(settings: PulsePrivateSettings): void;
+  load(): PulsePrivateSettings | null;
+};
+
+/**
+ * The real `secure_settings` row and revision, with plaintext JSON standing in for
+ * ciphertext: the service's commits (host or worker) apply to it exactly as to the
+ * encrypted store.
+ */
+function tableStore(db: Database.Database): TestPulseStore {
+  ensureSecureSettingsSchema(db);
+  const encode = (settings: PulsePrivateSettings) => {
+    const encryptedData = JSON.stringify(settings);
+    return { encryptedData, checksum: createHash("sha256").update(encryptedData).digest("hex") };
+  };
+  const read = () => {
+    const row = db
+      .prepare("SELECT encrypted_data, revision FROM secure_settings WHERE category = 'pulse'")
+      .get() as { encrypted_data: string; revision: number } | undefined;
+    return row
+      ? { settings: JSON.parse(row.encrypted_data) as PulsePrivateSettings, revision: row.revision }
+      : { settings: null, revision: null };
+  };
   return {
-    load: () => {
-      const row = db.prepare("SELECT json FROM test_settings WHERE id = 1").get() as
-        | { json: string }
-        | undefined;
-      return row ? (JSON.parse(row.json) as PulsePrivateSettings) : null;
-    },
+    read,
+    encode,
+    load: () => read().settings,
     save: (settings) => {
-      db.prepare(
-        "INSERT INTO test_settings (id, json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json",
-      ).run(JSON.stringify(settings));
+      db.transaction(() =>
+        commitSecureSettingsWrites(db, [
+          { category: "pulse", expectedRevision: "any", record: encode(settings) },
+        ]),
+      )();
     },
   };
 }
@@ -149,7 +175,8 @@ describe("Pulse lifecycle: the latest decision wins", () => {
       },
     });
     const running = f.service.flush();
-    await Promise.resolve();
+    // Let the flush reach the enrollment request (its reads are units, DB6).
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await f.service.setEnabled(false);
     expect(f.saved().consentState).toBe("disabled");
     gate.release();
@@ -240,7 +267,7 @@ describe("Pulse lifecycle: the latest decision wins", () => {
     expect(latest.enrolled).toBe(false);
     expect(latest.identityStartedAt).toBe(NOW);
     // Yesterday was consented only under the old identity.
-    expect(f.service.getSettings().preview).toMatchObject({
+    expect((await f.service.getSettings()).preview).toMatchObject({
       state: "ineligible",
       reason: "incomplete_consent_day",
     });
@@ -335,7 +362,7 @@ describe("Pulse remote deletion", () => {
 
     // "Restart": a new service over the same database.
     const restarted = fixture({ db, handler: async () => ({ ok: true, status: 200 }) });
-    expect(restarted.service.getSettings().deletion.state).toBe("pending");
+    expect((await restarted.service.getSettings()).deletion.state).toBe("pending");
     expect((await restarted.service.setEnabled(true)).error).toBe("deletion_pending");
     expect((await restarted.service.resetIdentity()).error).toBe("deletion_pending");
     expect(restarted.saved().consentState).toBe("disabled");
@@ -408,7 +435,7 @@ describe("Pulse delivery: one queue, receipts, accurate preview", () => {
     const restarted = fixture({ db });
     expect((await restarted.service.flush()).outcome).toBe("already_sent");
     expect(restarted.dailyRequests()).toHaveLength(0);
-    expect(restarted.service.getSettings().preview).toMatchObject({
+    expect((await restarted.service.getSettings()).preview).toMatchObject({
       state: "already_sent",
       periodStart: YESTERDAY,
     });
@@ -430,16 +457,16 @@ describe("Pulse delivery: one queue, receipts, accurate preview", () => {
     });
     insert.run("a".repeat(64), installationId, "2026-09-22T00:00:00.000Z", older, 2);
     insert.run("b".repeat(64), installationId, "2026-09-24T00:00:00.000Z", newer, 1);
-    const preview = f.service.getSettings().preview;
+    const preview = (await f.service.getSettings()).preview;
     expect(preview.state).toBe("queued");
     await f.service.flush();
     expect(f.dailyRequests()[0].body).toBe(older);
     expect(preview.state === "queued" && preview.package.packageId).toBe("a".repeat(64));
   });
 
-  it("opening settings has no side effect on the outbox", () => {
+  it("opening settings has no side effect on the outbox", async () => {
     const f = fixture({ settings: enabledSettings() });
-    const settings = f.service.getSettings();
+    const settings = await f.service.getSettings();
     expect(settings.preview.state).toBe("candidate");
     expect(settings.pendingPackage?.period.start).toBe(YESTERDAY);
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM pulse_outbox").get()).toEqual({ n: 0 });
@@ -485,9 +512,9 @@ describe("Pulse delivery: one queue, receipts, accurate preview", () => {
   it("refreshes the preview across a UTC rollover", async () => {
     let clock = NOW;
     const f = fixture({ settings: enabledSettings(), now: () => clock });
-    const before = f.service.getSettings().pendingPackage!.period.start;
+    const before = (await f.service.getSettings()).pendingPackage!.period.start;
     clock += DAY_MS;
-    const after = f.service.getSettings().pendingPackage!.period.start;
+    const after = (await f.service.getSettings()).pendingPackage!.period.start;
     expect(before).toBe(YESTERDAY);
     expect(after).toBe("2026-09-26T00:00:00.000Z");
   });
@@ -504,14 +531,17 @@ describe("Pulse delivery: one queue, receipts, accurate preview", () => {
 
   it("disabled and deletion-pending previews are ineligible and Send reports why", async () => {
     const f = fixture({ settings: { consentState: "disabled" } });
-    expect(f.service.getSettings().preview).toEqual({ state: "ineligible", reason: "disabled" });
+    expect((await f.service.getSettings()).preview).toEqual({
+      state: "ineligible",
+      reason: "disabled",
+    });
     expect((await f.service.flush()).outcome).toBe("no_eligible_day");
   });
 
   it("reports the first eligible day after opting in", async () => {
     const f = fixture({ settings: { consentState: "unset" } });
     await f.service.setEnabled(true);
-    expect(f.service.getSettings().preview).toEqual({
+    expect((await f.service.getSettings()).preview).toEqual({
       state: "ineligible",
       reason: "incomplete_consent_day",
       eligibleFrom: "2026-09-27T00:00:00.000Z",
@@ -594,6 +624,61 @@ describe("Pulse across processes sharing one profile", () => {
   });
 });
 
+describe("Pulse transactions never span host work", () => {
+  it("reads, encrypts and builds packages outside every transaction", async () => {
+    const db = new Database(":memory:");
+    openDbs.push(db);
+    const violations: string[] = [];
+    const base = tableStore(db);
+    const watched: PulseSettingsStore = {
+      read: () => {
+        if (db.inTransaction) violations.push("read");
+        return base.read();
+      },
+      encode: (settings) => {
+        if (db.inTransaction) violations.push("encode");
+        return base.encode(settings);
+      },
+    };
+    const original = (
+      PulseService.prototype as unknown as { buildPackage: (id: string) => unknown }
+    ).buildPackage;
+    const spy = vi
+      .spyOn(
+        PulseService.prototype as unknown as { buildPackage: (id: string) => unknown },
+        "buildPackage",
+      )
+      .mockImplementation(function (this: unknown, installationId: string) {
+        if (db.inTransaction) violations.push("buildPackage");
+        return original.call(this, installationId);
+      });
+    try {
+      createTaskTables(db);
+      let clock = NOW - 3 * DAY_MS;
+      const service = new PulseService(db, {
+        version: "0.0.0",
+        runtime: "desktop",
+        now: () => clock,
+        fetch: (async () => ({ ok: true, status: 202 })) as unknown as typeof fetch,
+        settingsStore: watched,
+      });
+      expect((await service.setEnabled(true)).success).toBe(true);
+      // Enabling starts a flush of its own; let it finish before the clock moves.
+      await service.flush();
+      clock = NOW;
+      expect((await service.flush()).outcome).toBe("sent");
+      expect(spy).toHaveBeenCalled();
+      expect((await service.resetIdentity()).success).toBe(true);
+      expect((await service.setEnabled(false)).success).toBe(true);
+      expect((await service.deleteRemoteData()).success).toBe(true);
+      await service.getSettings();
+      expect(violations).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe("Pulse start, stop and shutdown", () => {
   it("repeated start/stop leaves no timers and shutdown settles in-flight work", async () => {
     const f = fixture({
@@ -637,7 +722,7 @@ describe("Pulse start, stop and shutdown", () => {
 });
 
 describe("Pulse settings upgrade", () => {
-  it("defaults revision to zero and starts identity eligibility at upgrade time", () => {
+  it("defaults revision to zero and starts identity eligibility at upgrade time", async () => {
     const f = fixture({
       settings: {
         consentState: "enabled",
@@ -647,7 +732,7 @@ describe("Pulse settings upgrade", () => {
         enabledAt: NOW - 30 * DAY_MS,
       },
     });
-    const settings = f.service.getSettings();
+    const settings = await f.service.getSettings();
     expect(f.saved().revision).toBe(0);
     expect(settings.enabled).toBe(true);
     expect(f.saved().identityStartedAt).toBe(NOW);
@@ -658,9 +743,9 @@ describe("Pulse settings upgrade", () => {
     });
   });
 
-  it("does not infer a sent day from lastSentAt", () => {
+  it("does not infer a sent day from lastSentAt", async () => {
     const f = fixture({ settings: enabledSettings({ lastSentAt: NOW - 1000 }) });
-    expect(f.service.getSettings().preview.state).toBe("candidate");
+    expect((await f.service.getSettings()).preview.state).toBe("candidate");
   });
 });
 
@@ -670,10 +755,10 @@ describe("Pulse when encrypted settings refuse writes", () => {
     const store = f.store;
     let refusing = true;
     const refusingStore: PulseSettingsStore = {
-      load: () => store.load(),
-      save: (settings) => {
+      read: () => store.read(),
+      encode: (settings) => {
         if (refusing) throw new PulseSettingsWriteRefusedError();
-        store.save(settings);
+        return store.encode(settings);
       },
       refusesWrites: () => refusing,
     };
@@ -717,18 +802,58 @@ describe("Pulse when encrypted settings refuse writes", () => {
       runtime: "desktop",
       now: () => NOW,
       settingsStore: {
-        load: () => f.store.load(),
-        save: (settings) => {
+        read: () => f.store.read(),
+        encode: (settings) => {
           if (refusing) throw new PulseSettingsWriteRefusedError();
-          f.store.save(settings);
+          return f.store.encode(settings);
         },
         refusesWrites: () => refusing,
       },
     });
-    expect(service.getSettings().enabled).toBe(true);
+    expect((await service.getSettings()).enabled).toBe(true);
     expect(f.saved().identityStartedAt).toBeUndefined();
     refusing = false;
     expect((await service.setEnabled(false)).success).toBe(true);
     expect(f.saved().consentState).toBe("disabled");
+  });
+});
+
+describe("Pulse beside a process that holds the keychain", () => {
+  it("never replaces a settings record it cannot read, and reports no consent", async () => {
+    const f = fixture({ settings: enabledSettings() });
+    const requests: string[] = [];
+    const service = new PulseService(f.db, {
+      version: "0.0.0",
+      runtime: "daemon",
+      now: () => NOW,
+      fetch: (async (url: string) => {
+        requests.push(url);
+        return { ok: true, status: 202 };
+      }) as unknown as typeof fetch,
+      // As the daemon sees a record the desktop app encrypted with the OS keychain.
+      settingsStore: {
+        read: () => ({
+          ...f.store.read(),
+          settings: undefined,
+          unreadableStatus: "os_encryption_unavailable",
+        }),
+        encode: (settings) => f.store.encode(settings),
+      },
+    });
+    const before = f.store.read();
+    expect((await service.getSettings()).consentState).toBe("unset");
+    for (const result of [
+      await service.setEnabled(false),
+      await service.resetIdentity(),
+      await service.deleteRemoteData(),
+    ]) {
+      expect(result).toMatchObject({ success: false, error: "settings_write_refused" });
+    }
+    expect(await service.flush()).toMatchObject({
+      outcome: "error",
+      error: "settings_write_refused",
+    });
+    expect(f.store.read()).toEqual(before);
+    expect(requests).toEqual([]);
   });
 });

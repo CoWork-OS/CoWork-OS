@@ -18,11 +18,11 @@ import type {
   WorkSessionItem,
 } from "../../shared/types";
 import {
-  ArtifactRepository,
-  ApprovalRepository,
-  InputRequestRepository,
-  TaskRepository,
-  WorkspaceRepository,
+  ArtifactStore,
+  ApprovalStore,
+  InputRequestStore,
+  TaskStore,
+  WorkspaceStore,
 } from "../database/repositories";
 import {
   WorkSessionContractRepository,
@@ -183,11 +183,11 @@ export interface UserRequirementCorrection {
 export class WorkSessionContractService {
   private readonly repository: WorkSessionContractRepository;
   private readonly protocol: WorkSessionProtocolService;
-  private readonly taskRepo: TaskRepository;
-  private readonly artifactRepo: ArtifactRepository;
-  private readonly approvalRepo: ApprovalRepository;
-  private readonly inputRequestRepo: InputRequestRepository;
-  private readonly workspaceRepo: WorkspaceRepository;
+  private readonly taskRepo: TaskStore;
+  private readonly artifactRepo: ArtifactStore;
+  private readonly approvalRepo: ApprovalStore;
+  private readonly inputRequestRepo: InputRequestStore;
+  private readonly workspaceRepo: WorkspaceStore;
   private readonly artifactEvidenceInspector: WorkspaceArtifactEvidenceInspector;
 
   constructor(
@@ -197,11 +197,11 @@ export class WorkSessionContractService {
   ) {
     this.repository = new WorkSessionContractRepository(db);
     this.protocol = protocol || new WorkSessionProtocolService(db);
-    this.taskRepo = new TaskRepository(db);
-    this.artifactRepo = new ArtifactRepository(db);
-    this.approvalRepo = new ApprovalRepository(db);
-    this.inputRequestRepo = new InputRequestRepository(db);
-    this.workspaceRepo = new WorkspaceRepository(db);
+    this.taskRepo = new TaskStore(db);
+    this.artifactRepo = new ArtifactStore(db);
+    this.approvalRepo = new ApprovalStore(db);
+    this.inputRequestRepo = new InputRequestStore(db);
+    this.workspaceRepo = new WorkspaceStore(db);
     this.artifactEvidenceInspector =
       artifactEvidenceInspector || new WorkspaceArtifactEvidenceInspector();
   }

@@ -1,3 +1,8 @@
+import {
+  CoreFailureClusterRepository,
+  CoreHarnessExperimentRepository,
+} from "./core-repository-facades";
+import { AutomationProfileRepository } from "../agents/agent-repository-facades";
 import type {
   AutomationProfile,
   CoreFailureCluster,
@@ -5,10 +10,8 @@ import type {
   CoreExperimentChangeKind,
   ListCoreExperimentsRequest,
 } from "../../shared/types";
-import { AutomationProfileRepository } from "../agents/AutomationProfileRepository";
+
 import { SubconsciousSettingsManager } from "../subconscious/SubconsciousSettingsManager";
-import { CoreFailureClusterRepository } from "./CoreFailureClusterRepository";
-import { CoreHarnessExperimentRepository } from "./CoreHarnessExperimentRepository";
 
 export class CoreHarnessExperimentService {
   constructor(
@@ -21,23 +24,23 @@ export class CoreHarnessExperimentService {
     return this.experimentRepo.listExperiments(request);
   }
 
-  proposeExperimentsForCluster(clusterId: string): CoreHarnessExperiment[] {
-    const cluster = this.clusterRepo.findById(clusterId);
+  async proposeExperimentsForCluster(clusterId: string): Promise<CoreHarnessExperiment[]> {
+    const cluster = await this.clusterRepo.findById(clusterId);
     if (!cluster) return [];
-    const existing = this.experimentRepo.listExperiments({
+    const existing = await this.experimentRepo.listExperiments({
       clusterId,
       limit: 20,
     });
     if (existing.some((item) => ["proposed", "running", "passed_gate"].includes(item.status))) {
       return existing;
     }
-    const profile = this.automationProfileRepo.findById(cluster.profileId);
+    const profile = await this.automationProfileRepo.findById(cluster.profileId);
     if (!profile) return [];
 
     const proposal = this.buildProposal(cluster, profile);
     if (!proposal) return [];
     const now = Date.now();
-    const experiment = this.experimentRepo.createExperiment({
+    const experiment = await this.experimentRepo.createExperiment({
       profileId: cluster.profileId,
       workspaceId: cluster.workspaceId,
       clusterId: cluster.id,
@@ -48,7 +51,7 @@ export class CoreHarnessExperimentService {
       createdAt: now,
       updatedAt: now,
     });
-    this.clusterRepo.update(cluster.id, {
+    await this.clusterRepo.update(cluster.id, {
       linkedExperimentId: experiment.id,
       updatedAt: now,
     });

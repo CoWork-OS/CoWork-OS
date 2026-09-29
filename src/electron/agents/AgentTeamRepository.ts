@@ -5,7 +5,7 @@ import { AgentTeam, CreateAgentTeamRequest, UpdateAgentTeamRequest } from "../..
 /**
  * Repository for managing agent teams (Team Lead + members) in the database.
  */
-export class AgentTeamRepository {
+export class AgentTeamStore {
   constructor(private db: Database.Database) {}
 
   /**

@@ -154,8 +154,8 @@ describe("MemorySynthesizer", () => {
     vi.clearAllMocks();
   });
 
-  it("produces hot and structured memory without injecting recall hints into the prompt", () => {
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+  it("produces hot and structured memory without injecting recall hints into the prompt", async () => {
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).toContain("<cowork_hot_memory>");
     expect(result.text).toContain("<cowork_structured_memory>");
@@ -163,14 +163,14 @@ describe("MemorySynthesizer", () => {
     expect(result.fragmentCount).toBeGreaterThan(0);
   });
 
-  it("includes curated hot memory by default", () => {
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+  it("includes curated hot memory by default", async () => {
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).toContain("Curated Hot Memory");
     expect(result.sourceAttribution.curated_memory).toBeGreaterThan(0);
   });
 
-  it("injects source-backed Box Brain recall with its Box URL", () => {
+  it("injects source-backed Box Brain recall with its Box URL", async () => {
     const settingsSpy = vi.spyOn(BoxSettingsManager, "loadSettings").mockReturnValue({
       enabled: true,
       mcpEnabled: true,
@@ -197,7 +197,7 @@ describe("MemorySynthesizer", () => {
       },
     ]);
 
-    const result = MemorySynthesizer.buildStructuredMemoryContext(
+    const result = await MemorySynthesizer.buildStructuredMemoryContext(
       "ws1",
       "/workspace",
       "approval policy",
@@ -209,8 +209,52 @@ describe("MemorySynthesizer", () => {
     settingsSpy.mockRestore();
   });
 
-  it("renders operating-profile facts as a personal operating manual", () => {
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+  it("uses prefetched Box Brain hits without a synchronous memory search", async () => {
+    const settingsSpy = vi.spyOn(BoxSettingsManager, "loadSettings").mockReturnValue({
+      enabled: true,
+      mcpEnabled: true,
+      brain: {
+        enabled: true,
+        rootFolderId: "123",
+        syncIntervalMinutes: 60,
+        maxItemsPerRun: 20,
+        includeContent: true,
+        useBoxAiSummaries: false,
+        improvementEnabled: true,
+        maxContentChars: 10000,
+      },
+    });
+    const hit = {
+      id: "box-memory-2",
+      snippet:
+        "[Imported from Box Brain] File: Travel Policy.md | Box URL: https://app.box.com/file/456",
+      type: "observation" as const,
+      relevanceScore: 0.8,
+      createdAt: Date.now() - 5_000,
+      source: "db" as const,
+    };
+    const searchAsync = vi.fn(async () => [hit]);
+    (MemoryService as unknown as { searchAsync: typeof searchAsync }).searchAsync = searchAsync;
+    vi.mocked(MemoryService.search).mockClear();
+
+    const boxBrainHits = await MemorySynthesizer.prefetchBoxBrainHits("ws1", "travel policy");
+    const result = await MemorySynthesizer.buildStructuredMemoryContext(
+      "ws1",
+      "/workspace",
+      "travel policy",
+      {
+        boxBrainHits,
+      },
+    );
+
+    expect(searchAsync).toHaveBeenCalledWith("ws1", "travel policy", 8);
+    expect(MemoryService.search).not.toHaveBeenCalled();
+    expect(result.text).toContain("https://app.box.com/file/456");
+    settingsSpy.mockRestore();
+  });
+
+  it("renders operating-profile facts as a personal operating manual", async () => {
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).toContain("Personal Operating Manual");
     expect(result.text).toContain(
@@ -220,7 +264,7 @@ describe("MemorySynthesizer", () => {
     expect(result.text).toContain("[Identity] Preferred name: Alice");
   });
 
-  it("keeps low-confidence conversation-derived operating facts out of hot prompt injection", () => {
+  it("keeps low-confidence conversation-derived operating facts out of hot prompt injection", async () => {
     vi.mocked(UserProfileService.getProfile).mockReturnValueOnce({
       facts: [
         {
@@ -245,14 +289,14 @@ describe("MemorySynthesizer", () => {
       updatedAt: Date.now(),
     });
 
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).not.toContain("Personal Operating Manual");
     expect(result.text).not.toContain("Pushback: challenge weak ideas with evidence.");
     expect(result.text).toContain("[Identity] Preferred name: Alice");
   });
 
-  it("omits L0 hot memory when curated memory is disabled even with wake-up layers on", () => {
+  it("omits L0 hot memory when curated memory is disabled even with wake-up layers on", async () => {
     vi.mocked(MemoryFeaturesManager.loadSettings).mockReturnValueOnce({
       curatedMemoryEnabled: false,
       sessionRecallEnabled: true,
@@ -262,7 +306,7 @@ describe("MemorySynthesizer", () => {
       defaultArchiveInjectionEnabled: false,
     } as Any);
 
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).not.toContain("<cowork_hot_memory>");
     expect(result.text).not.toContain("Curated Hot Memory");
@@ -271,14 +315,14 @@ describe("MemorySynthesizer", () => {
     expect(result.sourceAttribution.relationship).toBe(0);
   });
 
-  it("keeps archive recall out of default injection", () => {
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+  it("keeps archive recall out of default injection", async () => {
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).not.toContain("Archived Recall");
     expect(result.sourceAttribution.memory).toBe(0);
   });
 
-  it("can include archive recall when the feature flag is enabled", () => {
+  it("can include archive recall when the feature flag is enabled", async () => {
     (MemoryFeaturesManager.loadSettings as Any).mockReturnValueOnce({
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
@@ -288,14 +332,14 @@ describe("MemorySynthesizer", () => {
       defaultArchiveInjectionEnabled: true,
     } as Any);
 
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).not.toContain("Archived Recall");
     expect(result.sourceAttribution.memory).toBe(0);
   });
 
-  it("includes workspace kit context when enabled", () => {
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "task", {
+  it("includes workspace kit context when enabled", async () => {
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "task", {
       includeWorkspaceKit: true,
     });
 
@@ -303,25 +347,25 @@ describe("MemorySynthesizer", () => {
     expect(result.sourceAttribution.workspace_kit).toBe(1);
   });
 
-  it("tracks dropped fragments under a small token budget", () => {
-    const result = MemorySynthesizer.buildHotMemoryContext("ws1", 10);
+  it("tracks dropped fragments under a small token budget", async () => {
+    const result = await MemorySynthesizer.buildHotMemoryContext("ws1", 10);
 
     expect(result.droppedCount).toBeGreaterThan(0);
     expect(result.totalTokens).toBeGreaterThan(0);
   });
 
-  it("ignores null playbook and knowledge-graph payloads without dropping other context", () => {
+  it("ignores null playbook and knowledge-graph payloads without dropping other context", async () => {
     vi.mocked(PlaybookService.getPlaybookForContext).mockReturnValueOnce(null as Any);
     vi.mocked(KnowledgeGraphService.buildContextForTask).mockReturnValueOnce(null as Any);
 
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).toContain("Recent Summaries");
     expect(result.text).not.toContain("Past Task Patterns");
     expect(result.text).not.toContain("Known Entities");
   });
 
-  it("deduplicates archived recall when recent and search results point to the same memory id", () => {
+  it("deduplicates archived recall when recent and search results point to the same memory id", async () => {
     vi.mocked(MemoryFeaturesManager.loadSettings).mockReturnValueOnce({
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
@@ -348,14 +392,14 @@ describe("MemorySynthesizer", () => {
       },
     ] as Any);
 
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
     const archiveMentions = result.text.match(/Use a single archive entry\./g) || [];
 
     expect(result.sourceAttribution.memory).toBe(1);
     expect(archiveMentions).toHaveLength(1);
   });
 
-  it("uses the sanitizer output when rendering memory fragments", () => {
+  it("uses the sanitizer output when rendering memory fragments", async () => {
     vi.mocked(InputSanitizer.sanitizeMemoryContent).mockImplementation((text: string) =>
       text.replace("<script>", "").replace("</script>", ""),
     );
@@ -378,14 +422,18 @@ describe("MemorySynthesizer", () => {
       defaultArchiveInjectionEnabled: true,
     } as Any);
 
-    const result = MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
     expect(result.text).not.toContain("<script>");
     expect(result.text).toContain("alert(1) sanitize me");
   });
 
-  it("builds a wake-up layer preview with only L0/L1 injected by default", () => {
-    const preview = MemorySynthesizer.buildLayerPreview("ws1", "/workspace", "Deploy the API");
+  it("builds a wake-up layer preview with only L0/L1 injected by default", async () => {
+    const preview = await MemorySynthesizer.buildLayerPreview(
+      "ws1",
+      "/workspace",
+      "Deploy the API",
+    );
 
     expect(preview.injectedLayerIds).toEqual(["L0", "L1"]);
     expect(preview.excludedLayerIds).toEqual(["L2", "L3"]);

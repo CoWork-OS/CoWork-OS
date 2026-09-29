@@ -92,7 +92,7 @@ describe("LoreService", () => {
       };
 
       // Simulate a task_completed event via the internal method.
-      (service as Any).ingestTaskCompleted(
+      await (service as Any).ingestTaskCompleted(
         "task-1",
         { resultSummary: "Auth flow done" },
         Date.now(),
@@ -138,7 +138,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted(
+      await (service as Any).ingestTaskCompleted(
         "task-2",
         { resultSummary: "Pipeline green" },
         Date.now(),
@@ -180,7 +180,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-1", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-1", {}, Date.now());
       await (service as Any).flushWorkspace("ws-1");
 
       const content = readFile(lorePath);
@@ -204,7 +204,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-short", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-short", {}, Date.now());
       const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state).toBeUndefined();
     });
@@ -224,7 +224,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-sub", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-sub", {}, Date.now());
       const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state).toBeUndefined();
     });
@@ -244,7 +244,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-pub", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-pub", {}, Date.now());
       const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state).toBeUndefined();
     });
@@ -259,8 +259,8 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-dup", {}, Date.now());
-      (service as Any).ingestTaskCompleted("task-dup", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-dup", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-dup", {}, Date.now());
 
       const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state.entries).toHaveLength(1);
@@ -279,7 +279,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-nokit", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-nokit", {}, Date.now());
       const state = (service as Any).stateByWorkspace.get("ws-1");
       expect(state).toBeUndefined();
     });
@@ -319,9 +319,9 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("new-1", {}, Date.now());
-      (service as Any).ingestTaskCompleted("new-2", {}, Date.now());
-      (service as Any).ingestTaskCompleted("new-3", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("new-1", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("new-2", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("new-3", {}, Date.now());
       await (service as Any).flushWorkspace("ws-1");
 
       const content = readFile(lorePath);
@@ -357,7 +357,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-1", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-1", {}, Date.now());
       await (service as Any).flushWorkspace("ws-1");
 
       const content = readFile(lorePath);
@@ -381,7 +381,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-debounce", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-debounce", {}, Date.now());
 
       // File should NOT exist yet (flush hasn't fired).
       const lorePath = path.join(tmpDir, ".cowork", "LORE.md");
@@ -418,7 +418,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted(
+      await (service as Any).ingestTaskCompleted(
         "task-fmt",
         { resultSummary: "Clean separation of concerns" },
         Date.now(),
@@ -446,7 +446,7 @@ describe("LoreService", () => {
         findById: () => makeWorkspaceRow("ws-1", tmpDir),
       };
 
-      (service as Any).ingestTaskCompleted("task-nosummary", {}, Date.now());
+      await (service as Any).ingestTaskCompleted("task-nosummary", {}, Date.now());
       await (service as Any).flushWorkspace("ws-1");
 
       const lorePath = path.join(tmpDir, ".cowork", "LORE.md");

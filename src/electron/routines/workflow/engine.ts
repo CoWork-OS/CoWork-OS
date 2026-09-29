@@ -1,3 +1,4 @@
+import { RoutineWorkflowRepository } from "../routine-repository-facades";
 import { randomUUID } from "crypto";
 import type {
   RoutineWorkflowDefinition,
@@ -9,7 +10,7 @@ import type {
 import type { AccessProfileId } from "../../../shared/access-profiles";
 import type { Routine } from "../types";
 import { DEFAULT_WORKFLOW_LIMITS, getWorkflowOperation } from "./catalog";
-import { RoutineWorkflowRepository } from "./repository";
+
 import { validateRoutineWorkflow } from "./validation";
 import {
   evaluateWorkflowComparison,
@@ -95,7 +96,7 @@ export class RoutineWorkflowEngine {
       );
     }
 
-    const run = this.repository.createRun({
+    const run = await this.repository.createRun({
       routineId: input.routine.id,
       workflowVersionId: input.workflowVersionId,
       triggerNodeId: input.workflow.starterNodeId,
@@ -111,7 +112,7 @@ export class RoutineWorkflowEngine {
       } satisfies StoredRunContext,
     });
 
-    const existingSteps = this.repository.listSteps(run.id);
+    const existingSteps = await this.repository.listSteps(run.id);
     if (existingSteps.length > 0) {
       if (
         run.status === "completed" ||
@@ -125,10 +126,10 @@ export class RoutineWorkflowEngine {
       return this.continueRun(input.routine, input.workflow, run.id);
     }
 
-    this.repository.initializeSteps(run.id, input.routine.id, input.workflow.nodes);
-    const starterStep = this.repository.findStep(run.id, input.workflow.starterNodeId);
+    await this.repository.initializeSteps(run.id, input.routine.id, input.workflow.nodes);
+    const starterStep = await this.repository.findStep(run.id, input.workflow.starterNodeId);
     if (starterStep?.status === "pending") {
-      this.repository.updateStep(starterStep.id, {
+      await this.repository.updateStep(starterStep.id, {
         status: "completed",
         attemptCount: 1,
         input: input.trigger,
@@ -137,7 +138,7 @@ export class RoutineWorkflowEngine {
         finishedAt: this.now(),
       });
     }
-    this.repository.updateRun(run.id, {
+    await this.repository.updateRun(run.id, {
       status: "running",
       startedAt: run.startedAt || this.now(),
     });
@@ -152,7 +153,7 @@ export class RoutineWorkflowEngine {
     if (this.running.has(runId)) return this.requireRun(runId);
     this.running.add(runId);
     try {
-      let run = this.requireRun(runId);
+      let run = await this.requireRun(runId);
       if (run.status === "completed" || run.status === "failed" || run.status === "cancelled")
         return run;
       const limits = { ...DEFAULT_WORKFLOW_LIMITS, ...workflow.settings };
@@ -165,18 +166,18 @@ export class RoutineWorkflowEngine {
       };
 
       while (budget.remaining > 0) {
-        run = this.requireRun(runId);
+        run = await this.requireRun(runId);
         if (run.status === "waiting_for_approval" || run.status === "cancelled") return run;
         if (this.now() > deadline) {
-          return this.repository.updateRun(runId, {
+          return (await this.repository.updateRun(runId, {
             status: "failed",
             error: `Workflow exceeded its ${limits.maxRunDurationMs}ms run limit.`,
             finishedAt: this.now(),
-          })!;
+          }))!;
         }
 
         const stepByNode = new Map(
-          this.repository.listSteps(runId).map((step) => [step.nodeId, step]),
+          (await this.repository.listSteps(runId)).map((step) => [step.nodeId, step]),
         );
         const ready = this.findReadyNodes(workflow, stepByNode);
         if (ready.length === 0) {
@@ -184,25 +185,25 @@ export class RoutineWorkflowEngine {
             (step) => step.status === "waiting_for_approval",
           );
           if (waiting) {
-            return this.repository.updateRun(runId, { status: "waiting_for_approval" })!;
+            return (await this.repository.updateRun(runId, { status: "waiting_for_approval" }))!;
           }
           const unfinished = Array.from(stepByNode.values()).filter(
             (step) => !TERMINAL_STEP_STATUSES.has(step.status),
           );
           if (unfinished.length > 0) {
-            return this.repository.updateRun(runId, {
+            return (await this.repository.updateRun(runId, {
               status: "failed",
               error:
                 "Workflow could not make progress because its graph dependencies are unresolved.",
               finishedAt: this.now(),
-            })!;
+            }))!;
           }
-          return this.finishRun(runId, stepByNode);
+          return await this.finishRun(runId, stepByNode);
         }
 
         for (const candidate of ready) {
           if (candidate.skip) {
-            this.repository.updateStep(candidate.step.id, {
+            await this.repository.updateStep(candidate.step.id, {
               status: "skipped",
               output: { __port: "skipped" },
               finishedAt: this.now(),
@@ -217,24 +218,25 @@ export class RoutineWorkflowEngine {
             candidate.step,
             budget,
           );
-          if (this.requireRun(runId).status === "cancelled") return this.requireRun(runId);
-          if (outcome === "waiting_for_approval") return this.requireRun(runId);
+          if ((await this.requireRun(runId)).status === "cancelled")
+            return await this.requireRun(runId);
+          if (outcome === "waiting_for_approval") return await this.requireRun(runId);
           if (outcome === "failed" && candidate.node.onError !== "continue") {
-            const failedStep = this.repository.getStep(candidate.step.id);
-            return this.repository.updateRun(runId, {
+            const failedStep = await this.repository.getStep(candidate.step.id);
+            return (await this.repository.updateRun(runId, {
               status: "failed",
               error: failedStep?.error || `${candidate.node.name} failed.`,
               finishedAt: this.now(),
-            })!;
+            }))!;
           }
         }
       }
 
-      return this.repository.updateRun(runId, {
+      return (await this.repository.updateRun(runId, {
         status: "failed",
         error: `Workflow exceeded its ${limits.maxStepCount}-step execution limit.`,
         finishedAt: this.now(),
-      })!;
+      }))!;
     } finally {
       this.running.delete(runId);
     }
@@ -247,53 +249,53 @@ export class RoutineWorkflowEngine {
     stepId: string;
     approved: boolean;
   }): Promise<RoutineWorkflowRunRecord> {
-    const run = this.requireRun(input.runId);
-    const step = this.repository.getStep(input.stepId);
+    const run = await this.requireRun(input.runId);
+    const step = await this.repository.getStep(input.stepId);
     if (!step || step.runId !== run.id || step.status !== "waiting_for_approval") {
       throw new Error("Workflow approval is no longer pending.");
     }
     if (!input.approved) {
-      this.repository.updateStep(step.id, {
+      await this.repository.updateStep(step.id, {
         status: "failed",
         error: "User rejected this workflow action.",
         finishedAt: this.now(),
       });
-      return this.repository.updateRun(run.id, {
+      return (await this.repository.updateRun(run.id, {
         status: "failed",
         error: "User rejected a required workflow action.",
         finishedAt: this.now(),
-      })!;
+      }))!;
     }
     const context = this.getContext(run);
     context.approvedStepIds = Array.from(new Set([...context.approvedStepIds, step.id]));
-    this.repository.updateStep(step.id, { status: "pending", approvalId: "approved" });
-    this.repository.updateRun(run.id, { status: "running", context });
+    await this.repository.updateStep(step.id, { status: "pending", approvalId: "approved" });
+    await this.repository.updateRun(run.id, { status: "running", context });
     return this.continueRun(input.routine, input.workflow, run.id);
   }
 
-  cancel(runId: string): RoutineWorkflowRunRecord | null {
-    const run = this.repository.getRun(runId);
+  async cancel(runId: string): Promise<RoutineWorkflowRunRecord | null> {
+    const run = await this.repository.getRun(runId);
     if (!run || run.status === "completed" || run.status === "failed" || run.status === "cancelled")
       return run;
     for (const controller of this.activeControllers.get(runId) || []) {
       controller.abort(new Error("Workflow run was cancelled."));
     }
-    for (const step of this.repository.listSteps(runId)) {
+    for (const step of await this.repository.listSteps(runId)) {
       if (!TERMINAL_STEP_STATUSES.has(step.status)) {
-        this.repository.updateStep(step.id, { status: "cancelled", finishedAt: this.now() });
+        await this.repository.updateStep(step.id, { status: "cancelled", finishedAt: this.now() });
       }
     }
     return this.repository.updateRun(runId, { status: "cancelled", finishedAt: this.now() });
   }
 
-  recoverInterruptedRun(
+  async recoverInterruptedRun(
     workflow: RoutineWorkflowDefinition,
     runId: string,
-  ): RoutineWorkflowRunRecord | null {
-    const run = this.repository.getRun(runId);
+  ): Promise<RoutineWorkflowRunRecord | null> {
+    const run = await this.repository.getRun(runId);
     if (!run) return null;
-    const interrupted = this.repository
-      .listSteps(runId)
+    const interrupted = (await this.repository
+      .listSteps(runId))
       .filter((step) => step.status === "running" || step.status === "retrying");
     if (interrupted.length === 0) return run;
 
@@ -302,7 +304,7 @@ export class RoutineWorkflowEngine {
     context.approvedStepIds = context.approvedStepIds.filter((id) => !interruptedIds.has(id));
     for (const step of interrupted) {
       const node = findWorkflowNode(workflow.nodes, step.nodeId);
-      this.repository.updateStep(step.id, {
+      await this.repository.updateStep(step.id, {
         status: "waiting_for_approval",
         approvalId: randomUUID(),
         error: node
@@ -363,7 +365,7 @@ export class RoutineWorkflowEngine {
     step: RoutineWorkflowStepRecord,
     budget: ExecutionBudget,
   ): Promise<"completed" | "failed" | "waiting_for_approval"> {
-    const run = this.requireRun(runId);
+    const run = await this.requireRun(runId);
     const context = this.getContext(run);
     const variableContext: WorkflowVariableContext = {
       trigger: context.trigger,
@@ -375,12 +377,12 @@ export class RoutineWorkflowEngine {
     if (!context.dryRun && !approved && this.nodeNeedsApproval(routine, node)) {
       const approvalId =
         step.approvalId && step.approvalId !== "approved" ? step.approvalId : randomUUID();
-      this.repository.updateStep(step.id, {
+      await this.repository.updateStep(step.id, {
         status: "waiting_for_approval",
         input: redactForStorage(resolvedInput),
         approvalId,
       });
-      this.repository.updateRun(runId, { status: "waiting_for_approval" });
+      await this.repository.updateRun(runId, { status: "waiting_for_approval" });
       return "waiting_for_approval";
     }
 
@@ -396,7 +398,7 @@ export class RoutineWorkflowEngine {
     };
     let lastError: unknown;
     for (let attempt = step.attemptCount + 1; attempt <= retry.maxAttempts; attempt += 1) {
-      this.repository.updateStep(step.id, {
+      await this.repository.updateStep(step.id, {
         status: attempt === 1 ? "running" : "retrying",
         attemptCount: attempt,
         input: redactForStorage(resolvedInput),
@@ -428,8 +430,8 @@ export class RoutineWorkflowEngine {
         const normalizedOutput = { ...output, __port: output.__port || "success" };
         context.nodes[node.id] = redactForStorage(normalizedOutput);
         context.executedOperationCount = budget.context.executedOperationCount;
-        this.repository.updateRun(runId, { context });
-        this.repository.updateStep(step.id, {
+        await this.repository.updateRun(runId, { context });
+        await this.repository.updateStep(step.id, {
           status: "completed",
           output: redactForStorage(normalizedOutput),
           error: undefined,
@@ -439,7 +441,7 @@ export class RoutineWorkflowEngine {
       } catch (error) {
         lastError = error;
         context.executedOperationCount = budget.context.executedOperationCount;
-        this.repository.updateRun(runId, { context });
+        await this.repository.updateRun(runId, { context });
         if (controller.signal.aborted) break;
         if (attempt < retry.maxAttempts) {
           const delay = Math.min(
@@ -452,9 +454,9 @@ export class RoutineWorkflowEngine {
         this.untrackController(runId, controller);
       }
     }
-    if (this.repository.getRun(runId)?.status === "cancelled") return "failed";
+    if ((await this.repository.getRun(runId))?.status === "cancelled") return "failed";
     const message = lastError instanceof Error ? lastError.message : String(lastError);
-    this.repository.updateStep(step.id, {
+    await this.repository.updateStep(step.id, {
       status: "failed",
       error: message,
       output: { __port: "error" },
@@ -577,13 +579,13 @@ export class RoutineWorkflowEngine {
     }
   }
 
-  private finishRun(
+  private async finishRun(
     runId: string,
     stepByNode: Map<string, RoutineWorkflowStepRecord>,
-  ): RoutineWorkflowRunRecord {
-    const context = this.getContext(this.requireRun(runId));
+  ): Promise<RoutineWorkflowRunRecord> {
+    const context = this.getContext(await this.requireRun(runId));
     const failed = Array.from(stepByNode.values()).filter((step) => step.status === "failed");
-    return this.repository.updateRun(runId, {
+    return (await this.repository.updateRun(runId, {
       status: failed.length > 0 ? "partial_success" : "completed",
       output: context.nodes,
       error:
@@ -594,11 +596,11 @@ export class RoutineWorkflowEngine {
               .join("; ")
           : undefined,
       finishedAt: this.now(),
-    })!;
+    }))!;
   }
 
-  private requireRun(runId: string): RoutineWorkflowRunRecord {
-    const run = this.repository.getRun(runId);
+  private async requireRun(runId: string): Promise<RoutineWorkflowRunRecord> {
+    const run = await this.repository.getRun(runId);
     if (!run) throw new Error(`Workflow run not found: ${runId}`);
     return run;
   }

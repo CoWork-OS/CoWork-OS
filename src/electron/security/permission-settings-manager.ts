@@ -59,25 +59,55 @@ const PERMISSION_MODES: readonly PermissionMode[] = [
 
 export class PermissionSettingsManager {
   private static cachedSettings: PermissionSettings | null = null;
+  /**
+   * The stored revision the cache was read at (DB5). Every load compares it with the
+   * row, one indexed read, so an edit or revocation by any process (the CLI, the
+   * daemon, another window) applies before the next permission decision.
+   */
+  private static cachedRevision: number | null | undefined = undefined;
 
   static loadSettings(): PermissionSettings {
-    if (this.cachedSettings) {
+    let repository: SecureSettingsRepository | null = null;
+    let revision: number | null | undefined;
+    try {
+      if (SecureSettingsRepository.isInitialized()) {
+        repository = SecureSettingsRepository.getInstance();
+        revision = repository.getRevision("permissions");
+      }
+    } catch (error) {
+      console.error("[PermissionSettingsManager] Failed to check settings revision:", error);
+    }
+    if (this.cachedSettings && this.cachedRevision === revision) {
       return this.cachedSettings;
     }
 
     try {
-      if (SecureSettingsRepository.isInitialized()) {
-        const repository = SecureSettingsRepository.getInstance();
-        const stored = repository.load<PermissionSettingsInput>("permissions");
+      if (repository) {
+        const record = repository.readRecord<PermissionSettingsInput>("permissions");
+        const stored = record.data;
         if (stored) {
           const normalized = this.normalizeSettings(stored);
           this.cachedSettings = normalized;
+          this.cachedRevision = record.revision;
           // Persist the migration once, after a fully normalized snapshot is
-          // available. A failed write leaves the in-memory result usable and
-          // will be retried after the cache is cleared on the next startup.
+          // available, under a revision check so it cannot overwrite a concurrent
+          // edit. A failed write leaves the in-memory result usable.
           if (this.requiresMigrationWrite(stored)) {
             try {
-              repository.save("permissions", normalized);
+              // Cache exactly what the stored row normalizes to. Normalizing again
+              // would re-stamp `migratedAt` (and rule `createdAt`), so the cached
+              // value would differ from the persisted one a later load returns.
+              let persisted: PermissionSettings | undefined;
+              const migrated = repository.update<PermissionSettingsInput>(
+                "permissions",
+                (current) => {
+                  if (!current) return undefined;
+                  persisted = this.normalizeSettings(current);
+                  return this.requiresMigrationWrite(current) ? persisted : undefined;
+                },
+              );
+              if (persisted) this.cachedSettings = persisted;
+              this.cachedRevision = migrated.revision;
             } catch (error) {
               console.warn(
                 "[PermissionSettingsManager] Failed to persist settings migration; retaining in-memory fail-closed result:",
@@ -93,6 +123,7 @@ export class PermissionSettingsManager {
     }
 
     this.cachedSettings = this.normalizeSettings(DEFAULT_SETTINGS);
+    this.cachedRevision = revision;
     return this.cachedSettings;
   }
 
@@ -121,33 +152,70 @@ export class PermissionSettingsManager {
       // backup. Keep the durable prior representation across ordinary edits.
       ...(existingMigration && !settings?.migration ? { migration: existingMigration } : {}),
     });
+    // The edit was made against the settings this process last loaded. Rules another
+    // writer added since (an approval remembered "in profile", another process) are not
+    // in that snapshot, so the edit cannot mean to remove them: keep them (DB5).
+    const baseline = new Set(
+      (this.cachedSettings?.rules ?? []).map((rule) => permissionRuleFingerprint(rule)),
+    );
     const repository = SecureSettingsRepository.getInstance();
-    repository.save("permissions", normalized);
-    this.cachedSettings = normalized;
+    const result = repository.update<PermissionSettingsInput>("permissions", (current) => {
+      const stored = current ? this.normalizeSettings(current) : null;
+      const requested = new Set(normalized.rules.map((rule) => permissionRuleFingerprint(rule)));
+      const concurrentlyAdded = (stored?.rules ?? []).filter((rule) => {
+        const fingerprint = permissionRuleFingerprint(rule);
+        return !baseline.has(fingerprint) && !requested.has(fingerprint);
+      });
+      return concurrentlyAdded.length > 0
+        ? { ...normalized, rules: [...normalized.rules, ...concurrentlyAdded] }
+        : normalized;
+    });
+    this.cachedSettings = this.normalizeSettings(result.value ?? normalized);
+    this.cachedRevision = result.revision;
   }
 
+  /**
+   * Remember a rule in the profile. Applied to the latest stored settings under a
+   * revision check, so it neither drops a concurrent edit nor revives a rule the user
+   * removed from a stale copy. Throws when the write is refused.
+   */
   static appendRule(rule: PermissionRule): PermissionSettings {
-    const current = this.loadSettings();
-    const nextRules = [...current.rules];
-    const fingerprint = permissionRuleFingerprint(rule);
-    if (!nextRules.some((existing) => permissionRuleFingerprint(existing) === fingerprint)) {
-      nextRules.push({
-        ...rule,
-        source: "profile",
-        scope: normalizePermissionScope(rule.scope),
-        createdAt: rule.createdAt || Date.now(),
-      });
+    if (!SecureSettingsRepository.isInitialized()) {
+      throw new Error("SecureSettingsRepository not initialized");
     }
-    const next = {
-      ...current,
-      rules: nextRules,
-    };
-    this.saveSettings(next);
+    const fingerprint = permissionRuleFingerprint(rule);
+    const result = SecureSettingsRepository.getInstance().update<PermissionSettingsInput>(
+      "permissions",
+      (current) => {
+        const settings = this.normalizeSettings(current ?? DEFAULT_SETTINGS);
+        if (
+          settings.rules.some((existing) => permissionRuleFingerprint(existing) === fingerprint)
+        ) {
+          return current ? undefined : settings;
+        }
+        return {
+          ...settings,
+          rules: [
+            ...settings.rules,
+            {
+              ...rule,
+              source: "profile",
+              scope: normalizePermissionScope(rule.scope),
+              createdAt: rule.createdAt || Date.now(),
+            },
+          ],
+        };
+      },
+    );
+    const next = this.normalizeSettings(result.value ?? DEFAULT_SETTINGS);
+    this.cachedSettings = next;
+    this.cachedRevision = result.revision;
     return next;
   }
 
   static clearCache(): void {
     this.cachedSettings = null;
+    this.cachedRevision = undefined;
   }
 
   private static requiresMigrationWrite(source: PermissionSettingsInput): boolean {

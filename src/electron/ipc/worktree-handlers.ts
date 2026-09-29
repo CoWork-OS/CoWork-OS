@@ -45,7 +45,7 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
   ipcMain.handle(IPC_CHANNELS.WORKTREE_GET_INFO, async (_, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.WORKTREE_GET_INFO);
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
-    return worktreeManager.getWorktreeInfo(validatedTaskId) ?? null;
+    return (await worktreeManager.getWorktreeInfo(validatedTaskId)) ?? null;
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKTREE_LIST, async (_, workspaceId: unknown) => {
@@ -58,7 +58,7 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     checkRateLimit(IPC_CHANNELS.WORKTREE_MERGE);
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
     try {
-      const info = worktreeManager.getWorktreeInfo(validatedTaskId);
+      const info = await worktreeManager.getWorktreeInfo(validatedTaskId);
       if (info) {
         const baseRepoPath = info.repoPath || agentDaemon.getWorkspaceById(info.workspaceId)?.path;
         if (!baseRepoPath) {
@@ -88,7 +88,7 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     checkRateLimit(IPC_CHANNELS.WORKTREE_CLEANUP);
     const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
     try {
-      const info = worktreeManager.getWorktreeInfo(validatedTaskId);
+      const info = await worktreeManager.getWorktreeInfo(validatedTaskId);
       if (info) {
         const baseRepoPath = info.repoPath || agentDaemon.getWorkspaceById(info.workspaceId)?.path;
         if (!baseRepoPath) {
@@ -150,7 +150,7 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     const validatedSessionId = validateInput(UUIDSchema, sessionId, "comparison session ID");
     const comparisonService = agentDaemon.getComparisonService();
     if (!comparisonService) return null;
-    return comparisonService.getSession(validatedSessionId) ?? null;
+    return (await comparisonService.getSession(validatedSessionId)) ?? null;
   });
 
   ipcMain.handle(IPC_CHANNELS.COMPARISON_LIST, async (_, workspaceId: unknown) => {
@@ -177,7 +177,7 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
     const validatedSessionId = validateInput(UUIDSchema, sessionId, "comparison session ID");
     const comparisonService = agentDaemon.getComparisonService();
     if (!comparisonService) return null;
-    const session = comparisonService.getSession(validatedSessionId);
+    const session = await comparisonService.getSession(validatedSessionId);
     return session?.comparisonResult ?? null;
   });
 

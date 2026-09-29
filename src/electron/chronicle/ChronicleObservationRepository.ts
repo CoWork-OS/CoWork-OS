@@ -1,9 +1,10 @@
+import { MemorySettingsRepository } from "../database/repository-facades";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
 import { createLogger } from "../utils/logger";
 import { DatabaseManager } from "../database/schema";
-import { MemorySettingsRepository } from "../database/repositories";
+
 import { ChronicleSettingsManager } from "./ChronicleSettingsManager";
 import type { ChroniclePersistedObservation, ChronicleResolvedContext } from "./types";
 
@@ -70,14 +71,14 @@ function readObservationFileSync(filePath: string): ChroniclePersistedObservatio
   }
 }
 
-function shouldPersistDurably(workspaceId: string): boolean {
+async function shouldPersistDurably(workspaceId: string): Promise<boolean> {
   const chronicleSettings = ChronicleSettingsManager.loadSettings();
   if (!chronicleSettings.respectWorkspaceMemory) {
     return true;
   }
   try {
     const repo = new MemorySettingsRepository(DatabaseManager.getInstance().getDatabase());
-    const memorySettings = repo.getOrCreate(workspaceId);
+    const memorySettings = await repo.getOrCreate(workspaceId);
     return (
       memorySettings.enabled &&
       memorySettings.autoCapture &&
@@ -123,7 +124,7 @@ export class ChronicleObservationRepository {
       destinationHints?: string[];
     },
   ): Promise<ChroniclePersistedObservation | null> {
-    if (!shouldPersistDurably(input.workspaceId)) {
+    if (!(await shouldPersistDurably(input.workspaceId))) {
       return null;
     }
     const dirs = await ensureWorkspaceDirs(workspacePath);

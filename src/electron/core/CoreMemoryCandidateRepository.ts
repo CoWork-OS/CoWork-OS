@@ -8,7 +8,7 @@ import type {
 
 type Any = any;
 
-export class CoreMemoryCandidateRepository {
+export class CoreMemoryCandidateStore {
   constructor(private readonly db: Database.Database) {}
 
   create(

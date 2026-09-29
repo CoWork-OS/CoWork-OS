@@ -1,20 +1,20 @@
+import { CoreRegressionGateRepository } from "./core-repository-facades";
 import type {
   CoreEvalCase,
   CoreFailureCluster,
   CoreHarnessExperiment,
   CoreRegressionGateResult,
 } from "../../shared/types";
-import { CoreRegressionGateRepository } from "./CoreRegressionGateRepository";
 
 export class CoreRegressionGateService {
   constructor(private readonly repo: CoreRegressionGateRepository) {}
 
-  evaluate(params: {
+  async evaluate(params: {
     experimentRunId: string;
     cluster: CoreFailureCluster;
     experiment: CoreHarnessExperiment;
     linkedEvalCases: CoreEvalCase[];
-  }): CoreRegressionGateResult {
+  }): Promise<CoreRegressionGateResult> {
     const regressions: string[] = [];
     const proposal = params.experiment.proposal || {};
     let targetImproved = false;

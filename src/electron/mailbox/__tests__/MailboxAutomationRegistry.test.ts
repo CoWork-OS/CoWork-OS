@@ -82,7 +82,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
   describe("createRule", () => {
     it("creates a rule and returns it", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const rule = MailboxAutomationRegistry.createRule({
+      const rule = await MailboxAutomationRegistry.createRule({
         name: "High-priority rule",
         workspaceId: "ws-default",
         conditions: [],
@@ -105,7 +105,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
 
     it("creates a paused rule when enabled is false", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const rule = MailboxAutomationRegistry.createRule({
+      const rule = await MailboxAutomationRegistry.createRule({
         name: "Paused rule",
         workspaceId: "ws-default",
         conditions: [],
@@ -130,7 +130,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         resolveDefaultWorkspaceId: () => "ws-default",
       });
 
-      expect(() =>
+      await expect(
         MailboxAutomationRegistry.createRule({
           name: "No trigger",
           conditions: [],
@@ -139,7 +139,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
           actionPrompt: "prompt",
           source: "mailbox_event",
         }),
-      ).toThrow("Trigger service is not available");
+      ).rejects.toThrow("Trigger service is not available");
 
       freshDb.close();
     });
@@ -149,7 +149,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
     it("returns all non-deleted automations", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
 
-      MailboxAutomationRegistry.createRule({
+      await MailboxAutomationRegistry.createRule({
         name: "Rule A",
         workspaceId: "ws-default",
         conditions: [],
@@ -158,7 +158,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         actionPrompt: "prompt A",
         source: "mailbox_event",
       });
-      MailboxAutomationRegistry.createRule({
+      await MailboxAutomationRegistry.createRule({
         name: "Rule B",
         workspaceId: "ws-default",
         conditions: [],
@@ -168,7 +168,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         source: "mailbox_event",
       });
 
-      const list = MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" });
+      const list = await MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" });
       expect(list).toHaveLength(2);
       const names = list.map((item) => item.name);
       expect(names).toContain("Rule A");
@@ -177,16 +177,16 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
 
     it("returns empty list when no automations exist", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      expect(MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-empty" })).toHaveLength(
-        0,
-      );
+      expect(
+        await MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-empty" }),
+      ).toHaveLength(0);
     });
   });
 
   describe("updateRule", () => {
     it("updates an existing rule's name and reflects the change", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const created = MailboxAutomationRegistry.createRule({
+      const created = await MailboxAutomationRegistry.createRule({
         name: "Original name",
         workspaceId: "ws-default",
         conditions: [],
@@ -196,19 +196,21 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         source: "mailbox_event",
       });
 
-      const updated = MailboxAutomationRegistry.updateRule(created.id, { name: "Updated name" });
+      const updated = await MailboxAutomationRegistry.updateRule(created.id, {
+        name: "Updated name",
+      });
       expect(updated).not.toBeNull();
       expect(updated?.name).toBe("Updated name");
     });
 
     it("returns null for an unknown automation id", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      expect(MailboxAutomationRegistry.updateRule("no-such-id", { name: "x" })).toBeNull();
+      expect(await MailboxAutomationRegistry.updateRule("no-such-id", { name: "x" })).toBeNull();
     });
 
     it("pauses a rule when status is set to paused", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const created = MailboxAutomationRegistry.createRule({
+      const created = await MailboxAutomationRegistry.createRule({
         name: "Active rule",
         workspaceId: "ws-default",
         conditions: [],
@@ -218,7 +220,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         source: "mailbox_event",
       });
 
-      const updated = MailboxAutomationRegistry.updateRule(created.id, { status: "paused" });
+      const updated = await MailboxAutomationRegistry.updateRule(created.id, { status: "paused" });
       expect(updated?.status).toBe("paused");
     });
   });
@@ -226,7 +228,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
   describe("deleteRule", () => {
     it("soft-deletes a rule and removes it from the active list", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const created = MailboxAutomationRegistry.createRule({
+      const created = await MailboxAutomationRegistry.createRule({
         name: "To be deleted",
         workspaceId: "ws-default",
         conditions: [],
@@ -236,21 +238,23 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         source: "mailbox_event",
       });
 
-      const deleted = MailboxAutomationRegistry.deleteRule(created.id);
+      const deleted = await MailboxAutomationRegistry.deleteRule(created.id);
       expect(deleted).toBe(true);
 
-      const remaining = MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" });
+      const remaining = await MailboxAutomationRegistry.listAutomations({
+        workspaceId: "ws-default",
+      });
       expect(remaining.every((item) => item.id !== created.id)).toBe(true);
     });
 
     it("returns false for a non-existent rule id", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      expect(MailboxAutomationRegistry.deleteRule("ghost-id")).toBe(false);
+      expect(await MailboxAutomationRegistry.deleteRule("ghost-id")).toBe(false);
     });
 
     it("removes the backing trigger when deleting a rule", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const created = MailboxAutomationRegistry.createRule({
+      const created = await MailboxAutomationRegistry.createRule({
         name: "Trigger removal rule",
         workspaceId: "ws-default",
         conditions: [],
@@ -260,7 +264,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         source: "mailbox_event",
       });
 
-      MailboxAutomationRegistry.deleteRule(created.id);
+      await MailboxAutomationRegistry.deleteRule(created.id);
       expect(triggerService.removeTrigger).toHaveBeenCalledWith(created.backingTriggerId);
     });
   });
@@ -268,7 +272,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
   describe("forward automations", () => {
     it("creates a forwarding automation with normalized defaults", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const automation = MailboxAutomationRegistry.createForward({
+      const automation = await MailboxAutomationRegistry.createForward({
         name: "Forward invoices",
         schedule: { kind: "every", everyMs: 15 * 60 * 1000 },
         targetEmail: "ops@example.com",
@@ -285,7 +289,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
 
     it("updates a forwarding automation and recomputes next run", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const created = MailboxAutomationRegistry.createForward({
+      const created = await MailboxAutomationRegistry.createForward({
         name: "Forward invoices",
         schedule: { kind: "every", everyMs: 15 * 60 * 1000 },
         targetEmail: "ops@example.com",
@@ -293,7 +297,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         allowedDomains: [],
       });
 
-      const updated = MailboxAutomationRegistry.updateForward(created.id, {
+      const updated = await MailboxAutomationRegistry.updateForward(created.id, {
         dryRun: false,
         subjectKeywords: ["invoice"],
       });
@@ -305,7 +309,7 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
 
     it("soft-deletes a forwarding automation", async () => {
       const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
-      const created = MailboxAutomationRegistry.createForward({
+      const created = await MailboxAutomationRegistry.createForward({
         name: "Forward invoices",
         schedule: { kind: "every", everyMs: 15 * 60 * 1000 },
         targetEmail: "ops@example.com",
@@ -313,9 +317,9 @@ describeWithSqlite("MailboxAutomationRegistry", () => {
         allowedDomains: [],
       });
 
-      expect(MailboxAutomationRegistry.deleteForward(created.id)).toBe(true);
+      expect(await MailboxAutomationRegistry.deleteForward(created.id)).toBe(true);
       expect(
-        MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" }).find(
+        (await MailboxAutomationRegistry.listAutomations({ workspaceId: "ws-default" })).find(
           (item) => item.id === created.id,
         ),
       ).toBeUndefined();

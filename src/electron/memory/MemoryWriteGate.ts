@@ -1,10 +1,7 @@
+import { WorkspaceRepository } from "../database/repository-facades";
+import { PendingMemoryWriteRepository } from "../database/repository-facades";
 import type { DatabaseManager } from "../database/schema";
-import {
-  PendingMemoryWriteRepository,
-  type PendingMemoryWrite,
-  type MemoryType,
-  WorkspaceRepository,
-} from "../database/repositories";
+import { type PendingMemoryWrite, type MemoryType } from "../database/repositories";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { approvalPromptsDisabled } from "../agent/approval-policy";
 import { createLogger } from "../utils/logger";
@@ -59,7 +56,7 @@ export class MemoryWriteGate {
     this.initialized = true;
   }
 
-  static evaluate(request: MemoryWriteRequest): MemoryWriteDecision {
+  static async evaluate(request: MemoryWriteRequest): Promise<MemoryWriteDecision> {
     if (!this.initialized) {
       logger.warn("[MemoryWriteGate] Not initialized; allowing memory write.");
       return { allowed: true };
@@ -78,7 +75,7 @@ export class MemoryWriteGate {
       return { allowed: true };
     }
 
-    const pending = this.pendingRepo.create({
+    const pending = await this.pendingRepo.create({
       ...request,
       summary: this.normalizeSummary(request.summary),
       proposedValue: request.proposedValue ?? this.extractProposedValue(request.payload),
@@ -97,26 +94,29 @@ export class MemoryWriteGate {
     };
   }
 
-  static listPending(workspaceId?: string, limit = 100): PendingMemoryWrite[] {
+  static async listPending(workspaceId?: string, limit = 100): Promise<PendingMemoryWrite[]> {
     this.ensureInitialized();
     return this.pendingRepo.list({ workspaceId, status: "pending", limit });
   }
 
-  static listPendingForDisplay(workspaceId?: string, limit = 100): MemoryWriteApprovalItem[] {
-    return this.listPending(workspaceId, limit).map((item) => this.toDisplayItem(item));
+  static async listPendingForDisplay(
+    workspaceId?: string,
+    limit = 100,
+  ): Promise<MemoryWriteApprovalItem[]> {
+    return (await this.listPending(workspaceId, limit)).map((item) => this.toDisplayItem(item));
   }
 
-  static findPending(id: string): PendingMemoryWrite | undefined {
+  static async findPending(id: string): Promise<PendingMemoryWrite | undefined> {
     this.ensureInitialized();
     return this.pendingRepo.findById(id);
   }
 
-  static findPendingForDisplay(id: string): MemoryWriteApprovalItem | undefined {
-    const item = this.findPending(id);
+  static async findPendingForDisplay(id: string): Promise<MemoryWriteApprovalItem | undefined> {
+    const item = await this.findPending(id);
     return item ? this.toDisplayItem(item) : undefined;
   }
 
-  static pendingCount(workspaceId?: string): number {
+  static async pendingCount(workspaceId?: string): Promise<number> {
     this.ensureInitialized();
     return this.pendingRepo.countPending(workspaceId);
   }
@@ -126,7 +126,7 @@ export class MemoryWriteGate {
     opts: { workspaceId?: string; reviewedBy?: string } = {},
   ): Promise<MemoryWriteApprovalItem> {
     this.ensureInitialized();
-    const pending = this.pendingRepo.findById(id);
+    const pending = await this.pendingRepo.findById(id);
     if (!pending) {
       throw new Error(`Pending memory write not found: ${id}`);
     }
@@ -137,57 +137,60 @@ export class MemoryWriteGate {
       throw new Error(`Pending memory write is already ${pending.status}.`);
     }
 
-    const claimed = this.pendingRepo.updateStatusIfCurrent(id, "pending", "applying", {
+    const claimed = await this.pendingRepo.updateStatusIfCurrent(id, "pending", "applying", {
       reviewedBy: opts.reviewedBy,
       resolution: "Applying approved memory write.",
     });
     if (!claimed) {
-      const current = this.pendingRepo.findById(id);
+      const current = await this.pendingRepo.findById(id);
       throw new Error(`Pending memory write is already ${current?.status || "changed"}.`);
     }
 
     try {
       await this.replay(claimed);
-      const applied = this.pendingRepo.updateStatusIfCurrent(id, "applying", "applied", {
+      const applied = await this.pendingRepo.updateStatusIfCurrent(id, "applying", "applied", {
         reviewedBy: opts.reviewedBy,
         resolution: "Applied approved memory write.",
       });
-      return this.toDisplayItem(applied || this.pendingRepo.findById(id) || claimed);
+      return this.toDisplayItem(applied || (await this.pendingRepo.findById(id)) || claimed);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const failed =
-        this.pendingRepo.updateStatusIfCurrent(id, "applying", "failed", {
+        (await this.pendingRepo.updateStatusIfCurrent(id, "applying", "failed", {
           reviewedBy: opts.reviewedBy,
           resolution: message,
-        }) ||
-        this.pendingRepo.updateStatus(id, "failed", {
+        })) ||
+        (await this.pendingRepo.updateStatus(id, "failed", {
           reviewedBy: opts.reviewedBy,
           resolution: message,
-        });
+        }));
       logger.warn(`[MemoryWriteGate] Failed to apply pending write ${id}: ${message}`);
       return this.toDisplayItem(failed || claimed);
     }
   }
 
-  static markApplied(
+  static async markApplied(
     id: string,
     resolution = "Applied approved memory write.",
-  ): PendingMemoryWrite | undefined {
+  ): Promise<PendingMemoryWrite | undefined> {
     this.ensureInitialized();
     return this.pendingRepo.updateStatusIfCurrent(id, "applying", "applied", { resolution });
   }
 
-  static reject(id: string, resolution = "Rejected memory write."): PendingMemoryWrite | undefined {
+  static async reject(
+    id: string,
+    resolution = "Rejected memory write.",
+  ): Promise<PendingMemoryWrite | undefined> {
     this.ensureInitialized();
     return this.pendingRepo.updateStatusIfCurrent(id, "pending", "rejected", { resolution });
   }
 
-  static rejectForDisplay(
+  static async rejectForDisplay(
     id: string,
     opts: { workspaceId?: string; reviewedBy?: string; resolution?: string } = {},
-  ): MemoryWriteApprovalItem {
+  ): Promise<MemoryWriteApprovalItem> {
     this.ensureInitialized();
-    const pending = this.pendingRepo.findById(id);
+    const pending = await this.pendingRepo.findById(id);
     if (!pending) {
       throw new Error(`Pending memory write not found: ${id}`);
     }
@@ -197,12 +200,12 @@ export class MemoryWriteGate {
     if (pending.status !== "pending") {
       throw new Error(`Pending memory write is already ${pending.status}.`);
     }
-    const rejected = this.pendingRepo.updateStatusIfCurrent(id, "pending", "rejected", {
+    const rejected = await this.pendingRepo.updateStatusIfCurrent(id, "pending", "rejected", {
       reviewedBy: opts.reviewedBy,
       resolution: opts.resolution || "Rejected memory write.",
     });
     if (!rejected) {
-      const current = this.pendingRepo.findById(id);
+      const current = await this.pendingRepo.findById(id);
       throw new Error(`Pending memory write is already ${current?.status || "changed"}.`);
     }
     return this.toDisplayItem(rejected);
@@ -217,18 +220,18 @@ export class MemoryWriteGate {
    * remain auditable as rejected rows. In-flight `applying` rows are left
    * alone so a live replay cannot be interrupted by cleanup.
    */
-  static rejectAllPending(
+  static async rejectAllPending(
     opts: {
       workspaceId?: string;
       reviewedBy?: string;
       resolution?: string;
     } = {},
-  ): number {
+  ): Promise<number> {
     this.ensureInitialized();
     const resolution =
       opts.resolution ||
       "Rejected by the no-prompt memory-write migration; stale queued data was not replayed.";
-    const count = this.pendingRepo.rejectPending({
+    const count = await this.pendingRepo.rejectPending({
       workspaceId: opts.workspaceId,
       reviewedBy: opts.reviewedBy || "system:no-prompt-migration",
       resolution,
@@ -241,11 +244,11 @@ export class MemoryWriteGate {
     return count;
   }
 
-  static markFailed(id: string, resolution: string): PendingMemoryWrite | undefined {
+  static async markFailed(id: string, resolution: string): Promise<PendingMemoryWrite | undefined> {
     this.ensureInitialized();
     return (
-      this.pendingRepo.updateStatusIfCurrent(id, "applying", "failed", { resolution }) ||
-      this.pendingRepo.updateStatusIfCurrent(id, "pending", "failed", { resolution })
+      (await this.pendingRepo.updateStatusIfCurrent(id, "applying", "failed", { resolution })) ||
+      (await this.pendingRepo.updateStatusIfCurrent(id, "pending", "failed", { resolution }))
     );
   }
 
@@ -309,7 +312,7 @@ export class MemoryWriteGate {
       throw new Error("Pending archive memory payload is missing type or content.");
     }
     const options = this.asPlainObject(payload.options);
-    const workspace = this.getStoredWorkspace(pending.workspaceId);
+    const workspace = await this.getStoredWorkspace(pending.workspaceId);
     const memory = await MemoryService.capture(
       pending.workspaceId,
       pending.taskId,
@@ -331,7 +334,7 @@ export class MemoryWriteGate {
     const { CuratedMemoryService } = await import("./CuratedMemoryService");
     const payload = pending.payload;
     const filesystemGuards = this.getCuratedFilesystemGuards(
-      this.getStoredWorkspace(pending.workspaceId),
+      await this.getStoredWorkspace(pending.workspaceId),
     );
     const action = this.asString(payload.action);
     const target = this.asCuratedTarget(payload.target);
@@ -392,13 +395,13 @@ export class MemoryWriteGate {
   private static async replayExternal(pending: PendingMemoryWrite): Promise<void> {
     const { SupermemoryService } = await import("./SupermemoryService");
     const payload = pending.payload;
-    const storedWorkspace = this.getStoredWorkspace(pending.workspaceId);
+    const storedWorkspace = await this.getStoredWorkspace(pending.workspaceId);
     if (!this.isExternalMemoryReplayAllowed(storedWorkspace)) {
       throw new Error(
         "Approved external memory write was blocked because the workspace no longer permits automatic network access.",
       );
     }
-    const workspace = this.getWorkspaceRef(pending.workspaceId);
+    const workspace = await this.getWorkspaceRef(pending.workspaceId);
     if (pending.action === "remember") {
       const content = this.asString(payload.content);
       if (!content) throw new Error("Pending Supermemory remember payload is missing content.");
@@ -434,10 +437,10 @@ export class MemoryWriteGate {
     throw new Error(`Unsupported external memory action: ${pending.action}`);
   }
 
-  private static getWorkspaceRef(workspaceId: string): { id: string; name: string } {
+  private static async getWorkspaceRef(workspaceId: string): Promise<{ id: string; name: string }> {
     try {
       if (this.db) {
-        const workspace = new WorkspaceRepository(this.db).findById(workspaceId);
+        const workspace = await new WorkspaceRepository(this.db).findById(workspaceId);
         if (workspace) {
           return { id: workspace.id, name: workspace.name || workspace.id };
         }
@@ -448,10 +451,10 @@ export class MemoryWriteGate {
     return { id: workspaceId, name: workspaceId };
   }
 
-  private static getStoredWorkspace(workspaceId: string): Workspace | undefined {
+  private static async getStoredWorkspace(workspaceId: string): Promise<Workspace | undefined> {
     try {
       if (!this.db) return undefined;
-      return new WorkspaceRepository(this.db).findById(workspaceId);
+      return await new WorkspaceRepository(this.db).findById(workspaceId);
     } catch {
       return undefined;
     }

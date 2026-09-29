@@ -11,7 +11,7 @@ export interface DeviceProfile {
   updatedAt: number;
 }
 
-export class DeviceProfileRepository {
+export class DeviceProfileStore {
   constructor(private db: Database.Database) {}
 
   upsert(deviceId: string, data: Partial<Omit<DeviceProfile, "deviceId" | "createdAt">>): void {

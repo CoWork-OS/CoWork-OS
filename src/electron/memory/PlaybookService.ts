@@ -1,11 +1,8 @@
 import { createLogger } from "../utils/logger";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { MemoryService } from "./MemoryService";
-import {
-  hashMemoryContent,
-  PlaybookEvidenceStore,
-  type PlaybookEvidenceRecord,
-} from "./PlaybookEvidenceStore";
+import { PlaybookEvidenceLedger } from "./PlaybookEvidenceLedger";
+import { hashMemoryContent, type PlaybookEvidenceRecord } from "./PlaybookEvidenceStore";
 import { scorePlaybookRelevance } from "./playbook-relevance";
 
 const logger = createLogger("PlaybookService");
@@ -108,21 +105,22 @@ function decayFactor(ageMs: number): number {
  * be recalled. Failures and legacy reinforcement text are never treated as proof.
  */
 export class PlaybookService {
-  private static evidenceStoreOverride: PlaybookEvidenceStore | undefined;
-  private static evidenceStoreCache: { db: unknown; store: PlaybookEvidenceStore } | null = null;
+  private static evidenceStoreOverride: PlaybookEvidenceLedger | undefined;
+  private static evidenceStoreCache: { db: unknown; store: PlaybookEvidenceLedger } | null = null;
 
   /** Inject a ledger (tests), or pass undefined to return to the profile database. */
-  static setEvidenceStoreForTesting(store: PlaybookEvidenceStore | undefined): void {
+  static setEvidenceStoreForTesting(store: PlaybookEvidenceLedger | undefined): void {
     this.evidenceStoreOverride = store;
     this.evidenceStoreCache = null;
   }
 
-  static getEvidenceStore(): PlaybookEvidenceStore | null {
+  /** The async ledger (DB6): each operation is one memory-domain unit. */
+  static getEvidenceStore(): PlaybookEvidenceLedger | null {
     if (this.evidenceStoreOverride) return this.evidenceStoreOverride;
     const db = MemoryService.getDatabase?.();
     if (!db) return null;
     if (this.evidenceStoreCache?.db !== db) {
-      this.evidenceStoreCache = { db, store: new PlaybookEvidenceStore(db) };
+      this.evidenceStoreCache = { db, store: PlaybookEvidenceLedger.open(db) };
     }
     return this.evidenceStoreCache.store;
   }
@@ -188,9 +186,9 @@ export class PlaybookService {
     if (!store) return { status: "skipped", reason: "ledger_unavailable" };
     const category = outcome === "failure" ? this.classifyError(errorMessage || "") : null;
     if (category === "user_correction") {
-      store.invalidateTask(workspaceId, taskId, "corrected_by_user");
+      await store.invalidateTask(workspaceId, taskId, "corrected_by_user");
     }
-    if (outcome === "success" && store.find(workspaceId, taskId)) {
+    if (outcome === "success" && (await store.find(workspaceId, taskId))) {
       return { status: "skipped", reason: "duplicate_execution" };
     }
 
@@ -235,7 +233,7 @@ export class PlaybookService {
       if (!memory) return { status: "skipped", reason: "memory_not_recorded" };
       if (outcome === "failure") return { status: "recorded", memoryId: memory.id };
 
-      const { created, record } = store.record({
+      const { created, record } = await store.record({
         workspaceId,
         taskId,
         sourceMemoryId: memory.id,
@@ -254,16 +252,17 @@ export class PlaybookService {
    * Active successes, newest first, whose source memory still exists unchanged and is not
    * private or suppressed in Memory Hub. Their text is read from that memory.
    */
-  static eligibleSuccesses(store: PlaybookEvidenceStore, workspaceId: string): PlaybookSuccess[] {
-    const successes: PlaybookSuccess[] = [];
-    for (const record of store.listActive(workspaceId)) {
-      const content = store.readSource(record);
-      if (content === null || MemoryObservationService.isPromptSuppressed(record.sourceMemoryId)) {
-        continue;
-      }
-      successes.push({ record, ...parseSuccessMemory(content) });
-    }
-    return successes;
+  static async eligibleSuccesses(
+    store: PlaybookEvidenceLedger,
+    workspaceId: string,
+  ): Promise<PlaybookSuccess[]> {
+    const readable = await store.listReadable(workspaceId);
+    const suppressed = await MemoryObservationService.suppressedIds(
+      readable.map(({ record }) => record.sourceMemoryId),
+    );
+    return readable
+      .filter(({ record }) => !suppressed.has(record.sourceMemoryId))
+      .map(({ record, content }) => ({ record, ...parseSuccessMemory(content) }));
   }
 
   /**
@@ -271,12 +270,16 @@ export class PlaybookService {
    * to this prompt before any top-N selection. Failures, corrected outcomes, inbox
    * observations and reinforcement-derived entries never appear here.
    */
-  static getPlaybookForContext(workspaceId: string, taskPrompt: string, maxEntries = 3): string {
+  static async getPlaybookForContext(
+    workspaceId: string,
+    taskPrompt: string,
+    maxEntries = 3,
+  ): Promise<string> {
     try {
       const store = this.getEvidenceStore();
       if (!store) return "";
       const now = Date.now();
-      const ranked = this.eligibleSuccesses(store, workspaceId)
+      const ranked = (await this.eligibleSuccesses(store, workspaceId))
         .map((success) => ({
           success,
           relevance: scorePlaybookRelevance(
@@ -314,13 +317,13 @@ export class PlaybookService {
    * used a compatible approach for a relevant request. A similar prompt alone is not
    * enough: the pattern key must match.
    */
-  static reinforceFromEvidence(
+  static async reinforceFromEvidence(
     workspaceId: string,
     evidenceId: string,
-  ): PlaybookReinforcementResult {
+  ): Promise<PlaybookReinforcementResult> {
     const store = this.getEvidenceStore();
     if (!store) return { linkedEvidenceIds: [] };
-    const successes = this.eligibleSuccesses(store, workspaceId);
+    const successes = await this.eligibleSuccesses(store, workspaceId);
     const current = successes.find((success) => success.record.id === evidenceId);
     if (!current?.record.patternKey) return { linkedEvidenceIds: [] };
 
@@ -340,9 +343,10 @@ export class PlaybookService {
       .slice(0, MAX_REINFORCEMENT_LINKS);
 
     return {
-      linkedEvidenceIds: candidates
-        .filter(({ success }) => store.link(evidenceId, success.record.id))
-        .map(({ success }) => success.record.id),
+      linkedEvidenceIds: await store.linkAll(
+        evidenceId,
+        candidates.map(({ success }) => success.record.id),
+      ),
     };
   }
 

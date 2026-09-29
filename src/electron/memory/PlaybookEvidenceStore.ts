@@ -56,13 +56,23 @@ export function hashMemoryContent(content: string): string {
  * Narrow learning index for Playbook successes. General memory storage stays in
  * MemoryService; this ledger only records which tasks succeeded, and which later
  * successes reinforced which earlier ones.
+ *
+ * This is the synchronous store the memory domain's transaction units run (async SQLite
+ * migration plan, DB6), on the host connection or in the database worker; services use
+ * the async `PlaybookEvidenceLedger`.
  */
 export class PlaybookEvidenceStore {
   constructor(
     private readonly db: Database.Database,
     private readonly now: () => number = Date.now,
+    /** Units run on a profile whose ledger schema the host already created. */
+    ensureSchema = true,
   ) {
-    this.db.exec(`
+    if (ensureSchema) PlaybookEvidenceStore.ensureSchema(db);
+  }
+
+  static ensureSchema(db: Database.Database): void {
+    db.exec(`
       -- The first ledger shape copied memory text and never shipped in a release; drop
       -- it so no copy outlives its memory's privacy state.
       DROP TABLE IF EXISTS playbook_evidence_links;
@@ -183,6 +193,24 @@ export class PlaybookEvidenceStore {
          WHERE workspace_id = ? AND task_id = ? AND invalidated_at IS NULL`,
       )
       .run(this.now(), reason, workspaceId, taskId).changes;
+  }
+
+  /**
+   * Active evidence with its source memory's content, newest first, skipping evidence
+   * `readSource` rejects (and invalidating what it invalidates). One transaction.
+   */
+  listReadable(workspaceId: string): Array<{ record: PlaybookEvidenceRecord; content: string }> {
+    const readable: Array<{ record: PlaybookEvidenceRecord; content: string }> = [];
+    for (const record of this.listActive(workspaceId)) {
+      const content = this.readSource(record);
+      if (content !== null) readable.push({ record, content });
+    }
+    return readable;
+  }
+
+  /** Link `evidenceId` to each earlier execution; returns the ids newly linked, in order. */
+  linkAll(evidenceId: string, reinforcesEvidenceIds: string[]): string[] {
+    return reinforcesEvidenceIds.filter((id) => this.link(evidenceId, id));
   }
 
   /**

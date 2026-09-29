@@ -124,7 +124,7 @@ describeWithSqlite("pruneTempWorkspaces foreign-key cleanup", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("removes a temp workspace whose tasks are referenced by team rows and a branched task", () => {
+  it("removes a temp workspace whose tasks are referenced by team rows and a branched task", async () => {
     const warn = vi.spyOn(console, "warn");
     const temp = insertTempWorkspace("session-a");
     insertTask("temp-root", temp.id);
@@ -143,7 +143,7 @@ describeWithSqlite("pruneTempWorkspaces foreign-key cleanup", () => {
        VALUES ('thought-temp', 'run-temp', 'item-temp', 'role-1', 'Role 1', 'analysis', 'x', 'temp-branch', ?, ?)`,
     ).run(oldMs, oldMs);
 
-    const result = prune();
+    const result = await prune();
 
     expect(result.candidateWorkspaceIds).toEqual([temp.id]);
     expect(result.removedRows).toBe(1);
@@ -162,7 +162,7 @@ describeWithSqlite("pruneTempWorkspaces foreign-key cleanup", () => {
     expect(warn.mock.calls.flat().join(" ")).not.toContain("temp workspace");
   });
 
-  it("nulls optional references from surviving rows and deletes rows that require the temp task", () => {
+  it("nulls optional references from surviving rows and deletes rows that require the temp task", async () => {
     const temp = insertTempWorkspace("session-b");
     insertTask("temp-root", temp.id);
     insertTask("main-branch", "main-workspace", "temp-root");
@@ -188,7 +188,7 @@ describeWithSqlite("pruneTempWorkspaces foreign-key cleanup", () => {
       "INSERT INTO future_task_receipts (id, owner_task_id) VALUES ('receipt-temp', 'temp-root'), ('receipt-main', 'main-branch')",
     ).run();
 
-    const result = prune();
+    const result = await prune();
 
     expect(result.removedRows).toBe(1);
     expect(count("SELECT COUNT(*) AS n FROM workspaces WHERE id = ?", temp.id)).toBe(0);
@@ -214,7 +214,7 @@ describeWithSqlite("pruneTempWorkspaces foreign-key cleanup", () => {
     expect(db.pragma("foreign_key_check")).toEqual([]);
   });
 
-  it("logs a warning naming the workspace and keeps the fallback when cleanup fails", () => {
+  it("logs a warning naming the workspace and keeps the fallback when cleanup fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const temp = insertTempWorkspace("session-c");
     insertTask("temp-root", temp.id);
@@ -228,7 +228,7 @@ describeWithSqlite("pruneTempWorkspaces foreign-key cleanup", () => {
     `);
     db.prepare("INSERT INTO future_locks (id, task_id_ref) VALUES ('lock', 'temp-root')").run();
 
-    const result = prune();
+    const result = await prune();
 
     expect(result.removedRows).toBe(0);
     expect(count("SELECT COUNT(*) AS n FROM workspaces WHERE id = ?", temp.id)).toBe(1);

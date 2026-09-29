@@ -17,12 +17,12 @@ const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
 describeWithSqlite("RoutineWorkflowRepository", () => {
   let db: import("better-sqlite3").Database;
-  let Repository: typeof import("../repository").RoutineWorkflowRepository;
+  let Repository: typeof import("../repository").RoutineWorkflowStore;
 
   beforeEach(async () => {
     const Database = (await import("better-sqlite3")).default;
     db = new Database(":memory:");
-    ({ RoutineWorkflowRepository: Repository } = await import("../repository"));
+    ({ RoutineWorkflowStore: Repository } = await import("../repository"));
   });
 
   it("keeps one active immutable version", () => {

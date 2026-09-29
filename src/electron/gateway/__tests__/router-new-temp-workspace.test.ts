@@ -35,7 +35,8 @@ function createMockDb() {
       get: vi.fn(),
       all: vi.fn().mockReturnValue([]),
     }),
-    transaction: vi.fn((fn: Any) => fn),
+    // Storage-domain units run in `transaction(...).deferred()` or `.immediate()`.
+    transaction: vi.fn((fn: Any) => Object.assign(fn, { deferred: fn, immediate: fn })),
   } as Any;
 }
 

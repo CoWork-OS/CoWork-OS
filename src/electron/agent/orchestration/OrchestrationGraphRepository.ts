@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import type {
   OrchestrationGraphEdge,
@@ -165,7 +165,14 @@ type OrchestrationGraphEdgeInsert = Omit<OrchestrationGraphEdge, "id" | "runId">
   id?: string;
 };
 
-export class OrchestrationGraphRepository {
+/**
+ * Orchestration graph runs, nodes, edges and node events (async SQLite migration plan,
+ * DB6). As services-domain units these run in the database worker when the domain is
+ * routed there; callers use the async OrchestrationGraphRepository facade in
+ * orchestration-graph-repository-facades.ts. Creating a run with its nodes and edges,
+ * and appending nodes, are single transactions.
+ */
+export class OrchestrationGraphStore {
   constructor(private readonly db: Database.Database) {}
 
   markNodeReady(nodeId: string): boolean {

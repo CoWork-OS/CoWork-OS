@@ -10,7 +10,7 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { ContextType, SecurityMode, ContextPolicy } from "../../shared/types";
 
 /**
@@ -60,9 +60,14 @@ export interface ContextAccessResult {
 export const DEFAULT_GROUP_TOOL_RESTRICTIONS = ["group:memory"];
 
 /**
- * ContextPolicyManager handles per-context security policies
+ * Per-channel, per-context (DM or group) security policies (async SQLite migration plan,
+ * DB6). As services-domain units these run in the database worker when the domain is
+ * routed there; callers use the async ContextPolicyManager facade in context-policy-
+ * repository-facades.ts. Reading a context's policy creates its default policy on first
+ * use, so policy checks are write units: a check and the default it creates share one
+ * transaction.
  */
-export class ContextPolicyManager {
+export class ContextPolicyStore {
   private db: Database.Database;
 
   constructor(db: Database.Database) {

@@ -26,12 +26,12 @@ const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
 describeWithSqlite("ContactIdentityService", () => {
   let db: import("better-sqlite3").Database;
-  let service: import("../ContactIdentityService").ContactIdentityService;
+  let service: import("../identity-repository-facades").ContactIdentityService;
 
   beforeEach(async () => {
     const [Database, { ContactIdentityService }] = await Promise.all([
       import("better-sqlite3").then((m) => m.default),
-      import("../ContactIdentityService"),
+      import("../identity-repository-facades"),
     ]);
 
     db = new Database(":memory:");
@@ -225,8 +225,8 @@ describeWithSqlite("ContactIdentityService", () => {
   });
 
   describe("resolveMailboxContact (creates identity)", () => {
-    it("creates a new contact identity for a new email", () => {
-      const result = service.resolveMailboxContact({
+    it("creates a new contact identity for a new email", async () => {
+      const result = await service.resolveMailboxContact({
         workspaceId: "ws-1",
         email: "alice@example.com",
         displayName: "Alice",
@@ -239,13 +239,13 @@ describeWithSqlite("ContactIdentityService", () => {
       expect(result.confidence).toBeGreaterThan(0);
     });
 
-    it("returns the same identity on a second resolve with the same email", () => {
-      const first = service.resolveMailboxContact({
+    it("returns the same identity on a second resolve with the same email", async () => {
+      const first = await service.resolveMailboxContact({
         workspaceId: "ws-1",
         email: "bob@example.com",
         displayName: "Bob",
       });
-      const second = service.resolveMailboxContact({
+      const second = await service.resolveMailboxContact({
         workspaceId: "ws-1",
         email: "bob@example.com",
         displayName: "Bob Smith",
@@ -254,8 +254,8 @@ describeWithSqlite("ContactIdentityService", () => {
       expect(second.identity?.id).toBe(first.identity?.id);
     });
 
-    it("returns missing_primary_email reason when email is absent", () => {
-      const result = service.resolveMailboxContact({
+    it("returns missing_primary_email reason when email is absent", async () => {
+      const result = await service.resolveMailboxContact({
         workspaceId: "ws-1",
         displayName: "NoEmail",
       });
@@ -265,70 +265,70 @@ describeWithSqlite("ContactIdentityService", () => {
   });
 
   describe("getIdentity", () => {
-    it("retrieves a previously created identity by id", () => {
-      const { identity } = service.resolveMailboxContact({
+    it("retrieves a previously created identity by id", async () => {
+      const { identity } = await service.resolveMailboxContact({
         workspaceId: "ws-1",
         email: "carol@example.com",
         displayName: "Carol",
       });
       expect(identity).not.toBeNull();
-      const fetched = service.getIdentity(identity!.id);
+      const fetched = await service.getIdentity(identity!.id);
       expect(fetched?.id).toBe(identity!.id);
       expect(fetched?.primaryEmail).toBe("carol@example.com");
     });
 
-    it("returns null for an unknown identity id", () => {
-      expect(service.getIdentity("non-existent-id")).toBeNull();
+    it("returns null for an unknown identity id", async () => {
+      expect(await service.getIdentity("non-existent-id")).toBeNull();
     });
   });
 
   describe("listIdentities", () => {
-    it("lists all identities for a workspace", () => {
-      service.resolveMailboxContact({
+    it("lists all identities for a workspace", async () => {
+      await service.resolveMailboxContact({
         workspaceId: "ws-list",
         email: "d@example.com",
         displayName: "D",
       });
-      service.resolveMailboxContact({
+      await service.resolveMailboxContact({
         workspaceId: "ws-list",
         email: "e@example.com",
         displayName: "E",
       });
 
-      const list = service.listIdentities("ws-list");
+      const list = await service.listIdentities("ws-list");
       expect(list.length).toBe(2);
       const emails = list.map((i) => i.primaryEmail);
       expect(emails).toContain("d@example.com");
       expect(emails).toContain("e@example.com");
     });
 
-    it("isolates identities between workspaces", () => {
-      service.resolveMailboxContact({
+    it("isolates identities between workspaces", async () => {
+      await service.resolveMailboxContact({
         workspaceId: "ws-a",
         email: "a@example.com",
         displayName: "A",
       });
-      service.resolveMailboxContact({
+      await service.resolveMailboxContact({
         workspaceId: "ws-b",
         email: "b@example.com",
         displayName: "B",
       });
 
-      expect(service.listIdentities("ws-a")).toHaveLength(1);
-      expect(service.listIdentities("ws-b")).toHaveLength(1);
+      expect(await service.listIdentities("ws-a")).toHaveLength(1);
+      expect(await service.listIdentities("ws-b")).toHaveLength(1);
     });
   });
 
   describe("linkManualHandle", () => {
-    it("links a handle to an existing identity", () => {
-      const { identity } = service.resolveMailboxContact({
+    it("links a handle to an existing identity", async () => {
+      const { identity } = await service.resolveMailboxContact({
         workspaceId: "ws-1",
         email: "frank@example.com",
         displayName: "Frank",
       });
       expect(identity).not.toBeNull();
 
-      const handle = service.linkManualHandle({
+      const handle = await service.linkManualHandle({
         workspaceId: "ws-1",
         contactIdentityId: identity!.id,
         handleType: "slack_user_id",
@@ -341,20 +341,20 @@ describeWithSqlite("ContactIdentityService", () => {
       expect(handle?.handleType).toBe("slack_user_id");
       expect(handle?.normalizedValue).toBe("u12345"); // normalized to lowercase
 
-      const fetched = service.getIdentity(identity!.id);
+      const fetched = await service.getIdentity(identity!.id);
       const slackHandles = fetched?.handles.filter((h) => h.handleType === "slack_user_id") ?? [];
       expect(slackHandles.length).toBeGreaterThanOrEqual(1);
     });
 
-    it("returns null when normalizedValue is empty", () => {
-      const { identity } = service.resolveMailboxContact({
+    it("returns null when normalizedValue is empty", async () => {
+      const { identity } = await service.resolveMailboxContact({
         workspaceId: "ws-1",
         email: "grace@example.com",
         displayName: "Grace",
       });
       expect(identity).not.toBeNull();
 
-      const handle = service.linkManualHandle({
+      const handle = await service.linkManualHandle({
         workspaceId: "ws-1",
         contactIdentityId: identity!.id,
         handleType: "slack_user_id",
@@ -368,15 +368,15 @@ describeWithSqlite("ContactIdentityService", () => {
   });
 
   describe("unlinkHandle", () => {
-    it("removes a linked handle and returns true", () => {
-      const { identity } = service.resolveMailboxContact({
+    it("removes a linked handle and returns true", async () => {
+      const { identity } = await service.resolveMailboxContact({
         workspaceId: "ws-1",
         email: "henry@example.com",
         displayName: "Henry",
       });
       expect(identity).not.toBeNull();
 
-      const handle = service.linkManualHandle({
+      const handle = await service.linkManualHandle({
         workspaceId: "ws-1",
         contactIdentityId: identity!.id,
         handleType: "slack_user_id",
@@ -386,10 +386,10 @@ describeWithSqlite("ContactIdentityService", () => {
       });
       expect(handle).not.toBeNull();
 
-      const result = service.unlinkHandle(handle!.id);
+      const result = await service.unlinkHandle(handle!.id);
       expect(result).toBe(true);
 
-      const fetched = service.getIdentity(identity!.id);
+      const fetched = await service.getIdentity(identity!.id);
       const slackHandles = fetched?.handles.filter((h) => h.handleType === "slack_user_id") ?? [];
       expect(slackHandles).toHaveLength(0);
 
@@ -409,8 +409,8 @@ describeWithSqlite("ContactIdentityService", () => {
       });
     });
 
-    it("returns false for a non-existent handle id", () => {
-      expect(service.unlinkHandle("ghost-handle-id")).toBe(false);
+    it("returns false for a non-existent handle id", async () => {
+      expect(await service.unlinkHandle("ghost-handle-id")).toBe(false);
     });
   });
 });

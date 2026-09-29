@@ -16,6 +16,8 @@ const REQUIRED_PATHS = [
   "bin/coworkd-node.js",
   "bin/coworkctl.js",
   "dist/daemon/daemon/main.js",
+  "dist/web/index.html",
+  "dist/web/web-manifest.json",
   "deploy/systemd/cowork-os-node.service",
   "deploy/systemd/cowork-os.env.example",
 ];
@@ -192,7 +194,7 @@ async function assertRequiredBuildOutputs() {
     throw new Error(
       `Missing required files for Linux server package:\n${missing
         .map((item) => `  - ${item}`)
-        .join("\n")}\nRun npm run build:daemon && npm run build:connectors first.`,
+        .join("\n")}\nRun npm run build:web && npm run build:daemon && npm run build:connectors first.`,
     );
   }
 }
@@ -239,6 +241,7 @@ async function main() {
       "bin/coworkd-node.js",
       "bin/coworkctl.js",
       "dist/daemon",
+      "dist/web",
       "deploy/systemd",
       "resources",
       "docs/vps-linux.md",

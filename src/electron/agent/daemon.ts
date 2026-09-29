@@ -32,9 +32,16 @@ import {
 import { pruneTaskEventsWithWorker, readStorageStats } from "../database/async/maintenance";
 import { performance } from "perf_hooks";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
+import {
+  TaskAdmissionConflictError,
+  TaskAdmissionInputError,
+  TaskAdmissionReceiptUnavailableError,
+  TaskAdmissionService,
+} from "../control-plane/task-admission-service";
 import type Database from "better-sqlite3";
 import {
   TaskStore,
+  type TaskAdmissionInput,
   TaskEventRepository,
   WorkspaceStore,
   MemoryType,
@@ -668,6 +675,7 @@ export class AgentDaemon extends EventEmitter {
   ]);
 
   private taskRepo: TaskStore;
+  private taskAdmissionService: TaskAdmissionService;
   /** Synchronous graph reads on the hot path (DB6); writes go through the engine's facade. */
   private orchestrationGraphStore: OrchestrationGraphStore;
   private eventRepo: TaskEventRepository;
@@ -785,6 +793,7 @@ export class AgentDaemon extends EventEmitter {
         this.options.recurringApprovalService || new RecurringApprovalService(db),
     };
     this.taskRepo = new TaskStore(db);
+    this.taskAdmissionService = new TaskAdmissionService(db);
     this.orchestrationGraphStore = new OrchestrationGraphStore(db);
     this.eventRepo = new TaskEventRepository(db);
     this.workspaceRepo = new WorkspaceStore(db);
@@ -2155,6 +2164,10 @@ export class AgentDaemon extends EventEmitter {
         }
       }
     }
+
+    // Admission commits the queued task and receipt before building the additive
+    // work-session projections. Repair those projections before queue recovery.
+    this.ensureQueuedTaskSessionProjections(queuedTasks);
 
     // Initialize queue with queued tasks
     await this.queueManager.initialize(queuedTasks, []);
@@ -3892,6 +3905,123 @@ export class AgentDaemon extends EventEmitter {
     return task;
   }
 
+  /**
+   * Atomically admit a queued task and its operation receipt, then wake it when
+   * requested. `requestIdentity` is the canonical validated client payload; it
+   * stays stable when routing, memory context, or defaults change between retries.
+   */
+  async createTaskIdempotent(params: {
+    operationKey: string;
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    agentConfig?: AgentConfig;
+    budgetTokens?: number;
+    budgetCost?: number;
+    source?: Task["source"];
+    taskOverrides?: Partial<Task>;
+    boardColumn?: Task["boardColumn"];
+    requestIdentity?: unknown;
+    autoStart?: boolean;
+  }): Promise<{ task: Task; replayed: boolean }> {
+    const requestIdentity = params.requestIdentity ?? {
+      title: params.title,
+      prompt: params.prompt,
+      workspaceId: params.workspaceId,
+      agentConfig: params.agentConfig,
+      budgetTokens: params.budgetTokens,
+      budgetCost: params.budgetCost,
+      source: params.source,
+      taskOverrides: sanitizeTaskOverrides(params.taskOverrides),
+      boardColumn: params.boardColumn,
+    };
+    const finishAdmission = async (
+      admitted: { task: Task; replayed: boolean },
+      derived?: ReturnType<AgentDaemon["deriveTaskStrategy"]>,
+    ) => {
+      this.ensureTaskSessionProjections(admitted.task);
+      if (!admitted.replayed && derived) this.logTaskIntentRouted(admitted.task.id, derived);
+      if (params.autoStart !== false) await this.wakeAdmittedTask(admitted.task.id);
+      return admitted;
+    };
+
+    try {
+      const replay = await this.taskAdmissionService.findReplayByRequestIdentity(
+        params.operationKey,
+        requestIdentity,
+      );
+      if (replay) return await finishAdmission(replay);
+    } catch (error) {
+      if (
+        error instanceof TaskAdmissionInputError ||
+        error instanceof TaskAdmissionConflictError ||
+        error instanceof TaskAdmissionReceiptUnavailableError
+      ) {
+        throw error;
+      }
+      // The storage worker may be temporarily unavailable. Preparation and the
+      // service's same-key transaction/reconciliation path can still recover it.
+    }
+
+    let prepared: ReturnType<AgentDaemon["prepareTaskCreation"]>;
+    try {
+      prepared = this.prepareTaskCreation(params);
+    } catch (preparationError) {
+      // A concurrent attempt may have committed while preparation was running;
+      // retry the receipt lookup before surfacing mutable-context failures.
+      try {
+        const replay = await this.taskAdmissionService.findReplayByRequestIdentity(
+          params.operationKey,
+          requestIdentity,
+        );
+        if (replay) return await finishAdmission(replay);
+      } catch (error) {
+        if (
+          error instanceof TaskAdmissionInputError ||
+          error instanceof TaskAdmissionConflictError ||
+          error instanceof TaskAdmissionReceiptUnavailableError
+        ) {
+          throw error;
+        }
+      }
+      throw preparationError;
+    }
+
+    const admitted = await this.taskAdmissionService.admit(
+      params.operationKey,
+      prepared.input,
+      requestIdentity,
+    );
+    return finishAdmission(admitted, prepared.derived);
+  }
+
+  /** Wake a durable admission after caller-side metadata has been committed. */
+  async startAdmittedTask(operationKey: string, taskId: string): Promise<void> {
+    const receipt = await this.taskAdmissionService.getByOperationKey(operationKey);
+    if (!receipt.found || receipt.taskId !== taskId) {
+      throw new Error("Task admission receipt does not match the requested task");
+    }
+    await this.wakeAdmittedTask(taskId);
+  }
+
+  private async wakeAdmittedTask(taskId: string): Promise<void> {
+    if (this.shutdownRequested) {
+      throw new Error("Agent daemon is shutting down; admitted task remains queued.");
+    }
+    const task = this.taskRepo.findById(taskId);
+    if (
+      !task ||
+      task.status !== "queued" ||
+      this.queueManager.isQueued(taskId) ||
+      this.queueManager.isRunning(taskId)
+    ) {
+      return;
+    }
+    // The receipt is durable before this call. If waking fails, a same-key retry
+    // or startup recovery can start this same queued task.
+    await this.startTask(task);
+  }
+
   private createTaskRecord(params: {
     title: string;
     prompt: string;
@@ -3901,6 +4031,36 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
+  }) {
+    const { input, derived } = this.prepareTaskCreation(params);
+    const task = this.taskRepo.create({ ...input, status: "pending" });
+    const rootLineageUpdates: Partial<Task> = {
+      sessionId: input.sessionId || task.id,
+      resumeStrategy: input.resumeStrategy,
+      ...(input.branchFromTaskId
+        ? {
+            branchFromTaskId: input.branchFromTaskId,
+            branchFromEventId: input.branchFromEventId,
+            branchLabel: input.branchLabel,
+          }
+        : {}),
+    };
+    this.taskRepo.update(task.id, rootLineageUpdates);
+    Object.assign(task, rootLineageUpdates);
+    this.ensureTaskSessionProjections(task);
+    return { task, derived };
+  }
+
+  private prepareTaskCreation(params: {
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    agentConfig?: AgentConfig;
+    budgetTokens?: number;
+    budgetCost?: number;
+    source?: Task["source"];
+    taskOverrides?: Partial<Task>;
+    boardColumn?: Task["boardColumn"];
   }) {
     const botTeamAgentConfig = this.attachDefaultBotTeam(
       params.workspaceId,
@@ -3926,11 +4086,18 @@ export class AgentDaemon extends EventEmitter {
         })
       : undefined;
     const safeTaskOverrides = sanitizeTaskOverrides(params.taskOverrides);
-    const task = this.taskRepo.create({
+    const memoryFeatures = MemoryFeaturesManager.loadSettings();
+    const resumeStrategy =
+      safeTaskOverrides?.resumeStrategy ||
+      (memoryFeatures.transcriptStoreEnabled ? "checkpoint" : "snapshot");
+    const sessionId =
+      typeof safeTaskOverrides?.sessionId === "string" && safeTaskOverrides.sessionId.trim()
+        ? safeTaskOverrides.sessionId.trim()
+        : undefined;
+    const input: TaskAdmissionInput = {
       title: params.title,
       prompt: derived.prompt,
       rawPrompt: params.prompt,
-      status: "pending",
       workspaceId: params.workspaceId,
       agentConfig: derived.agentConfig,
       budgetTokens: params.budgetTokens,
@@ -3939,27 +4106,14 @@ export class AgentDaemon extends EventEmitter {
       budgetProfile: cronBudgetProfile,
       ...(params.source ? { source: params.source } : {}),
       ...safeTaskOverrides,
-    });
-    const memoryFeatures = MemoryFeaturesManager.loadSettings();
-    const rootLineageUpdates: Partial<Task> = {
-      sessionId:
-        typeof safeTaskOverrides?.sessionId === "string" &&
-        safeTaskOverrides.sessionId.trim().length > 0
-          ? safeTaskOverrides.sessionId.trim()
-          : task.id,
-      resumeStrategy:
-        safeTaskOverrides?.resumeStrategy ||
-        (memoryFeatures.transcriptStoreEnabled ? "checkpoint" : "snapshot"),
-      ...(safeTaskOverrides?.branchFromTaskId
-        ? {
-            branchFromTaskId: safeTaskOverrides.branchFromTaskId,
-            branchFromEventId: safeTaskOverrides.branchFromEventId,
-            branchLabel: safeTaskOverrides.branchLabel,
-          }
-        : {}),
+      ...(params.boardColumn ? { boardColumn: params.boardColumn } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      resumeStrategy,
     };
-    this.taskRepo.update(task.id, rootLineageUpdates);
-    Object.assign(task, rootLineageUpdates);
+    return { input, derived };
+  }
+
+  private ensureTaskSessionProjections(task: Task): void {
     try {
       this.workSessionProtocolService.ensureForTask(task);
       this.workSessionContractService.ensureForTask(task);
@@ -3969,7 +4123,12 @@ export class AgentDaemon extends EventEmitter {
       // record from being created.
       log.warn(`[work-session-protocol] Failed to initialize task ${task.id}:`, error);
     }
-    return { task, derived };
+  }
+
+  private ensureQueuedTaskSessionProjections(queuedTasks: Task[]): void {
+    for (const task of queuedTasks) {
+      this.ensureTaskSessionProjections(task);
+    }
   }
 
   /**
@@ -15051,6 +15210,56 @@ export class AgentDaemon extends EventEmitter {
    */
   getDurableTaskEvents(taskId: string, type: string): TaskEvent[] {
     return readDurableTaskEvents(this, taskId, type, 200);
+  }
+
+  /**
+   * Find one durable human follow-up receipt by its exact message identity.
+   * Unlike the bounded task-event convenience method above, this scans the
+   * durable user-message stream so old operation keys remain reconcilable.
+   * The result intentionally contains receipt metadata only, never message text.
+   */
+  getDurableTaskFollowUpReceipt(taskId: string, messageId: string): AgentMessageSendResult | null {
+    const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+    if (!normalizedTaskId || !normalizedMessageId) return null;
+
+    const event = readDurableTaskEvents(this, normalizedTaskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === normalizedMessageId && payload.deliveryMode !== "message";
+      });
+    if (!event) return null;
+
+    const payload = (event.payload as Record<string, unknown> | undefined) || {};
+    const rawStatus = payload.deliveryStatus ?? payload.status;
+    const deliveryStatus: AgentMessageDeliveryStatus =
+      rawStatus === "queued" ||
+      rawStatus === "started" ||
+      rawStatus === "delivered" ||
+      rawStatus === "failed" ||
+      rawStatus === "quarantined" ||
+      rawStatus === "accepted"
+        ? rawStatus
+        : "accepted";
+    return {
+      queued: deliveryStatus === "queued" || deliveryStatus === "started",
+      duplicate: true,
+      messageId: normalizedMessageId,
+      deliveryMode: "follow_up",
+      deliveryStatus,
+      ...(typeof payload.acceptedAt === "number"
+        ? { acceptedAt: payload.acceptedAt }
+        : { acceptedAt: event.timestamp }),
+      ...(typeof payload.queuedAt === "number" ? { queuedAt: payload.queuedAt } : {}),
+      ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
+      ...(typeof payload.deliveredAt === "number" ? { deliveredAt: payload.deliveredAt } : {}),
+      ...(typeof payload.failedAt === "number" ? { failedAt: payload.failedAt } : {}),
+      ...(typeof payload.quarantinedAt === "number"
+        ? { quarantinedAt: payload.quarantinedAt }
+        : {}),
+    };
   }
 
   private getQueuedAgentMessageDeliveryStatus(

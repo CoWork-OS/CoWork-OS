@@ -1,5 +1,11 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import * as http from "http";
+import {
+  HOST_CAPABILITIES,
+  WEB_API_PATH,
+  type HostCapabilities,
+} from "../../../shared/host-api/contracts";
+import { WebApplication } from "../../../host/web/WebApplication";
 import { WebAccessServer } from "../WebAccessServer";
 
 function makeDeps() {
@@ -70,6 +76,7 @@ describe("WebAccessServer", () => {
   it("reports running status after start", () => {
     const status = server.getStatus();
     expect(status.running).toBe(true);
+    expect(status.browserApplication).toBe(false);
     expect(status.url).toContain(String(testPort));
     expect(status.startedAt).toBeGreaterThan(0);
   });
@@ -202,6 +209,48 @@ describe("WebAccessServer", () => {
 
     expect(res.status).toBe(200);
     expect(deps.handleIpcInvoke).toHaveBeenCalledWith("workspace:list");
+  });
+
+  it("attaches the cookie-authenticated browser host after startup without changing legacy REST behavior", async () => {
+    const capabilities = Object.fromEntries(
+      HOST_CAPABILITIES.map((name) => [name, { available: true }]),
+    ) as HostCapabilities;
+    const webApplication = new WebApplication({
+      enabled: true,
+      webDirectory: "/tmp/cowork-web-test-assets",
+      deployment: { mode: "loopback" },
+      getHostIdentity: () => ({
+        installationId: "opaque-installation",
+        profileId: "profile-1",
+        generation: "run-1",
+        runtime: "node",
+        platform: "linux",
+        appVersion: "1.0.0",
+      }),
+      getCapabilities: async () => capabilities,
+      getSessionBootstrap: async () => ({
+        providerReady: false,
+        onboardingCompleted: false,
+        disclaimerAccepted: false,
+        activeWorkspaceId: null,
+      }),
+    });
+    await server.setWebApplication(webApplication);
+    expect(server.getStatus().browserApplication).toBe(true);
+
+    const bootstrap = await request(testPort, {
+      path: `${WEB_API_PATH}/bootstrap`,
+      headers: { Origin: `http://127.0.0.1:${testPort}` },
+    });
+    expect(bootstrap.status).toBe(200);
+    expect(bootstrap.headers["access-control-allow-origin"]).toBeUndefined();
+
+    const legacy = await request(testPort, {
+      path: "/api/tasks",
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(legacy.status).toBe(200);
+    expect(deps.handleIpcInvoke).toHaveBeenCalledWith("task:list");
   });
 
   it("GET /api/accounts routes to account:list with query filters", async () => {

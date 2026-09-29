@@ -78,6 +78,7 @@ async function main() {
         "  --headless",
         "  --enable-control-plane",
         "  --import-env-settings",
+        "  --no-import-env-settings (keep provider env vars out of this profile)",
         "  --user-data-dir <path>",
         "",
         "Common env vars:",
@@ -122,7 +123,7 @@ async function main() {
     // eslint-disable-next-line no-console
     console.log("CoWork OS: Rebuilding native deps for Node (better-sqlite3)...");
     try {
-      await run("npm", ["rebuild", "better-sqlite3"], {
+      await run("npm", ["rebuild", "--ignore-scripts=false", "better-sqlite3"], {
         cwd: packageDir,
         stdio: "inherit",
         shell: true,
@@ -137,8 +138,13 @@ async function main() {
     }
   }
 
-  const defaultArgs = ["--headless", "--enable-control-plane", "--import-env-settings"];
-  const args = [...defaultArgs, ...argv];
+  const importEnvSettings = !hasFlag(argv, "--no-import-env-settings");
+  const defaultArgs = [
+    "--headless",
+    "--enable-control-plane",
+    ...(importEnvSettings ? ["--import-env-settings"] : []),
+  ];
+  const args = [...defaultArgs, ...argv.filter((arg) => arg !== "--no-import-env-settings")];
 
   const node = spawn(process.execPath, [mainPath, ...args], {
     cwd: packageDir,
@@ -146,9 +152,17 @@ async function main() {
     env: { ...process.env },
   });
 
+  // Forward service-manager and test-harness shutdown to the daemon. Otherwise
+  // the wrapper exits while its child keeps the listener and inherited pipes open.
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.on(signal, () => {
+      if (node.exitCode === null && node.signalCode === null) node.kill(signal);
+    });
+  }
+
   node.on("close", (code) => {
     // eslint-disable-next-line no-process-exit
-    process.exit(code);
+    process.exit(code ?? 0);
   });
 }
 

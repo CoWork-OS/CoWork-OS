@@ -5,7 +5,7 @@ import path from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DatabaseClient } from "../async/DatabaseClient";
 import { DATABASE_COMMANDS, requiredTablesFor } from "../async/commands";
-import { TaskStore, WorkspaceStore } from "../repositories";
+import { TaskEventRepository, TaskStore, WorkspaceStore } from "../repositories";
 import {
   AnnotationRepository,
   ApprovalRepository,
@@ -14,6 +14,7 @@ import {
   ChannelSessionRepository,
   ChannelUserRepository,
   TaskRepository,
+  TaskEventReplayRepository,
   WorkspaceRepository,
   InputRequestRepository,
   MemorySettingsRepository,
@@ -129,6 +130,50 @@ describe("storage layer leaf repositories on the host and in the database worker
       prompt: "storage",
       status: "executing",
       workspaceId: workspace.id,
+    });
+
+    new TaskEventRepository(db).create({
+      id: "timeline-event",
+      taskId: task.id,
+      timestamp: start,
+      type: "assistant_message",
+      payload: { message: "Replay facade" },
+    });
+    new TaskEventRepository(db).create({
+      id: "timeline-event-older",
+      taskId: task.id,
+      timestamp: start - 1,
+      type: "assistant_message",
+      payload: { message: "Older replay facade page" },
+    });
+    const taskEvents = new TaskEventReplayRepository(db);
+    const mutationCursor = await taskEvents.getCommittedMutationCursor(task.id);
+    const mutationPage = await taskEvents.findCommittedMutationPage({
+      taskId: task.id,
+      afterCursor: { taskId: task.id, position: 0 },
+      limit: 10,
+    });
+    const timelineSnapshot = await taskEvents.findTimelinePage({ taskId: task.id, limit: 10 });
+    const scopedSnapshot = await taskEvents.findScopedTimelineSnapshot({
+      taskId: task.id,
+      workspaceId: workspace.id,
+      limit: 1,
+    });
+    const historyCursor =
+      scopedSnapshot.outcome === "available" ? scopedSnapshot.page.nextCursor : null;
+    const scopedHistory = historyCursor?.id
+      ? await taskEvents.findScopedTimelineHistoryPage({
+          taskId: task.id,
+          workspaceId: workspace.id,
+          beforeCursor: { ...historyCursor, id: historyCursor.id },
+          limit: 1,
+        })
+      : { outcome: "unavailable" as const };
+    const scopedPage = await taskEvents.findScopedMutationPage({
+      taskId: task.id,
+      workspaceId: workspace.id,
+      afterCursor: { taskId: task.id, position: 0 },
+      limit: 10,
     });
 
     const approvals = new ApprovalRepository(db);
@@ -273,6 +318,34 @@ describe("storage layer leaf repositories on the host and in the database worker
         workspace: await workspaces.findByPath(otherDir),
         workspaceCount: (await workspaces.findAll()).length,
         task: await tasks.findById(created.id),
+        eventMutationCursor: mutationCursor,
+        eventMutationOutcome: mutationPage.outcome,
+        eventMutationCount:
+          mutationPage.outcome === "page" || mutationPage.outcome === "page_with_more"
+            ? mutationPage.changes.length
+            : 0,
+        timelineEventIds: timelineSnapshot.events.map((event) => event.id),
+        timelineHasMore: timelineSnapshot.hasMoreHistory,
+        scopedSnapshotOutcome: scopedSnapshot.outcome,
+        scopedSnapshotEventIds:
+          scopedSnapshot.outcome === "available"
+            ? scopedSnapshot.page.events.map((event) => event.id)
+            : [],
+        scopedHistoryOutcome: scopedHistory.outcome,
+        scopedHistoryEventIds:
+          scopedHistory.outcome === "available"
+            ? scopedHistory.page.events.map((event) => event.id)
+            : [],
+        scopedHistoryHasMore:
+          scopedHistory.outcome === "available" ? scopedHistory.page.hasMoreHistory : false,
+        scopedPageOutcome: scopedPage.outcome,
+        scopedPageEventIds:
+          scopedPage.outcome === "available" &&
+          (scopedPage.page.outcome === "page" || scopedPage.page.outcome === "page_with_more")
+            ? scopedPage.page.changes.flatMap((change) =>
+                change.operation === "upsert" ? [change.event.id] : [],
+              )
+            : [],
         pinned: pinned?.pinned,
         movedColumn: moved?.boardColumn,
         byWorkspace: byWorkspace.map((entry) => entry.id === created.id),

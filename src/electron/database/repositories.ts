@@ -17,6 +17,7 @@ import {
 } from "../memory/memory-capture-sql";
 import {
   Task,
+  TaskStatus,
   TaskEvent,
   TaskEventDetailResult,
   TaskTimelinePageCursor,
@@ -685,9 +686,7 @@ export class TaskStore {
   }): { sql: string; args: Any[] } {
     if (!cursor?.id) return { sql: "", args: [] };
     const pinnedRank = cursor.pinned ? 0 : 1;
-    const activeRank = TaskStore.SIDEBAR_ACTIVE_STATUSES.has(String(cursor.status || ""))
-      ? 0
-      : 1;
+    const activeRank = TaskStore.SIDEBAR_ACTIVE_STATUSES.has(String(cursor.status || "")) ? 0 : 1;
     const updatedAt =
       typeof cursor.updatedAt === "number" && Number.isFinite(cursor.updatedAt)
         ? Math.floor(cursor.updatedAt)
@@ -1516,6 +1515,13 @@ export class TaskStore {
       const deleteEvents = this.db.prepare("DELETE FROM task_events WHERE task_id = ?");
       deleteEvents.run(taskId);
 
+      // Deleting task_events first appends tombstones; discard those replay records with
+      // the deleted aggregate so journal metadata does not accumulate for removed tasks.
+      this.db.prepare("DELETE FROM task_event_mutation_journal WHERE task_id = ?").run(taskId);
+      this.db
+        .prepare("DELETE FROM task_event_mutation_journal_state WHERE task_id = ?")
+        .run(taskId);
+
       const deleteArtifacts = this.db.prepare("DELETE FROM artifacts WHERE task_id = ?");
       deleteArtifacts.run(taskId);
 
@@ -2181,11 +2187,344 @@ export class TaskStore {
   }
 }
 
+export type TaskAdmissionInput = Omit<
+  Task,
+  "id" | "createdAt" | "updatedAt" | "status" | "resumeStrategy"
+> & { resumeStrategy: NonNullable<Task["resumeStrategy"]> };
+
+export type TaskAdmissionStoreOutcome =
+  | { kind: "created" | "replayed"; task: Task; createdAt: number }
+  | { kind: "payload_conflict" | "task_missing"; taskId: string; createdAt: number };
+
+export interface TaskAdmissionReceiptLookup {
+  operationKey: string;
+  payloadHash: string;
+  taskId: string;
+  createdAt: number;
+  task: Task | null;
+}
+
+/**
+ * Atomically creates a recoverable queued task and its idempotency receipt. This store
+ * runs only inside a storage transaction unit, on either the host connection or worker.
+ */
+export class TaskAdmissionStore {
+  private readonly taskStore: TaskStore;
+
+  constructor(private readonly db: Database.Database) {
+    this.taskStore = new TaskStore(db);
+  }
+
+  admit(
+    operationKey: string,
+    payloadHash: string,
+    input: TaskAdmissionInput,
+  ): TaskAdmissionStoreOutcome {
+    const normalizedOperationKey = this.requireOperationKey(operationKey);
+    const normalizedPayloadHash = this.requirePayloadHash(payloadHash);
+    const receipt = this.db
+      .prepare(
+        `SELECT operation_key, payload_hash, task_id, created_at
+         FROM task_admission_receipts WHERE operation_key = ?`,
+      )
+      .get(normalizedOperationKey) as Any;
+
+    if (receipt) {
+      const taskId = String(receipt.task_id ?? "");
+      const createdAt = Number(receipt.created_at ?? 0);
+      if (receipt.payload_hash !== normalizedPayloadHash) {
+        return { kind: "payload_conflict", taskId, createdAt };
+      }
+      const task = this.taskStore.findById(taskId);
+      if (!task) return { kind: "task_missing", taskId, createdAt };
+      return { kind: "replayed", task, createdAt };
+    }
+
+    const createdTask = this.taskStore.create({ ...input, status: "queued" });
+    const sessionId =
+      typeof input.sessionId === "string" && input.sessionId.trim()
+        ? input.sessionId.trim()
+        : createdTask.id;
+    const lineage: Partial<Task> = {
+      sessionId,
+      resumeStrategy: input.resumeStrategy,
+      ...(input.boardColumn !== undefined ? { boardColumn: input.boardColumn } : {}),
+    };
+    if (input.branchFromTaskId !== undefined) lineage.branchFromTaskId = input.branchFromTaskId;
+    if (input.branchFromEventId !== undefined) lineage.branchFromEventId = input.branchFromEventId;
+    if (input.branchLabel !== undefined) lineage.branchLabel = input.branchLabel;
+
+    // TaskStore.create does not include session lineage columns in its initial INSERT.
+    // Persist lineage before inserting the receipt, in this same transaction, so queued
+    // startup recovery sees the complete task record after any crash boundary.
+    // TaskStore's usage-projector hooks only invalidate caches and schedule asynchronous
+    // refresh/backfill work. The host transaction unit commits before that work can read;
+    // worker execution has no initialized host projector. The projection remains derived
+    // and is rebuilt from committed task rows, rather than being part of this receipt.
+    this.taskStore.update(createdTask.id, lineage);
+    const task = this.taskStore.findById(createdTask.id);
+    if (!task) throw new Error("admitted task disappeared before its receipt was written");
+
+    this.db
+      .prepare(
+        `INSERT INTO task_admission_receipts (operation_key, payload_hash, task_id, created_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(normalizedOperationKey, normalizedPayloadHash, task.id, task.createdAt);
+
+    return { kind: "created", task, createdAt: task.createdAt };
+  }
+
+  findByOperationKey(operationKey: string): TaskAdmissionReceiptLookup | undefined {
+    const normalizedOperationKey = this.requireOperationKey(operationKey);
+    const receipt = this.db
+      .prepare(
+        `SELECT operation_key, payload_hash, task_id, created_at
+         FROM task_admission_receipts WHERE operation_key = ?`,
+      )
+      .get(normalizedOperationKey) as Any;
+    if (!receipt) return undefined;
+
+    const taskId = String(receipt.task_id ?? "");
+    return {
+      operationKey: String(receipt.operation_key ?? normalizedOperationKey),
+      payloadHash: String(receipt.payload_hash ?? ""),
+      taskId,
+      createdAt: Number(receipt.created_at ?? 0),
+      task: this.taskStore.findById(taskId) ?? null,
+    };
+  }
+
+  private requireOperationKey(value: string): string {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (!normalized || normalized.length > 200) {
+      throw new Error("operationKey must contain 1..200 characters");
+    }
+    return normalized;
+  }
+
+  private requirePayloadHash(value: string): string {
+    if (typeof value !== "string" || !/^[a-f0-9]{64}$/i.test(value)) {
+      throw new Error("payloadHash must be a SHA-256 hex digest");
+    }
+    return value.toLowerCase();
+  }
+}
+
+export interface BrowserTaskCancelReceipt {
+  fingerprint: string;
+  taskId: string;
+  workspaceId: string;
+  expectedStatus: TaskStatus;
+  expectedUpdatedAt: number;
+  state: "pending" | "completed";
+  result?: {
+    taskId: string;
+    workspaceId: string;
+    operationKey: string;
+    outcome: "observed_terminal" | "pending";
+    status: TaskStatus;
+    updatedAt: number;
+  };
+}
+
+/** A small durable intent/result store for browser task cancellation. */
+export class BrowserTaskCancelReceiptStore {
+  constructor(private readonly db: Database.Database) {}
+
+  reserve(
+    scopedKey: string,
+    fingerprint: string,
+    taskId: string,
+    workspaceId: string,
+    expectedStatus: TaskStatus,
+    expectedUpdatedAt: number,
+  ): { created: boolean; receipt: BrowserTaskCancelReceipt } {
+    this.validateKey(scopedKey);
+    this.validateKey(fingerprint);
+    if (!taskId || taskId.length > 128 || !workspaceId || workspaceId.length > 128) {
+      throw new Error("Invalid browser cancellation scope");
+    }
+    if (!Number.isSafeInteger(expectedUpdatedAt) || expectedUpdatedAt < 0) {
+      throw new Error("Invalid browser cancellation revision");
+    }
+    const existing = this.get(scopedKey);
+    if (existing) return { created: false, receipt: existing };
+    const now = Date.now();
+    const inserted = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO browser_task_cancel_receipts
+         (scoped_key, fingerprint, task_id, workspace_id, expected_status, expected_updated_at, state, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      )
+      .run(
+        scopedKey,
+        fingerprint,
+        taskId,
+        workspaceId,
+        expectedStatus,
+        expectedUpdatedAt,
+        now,
+        now,
+      );
+    const receipt = this.get(scopedKey);
+    if (!receipt) throw new Error("Browser cancellation receipt was not reserved");
+    return {
+      created: inserted.changes === 1,
+      receipt,
+    };
+  }
+
+  complete(scopedKey: string, result: NonNullable<BrowserTaskCancelReceipt["result"]>): void {
+    this.validateKey(scopedKey);
+    if (!result || JSON.stringify(result).length > 2_048) {
+      throw new Error("Invalid browser cancellation result");
+    }
+    const receipt = this.get(scopedKey);
+    if (!receipt) throw new Error("Browser cancellation receipt is missing");
+    if (receipt.state === "completed") return;
+    if (receipt.taskId !== result.taskId || receipt.workspaceId !== result.workspaceId) {
+      throw new Error("Browser cancellation result scope mismatch");
+    }
+    const updated = this.db
+      .prepare(
+        `UPDATE browser_task_cancel_receipts
+         SET state = 'completed', result_json = ?, updated_at = ?
+         WHERE scoped_key = ? AND state = 'pending'`,
+      )
+      .run(JSON.stringify(result), Date.now(), scopedKey);
+    if (updated.changes !== 1 && this.get(scopedKey)?.state !== "completed") {
+      throw new Error("Browser cancellation receipt was not completed");
+    }
+  }
+
+  get(scopedKey: string): BrowserTaskCancelReceipt | null {
+    this.validateKey(scopedKey);
+    const row = this.db
+      .prepare(
+        `SELECT fingerprint, task_id, workspace_id, expected_status, expected_updated_at, state, result_json
+         FROM browser_task_cancel_receipts WHERE scoped_key = ?`,
+      )
+      .get(scopedKey) as Any;
+    if (!row) return null;
+    return {
+      fingerprint: String(row.fingerprint),
+      taskId: String(row.task_id),
+      workspaceId: String(row.workspace_id),
+      expectedStatus: row.expected_status as TaskStatus,
+      expectedUpdatedAt: Number(row.expected_updated_at),
+      state: row.state as "pending" | "completed",
+      ...(row.result_json
+        ? { result: JSON.parse(String(row.result_json)) as BrowserTaskCancelReceipt["result"] }
+        : {}),
+    };
+  }
+
+  private validateKey(value: string): void {
+    if (typeof value !== "string" || !/^[a-f0-9]{64}$/i.test(value)) {
+      throw new Error("Browser cancellation key must be a SHA-256 digest");
+    }
+  }
+}
+
 export interface PreparedTaskEvent {
   stored: TaskEvent;
   /** Bound parameters for TASK_EVENT_INSERT_SQL, in column order. */
   params: unknown[];
 }
+
+export interface TaskEventMutationCursor {
+  taskId: string;
+  position: number;
+}
+
+export type TaskEventMutation =
+  | { cursor: number; operation: "upsert"; event: TaskEvent }
+  | { cursor: number; operation: "delete"; eventId: string };
+
+export type TaskEventMutationPageResult =
+  | {
+      outcome: "invalid_request";
+      reason:
+        | "task_id_required"
+        | "cursor_required"
+        | "cursor_task_mismatch"
+        | "cursor_invalid"
+        | "cursor_ahead"
+        | "limit_invalid";
+    }
+  | {
+      outcome: "cursor_expired";
+      taskId: string;
+      afterCursor: TaskEventMutationCursor;
+      earliestAvailableCursor: number;
+      resyncCursor: TaskEventMutationCursor;
+      changes: [];
+      hasMore: false;
+    }
+  | {
+      outcome: "no_changes";
+      taskId: string;
+      changes: [];
+      nextCursor: TaskEventMutationCursor;
+      hasMore: false;
+    }
+  | {
+      outcome: "page";
+      taskId: string;
+      changes: TaskEventMutation[];
+      nextCursor: TaskEventMutationCursor;
+      hasMore: false;
+    }
+  | {
+      outcome: "page_with_more";
+      taskId: string;
+      changes: TaskEventMutation[];
+      nextCursor: TaskEventMutationCursor;
+      hasMore: true;
+    };
+
+export interface TaskEventMutationPageRequest {
+  taskId: string;
+  afterCursor: TaskEventMutationCursor;
+  limit?: number;
+}
+
+export interface TaskEventScopedTimelineSnapshotRequest {
+  taskId: string;
+  workspaceId: string;
+  limit?: number;
+}
+
+export type TaskEventScopedTimelineSnapshotResult =
+  | {
+      outcome: "available";
+      cursor: TaskEventMutationCursor;
+      page: TaskTimelinePageResult;
+    }
+  | { outcome: "unavailable" };
+
+export interface TaskEventScopedTimelineHistoryPageRequest {
+  taskId: string;
+  workspaceId: string;
+  beforeCursor: TaskTimelinePageCursor & { id: string };
+  limit?: number;
+}
+
+export type TaskEventScopedTimelineHistoryPageResult =
+  | { outcome: "available"; page: TaskTimelinePageResult }
+  | { outcome: "unavailable" };
+
+export interface TaskEventScopedMutationPageRequest extends TaskEventMutationPageRequest {
+  workspaceId: string;
+}
+
+export type TaskEventScopedMutationPageResult =
+  | { outcome: "available"; page: TaskEventMutationPageResult }
+  | { outcome: "unavailable" };
+
+const TASK_EVENT_MUTATION_PAGE_DEFAULT_LIMIT = 100;
+const TASK_EVENT_MUTATION_PAGE_MAX_LIMIT = 500;
 
 /** Stored task event columns, in insert parameter order. */
 export const TASK_EVENT_COLUMN_NAMES = [
@@ -2639,6 +2978,256 @@ export class TaskEventRepository {
     return this.mapRowsToEvents(merged, { persistMigrations: false }).events;
   }
 
+  /** Capture the committed mutation position before a caller starts a timeline snapshot. */
+  getCommittedMutationCursor(taskId: string): TaskEventMutationCursor | null {
+    const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+    if (!normalizedTaskId) return null;
+    const row = this.db
+      .prepare(
+        `SELECT high_water_cursor
+         FROM task_event_mutation_journal_state
+         WHERE task_id = ?`,
+      )
+      .get(normalizedTaskId) as { high_water_cursor?: number } | undefined;
+    const position = Number(row?.high_water_cursor ?? 0);
+    return {
+      taskId: normalizedTaskId,
+      position: Number.isSafeInteger(position) && position >= 0 ? position : 0,
+    };
+  }
+
+  /** Read scope, committed cursor, and newest timeline page in one SQLite snapshot. */
+  findScopedTimelineSnapshot(
+    request: TaskEventScopedTimelineSnapshotRequest,
+  ): TaskEventScopedTimelineSnapshotResult {
+    const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
+    const workspaceId = typeof request?.workspaceId === "string" ? request.workspaceId.trim() : "";
+    if (!taskId || !workspaceId || isTempWorkspaceId(workspaceId))
+      return { outcome: "unavailable" };
+
+    return this.db
+      .transaction((): TaskEventScopedTimelineSnapshotResult => {
+        if (!this.taskBelongsToWorkspace(taskId, workspaceId)) return { outcome: "unavailable" };
+        const cursor = this.getCommittedMutationCursor(taskId) ?? { taskId, position: 0 };
+        const page = this.findTimelinePage({
+          taskId,
+          cursor: null,
+          limit: request.limit,
+          byteLimit: 448 * 1024,
+          singleEventByteLimit: 16 * 1024,
+          includePending: false,
+        });
+        return { outcome: "available", cursor, page } as const;
+      })
+      .deferred();
+  }
+
+  /** Read one older committed history page after checking task/workspace scope atomically. */
+  findScopedTimelineHistoryPage(
+    request: TaskEventScopedTimelineHistoryPageRequest,
+  ): TaskEventScopedTimelineHistoryPageResult {
+    const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
+    const workspaceId = typeof request?.workspaceId === "string" ? request.workspaceId.trim() : "";
+    const beforeCursor = request?.beforeCursor;
+    if (
+      !taskId ||
+      !workspaceId ||
+      isTempWorkspaceId(workspaceId) ||
+      !beforeCursor ||
+      !Number.isSafeInteger(beforeCursor.order) ||
+      !Number.isSafeInteger(beforeCursor.timestamp) ||
+      typeof beforeCursor.id !== "string" ||
+      !beforeCursor.id.trim()
+    ) {
+      return { outcome: "unavailable" };
+    }
+
+    return this.db
+      .transaction((): TaskEventScopedTimelineHistoryPageResult => {
+        if (!this.taskBelongsToWorkspace(taskId, workspaceId)) return { outcome: "unavailable" };
+        const page = this.findTimelinePage({
+          taskId,
+          cursor: beforeCursor,
+          limit: request.limit,
+          byteLimit: 448 * 1024,
+          singleEventByteLimit: 16 * 1024,
+          includePending: false,
+        });
+        return { outcome: "available", page };
+      })
+      .deferred();
+  }
+
+  /** Check scope and read one committed journal page from the same SQLite snapshot. */
+  findScopedMutationPage(
+    request: TaskEventScopedMutationPageRequest,
+  ): TaskEventScopedMutationPageResult {
+    const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
+    const workspaceId = typeof request?.workspaceId === "string" ? request.workspaceId.trim() : "";
+    if (!taskId || !workspaceId || isTempWorkspaceId(workspaceId))
+      return { outcome: "unavailable" };
+
+    return this.db
+      .transaction((): TaskEventScopedMutationPageResult => {
+        if (!this.taskBelongsToWorkspace(taskId, workspaceId)) return { outcome: "unavailable" };
+        return { outcome: "available", page: this.findCommittedMutationPage(request) };
+      })
+      .deferred();
+  }
+
+  private taskBelongsToWorkspace(taskId: string, workspaceId: string): boolean {
+    if (!taskId || !workspaceId || isTempWorkspaceId(workspaceId)) return false;
+    const row = this.db
+      .prepare(
+        `SELECT 1 AS available
+         FROM tasks AS task
+         INNER JOIN workspaces AS workspace ON workspace.id = task.workspace_id
+         WHERE task.id = ? AND task.workspace_id = ?
+         LIMIT 1`,
+      )
+      .get(taskId, workspaceId) as { available?: number } | undefined;
+    return row?.available === 1;
+  }
+
+  /**
+   * Read committed task-event mutations after a per-task cursor. Journal rows and their
+   * current canonical event payloads come from the same SQLite read snapshot. This path
+   * intentionally bypasses the pending-writer overlay: only committed trigger rows are
+   * visible, and an upsert whose event has since disappeared is returned as a tombstone.
+   */
+  findCommittedMutationPage(request: TaskEventMutationPageRequest): TaskEventMutationPageResult {
+    const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
+    if (!taskId) return { outcome: "invalid_request", reason: "task_id_required" };
+
+    const cursor = request?.afterCursor;
+    if (!cursor || typeof cursor !== "object") {
+      return { outcome: "invalid_request", reason: "cursor_required" };
+    }
+    if (typeof cursor.taskId !== "string" || cursor.taskId.trim() !== taskId) {
+      return { outcome: "invalid_request", reason: "cursor_task_mismatch" };
+    }
+    if (!Number.isSafeInteger(cursor.position) || cursor.position < 0) {
+      return { outcome: "invalid_request", reason: "cursor_invalid" };
+    }
+    const limit =
+      request.limit === undefined ? TASK_EVENT_MUTATION_PAGE_DEFAULT_LIMIT : request.limit;
+    if (
+      typeof limit !== "number" ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > TASK_EVENT_MUTATION_PAGE_MAX_LIMIT
+    ) {
+      return { outcome: "invalid_request", reason: "limit_invalid" };
+    }
+
+    return this.db
+      .transaction(() => {
+        const state = this.db
+          .prepare(
+            `SELECT high_water_cursor, earliest_available_cursor
+             FROM task_event_mutation_journal_state
+             WHERE task_id = ?`,
+          )
+          .get(taskId) as
+          | { high_water_cursor?: number; earliest_available_cursor?: number }
+          | undefined;
+        const highWater = Number(state?.high_water_cursor ?? 0);
+        const earliestAvailable = Number(state?.earliest_available_cursor ?? 1);
+
+        if (cursor.position > highWater) {
+          return { outcome: "invalid_request", reason: "cursor_ahead" } as const;
+        }
+        if (cursor.position < earliestAvailable - 1) {
+          return {
+            outcome: "cursor_expired",
+            taskId,
+            afterCursor: { taskId, position: cursor.position },
+            earliestAvailableCursor: earliestAvailable,
+            resyncCursor: { taskId, position: highWater },
+            changes: [],
+            hasMore: false,
+          } satisfies TaskEventMutationPageResult;
+        }
+
+        const rows = this.db
+          .prepare(
+            `SELECT cursor, event_id, operation
+             FROM task_event_mutation_journal
+             WHERE task_id = ? AND cursor > ?
+             ORDER BY cursor ASC
+             LIMIT ?`,
+          )
+          .all(taskId, cursor.position, limit + 1) as Array<{
+          cursor: number;
+          event_id: string;
+          operation: "insert" | "update" | "delete";
+        }>;
+        const selected = rows.slice(0, limit);
+        const upsertIds = Array.from(
+          new Set(
+            selected
+              .filter((row) => row.operation !== "delete")
+              .map((row) => String(row.event_id ?? ""))
+              .filter(Boolean),
+          ),
+        );
+        const eventRows =
+          upsertIds.length === 0
+            ? []
+            : (this.db
+                .prepare(
+                  `SELECT *
+                   FROM task_events
+                   WHERE task_id = ? AND id IN (${upsertIds.map(() => "?").join(", ")})`,
+                )
+                .all(taskId, ...upsertIds) as Any[]);
+        const eventsById = new Map(
+          this.mapRowsToEvents(eventRows, { persistMigrations: false }).events.map((event) => [
+            event.id,
+            event,
+          ]),
+        );
+        const changes: TaskEventMutation[] = selected.map((row) => {
+          const changeCursor = Number(row.cursor);
+          const eventId = String(row.event_id ?? "");
+          const event = row.operation === "delete" ? undefined : eventsById.get(eventId);
+          return event
+            ? { cursor: changeCursor, operation: "upsert", event }
+            : { cursor: changeCursor, operation: "delete", eventId };
+        });
+        const lastCursor = selected.length
+          ? Number(selected[selected.length - 1]!.cursor)
+          : cursor.position;
+        const nextCursor = { taskId, position: lastCursor };
+        if (changes.length === 0) {
+          return {
+            outcome: "no_changes",
+            taskId,
+            changes: [],
+            nextCursor,
+            hasMore: false,
+          } satisfies TaskEventMutationPageResult;
+        }
+        if (rows.length > limit) {
+          return {
+            outcome: "page_with_more",
+            taskId,
+            changes,
+            nextCursor,
+            hasMore: true,
+          } as const;
+        }
+        return {
+          outcome: "page",
+          taskId,
+          changes,
+          nextCursor,
+          hasMore: false,
+        } as const;
+      })
+      .deferred();
+  }
+
   findTimelinePage(request: TaskTimelinePageRequest): TaskTimelinePageResult {
     const taskId = typeof request.taskId === "string" ? request.taskId.trim() : "";
     if (!taskId) {
@@ -2806,7 +3395,7 @@ export class TaskEventRepository {
     } else {
       rows = selectRows("task_id = ?", [taskId]);
     }
-    if (!cursor) {
+    if (!cursor && request.includePending !== false) {
       // The latest page includes accepted rows not committed yet (DB6): merged here rather
       // than committed on the host. Older pages sit behind their anchor, below any of them.
       rows = this.withPendingRows(taskId, rows, {
@@ -3621,6 +4210,15 @@ export class ArtifactStore {
       "SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at DESC",
     );
     const rows = stmt.all(taskId) as Any[];
+    return rows.map((row) => this.mapRowToArtifact(row));
+  }
+
+  findByTaskIdPage(taskId: string, limit: number, offset: number): Artifact[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+      )
+      .all(taskId, limit, offset) as Any[];
     return rows.map((row) => this.mapRowToArtifact(row));
   }
 
@@ -6695,10 +7293,7 @@ export class MemoryStore {
         LIMIT ?
       `);
 
-      const tokenized = this.buildRelaxedFtsQuery(
-        raw,
-        MemoryStore.PROMPT_RECALL_FTS_MAX_TOKENS,
-      );
+      const tokenized = this.buildRelaxedFtsQuery(raw, MemoryStore.PROMPT_RECALL_FTS_MAX_TOKENS);
       const tryRaw = this.shouldTryRawFtsQuery(raw);
 
       const mapRows = (rows: Record<string, unknown>[]) =>

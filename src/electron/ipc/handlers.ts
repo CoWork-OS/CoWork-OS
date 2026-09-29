@@ -308,6 +308,7 @@ import { SearchProviderFactory, SearchSettings, SearchProviderType } from "../ag
 import { ShellSessionManager } from "../agent/tools/shell-session-manager";
 import { GitHubReviewService } from "../git/GitHubReviewService";
 import { TerminalPtyManager } from "../terminal/TerminalPtyManager";
+import { assertTerminalShellAllowed } from "../terminal/terminal-shell-policy";
 import { normalizeTerminalAttachInput } from "../terminal/terminal-input-policy";
 import { ChannelGateway } from "../gateway";
 import { CHANNEL_TYPES } from "../gateway/channels/types";
@@ -320,11 +321,7 @@ import { listIntegrationMentionOptions } from "../integrations/integration-menti
 import { ProfileManager } from "../profiles/ProfileManager";
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
-import {
-  applyDefaultAccessProfile,
-  resolveEffectiveAccessProfile,
-} from "../security/access-profile-resolver";
-import { loadPolicies } from "../admin/policies";
+import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import {
   appendWorkspacePermissionManifestRule,
   removeWorkspacePermissionManifestRule,
@@ -1211,29 +1208,6 @@ async function resolveWorkspaceContainedCwd(workspacePath: string, cwd?: string)
     throw new Error("Terminal cwd must stay within the workspace.");
   }
   return candidateRealPath;
-}
-
-function assertTerminalShellAllowed(workspace: Workspace, task?: Task): void {
-  const accessProfile = resolveEffectiveAccessProfile({
-    task,
-    workspace,
-    settings: PermissionSettingsManager.loadSettings(),
-    adminPolicies: loadPolicies(),
-  });
-  const legacyShellOverride =
-    typeof task?.agentConfig?.accessProfileId !== "string" &&
-    task?.agentConfig?.shellAccess === true;
-  const namedProfileSelected = Boolean(accessProfile.requestedId);
-  const shellAllowed = namedProfileSelected
-    ? accessProfile.shellEnabled
-    : workspace.permissions?.shell === true || legacyShellOverride;
-  if (!shellAllowed) {
-    // A profile downgrade must not leave an already-open PTY alive. Retain
-    // the tab records so the user can still see and close them, but terminate
-    // the underlying processes before reporting the denial.
-    TerminalPtyManager.getInstance().stopTabsForWorkspace(workspace.id, "Shell access revoked");
-    throw new Error("An access profile that permits command tools is required for terminal tabs.");
-  }
 }
 
 async function approveTerminalCommand(params: {

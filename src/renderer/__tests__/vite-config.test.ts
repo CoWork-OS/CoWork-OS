@@ -6,6 +6,7 @@ import { loadConfigFromFile } from "vite";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const viteConfigPath = path.join(repositoryRoot, "vite.config.mts");
+const webViteConfigPath = path.join(repositoryRoot, "vite.web.config.mts");
 
 describe("renderer Vite configuration", () => {
   it("preserves the Electron renderer output contract under Vite 8", async () => {
@@ -22,5 +23,21 @@ describe("renderer Vite configuration", () => {
     expect(loaded?.config.build?.emptyOutDir).toBe(true);
     expect(loaded?.config.server?.host).toBe("127.0.0.1");
     expect(loaded?.config.server?.strictPort).toBe(true);
+  });
+});
+
+describe("browser Vite configuration", () => {
+  it("keeps the browser output separate from the Electron renderer", async () => {
+    const loaded = await loadConfigFromFile(
+      { command: "build", mode: "production" },
+      webViteConfigPath,
+      repositoryRoot,
+    );
+
+    expect(loaded).toBeDefined();
+    expect(loaded?.config.root).toBe(path.join(repositoryRoot, "src/renderer-web"));
+    expect(loaded?.config.base).toBe("./");
+    expect(loaded?.config.build?.outDir).toBe(path.join(repositoryRoot, "dist/web"));
+    expect(loaded?.config.build?.emptyOutDir).toBe(true);
   });
 });

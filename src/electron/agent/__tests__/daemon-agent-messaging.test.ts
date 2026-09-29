@@ -23,6 +23,61 @@ function makeEvent(id: string, taskId: string, type: TaskEvent["type"], payload:
 }
 
 describe("AgentDaemon agent-message receipts", () => {
+  it("looks up an exact human follow-up receipt beyond the bounded event convenience page", () => {
+    const events = Array.from({ length: 205 }, (_, index) =>
+      makeEvent(`user-${index}`, "task-1", "user_message", {
+        messageId: `web:control-plane:operation-${index}`,
+        deliveryMode: "follow_up",
+        deliveryStatus: "accepted",
+        acceptedAt: index + 1,
+        message: "private follow-up text",
+      }),
+    );
+    const daemonLike = { getTaskEvents: vi.fn(() => events) } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const receipt = (AgentDaemon.prototype as Any).getDurableTaskFollowUpReceipt.call(
+      daemonLike,
+      "task-1",
+      "web:control-plane:operation-0",
+    );
+
+    expect(receipt).toMatchObject({
+      messageId: "web:control-plane:operation-0",
+      deliveryMode: "follow_up",
+      deliveryStatus: "accepted",
+      acceptedAt: 1,
+    });
+    expect(receipt).not.toHaveProperty("message");
+    expect(daemonLike.getTaskEvents).toHaveBeenCalledWith("task-1", {
+      types: ["user_message"],
+      limit: undefined,
+    });
+  });
+
+  it("does not return queue-only message receipts as ordinary follow-ups", () => {
+    const daemonLike = {
+      eventRepo: {
+        findByTaskIdAndTypes: vi.fn(() => [
+          makeEvent("queue-only", "task-1", "user_message", {
+            messageId: "shared-id",
+            deliveryMode: "message",
+            message: "private queued message",
+          }),
+        ]),
+      },
+    } as Any;
+    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+
+    const receipt = (AgentDaemon.prototype as Any).getDurableTaskFollowUpReceipt.call(
+      daemonLike,
+      "task-1",
+      "shared-id",
+    );
+
+    expect(receipt).toBeNull();
+  });
+
   it("returns the repaired bot-team identity with messaging authorization", () => {
     const task = {
       id: "bot-task",

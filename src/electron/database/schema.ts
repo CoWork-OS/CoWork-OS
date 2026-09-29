@@ -34,6 +34,7 @@ import { instrumentDatabase } from "./sqlite-instrumentation";
 import { TimelineProjectionOutboxRepository } from "./TimelineProjectionOutboxRepository";
 import { applyConnectionPragmas, HOST_BUSY_TIMEOUT_MS, resolveDatabasePath } from "./connection";
 import { initializeMailboxSearchIndex } from "./mailbox-search-index-schema";
+import { TASK_EVENT_MUTATION_JOURNAL_MAX_ROWS_PER_TASK } from "../../shared/task-event-mutation-journal-limits";
 
 const schemaLogger = createLogger("DatabaseManager");
 const STARTUP_PHASE_WARN_MS = 250;
@@ -769,6 +770,36 @@ export class DatabaseManager {
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
       );
 
+      -- Idempotent task admission receipts intentionally do not cascade with task deletion.
+      -- Reusing an old operation key must never silently create a second task.
+      CREATE TABLE IF NOT EXISTS task_admission_receipts (
+        operation_key TEXT PRIMARY KEY CHECK (length(operation_key) BETWEEN 1 AND 200),
+        payload_hash TEXT NOT NULL CHECK (length(payload_hash) = 64),
+        task_id TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_task_admission_receipts_created
+        ON task_admission_receipts(created_at);
+
+      -- Browser task cancellation reserves an operation key before dispatch.
+      -- Receipts survive task deletion so an old key cannot silently start a new action.
+      CREATE TABLE IF NOT EXISTS browser_task_cancel_receipts (
+        scoped_key TEXT PRIMARY KEY CHECK (length(scoped_key) = 64),
+        fingerprint TEXT NOT NULL CHECK (length(fingerprint) = 64),
+        task_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        expected_status TEXT NOT NULL,
+        expected_updated_at INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending', 'completed')),
+        result_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_browser_task_cancel_receipts_task
+        ON browser_task_cancel_receipts(task_id, created_at);
+
       CREATE TABLE IF NOT EXISTS task_session_metadata (
         session_id TEXT PRIMARY KEY,
         name TEXT,
@@ -878,6 +909,115 @@ export class DatabaseManager {
         actor TEXT,
         legacy_type TEXT,
         FOREIGN KEY (task_id) REFERENCES tasks(id)
+      );
+
+      -- A compact, committed change journal. Payloads stay in task_events and are
+      -- hydrated on reads from one SQLite snapshot. Per-task cursors keep replay
+      -- positions scoped and monotonic even when unrelated tasks are active.
+      CREATE TABLE IF NOT EXISTS task_event_mutation_journal_state (
+        task_id TEXT PRIMARY KEY,
+        high_water_cursor INTEGER NOT NULL CHECK (high_water_cursor >= 1),
+        earliest_available_cursor INTEGER NOT NULL DEFAULT 1
+          CHECK (earliest_available_cursor >= 1 AND earliest_available_cursor <= high_water_cursor + 1)
+      );
+
+      CREATE TABLE IF NOT EXISTS task_event_mutation_journal (
+        task_id TEXT NOT NULL,
+        cursor INTEGER NOT NULL CHECK (cursor >= 1),
+        event_id TEXT NOT NULL,
+        operation TEXT NOT NULL CHECK (operation IN ('insert', 'update', 'delete')),
+        PRIMARY KEY (task_id, cursor)
+      ) WITHOUT ROWID;
+
+      CREATE TRIGGER IF NOT EXISTS task_events_mutation_journal_insert
+      AFTER INSERT ON task_events BEGIN
+        INSERT INTO task_event_mutation_journal_state (
+          task_id, high_water_cursor, earliest_available_cursor
+        ) VALUES (NEW.task_id, 1, 1)
+        ON CONFLICT(task_id) DO UPDATE SET high_water_cursor = high_water_cursor + 1;
+
+        INSERT INTO task_event_mutation_journal (task_id, cursor, event_id, operation)
+        SELECT NEW.task_id, high_water_cursor, NEW.id, 'insert'
+        FROM task_event_mutation_journal_state WHERE task_id = NEW.task_id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS task_events_mutation_journal_update
+      AFTER UPDATE ON task_events
+      WHEN OLD.task_id = NEW.task_id AND OLD.id = NEW.id BEGIN
+        INSERT INTO task_event_mutation_journal_state (
+          task_id, high_water_cursor, earliest_available_cursor
+        ) VALUES (NEW.task_id, 1, 1)
+        ON CONFLICT(task_id) DO UPDATE SET high_water_cursor = high_water_cursor + 1;
+
+        INSERT INTO task_event_mutation_journal (task_id, cursor, event_id, operation)
+        SELECT NEW.task_id, high_water_cursor, NEW.id, 'update'
+        FROM task_event_mutation_journal_state WHERE task_id = NEW.task_id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS task_events_mutation_journal_rekey
+      AFTER UPDATE ON task_events
+      WHEN OLD.task_id <> NEW.task_id OR OLD.id <> NEW.id BEGIN
+        INSERT INTO task_event_mutation_journal_state (
+          task_id, high_water_cursor, earliest_available_cursor
+        ) VALUES (OLD.task_id, 1, 1)
+        ON CONFLICT(task_id) DO UPDATE SET high_water_cursor = high_water_cursor + 1;
+
+        INSERT INTO task_event_mutation_journal (task_id, cursor, event_id, operation)
+        SELECT OLD.task_id, high_water_cursor, OLD.id, 'delete'
+        FROM task_event_mutation_journal_state WHERE task_id = OLD.task_id;
+
+        INSERT INTO task_event_mutation_journal_state (
+          task_id, high_water_cursor, earliest_available_cursor
+        ) VALUES (NEW.task_id, 1, 1)
+        ON CONFLICT(task_id) DO UPDATE SET high_water_cursor = high_water_cursor + 1;
+
+        INSERT INTO task_event_mutation_journal (task_id, cursor, event_id, operation)
+        SELECT NEW.task_id, high_water_cursor, NEW.id, 'update'
+        FROM task_event_mutation_journal_state WHERE task_id = NEW.task_id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS task_events_mutation_journal_delete
+      AFTER DELETE ON task_events BEGIN
+        INSERT INTO task_event_mutation_journal_state (
+          task_id, high_water_cursor, earliest_available_cursor
+        ) VALUES (OLD.task_id, 1, 1)
+        ON CONFLICT(task_id) DO UPDATE SET high_water_cursor = high_water_cursor + 1;
+
+        INSERT INTO task_event_mutation_journal (task_id, cursor, event_id, operation)
+        SELECT OLD.task_id, high_water_cursor, OLD.id, 'delete'
+        FROM task_event_mutation_journal_state WHERE task_id = OLD.task_id;
+      END;
+
+      -- Keep replay storage bounded per task while retaining a monotonic high-water
+      -- cursor. A client older than this window receives cursor_expired and resnapshots.
+      CREATE TRIGGER IF NOT EXISTS task_event_mutation_journal_prune
+      AFTER INSERT ON task_event_mutation_journal BEGIN
+        UPDATE task_event_mutation_journal_state
+        SET earliest_available_cursor = MAX(
+          earliest_available_cursor,
+          NEW.cursor - ${TASK_EVENT_MUTATION_JOURNAL_MAX_ROWS_PER_TASK} + 1
+        )
+        WHERE task_id = NEW.task_id;
+
+        DELETE FROM task_event_mutation_journal
+        WHERE task_id = NEW.task_id
+          AND cursor < (
+            SELECT earliest_available_cursor
+            FROM task_event_mutation_journal_state
+            WHERE task_id = NEW.task_id
+          );
+      END;
+
+      UPDATE task_event_mutation_journal_state
+      SET earliest_available_cursor = MAX(
+        earliest_available_cursor,
+        high_water_cursor - ${TASK_EVENT_MUTATION_JOURNAL_MAX_ROWS_PER_TASK} + 1
+      );
+      DELETE FROM task_event_mutation_journal
+      WHERE cursor < (
+        SELECT earliest_available_cursor
+        FROM task_event_mutation_journal_state
+        WHERE task_id = task_event_mutation_journal.task_id
       );
 
       CREATE TABLE IF NOT EXISTS session_progress (

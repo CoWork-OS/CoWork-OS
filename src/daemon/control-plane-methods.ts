@@ -53,6 +53,7 @@ import {
   sanitizeTaskEventDetailRequest,
   sanitizeTaskTimelinePageRequest,
 } from "../electron/control-plane/task-event-transport";
+import { TASK_EVENT_BRIDGE_ALLOWLIST } from "../electron/control-plane/task-event-bridge-contract";
 import { controlPlaneStatements } from "../electron/control-plane/control-plane-statement-port";
 
 export interface ControlPlaneMethodDeps {
@@ -71,6 +72,7 @@ function sanitizeTaskCreateParams(params: unknown): {
   title: string;
   prompt: string;
   workspaceId: string;
+  operationKey?: string;
   assignedAgentRoleId?: string;
   agentConfig?: AgentConfig;
   budgetTokens?: number;
@@ -78,6 +80,14 @@ function sanitizeTaskCreateParams(params: unknown): {
   shellAccess?: boolean;
 } {
   const p = (params ?? {}) as Any;
+  const hasOperationKey = Object.prototype.hasOwnProperty.call(p, "operationKey");
+  const operationKey = typeof p.operationKey === "string" ? p.operationKey.trim() : "";
+  if (hasOperationKey && (!operationKey || operationKey.length > 200)) {
+    throw {
+      code: ErrorCodes.INVALID_PARAMS,
+      message: "operationKey must contain 1..200 characters",
+    };
+  }
   const title = typeof p.title === "string" ? p.title.trim() : "";
   const prompt = typeof p.prompt === "string" ? p.prompt.trim() : "";
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
@@ -138,6 +148,7 @@ function sanitizeTaskCreateParams(params: unknown): {
     title,
     prompt,
     workspaceId,
+    ...(hasOperationKey ? { operationKey } : {}),
     ...(assignedAgentRoleId ? { assignedAgentRoleId } : {}),
     ...(agentConfig ? { agentConfig } : {}),
     ...(budgetTokens !== undefined ? { budgetTokens } : {}),
@@ -686,21 +697,9 @@ export function attachAgentDaemonTaskBridge(
   server: ControlPlaneServer,
   daemon: AgentDaemon,
 ): () => void {
-  const allowlist = [
-    "timeline_group_started",
-    "timeline_group_finished",
-    "timeline_step_started",
-    "timeline_step_updated",
-    "timeline_step_finished",
-    "timeline_evidence_attached",
-    "timeline_artifact_emitted",
-    "timeline_command_output",
-    "timeline_error",
-  ] as const;
-
   const unsubscribes: Array<() => void> = [];
 
-  for (const eventType of allowlist) {
+  for (const eventType of TASK_EVENT_BRIDGE_ALLOWLIST) {
     const handler = (evt: Any) => {
       try {
         const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
@@ -1007,6 +1006,55 @@ export function registerControlPlaneMethods(
       PermissionSettingsManager.loadSettings(),
     );
 
+    if (validated.operationKey) {
+      const admitted = await agentDaemon.createTaskIdempotent({
+        operationKey: validated.operationKey,
+        title: validated.title,
+        prompt: validated.prompt,
+        workspaceId: validated.workspaceId,
+        agentConfig: normalizedAgentConfig,
+        budgetTokens: validated.budgetTokens,
+        budgetCost: validated.budgetCost,
+        source: "api",
+        taskOverrides: validated.assignedAgentRoleId
+          ? { assignedAgentRoleId: validated.assignedAgentRoleId }
+          : undefined,
+        boardColumn: validated.assignedAgentRoleId ? "todo" : undefined,
+        requestIdentity: {
+          title: validated.title,
+          prompt: validated.prompt,
+          workspaceId: validated.workspaceId,
+          assignedAgentRoleId: validated.assignedAgentRoleId,
+          agentConfig: validated.agentConfig,
+          budgetTokens: validated.budgetTokens,
+          budgetCost: validated.budgetCost,
+          shellAccess: validated.shellAccess,
+        },
+        autoStart: false,
+      });
+
+      if (!isTempWorkspaceId(validated.workspaceId)) {
+        try {
+          await workspaceRepo.updateLastUsedAt(validated.workspaceId);
+        } catch (error) {
+          console.warn("[ControlPlane] Failed to update workspace last used time:", error);
+        }
+      }
+
+      try {
+        await agentDaemon.startAdmittedTask(validated.operationKey, admitted.task.id);
+      } catch (error: Any) {
+        // A failed wake must leave the durable receipt and queued task available
+        // to a same-key retry or startup queue recovery.
+        throw {
+          code: ErrorCodes.METHOD_FAILED,
+          message: error?.message || "Failed to start admitted task. Check LLM provider settings.",
+        };
+      }
+
+      return { taskId: admitted.task.id, task: admitted.task, replayed: admitted.replayed };
+    }
+
     const task = await taskRepo.create({
       title: validated.title,
       prompt: validated.prompt,
@@ -1129,13 +1177,33 @@ export function registerControlPlaneMethods(
 
   server.registerMethod(Methods.TASK_SEND_MESSAGE, async (client, params) => {
     requireScope(client, "admin");
-    const { taskId, message, images, expectedTurnId, interactionMode } =
-      sanitizeTaskMessageParams(params);
-    await agentDaemon.sendMessage(taskId, message, images, undefined, {
+    const {
+      taskId,
+      message,
+      images,
+      quotedAssistantMessage,
+      expectedTurnId,
+      interactionMode,
+      deliveryMode,
+      returnOnAccepted,
+      messageId,
+      permissionMode,
+      accessProfileId,
+      shellAccess,
+      integrationMentions,
+    } = sanitizeTaskMessageParams(params);
+    const result = await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
       ...(expectedTurnId ? { expectedTurnId } : {}),
       ...(interactionMode ? { interactionMode } : {}),
+      ...(deliveryMode ? { deliveryMode } : {}),
+      ...(returnOnAccepted ? { returnOnAccepted: true } : {}),
+      ...(messageId ? { messageId } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
+      ...(accessProfileId ? { accessProfileId } : {}),
+      ...(shellAccess !== undefined ? { shellAccess } : {}),
+      ...(integrationMentions !== undefined ? { integrationMentions } : {}),
     });
-    return { ok: true };
+    return { ok: true, ...result };
   });
 
   // Approvals

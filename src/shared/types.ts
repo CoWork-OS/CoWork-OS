@@ -3985,6 +3985,8 @@ export interface TaskTimelinePageRequest {
   singleEventByteLimit?: number;
   additionalTaskIds?: string[];
   additionalTaskEventTypes?: string[];
+  /** Internal committed snapshot reads may opt out of the host's pending-write overlay. */
+  includePending?: boolean;
 }
 
 export interface TaskTimelinePageSummary {
@@ -9815,6 +9817,7 @@ export const IPC_CHANNELS = {
   WEBACCESS_GET_SETTINGS: "webaccess:getSettings",
   WEBACCESS_SAVE_SETTINGS: "webaccess:saveSettings",
   WEBACCESS_GET_STATUS: "webaccess:getStatus",
+  WEBACCESS_CREATE_PAIRING_CODE: "webaccess:createPairingCode",
 
   // Playwright QA (Automated Visual Testing)
   QA_GET_RUNS: "qa:getRuns",

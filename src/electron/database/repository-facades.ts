@@ -30,6 +30,9 @@ import type {
   ScheduledMessageStore,
   SkillStore,
   TaskSessionMetadataStore,
+  TaskAdmissionStore,
+  BrowserTaskCancelReceiptStore,
+  TaskEventRepository as TaskEventRepositoryStore,
   TaskStore,
   WorkspacePermissionRuleStore,
   WorkspaceStore,
@@ -99,6 +102,43 @@ export const TaskSessionMetadataRepository = repositoryFacade<
   (typeof TASKSESSIONMETADATA_METHODS)[number]
 >("taskSessionMetadata_", TASKSESSIONMETADATA_METHODS);
 
+const TASK_ADMISSION_METHODS = ["admit", "findByOperationKey"] as const;
+export type TaskAdmissionRepository = AsyncStore<
+  TaskAdmissionStore,
+  (typeof TASK_ADMISSION_METHODS)[number]
+>;
+export const TaskAdmissionRepository = repositoryFacade<
+  TaskAdmissionStore,
+  (typeof TASK_ADMISSION_METHODS)[number]
+>("taskAdmission_", TASK_ADMISSION_METHODS);
+
+const BROWSER_TASK_CANCEL_RECEIPT_METHODS = ["reserve", "complete", "get"] as const;
+export type BrowserTaskCancelReceiptRepository = AsyncStore<
+  BrowserTaskCancelReceiptStore,
+  (typeof BROWSER_TASK_CANCEL_RECEIPT_METHODS)[number]
+>;
+export const BrowserTaskCancelReceiptRepository = repositoryFacade<
+  BrowserTaskCancelReceiptStore,
+  (typeof BROWSER_TASK_CANCEL_RECEIPT_METHODS)[number]
+>("browserTaskCancelReceipt_", BROWSER_TASK_CANCEL_RECEIPT_METHODS);
+
+const TASK_EVENT_REPLAY_METHODS = [
+  "getCommittedMutationCursor",
+  "findCommittedMutationPage",
+  "findTimelinePage",
+  "findScopedTimelineSnapshot",
+  "findScopedTimelineHistoryPage",
+  "findScopedMutationPage",
+] as const;
+export type TaskEventReplayRepository = AsyncStore<
+  TaskEventRepositoryStore,
+  (typeof TASK_EVENT_REPLAY_METHODS)[number]
+>;
+export const TaskEventReplayRepository = repositoryFacade<
+  TaskEventRepositoryStore,
+  (typeof TASK_EVENT_REPLAY_METHODS)[number]
+>("taskEvent_", TASK_EVENT_REPLAY_METHODS);
+
 const BOTNOTIFICATIONPREFERENCE_METHODS = ["findByAgentRoleId", "upsert"] as const;
 export type BotNotificationPreferenceRepository = AsyncStore<
   BotNotificationPreferenceStore,
@@ -109,7 +149,13 @@ export const BotNotificationPreferenceRepository = repositoryFacade<
   (typeof BOTNOTIFICATIONPREFERENCE_METHODS)[number]
 >("botNotificationPreference_", BOTNOTIFICATIONPREFERENCE_METHODS);
 
-const ARTIFACT_METHODS = ["create", "findByTaskId", "findById", "findLatestByPath"] as const;
+const ARTIFACT_METHODS = [
+  "create",
+  "findByTaskId",
+  "findByTaskIdPage",
+  "findById",
+  "findLatestByPath",
+] as const;
 export type ArtifactRepository = AsyncStore<ArtifactStore, (typeof ARTIFACT_METHODS)[number]>;
 export const ArtifactRepository = repositoryFacade<
   ArtifactStore,

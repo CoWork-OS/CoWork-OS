@@ -33,6 +33,8 @@ import {
   type TailscaleExposureResult,
 } from "../tailscale";
 import { getControlPlaneWebUIHtml } from "./web-ui";
+import { WebApplication, type WebApplicationMount } from "../../host/web/WebApplication";
+import { WEB_API_PATH } from "../../shared/host-api/contracts";
 
 /**
  * Control plane server configuration
@@ -67,6 +69,8 @@ export interface ControlPlaneConfig {
   authBanDurationMs?: number;
   /** Event handler for server events */
   onEvent?: (event: ControlPlaneServerEvent) => void;
+  /** Optional explicit browser app host. Omission keeps the browser API disabled. */
+  webApplication?: WebApplication;
 }
 
 /**
@@ -110,16 +114,19 @@ export class ControlPlaneServer {
   private httpServer: http.Server | null = null;
   private wss: WebSocketServer | null = null;
   private clients: ClientRegistry;
-  private config: Required<ControlPlaneConfig>;
+  private config: Required<Omit<ControlPlaneConfig, "webApplication">>;
   private methods: Map<string, MethodHandler> = new Map();
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private tailscaleCleanup: (() => Promise<void>) | null = null;
+  private webApplication?: WebApplication;
+  private webApplicationMount: WebApplicationMount | null = null;
 
   // Rate limiting for auth attempts: Map<remoteAddress, { attempts: number, bannedUntil?: number }>
   private authAttempts: Map<string, { attempts: number; bannedUntil?: number }> = new Map();
 
   constructor(config: ControlPlaneConfig) {
+    this.webApplication = config.webApplication;
     this.config = {
       port: config.port ?? 18789,
       host: config.host ?? "127.0.0.1",
@@ -170,9 +177,11 @@ export class ControlPlaneServer {
       return;
     }
 
-    return new Promise((resolve, reject) => {
-      // Create HTTP server for WebSocket upgrade
-      this.httpServer = http.createServer((req, res) => {
+    this.httpServer = http.createServer((req, res) => {
+      void (async () => {
+        if (this.webApplicationMount && (await this.webApplicationMount.handleRequest(req, res)))
+          return;
+
         // Minimal web UI (headless dashboard)
         if ((req.url === "/" || req.url === "/ui") && req.method === "GET") {
           const html = getControlPlaneWebUIHtml();
@@ -214,11 +223,31 @@ export class ControlPlaneServer {
         // Return 404 for other HTTP requests
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Not found" }));
+      })().catch((error) => {
+        console.error("[ControlPlane] HTTP request failed:", error);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify({ error: "Internal server error" }));
+        } else if (!res.writableEnded) {
+          res.end();
+        }
       });
+    });
 
+    if (this.webApplication?.enabled) {
+      try {
+        this.mountWebApplication();
+      } catch (error) {
+        this.httpServer = null;
+        throw error;
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      const server = this.httpServer!;
       // Create WebSocket server
       this.wss = new WebSocketServer({
-        server: this.httpServer,
+        noServer: true,
         maxPayload: this.config.maxPayloadBytes,
       });
 
@@ -230,6 +259,39 @@ export class ControlPlaneServer {
       this.wss.on("error", (error) => {
         console.error("[ControlPlane] WebSocket server error:", error);
         this.emitEvent({ action: "error", timestamp: Date.now(), error: String(error) });
+      });
+
+      server.on("upgrade", (request, socket, head) => {
+        let pathname: string;
+        try {
+          pathname = new URL(request.url || "/", "http://control-plane.invalid").pathname;
+        } catch {
+          socket.destroy();
+          return;
+        }
+
+        if (pathname === `${WEB_API_PATH}/ws`) {
+          const mount = this.webApplicationMount;
+          if (!mount) {
+            rejectUpgrade(socket, 404, "Browser application is disabled");
+            return;
+          }
+          void mount.handleUpgrade(request, socket, head).catch((error) => {
+            console.error("[ControlPlane] Browser WebSocket upgrade failed:", error);
+            socket.destroy();
+          });
+          return;
+        }
+
+        // Keep the existing native Control Plane WebSocket handshake and protocol on its root listener.
+        const nativeWss = this.wss;
+        if (!nativeWss) {
+          socket.destroy();
+          return;
+        }
+        nativeWss.handleUpgrade(request, socket, head, (webSocket) => {
+          nativeWss.emit("connection", webSocket, request);
+        });
       });
 
       let listening = false;
@@ -253,7 +315,7 @@ export class ControlPlaneServer {
 
         resolve();
       };
-      this.httpServer.on("error", (error: NodeJS.ErrnoException) => {
+      server.on("error", (error: NodeJS.ErrnoException) => {
         if (
           !listening &&
           !retriedWithDynamicLoopbackPort &&
@@ -269,18 +331,48 @@ export class ControlPlaneServer {
           );
           // The first listen() already registered onListening for the
           // "listening" event; passing it again would run it twice.
-          this.httpServer?.listen(this.config.port, this.config.host);
+          server.listen(this.config.port, this.config.host);
           return;
         }
 
         console.error("[ControlPlane] HTTP server error:", error);
         this.emitEvent({ action: "error", timestamp: Date.now(), error: String(error) });
-        if (!listening) reject(error);
+        if (!listening) {
+          reject(error);
+          this.httpServer = null;
+          const failedWss = this.wss;
+          this.wss = null;
+          if (failedWss) failedWss.close();
+          const failedMount = this.webApplicationMount;
+          this.webApplicationMount = null;
+          if (failedMount) void failedMount.close();
+        }
       });
 
       // Bind the configured port first. If another local service owns it, the
       // loopback-only fallback below asks the OS for an unused port atomically.
-      this.httpServer.listen(this.config.port, this.config.host, onListening);
+      server.listen(this.config.port, this.config.host, onListening);
+    });
+  }
+
+  /** Enable or disable the browser app after Control Plane startup. */
+  async setWebApplication(webApplication?: WebApplication): Promise<void> {
+    if (this.webApplicationMount) await this.webApplicationMount.close();
+    this.webApplicationMount = null;
+    this.webApplication = webApplication;
+    this.mountWebApplication();
+  }
+
+  private mountWebApplication(): void {
+    const server = this.httpServer;
+    if (!server || !this.webApplication?.enabled) return;
+    this.webApplicationMount = this.webApplication.mount({
+      audience: "control-plane",
+      listenerHost: this.config.host,
+      getListenerPort: () => {
+        const address = server.address();
+        return address && typeof address !== "string" ? address.port : undefined;
+      },
     });
   }
 
@@ -340,6 +432,11 @@ export class ControlPlaneServer {
 
     // Close all client connections
     this.clients.closeAll(1001, "Server shutting down");
+
+    if (this.webApplicationMount) {
+      await this.webApplicationMount.close();
+      this.webApplicationMount = null;
+    }
 
     // Close WebSocket server
     if (this.wss) {
@@ -798,4 +895,12 @@ export class ControlPlaneServer {
       }
     }
   }
+}
+
+function rejectUpgrade(socket: import("stream").Duplex, statusCode: number, message: string): void {
+  if (socket.destroyed) return;
+  const safeMessage = message.replace(/[\r\n]/g, " ");
+  socket.end(
+    `HTTP/1.1 ${statusCode} ${http.STATUS_CODES[statusCode] || "Error"}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(safeMessage)}\r\n\r\n${safeMessage}`,
+  );
 }

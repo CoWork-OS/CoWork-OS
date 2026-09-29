@@ -288,10 +288,15 @@ async function validateDatabaseWorkerAssets(resourcesRoot, targetKey) {
     "/dist/electron/electron/database/async/database-worker.js",
     "/dist/electron/electron/database/fts-worker.js",
     "/dist/electron/electron/database/schema-bootstrap-worker.js",
+    "/dist/web/index.html",
+    "/dist/web/web-manifest.json",
   ];
   const missing = workers.filter((entry) => !entries.has(entry));
   if (missing.length > 0) {
-    throw new Error(`Database worker assets missing from ${archive}: ${missing.join(", ")}`);
+    throw new Error(`Required runtime assets missing from ${archive}: ${missing.join(", ")}`);
+  }
+  if (![...entries].some((entry) => /^\/dist\/web\/assets\/.*\.js$/.test(entry))) {
+    throw new Error(`Browser JavaScript asset missing from ${archive}`);
   }
   // The module ships per-platform prebuilds, or a local build when rebuilt from source.
   const moduleRoot = path.join(

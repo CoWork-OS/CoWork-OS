@@ -28,6 +28,9 @@ import {
   ScheduledMessageStore,
   SkillStore,
   TaskSessionMetadataStore,
+  TaskAdmissionStore,
+  BrowserTaskCancelReceiptStore,
+  TaskEventRepository,
   TaskStore,
   WorkspacePermissionRuleStore,
   WorkspaceStore,
@@ -44,6 +47,59 @@ import { WorkSessionProtocolRepository } from "./WorkSessionProtocolRepository";
  * a method is a write when it, or a method it calls, writes or opens a transaction.
  */
 export const STORAGE_UNITS = {
+  browserTaskCancelReceipt_reserve: storeUnit(
+    (db: Database.Database) => new BrowserTaskCancelReceiptStore(db),
+    "reserve",
+    { readonly: false },
+  ),
+  browserTaskCancelReceipt_complete: storeUnit(
+    (db: Database.Database) => new BrowserTaskCancelReceiptStore(db),
+    "complete",
+    { readonly: false },
+  ),
+  browserTaskCancelReceipt_get: storeUnit(
+    (db: Database.Database) => new BrowserTaskCancelReceiptStore(db),
+    "get",
+    { readonly: true },
+  ),
+  taskAdmission_admit: storeUnit((db: Database.Database) => new TaskAdmissionStore(db), "admit", {
+    readonly: false,
+  }),
+  taskAdmission_findByOperationKey: storeUnit(
+    (db: Database.Database) => new TaskAdmissionStore(db),
+    "findByOperationKey",
+    { readonly: true },
+  ),
+  taskEvent_getCommittedMutationCursor: storeUnit(
+    (db: Database.Database) => new TaskEventRepository(db),
+    "getCommittedMutationCursor",
+    { readonly: true },
+  ),
+  taskEvent_findCommittedMutationPage: storeUnit(
+    (db: Database.Database) => new TaskEventRepository(db),
+    "findCommittedMutationPage",
+    { readonly: true },
+  ),
+  taskEvent_findTimelinePage: storeUnit(
+    (db: Database.Database) => new TaskEventRepository(db),
+    "findTimelinePage",
+    { readonly: true },
+  ),
+  taskEvent_findScopedTimelineSnapshot: storeUnit(
+    (db: Database.Database) => new TaskEventRepository(db),
+    "findScopedTimelineSnapshot",
+    { readonly: true },
+  ),
+  taskEvent_findScopedTimelineHistoryPage: storeUnit(
+    (db: Database.Database) => new TaskEventRepository(db),
+    "findScopedTimelineHistoryPage",
+    { readonly: true },
+  ),
+  taskEvent_findScopedMutationPage: storeUnit(
+    (db: Database.Database) => new TaskEventRepository(db),
+    "findScopedMutationPage",
+    { readonly: true },
+  ),
   taskSessionMetadata_findBySessionId: storeUnit(
     (db: Database.Database) => new TaskSessionMetadataStore(db),
     "findBySessionId",
@@ -95,6 +151,11 @@ export const STORAGE_UNITS = {
   artifact_findByTaskId: storeUnit(
     (db: Database.Database) => new ArtifactStore(db),
     "findByTaskId",
+    { readonly: true },
+  ),
+  artifact_findByTaskIdPage: storeUnit(
+    (db: Database.Database) => new ArtifactStore(db),
+    "findByTaskIdPage",
     { readonly: true },
   ),
   artifact_findById: storeUnit((db: Database.Database) => new ArtifactStore(db), "findById", {

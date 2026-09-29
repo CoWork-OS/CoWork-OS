@@ -9,11 +9,13 @@ import { ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
 import { WebAccessServer } from "../web-server/WebAccessServer";
 import { WebAccessConfig, WebAccessStatus } from "../web-server/types";
+import type { PairingCode } from "../../host/web/WebApplication";
 
 export function setupWebAccessHandlers(
   webAccessServer: WebAccessServer,
   options?: {
     saveSettings?: (settings: WebAccessConfig) => void;
+    createPairingCode?: () => PairingCode;
   },
 ): void {
   ipcMain.handle(IPC_CHANNELS.WEBACCESS_GET_SETTINGS, async (): Promise<WebAccessConfig> => {
@@ -31,5 +33,10 @@ export function setupWebAccessHandlers(
 
   ipcMain.handle(IPC_CHANNELS.WEBACCESS_GET_STATUS, async (): Promise<WebAccessStatus> => {
     return webAccessServer.getStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WEBACCESS_CREATE_PAIRING_CODE, async (): Promise<PairingCode> => {
+    if (!options?.createPairingCode) throw new Error("Browser pairing is disabled.");
+    return options.createPairingCode();
   });
 }

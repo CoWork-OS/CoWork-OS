@@ -1,0 +1,307 @@
+import type Database from "better-sqlite3";
+import {
+  ApprovalRepository,
+  ArtifactRepository,
+  BrowserTaskCancelReceiptRepository,
+  InputRequestRepository,
+  TaskEventReplayRepository,
+  TaskRepository,
+  WorkspaceRepository,
+} from "../../electron/database/repository-facades";
+import { LLMProviderFactory } from "../../electron/agent/llm";
+import type { AgentDaemon } from "../../electron/agent/daemon";
+import { AppearanceManager } from "../../electron/settings/appearance-manager";
+import {
+  HOST_CAPABILITIES,
+  type HostCapabilities,
+  type HostIdentity,
+  type WebSessionBootstrap,
+} from "../../shared/host-api/contracts";
+import { isTempWorkspaceId } from "../../shared/types";
+import { WebApplication, type WebDeploymentPolicy } from "../web/WebApplication";
+import { createBrowserReadMethods, createDatabaseBrowserReadSources } from "./browser-read-methods";
+import { BrowserWorkspaceFiles, createBrowserWorkspaceFileMethods } from "./browser-files";
+import { createBrowserTaskMethods, type BrowserTaskCommands } from "./browser-task-methods";
+import { createBrowserFollowUpMethods } from "./browser-follow-up-methods";
+import { createBrowserTaskEventMethods } from "./browser-task-event-methods";
+import {
+  createBrowserApprovalMethods,
+  type BrowserApprovalCommands,
+} from "./browser-approval-methods";
+import { TaskAdmissionService } from "../../electron/control-plane/task-admission-service";
+import {
+  applyAccessProfileToWorkspace,
+  resolveEffectiveAccessProfile,
+} from "../../electron/security/access-profile-resolver";
+import { PermissionSettingsManager } from "../../electron/security/permission-settings-manager";
+import { loadPolicies } from "../../electron/admin/policies";
+import { verifyWebArtifact } from "./web-artifact";
+import { BrowserArtifacts, createBrowserArtifactMethods } from "./browser-artifacts";
+import { createBrowserGitMethods } from "./browser-git-methods";
+import { createBrowserTaskCancellationMethods } from "./browser-task-cancellation";
+import { BrowserTerminalAttachmentService } from "./browser-terminal-methods";
+import { TerminalPtyManager } from "../../electron/terminal/TerminalPtyManager";
+import { assertTerminalShellAllowed } from "../../electron/terminal/terminal-shell-policy";
+import { WorkSessionContractRepository } from "../../electron/database/WorkSessionContractRepository";
+
+export interface BrowserHostApplicationOptions {
+  db: Database.Database;
+  webDirectory: string;
+  deployment: WebDeploymentPolicy;
+  identity: HostIdentity;
+  taskCommands?: Pick<BrowserTaskCommands, "createTaskIdempotent" | "startAdmittedTask"> &
+    BrowserApprovalCommands &
+    Pick<AgentDaemon, "sendMessage" | "getDurableTaskFollowUpReceipt" | "cancelTask">;
+  getSessionBootstrap?: () =>
+    | Omit<WebSessionBootstrap, "apiVersion" | "host" | "csrfToken">
+    | Promise<Omit<WebSessionBootstrap, "apiVersion" | "host" | "csrfToken">>;
+}
+
+const READ_CAPABILITIES = new Set([
+  "tasks.read",
+  "tasks.events",
+  "workspaces.read",
+  "files.read",
+  "artifacts.read",
+  "git.read",
+  "terminal.attach",
+]);
+
+export function browserHostCapabilities(
+  taskCreationAvailable = false,
+  uploadsAvailable = false,
+): HostCapabilities {
+  return Object.fromEntries(
+    HOST_CAPABILITIES.map((name) => [
+      name,
+      READ_CAPABILITIES.has(name) ||
+      (uploadsAvailable && name === "files.upload") ||
+      (taskCreationAvailable &&
+        (name === "tasks.create" || name === "tasks.followUp" || name === "tasks.cancel")) ||
+      (taskCreationAvailable && (name === "tasks.approvals" || name === "tasks.inputRequests"))
+        ? { available: true }
+        : { available: false, reason: "This workflow is not yet available in the browser." },
+    ]),
+  ) as HostCapabilities;
+}
+
+/** One opt-in browser authority shared by the desktop Web Access and Control Plane listeners. */
+export function createBrowserHostApplication(
+  options: BrowserHostApplicationOptions,
+): WebApplication {
+  verifyWebArtifact(options.webDirectory, options.identity.appVersion);
+  const workspaceRepository = new WorkspaceRepository(options.db);
+  const taskRepository = new TaskRepository(options.db);
+  const artifactRepository = new ArtifactRepository(options.db);
+  const artifactRevisionRepository = new WorkSessionContractRepository(options.db);
+  const taskEventRepository = new TaskEventReplayRepository(options.db);
+  const cancellationReceipts = options.taskCommands
+    ? new BrowserTaskCancelReceiptRepository(options.db)
+    : null;
+  const approvalRepository = options.taskCommands ? new ApprovalRepository(options.db) : null;
+  const inputRequestRepository = options.taskCommands
+    ? new InputRequestRepository(options.db)
+    : null;
+  const getCapabilities = () => browserHostCapabilities(Boolean(options.taskCommands), true);
+  const resolveBrowserWorkspace = async (workspaceId: string) => {
+    const workspace = await workspaceRepository.findById(workspaceId);
+    if (!workspace) return null;
+    const profile = resolveEffectiveAccessProfile({
+      workspace,
+      settings: PermissionSettingsManager.loadSettings(),
+      adminPolicies: loadPolicies(),
+    });
+    return applyAccessProfileToWorkspace(workspace, profile);
+  };
+  const workspaceFiles = new BrowserWorkspaceFiles({
+    resolveWorkspace: resolveBrowserWorkspace,
+    getCapabilities,
+  });
+  const browserArtifacts = new BrowserArtifacts({
+    getCapabilities,
+    resolveArtifact: async (selector) => {
+      const revision =
+        "artifactRevisionId" in selector
+          ? artifactRevisionRepository.getArtifactRevisionById(selector.artifactRevisionId)
+          : undefined;
+      const artifactId = "artifactId" in selector ? selector.artifactId : revision?.artifactId;
+      if (!artifactId) return null;
+      const artifact = await artifactRepository.findById(artifactId);
+      if (!artifact) return null;
+      const task = await taskRepository.findById(artifact.taskId);
+      if (!task?.workspaceId) return null;
+      const workspace = await resolveBrowserWorkspace(task.workspaceId);
+      return workspace ? { artifact, task, workspace, revision } : null;
+    },
+    listTaskArtifacts: async (request) => {
+      const task = await taskRepository.findById(request.taskId);
+      if (!task || task.workspaceId !== request.workspaceId) return null;
+      const workspace = await resolveBrowserWorkspace(request.workspaceId);
+      if (!workspace) return null;
+      const rows = await artifactRepository.findByTaskIdPage(
+        request.taskId,
+        request.limit + 1,
+        request.offset,
+      );
+      return {
+        task,
+        workspace,
+        artifacts: rows.slice(0, request.limit),
+        hasMore: rows.length > request.limit,
+      };
+    },
+  });
+  const taskAdmission = options.taskCommands ? new TaskAdmissionService(options.db) : null;
+  const taskMethods =
+    options.taskCommands && taskAdmission
+      ? createBrowserTaskMethods({
+          commands: {
+            createTaskIdempotent: (params) => options.taskCommands!.createTaskIdempotent(params),
+            startAdmittedTask: (operationKey, taskId) =>
+              options.taskCommands!.startAdmittedTask(operationKey, taskId),
+            getTaskAdmission: (operationKey) => taskAdmission.getByOperationKey(operationKey),
+          },
+          getWorkspace: async (workspaceId) =>
+            (await workspaceRepository.findById(workspaceId)) ?? null,
+        })
+      : {};
+  const followUpMethods = options.taskCommands
+    ? createBrowserFollowUpMethods({
+        getWorkspace: async (workspaceId) =>
+          (await workspaceRepository.findById(workspaceId)) ?? null,
+        getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+        commands: {
+          sendFollowUp: (taskId, message, messageId) =>
+            options.taskCommands!.sendMessage(taskId, message, undefined, undefined, {
+              deliveryMode: "follow_up",
+              returnOnAccepted: true,
+              messageId,
+            }),
+          getFollowUpReceipt: async (taskId, messageId) =>
+            options.taskCommands!.getDurableTaskFollowUpReceipt(taskId, messageId),
+        },
+      })
+    : {};
+  const approvalMethods =
+    options.taskCommands && approvalRepository && inputRequestRepository
+      ? createBrowserApprovalMethods({
+          getWorkspace: async (workspaceId) =>
+            (await workspaceRepository.findById(workspaceId)) ?? null,
+          getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+          listPendingApprovals: () => approvalRepository.findAllPending(),
+          getApproval: async (approvalId) =>
+            (await approvalRepository.findById(approvalId)) ?? null,
+          listPendingInputRequests: () => inputRequestRepository.findAllPending(),
+          getInputRequest: async (requestId) =>
+            (await inputRequestRepository.findById(requestId)) ?? null,
+          commands: {
+            respondToApproval: (approvalId, approved) =>
+              options.taskCommands!.respondToApproval(approvalId, approved),
+            respondToInputRequest: (response) =>
+              options.taskCommands!.respondToInputRequest(response),
+          },
+        })
+      : {};
+  const taskEventMethods = createBrowserTaskEventMethods({
+    findScopedTimelineSnapshot: (request) =>
+      taskEventRepository.findScopedTimelineSnapshot(request),
+    findScopedTimelineHistoryPage: (request) =>
+      taskEventRepository.findScopedTimelineHistoryPage(request),
+    findScopedMutationPage: (request) => taskEventRepository.findScopedMutationPage(request),
+  });
+  const cancellationMethods =
+    options.taskCommands && cancellationReceipts
+      ? createBrowserTaskCancellationMethods({
+          getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+          getWorkspace: resolveBrowserWorkspace,
+          cancelTask: (taskId) => options.taskCommands!.cancelTask(taskId),
+          receipts: cancellationReceipts,
+        })
+      : {};
+  const terminal = new BrowserTerminalAttachmentService({
+    getWorkspace: resolveBrowserWorkspace,
+    getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+    assertShellAllowed: async (workspace, task) => {
+      const rawWorkspace = await workspaceRepository.findById(workspace.id);
+      if (!rawWorkspace) throw new Error("Workspace is unavailable.");
+      assertTerminalShellAllowed(rawWorkspace, task);
+    },
+    terminal: TerminalPtyManager.getInstance(),
+  });
+  return new WebApplication({
+    enabled: true,
+    webDirectory: options.webDirectory,
+    deployment: options.deployment,
+    getHostIdentity: () => options.identity,
+    getCapabilities,
+    getSessionBootstrap:
+      options.getSessionBootstrap ??
+      (() => readBrowserSessionBootstrap(options.db, Boolean(options.taskCommands))),
+    methods: {
+      ...createBrowserReadMethods(createDatabaseBrowserReadSources(options.db)),
+      ...createBrowserWorkspaceFileMethods(workspaceFiles),
+      ...createBrowserArtifactMethods(browserArtifacts),
+      ...createBrowserGitMethods({
+        resolveWorkspace: resolveBrowserWorkspace,
+        getCapabilities,
+      }),
+      ...taskEventMethods,
+      ...taskMethods,
+      ...followUpMethods,
+      ...approvalMethods,
+      ...cancellationMethods,
+      ...terminal.methods(),
+    },
+    handleWorkspaceFileDownload: (context, req, res) =>
+      workspaceFiles.handleDownloadRequest(context, req, res),
+    handleWorkspaceFileUpload: (context, req, res) =>
+      workspaceFiles.handleUploadRequest(context, req, res),
+    handleArtifactDownload: (context, req, res) =>
+      browserArtifacts.handleDownloadRequest(context, req, res),
+    onSessionRevoked: (sessionId) => {
+      browserArtifacts.revokeSession(sessionId);
+      terminal.revokeSession(sessionId);
+    },
+    onClose: () => {
+      browserArtifacts.dispose();
+      terminal.dispose();
+    },
+    appVersion: options.identity.appVersion,
+  });
+}
+
+async function readBrowserSessionBootstrap(
+  db: Database.Database,
+  taskCreationAvailable: boolean,
+): Promise<Omit<WebSessionBootstrap, "apiVersion" | "host" | "csrfToken">> {
+  const workspaces = await new WorkspaceRepository(db).findAll();
+  const activeWorkspace = workspaces.find(
+    (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+  );
+  const appearance = AppearanceManager.loadSettings();
+  const llm = LLMProviderFactory.loadSettings();
+  const providerReady = Boolean(
+    llm.anthropic?.apiKey ||
+    llm.anthropic?.subscriptionToken ||
+    llm.openai?.apiKey ||
+    llm.openai?.accessToken ||
+    llm.gemini?.apiKey ||
+    llm.openrouter?.apiKey ||
+    llm.groq?.apiKey ||
+    llm.xai?.apiKey ||
+    llm.kimi?.apiKey ||
+    llm.azure?.apiKey ||
+    llm.bedrock?.accessKeyId ||
+    llm.bedrock?.profile ||
+    Object.values(llm.customProviders || {}).some(
+      (provider) => typeof provider?.apiKey === "string" && provider.apiKey.trim().length > 0,
+    ),
+  );
+  return {
+    providerReady,
+    onboardingCompleted: appearance.onboardingCompleted === true,
+    disclaimerAccepted: appearance.disclaimerAccepted === true,
+    activeWorkspaceId: activeWorkspace?.id ?? null,
+    capabilities: browserHostCapabilities(taskCreationAvailable, true),
+  };
+}

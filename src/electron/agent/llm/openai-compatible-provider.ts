@@ -489,7 +489,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         console.warn(
           `[${this.providerName}] Prompt cache controls rejected; retrying without cache controls`,
         );
-        return this.createMessage({ ...request, promptCache: undefined });
+        return await this.createMessage({ ...request, promptCache: undefined });
       }
 
       if (error instanceof AtomicChatProviderError) {

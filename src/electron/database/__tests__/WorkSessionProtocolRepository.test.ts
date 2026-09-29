@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DatabaseManager } from "../schema";
-import { TaskRepository } from "../repositories";
+import { TaskStore } from "../repositories";
 import {
   StaleWorkSessionTurnError,
   WorkSessionProtocolRepository,
@@ -27,7 +27,7 @@ describeWithSqlite("WorkSessionProtocolRepository", () => {
   let previousUserDataDir: string | undefined;
   let manager: DatabaseManager;
   let db: Database.Database;
-  let taskRepo: TaskRepository;
+  let taskRepo: TaskStore;
   let repository: WorkSessionProtocolRepository;
 
   beforeEach(() => {
@@ -36,7 +36,7 @@ describeWithSqlite("WorkSessionProtocolRepository", () => {
     process.env.COWORK_USER_DATA_DIR = tempDir;
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     repository = new WorkSessionProtocolRepository(db);
     db.prepare(
       `INSERT INTO workspaces (id, name, path, created_at, permissions)

@@ -1,3 +1,4 @@
+import { WorkspaceRepository } from "../database/repository-facades";
 import crypto from "crypto";
 import type Database from "better-sqlite3";
 import type {
@@ -11,7 +12,7 @@ import type {
 } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
 import type { MCPCallResult, MCPServerConfig, MCPTool } from "../mcp/types";
-import { WorkspaceRepository } from "../database/repositories";
+
 import { BoxSettingsManager, normalizeBoxSettings } from "../settings/box-manager";
 import { getBoxAccessToken } from "../utils/box-api";
 import { getBoxMcpServer, syncBoxMcpServerSettings } from "../mcp/box-integration";
@@ -20,7 +21,8 @@ import { MemoryService } from "./MemoryService";
 import { DreamingRepository } from "./DreamingRepository";
 import { DreamingService, type RunDreamingRequest } from "./DreamingService";
 import {
-  BoxBrainRepository,
+  createBoxBrainRepository,
+  type BoxBrainRepository,
   type BoxBrainItemRecord,
   type BoxBrainSourceRecord,
 } from "./BoxBrainRepository";
@@ -376,7 +378,7 @@ export class BoxBrainService {
     private readonly db: Database.Database,
     private readonly deps: BoxBrainServiceDeps = {},
   ) {
-    this.repo = new BoxBrainRepository(db);
+    this.repo = createBoxBrainRepository(db);
   }
 
   static initialize(db: Database.Database): BoxBrainService {
@@ -460,17 +462,17 @@ export class BoxBrainService {
     }
   }
 
-  getStatus(workspaceId?: string): BoxBrainStatus {
+  async getStatus(workspaceId?: string): Promise<BoxBrainStatus> {
     const settings = this.getSettings();
     const brain = settings.brain;
     const targetWorkspaceId = workspaceId || brain?.workspaceId;
     const workspace = targetWorkspaceId
-      ? this.findWorkspace(targetWorkspaceId)
-      : this.findWorkspace();
+      ? await this.findWorkspace(targetWorkspaceId)
+      : await this.findWorkspace();
     const server = this.getBoxMcpServer();
     const source =
       workspace && server && brain
-        ? this.repo.findSource(workspace.id, server.id, brain.rootFolderId)
+        ? await this.repo.findSource(workspace.id, server.id, brain.rootFolderId)
         : null;
     return {
       configured: Boolean(
@@ -496,24 +498,24 @@ export class BoxBrainService {
     };
   }
 
-  listItems(workspaceId?: string): BoxBrainItemRecord[] {
+  async listItems(workspaceId?: string): Promise<BoxBrainItemRecord[]> {
     const settings = this.getSettings();
     const brain = settings.brain;
-    const workspace = this.findWorkspace(workspaceId || brain?.workspaceId);
+    const workspace = await this.findWorkspace(workspaceId || brain?.workspaceId);
     const server = this.getBoxMcpServer();
     if (!workspace || !server || !brain) return [];
-    const source = this.repo.findSource(workspace.id, server.id, brain.rootFolderId);
-    return source ? this.repo.listItems(source.id) : [];
+    const source = await this.repo.findSource(workspace.id, server.id, brain.rootFolderId);
+    return source ? await this.repo.listItems(source.id) : [];
   }
 
-  listRuns(workspaceId?: string, limit = 20) {
+  async listRuns(workspaceId?: string, limit = 20) {
     const settings = this.getSettings();
     const brain = settings.brain;
-    const workspace = this.findWorkspace(workspaceId || brain?.workspaceId);
+    const workspace = await this.findWorkspace(workspaceId || brain?.workspaceId);
     const server = this.getBoxMcpServer();
     if (!workspace || !server || !brain) return [];
-    const source = this.repo.findSource(workspace.id, server.id, brain.rootFolderId);
-    return source ? this.repo.listRuns(source.id, limit) : [];
+    const source = await this.repo.findSource(workspace.id, server.id, brain.rootFolderId);
+    return source ? await this.repo.listRuns(source.id, limit) : [];
   }
 
   private getSettings(): BoxSettingsData {
@@ -532,8 +534,9 @@ export class BoxBrainService {
     return this.deps.now?.() ?? Date.now();
   }
 
-  private findWorkspace(workspaceId?: string): Workspace | null {
-    const workspaces = this.deps.listWorkspaces?.() || new WorkspaceRepository(this.db).findAll();
+  private async findWorkspace(workspaceId?: string): Promise<Workspace | null> {
+    const workspaces =
+      this.deps.listWorkspaces?.() || (await new WorkspaceRepository(this.db).findAll());
     const candidate = workspaceId
       ? workspaces.find((workspace) => workspace.id === workspaceId)
       : workspaces.find((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
@@ -561,7 +564,7 @@ export class BoxBrainService {
       throw new Error("Box access is not configured. Connect Box before running Box Brain.");
     }
 
-    const workspace = this.findWorkspace(brain.workspaceId);
+    const workspace = await this.findWorkspace(brain.workspaceId);
     if (!workspace) return null;
 
     let server = this.getBoxMcpServer();
@@ -574,7 +577,7 @@ export class BoxBrainService {
       throw new Error("Hosted Box MCP server is not configured or enabled.");
     }
 
-    const source = this.repo.ensureSource(workspace.id, server.id, brain);
+    const source = await this.repo.ensureSource(workspace.id, server.id, brain);
     return { source, workspace };
   }
 
@@ -684,9 +687,9 @@ export class BoxBrainService {
       return this.emptyResult("skipped", "A Box Brain sync is already running", source.id);
     }
     this.runningSources.add(source.id);
-    const run = this.repo.createRun(source.id, workspace.id, this.now());
+    const run = await this.repo.createRun(source.id, workspace.id, this.now());
     const startedAt = run.startedAt;
-    this.repo.updateSource(source.id, { lastRunAt: startedAt, lastError: null });
+    await this.repo.updateSource(source.id, { lastRunAt: startedAt, lastError: null });
 
     let discoveredCount = 0;
     let indexedCount = 0;
@@ -700,7 +703,7 @@ export class BoxBrainService {
       const crawl = await this.crawlFolderTree(source, tools);
       const discovered = crawl.items;
       discoveredCount = discovered.length;
-      const previousItems = this.repo.listItems(source.id);
+      const previousItems = await this.repo.listItems(source.id);
       const previousById = new Map(previousItems.map((item) => [item.boxId, item]));
       const seenIds = new Set<string>();
       const aiState: RunAiState = { calls: 0, unavailable: false };
@@ -723,7 +726,7 @@ export class BoxBrainService {
           !itemIdentityChanged(previous, item);
 
         if (canReuse || canReuseMetadataOnly) {
-          this.repo.upsertItem({
+          await this.repo.upsertItem({
             ...item,
             sourceId: source.id,
             workspaceId: workspace.id,
@@ -739,7 +742,7 @@ export class BoxBrainService {
 
         const outcome = await this.indexItem(source, workspace.id, item, previous, tools, aiState);
         if (outcome.memoryId) {
-          this.repo.upsertItem({
+          await this.repo.upsertItem({
             ...item,
             sourceId: source.id,
             workspaceId: workspace.id,
@@ -752,7 +755,7 @@ export class BoxBrainService {
           if (outcome.status === "skipped" || outcome.status === "error") skippedCount += 1;
           else indexedCount += 1;
         } else {
-          this.repo.upsertItem({
+          await this.repo.upsertItem({
             ...item,
             sourceId: source.id,
             workspaceId: workspace.id,
@@ -770,9 +773,9 @@ export class BoxBrainService {
         for (const previous of previousItems) {
           if (seenIds.has(previous.boxId) || previous.status === "deleted") continue;
           if (previous.memoryId) {
-            this.deleteMemoryEntries(workspace.id, [previous.memoryId]);
+            await this.deleteMemoryEntries(workspace.id, [previous.memoryId]);
           }
-          this.repo.updateItemStatus(source.id, previous.boxId, "deleted", {
+          await this.repo.updateItemStatus(source.id, previous.boxId, "deleted", {
             deletedAt: this.now(),
             error: undefined,
           });
@@ -791,7 +794,7 @@ export class BoxBrainService {
       const status: BoxBrainRunStatus =
         skippedCount > 0 || !crawl.complete ? "partial" : "completed";
       const completedAt = this.now();
-      this.repo.updateRun(run.id, {
+      await this.repo.updateRun(run.id, {
         status,
         discoveredCount,
         indexedCount,
@@ -801,7 +804,7 @@ export class BoxBrainService {
         improvementRunId,
         completedAt,
       });
-      this.repo.updateSource(source.id, {
+      await this.repo.updateSource(source.id, {
         lastRunAt: completedAt,
         lastSuccessAt: completedAt,
         lastError: null,
@@ -825,7 +828,7 @@ export class BoxBrainService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const completedAt = this.now();
-      this.repo.updateRun(run.id, {
+      await this.repo.updateRun(run.id, {
         status: "failed",
         discoveredCount,
         indexedCount,
@@ -835,7 +838,7 @@ export class BoxBrainService {
         error: message,
         completedAt,
       });
-      this.repo.updateSource(source.id, {
+      await this.repo.updateSource(source.id, {
         lastRunAt: completedAt,
         lastError: message,
         lastDiscoveredCount: discoveredCount,
@@ -923,7 +926,7 @@ export class BoxBrainService {
     const replace = this.deps.replaceMemory || MemoryService.replaceMemory;
     const indexedAt = this.now();
     let memory = previous?.memoryId
-      ? await Promise.resolve(replace(workspaceId, previous.memoryId, content, summary))
+      ? await replace(workspaceId, previous.memoryId, content, summary)
       : null;
     if (!memory) {
       memory = await capture(workspaceId, undefined, "observation", content, true, {
@@ -954,9 +957,9 @@ export class BoxBrainService {
     };
   }
 
-  private deleteMemoryEntries(workspaceId: string, ids: string[]): void {
+  private async deleteMemoryEntries(workspaceId: string, ids: string[]): Promise<void> {
     const deleteEntries = this.deps.deleteMemoryEntries || MemoryService.deleteEntries;
-    deleteEntries(workspaceId, ids);
+    await deleteEntries(workspaceId, ids);
   }
 
   private async waitForAiPacing(): Promise<void> {
@@ -999,7 +1002,7 @@ export class BoxBrainService {
     const result = this.deps.runDreaming
       ? await this.deps.runDreaming(request)
       : await new DreamingService(new DreamingRepository(this.db)).run(request);
-    this.repo.updateSource(source.id, { lastImprovementRunAt: now });
+    await this.repo.updateSource(source.id, { lastImprovementRunAt: now });
     return result.run.id;
   }
 

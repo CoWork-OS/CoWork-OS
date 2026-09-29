@@ -26,7 +26,7 @@ import { WorkSessionRolloutService } from "./WorkSessionRolloutService";
 
 const PROJECTION_NAME = "work-session-vnext";
 const DEFAULT_ACTIVITY_LEASE_TTL_MS = 5 * 60_000;
-const DEFAULT_LEASE_MAINTENANCE_INTERVAL_MS = 10_000;
+export const DEFAULT_LEASE_MAINTENANCE_INTERVAL_MS = 10_000;
 const MAX_STATUS_BY_TURN = 4_096;
 const END_EVENTS = new Set([
   "llm_completed",
@@ -272,6 +272,21 @@ export class WorkSessionReliabilityService {
     }
     this.leases.stopSweeper();
     this.leaseTokens.clear();
+  }
+
+  /**
+   * One round of lease upkeep: expire stale leases, then renew leases this instance
+   * holds. `start()` runs it on timers; when timeline projections run in the database
+   * worker, the host triggers it there instead, because the worker's instance holds the
+   * lease tokens.
+   */
+  maintainLeases(): void {
+    try {
+      this.leases.expireStale();
+    } catch {
+      // Same tolerance as the sweeper timer: the next round sweeps again.
+    }
+    this.maintainKnownLeases();
   }
 
   private maintainKnownLeases(): void {

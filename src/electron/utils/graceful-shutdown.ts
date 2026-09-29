@@ -1,6 +1,13 @@
+/** What earlier steps did, for steps that record how the shutdown went (DB6). */
+export interface ShutdownContext {
+  /** No earlier step failed or timed out. */
+  quiescent: boolean;
+  failedSteps: readonly string[];
+}
+
 export interface ShutdownStep {
   name: string;
-  run: () => unknown | Promise<unknown>;
+  run: (context: ShutdownContext) => unknown | Promise<unknown>;
   /** Skip this release step if an earlier stop failed or timed out. */
   requiresQuiescence?: boolean;
 }
@@ -44,7 +51,9 @@ export async function runShutdownSteps(
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        Promise.resolve().then(() => step.run()),
+        Promise.resolve().then(() =>
+          step.run({ quiescent: quiescenceReached, failedSteps: [...failedSteps] }),
+        ),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error(`Shutdown step timed out after ${stepTimeoutMs}ms`)),

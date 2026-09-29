@@ -1,7 +1,9 @@
-import Database from "better-sqlite3";
+import { ChannelStore } from "../../database/repositories";
+import { ChannelRepository } from "../../database/repository-facades";
+import type Database from "better-sqlite3";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
-import { ChannelRepository } from "../../database/repositories";
+
 import { EmailClient } from "../../gateway/channels/email-client";
 import { LoomEmailClient } from "../../gateway/channels/loom-client";
 import { assertSafeLoomMailboxFolder } from "../../utils/loom";
@@ -22,6 +24,8 @@ function asBoolean(value: unknown): boolean | null {
 
 export class EmailImapTools {
   private channelRepo: ChannelRepository;
+  // `isAvailable` feeds the synchronous tool catalog, so it reads on the host connection.
+  private channelStore: ChannelStore;
 
   constructor(
     private db: Database.Database,
@@ -29,10 +33,11 @@ export class EmailImapTools {
     private taskId: string,
   ) {
     this.channelRepo = new ChannelRepository(db);
+    this.channelStore = new ChannelStore(db);
   }
 
   isAvailable(): boolean {
-    const channel = this.channelRepo.findByType("email");
+    const channel = this.channelStore.findByType("email");
     if (!channel) return false;
     if (!channel.enabled) return false;
 
@@ -106,7 +111,7 @@ export class EmailImapTools {
       max_body_chars: maxBodyChars,
     });
 
-    const channel = this.channelRepo.findByType("email");
+    const channel = await this.channelRepo.findByType("email");
     if (!channel) {
       return {
         success: false,

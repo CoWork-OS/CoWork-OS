@@ -2,8 +2,7 @@ import type { AgentConfig } from "../../shared/types";
 import type { ChannelType } from "../gateway/channels/types";
 import type { CronDeliveryConfig, CronSchedule } from "../cron/types";
 import type { CronService } from "../cron";
-import type { EventTriggerService } from "../triggers/EventTriggerService";
-import type { TriggerCondition } from "../triggers/types";
+import type { EventTriggerRegistry, TriggerCondition } from "../triggers/types";
 import type { HooksConfig } from "../hooks/types";
 import type { RoutineWorkflowDefinition, RoutineWorkflowNode } from "../../shared/routine-workflow";
 import type { AccessProfileId } from "../../shared/access-profiles";
@@ -255,7 +254,7 @@ export interface RoutineManagedSessionSnapshot {
 export interface RoutineServiceDeps {
   db: Any;
   getCronService: () => CronService | null;
-  getEventTriggerService: () => EventTriggerService | null;
+  getEventTriggerService: () => EventTriggerRegistry | null;
   loadHooksSettings: () => HooksConfig;
   saveHooksSettings: (settings: HooksConfig) => void;
   createTask?: (params: {

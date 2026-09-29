@@ -1,5 +1,5 @@
 /**
- * Tests for ChannelUserRepository pending user deletion methods
+ * Tests for ChannelUserStore pending user deletion methods
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -114,7 +114,7 @@ class MockChannelUserRepository {
   }
 }
 
-describe("ChannelUserRepository - Pending User Deletion", () => {
+describe("ChannelUserStore - Pending User Deletion", () => {
   let repo: MockChannelUserRepository;
 
   beforeEach(() => {

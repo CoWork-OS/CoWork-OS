@@ -1,19 +1,24 @@
-import { AutomationProfileRepository } from "../agents/AutomationProfileRepository";
+import {
+  CoreMemoryCandidateRepository,
+  CoreMemoryDistillRunRepository,
+  CoreMemoryScopeStateRepository,
+  CoreTraceRepository,
+} from "./core-repository-facades";
+import { AutomationProfileRepository } from "../agents/agent-repository-facades";
+import { WorkspaceRepository } from "../database/repository-facades";
+
 import { MemoryService } from "../memory/MemoryService";
 import { LayeredMemoryIndexService } from "../memory/LayeredMemoryIndexService";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
-import { WorkspaceRepository } from "../database/repositories";
+
 import type {
   CoreMemoryCandidate,
   CoreMemoryDistillRun,
   RunCoreMemoryDistillNowRequest,
 } from "../../shared/types";
-import { CoreMemoryCandidateRepository } from "./CoreMemoryCandidateRepository";
-import { CoreMemoryDistillRunRepository } from "./CoreMemoryDistillRunRepository";
+
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";
-import { CoreMemoryScopeStateRepository } from "./CoreMemoryScopeStateRepository";
-import { CoreTraceRepository } from "./CoreTraceRepository";
 
 export class CoreMemoryDistiller {
   constructor(
@@ -27,10 +32,10 @@ export class CoreMemoryDistiller {
   ) {}
 
   async runHotPath(traceId: string): Promise<CoreMemoryDistillRun | undefined> {
-    const trace = this.traceRepo.findById(traceId);
+    const trace = await this.traceRepo.findById(traceId);
     if (!trace) return undefined;
-    const accepted = this.candidateRepo
-      .listForTrace(traceId)
+    const accepted = (await this.candidateRepo
+      .listForTrace(traceId))
       .filter((candidate) => candidate.status === "accepted");
     if (!accepted.length) {
       return this.distillRunRepo.create({
@@ -47,7 +52,7 @@ export class CoreMemoryDistiller {
         completedAt: Date.now(),
       });
     }
-    const run = this.distillRunRepo.create({
+    const run = await this.distillRunRepo.create({
       profileId: trace.profileId,
       workspaceId: trace.workspaceId,
       mode: "hot_path",
@@ -64,10 +69,14 @@ export class CoreMemoryDistiller {
         const stored = await this.writeCandidateMemory(candidate);
         if (stored) {
           written += 1;
-          this.scopeStateRepo.touchDistill(candidate.scopeKind, candidate.scopeRef, Date.now());
+          await this.scopeStateRepo.touchDistill(
+            candidate.scopeKind,
+            candidate.scopeRef,
+            Date.now(),
+          );
         }
       }
-      return this.distillRunRepo.update(run.id, {
+      return await this.distillRunRepo.update(run.id, {
         status: "completed",
         acceptedCount: written,
         summary: { traceId, acceptedCandidateIds: accepted.map((item) => item.id) },
@@ -83,11 +92,11 @@ export class CoreMemoryDistiller {
   }
 
   async runOffline(request: RunCoreMemoryDistillNowRequest): Promise<CoreMemoryDistillRun> {
-    const profile = this.automationProfileRepo.findById(request.profileId);
+    const profile = await this.automationProfileRepo.findById(request.profileId);
     if (!profile) {
       throw new Error("Automation profile not found");
     }
-    const run = this.distillRunRepo.create({
+    const run = await this.distillRunRepo.create({
       profileId: profile.id,
       workspaceId: request.workspaceId,
       mode: "offline",
@@ -99,12 +108,12 @@ export class CoreMemoryDistiller {
       startedAt: Date.now(),
     });
     try {
-      const traces = this.traceRepo.list({
+      const traces = await this.traceRepo.list({
         profileId: profile.id,
         workspaceId: request.workspaceId,
         limit: 100,
       });
-      const candidates = this.candidateRepo.list({
+      const candidates = await this.candidateRepo.list({
         profileId: profile.id,
         workspaceId: request.workspaceId,
         status: "accepted",
@@ -115,12 +124,16 @@ export class CoreMemoryDistiller {
         const stored = await this.writeCandidateMemory(candidate);
         if (stored) {
           acceptedCount += 1;
-          this.scopeStateRepo.touchDistill(candidate.scopeKind, candidate.scopeRef, Date.now());
+          await this.scopeStateRepo.touchDistill(
+            candidate.scopeKind,
+            candidate.scopeRef,
+            Date.now(),
+          );
         }
       }
 
       const workspacePath = request.workspaceId
-        ? this.workspaceRepo.findById(request.workspaceId)?.path
+        ? (await this.workspaceRepo.findById(request.workspaceId))?.path
         : undefined;
       if (request.workspaceId && workspacePath) {
         await LayeredMemoryIndexService.refreshIndex({
@@ -129,7 +142,7 @@ export class CoreMemoryDistiller {
           taskPrompt: `Core memory distillation for profile ${profile.id}`,
         });
       }
-      return this.distillRunRepo.update(run.id, {
+      return (await this.distillRunRepo.update(run.id, {
         status: "completed",
         sourceTraceCount: traces.length,
         candidateCount: candidates.length,
@@ -139,13 +152,13 @@ export class CoreMemoryDistiller {
           candidateIds: candidates.map((candidate) => candidate.id),
         },
         completedAt: Date.now(),
-      })!;
+      }))!;
     } catch (error) {
-      return this.distillRunRepo.update(run.id, {
+      return (await this.distillRunRepo.update(run.id, {
         status: "failed",
         error: error instanceof Error ? error.message : String(error),
         completedAt: Date.now(),
-      })!;
+      }))!;
     }
   }
 

@@ -5,8 +5,14 @@
  * Manages channel adapters, routing, and sessions.
  */
 
+import {
+  ChannelRepository,
+  ChannelSessionRepository,
+  ChannelUserRepository,
+} from "../database/repository-facades";
+import { ChannelMessageRepository } from "../database/repository-facades";
 import type { BrowserWindow } from "electron";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import * as fs from "fs";
 import * as path from "path";
 import { MessageRouter, RouterConfig } from "./router";
@@ -53,13 +59,7 @@ import { BlueBubblesAdapter, createBlueBubblesAdapter } from "./channels/bluebub
 import { createGoogleChatAdapter } from "./channels/google-chat";
 import { EmailAdapter, createEmailAdapter } from "./channels/email";
 import { XAdapter, createXAdapter, type XAdapterConfig } from "./channels/x";
-import {
-  ChannelRepository,
-  ChannelUserRepository,
-  ChannelSessionRepository,
-  ChannelMessageRepository,
-  Channel,
-} from "../database/repositories";
+import { Channel } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
 import { HookAgentIngress, initializeHookAgentIngress } from "../hooks/agent-ingress";
 import { PersonalityManager } from "../settings/personality-manager";
@@ -143,6 +143,13 @@ export class ChannelGateway {
   private pendingCleanupInterval: ReturnType<typeof setInterval> | null = null;
   private discordSupervisorService?: DiscordSupervisorService;
 
+  /** Start router work from an event handler without holding it up; report failures. */
+  private detachRouterWork(work: Promise<unknown>, label: string): void {
+    void Promise.resolve(work).catch((error: unknown) =>
+      logger.warn(`Router ${label} failed:`, error),
+    );
+  }
+
   constructor(db: Database.Database, config: GatewayConfig = {}) {
     this.db = db;
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -216,7 +223,10 @@ export class ChannelGateway {
         lastMessages.set(data.taskId, trimmed);
 
         // Stream updates to channel (router will debounce for channels that can't edit messages).
-        this.router.sendTaskUpdate(data.taskId, trimmed, true);
+        this.detachRouterWork(
+          this.router.sendTaskUpdate(data.taskId, trimmed, true),
+          "sendTaskUpdate",
+        );
 
         // Mark follow-up as having produced user-visible output, but only after a
         // follow-up has actually started (see onUserMessage above).
@@ -239,12 +249,18 @@ export class ChannelGateway {
       const fallback = position
         ? `⏳ Queued (position ${position}). I’ll start as soon as a slot is free.`
         : "⏳ Queued. I’ll start as soon as a slot is free.";
-      this.router.sendTaskUpdate(data.taskId, explicit || fallback);
+      this.detachRouterWork(
+        this.router.sendTaskUpdate(data.taskId, explicit || fallback),
+        "sendTaskUpdate",
+      );
     };
 
     const onTaskDequeued = (data: { taskId: string; message?: string }) => {
       const explicit = typeof data.message === "string" ? data.message.trim() : "";
-      this.router.sendTaskUpdate(data.taskId, explicit || "▶️ Starting now.");
+      this.detachRouterWork(
+        this.router.sendTaskUpdate(data.taskId, explicit || "▶️ Starting now."),
+        "sendTaskUpdate",
+      );
     };
 
     // Listen for task completion
@@ -287,7 +303,10 @@ export class ChannelGateway {
       if (!result) {
         result = fallbackMessage;
       }
-      this.router.handleTaskCompletion(data.taskId, result);
+      this.detachRouterWork(
+        this.router.handleTaskCompletion(data.taskId, result),
+        "handleTaskCompletion",
+      );
       lastMessages.delete(data.taskId);
       followUpMessagesSent.delete(data.taskId);
     };
@@ -295,7 +314,10 @@ export class ChannelGateway {
     // Listen for task cancellation
     const onTaskCancelled = (data: { taskId: string; message?: string }) => {
       const reason = typeof data.message === "string" ? data.message.trim() : undefined;
-      this.router.handleTaskCancelled(data.taskId, reason);
+      this.detachRouterWork(
+        this.router.handleTaskCancelled(data.taskId, reason),
+        "handleTaskCancelled",
+      );
       lastMessages.delete(data.taskId);
       followUpMessagesSent.delete(data.taskId);
     };
@@ -304,7 +326,10 @@ export class ChannelGateway {
     // Note: daemon emits { taskId, error } or { taskId, message }
     const onError = (data: { taskId: string; error?: string; message?: string }) => {
       const errorMsg = data.error || data.message || "Unknown error";
-      this.router.handleTaskFailure(data.taskId, errorMsg);
+      this.detachRouterWork(
+        this.router.handleTaskFailure(data.taskId, errorMsg),
+        "handleTaskFailure",
+      );
       lastMessages.delete(data.taskId);
       followUpMessagesSent.delete(data.taskId);
     };
@@ -328,7 +353,7 @@ export class ChannelGateway {
         tool: toolName,
         error: errorMsg,
       });
-      this.router.sendTaskUpdate(data.taskId, message);
+      this.detachRouterWork(this.router.sendTaskUpdate(data.taskId, message), "sendTaskUpdate");
     };
 
     // Listen for follow-up message completion
@@ -346,7 +371,7 @@ export class ChannelGateway {
       // If no assistant messages were sent during the follow-up, send a confirmation
       if (!sentAnyAssistant) {
         const message = getChannelMessage("followUpProcessed", this.getMessageContext());
-        this.router.sendTaskUpdate(data.taskId, message);
+        this.detachRouterWork(this.router.sendTaskUpdate(data.taskId, message), "sendTaskUpdate");
       }
       followUpMessagesSent.delete(data.taskId);
       followUpLatestAssistantText.delete(data.taskId);
@@ -399,7 +424,10 @@ export class ChannelGateway {
       if (data?.approval?.autoApproved) {
         return;
       }
-      this.router.sendApprovalRequest(data.taskId, data.approval);
+      this.detachRouterWork(
+        this.router.sendApprovalRequest(data.taskId, data.approval),
+        "sendApprovalRequest",
+      );
     };
 
     const onArtifactCreated = (data: { taskId: string; path?: string; label?: string }) => {
@@ -407,7 +435,10 @@ export class ChannelGateway {
       if (!path) return;
       const label =
         typeof data.label === "string" && data.label.trim().length > 0 ? data.label : path;
-      this.router.sendTaskUpdate(data.taskId, `📎 Artifact: ${label}\n${path}`);
+      this.detachRouterWork(
+        this.router.sendTaskUpdate(data.taskId, `📎 Artifact: ${label}\n${path}`),
+        "sendTaskUpdate",
+      );
     };
 
     const onKeyClaimEvidenceAttached = (data: {
@@ -446,10 +477,10 @@ export class ChannelGateway {
         })
         .join("\n");
 
-      this.router.sendTaskUpdate(
+      this.detachRouterWork(this.router.sendTaskUpdate(
         data.taskId,
         `🔎 Evidence links for key claims\n\n${claimLines}Sources:\n${sourceLines}`,
-      );
+      ), "sendTaskUpdate");
     };
 
     const timelineBridgeHandler = (timelineType: string) => (evt: Any) => {
@@ -585,7 +616,7 @@ export class ChannelGateway {
       if (timelineType === "timeline_step_updated" && typeof payload.message === "string") {
         const message = payload.message.trim();
         if (message.length > 0) {
-          this.router.sendTaskUpdate(taskId, message);
+          this.detachRouterWork(this.router.sendTaskUpdate(taskId, message), "sendTaskUpdate");
         }
       }
     };
@@ -628,7 +659,7 @@ export class ChannelGateway {
       await this.router.connectAll();
     }
 
-    this.startPendingCleanup();
+    await this.startPendingCleanup();
 
     registerChannelLiveFetchProvider(this);
 
@@ -714,8 +745,8 @@ export class ChannelGateway {
     return adapter.downloadAttachment(chatId, messageId, inboxDir);
   }
 
-  getStartupStats(): { loaded: number; enabled: number; connected: number } {
-    const channels = this.channelRepo.findAll();
+  async getStartupStats(): Promise<{ loaded: number; enabled: number; connected: number }> {
+    const channels = await this.channelRepo.findAll();
     const enabled = channels.filter((channel) => channel.enabled).length;
     const connected = channels.filter((channel) => channel.status === "connected").length;
     return {
@@ -725,16 +756,22 @@ export class ChannelGateway {
     };
   }
 
-  private startPendingCleanup(): void {
+  private async startPendingCleanup(): Promise<void> {
     if (this.pendingCleanupInterval) return;
     // Run once at startup to clear any stale entries.
-    this.cleanupPendingUsers();
-    this.cleanupIdleSessions();
+    await this.cleanupPendingUsers();
+    await this.cleanupIdleSessions();
     // Then run every 10 minutes.
     this.pendingCleanupInterval = setInterval(
       () => {
-        this.cleanupPendingUsers();
-        this.cleanupIdleSessions();
+        void Promise.all([this.cleanupPendingUsers(), this.cleanupIdleSessions()]).catch(
+          (error) => {
+            console.error(
+              "[ChannelGateway] Failed to clean up pending users or idle sessions:",
+              error,
+            );
+          },
+        );
       },
       10 * 60 * 1000,
     );
@@ -747,18 +784,18 @@ export class ChannelGateway {
     }
   }
 
-  private cleanupPendingUsers(): void {
-    const channels = this.channelRepo.findAll();
+  private async cleanupPendingUsers(): Promise<void> {
+    const channels = await this.channelRepo.findAll();
     for (const channel of channels) {
-      const removed = this.userRepo.deleteExpiredPending(channel.id);
+      const removed = await this.userRepo.deleteExpiredPending(channel.id);
       if (removed > 0) {
         this.emitUsersUpdated(channel);
       }
     }
   }
 
-  private cleanupIdleSessions(): void {
-    this.sessionManager.cleanupOldSessions(IDLE_SESSION_RETENTION_MS);
+  private async cleanupIdleSessions(): Promise<void> {
+    await this.sessionManager.cleanupOldSessions(IDLE_SESSION_RETENTION_MS);
   }
 
   private emitUsersUpdated(channel: Channel): void {
@@ -786,13 +823,13 @@ export class ChannelGateway {
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Check if Telegram channel already exists
-    const existing = this.channelRepo.findByType("telegram");
+    const existing = await this.channelRepo.findByType("telegram");
     if (existing) {
       throw new Error("Telegram channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "telegram",
       name,
       enabled: false, // Don't enable until tested
@@ -809,6 +846,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Telegram channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -825,13 +865,13 @@ export class ChannelGateway {
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Check if Discord channel already exists
-    const existing = this.channelRepo.findByType("discord");
+    const existing = await this.channelRepo.findByType("discord");
     if (existing) {
       throw new Error("Discord channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "discord",
       name,
       enabled: false, // Don't enable until tested
@@ -844,6 +884,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Discord channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -860,7 +903,7 @@ export class ChannelGateway {
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.create({
       type: "slack",
       name,
       enabled: false, // Don't enable until tested
@@ -897,7 +940,7 @@ export class ChannelGateway {
     },
   ): Promise<Channel> {
     // Check if WhatsApp channel already exists
-    const existing = this.channelRepo.findByType("whatsapp");
+    const existing = await this.channelRepo.findByType("whatsapp");
     if (existing) {
       throw new Error("WhatsApp channel already configured. Update or remove it first.");
     }
@@ -906,7 +949,7 @@ export class ChannelGateway {
     this.clearWhatsAppAuthDir();
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "whatsapp",
       name,
       enabled: false, // Don't enable until QR code is scanned
@@ -939,6 +982,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("WhatsApp channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -961,13 +1007,13 @@ export class ChannelGateway {
     },
   ): Promise<Channel> {
     // Check if iMessage channel already exists
-    const existing = this.channelRepo.findByType("imessage");
+    const existing = await this.channelRepo.findByType("imessage");
     if (existing) {
       throw new Error("iMessage channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "imessage",
       name,
       enabled: false, // Don't enable until connected
@@ -990,6 +1036,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("iMessage channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1011,13 +1060,13 @@ export class ChannelGateway {
     sendTypingIndicators: boolean = true,
   ): Promise<Channel> {
     // Check if Signal channel already exists
-    const existing = this.channelRepo.findByType("signal");
+    const existing = await this.channelRepo.findByType("signal");
     if (existing) {
       throw new Error("Signal channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "signal",
       name,
       enabled: false, // Don't enable until connected
@@ -1041,6 +1090,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Signal channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1056,13 +1108,13 @@ export class ChannelGateway {
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Check if Mattermost channel already exists
-    const existing = this.channelRepo.findByType("mattermost");
+    const existing = await this.channelRepo.findByType("mattermost");
     if (existing) {
       throw new Error("Mattermost channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "mattermost",
       name,
       enabled: false, // Don't enable until connected
@@ -1080,6 +1132,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Mattermost channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1097,13 +1152,13 @@ export class ChannelGateway {
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Check if Matrix channel already exists
-    const existing = this.channelRepo.findByType("matrix");
+    const existing = await this.channelRepo.findByType("matrix");
     if (existing) {
       throw new Error("Matrix channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "matrix",
       name,
       enabled: false, // Don't enable until connected
@@ -1123,6 +1178,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Matrix channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1139,13 +1197,13 @@ export class ChannelGateway {
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Check if Twitch channel already exists
-    const existing = this.channelRepo.findByType("twitch");
+    const existing = await this.channelRepo.findByType("twitch");
     if (existing) {
       throw new Error("Twitch channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "twitch",
       name,
       enabled: false, // Don't enable until connected
@@ -1164,6 +1222,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Twitch channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1179,13 +1240,13 @@ export class ChannelGateway {
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Check if LINE channel already exists
-    const existing = this.channelRepo.findByType("line");
+    const existing = await this.channelRepo.findByType("line");
     if (existing) {
       throw new Error("LINE channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "line",
       name,
       enabled: false, // Don't enable until connected
@@ -1203,6 +1264,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("LINE channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1225,13 +1289,13 @@ export class ChannelGateway {
     },
   ): Promise<Channel> {
     // Check if BlueBubbles channel already exists
-    const existing = this.channelRepo.findByType("bluebubbles");
+    const existing = await this.channelRepo.findByType("bluebubbles");
     if (existing) {
       throw new Error("BlueBubbles channel already configured. Update or remove it first.");
     }
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "bluebubbles",
       name,
       enabled: false, // Don't enable until connected
@@ -1254,6 +1318,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("BlueBubbles channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1270,12 +1337,12 @@ export class ChannelGateway {
     webhookSecret?: string,
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
-    const existing = this.channelRepo.findByType("googlechat");
+    const existing = await this.channelRepo.findByType("googlechat");
     if (existing) {
       throw new Error("Google Chat channel already configured. Update or remove it first.");
     }
 
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "googlechat",
       name,
       enabled: false,
@@ -1295,6 +1362,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Google Chat channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1333,7 +1403,7 @@ export class ChannelGateway {
     },
   ): Promise<Channel> {
     // Check if Email channel already exists
-    const existing = this.channelRepo.findByType("email");
+    const existing = await this.channelRepo.findByType("email");
     if (existing) {
       throw new Error("Email channel already configured. Update or remove it first.");
     }
@@ -1390,7 +1460,7 @@ export class ChannelGateway {
           };
 
     // Create channel record
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "email",
       name,
       enabled: false, // Don't enable until connected
@@ -1404,6 +1474,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Email channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1421,12 +1494,12 @@ export class ChannelGateway {
     webhookPath: string = "/feishu/webhook",
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
-    const existing = this.channelRepo.findByType("feishu");
+    const existing = await this.channelRepo.findByType("feishu");
     if (existing) {
       throw new Error("Feishu / Lark channel already configured. Update or remove it first.");
     }
 
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "feishu",
       name,
       enabled: false,
@@ -1447,6 +1520,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("Feishu / Lark channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1465,12 +1541,12 @@ export class ChannelGateway {
     webhookPath: string = "/wecom/webhook",
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
-    const existing = this.channelRepo.findByType("wecom");
+    const existing = await this.channelRepo.findByType("wecom");
     if (existing) {
       throw new Error("WeCom channel already configured. Update or remove it first.");
     }
 
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "wecom",
       name,
       enabled: false,
@@ -1492,6 +1568,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("WeCom channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1514,7 +1593,7 @@ export class ChannelGateway {
     },
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
-    if (this.channelRepo.findByType("whatsapp_cloud")) {
+    if (await this.channelRepo.findByType("whatsapp_cloud")) {
       throw new Error("WhatsApp Cloud channel already configured. Update or remove it first.");
     }
     return this.channelRepo.create({
@@ -1557,7 +1636,7 @@ export class ChannelGateway {
     },
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
-    if (this.channelRepo.findByType("twilio_sms")) {
+    if (await this.channelRepo.findByType("twilio_sms")) {
       throw new Error("Twilio SMS channel already configured. Update or remove it first.");
     }
     return this.channelRepo.create({
@@ -1597,12 +1676,12 @@ export class ChannelGateway {
     },
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
-    const existing = this.channelRepo.findByType("x");
+    const existing = await this.channelRepo.findByType("x");
     if (existing) {
       throw new Error("X channel already configured. Update or remove it first.");
     }
 
-    const channel = this.channelRepo.create({
+    const channel = await this.channelRepo.createIfTypeAbsent({
       type: "x",
       name,
       enabled: false,
@@ -1622,6 +1701,9 @@ export class ChannelGateway {
       },
       status: "disconnected",
     });
+    if (!channel) {
+      throw new Error("X channel already configured. Update or remove it first.");
+    }
 
     return channel;
   }
@@ -1629,18 +1711,18 @@ export class ChannelGateway {
   /**
    * Update a channel configuration
    */
-  updateChannel(channelId: string, updates: Partial<Channel>): void {
-    this.channelRepo.update(channelId, updates);
+  async updateChannel(channelId: string, updates: Partial<Channel>): Promise<void> {
+    await this.channelRepo.update(channelId, updates);
 
     if (updates.config === undefined) return;
 
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel) return;
     this.assertChannelConfigAvailable(channel);
 
     const adapter =
       this.router.getAdapterByChannelId(channelId) ||
-      (this.channelRepo.findAllByType(channel.type).length === 1
+      ((await this.channelRepo.findAllByType(channel.type)).length === 1
         ? this.router.getAdapter(channel.type as ChannelType)
         : undefined);
     if (this.isMicrosoftEmailOAuthChannel(channel)) {
@@ -1659,7 +1741,7 @@ export class ChannelGateway {
    * Enable a channel and connect
    */
   async enableChannel(channelId: string): Promise<void> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel) {
       throw new Error("Channel not found");
     }
@@ -1672,7 +1754,7 @@ export class ChannelGateway {
     // Create and register adapter if not already done
     let adapter =
       this.router.getAdapterByChannelId(channelId) ||
-      (this.channelRepo.findAllByType(channel.type).length === 1
+      ((await this.channelRepo.findAllByType(channel.type)).length === 1
         ? this.router.getAdapter(channel.type as ChannelType)
         : undefined);
     if (!adapter) {
@@ -1682,7 +1764,7 @@ export class ChannelGateway {
     }
 
     // Update channel state
-    this.channelRepo.update(channelId, { enabled: true });
+    await this.channelRepo.update(channelId, { enabled: true });
 
     // Connect
     await adapter.connect();
@@ -1692,21 +1774,21 @@ export class ChannelGateway {
    * Disable a channel and disconnect
    */
   async disableChannel(channelId: string): Promise<void> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel) {
       throw new Error("Channel not found");
     }
 
     const adapter =
       this.router.getAdapterByChannelId(channelId) ||
-      (this.channelRepo.findAllByType(channel.type).length === 1
+      ((await this.channelRepo.findAllByType(channel.type)).length === 1
         ? this.router.getAdapter(channel.type as ChannelType)
         : undefined);
     if (adapter) {
       await adapter.disconnect();
     }
 
-    this.channelRepo.update(channelId, { enabled: false, status: "disconnected" });
+    await this.channelRepo.update(channelId, { enabled: false, status: "disconnected" });
   }
 
   /**
@@ -1714,7 +1796,7 @@ export class ChannelGateway {
    * This method connects the WhatsApp adapter and forwards QR codes to the renderer
    */
   async enableWhatsAppWithQRForwarding(channelId: string): Promise<void> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel || channel.type !== "whatsapp") {
       throw new Error("WhatsApp channel not found");
     }
@@ -1744,25 +1826,30 @@ export class ChannelGateway {
             status,
             error: error?.message,
           });
+          // Update channel status in database (best effort; the listener stays synchronous)
+          const recordStatus = (updates: Partial<Channel>) => {
+            void this.channelRepo.update(channelId, updates).catch((updateError) => {
+              console.error("Failed to record WhatsApp channel status:", updateError);
+            });
+          };
           if (status === "connected") {
             mainWindow.webContents.send(IPC_CHANNELS.WHATSAPP_CONNECTED);
-            // Update channel status in database
-            this.channelRepo.update(channelId, {
+            recordStatus({
               enabled: true,
               status: "connected",
               botUsername: adapter?.botUsername,
             });
           } else if (status === "error") {
-            this.channelRepo.update(channelId, { status: "error" });
+            recordStatus({ status: "error" });
           } else if (status === "disconnected") {
-            this.channelRepo.update(channelId, { status: "disconnected" });
+            recordStatus({ status: "disconnected" });
           }
         }
       });
     }
 
     // Update channel state to connecting
-    this.channelRepo.update(channelId, { enabled: true, status: "connecting" });
+    await this.channelRepo.update(channelId, { enabled: true, status: "connecting" });
 
     // Connect (this will trigger QR code generation)
     await adapter.connect();
@@ -1772,7 +1859,7 @@ export class ChannelGateway {
    * Get WhatsApp channel info including QR code
    */
   async getWhatsAppInfo(): Promise<{ qrCode?: string; phoneNumber?: string; status?: string }> {
-    const channel = this.channelRepo.findByType("whatsapp");
+    const channel = await this.channelRepo.findByType("whatsapp");
     if (!channel) {
       return {};
     }
@@ -1800,9 +1887,9 @@ export class ChannelGateway {
       this.clearWhatsAppAuthDir();
     }
 
-    const channel = this.channelRepo.findByType("whatsapp");
+    const channel = await this.channelRepo.findByType("whatsapp");
     if (channel) {
-      this.channelRepo.update(channel.id, {
+      await this.channelRepo.update(channel.id, {
         enabled: false,
         status: "disconnected",
         botUsername: undefined,
@@ -1814,7 +1901,7 @@ export class ChannelGateway {
    * Remove a channel
    */
   async removeChannel(channelId: string): Promise<void> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel) return;
 
     if (channel.type === "whatsapp") {
@@ -1831,7 +1918,7 @@ export class ChannelGateway {
     }
 
     // Delete the channel and all associated records atomically.
-    this.channelRepo.delete(channelId);
+    await this.channelRepo.delete(channelId);
     this.router.unregisterAdapter(channelId);
 
     if (channel.type === "whatsapp_cloud" || channel.type === "twilio_sms") {
@@ -1848,7 +1935,7 @@ export class ChannelGateway {
   async testChannel(
     channelId: string,
   ): Promise<{ success: boolean; error?: string; botUsername?: string }> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel) {
       return { success: false, error: "Channel not found" };
     }
@@ -1890,21 +1977,21 @@ export class ChannelGateway {
   /**
    * Get all channels
    */
-  getChannels(): Channel[] {
+  async getChannels(): Promise<Channel[]> {
     return this.channelRepo.findAll();
   }
 
   /**
    * Get a channel by ID
    */
-  getChannel(channelId: string): Channel | undefined {
+  async getChannel(channelId: string): Promise<Channel | undefined> {
     return this.channelRepo.findById(channelId);
   }
 
   /**
    * Get channel by type
    */
-  getChannelByType(type: string): Channel | undefined {
+  async getChannelByType(type: string): Promise<Channel | undefined> {
     return this.channelRepo.findByType(type);
   }
 
@@ -1913,8 +2000,12 @@ export class ChannelGateway {
   /**
    * Generate a pairing code for a user
    */
-  generatePairingCode(channelId: string, userId?: string, displayName?: string): string {
-    const channel = this.channelRepo.findById(channelId);
+  async generatePairingCode(
+    channelId: string,
+    userId?: string,
+    displayName?: string,
+  ): Promise<string> {
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel) {
       throw new Error("Channel not found");
     }
@@ -1924,22 +2015,24 @@ export class ChannelGateway {
   /**
    * Grant access to a user
    */
-  grantUserAccess(channelId: string, userId: string, displayName?: string): void {
-    this.securityManager.grantAccess(channelId, userId, displayName);
+  async grantUserAccess(channelId: string, userId: string, displayName?: string): Promise<void> {
+    await this.securityManager.grantAccess(channelId, userId, displayName);
   }
 
   /**
    * Revoke user access
    */
-  revokeUserAccess(channelId: string, userId: string): void {
-    this.securityManager.revokeAccess(channelId, userId);
+  async revokeUserAccess(channelId: string, userId: string): Promise<void> {
+    await this.securityManager.revokeAccess(channelId, userId);
   }
 
   /**
    * Get users for a channel
    * Automatically cleans up expired pending pairing entries
    */
-  getChannelUsers(channelId: string): ReturnType<typeof this.userRepo.findByChannelId> {
+  async getChannelUsers(
+    channelId: string,
+  ): Promise<ReturnType<typeof this.userRepo.findByChannelId>> {
     // Use securityManager to trigger cleanup of expired pending entries
     return this.securityManager.getChannelUsers(channelId);
   }
@@ -1981,13 +2074,13 @@ export class ChannelGateway {
     text: string,
     options?: { replyTo?: string; parseMode?: "text" | "markdown" | "html" },
   ): Promise<string | null> {
-    const session = this.sessionManager.getSession(sessionId);
+    const session = await this.sessionManager.getSession(sessionId);
     if (!session) {
       console.error("Session not found:", sessionId);
       return null;
     }
 
-    const channel = this.channelRepo.findById(session.channelId);
+    const channel = await this.channelRepo.findById(session.channelId);
     if (!channel) {
       console.error("Channel not found:", session.channelId);
       return null;
@@ -2008,10 +2101,10 @@ export class ChannelGateway {
   /**
    * Get distinct chat IDs for a channel, ordered by most recent message.
    */
-  getDistinctChatIds(
+  async getDistinctChatIds(
     channelId: string,
     limit = 50,
-  ): Array<{ chatId: string; lastTimestamp: number }> {
+  ): Promise<Array<{ chatId: string; lastTimestamp: number }>> {
     return this.messageRepo.getDistinctChatIds(channelId, limit);
   }
 
@@ -2086,7 +2179,7 @@ export class ChannelGateway {
    * Load and register channel adapters
    */
   private async loadChannels(): Promise<void> {
-    const channels = this.channelRepo.findAll();
+    const channels = await this.channelRepo.findAll();
 
     for (const channel of channels) {
       try {
@@ -2127,9 +2220,9 @@ export class ChannelGateway {
   private async connectMicrosoftEmailGraphChannels(
     options: ChannelConnectOptions = {},
   ): Promise<void> {
-    const channels = this.channelRepo
-      .findEnabled()
-      .filter((channel) => this.isMicrosoftEmailOAuthChannel(channel));
+    const channels = (await this.channelRepo.findEnabled()).filter((channel) =>
+      this.isMicrosoftEmailOAuthChannel(channel),
+    );
 
     for (const channel of channels) {
       try {
@@ -2149,17 +2242,17 @@ export class ChannelGateway {
     options: ChannelConnectOptions = {},
   ): Promise<void> {
     this.router.unregisterAdapter(channel.id);
-    this.channelRepo.update(channel.id, { enabled: true, status: "connecting" });
+    await this.channelRepo.update(channel.id, { enabled: true, status: "connecting" });
 
     try {
       await this.validateMicrosoftEmailGraphReadAccess(channel, options);
-      this.channelRepo.update(channel.id, {
+      await this.channelRepo.update(channel.id, {
         enabled: true,
         status: "connected",
         botUsername: this.getMicrosoftEmailIdentity(channel),
       });
     } catch (error) {
-      this.channelRepo.update(channel.id, { status: "error" });
+      await this.channelRepo.update(channel.id, { status: "error" });
       throw error;
     }
   }
@@ -2209,7 +2302,7 @@ export class ChannelGateway {
     });
     await this.probeMicrosoftGraphReadAccess(refreshed.accessToken, options);
 
-    this.channelRepo.update(channel.id, {
+    await this.channelRepo.update(channel.id, {
       config: {
         ...channel.config,
         microsoftGraphAccessToken: refreshed.accessToken,
@@ -2267,7 +2360,7 @@ export class ChannelGateway {
   }
 
   private async getEmailOAuthAccessToken(channelId: string): Promise<string> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel || channel.type !== "email") {
       throw new Error("Email channel not found");
     }
@@ -2315,7 +2408,7 @@ export class ChannelGateway {
       ),
     };
 
-    this.channelRepo.update(channelId, { config: nextConfig });
+    await this.channelRepo.update(channelId, { config: nextConfig });
     return refreshed.accessToken;
   }
 
@@ -2621,7 +2714,7 @@ export class ChannelGateway {
    * adapter when there is one and from its persisted state otherwise.
    */
   async getChannelHealth(channelId: string): Promise<Record<string, unknown> | null> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel) return null;
     const running = this.router.getAdapterByChannelId(channelId);
     if (!running && channel.type !== "whatsapp_cloud" && channel.type !== "twilio_sms") {

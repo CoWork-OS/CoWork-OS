@@ -1,9 +1,11 @@
+import { recentTaskEventsOfType } from "./agent-signal-reads";
+import { AgentRoleRepository } from "./agent-repository-facades";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import fs from "fs";
 import path from "path";
 import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
-import { AgentRoleRepository } from "./AgentRoleRepository";
-import { TaskRepository, WorkspaceRepository } from "../database/repositories";
+
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 
 type Any = any;
@@ -126,7 +128,9 @@ export class FeedbackService {
       try {
         const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
         if (!taskId) return;
-        this.ingestFeedbackEvent(taskId, evt, Date.now(), { queueWeekly: true });
+        void this.ingestFeedbackEvent(taskId, evt, Date.now(), { queueWeekly: true }).catch(() => {
+          // ignore
+        });
       } catch {
         // ignore
       }
@@ -149,10 +153,10 @@ export class FeedbackService {
     return created;
   }
 
-  private formatAgentName(agentRoleId: string | null): string {
+  private async formatAgentName(agentRoleId: string | null): Promise<string> {
     if (!agentRoleId) return "Main";
     if (agentRoleId === "main") return "Main";
-    const role = this.agentRoleRepo.findById(agentRoleId);
+    const role = await this.agentRoleRepo.findById(agentRoleId);
     return role?.displayName || role?.name || agentRoleId.slice(0, 8);
   }
 
@@ -165,13 +169,13 @@ export class FeedbackService {
     }
   }
 
-  private ingestFeedbackEvent(
+  private async ingestFeedbackEvent(
     taskId: string,
     payload: Any,
     timestampMs: number,
     opts?: { queueWeekly?: boolean },
-  ): void {
-    const task = this.taskRepo.findById(taskId);
+  ): Promise<void> {
+    const task = await this.taskRepo.findById(taskId);
     if (!task) return;
 
     const gatewayContext = task.agentConfig?.gatewayContext;
@@ -182,7 +186,7 @@ export class FeedbackService {
     const workspaceId = task.workspaceId;
     if (!workspaceId) return;
 
-    const workspace = this.workspaceRepo.findById(workspaceId);
+    const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace?.path) return;
     if (!this.ensureKitDirExists(workspace.path)) return;
 
@@ -202,7 +206,7 @@ export class FeedbackService {
         : task.assignedAgentRoleId
           ? task.assignedAgentRoleId
           : null;
-    const agentName = this.formatAgentName(agentRoleId);
+    const agentName = await this.formatAgentName(agentRoleId);
 
     const state = this.getWorkspaceState(workspaceId);
 
@@ -255,7 +259,7 @@ export class FeedbackService {
   }
 
   private async flushWorkspace(workspaceId: string): Promise<void> {
-    const workspace = this.workspaceRepo.findById(workspaceId);
+    const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace?.path) return;
     if (!this.ensureKitDirExists(workspace.path)) return;
 
@@ -351,20 +355,13 @@ export class FeedbackService {
 
   private async rebuildFromRecentFeedbackEvents(): Promise<void> {
     const sinceMs = Date.now() - REBUILD_WINDOW_MS;
-    const stmt = this.db.prepare(`
-      SELECT e.task_id as taskId, e.timestamp as timestamp, e.payload as payload
-      FROM task_events e
-      WHERE (e.type = 'user_feedback' OR e.legacy_type = 'user_feedback')
-        AND e.timestamp >= ?
-      ORDER BY e.timestamp DESC
-      LIMIT ?
-    `);
-
-    const rows = stmt.all(sinceMs, STARTUP_REBUILD_LIMIT) as Array<{
-      taskId: string;
-      timestamp: number;
-      payload: string;
-    }>;
+    const rows = await recentTaskEventsOfType(
+      this.db,
+      "user_feedback",
+      sinceMs,
+      STARTUP_REBUILD_LIMIT,
+      "desc",
+    );
     for (const row of rows) {
       const payload = row?.payload;
       if (!payload) continue;
@@ -374,7 +371,7 @@ export class FeedbackService {
       } catch {
         continue;
       }
-      this.ingestFeedbackEvent(row.taskId, parsed, row.timestamp, { queueWeekly: false });
+      await this.ingestFeedbackEvent(row.taskId, parsed, row.timestamp, { queueWeekly: false });
     }
   }
 }

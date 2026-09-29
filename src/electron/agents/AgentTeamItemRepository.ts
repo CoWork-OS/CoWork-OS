@@ -10,7 +10,7 @@ import {
 /**
  * Repository for managing agent team items (shared checklist) in the database.
  */
-export class AgentTeamItemRepository {
+export class AgentTeamItemStore {
   constructor(private db: Database.Database) {}
 
   /**

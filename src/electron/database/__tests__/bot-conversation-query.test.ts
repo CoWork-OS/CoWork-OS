@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { TaskRepository } from "../repositories";
+import { TaskStore } from "../repositories";
 
 describe("bot conversation query isolation", () => {
   it("filters before pagination and excludes archived conversations without excluding ordinary role work from generic lists", () => {
@@ -84,7 +84,7 @@ describe("bot conversation query isolation", () => {
         "older-agent-receipt",
       );
       for (let i = 0; i < 600; i++) add(`unrelated-${i}`, "workspace-b", "bot-b", "{}", 10 + i);
-      const repo = new TaskRepository(db as never);
+      const repo = new TaskStore(db as never);
       const filter = {
         botConversation: { workspaceId: "workspace-a", agentRoleId: "bot-a" },
         includeArchivedSessions: false,

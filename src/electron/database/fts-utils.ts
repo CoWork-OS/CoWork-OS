@@ -21,3 +21,10 @@ export function buildRelaxedTokenFtsQuery(rawTokens: string[]): string {
     .map((t) => `"${t}"`);
   return parts.join(" OR ");
 }
+
+// Imported memories can optionally carry a lightweight control header on the first line.
+export const IMPORTED_PROMPT_RECALL_IGNORE_MARKER = "[cowork:prompt_recall=ignore]";
+
+/** SQL predicate matching imported memories; shared by the host repository and the FTS worker. */
+export const buildImportedMemoryFilterSql = (contentExpr: string): string =>
+  `(${contentExpr} LIKE '[Imported from %' OR ${contentExpr} LIKE '${IMPORTED_PROMPT_RECALL_IGNORE_MARKER}%[Imported from %')`;

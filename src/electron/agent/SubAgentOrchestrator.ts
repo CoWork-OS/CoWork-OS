@@ -13,12 +13,9 @@
  */
 
 import { EventEmitter } from "events";
-import Database from "better-sqlite3";
-import {
-  OrchestrationRepository,
-  OrchestrationRun,
-  OrchestrationTask,
-} from "./OrchestrationRepository";
+import type Database from "better-sqlite3";
+import { OrchestrationRun, OrchestrationTask } from "./OrchestrationRepository";
+import { OrchestrationRepository } from "./orchestration-repository-facades";
 import type { AgentDaemon } from "./daemon";
 import { getACPRegistry } from "../acp";
 import { RemoteAgentInvoker } from "../acp/remote-invoker";
@@ -58,7 +55,7 @@ export class SubAgentOrchestrator extends EventEmitter {
       status: "pending" as const,
     }));
 
-    const run = this.repo.create({
+    const run = await this.repo.create({
       rootTaskId: this.deps.parentTaskId,
       workspaceId: this.deps.workspaceId,
       tasks: initialTasks,
@@ -75,7 +72,7 @@ export class SubAgentOrchestrator extends EventEmitter {
    * Re-attaches to any tasks still in-flight and continues the DAG.
    */
   async resume(runId: string): Promise<void> {
-    const run = this.repo.findById(runId);
+    const run = await this.repo.findById(runId);
     if (!run || run.status !== "running") return;
     await this.executeRun(run);
   }
@@ -115,7 +112,7 @@ export class SubAgentOrchestrator extends EventEmitter {
         if (allDone) {
           const succeeded = current.tasks.filter((t) => t.status === "completed").length;
           const failed = current.tasks.filter((t) => t.status === "failed").length;
-          current = this.setRunStatus(current, "completed");
+          current = await this.setRunStatus(current, "completed");
           this.emit("run_completed", {
             type: "run_completed",
             runId: current.id,
@@ -126,7 +123,7 @@ export class SubAgentOrchestrator extends EventEmitter {
         }
         // Wait for a task completion signal instead of busy-polling
         await this.waitForTaskCompletion(15_000);
-        const refreshed = this.repo.findById(current.id);
+        const refreshed = await this.repo.findById(current.id);
         if (!refreshed) return;
         current = refreshed;
         continue;
@@ -143,7 +140,7 @@ export class SubAgentOrchestrator extends EventEmitter {
 
       // Refresh state from DB — no artificial delay needed since spawnTask
       // already awaited task completion
-      const refreshed = this.repo.findById(current.id);
+      const refreshed = await this.repo.findById(current.id);
       if (!refreshed) return;
       current = refreshed;
     }
@@ -167,7 +164,7 @@ export class SubAgentOrchestrator extends EventEmitter {
   ): Promise<OrchestrationRun> {
     // Mark as spawned immediately to prevent double-spawn
     const updated = this.updateTask(run, task.id, { status: "spawned" });
-    this.repo.update(updated.id, { tasks: updated.tasks });
+    await this.repo.update(updated.id, { tasks: updated.tasks });
 
     try {
       let taskId = "";
@@ -232,7 +229,7 @@ export class SubAgentOrchestrator extends EventEmitter {
         remoteTaskId,
         startedAt: Date.now(),
       });
-      this.repo.update(afterSpawn.id, { tasks: afterSpawn.tasks });
+      await this.repo.update(afterSpawn.id, { tasks: afterSpawn.tasks });
       this.emit("task_spawned", { type: "task_spawned", nodeId: task.id, taskId });
 
       // Wait for completion
@@ -247,7 +244,7 @@ export class SubAgentOrchestrator extends EventEmitter {
           output: result.output,
           completedAt: Date.now(),
         });
-        this.repo.update(afterDone.id, { tasks: afterDone.tasks });
+        await this.repo.update(afterDone.id, { tasks: afterDone.tasks });
         this.emit("task_completed", {
           type: "task_completed",
           nodeId: task.id,
@@ -261,7 +258,7 @@ export class SubAgentOrchestrator extends EventEmitter {
           error: result.error,
           completedAt: Date.now(),
         });
-        this.repo.update(afterFail.id, { tasks: afterFail.tasks });
+        await this.repo.update(afterFail.id, { tasks: afterFail.tasks });
         this.emit("task_failed", {
           type: "task_failed",
           nodeId: task.id,
@@ -277,7 +274,7 @@ export class SubAgentOrchestrator extends EventEmitter {
         error,
         completedAt: Date.now(),
       });
-      this.repo.update(afterError.id, { tasks: afterError.tasks });
+      await this.repo.update(afterError.id, { tasks: afterError.tasks });
       this.emit("task_failed", { type: "task_failed", nodeId: task.id, taskId: "", error });
       return afterError;
     }
@@ -373,12 +370,12 @@ export class SubAgentOrchestrator extends EventEmitter {
     };
   }
 
-  private setRunStatus(
+  private async setRunStatus(
     run: OrchestrationRun,
     status: OrchestrationRun["status"],
-  ): OrchestrationRun {
+  ): Promise<OrchestrationRun> {
     const updated = { ...run, status, completedAt: Date.now() };
-    this.repo.update(run.id, { status, completedAt: updated.completedAt });
+    await this.repo.update(run.id, { status, completedAt: updated.completedAt });
     return updated;
   }
 }

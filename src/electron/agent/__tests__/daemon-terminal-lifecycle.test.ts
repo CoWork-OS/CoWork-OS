@@ -328,7 +328,7 @@ describe("AgentDaemon terminal lifecycle helpers", () => {
     );
   });
 
-  it("cancelTaskRecord persists cancelled status and emits canonical terminal events", () => {
+  it("cancelTaskRecord persists cancelled status and emits canonical terminal events", async () => {
     const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
       taskRepo: {
         findById: vi.fn().mockReturnValue({
@@ -360,7 +360,7 @@ describe("AgentDaemon terminal lifecycle helpers", () => {
       teamOrchestrator: null,
     }) as Any;
 
-    AgentDaemon.prototype.cancelTaskRecord.call(
+    await AgentDaemon.prototype.cancelTaskRecord.call(
       daemonLike,
       "task-cancelled",
       "Task was stopped by user",

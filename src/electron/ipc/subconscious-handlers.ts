@@ -194,7 +194,7 @@ export function setupImprovementHandlers(service: SubconsciousLoopService): void
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_RUN_NEXT, async () => {
     const run = await service.runNow();
     return run
-      ? service.listImprovementCampaigns().find((item) => item.id === run.id) || null
+      ? (await service.listImprovementCampaigns()).find((item) => item.id === run.id) || null
       : null;
   });
   ipcMain.handle(
@@ -205,17 +205,17 @@ export function setupImprovementHandlers(service: SubconsciousLoopService): void
   ipcMain.handle(IPC_CHANNELS.IMPROVEMENT_RETRY_RUN, async (_event, runId: string) => {
     const run = await service.retryRun(validateInput(UUIDSchema, runId, "run ID"));
     return run
-      ? service.listImprovementCampaigns().find((item) => item.id === run.id) || null
+      ? (await service.listImprovementCampaigns()).find((item) => item.id === run.id) || null
       : null;
   });
   ipcMain.handle(
     IPC_CHANNELS.IMPROVEMENT_DISMISS_CANDIDATE,
     async (_event, candidateId: string) => {
       const validatedCandidateId = validateInput(TargetKeySchema, candidateId, "candidate ID");
-      const target = service.dismissTarget(validatedCandidateId);
+      const target = await service.dismissTarget(validatedCandidateId);
       return target
-        ? service
-            .listImprovementCandidates(target.target.workspaceId)
+        ? (await service
+            .listImprovementCandidates(target.target.workspaceId))
             .find((item) => item.id === candidateId)
         : undefined;
     },
@@ -225,7 +225,7 @@ export function setupImprovementHandlers(service: SubconsciousLoopService): void
     async (_event, runId: string, reviewStatus: "accepted" | "dismissed") => {
       const run = await service.reviewRun(validateInput(UUIDSchema, runId, "run ID"), reviewStatus);
       return run
-        ? service.listImprovementCampaigns().find((item) => item.id === run.id)
+        ? (await service.listImprovementCampaigns()).find((item) => item.id === run.id)
         : undefined;
     },
   );

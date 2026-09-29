@@ -18,7 +18,7 @@ import {
   DEFAULT_AGENT_ROLES,
 } from "../../shared/types";
 import { normalizeAgentRoleIcon } from "./agent-role-display";
-import { AutomationProfileRepository } from "./AutomationProfileRepository";
+import { AutomationProfileStore } from "./AutomationProfileRepository";
 import { createLogger } from "../utils/logger";
 
 type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
@@ -137,11 +137,11 @@ function mergeAutomationProfileMetadataIntoSoul(
 /**
  * Repository for managing agent roles in the database
  */
-export class AgentRoleRepository {
-  private readonly automationProfileRepo: AutomationProfileRepository;
+export class AgentRoleStore {
+  private readonly automationProfileRepo: AutomationProfileStore;
 
   constructor(private db: Database.Database) {
-    this.automationProfileRepo = new AutomationProfileRepository(db);
+    this.automationProfileRepo = new AutomationProfileStore(db);
   }
 
   private buildHeartbeatPolicyAlias(role: AgentRole): HeartbeatPolicy | undefined {
@@ -402,6 +402,79 @@ export class AgentRoleRepository {
   /**
    * Find all agent roles
    */
+  /**
+   * Detach persona-template and twin roles from core automation: mark them templates,
+   * turn their heartbeats and automation profiles off, and drop their heartbeat policies
+   * and subconscious state. A startup repair; repeat runs change nothing.
+   */
+  detachTemplatedRolesFromCoreAutomation(now: number): { roleCount: number; changes: number } {
+    const templatedRoles = this.db
+      .prepare(
+        `SELECT id
+         FROM agent_roles
+         WHERE COALESCE(source_template_id, '') != ''
+            OR name LIKE 'twin-%'
+            OR display_name LIKE '%Twin%'`,
+      )
+      .all() as Array<{ id?: string }>;
+
+    const roleIds = templatedRoles
+      .map((row) => (typeof row.id === "string" ? row.id : ""))
+      .filter(Boolean);
+    if (!roleIds.length) {
+      return { roleCount: 0, changes: 0 };
+    }
+
+    const placeholders = roleIds.map(() => "?").join(", ");
+    const targetKeys = roleIds.map((id) => `agent_role:${id}`);
+    let changes = 0;
+    const run = (sql: string, ...params: unknown[]): void => {
+      changes += Number(this.db.prepare(sql).run(...params).changes || 0);
+    };
+    // Only touch rows that still need it, so repeat launches are no-ops. As a unit this is
+    // one transaction.
+    {
+      run(
+        `UPDATE agent_roles
+         SET role_kind = 'persona_template',
+             heartbeat_enabled = 0,
+             heartbeat_status = 'idle',
+             heartbeat_last_pulse_result = NULL,
+             heartbeat_last_dispatch_kind = NULL,
+             updated_at = ?
+         WHERE id IN (${placeholders})
+           AND (COALESCE(role_kind, '') != 'persona_template'
+             OR COALESCE(heartbeat_enabled, 0) != 0
+             OR COALESCE(heartbeat_status, 'idle') != 'idle'
+             OR heartbeat_last_pulse_result IS NOT NULL
+             OR heartbeat_last_dispatch_kind IS NOT NULL)`,
+        now,
+        ...roleIds,
+      );
+      run(
+        `UPDATE automation_profiles
+         SET enabled = 0,
+             updated_at = ?
+         WHERE agent_role_id IN (${placeholders}) AND enabled != 0`,
+        now,
+        ...roleIds,
+      );
+      run(`DELETE FROM heartbeat_policies WHERE agent_role_id IN (${placeholders})`, ...roleIds);
+      for (const table of [
+        "subconscious_dispatch_records",
+        "subconscious_backlog_items",
+        "subconscious_decisions",
+        "subconscious_critiques",
+        "subconscious_hypotheses",
+        "subconscious_runs",
+        "subconscious_targets",
+      ]) {
+        run(`DELETE FROM ${table} WHERE target_key IN (${placeholders})`, ...targetKeys);
+      }
+    }
+    return { roleCount: roleIds.length, changes };
+  }
+
   findAll(includeInactive = false): AgentRole[] {
     const stmt = includeInactive
       ? this.db.prepare("SELECT * FROM agent_roles ORDER BY sort_order ASC, created_at ASC")

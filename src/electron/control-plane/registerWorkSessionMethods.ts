@@ -1,12 +1,13 @@
 import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
-import { WorkSessionProtocolRepository } from "../database/WorkSessionProtocolRepository";
+import { WorkSessionProtocolReader } from "../database/repository-facades";
 import {
   evaluateIsolatedReplay,
   type WorkSessionReplayAssertions,
 } from "../sessions/WorkSessionReplayEvaluationService";
 import { ControlPlaneServer } from "./server";
 import { ErrorCodes, Methods } from "./protocol";
+import { controlPlaneStatements } from "./control-plane-statement-port";
 
 type Scope = "admin" | "read" | "write" | "operator";
 type RequireScope = (client: unknown, scope: Scope) => void;
@@ -72,7 +73,7 @@ export function registerWorkSessionMethods(input: {
 }): void {
   const { server, db, agentDaemon, requireScope } = input;
   const reliability = agentDaemon.getWorkSessionReliabilityService();
-  const protocol = new WorkSessionProtocolRepository(db);
+  const protocol = new WorkSessionProtocolReader(db);
 
   server.registerMethod(Methods.WORK_SESSION_ROLLOUT_GET, async (client) => {
     requireScope(client, "read");
@@ -147,13 +148,13 @@ export function registerWorkSessionMethods(input: {
     const value = record(params);
     const taskId = id(value.taskId, "taskId");
     const sessionId =
-      protocol.findSessionIdForTask(taskId) ||
+      (await protocol.findSessionIdForTask(taskId)) ||
       (
-        db.prepare("SELECT id FROM work_sessions WHERE task_id = ? LIMIT 1").get(taskId) as
+        (await controlPlaneStatements(db).get("api_workSessionIdForTask", [taskId])) as
           | { id?: string }
           | undefined
       )?.id;
-    const items = sessionId ? protocol.listAllItems(sessionId) : [];
+    const items = sessionId ? await protocol.listAllItems(sessionId) : [];
     return {
       taskId,
       sessionId: sessionId || null,

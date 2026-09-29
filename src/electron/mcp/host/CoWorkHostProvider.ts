@@ -1,12 +1,9 @@
+import { TaskRepository, WorkspaceRepository } from "../../database/repository-facades";
+import { ArtifactRepository } from "../../database/repository-facades";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import path from "path";
-import {
-  ArtifactRepository,
-  TaskEventRepository,
-  TaskRepository,
-  WorkspaceRepository,
-} from "../../database/repositories";
+import { TaskEventRepository } from "../../database/repositories";
 import type { MCPResource, MCPResourceReadResult, MCPTool } from "../types";
 
 type ToolDelegate = {
@@ -55,7 +52,7 @@ export class CoWorkHostProvider {
     return this.deps.toolDelegate.executeTool(name, args);
   }
 
-  getResources(): MCPResource[] {
+  async getResources(): Promise<MCPResource[]> {
     const resources: MCPResource[] = [
       {
         uri: "cowork://workspaces",
@@ -71,7 +68,7 @@ export class CoWorkHostProvider {
       },
     ];
 
-    const workspaces = this.deps.workspaceRepo.findAll().slice(0, 25);
+    const workspaces = (await this.deps.workspaceRepo.findAll()).slice(0, 25);
     for (const workspace of workspaces) {
       resources.push({
         uri: `cowork://workspaces/${workspace.id}`,
@@ -81,7 +78,7 @@ export class CoWorkHostProvider {
       });
     }
 
-    const tasks = this.deps.taskRepo.findAll(25, 0);
+    const tasks = await this.deps.taskRepo.findAll(25, 0);
     for (const task of tasks) {
       resources.push(
         {
@@ -103,7 +100,7 @@ export class CoWorkHostProvider {
           mimeType: "application/json",
         },
       );
-      for (const artifact of this.deps.artifactRepo.findByTaskId(task.id).slice(0, 10)) {
+      for (const artifact of (await this.deps.artifactRepo.findByTaskId(task.id)).slice(0, 10)) {
         resources.push({
           uri: `cowork://artifacts/${artifact.id}`,
           name: path.basename(artifact.path),
@@ -121,19 +118,19 @@ export class CoWorkHostProvider {
     const pathSegments = parsed.pathname.split("/").filter(Boolean);
 
     if (parsed.hostname === "workspaces" && pathSegments.length === 0) {
-      return toJsonResource(uri, this.deps.workspaceRepo.findAll());
+      return toJsonResource(uri, await this.deps.workspaceRepo.findAll());
     }
     if (parsed.hostname === "workspaces" && pathSegments.length === 1) {
-      const workspace = this.deps.workspaceRepo.findById(pathSegments[0]);
+      const workspace = await this.deps.workspaceRepo.findById(pathSegments[0]);
       if (!workspace) throw new Error("Workspace not found");
       return toJsonResource(uri, workspace);
     }
 
     if (parsed.hostname === "tasks" && pathSegments.length === 0) {
-      return toJsonResource(uri, this.deps.taskRepo.findAll(100, 0));
+      return toJsonResource(uri, await this.deps.taskRepo.findAll(100, 0));
     }
     if (parsed.hostname === "tasks" && pathSegments.length === 1) {
-      const task = this.deps.taskRepo.findById(pathSegments[0]);
+      const task = await this.deps.taskRepo.findById(pathSegments[0]);
       if (!task) throw new Error("Task not found");
       return toJsonResource(uri, task);
     }
@@ -145,12 +142,12 @@ export class CoWorkHostProvider {
       pathSegments.length === 2 &&
       pathSegments[1] === "artifacts"
     ) {
-      return toJsonResource(uri, this.deps.artifactRepo.findByTaskId(pathSegments[0]));
+      return toJsonResource(uri, await this.deps.artifactRepo.findByTaskId(pathSegments[0]));
     }
 
     if (parsed.hostname === "artifacts" && pathSegments.length === 1) {
       const artifactId = pathSegments[0];
-      const artifact = this.deps.artifactRepo.findById(artifactId);
+      const artifact = await this.deps.artifactRepo.findById(artifactId);
       if (!artifact) throw new Error("Artifact not found");
 
       if (!fsSync.existsSync(artifact.path)) {

@@ -13,11 +13,11 @@ import {
 } from "../../shared/types";
 import { isTerminalTaskStatus } from "../../shared/task-status";
 import {
-  ApprovalRepository,
-  ArtifactRepository,
-  InputRequestRepository,
+  ApprovalStore,
+  ArtifactStore,
+  InputRequestStore,
   TaskEventRepository,
-  TaskRepository,
+  TaskStore,
 } from "../database/repositories";
 
 const MAX_HEADLINE_LENGTH = 240;
@@ -179,18 +179,18 @@ function defaultHeadline(task: Task): string {
 }
 
 export class SessionProgressService {
-  private readonly taskRepo: TaskRepository;
+  private readonly taskRepo: TaskStore;
   private readonly eventRepo: TaskEventRepository;
-  private readonly approvalRepo: ApprovalRepository;
-  private readonly inputRequestRepo: InputRequestRepository;
-  private readonly artifactRepo: ArtifactRepository;
+  private readonly approvalRepo: ApprovalStore;
+  private readonly inputRequestRepo: InputRequestStore;
+  private readonly artifactRepo: ArtifactStore;
 
   constructor(private readonly db: Database.Database) {
-    this.taskRepo = new TaskRepository(db);
+    this.taskRepo = new TaskStore(db);
     this.eventRepo = new TaskEventRepository(db);
-    this.approvalRepo = new ApprovalRepository(db);
-    this.inputRequestRepo = new InputRequestRepository(db);
-    this.artifactRepo = new ArtifactRepository(db);
+    this.approvalRepo = new ApprovalStore(db);
+    this.inputRequestRepo = new InputRequestStore(db);
+    this.artifactRepo = new ArtifactStore(db);
   }
 
   get(taskId: string): SessionProgressState | undefined {
@@ -223,9 +223,13 @@ export class SessionProgressService {
     return state;
   }
 
+  /** Whether the event changes progress state (and so triggers a rebuild). */
+  isStructuralEvent(event: TaskEvent): boolean {
+    return STRUCTURAL_EVENT_TYPES.has(eventType(event));
+  }
+
   updateFromEvent(event: TaskEvent): SessionProgressState | undefined {
-    const type = eventType(event);
-    if (!STRUCTURAL_EVENT_TYPES.has(type)) return undefined;
+    if (!this.isStructuralEvent(event)) return undefined;
     return this.rebuild(event.taskId);
   }
 

@@ -10,6 +10,7 @@
  * Settings are stored encrypted in the database using SecureSettingsRepository.
  */
 
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import {
   app,
   Tray,
@@ -25,7 +26,7 @@ import * as os from "os";
 import * as fs from "fs";
 import { ChannelGateway } from "../gateway";
 import { DatabaseManager } from "../database/schema";
-import { TaskRepository, WorkspaceRepository } from "../database/repositories";
+import { type Channel } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
 import { QuickInputWindow } from "./QuickInputWindow";
 import {
@@ -37,6 +38,7 @@ import {
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { createLogger } from "../utils/logger";
 import {
   createUniqueScopedTempWorkspaceDirectorySync,
   ensureTempWorkspaceDirectoryPathSync,
@@ -56,6 +58,7 @@ import { NativeNotificationCenter, NotificationOverlayManager } from "../notific
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 
+const trayLogger = createLogger("TrayManager");
 const LEGACY_SETTINGS_FILE = "tray-settings.json";
 
 /**
@@ -139,6 +142,7 @@ export class TrayManager {
   private workspaceRepo: WorkspaceRepository | null = null;
   private settings: TraySettings = DEFAULT_SETTINGS;
   private connectedChannels: number = 0;
+  private contextMenuSequence = 0;
   private activeTaskCount: number = 0;
   private quickInputWindow: QuickInputWindow | null = null;
   private currentQuickTaskId: string | null = null;
@@ -225,7 +229,9 @@ export class TrayManager {
     // Initialize quick input window
     this.quickInputWindow = new QuickInputWindow();
     this.quickInputWindow.setOnSubmit((task, workspaceId) => {
-      this.handleQuickTaskSubmit(task, workspaceId);
+      void this.handleQuickTaskSubmit(task, workspaceId).catch((error: unknown) => {
+        trayLogger.warn("Quick task submission failed:", error);
+      });
     });
     this.quickInputWindow.setOnOpenMain(() => {
       this.showMainWindow();
@@ -403,11 +409,12 @@ export class TrayManager {
     if (!this.workspaceRepo) throw new Error("Workspace repository not available");
 
     const db = this.dbManager.getDatabase();
-    const ensureTempWorkspace = (
+    const workspaceRepo = this.workspaceRepo;
+    const ensureTempWorkspace = async (
       workspaceId: string,
       workspacePath: string,
       existing?: Workspace,
-    ): Workspace => {
+    ): Promise<Workspace> => {
       const tempWorkspaceRoot = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME);
       const safeWorkspacePath = ensureTempWorkspaceDirectoryPathSync(
         tempWorkspaceRoot,
@@ -426,23 +433,14 @@ export class TrayManager {
         unrestrictedFileAccess: true,
       };
 
-      const stmt = db.prepare(`
-        INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          name = excluded.name,
-          path = excluded.path,
-          last_used_at = excluded.last_used_at,
-          permissions = excluded.permissions
-      `);
-      stmt.run(
-        workspaceId,
-        TEMP_WORKSPACE_NAME,
-        safeWorkspacePath,
+      await workspaceRepo.upsertWithId({
+        id: workspaceId,
+        name: TEMP_WORKSPACE_NAME,
+        path: safeWorkspacePath,
         createdAt,
         lastUsedAt,
-        JSON.stringify(permissions),
-      );
+        permissions,
+      });
 
       return {
         id: workspaceId,
@@ -455,22 +453,22 @@ export class TrayManager {
       };
     };
 
-    const existing = this.workspaceRepo
-      .findAll()
+    const existing = (await this.workspaceRepo
+      .findAll())
       .find((workspace) => isTempWorkspaceInScope(workspace.id, "tray"));
     let workspace: Workspace;
     if (existing) {
-      workspace = ensureTempWorkspace(existing.id, existing.path, existing);
+      workspace = await ensureTempWorkspace(existing.id, existing.path, existing);
     } else {
       const created = createUniqueScopedTempWorkspaceDirectorySync(
         path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
         "tray",
       );
-      workspace = ensureTempWorkspace(created.workspaceId, created.path);
+      workspace = await ensureTempWorkspace(created.workspaceId, created.path);
     }
 
     try {
-      pruneTempWorkspaces({
+      await pruneTempWorkspaces({
         db,
         tempWorkspaceRoot: path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
         currentWorkspaceId: workspace.id,
@@ -510,8 +508,8 @@ export class TrayManager {
       let wsId = workspaceId;
       if (!wsId) {
         // Get the first non-temp workspace, or use temp workspace as fallback
-        const workspaces = this.workspaceRepo
-          .findAll()
+        const workspaces = (await this.workspaceRepo
+          .findAll())
           .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
         if (workspaces.length > 0) {
           wsId = workspaces[0].id;
@@ -523,7 +521,7 @@ export class TrayManager {
       }
 
       // Create task
-      const task = this.taskRepo.create({
+      const task = await this.taskRepo.create({
         title: prompt.slice(0, 50) + (prompt.length > 50 ? "..." : ""),
         prompt,
         workspaceId: wsId,
@@ -809,10 +807,21 @@ export class TrayManager {
    * Update the tray context menu
    */
   private updateContextMenu(): void {
+    const sequence = ++this.contextMenuSequence;
+    void this.refreshContextMenu(sequence).catch((error) => {
+      trayLogger.warn("Failed to update the tray menu:", error);
+    });
+  }
+
+  private async refreshContextMenu(sequence: number): Promise<void> {
     if (!this.tray) return;
 
-    const statusText = this.getStatusText();
-    const workspaces = this.getWorkspaces();
+    // Channels are read through the async storage facade; a refresh that an
+    // overlapping later one has superseded drops its result.
+    const channels = (await this.gateway?.getChannels()) || [];
+    if (!this.tray || sequence !== this.contextMenuSequence) return;
+    const statusText = this.getStatusText(channels);
+    const workspaces = await this.getWorkspaces();
 
     const menuTemplate: Electron.MenuItemConstructorOptions[] = [
       // Status section
@@ -859,7 +868,7 @@ export class TrayManager {
       // Channels submenu
       {
         label: "Channels",
-        submenu: this.buildChannelsSubmenu(),
+        submenu: this.buildChannelsSubmenu(channels),
       },
       { type: "separator" },
 
@@ -915,9 +924,7 @@ export class TrayManager {
   /**
    * Build the channels submenu
    */
-  private buildChannelsSubmenu(): Electron.MenuItemConstructorOptions[] {
-    const channels = this.gateway?.getChannels() || [];
-
+  private buildChannelsSubmenu(channels: Channel[]): Electron.MenuItemConstructorOptions[] {
     if (channels.length === 0) {
       return [{ label: "No channels configured", enabled: false }];
     }
@@ -941,9 +948,8 @@ export class TrayManager {
   /**
    * Get status text for the menu
    */
-  private getStatusText(): string {
+  private getStatusText(channels: Channel[]): string {
     const chronicleSettings = ChronicleSettingsManager.loadSettings();
-    const channels = this.gateway?.getChannels() || [];
     this.connectedChannels = channels.filter((c) => c.status === "connected").length;
 
     if (this.activeTaskCount > 0) {
@@ -994,12 +1000,11 @@ export class TrayManager {
   /**
    * Get workspaces from database (excluding temp workspace)
    */
-  private getWorkspaces(): Array<{ id: string; name: string; path: string }> {
+  private async getWorkspaces(): Promise<Array<{ id: string; name: string; path: string }>> {
     if (!this.workspaceRepo) return [];
 
     try {
-      return this.workspaceRepo
-        .findAll()
+      return (await this.workspaceRepo.findAll())
         .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id))
         .map(({ id, name, path: workspacePath }) => ({ id, name, path: workspacePath }))
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -1036,7 +1041,7 @@ export class TrayManager {
 
     // On macOS, also bring app to foreground
     if (process.platform === "darwin") {
-      app.dock?.show();
+      void app.dock?.show();
     }
   }
 
@@ -1066,7 +1071,7 @@ export class TrayManager {
     if (process.platform !== "darwin") return;
 
     if (this.settings.showDockIcon) {
-      app.dock?.show();
+      void app.dock?.show();
     } else {
       app.dock?.hide();
     }

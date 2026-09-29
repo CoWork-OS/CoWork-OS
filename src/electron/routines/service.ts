@@ -1,3 +1,5 @@
+import { RoutineRepository, RoutineWorkflowRepository } from "./routine-repository-facades";
+import { RoutineStore } from "./routine-sql";
 import { randomUUID } from "crypto";
 import type { AgentConfig } from "../../shared/types";
 import type { AccessProfileId } from "../../shared/access-profiles";
@@ -44,7 +46,7 @@ import type {
 import { getWorkflowCapabilities } from "./workflow/catalog";
 import { RoutineWorkflowEngine } from "./workflow/engine";
 import { generateRoutineWorkflowDraft } from "./workflow/generator";
-import { RoutineWorkflowRepository } from "./workflow/repository";
+
 import { validateRoutineWorkflow } from "./workflow/validation";
 import { GoogleWorkspaceSettingsManager } from "../settings/google-workspace-manager";
 import {
@@ -89,6 +91,8 @@ export class RoutineService {
     >;
 
   private readonly workflowRepository: RoutineWorkflowRepository;
+  // The service's own routine and run rows, through services-domain units (DB6).
+  private readonly routineRows: RoutineRepository;
   private readonly workflowEngine: RoutineWorkflowEngine;
   private readonly workflowSecretStore = new RoutineWorkflowSecretStore();
   private workflowInboxTimer: NodeJS.Timeout | null = null;
@@ -103,23 +107,19 @@ export class RoutineService {
     };
     this.ensureSchema();
     this.workflowRepository = new RoutineWorkflowRepository(this.deps.db, this.deps.now);
+    this.routineRows = new RoutineRepository(this.deps.db);
     this.workflowEngine = new RoutineWorkflowEngine(this.workflowRepository, {
       now: this.deps.now,
       executeAction: this.deps.executeWorkflowAction,
     });
   }
 
-  list(): Routine[] {
-    const rows = this.deps.db
-      .prepare("SELECT * FROM automation_routines ORDER BY updated_at DESC")
-      .all() as Any[];
-    return rows.map((row) => this.mapRow(row));
+  async list(): Promise<Routine[]> {
+    return (await this.routineRows.listRoutineRows()).map((row) => this.mapRow(row));
   }
 
-  get(id: string): Routine | null {
-    const row = this.deps.db.prepare("SELECT * FROM automation_routines WHERE id = ?").get(id) as
-      | Any
-      | undefined;
+  async get(id: string): Promise<Routine | null> {
+    const row = await this.routineRows.getRoutineRow(id);
     return row ? this.mapRow(row) : null;
   }
 
@@ -127,9 +127,9 @@ export class RoutineService {
     return getWorkflowCapabilities();
   }
 
-  getActiveWorkflowDefinition(routineId: string): RoutineWorkflowDefinition | null {
-    const routine = this.get(routineId);
-    const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+  async getActiveWorkflowDefinition(routineId: string): Promise<RoutineWorkflowDefinition | null> {
+    const routine = await this.get(routineId);
+    const version = routine ? await this.resolveActiveWorkflowVersion(routine) : null;
     return version ? structuredClone(version.definition) : null;
   }
 
@@ -146,8 +146,8 @@ export class RoutineService {
     return generateRoutineWorkflowDraft(normalized);
   }
 
-  saveWorkflowDraft(routineId: string, workflow: RoutineWorkflowDefinition) {
-    const routine = this.get(routineId);
+  async saveWorkflowDraft(routineId: string, workflow: RoutineWorkflowDefinition) {
+    const routine = await this.get(routineId);
     if (!routine) throw new Error(`Routine not found: ${routineId}`);
     const validation = validateRoutineWorkflow(workflow, { allowIncomplete: true });
     if (validation.issues.some((issue) => issue.severity === "error")) {
@@ -158,8 +158,8 @@ export class RoutineService {
           .join(" "),
       );
     }
-    const version = this.workflowRepository.createVersion(routineId, workflow, "draft");
-    this.persist(
+    const version = await this.workflowRepository.createVersion(routineId, workflow, "draft");
+    await this.persist(
       toCompatibilityRoutine({
         ...routine,
         workflow: structuredClone(workflow),
@@ -170,8 +170,8 @@ export class RoutineService {
   }
 
   async activateWorkflowVersion(routineId: string, versionId: string): Promise<Routine | null> {
-    const routine = this.get(routineId);
-    const version = this.workflowRepository.getVersion(versionId);
+    const routine = await this.get(routineId);
+    const version = await this.workflowRepository.getVersion(versionId);
     if (!routine || !version || version.routineId !== routineId) return null;
     const validation = validateRoutineWorkflow(version.definition);
     if (!validation.valid) {
@@ -184,17 +184,19 @@ export class RoutineService {
     }
     this.assertWorkflowSecretsReady(version.definition);
     this.assertWorkflowAccountReady(version.definition, validation.requiredScopes);
-    this.workflowRepository.activateVersion(routineId, versionId);
+    await this.workflowRepository.activateVersion(routineId, versionId);
     const updated = toCompatibilityRoutine({
       ...routine,
       enabled: true,
       workflow: structuredClone(version.definition),
-      triggers: normalizeTriggers(deriveRoutineTriggersFromWorkflow(version.definition)),
+      triggers: normalizeTriggers(
+        deriveRoutineTriggersFromWorkflow(version.definition, this.deps.now()),
+      ),
       activeWorkflowVersionId: versionId,
       updatedAt: this.deps.now(),
     });
     const synced = await this.syncRoutine(updated, routine);
-    this.persist(synced);
+    await this.persist(synced);
     return synced;
   }
 
@@ -226,11 +228,14 @@ export class RoutineService {
     return this.workflowSecretStore.upsert(input);
   }
 
-  removeWorkflowSecret(id: string) {
-    const referencedBy = this.list()
-      .filter((routine) => routine.enabled)
-      .filter((routine) => {
-        const workflow = this.getActiveWorkflowDefinition(routine.id);
+  async removeWorkflowSecret(id: string) {
+    const enabled = (await this.list()).filter((routine) => routine.enabled);
+    const workflows = await Promise.all(
+      enabled.map((routine) => this.getActiveWorkflowDefinition(routine.id)),
+    );
+    const referencedBy = enabled
+      .filter((_routine, index) => {
+        const workflow = workflows[index];
         return Boolean(
           workflow &&
           flattenWorkflowNodes(workflow.nodes).some(
@@ -248,7 +253,7 @@ export class RoutineService {
   }
 
   async testWorkflow(request: RoutineWorkflowTestRequest) {
-    const routine = request.routineId ? this.get(request.routineId) : null;
+    const routine = request.routineId ? await this.get(request.routineId) : null;
     const workflow = request.workflow || routine?.workflow;
     if (!workflow) throw new Error("A workflow draft is required for testing.");
     const testRoutine =
@@ -277,25 +282,25 @@ export class RoutineService {
       idempotencyKey: `test:${randomUUID()}`,
       dryRun: request.dryRun !== false,
     });
-    return { run, steps: this.workflowRepository.listSteps(run.id) };
+    return { run, steps: await this.workflowRepository.listSteps(run.id) };
   }
 
-  enqueueWorkflowEvent(envelope: RoutineWorkflowEventEnvelope) {
-    const routine = this.get(envelope.routineId);
-    const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+  async enqueueWorkflowEvent(envelope: RoutineWorkflowEventEnvelope) {
+    const routine = await this.get(envelope.routineId);
+    const version = routine ? await this.resolveActiveWorkflowVersion(routine) : null;
     if (!routine || !routine.enabled || !version) {
       throw new Error("The target Routine v2 workflow is not active.");
     }
-    const event = this.workflowRepository.enqueueEvent(envelope);
+    const event = await this.workflowRepository.enqueueEvent(envelope);
     void this.processWorkflowInbox();
     return event;
   }
 
   async respondToWorkflowApproval(request: RoutineWorkflowApprovalRequest) {
-    const run = this.workflowRepository.getRun(request.runId);
+    const run = await this.workflowRepository.getRun(request.runId);
     if (!run) throw new Error(`Workflow run not found: ${request.runId}`);
-    const routine = this.get(run.routineId);
-    const version = this.workflowRepository.getVersion(run.workflowVersionId);
+    const routine = await this.get(run.routineId);
+    const version = await this.workflowRepository.getVersion(run.workflowVersionId);
     if (!routine || !version)
       throw new Error("The workflow definition for this run is unavailable.");
     const updated = await this.workflowEngine.respondToApproval({
@@ -305,21 +310,21 @@ export class RoutineService {
       stepId: request.stepId,
       approved: request.approved,
     });
-    this.refreshRoutineRunFromWorkflow(updated.id);
+    await this.refreshRoutineRunFromWorkflow(updated.id);
     return updated;
   }
 
-  cancelWorkflowRun(runId: string) {
-    const run = this.workflowEngine.cancel(runId);
-    if (run) this.refreshRoutineRunFromWorkflow(run.id);
+  async cancelWorkflowRun(runId: string) {
+    const run = await this.workflowEngine.cancel(runId);
+    if (run) await this.refreshRoutineRunFromWorkflow(run.id);
     return run;
   }
 
   async retryWorkflowRun(runId: string) {
-    const previous = this.workflowRepository.getRun(runId);
+    const previous = await this.workflowRepository.getRun(runId);
     if (!previous) throw new Error(`Workflow run not found: ${runId}`);
-    const routine = this.get(previous.routineId);
-    const version = this.workflowRepository.getVersion(previous.workflowVersionId);
+    const routine = await this.get(previous.routineId);
+    const version = await this.workflowRepository.getVersion(previous.workflowVersionId);
     if (!routine || !version)
       throw new Error("The workflow definition for this run is unavailable.");
     const context = previous.context as Record<string, Any>;
@@ -335,17 +340,17 @@ export class RoutineService {
     });
   }
 
-  startWorkflowRuntime(): void {
+  async startWorkflowRuntime(): Promise<void> {
     if (this.workflowInboxTimer) return;
     this.workflowRecoveryReady = false;
-    this.workflowRepository.requeueProcessingEvents();
+    await this.workflowRepository.requeueProcessingEvents();
     this.workflowInboxTimer = setInterval(() => void this.processWorkflowInbox(), 1_000);
     this.workflowMaintenanceTimer = setInterval(
-      () => this.pruneExpiredWorkflowData(),
+      () => void this.pruneExpiredWorkflowData(),
       6 * 60 * 60 * 1_000,
     );
     this.workflowMaintenanceTimer.unref?.();
-    this.pruneExpiredWorkflowData();
+    await this.pruneExpiredWorkflowData();
     void this.recoverWorkflowRuns().finally(() => {
       this.workflowRecoveryReady = true;
       void this.processWorkflowInbox();
@@ -362,41 +367,14 @@ export class RoutineService {
 
   async listRuns(routineId?: string, limit = DEFAULT_RUN_LIST_LIMIT): Promise<RoutineRun[]> {
     await this.refreshRunStatuses(routineId);
-    const rows = (
-      routineId
-        ? this.deps.db
-            .prepare(
-              `SELECT * FROM routine_runs
-             WHERE routine_id = ?
-             ORDER BY started_at DESC, created_at DESC
-             LIMIT ?`,
-            )
-            .all(routineId, limit)
-        : this.deps.db
-            .prepare(
-              `SELECT * FROM routine_runs
-             ORDER BY started_at DESC, created_at DESC
-             LIMIT ?`,
-            )
-            .all(limit)
-    ) as Any[];
+    const rows = await this.routineRows.listRunRows(routineId ?? null, limit);
     return dedupeRoutineRuns(rows.map((row) => this.mapRunRecord(row)));
   }
 
   async refreshRunsForTask(taskId: string): Promise<void> {
     const normalizedTaskId = taskId.trim();
     if (!normalizedTaskId || !this.deps.getTaskSnapshot) return;
-    const rows = this.deps.db
-      .prepare(
-        `SELECT * FROM routine_runs
-         WHERE backing_task_id = ?
-           AND (
-             status IN ('queued', 'running')
-             OR (status = 'failed' AND error_summary LIKE 'Timed out after %')
-           )
-         ORDER BY updated_at DESC`,
-      )
-      .all(normalizedTaskId) as Any[];
+    const rows = await this.routineRows.runRowsForTask(normalizedTaskId);
     for (const row of rows) {
       await this.refreshTaskBackedRun(this.mapRunRecord(row));
     }
@@ -404,15 +382,7 @@ export class RoutineService {
 
   async reconcileStaleTimeoutRuns(): Promise<void> {
     if (!this.deps.getTaskSnapshot) return;
-    const rows = this.deps.db
-      .prepare(
-        `SELECT * FROM routine_runs
-         WHERE backing_task_id IS NOT NULL
-           AND error_summary LIKE 'Timed out after %'
-           AND status IN ('failed', 'running')
-         ORDER BY updated_at DESC`,
-      )
-      .all() as Any[];
+    const rows = await this.routineRows.staleTimeoutRunRows();
     for (const row of rows) {
       await this.refreshTaskBackedRun(this.mapRunRecord(row));
     }
@@ -433,7 +403,7 @@ export class RoutineService {
         input.triggers?.length
           ? input.triggers
           : input.workflow
-            ? deriveRoutineTriggersFromWorkflow(input.workflow)
+            ? deriveRoutineTriggersFromWorkflow(input.workflow, now)
             : [],
       ),
       outputs: normalizeOutputs(input.outputs || []),
@@ -461,7 +431,7 @@ export class RoutineService {
         this.assertWorkflowSecretsReady(routine.workflow);
         this.assertWorkflowAccountReady(routine.workflow, validation.requiredScopes);
       }
-      const version = this.workflowRepository.createVersion(
+      const version = await this.workflowRepository.createVersion(
         routine.id,
         routine.workflow,
         routine.enabled ? "active" : "draft",
@@ -473,12 +443,12 @@ export class RoutineService {
     }
 
     const synced = await this.syncRoutine(routine, null);
-    this.persist(synced);
+    await this.persist(synced);
     return synced;
   }
 
   async update(id: string, patch: RoutinePatch): Promise<Routine | null> {
-    const existing = this.get(id);
+    const existing = await this.get(id);
     if (!existing) return null;
 
     let updated = toCompatibilityRoutine({
@@ -532,7 +502,7 @@ export class RoutineService {
         this.assertWorkflowSecretsReady(updated.workflow!);
         this.assertWorkflowAccountReady(updated.workflow!, validation.requiredScopes);
       }
-      const version = this.workflowRepository.createVersion(
+      const version = await this.workflowRepository.createVersion(
         updated.id,
         updated.workflow!,
         updated.enabled ? "active" : "draft",
@@ -543,7 +513,7 @@ export class RoutineService {
           version.status === "active" ? version.id : existing.activeWorkflowVersionId,
       });
     } else if (patch.enabled === true && !existing.enabled) {
-      const activeVersion = this.resolveActiveWorkflowVersion(existing);
+      const activeVersion = await this.resolveActiveWorkflowVersion(existing);
       if (activeVersion) {
         const validation = validateRoutineWorkflow(activeVersion.definition);
         if (!validation.valid) {
@@ -560,12 +530,12 @@ export class RoutineService {
     }
 
     const synced = await this.syncRoutine(updated, existing);
-    this.persist(synced);
+    await this.persist(synced);
     return synced;
   }
 
   async remove(id: string): Promise<boolean> {
-    const routine = this.get(id);
+    const routine = await this.get(id);
     if (!routine) return false;
 
     let hooksTouched = false;
@@ -576,9 +546,8 @@ export class RoutineService {
       if (isManagedEventRoutineTrigger(trigger)) eventTriggersTouched = true;
     }
 
-    this.deps.db.prepare("DELETE FROM automation_routines WHERE id = ?").run(id);
-    this.deps.db.prepare("DELETE FROM routine_runs WHERE routine_id = ?").run(id);
-    this.workflowRepository.deleteRoutineData(id);
+    // The routine, its runs and its workflow data go in one unit.
+    await this.routineRows.deleteRoutine(id);
     if (hooksTouched) {
       this.deps.onHooksConfigChanged?.(this.deps.loadHooksSettings());
     }
@@ -592,7 +561,7 @@ export class RoutineService {
     routineId: string,
     triggerId: string,
   ): Promise<RoutineApiTrigger | null> {
-    const routine = this.get(routineId);
+    const routine = await this.get(routineId);
     if (!routine) return null;
 
     let changed = false;
@@ -613,7 +582,7 @@ export class RoutineService {
   }
 
   async runNow(routineId: string): Promise<RoutineRun | null> {
-    const routine = this.get(routineId);
+    const routine = await this.get(routineId);
     if (!routine || !routine.enabled) return null;
 
     const manualTrigger =
@@ -626,7 +595,7 @@ export class RoutineService {
         enabled: true,
       } satisfies RoutineManualTrigger);
 
-    const workflowVersion = this.resolveActiveWorkflowVersion(routine);
+    const workflowVersion = await this.resolveActiveWorkflowVersion(routine);
     if (workflowVersion) {
       return this.startDeterministicWorkflow(
         routine,
@@ -655,7 +624,7 @@ export class RoutineService {
       source: "manual",
     });
 
-    const run = this.upsertRun({
+    const run = await this.upsertRun({
       runKey: `manual:${routine.id}:${this.deps.now()}`,
       routineId: routine.id,
       triggerId: manualTrigger.id,
@@ -674,14 +643,15 @@ export class RoutineService {
     return run;
   }
 
-  recordScheduledEvent(event: CronEvent): void {
+  async recordScheduledEvent(event: CronEvent): Promise<void> {
     if (event.action !== "started" && event.action !== "finished") return;
-    const routineMatch = this.findRoutineByManagedResource("managedCronJobId", event.jobId);
+    const routineMatch = await this.findRoutineByManagedResource("managedCronJobId", event.jobId);
     if (!routineMatch) return;
-    if (this.resolveActiveWorkflowVersion(routineMatch.routine)) return;
+    if (await this.resolveActiveWorkflowVersion(routineMatch.routine)) return;
 
     const runKey = `cron:${event.jobId}:${event.runAtMs ?? event.nextRunAtMs ?? this.deps.now()}`;
-    const existing = this.findRunByKey(runKey);
+    const existingRow = await this.routineRows.runRowByKey(runKey);
+    const existing = existingRow ? this.mapRunRecord(existingRow) : null;
     const startedAt = event.runAtMs ?? existing?.startedAt ?? this.deps.now();
     const backingTaskId = event.taskId ?? existing?.backingTaskId;
     const base = {
@@ -700,7 +670,7 @@ export class RoutineService {
     } as const;
 
     if (event.action === "started") {
-      this.upsertRun({
+      await this.upsertRun({
         ...base,
         status: "running",
       });
@@ -712,7 +682,7 @@ export class RoutineService {
       Boolean(backingTaskId),
       Boolean(event.taskStillRunning),
     );
-    this.upsertRun({
+    await this.upsertRun({
       ...base,
       finishedAt: status === "queued" || status === "running" ? undefined : this.deps.now(),
       status,
@@ -726,8 +696,8 @@ export class RoutineService {
     runAtMs: number,
     agentConfig?: AgentConfig,
   ) {
-    const routine = this.get(routineId);
-    const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+    const routine = await this.get(routineId);
+    const version = routine ? await this.resolveActiveWorkflowVersion(routine) : null;
     if (!routine || !routine.enabled || !version) {
       throw new Error("Scheduled Routine v2 workflow is not active.");
     }
@@ -761,8 +731,8 @@ export class RoutineService {
     payload: Record<string, unknown>,
     metadata?: Record<string, string>,
   ) {
-    const routine = this.get(routineId);
-    const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+    const routine = await this.get(routineId);
+    const version = routine ? await this.resolveActiveWorkflowVersion(routine) : null;
     if (!routine || !routine.enabled || !version) {
       throw new Error("Webhook Routine v2 workflow is not active.");
     }
@@ -789,19 +759,19 @@ export class RoutineService {
     };
   }
 
-  recordEventTriggerFire(payload: {
+  async recordEventTriggerFire(payload: {
     trigger: EventTrigger;
     event: TriggerEvent;
     historyEntry: TriggerHistoryEntry;
-  }): void {
+  }): Promise<void> {
     if (payload.historyEntry.actionResult === "workflow_queued") return;
-    const routineMatch = this.findRoutineByManagedResource(
+    const routineMatch = await this.findRoutineByManagedResource(
       "managedEventTriggerId",
       payload.trigger.id,
     );
     if (!routineMatch) return;
 
-    this.upsertRun({
+    await this.upsertRun({
       runKey: `event:${payload.historyEntry.id}`,
       routineId: routineMatch.routine.id,
       triggerId: routineMatch.trigger.id,
@@ -819,16 +789,19 @@ export class RoutineService {
   }
 
   async interceptManagedEventTrigger(trigger: EventTrigger, event: TriggerEvent) {
-    const routineMatch = this.findRoutineByManagedResource("managedEventTriggerId", trigger.id);
+    const routineMatch = await this.findRoutineByManagedResource(
+      "managedEventTriggerId",
+      trigger.id,
+    );
     if (!routineMatch) return { handled: false };
-    const version = this.resolveActiveWorkflowVersion(routineMatch.routine);
+    const version = await this.resolveActiveWorkflowVersion(routineMatch.routine);
     if (!version) return { handled: false };
     const payload = {
       ...event.fields,
       source: event.source,
       timestamp: event.timestamp,
     };
-    this.enqueueWorkflowEvent({
+    await this.enqueueWorkflowEvent({
       routineId: routineMatch.routine.id,
       triggerNodeId: version.definition.starterNodeId,
       source: event.source,
@@ -840,21 +813,21 @@ export class RoutineService {
     return { handled: true, actionResult: "workflow_queued" };
   }
 
-  recordApiTriggerDispatch(payload: {
+  async recordApiTriggerDispatch(payload: {
     mappingId?: string;
     path?: string;
     workspaceId?: string;
     taskId?: string;
     metadata?: Record<string, string>;
     response?: { statusCode?: number; message?: string; includeTaskId?: boolean };
-  }): void {
+  }): Promise<void> {
     const mappingId = payload.mappingId || payload.metadata?.mappingId;
     const routineMatch = mappingId
-      ? this.findRoutineByManagedResource("managedHookMappingId", mappingId)
-      : this.findRoutineByApiPath(payload.path);
+      ? await this.findRoutineByManagedResource("managedHookMappingId", mappingId)
+      : await this.findRoutineByApiPath(payload.path);
     if (!routineMatch) return;
 
-    this.upsertRun({
+    await this.upsertRun({
       runKey: `api:${mappingId || payload.path || routineMatch.trigger.id}:${this.deps.now()}`,
       routineId: routineMatch.routine.id,
       triggerId: routineMatch.trigger.id,
@@ -1001,26 +974,20 @@ export class RoutineService {
     };
   }
 
-  private persist(routine: Routine): void {
-    this.deps.db
-      .prepare(
-        `INSERT OR REPLACE INTO automation_routines
-         (id, name, description, enabled, workspace_id, prompt, connectors_json, triggers_json, definition_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        routine.id,
-        routine.name,
-        routine.description || null,
-        routine.enabled ? 1 : 0,
-        routine.workspaceId,
-        routine.instructions,
-        JSON.stringify(routine.connectorPolicy.connectorIds),
-        JSON.stringify(routine.triggers),
-        JSON.stringify(stripCompatibilityFields(routine)),
-        routine.createdAt,
-        routine.updatedAt,
-      );
+  private async persist(routine: Routine): Promise<void> {
+    await this.routineRows.persistRoutine({
+      id: routine.id,
+      name: routine.name,
+      description: routine.description || null,
+      enabled: routine.enabled ? 1 : 0,
+      workspaceId: routine.workspaceId,
+      prompt: routine.instructions,
+      connectorsJson: JSON.stringify(routine.connectorPolicy.connectorIds),
+      triggersJson: JSON.stringify(routine.triggers),
+      definitionJson: JSON.stringify(stripCompatibilityFields(routine)),
+      createdAt: routine.createdAt,
+      updatedAt: routine.updatedAt,
+    });
   }
 
   private async syncRoutine(routine: Routine, previous: Routine | null): Promise<Routine> {
@@ -1244,14 +1211,14 @@ export class RoutineService {
 
     const existing = triggerService.getTrigger(nextTriggerId);
     if (existing) {
-      triggerService.updateTrigger(nextTriggerId, nextTrigger);
+      await triggerService.updateTrigger(nextTriggerId, nextTrigger);
       return {
         ...trigger,
         managedEventTriggerId: nextTriggerId,
       };
     }
 
-    const created = triggerService.addTrigger({
+    const created = await triggerService.addTrigger({
       name: nextTrigger.name,
       description: nextTrigger.description,
       enabled: nextTrigger.enabled,
@@ -1291,7 +1258,7 @@ export class RoutineService {
       case "mailbox_event":
       case "github_event":
         if (trigger.managedEventTriggerId) {
-          this.deps.getEventTriggerService()?.removeTrigger(trigger.managedEventTriggerId);
+          await this.deps.getEventTriggerService()?.removeTrigger(trigger.managedEventTriggerId);
         }
         return;
       case "manual":
@@ -1338,9 +1305,9 @@ export class RoutineService {
     return Object.keys(config).length > 0 ? config : undefined;
   }
 
-  private resolveActiveWorkflowVersion(routine: Routine) {
+  private async resolveActiveWorkflowVersion(routine: Routine) {
     if (routine.activeWorkflowVersionId) {
-      const version = this.workflowRepository.getVersion(routine.activeWorkflowVersionId);
+      const version = await this.workflowRepository.getVersion(routine.activeWorkflowVersionId);
       if (version?.status === "active") return version;
     }
     return this.workflowRepository.getActiveVersion(routine.id);
@@ -1405,7 +1372,7 @@ export class RoutineService {
       dryRun: params.dryRun,
       accessProfileId: params.accessProfileId,
     });
-    const run = this.upsertRun({
+    const run = await this.upsertRun({
       runKey: `workflow:${workflowRun.id}`,
       routineId: routine.id,
       triggerId: params.triggerId,
@@ -1419,7 +1386,7 @@ export class RoutineService {
       errorSummary: workflowRun.error,
       artifactsSummary: summarizeWorkflowRun(
         workflowRun,
-        this.workflowRepository.listSteps(workflowRun.id),
+        await this.workflowRepository.listSteps(workflowRun.id),
       ),
     });
     return run;
@@ -1428,7 +1395,7 @@ export class RoutineService {
   private async processWorkflowInbox(): Promise<void> {
     if (!this.workflowRecoveryReady) return;
     while (this.workflowInboxActive < 4) {
-      const event = this.workflowRepository.claimNextEvent();
+      const event = await this.workflowRepository.claimNextEvent();
       if (!event) return;
       this.workflowInboxActive += 1;
       void this.processWorkflowEvent(event).finally(() => {
@@ -1439,13 +1406,13 @@ export class RoutineService {
   }
 
   private async processWorkflowEvent(
-    event: ReturnType<RoutineWorkflowRepository["enqueueEvent"]>,
+    event: Awaited<ReturnType<RoutineWorkflowRepository["enqueueEvent"]>>,
   ): Promise<void> {
     try {
-      const routine = this.get(event.routineId);
-      const version = routine ? this.resolveActiveWorkflowVersion(routine) : null;
+      const routine = await this.get(event.routineId);
+      const version = routine ? await this.resolveActiveWorkflowVersion(routine) : null;
       if (!routine || !routine.enabled || !version) {
-        this.workflowRepository.updateEvent(event.id, {
+        await this.workflowRepository.updateEvent(event.id, {
           status: "cancelled",
           error: "Routine was disabled or removed before this event was processed.",
         });
@@ -1460,7 +1427,7 @@ export class RoutineService {
         triggerId: routineTrigger?.id || event.triggerNodeId,
         triggerType: routineTrigger?.type || "manual",
       });
-      this.workflowRepository.updateEvent(event.id, {
+      await this.workflowRepository.updateEvent(event.id, {
         status: run.status === "failed" ? "failed" : "completed",
         runId: run.workflowRunId,
         error: run.errorSummary,
@@ -1468,67 +1435,61 @@ export class RoutineService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (event.attemptCount < 5) {
-        this.workflowRepository.updateEvent(event.id, {
+        await this.workflowRepository.updateEvent(event.id, {
           status: "pending",
           error: message,
           availableAt: this.deps.now() + Math.min(60_000, 1_000 * 2 ** event.attemptCount),
         });
       } else {
-        this.workflowRepository.updateEvent(event.id, { status: "failed", error: message });
+        await this.workflowRepository.updateEvent(event.id, { status: "failed", error: message });
       }
     }
   }
 
   private async recoverWorkflowRuns(): Promise<void> {
-    for (const run of this.workflowRepository.listRecoverableRuns()) {
-      const routine = this.get(run.routineId);
-      const version = this.workflowRepository.getVersion(run.workflowVersionId);
+    for (const run of await this.workflowRepository.listRecoverableRuns()) {
+      const routine = await this.get(run.routineId);
+      const version = await this.workflowRepository.getVersion(run.workflowVersionId);
       if (!routine || !version) {
-        this.workflowRepository.updateRun(run.id, {
+        await this.workflowRepository.updateRun(run.id, {
           status: "failed",
           error: "Workflow definition was unavailable during recovery.",
           finishedAt: this.deps.now(),
         });
         continue;
       }
-      const recovered = this.workflowEngine.recoverInterruptedRun(version.definition, run.id);
+      const recovered = await this.workflowEngine.recoverInterruptedRun(version.definition, run.id);
       if (recovered?.status === "waiting_for_approval") {
-        this.refreshRoutineRunFromWorkflow(run.id);
+        await this.refreshRoutineRunFromWorkflow(run.id);
         continue;
       }
-      await this.workflowEngine.continueRun(routine, version.definition, run.id).catch((error) => {
-        this.workflowRepository.updateRun(run.id, {
+      await this.workflowEngine.continueRun(routine, version.definition, run.id).catch(async (error) => {
+        await this.workflowRepository.updateRun(run.id, {
           status: "failed",
           error: error instanceof Error ? error.message : String(error),
           finishedAt: this.deps.now(),
         });
       });
-      this.refreshRoutineRunFromWorkflow(run.id);
+      await this.refreshRoutineRunFromWorkflow(run.id);
     }
   }
 
-  private pruneExpiredWorkflowData(): void {
+  private async pruneExpiredWorkflowData(): Promise<void> {
     try {
-      this.workflowRepository.pruneExpiredData((workflowVersionId) => {
-        const version = this.workflowRepository.getVersion(workflowVersionId);
-        return version?.definition.settings?.retainStepDataDays || 30;
-      });
+      // The store resolves each version's retention itself (a unit takes no callbacks).
+      await this.workflowRepository.pruneExpiredData();
     } catch (error) {
       logger.warn("Workflow retention maintenance failed:", error);
     }
   }
 
-  private refreshRoutineRunFromWorkflow(workflowRunId: string): void {
-    const workflowRun = this.workflowRepository.getRun(workflowRunId);
+  private async refreshRoutineRunFromWorkflow(workflowRunId: string): Promise<void> {
+    const workflowRun = await this.workflowRepository.getRun(workflowRunId);
     if (!workflowRun) return;
-    const row = this.deps.db
-      .prepare(
-        "SELECT * FROM routine_runs WHERE workflow_run_id = ? ORDER BY updated_at DESC LIMIT 1",
-      )
-      .get(workflowRunId) as Any | undefined;
+    const row = await this.routineRows.runRowByWorkflowRun(workflowRunId);
     if (!row) return;
     const existing = this.mapRunRecord(row);
-    this.upsertRun({
+    await this.upsertRun({
       ...existing,
       workflowRunId,
       status: mapWorkflowRunStatus(workflowRun.status),
@@ -1536,7 +1497,7 @@ export class RoutineService {
       errorSummary: workflowRun.error,
       artifactsSummary: summarizeWorkflowRun(
         workflowRun,
-        this.workflowRepository.listSteps(workflowRunId),
+        await this.workflowRepository.listSteps(workflowRunId),
       ),
     });
   }
@@ -1645,33 +1606,12 @@ export class RoutineService {
   }
 
   private async refreshRunStatuses(routineId?: string): Promise<void> {
-    const rows = (
-      routineId
-        ? this.deps.db
-            .prepare(
-              `SELECT * FROM routine_runs
-             WHERE routine_id = ?
-               AND (
-                 status IN ('queued', 'running')
-                 OR (status = 'failed' AND backing_task_id IS NOT NULL AND error_summary LIKE 'Timed out after %')
-               )
-             ORDER BY updated_at DESC`,
-            )
-            .all(routineId)
-        : this.deps.db
-            .prepare(
-              `SELECT * FROM routine_runs
-             WHERE status IN ('queued', 'running')
-                OR (status = 'failed' AND backing_task_id IS NOT NULL AND error_summary LIKE 'Timed out after %')
-             ORDER BY updated_at DESC`,
-            )
-            .all()
-    ) as Any[];
+    const rows = await this.routineRows.activeRunRows(routineId ?? null);
 
     for (const row of rows) {
       const run = this.mapRunRecord(row);
       if (run.workflowRunId) {
-        this.refreshRoutineRunFromWorkflow(run.workflowRunId);
+        await this.refreshRoutineRunFromWorkflow(run.workflowRunId);
         continue;
       }
       if (
@@ -1692,7 +1632,7 @@ export class RoutineService {
             : snapshot.status === "failed" || snapshot.status === "cancelled"
               ? "failed"
               : "running";
-        this.upsertRun({
+        await this.upsertRun({
           ...run,
           status,
           finishedAt:
@@ -1716,10 +1656,10 @@ export class RoutineService {
     const snapshot = await this.deps.getTaskSnapshot(run.backingTaskId);
     if (!snapshot) return;
     const status = mapTaskSnapshotStatus(snapshot.status, snapshot.terminalStatus);
-    const routine = this.get(run.routineId);
+    const routine = await this.get(run.routineId);
     const isNonTerminal = status === "queued" || status === "running";
     const isFailed = status === "failed";
-    this.upsertRun({
+    await this.upsertRun({
       ...run,
       status,
       finishedAt: isNonTerminal
@@ -1735,7 +1675,7 @@ export class RoutineService {
     });
   }
 
-  private upsertRun(input: {
+  private async upsertRun(input: {
     id?: string;
     runKey?: string;
     routineId: string;
@@ -1752,43 +1692,20 @@ export class RoutineService {
     outputStatus: RoutineRun["outputStatus"];
     errorSummary?: string;
     artifactsSummary?: string;
-  }): RoutineRun {
+  }): Promise<RoutineRun> {
     const now = this.deps.now();
-    const dedupeKey = this.computeRoutineRunDedupeKey(input);
-    const existing =
-      (dedupeKey ? this.findRunByDedupeKey(dedupeKey) : null) ||
-      (input.runKey ? this.findRunByKey(input.runKey) : null) ||
-      (input.id ? this.findRunById(input.id) : null);
-    const id = existing?.id || input.id || randomUUID();
-    const createdAt = existing?.createdAt || input.createdAt || now;
-    this.deps.db
-      .prepare(
-        `INSERT OR REPLACE INTO routine_runs
-         (id, routine_id, trigger_id, trigger_type, status, started_at, finished_at, source_event_summary,
-          backing_task_id, backing_managed_session_id, workflow_run_id, output_status, error_summary, artifacts_summary,
-          run_key, dedupe_key, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        input.routineId,
-        input.triggerId,
-        input.triggerType,
-        input.status,
-        input.startedAt,
-        input.finishedAt || null,
-        input.sourceEventSummary || null,
-        input.backingTaskId || null,
-        input.backingManagedSessionId || null,
-        input.workflowRunId || null,
-        input.outputStatus,
-        input.errorSummary || null,
-        input.artifactsSummary || null,
-        input.runKey || null,
-        dedupeKey || null,
-        createdAt,
-        now,
-      );
+    const routine = String(input.backingTaskId || "").trim()
+      ? await this.get(input.routineId)
+      : null;
+    const dedupeKey = this.computeRoutineRunDedupeKey(input, routine);
+    // Matching an existing run and writing it share one unit, so concurrent upserts of the
+    // same run cannot both insert.
+    const { id, createdAt } = await this.routineRows.upsertRunRow({
+      ...input,
+      newId: randomUUID(),
+      dedupeKey,
+      now,
+    });
 
     return {
       id,
@@ -1810,34 +1727,13 @@ export class RoutineService {
     };
   }
 
-  private findRunByDedupeKey(dedupeKey: string): RoutineRunRecord | null {
-    const row = this.deps.db
-      .prepare("SELECT * FROM routine_runs WHERE dedupe_key = ? ORDER BY updated_at DESC LIMIT 1")
-      .get(dedupeKey) as Any | undefined;
-    return row ? this.mapRunRecord(row) : null;
-  }
-
-  private findRunByKey(runKey: string): RoutineRunRecord | null {
-    const row = this.deps.db
-      .prepare("SELECT * FROM routine_runs WHERE run_key = ? ORDER BY updated_at DESC LIMIT 1")
-      .get(runKey) as Any | undefined;
-    return row ? this.mapRunRecord(row) : null;
-  }
-
-  private findRunById(id: string): RoutineRunRecord | null {
-    const row = this.deps.db.prepare("SELECT * FROM routine_runs WHERE id = ?").get(id) as
-      | Any
-      | undefined;
-    return row ? this.mapRunRecord(row) : null;
-  }
-
   private computeRoutineRunDedupeKey(input: {
     routineId: string;
     runKey?: string;
     backingTaskId?: string;
     backingManagedSessionId?: string;
     workflowRunId?: string;
-  }): string | null {
+  }, routine: Routine | null): string | null {
     const normalizedManagedSessionId = String(input.backingManagedSessionId || "").trim();
     if (normalizedManagedSessionId) {
       return `managed:${input.routineId}:${normalizedManagedSessionId}`;
@@ -1850,7 +1746,6 @@ export class RoutineService {
 
     const normalizedTaskId = String(input.backingTaskId || "").trim();
     if (normalizedTaskId) {
-      const routine = this.get(input.routineId);
       const targetTaskId = routine ? getRoutineTargetTaskId(routine) : null;
       if (!targetTaskId || targetTaskId !== normalizedTaskId) {
         return `task:${input.routineId}:${normalizedTaskId}`;
@@ -1862,13 +1757,21 @@ export class RoutineService {
     return null;
   }
 
+  /** Runs during schema setup on the host connection, before the unique dedupe index. */
   private reconcileRoutineRunDedupeKeys(): void {
-    const rows = this.deps.db.prepare("SELECT * FROM routine_runs").all() as Any[];
+    const store = new RoutineStore(this.deps.db);
+    const routines = new Map(
+      store.listRoutineRows().map((row) => {
+        const routine = this.mapRow(row);
+        return [routine.id, routine] as const;
+      }),
+    );
+    const rows = store.allRunRows();
     const groups = new Map<string, RoutineRunRecord[]>();
     const rowsWithoutKey: RoutineRunRecord[] = [];
     for (const row of rows) {
       const run = this.mapRunRecord(row);
-      const dedupeKey = this.computeRoutineRunDedupeKey(run);
+      const dedupeKey = this.computeRoutineRunDedupeKey(run, routines.get(run.routineId) ?? null);
       if (!dedupeKey) {
         rowsWithoutKey.push(run);
         continue;
@@ -1879,29 +1782,17 @@ export class RoutineService {
       groups.set(dedupeKey, existing);
     }
 
-    const updateKey = this.deps.db.prepare("UPDATE routine_runs SET dedupe_key = ? WHERE id = ?");
-    const clearKey = this.deps.db.prepare("UPDATE routine_runs SET dedupe_key = NULL WHERE id = ?");
-    const deleteRun = this.deps.db.prepare("DELETE FROM routine_runs WHERE id = ?");
-    const apply = this.deps.db.transaction(() => {
-      for (const run of rowsWithoutKey) {
-        clearKey.run(run.id);
-      }
-      for (const [dedupeKey, runs] of groups.entries()) {
-        if (runs.length === 1) {
-          updateKey.run(dedupeKey, runs[0].id);
-          continue;
-        }
-        const preferred = runs.reduce((best, candidate) => preferRoutineRun(best, candidate));
-        for (const run of runs) {
-          if (run.id === preferred.id) {
-            updateKey.run(dedupeKey, run.id);
-          } else {
-            deleteRun.run(run.id);
-          }
-        }
-      }
-    });
-    apply();
+    const plan = {
+      clear: rowsWithoutKey.map((run) => run.id),
+      set: [] as Array<[string, string]>,
+      remove: [] as string[],
+    };
+    for (const [dedupeKey, runs] of groups.entries()) {
+      const preferred = runs.reduce((best, candidate) => preferRoutineRun(best, candidate));
+      plan.set.push([dedupeKey, preferred.id]);
+      for (const run of runs) if (run.id !== preferred.id) plan.remove.push(run.id);
+    }
+    this.deps.db.transaction(() => store.applyRunDedupePlan(plan))();
   }
 
   private mapRunRecord(row: Any): RoutineRunRecord {
@@ -1912,11 +1803,11 @@ export class RoutineService {
     };
   }
 
-  private findRoutineByManagedResource(
+  private async findRoutineByManagedResource(
     field: "managedCronJobId" | "managedHookMappingId" | "managedEventTriggerId",
     value: string,
-  ): { routine: Routine; trigger: RoutineTrigger } | null {
-    for (const routine of this.list()) {
+  ): Promise<{ routine: Routine; trigger: RoutineTrigger } | null> {
+    for (const routine of await this.list()) {
       const trigger = routine.triggers.find((candidate) => {
         if (field === "managedCronJobId" && candidate.type === "schedule") {
           return candidate.managedCronJobId === value;
@@ -1934,12 +1825,12 @@ export class RoutineService {
     return null;
   }
 
-  private findRoutineByApiPath(
+  private async findRoutineByApiPath(
     path?: string,
-  ): { routine: Routine; trigger: RoutineApiTrigger } | null {
+  ): Promise<{ routine: Routine; trigger: RoutineApiTrigger } | null> {
     if (!path) return null;
     const normalized = path.replace(/^\/+/, "").replace(/\/+$/, "");
-    for (const routine of this.list()) {
+    for (const routine of await this.list()) {
       const trigger = routine.triggers.find(
         (candidate): candidate is RoutineApiTrigger =>
           candidate.type === "api" &&
@@ -2199,7 +2090,10 @@ function normalizeTriggers(triggers: RoutineTrigger[]): RoutineTrigger[] {
   });
 }
 
-function deriveRoutineTriggersFromWorkflow(workflow: RoutineWorkflowDefinition): RoutineTrigger[] {
+function deriveRoutineTriggersFromWorkflow(
+  workflow: RoutineWorkflowDefinition,
+  anchorMs = Date.now(),
+): RoutineTrigger[] {
   const starter = workflow.nodes.find(
     (node) => node.id === workflow.starterNodeId && node.kind === "starter",
   );
@@ -2222,7 +2116,11 @@ function deriveRoutineTriggersFromWorkflow(workflow: RoutineWorkflowDefinition):
           {
             ...base,
             type: "schedule",
-            schedule: { kind: "every", everyMs: Math.max(60_000, Number(expression) * 60_000) },
+            schedule: {
+              kind: "every",
+              everyMs: Math.max(60_000, Number(expression) * 60_000),
+              anchorMs,
+            },
           },
         ];
       }

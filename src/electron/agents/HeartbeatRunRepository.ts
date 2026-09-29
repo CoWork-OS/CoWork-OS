@@ -39,7 +39,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-export class HeartbeatRunRepository {
+export class HeartbeatRunStore {
   private memoryRuns = new Map<string, HeartbeatRun>();
   private memoryEvents = new Map<string, HeartbeatRunEvent[]>();
 
@@ -211,6 +211,52 @@ export class HeartbeatRunRepository {
       )
       .run(errorMessage, now, now);
     return result.changes;
+  }
+
+  /**
+   * Fail migrated v2 runs whose agent is gone, whose issue still points at them, or whose
+   * task has finished, and release their issues; one transaction. Returns how many.
+   */
+  reconcileLegacyMigratedRuns(message: string): number {
+    if (!this.db) return 0;
+    const db = this.db;
+    const staleRunIds = (
+      db
+        .prepare(
+          `SELECT r.id
+           FROM heartbeat_runs r
+           LEFT JOIN agent_roles a ON a.id = r.agent_role_id
+           LEFT JOIN issues i ON i.id = r.issue_id
+           LEFT JOIN tasks t ON t.id = r.task_id
+           WHERE r.status = 'running'
+             AND r.reason = 'migrated_v2_run'
+             AND r.issue_id IS NOT NULL
+             AND (
+               a.id IS NULL OR
+               i.active_run_id = r.id OR
+               t.status IN ('failed', 'completed', 'cancelled')
+             )`,
+        )
+        .all() as Array<{ id: string }>
+    ).map((row) => row.id);
+    if (staleRunIds.length === 0) return 0;
+    const placeholders = staleRunIds.map(() => "?").join(", ");
+    const now = Date.now();
+    db.prepare(
+      `UPDATE heartbeat_runs
+       SET status = 'failed',
+           error = COALESCE(error, ?),
+           updated_at = ?,
+           completed_at = COALESCE(completed_at, ?)
+       WHERE id IN (${placeholders})`,
+    ).run(message, now, now, ...staleRunIds);
+    db.prepare(
+      `UPDATE issues
+       SET active_run_id = NULL,
+           updated_at = ?
+       WHERE active_run_id IN (${placeholders})`,
+    ).run(now, ...staleRunIds);
+    return staleRunIds.length;
   }
 
   get(runId: string): HeartbeatRun | undefined {

@@ -1,3 +1,4 @@
+import { CoreFailureRecordRepository, CoreTraceRepository } from "./core-repository-facades";
 import { createHash } from "crypto";
 import type {
   CoreFailureCategory,
@@ -6,8 +7,6 @@ import type {
   CoreTrace,
   CoreTraceEvent,
 } from "../../shared/types";
-import { CoreFailureRecordRepository } from "./CoreFailureRecordRepository";
-import { CoreTraceRepository } from "./CoreTraceRepository";
 
 function hashParts(parts: Array<string | undefined>): string {
   const hash = createHash("sha1");
@@ -63,14 +62,14 @@ export class CoreFailureMiningService {
     private readonly failureRepo: CoreFailureRecordRepository,
   ) {}
 
-  mineTrace(traceId: string): CoreFailureRecord[] {
-    const existing = this.failureRepo.findByTraceId(traceId);
+  async mineTrace(traceId: string): Promise<CoreFailureRecord[]> {
+    const existing = await this.failureRepo.findByTraceId(traceId);
     if (existing.length > 0) return existing;
-    const trace = this.traceRepo.findById(traceId);
+    const trace = await this.traceRepo.findById(traceId);
     if (!trace) return [];
-    const events = this.traceRepo.listEvents(traceId);
+    const events = await this.traceRepo.listEvents(traceId);
     const candidates = this.buildCandidates(trace, events);
-    return candidates.map((candidate) => this.failureRepo.create(candidate));
+    return Promise.all(candidates.map((candidate) => this.failureRepo.create(candidate)));
   }
 
   private buildCandidates(

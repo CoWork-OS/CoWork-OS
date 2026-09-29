@@ -35,16 +35,16 @@ describe("EventTriggerService", () => {
   let service: EventTriggerService;
   let deps: EventTriggerServiceDeps;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     deps = makeDeps();
     service = new EventTriggerService(deps); // no DB
-    service.start();
+    await service.start();
   });
 
   // ── CRUD ────────────────────────────────────────────────────────
 
-  it("addTrigger creates a trigger with generated id", () => {
-    const trigger = service.addTrigger({
+  it("addTrigger creates a trigger with generated id", async () => {
+    const trigger = await service.addTrigger({
       name: "Test Trigger",
       enabled: true,
       source: "channel_message",
@@ -58,8 +58,8 @@ describe("EventTriggerService", () => {
     expect(trigger.name).toBe("Test Trigger");
   });
 
-  it("listTriggers returns all triggers", () => {
-    service.addTrigger({
+  it("listTriggers returns all triggers", async () => {
+    await service.addTrigger({
       name: "T1",
       enabled: true,
       source: "channel_message",
@@ -67,7 +67,7 @@ describe("EventTriggerService", () => {
       action: { type: "create_task", config: {} },
       workspaceId: "ws-1",
     });
-    service.addTrigger({
+    await service.addTrigger({
       name: "T2",
       enabled: true,
       source: "email",
@@ -80,8 +80,8 @@ describe("EventTriggerService", () => {
     expect(service.listTriggers("ws-1")).toHaveLength(1);
   });
 
-  it("updateTrigger modifies an existing trigger", () => {
-    const t = service.addTrigger({
+  it("updateTrigger modifies an existing trigger", async () => {
+    const t = await service.addTrigger({
       name: "Original",
       enabled: true,
       source: "channel_message",
@@ -90,17 +90,17 @@ describe("EventTriggerService", () => {
       workspaceId: "ws-1",
     });
 
-    const updated = service.updateTrigger(t.id, { name: "Renamed" });
+    const updated = await service.updateTrigger(t.id, { name: "Renamed" });
     expect(updated?.name).toBe("Renamed");
     expect(updated?.id).toBe(t.id); // id is immutable
   });
 
-  it("updateTrigger returns null for non-existent id", () => {
-    expect(service.updateTrigger("fake-id", { name: "X" })).toBeNull();
+  it("updateTrigger returns null for non-existent id", async () => {
+    expect(await service.updateTrigger("fake-id", { name: "X" })).toBeNull();
   });
 
-  it("removeTrigger deletes a trigger", () => {
-    const t = service.addTrigger({
+  it("removeTrigger deletes a trigger", async () => {
+    const t = await service.addTrigger({
       name: "ToDelete",
       enabled: true,
       source: "channel_message",
@@ -109,15 +109,15 @@ describe("EventTriggerService", () => {
       workspaceId: "ws-1",
     });
 
-    expect(service.removeTrigger(t.id)).toBe(true);
+    expect(await service.removeTrigger(t.id)).toBe(true);
     expect(service.listTriggers()).toHaveLength(0);
-    expect(service.removeTrigger(t.id)).toBe(false); // already gone
+    expect(await service.removeTrigger(t.id)).toBe(false); // already gone
   });
 
   // ── Event evaluation ──────────────────────────────────────────
 
   it("fires a trigger when conditions match", async () => {
-    service.addTrigger({
+    await service.addTrigger({
       name: "Deploy Watcher",
       enabled: true,
       source: "channel_message",
@@ -138,7 +138,7 @@ describe("EventTriggerService", () => {
       .fn()
       .mockResolvedValue({ handled: true, actionResult: "workflow_queued" });
     service.setFireInterceptor(interceptor);
-    const trigger = service.addTrigger({
+    const trigger = await service.addTrigger({
       name: "Workflow",
       enabled: true,
       source: "channel_message",
@@ -162,8 +162,8 @@ describe("EventTriggerService", () => {
       let activeCount = 4;
       const localDeps = makeDeps({ getActiveTaskCount: () => activeCount });
       const localService = new EventTriggerService(localDeps, db);
-      localService.start();
-      localService.addTrigger({
+      await localService.start();
+      await localService.addTrigger({
         name: "Queued",
         enabled: true,
         source: "channel_message",
@@ -201,8 +201,8 @@ describe("EventTriggerService", () => {
       );
       const localDeps = makeDeps({ getActiveTaskCount: () => activeCount, createTask });
       const localService = new EventTriggerService(localDeps, db);
-      localService.start();
-      localService.addTrigger({
+      await localService.start();
+      await localService.addTrigger({
         name: "Queued shutdown",
         enabled: true,
         source: "channel_message",
@@ -232,7 +232,7 @@ describe("EventTriggerService", () => {
   );
 
   it("does not fire disabled triggers", async () => {
-    service.addTrigger({
+    await service.addTrigger({
       name: "Disabled",
       enabled: false,
       source: "channel_message",
@@ -246,7 +246,7 @@ describe("EventTriggerService", () => {
   });
 
   it("does not fire when source doesn't match", async () => {
-    service.addTrigger({
+    await service.addTrigger({
       name: "Email Only",
       enabled: true,
       source: "email",
@@ -260,7 +260,7 @@ describe("EventTriggerService", () => {
   });
 
   it("treats email and mailbox_event as aliases and labels inbox fires", async () => {
-    const trigger = service.addTrigger({
+    const trigger = await service.addTrigger({
       name: "Inbox Automation",
       enabled: true,
       source: "mailbox_event",
@@ -283,7 +283,7 @@ describe("EventTriggerService", () => {
   });
 
   it("respects cooldown period", async () => {
-    const _t = service.addTrigger({
+    const _t = await service.addTrigger({
       name: "Cooldown Test",
       enabled: true,
       source: "channel_message",
@@ -302,7 +302,7 @@ describe("EventTriggerService", () => {
   });
 
   it("does not fire when service is stopped", async () => {
-    service.addTrigger({
+    await service.addTrigger({
       name: "Active",
       enabled: true,
       source: "channel_message",
@@ -319,7 +319,7 @@ describe("EventTriggerService", () => {
   // ── History ────────────────────────────────────────────────────
 
   it("records history when a trigger fires", async () => {
-    const t = service.addTrigger({
+    const t = await service.addTrigger({
       name: "History Test",
       enabled: true,
       source: "channel_message",
@@ -340,9 +340,9 @@ describe("EventTriggerService", () => {
     const sendTaskMessage = vi.fn().mockResolvedValue({ queued: true });
     const localDeps = makeDeps({ sendTaskMessage });
     const localService = new EventTriggerService(localDeps);
-    localService.start();
+    await localService.start();
 
-    const trigger = localService.addTrigger({
+    const trigger = await localService.addTrigger({
       name: "Thread Follow-up",
       enabled: true,
       source: "channel_message",
@@ -376,9 +376,9 @@ describe("EventTriggerService", () => {
   it("fails thread follow-up actions that are missing a target task", async () => {
     const localDeps = makeDeps();
     const localService = new EventTriggerService(localDeps);
-    localService.start();
+    await localService.start();
 
-    const trigger = localService.addTrigger({
+    const trigger = await localService.addTrigger({
       name: "Broken Thread Follow-up",
       enabled: true,
       source: "channel_message",
@@ -407,9 +407,9 @@ describe("EventTriggerService", () => {
     const deliverToChannel = vi.fn().mockResolvedValue(undefined);
     const localDeps = makeDeps({ deliverToChannel });
     const localService = new EventTriggerService(localDeps);
-    localService.start();
+    await localService.start();
 
-    localService.addTrigger({
+    await localService.addTrigger({
       name: "Reply Bot",
       enabled: true,
       source: "channel_message",
@@ -435,7 +435,7 @@ describe("EventTriggerService", () => {
 
   it("survives condition evaluation errors and continues to next trigger", async () => {
     // This trigger has a field that triggers no crash, but tests the try-catch
-    service.addTrigger({
+    await service.addTrigger({
       name: "Safe Trigger",
       enabled: true,
       source: "channel_message",
@@ -451,7 +451,7 @@ describe("EventTriggerService", () => {
   // ── Fire count ─────────────────────────────────────────────────
 
   it("increments fire count on each trigger firing", async () => {
-    const t = service.addTrigger({
+    const t = await service.addTrigger({
       name: "Counter",
       enabled: true,
       source: "channel_message",

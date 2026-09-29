@@ -75,6 +75,14 @@ export interface WorkSessionOperationalMetricInput {
 export class WorkSessionOperationalMetricsRepository {
   private readonly now: () => number;
   private readonly retentionPerScope: number;
+  /**
+   * Retention runs once per `pruneEvery` inserts in a scope instead of after every
+   * insert: the delete walks the whole retained window, and two metrics are recorded per
+   * timeline event. A scope can therefore hold up to `pruneEvery - 1` extra rows per
+   * repository instance; small retentions (tests) still prune on every insert.
+   */
+  private readonly pruneEvery: number;
+  private readonly insertsSincePrune = new Map<string, number>();
 
   constructor(
     private readonly db: Database.Database,
@@ -85,6 +93,7 @@ export class WorkSessionOperationalMetricsRepository {
       10_000,
       Math.max(10, Math.floor(options?.retentionPerScope || DEFAULT_RETENTION_PER_SCOPE)),
     );
+    this.pruneEvery = Math.max(1, Math.floor(this.retentionPerScope / 20));
   }
 
   record(input: WorkSessionOperationalMetricInput): WorkSessionOperationalMetric {
@@ -121,7 +130,7 @@ export class WorkSessionOperationalMetricsRepository {
         idempotencyKey || null,
         recordedAt,
       );
-    this.prune(sessionId, workspaceId);
+    this.maybePrune(sessionId, workspaceId);
     const row = this.db
       .prepare("SELECT * FROM work_session_operational_metrics WHERE id = ?")
       .get(id) as DbRow | undefined;
@@ -198,30 +207,47 @@ export class WorkSessionOperationalMetricsRepository {
     return [...grouped.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
+  private maybePrune(sessionId?: string, workspaceId?: string): void {
+    const key = `${sessionId || ""}|${workspaceId || ""}`;
+    const inserts = (this.insertsSincePrune.get(key) ?? 0) + 1;
+    if (inserts < this.pruneEvery) {
+      if (this.insertsSincePrune.size >= 10_000) this.insertsSincePrune.clear();
+      this.insertsSincePrune.set(key, inserts);
+      return;
+    }
+    this.insertsSincePrune.delete(key);
+    this.prune(sessionId, workspaceId);
+  }
+
+  /**
+   * Keep the newest `retentionPerScope` rows per scope. Runs after every insert, so
+   * each delete walks the scope's index past the retained rows (`LIMIT -1 OFFSET n`)
+   * instead of materializing and anti-joining the retained id set.
+   */
   prune(sessionId?: string, workspaceId?: string): number {
     let changes = 0;
     if (sessionId) {
       const result = this.db
         .prepare(
           `DELETE FROM work_session_operational_metrics
-           WHERE session_id = ? AND id NOT IN (
-             SELECT id FROM work_session_operational_metrics
-             WHERE session_id = ? ORDER BY recorded_at DESC, rowid DESC LIMIT ?
+           WHERE rowid IN (
+             SELECT rowid FROM work_session_operational_metrics
+             WHERE session_id = ? ORDER BY recorded_at DESC, rowid DESC LIMIT -1 OFFSET ?
            )`,
         )
-        .run(sessionId, sessionId, this.retentionPerScope);
+        .run(sessionId, this.retentionPerScope);
       changes += Number(result.changes || 0);
     }
     if (workspaceId) {
       const result = this.db
         .prepare(
           `DELETE FROM work_session_operational_metrics
-           WHERE workspace_id = ? AND id NOT IN (
-             SELECT id FROM work_session_operational_metrics
-             WHERE workspace_id = ? ORDER BY recorded_at DESC, rowid DESC LIMIT ?
+           WHERE rowid IN (
+             SELECT rowid FROM work_session_operational_metrics
+             WHERE workspace_id = ? ORDER BY recorded_at DESC, rowid DESC LIMIT -1 OFFSET ?
            )`,
         )
-        .run(workspaceId, workspaceId, this.retentionPerScope);
+        .run(workspaceId, this.retentionPerScope);
       changes += Number(result.changes || 0);
     }
     // Process-wide diagnostics (which intentionally have no user/session
@@ -231,10 +257,10 @@ export class WorkSessionOperationalMetricsRepository {
       const result = this.db
         .prepare(
           `DELETE FROM work_session_operational_metrics
-           WHERE session_id IS NULL AND workspace_id IS NULL AND id NOT IN (
-             SELECT id FROM work_session_operational_metrics
+           WHERE rowid IN (
+             SELECT rowid FROM work_session_operational_metrics
              WHERE session_id IS NULL AND workspace_id IS NULL
-             ORDER BY recorded_at DESC, rowid DESC LIMIT ?
+             ORDER BY recorded_at DESC, rowid DESC LIMIT -1 OFFSET ?
            )`,
         )
         .run(this.retentionPerScope);

@@ -4,7 +4,7 @@ import type { CoreLearningsEntry, ListCoreLearningsRequest } from "../../shared/
 
 type Any = any;
 
-export class CoreLearningsRepository {
+export class CoreLearningsStore {
   constructor(private readonly db: Database.Database) {}
 
   append(input: Omit<CoreLearningsEntry, "id"> & { id?: string }): CoreLearningsEntry {

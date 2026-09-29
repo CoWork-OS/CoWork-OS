@@ -69,7 +69,13 @@ export class TaskQueueManager {
     this.settings = this.loadSettings();
 
     // Start periodic timeout check (every minute)
-    this.timeoutCheckInterval = setInterval(() => this.checkForTimedOutTasks(), 60 * 1000);
+    this.timeoutCheckInterval = setInterval(
+      () =>
+        void this.checkForTimedOutTasks().catch((error: unknown) =>
+          console.error("[TaskQueueManager] Timeout check failed:", error),
+        ),
+      60 * 1000,
+    );
   }
 
   /**
@@ -396,7 +402,9 @@ export class TaskQueueManager {
     }
 
     // Process queue in case we increased concurrency
-    this.processQueue();
+    void this.processQueue().catch((error: unknown) =>
+      console.error("[TaskQueueManager] Failed to process the queue:", error),
+    );
     this.emitQueueUpdate();
   }
 

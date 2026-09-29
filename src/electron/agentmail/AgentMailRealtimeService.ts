@@ -1,10 +1,14 @@
-import Database from "better-sqlite3";
+import {
+  bindStatementContext,
+  detachedStatementContext,
+} from "../database/statements/statement-burst";
 import WebSocket from "ws";
 import { createLogger } from "../utils/logger";
 import { AgentMailStatus } from "../../shared/types";
 import { AgentMailSettingsManager } from "../settings/agentmail-manager";
 import { AgentMailClient } from "./AgentMailClient";
 import type { MailboxService } from "../mailbox/MailboxService";
+import type { MailboxStatementPort } from "../mailbox/mailbox-statement-port";
 
 const logger = createLogger("AgentMailRealtimeService");
 
@@ -25,6 +29,7 @@ export class AgentMailRealtimeService {
   private socket: WebSocket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private stopped = false;
+  private connecting: Promise<void> | null = null;
   private subscribedInboxIds = new Set<string>();
   private runtimeState: RuntimeState = {
     realtimeConnected: false,
@@ -34,18 +39,12 @@ export class AgentMailRealtimeService {
   };
 
   constructor(
-    private readonly db: Database.Database,
+    private readonly sql: MailboxStatementPort,
     private readonly mailboxService: MailboxService,
   ) {}
 
-  getRuntimeStatus(): RuntimeState {
-    const row = this.db
-      .prepare(
-        `SELECT connection_state, last_event_at, last_error
-         FROM agentmail_realtime_state
-         WHERE id = 'global'`,
-      )
-      .get() as
+  async getRuntimeStatus(): Promise<RuntimeState> {
+    const row = (await this.sql.get("agentmailRealtime_getRuntimeStatus_1", [])) as
       | {
           connection_state: AgentMailStatus["connectionState"];
           last_event_at: number | null;
@@ -65,47 +64,40 @@ export class AgentMailRealtimeService {
     };
   }
 
-  private persistRuntimeState(next: RuntimeState): void {
+  /** Updates the in-memory state at once; the stored row follows and never throws. */
+  private async persistRuntimeState(next: RuntimeState): Promise<void> {
     this.runtimeState = next;
-    this.db
-      .prepare(
-        `INSERT INTO agentmail_realtime_state
-          (id, connection_state, last_event_at, last_error, subscribed_inboxes_json, updated_at)
-         VALUES ('global', ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           connection_state = excluded.connection_state,
-           last_event_at = excluded.last_event_at,
-           last_error = excluded.last_error,
-           subscribed_inboxes_json = excluded.subscribed_inboxes_json,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
+    try {
+      await this.sql.run("agentmailRealtime_persistRuntimeState_1", [
         next.connectionState,
         next.lastEventAt || null,
         next.error || null,
         JSON.stringify(Array.from(this.subscribedInboxIds)),
         Date.now(),
-      );
+      ]);
+    } catch (error) {
+      logger.warn("Could not store AgentMail realtime state", error);
+    }
   }
 
-  private loadSubscribedInboxIds(): string[] {
-    const rows = this.db
-      .prepare("SELECT inbox_id FROM agentmail_inboxes ORDER BY inbox_id")
-      .all() as Array<{ inbox_id: string }>;
+  private async loadSubscribedInboxIds(): Promise<string[]> {
+    const rows = (await this.sql.all("agentmailRealtime_loadSubscribedInboxIds_1", [])) as Array<{
+      inbox_id: string;
+    }>;
     return rows.map((row) => row.inbox_id);
   }
 
-  start(): void {
+  async start(): Promise<void> {
     this.stopped = false;
     const settings = AgentMailSettingsManager.loadSettings();
     if (!settings.enabled || !settings.apiKey || !settings.realtimeEnabled) {
-      this.stop();
+      await this.stop();
       return;
     }
-    this.connect();
+    await this.connect();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopped = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -120,7 +112,7 @@ export class AgentMailRealtimeService {
       this.socket = null;
     }
     this.subscribedInboxIds = new Set();
-    this.persistRuntimeState({
+    await this.persistRuntimeState({
       realtimeConnected: false,
       connectionState: "disconnected",
       lastEventAt: this.runtimeState.lastEventAt,
@@ -128,14 +120,14 @@ export class AgentMailRealtimeService {
     });
   }
 
-  refreshSubscriptions(): void {
+  async refreshSubscriptions(): Promise<void> {
     const settings = AgentMailSettingsManager.loadSettings();
     if (!settings.enabled || !settings.apiKey || !settings.realtimeEnabled) {
-      this.stop();
+      await this.stop();
       return;
     }
 
-    const nextIds = this.loadSubscribedInboxIds();
+    const nextIds = await this.loadSubscribedInboxIds();
     this.subscribedInboxIds = new Set(nextIds);
 
     if (this.socket?.readyState === WebSocket.OPEN) {
@@ -143,7 +135,7 @@ export class AgentMailRealtimeService {
       return;
     }
 
-    this.start();
+    await this.start();
   }
 
   private scheduleReconnect(): void {
@@ -151,15 +143,27 @@ export class AgentMailRealtimeService {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.stopped) {
-        this.connect();
+        void detachedStatementContext("AgentMailRealtime.reconnect", () => this.connect()).catch(
+          (error) => logger.warn("AgentMail realtime reconnect failed", error),
+        );
       }
     }, 5000);
   }
 
-  private connect(): void {
+  /** One connection attempt at a time: its setup awaits the database before opening. */
+  private connect(): Promise<void> {
+    if (!this.connecting) {
+      this.connecting = this.openConnection().finally(() => {
+        this.connecting = null;
+      });
+    }
+    return this.connecting;
+  }
+
+  private async openConnection(): Promise<void> {
     const settings = AgentMailSettingsManager.loadSettings();
     if (!settings.enabled || !settings.apiKey || !settings.realtimeEnabled) {
-      this.stop();
+      await this.stop();
       return;
     }
 
@@ -167,42 +171,56 @@ export class AgentMailRealtimeService {
       return;
     }
 
-    this.subscribedInboxIds = new Set(this.loadSubscribedInboxIds());
-    this.persistRuntimeState({
+    this.subscribedInboxIds = new Set(await this.loadSubscribedInboxIds());
+    await this.persistRuntimeState({
       realtimeConnected: false,
       connectionState: "connecting",
       lastEventAt: this.runtimeState.lastEventAt,
       error: undefined,
     });
 
+    // stop() may have run while the state was being stored.
+    if (this.stopped) return;
     this.socket = new WebSocket(settings.websocketUrl || "wss://api.agentmail.to/v0/websocket", {
       headers: {
         Authorization: `Bearer ${settings.apiKey}`,
       },
     });
 
+    // Socket events are operations of their own, not part of the connection attempt.
+    // A socket event's work must not reject unhandled (for example under worker backpressure).
+    const detached = (label: string, fn: () => Promise<unknown>): Promise<void> =>
+      detachedStatementContext(`AgentMailRealtime.${label}`, fn).then(
+        () => undefined,
+        (error: unknown) => console.warn(`[AgentMailRealtime] ${label} handler failed:`, error),
+      );
+
     this.socket.on("open", () => {
-      this.persistRuntimeState({
-        realtimeConnected: true,
-        connectionState: "connected",
-        lastEventAt: this.runtimeState.lastEventAt,
-        error: undefined,
-      });
+      void detached("open", () =>
+        this.persistRuntimeState({
+          realtimeConnected: true,
+          connectionState: "connected",
+          lastEventAt: this.runtimeState.lastEventAt,
+          error: undefined,
+        }),
+      );
       this.sendSubscription(Array.from(this.subscribedInboxIds));
     });
 
     this.socket.on("message", (raw) => {
-      void this.handleMessage(raw.toString("utf8"));
+      void detached("message", () => this.handleMessage(raw.toString("utf8")));
     });
 
     this.socket.on("close", () => {
       this.socket = null;
-      this.persistRuntimeState({
-        realtimeConnected: false,
-        connectionState: this.stopped ? "disconnected" : "error",
-        lastEventAt: this.runtimeState.lastEventAt,
-        error: this.stopped ? undefined : "AgentMail realtime connection closed.",
-      });
+      void detached("close", () =>
+        this.persistRuntimeState({
+          realtimeConnected: false,
+          connectionState: this.stopped ? "disconnected" : "error",
+          lastEventAt: this.runtimeState.lastEventAt,
+          error: this.stopped ? undefined : "AgentMail realtime connection closed.",
+        }),
+      );
       if (!this.stopped) {
         this.scheduleReconnect();
       }
@@ -210,12 +228,14 @@ export class AgentMailRealtimeService {
 
     this.socket.on("error", (error) => {
       logger.warn("AgentMail realtime socket error", error);
-      this.persistRuntimeState({
-        realtimeConnected: false,
-        connectionState: "error",
-        lastEventAt: this.runtimeState.lastEventAt,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      void detached("error", () =>
+        this.persistRuntimeState({
+          realtimeConnected: false,
+          connectionState: "error",
+          lastEventAt: this.runtimeState.lastEventAt,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     });
   }
 
@@ -256,7 +276,7 @@ export class AgentMailRealtimeService {
     }
 
     if (type === "subscribed") {
-      this.persistRuntimeState({
+      await this.persistRuntimeState({
         realtimeConnected: true,
         connectionState: "connected",
         lastEventAt: this.runtimeState.lastEventAt,
@@ -296,14 +316,9 @@ export class AgentMailRealtimeService {
       return;
     }
 
-    const inboxRow = this.db
-      .prepare(
-        `SELECT workspace_id, pod_id
-         FROM agentmail_inboxes
-         WHERE inbox_id = ?
-         LIMIT 1`,
-      )
-      .get(inboxId) as { workspace_id: string; pod_id: string } | undefined;
+    const inboxRow = (await this.sql.get("agentmailRealtime_handleMessage_1", [inboxId])) as
+      | { workspace_id: string; pod_id: string }
+      | undefined;
     if (!inboxRow) {
       return;
     }
@@ -316,7 +331,7 @@ export class AgentMailRealtimeService {
         inboxRow.pod_id,
         thread,
       );
-      this.persistRuntimeState({
+      await this.persistRuntimeState({
         realtimeConnected: true,
         connectionState: "connected",
         lastEventAt: Date.now(),
@@ -324,7 +339,7 @@ export class AgentMailRealtimeService {
       });
     } catch (error) {
       logger.warn("Failed to hydrate AgentMail realtime event", error);
-      this.persistRuntimeState({
+      await this.persistRuntimeState({
         realtimeConnected: false,
         connectionState: "error",
         lastEventAt: this.runtimeState.lastEventAt,
@@ -333,3 +348,6 @@ export class AgentMailRealtimeService {
     }
   }
 }
+
+// Each call is one mailbox operation for the statement burst gate (DB6).
+bindStatementContext(AgentMailRealtimeService.prototype, "AgentMailRealtimeService");

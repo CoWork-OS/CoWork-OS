@@ -27,7 +27,7 @@ export function setupTriggerHandlers(
       _,
       trigger: Omit<EventTrigger, "id" | "createdAt" | "updatedAt" | "fireCount" | "lastFiredAt">,
     ): Promise<EventTrigger> => {
-      const created = triggerService.addTrigger(trigger);
+      const created = await triggerService.addTrigger(trigger);
       await onMutation?.();
       return created;
     },
@@ -36,13 +36,13 @@ export function setupTriggerHandlers(
   ipcMain.handle(
     IPC_CHANNELS.TRIGGER_UPDATE,
     async (_, data: { id: string; updates: Partial<EventTrigger> }): Promise<void> => {
-      triggerService.updateTrigger(data.id, data.updates);
+      await triggerService.updateTrigger(data.id, data.updates);
       await onMutation?.();
     },
   );
 
   ipcMain.handle(IPC_CHANNELS.TRIGGER_REMOVE, async (_, triggerId: string): Promise<void> => {
-    triggerService.removeTrigger(triggerId);
+    await triggerService.removeTrigger(triggerId);
     await onMutation?.();
   });
 

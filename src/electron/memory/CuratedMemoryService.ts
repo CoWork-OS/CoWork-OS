@@ -1,11 +1,9 @@
+import { WorkspaceRepository } from "../database/repository-facades";
+import { CuratedMemoryRepository } from "../database/repository-facades";
 import fs from "fs/promises";
 import path from "path";
 import type { DatabaseManager } from "../database/schema";
-import {
-  CuratedMemoryRepository,
-  WorkspaceRepository,
-  type CuratedMemoryEntryRecord,
-} from "../database/repositories";
+import { type CuratedMemoryEntryRecord } from "../database/repositories";
 import type {
   CuratedMemoryEntry,
   CuratedMemoryKind,
@@ -137,7 +135,7 @@ export class CuratedMemoryService {
     this.initialized = true;
   }
 
-  static list(
+  static async list(
     workspaceId: string,
     params: {
       target?: CuratedMemoryTarget;
@@ -145,12 +143,12 @@ export class CuratedMemoryService {
       status?: "active" | "archived";
       limit?: number;
     } = {},
-  ): CuratedMemoryEntry[] {
+  ): Promise<CuratedMemoryEntry[]> {
     this.ensureInitialized();
     return this.curatedRepo.list({ workspaceId, ...params });
   }
 
-  static getPromptEntries(workspaceId: string, limit = 8): CuratedMemoryEntry[] {
+  static async getPromptEntries(workspaceId: string, limit = 8): Promise<CuratedMemoryEntry[]> {
     this.ensureInitialized();
     return this.curatedRepo.list({
       workspaceId,
@@ -199,7 +197,7 @@ export class CuratedMemoryService {
       return { success: false, error: "remove requires either id or match" };
     }
 
-    const syncAccessError = this.validateSyncAccess(
+    const syncAccessError = await this.validateSyncAccess(
       params.workspaceId,
       params.filesystemReadGuard,
       params.filesystemWriteGuard,
@@ -209,7 +207,9 @@ export class CuratedMemoryService {
     }
 
     let entry: CuratedMemoryEntryRecord | undefined;
-    const existingById = hasStableId ? this.curatedRepo.findById(params.id!.trim()) : undefined;
+    const existingById = hasStableId
+      ? await this.curatedRepo.findById(params.id!.trim())
+      : undefined;
     if (
       existingById &&
       (existingById.workspaceId !== params.workspaceId || existingById.target !== params.target)
@@ -224,7 +224,12 @@ export class CuratedMemoryService {
         ? undefined
         : existingById
           ? { entry: existingById }
-          : this.findMatchCandidate(params.workspaceId, params.target, trimmedMatch, params.kind);
+          : await this.findMatchCandidate(
+              params.workspaceId,
+              params.target,
+              trimmedMatch,
+              params.kind,
+            );
     if (resolvedMatch?.error) {
       return {
         success: false,
@@ -242,7 +247,7 @@ export class CuratedMemoryService {
 
     if (!params.skipMemoryWriteGate) {
       const oldValue = params.action === "add" ? undefined : resolvedMatch?.entry?.content;
-      const gate = MemoryWriteGate.evaluate({
+      const gate = await MemoryWriteGate.evaluate({
         workspaceId: params.workspaceId,
         taskId: params.taskId,
         target: "curated",
@@ -281,19 +286,19 @@ export class CuratedMemoryService {
 
     if (params.action === "add") {
       const normalizedKey = normalizeMemoryKey(trimmedContent);
-      const existing = this.curatedRepo.findByNormalizedKey(
+      const existing = await this.curatedRepo.findByNormalizedKey(
         params.workspaceId,
         params.target,
         params.kind || defaultKind,
         normalizedKey,
       );
       if (existing) {
-        entry = this.curatedRepo.update(existing.id, {
+        entry = await this.curatedRepo.update(existing.id, {
           confidence: Math.max(existing.confidence, 0.85),
           lastConfirmedAt: Date.now(),
         });
       } else {
-        entry = this.curatedRepo.create({
+        entry = await this.curatedRepo.create({
           workspaceId: params.workspaceId,
           taskId: params.taskId,
           target: params.target,
@@ -309,7 +314,7 @@ export class CuratedMemoryService {
     } else {
       const existing = resolvedMatch!.entry!;
       if (params.action === "replace") {
-        entry = this.curatedRepo.update(existing.id, {
+        entry = await this.curatedRepo.update(existing.id, {
           kind: params.kind || existing.kind,
           content: trimmedContent,
           normalizedKey: normalizeMemoryKey(trimmedContent),
@@ -317,7 +322,7 @@ export class CuratedMemoryService {
           lastConfirmedAt: Date.now(),
         });
       } else {
-        entry = this.curatedRepo.archive(existing.id);
+        entry = await this.curatedRepo.archive(existing.id);
       }
     }
 
@@ -350,7 +355,7 @@ export class CuratedMemoryService {
     if (!content) return null;
 
     if (
-      this.validateSyncAccess(
+      await this.validateSyncAccess(
         params.workspaceId,
         params.filesystemReadGuard,
         params.filesystemWriteGuard,
@@ -361,7 +366,7 @@ export class CuratedMemoryService {
 
     const normalizedKey = normalizeMemoryKey(content);
     if (!params.skipMemoryWriteGate) {
-      const gate = MemoryWriteGate.evaluate({
+      const gate = await MemoryWriteGate.evaluate({
         workspaceId: params.workspaceId,
         taskId: params.taskId,
         target: "curated",
@@ -380,7 +385,7 @@ export class CuratedMemoryService {
       if (!gate.allowed) return null;
     }
 
-    const existing = this.curatedRepo.findByNormalizedKey(
+    const existing = await this.curatedRepo.findByNormalizedKey(
       params.workspaceId,
       params.target,
       params.kind,
@@ -388,11 +393,11 @@ export class CuratedMemoryService {
     );
 
     const entry = existing
-      ? this.curatedRepo.update(existing.id, {
+      ? await this.curatedRepo.update(existing.id, {
           confidence: Math.max(existing.confidence, params.confidence),
           lastConfirmedAt: Date.now(),
         })
-      : this.curatedRepo.create({
+      : await this.curatedRepo.create({
           workspaceId: params.workspaceId,
           taskId: params.taskId,
           target: params.target,
@@ -421,7 +426,7 @@ export class CuratedMemoryService {
     const next = previous
       .catch(() => undefined)
       .then(async () => {
-        const workspace = this.workspaceRepo.findById(workspaceId);
+        const workspace = await this.workspaceRepo.findById(workspaceId);
         if (!workspace?.path) return;
 
         const root = path.join(workspace.path, ".cowork");
@@ -437,13 +442,13 @@ export class CuratedMemoryService {
         if (!canWrite(root) || !canWrite(userPath) || !canWrite(memoryPath)) {
           throw new Error("Access denied while writing curated memory files.");
         }
-        const userEntries = this.curatedRepo.list({
+        const userEntries = await this.curatedRepo.list({
           workspaceId,
           target: "user",
           status: "active",
           limit: 200,
         });
-        const workspaceEntries = this.curatedRepo.list({
+        const workspaceEntries = await this.curatedRepo.list({
           workspaceId,
           target: "workspace",
           status: "active",
@@ -477,13 +482,13 @@ export class CuratedMemoryService {
     await next;
   }
 
-  private static validateSyncAccess(
+  private static async validateSyncAccess(
     workspaceId: string,
     readGuard?: CuratedMemoryFilesystemGuard,
     writeGuard?: CuratedMemoryFilesystemGuard,
-  ): string | undefined {
+  ): Promise<string | undefined> {
     if (!readGuard && !writeGuard) return undefined;
-    const workspace = this.workspaceRepo.findById(workspaceId);
+    const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace?.path) return "Workspace path is unavailable for curated memory sync.";
 
     const root = path.join(workspace.path, ".cowork");
@@ -497,21 +502,21 @@ export class CuratedMemoryService {
     return undefined;
   }
 
-  private static findMatchCandidate(
+  private static async findMatchCandidate(
     workspaceId: string,
     target: CuratedMemoryTarget,
     match: string,
     kind?: CuratedMemoryKind,
-  ): {
+  ): Promise<{
     entry?: CuratedMemoryEntryRecord;
     error?: string;
-  } {
+  }> {
     const normalizedMatch = normalizeMemoryKey(match);
     if (!normalizedMatch) {
       return { error: "match is required" };
     }
 
-    const entries = this.curatedRepo.list({
+    const entries = await this.curatedRepo.list({
       workspaceId,
       target,
       kind,

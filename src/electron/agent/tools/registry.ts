@@ -1,3 +1,5 @@
+import { AgentRoleRepository } from "../../agents/agent-repository-facades";
+import { ChannelStore } from "../../database/repositories";
 import {
   EXTERNAL_RUNTIME_AGENTS,
   normalizeExternalRuntimeAgent,
@@ -77,7 +79,6 @@ import { EmailImapTools } from "./email-imap-tools";
 import { GitTools } from "./git-tools";
 import { MemoryTools } from "./memory-tools";
 import { SupermemoryTools } from "./supermemory-tools";
-import { ChannelRepository } from "../../database/repositories";
 import { readFilesByPatterns } from "./read-files";
 import type { LLMTool, LLMToolPromptRenderContext } from "../llm/types";
 import { SearchProviderFactory } from "../search";
@@ -162,7 +163,7 @@ import {
   ChronicleSettingsManager,
 } from "../../chronicle";
 import { CitationTracker } from "../citation/CitationTracker";
-import { OrchestrationRepository } from "../OrchestrationRepository";
+import { OrchestrationRepository } from "../orchestration-repository-facades";
 import {
   canonicalizeToolName as canonicalizeToolNameUtil,
   getToolSemantics as getToolSemanticsUtil,
@@ -2181,7 +2182,7 @@ export class ToolRegistry {
 
       if (pipeline.decision === "deny") {
         if (pipeline.agentSecurity?.decision === "deny") {
-          getNumbatService()?.recordBlockedDecision(pipeline.agentSecurity.decisionId);
+          await getNumbatService()?.recordBlockedDecision(pipeline.agentSecurity.decisionId);
         }
         const reason = pipeline.reason ? `: ${pipeline.reason}` : "";
         throw Object.assign(
@@ -3147,7 +3148,7 @@ export class ToolRegistry {
     });
     register("switch_workspace", async ({ request }) => this.switchWorkspace(request.input));
     register("list_projects", async ({ request }) => {
-      const projects = this.daemon.listProjects({
+      const projects = await this.daemon.listProjects({
         includeArchived: request.input?.include_archived === true,
       });
       return {
@@ -3179,7 +3180,7 @@ export class ToolRegistry {
         return { success: false, error: "project_id and workspace_id are required" };
       }
       try {
-        const link = this.daemon.linkProjectWorkspace({
+        const link = await this.daemon.linkProjectWorkspace({
           projectId: project_id,
           workspaceId: workspace_id,
           isPrimary: is_primary,
@@ -3198,7 +3199,7 @@ export class ToolRegistry {
       }
     });
     register("list_goals", async ({ request }) => {
-      const goals = this.daemon.listGoals(request.input?.company_id);
+      const goals = await this.daemon.listGoals(request.input?.company_id);
       return {
         goals: goals.map((goal: Any) => ({
           id: goal.id,
@@ -3209,7 +3210,7 @@ export class ToolRegistry {
       };
     });
     register("list_issues", async ({ request }) => {
-      const issues = this.daemon.listIssues({
+      const issues = await this.daemon.listIssues({
         projectId: request.input?.project_id,
         goalId: request.input?.goal_id,
         status: Array.isArray(request.input?.status) ? request.input.status : undefined,
@@ -3232,7 +3233,7 @@ export class ToolRegistry {
         return { success: false, error: "title is required" };
       }
       try {
-        const issue = this.daemon.createIssue({
+        const issue = await this.daemon.createIssue({
           title: request.input.title,
           description: request.input.description,
           projectId: request.input.project_id,
@@ -3531,7 +3532,7 @@ export class ToolRegistry {
    * Query prior task event logs (tool calls, messages, feedback, file ops) from the local database.
    * Privacy-sensitive; should be blocked in shared gateway contexts.
    */
-  private taskEvents(input: {
+  private async taskEvents(input: {
     period: "today" | "yesterday" | "last_7_days" | "last_30_days" | "custom";
     from?: string;
     to?: string;
@@ -3539,7 +3540,7 @@ export class ToolRegistry {
     workspace_id?: string;
     types?: string[];
     include_payload?: boolean;
-  }): Any {
+  }): Promise<Any> {
     const period = input?.period;
     const allowed: Array<typeof period> = [
       "today",
@@ -3831,7 +3832,9 @@ export class ToolRegistry {
       // Some unit tests stub daemon as a plain object. Keep this best-effort.
       const dbGetter = (this.daemon as Any)?.getDatabase;
       if (typeof dbGetter === "function") {
-        const channelRepo = new ChannelRepository(dbGetter.call(this.daemon));
+        // Tool descriptions are built synchronously, so this status read stays on the
+        // host connection through the store.
+        const channelRepo = new ChannelStore(dbGetter.call(this.daemon));
         const emailChannel = channelRepo.findByType("email");
         if (!emailChannel) {
           emailChannelStatus = "not configured";
@@ -4237,7 +4240,7 @@ ${skillDescriptions}`;
           metadata.approvalKind === "shell_sensitive",
       });
       if (evaluation.decision === "deny") {
-        getNumbatService()?.recordBlockedDecision(evaluation.decisionId);
+        await getNumbatService()?.recordBlockedDecision(evaluation.decisionId);
         throw new Error(
           `Tool "${name}" blocked by agent security: ${
             evaluation.reason || "Action denied. Do not retry or attempt an equivalent action."
@@ -4846,7 +4849,7 @@ ${skillDescriptions}`;
     }
 
     if (name === "list_projects") {
-      const projects = this.daemon.listProjects({
+      const projects = await this.daemon.listProjects({
         includeArchived: input?.include_archived === true,
       });
       return {
@@ -4880,7 +4883,7 @@ ${skillDescriptions}`;
         return { success: false, error: "project_id and workspace_id are required" };
       }
       try {
-        const link = this.daemon.linkProjectWorkspace({
+        const link = await this.daemon.linkProjectWorkspace({
           projectId: project_id,
           workspaceId: workspace_id,
           isPrimary: is_primary,
@@ -4900,7 +4903,7 @@ ${skillDescriptions}`;
     }
 
     if (name === "list_goals") {
-      const goals = this.daemon.listGoals(input?.company_id);
+      const goals = await this.daemon.listGoals(input?.company_id);
       return {
         goals: goals.map((g: Any) => ({
           id: g.id,
@@ -4912,7 +4915,7 @@ ${skillDescriptions}`;
     }
 
     if (name === "list_issues") {
-      const issues = this.daemon.listIssues({
+      const issues = await this.daemon.listIssues({
         projectId: input?.project_id,
         goalId: input?.goal_id,
         status: Array.isArray(input?.status) ? input.status : undefined,
@@ -4936,7 +4939,7 @@ ${skillDescriptions}`;
         return { success: false, error: "title is required" };
       }
       try {
-        const issue = this.daemon.createIssue({
+        const issue = await this.daemon.createIssue({
           title: input.title,
           description: input.description,
           projectId: input.project_id,
@@ -5223,7 +5226,7 @@ ${skillDescriptions}`;
               mimeType,
             });
 
-            this.daemon.registerArtifact(
+            await this.daemon.registerArtifact(
               this.taskId,
               outputPath,
               mimeType || (content.type === "video" ? "video/mp4" : "image/png"),
@@ -5326,7 +5329,7 @@ ${skillDescriptions}`;
                 ".webp": "image/webp",
                 ".bmp": "image/bmp",
               };
-              this.daemon.registerArtifact(
+              await this.daemon.registerArtifact(
                 this.taskId,
                 workspacePath,
                 mimeTypes[ext] || "image/png",
@@ -10532,8 +10535,8 @@ ${skillDescriptions}`;
   }> {
     const requestedRunId = typeof input?.run_id === "string" ? input.run_id.trim() : "";
     const snapshot = requestedRunId
-      ? this.daemon.getOrchestrationGraphSnapshot(requestedRunId)
-      : this.daemon.findLatestOrchestrationGraphByRootTask(this.taskId);
+      ? await this.daemon.getOrchestrationGraphSnapshot(requestedRunId)
+      : await this.daemon.findLatestOrchestrationGraphByRootTask(this.taskId);
 
     if (!snapshot || snapshot.run.rootTaskId !== this.taskId) {
       return {
@@ -11264,7 +11267,7 @@ ${skillDescriptions}`;
   }> {
     const delegatedNode =
       typeof this.daemon.findDelegatedNode === "function"
-        ? this.daemon.findDelegatedNode(this.taskId, taskId)
+        ? await this.daemon.findDelegatedNode(this.taskId, taskId)
         : undefined;
     if (delegatedNode) {
       const result = await this.daemon.waitForDelegatedNode(this.taskId, taskId, timeoutSeconds);
@@ -11566,7 +11569,7 @@ ${skillDescriptions}`;
     if (task_ids && task_ids.length > 0) {
       // Get specific tasks (restricted to descendants only)
       for (const id of task_ids) {
-        const delegatedNode = this.daemon.findDelegatedNode(this.taskId, id);
+        const delegatedNode = await this.daemon.findDelegatedNode(this.taskId, id);
         if (delegatedNode && !delegatedNode.taskId) {
           delegatedNodes.push({
             task_id: delegatedNode.publicHandle || delegatedNode.remoteTaskId || delegatedNode.id,
@@ -11596,7 +11599,7 @@ ${skillDescriptions}`;
     } else {
       // Get all child tasks of current task
       tasks = await this.daemon.getChildTasks(this.taskId);
-      const graphRuns = this.daemon.listOrchestrationGraphsByRootTask(this.taskId);
+      const graphRuns = await this.daemon.listOrchestrationGraphsByRootTask(this.taskId);
       for (const run of graphRuns) {
         for (const node of run.nodes) {
           if (!node.publicHandle || node.taskId) continue;
@@ -11673,7 +11676,7 @@ ${skillDescriptions}`;
 
     // Get all child tasks
     let tasks = await this.daemon.getChildTasks(this.taskId);
-    const graphRuns = this.daemon.listOrchestrationGraphsByRootTask(this.taskId);
+    const graphRuns = await this.daemon.listOrchestrationGraphsByRootTask(this.taskId);
     let delegatedNodes = graphRuns.flatMap((run) =>
       run.nodes.filter((node) => node.publicHandle && !node.taskId),
     );
@@ -12269,7 +12272,7 @@ ${skillDescriptions}`;
   }> {
     const delegatedNode =
       typeof input?.task_id === "string"
-        ? this.daemon.findDelegatedNode?.(this.taskId, input.task_id)
+        ? await this.daemon.findDelegatedNode?.(this.taskId, input.task_id)
         : undefined;
     if (delegatedNode && !delegatedNode.taskId) {
       const handle = delegatedNode.publicHandle || delegatedNode.remoteTaskId || delegatedNode.id;
@@ -13715,10 +13718,10 @@ ${skillDescriptions}`;
   /**
    * Execute the manage_heartbeat tool
    */
-  private manageHeartbeat(input: { agent_name?: string; enabled?: boolean }): {
+  private async manageHeartbeat(input: { agent_name?: string; enabled?: boolean }): Promise<{
     success: boolean;
     message: string;
-  } {
+  }> {
     const { agent_name, enabled } = input;
     if (!agent_name || typeof agent_name !== "string" || agent_name.trim().length === 0) {
       return { success: false, message: "agent_name is required" };
@@ -13728,11 +13731,8 @@ ${skillDescriptions}`;
     }
 
     // Look up the agent role by display name
-    const db = this.daemon.getDatabase();
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
-    const { AgentRoleRepository } = require("../../agents/AgentRoleRepository");
-    const agentRoleRepo = new AgentRoleRepository(db);
-    const allRoles = agentRoleRepo.findAll(true); // include inactive
+    const agentRoleRepo = new AgentRoleRepository(this.daemon.getDatabase());
+    const allRoles = await agentRoleRepo.findAll(true); // include inactive
     const role = allRoles.find(
       (r: Any) =>
         r.displayName.toLowerCase() === agent_name.trim().toLowerCase() ||
@@ -13749,7 +13749,7 @@ ${skillDescriptions}`;
 
     // Update heartbeat config in DB
     const config = { heartbeatEnabled: enabled };
-    agentRoleRepo.updateHeartbeatConfig(role.id, config);
+    await agentRoleRepo.updateHeartbeatConfig(role.id, config);
 
     // Notify the HeartbeatService singleton to cancel or reschedule
     // oxlint-disable-next-line typescript-eslint(no-require-imports)

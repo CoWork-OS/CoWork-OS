@@ -15,6 +15,9 @@
  * - After import the caller is reminded to delete the source file.
  */
 
+import { MemoryEmbeddingRepository, MemoryRepository } from "../database/repository-facades";
+import { MemorySettingsRepository } from "../database/repository-facades";
+import { createMemoryStatementPort } from "./memory-statement-port";
 import * as fs from "fs/promises";
 import * as crypto from "crypto";
 import { EventEmitter } from "events";
@@ -23,11 +26,7 @@ import { recordLlmCallError, recordLlmCallSuccess } from "../agent/llm/usage-tel
 import type { LLMProviderType } from "../../shared/types";
 import { InputSanitizer } from "../agent/security";
 import { estimateTokens } from "../agent/context-manager";
-import {
-  MemoryRepository,
-  MemoryEmbeddingRepository,
-  MemorySettingsRepository,
-} from "../database/repositories";
+
 import { DatabaseManager } from "../database/schema";
 import { createLocalEmbedding } from "./local-embedding";
 
@@ -193,7 +192,7 @@ export class ChatGPTImporter {
       }
 
       // Verify memory system is enabled (but ignore autoCapture)
-      const settings = settingsRepo.getOrCreate(workspaceId);
+      const settings = await settingsRepo.getOrCreate(workspaceId);
       if (!settings.enabled) {
         throw new Error(
           "Memory system is disabled for this workspace. Enable it in settings first.",
@@ -258,18 +257,10 @@ export class ChatGPTImporter {
       // ── 2b. Build set of already-imported conversation IDs for resume ──
       const alreadyImported = new Set<string>();
       try {
-        const rows = db
-          .prepare(
-            `SELECT content
-             FROM memories
-             WHERE workspace_id = ?
-               AND (
-                 content LIKE '[Imported from ChatGPT %'
-                 OR content LIKE '[cowork:prompt_recall=ignore]%[Imported from ChatGPT %'
-               )
-             LIMIT 100000`,
-          )
-          .all(workspaceId) as Array<{ content: string }>;
+        const rows = await createMemoryStatementPort(db).all<{ content: string }>(
+          "chatgpt_importedContents",
+          [workspaceId],
+        );
         for (const row of rows) {
           const match = row.content.match(/\(conv:([a-f0-9-]+)\)/);
           if (match) alreadyImported.add(match[1]);
@@ -364,7 +355,7 @@ export class ChatGPTImporter {
               settings.privacyMode === "strict" ||
               containsSensitiveData(memoryContent);
 
-            const created = memoryRepo.create({
+            const created = await memoryRepo.create({
               workspaceId,
               taskId: undefined,
               type: entry.type as "observation" | "decision" | "insight",
@@ -379,7 +370,7 @@ export class ChatGPTImporter {
             try {
               const embedText = sanitized;
               const embedding = createLocalEmbedding(embedText);
-              embeddingRepo.upsert(workspaceId, created.id, embedding, created.updatedAt);
+              await embeddingRepo.upsert(workspaceId, created.id, embedding, created.updatedAt);
             } catch {
               // ignore
             }

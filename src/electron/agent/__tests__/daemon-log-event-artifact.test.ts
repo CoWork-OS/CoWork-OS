@@ -9,6 +9,7 @@ function createDaemonLike(taskOverrides: Record<string, unknown> = {}) {
   let seq = 0;
   return {
     logEvent: (AgentDaemon.prototype as Any).logEvent,
+    logEventWithinTaskRowReadScope: (AgentDaemon.prototype as Any).logEventWithinTaskRowReadScope,
     taskRepo: {
       findById: vi.fn().mockReturnValue({
         id: "task-1",

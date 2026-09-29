@@ -94,24 +94,26 @@ describe("Playbook evidence capture", () => {
     );
     const captured = await success("successful-task", "Reconcile invoices");
     expect(captured.status).toBe("recorded");
-    const reinforced = PlaybookService.reinforceFromEvidence(
+    const reinforced = await PlaybookService.reinforceFromEvidence(
       WS,
       captured.status === "recorded" ? captured.evidenceId : "",
     );
     expect(reinforced.linkedEvidenceIds).toEqual([]);
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).not.toContain(
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).not.toContain(
       "wrong spreadsheet",
     );
   });
 
   it("unrelated prompts return nothing and do not link", async () => {
     await success("old-task", "Export payroll CSV", ["write_file"]);
-    expect(PlaybookService.getPlaybookForContext(WS, "Botanical taxonomy of ferns")).toBe("");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Botanical taxonomy of ferns")).toBe("");
     const current = await success("new-task", "Botanical taxonomy of ferns", ["write_file"]);
     expect(
-      PlaybookService.reinforceFromEvidence(
-        WS,
-        current.status === "recorded" ? current.evidenceId : "",
+      (
+        await PlaybookService.reinforceFromEvidence(
+          WS,
+          current.status === "recorded" ? current.evidenceId : "",
+        )
       ).linkedEvidenceIds,
     ).toEqual([]);
   });
@@ -155,17 +157,19 @@ describe("Playbook evidence capture", () => {
       [],
       "[CORRECTION] that is the wrong ledger",
     );
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
   });
 
   it("deleting or editing the source memory invalidates dependent evidence", async () => {
     const first = await success("task-1", "Reconcile invoices");
     const second = await success("task-2", "Reconcile vendor invoices");
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toContain("Reconcile");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toContain(
+      "Reconcile",
+    );
     if (first.status !== "recorded" || second.status !== "recorded") throw new Error("setup");
     db.prepare("DELETE FROM memories WHERE id = ?").run(first.memoryId);
     db.prepare("UPDATE memories SET content = 'edited' WHERE id = ?").run(second.memoryId);
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
     const reasons = db
       .prepare("SELECT invalidation_reason AS r FROM playbook_evidence ORDER BY r")
       .all();
@@ -179,8 +183,8 @@ describe("Playbook evidence capture", () => {
     );
     await PlaybookService.captureMailboxPattern(WS, { title: "Reconcile invoices", summary: "x" });
     expect(evidenceCount()).toBe(0);
-    expect(PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
-    expect(PlaybookSkillPromoter.findCandidates(WS, 1)).toEqual([]);
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+    expect(await PlaybookSkillPromoter.findCandidates(WS, 1)).toEqual([]);
   });
 });
 
@@ -220,7 +224,7 @@ describe("Playbook evidence privacy", () => {
 
     // Redaction rewrites content without an event; the next read scrubs it.
     db.prepare("UPDATE memories SET content = '[redacted]'").run();
-    PlaybookService.getPlaybookForContext(WS, "Reconcile vendor invoices");
+    await PlaybookService.getPlaybookForContext(WS, "Reconcile vendor invoices");
     expect(ledgerText()).not.toContain("Reconcile");
     // The rows remain, so the same executions still cannot be counted again.
     expect(evidenceCount()).toBe(2);
@@ -239,11 +243,11 @@ describe("Playbook reinforcement and promotion", () => {
     await success("t2", "Reconcile monthly invoices", ["browser_navigate"]);
     const third = await success("t3", "Reconcile monthly invoices", ["write_file", "read_file"]);
     if (third.status !== "recorded") throw new Error("setup");
-    const result = PlaybookService.reinforceFromEvidence(WS, third.evidenceId);
+    const result = await PlaybookService.reinforceFromEvidence(WS, third.evidenceId);
     expect(result.linkedEvidenceIds).toHaveLength(1);
     expect(emitted).toHaveBeenCalledTimes(1);
     // Re-running reinforcement does not create duplicate links or events.
-    PlaybookService.reinforceFromEvidence(WS, third.evidenceId);
+    await PlaybookService.reinforceFromEvidence(WS, third.evidenceId);
     expect(emitted).toHaveBeenCalledTimes(1);
   });
 
@@ -253,14 +257,14 @@ describe("Playbook reinforcement and promotion", () => {
       const captured = await success(taskId, "Reconcile monthly invoices", ["read_file"]);
       if (captured.status !== "recorded") throw new Error("setup");
       ids.push(captured.evidenceId);
-      PlaybookService.reinforceFromEvidence(WS, captured.evidenceId);
+      await PlaybookService.reinforceFromEvidence(WS, captured.evidenceId);
     }
     // Repeated callbacks for t3 add nothing.
     await success("t3", "Reconcile monthly invoices", ["read_file"]);
-    const [candidate] = PlaybookSkillPromoter.findCandidates(WS, 3);
+    const [candidate] = await PlaybookSkillPromoter.findCandidates(WS, 3);
     expect(candidate.executionCount).toBe(3);
     expect(candidate.sourceEvidence[0]).toContain("observed runtime success");
-    expect(PlaybookSkillPromoter.findCandidates(WS, 4)).toEqual([]);
+    expect(await PlaybookSkillPromoter.findCandidates(WS, 4)).toEqual([]);
   });
 });
 

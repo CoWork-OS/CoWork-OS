@@ -1,9 +1,9 @@
 import { EventEmitter } from "events";
 import { createLogger } from "../utils/logger";
 import { MemoryService } from "./MemoryService";
+import { PlaybookEvidenceLedger } from "./PlaybookEvidenceLedger";
 import {
   hashMemoryContent,
-  PlaybookEvidenceStore,
   type PlaybookEvidenceRecord,
   type PlaybookOutcomeGrade,
 } from "./PlaybookEvidenceStore";
@@ -122,30 +122,28 @@ export class PlaybookService {
   /** Emits "pattern-reinforced" only after durable reinforcement links were created. */
   static readonly events = new EventEmitter();
 
-  private static evidenceStoreOverride: PlaybookEvidenceStore | null | undefined;
-  private static evidenceStoreCache: { db: unknown; store: PlaybookEvidenceStore } | null = null;
+  private static evidenceStoreOverride: PlaybookEvidenceLedger | null | undefined;
+  private static evidenceStoreCache: { db: unknown; store: PlaybookEvidenceLedger } | null = null;
 
   /** Inject a ledger (tests), or pass undefined to return to the profile database. */
-  static setEvidenceStoreForTesting(store: PlaybookEvidenceStore | null | undefined): void {
+  static setEvidenceStoreForTesting(store: PlaybookEvidenceLedger | null | undefined): void {
     this.evidenceStoreOverride = store;
     this.evidenceStoreCache = null;
   }
 
-  static getEvidenceStore(): PlaybookEvidenceStore | null {
+  static getEvidenceStore(): PlaybookEvidenceLedger | null {
     if (this.evidenceStoreOverride !== undefined) return this.evidenceStoreOverride;
     const db = MemoryService.getDatabase?.();
     if (!db) return null;
     if (this.evidenceStoreCache?.db !== db) {
-      const store = new PlaybookEvidenceStore(db);
+      const store = PlaybookEvidenceLedger.open(db);
       this.evidenceStoreCache = { db, store };
       // Deleting, clearing, pruning or editing memory scrubs dependent ledger text.
       MemoryService.onMemoryChanged?.(({ type, workspaceId }) => {
         if (!["deleted", "cleared", "pruned", "updated"].includes(type)) return;
-        try {
-          store.sweepWorkspace(workspaceId);
-        } catch (error) {
+        void store.sweepWorkspace(workspaceId).catch((error: unknown) => {
           logger.warn("Failed to sweep Playbook evidence after a memory change:", error);
-        }
+        });
       });
     }
     return this.evidenceStoreCache.store;
@@ -210,7 +208,7 @@ export class PlaybookService {
     const store = this.getEvidenceStore();
     if (!store) return { status: "skipped", reason: "ledger_unavailable" };
     const executionKey = derivePlaybookExecutionKey(taskId, options.turnId);
-    const existing = store.find(workspaceId, executionKey, outcome);
+    const existing = await store.find(workspaceId, executionKey, outcome);
     if (existing) {
       return { status: "skipped", reason: "duplicate_execution", evidenceId: existing.id };
     }
@@ -259,7 +257,7 @@ export class PlaybookService {
       // Ledger text comes from the memory exactly as stored, so inline <private>
       // redaction and truncation apply to it too; never from the raw prompt.
       const stored = parseGeneratedPlaybookMemory(memory.content);
-      const { created, record } = store.record({
+      const { created, record } = await store.record({
         workspaceId,
         taskId,
         executionKey,
@@ -286,7 +284,7 @@ export class PlaybookService {
       }
       if (category === "user_correction") {
         // An identifiable correction reverses this task's earlier success claims.
-        store.invalidateTaskSuccesses(workspaceId, taskId, "corrected_by_user");
+        await store.invalidateTaskSuccesses(workspaceId, taskId, "corrected_by_user");
       }
       return { status: "recorded", memoryId: memory.id, evidenceId: record.id, executionKey };
     } catch (err) {
@@ -297,14 +295,11 @@ export class PlaybookService {
 
   /** Active success evidence whose source memory still exists unchanged. */
   private static eligibleSuccesses(
-    store: PlaybookEvidenceStore,
+    store: PlaybookEvidenceLedger,
     workspaceId: string,
     excludeExecutionKey?: string,
-  ): PlaybookEvidenceRecord[] {
-    return store
-      .listActiveSuccesses(workspaceId)
-      .filter((record) => record.executionKey !== excludeExecutionKey)
-      .filter((record) => store.verifySource(record));
+  ): Promise<PlaybookEvidenceRecord[]> {
+    return store.verifiedSuccesses(workspaceId, excludeExecutionKey);
   }
 
   /**
@@ -312,12 +307,12 @@ export class PlaybookService {
    * to this prompt before any top-N selection. Failures, corrected outcomes, inbox
    * observations and reinforcement-derived entries never appear here.
    */
-  static getPlaybookForContext(
+  static async getPlaybookForContext(
     workspaceId: string,
     taskPrompt: string,
     maxEntries = 3,
     options: { excludeTaskId?: string } = {},
-  ): string {
+  ): Promise<string> {
     try {
       const store = this.getEvidenceStore();
       if (!store) return "";
@@ -325,7 +320,7 @@ export class PlaybookService {
       const excludeKey = options.excludeTaskId
         ? derivePlaybookExecutionKey(options.excludeTaskId)
         : undefined;
-      const ranked = this.eligibleSuccesses(store, workspaceId, excludeKey)
+      const ranked = (await this.eligibleSuccesses(store, workspaceId, excludeKey))
         .filter((record) => !options.excludeTaskId || record.taskId !== options.excludeTaskId)
         .map((record) => ({
           record,
@@ -364,17 +359,15 @@ export class PlaybookService {
    * Explicit recovery lookup: clearly labeled failure lessons relevant to this prompt.
    * Not part of generic success context.
    */
-  static getFailureLessonsForRecovery(
+  static async getFailureLessonsForRecovery(
     workspaceId: string,
     taskPrompt: string,
     maxEntries = 2,
-  ): string {
+  ): Promise<string> {
     try {
       const store = this.getEvidenceStore();
       if (!store) return "";
-      const lessons = store
-        .listActiveFailures(workspaceId)
-        .filter((record) => store.verifySource(record))
+      const lessons = (await store.verifiedFailures(workspaceId))
         .filter(
           (record) =>
             scorePlaybookRelevance(taskPrompt, `${record.title}\n${record.requestExcerpt}`).passes,
@@ -398,12 +391,12 @@ export class PlaybookService {
    * a compatible approach for a relevant request. A similar prompt alone is not enough: the
    * pattern key must match. Emits "pattern-reinforced" only when links were created.
    */
-  static reinforceFromEvidence(
+  static async reinforceFromEvidence(
     workspaceId: string,
     evidenceId: string,
-  ): PlaybookReinforcementResult {
+  ): Promise<PlaybookReinforcementResult> {
     const store = this.getEvidenceStore();
-    const current = store?.get(evidenceId);
+    const current = await store?.get(evidenceId);
     if (
       !store ||
       !current ||
@@ -415,7 +408,7 @@ export class PlaybookService {
       return { linkedEvidenceIds: [] };
     }
     const query = `${current.title}\n${current.requestExcerpt}`;
-    const candidates = this.eligibleSuccesses(store, workspaceId, current.executionKey)
+    const candidates = (await this.eligibleSuccesses(store, workspaceId, current.executionKey))
       .filter((record) => record.taskId !== current.taskId || record.turnId !== current.turnId)
       .filter((record) => record.patternKey === current.patternKey)
       .map((record) => ({
@@ -426,9 +419,10 @@ export class PlaybookService {
       .sort((a, b) => b.relevance.weightedOverlap - a.relevance.weightedOverlap)
       .slice(0, MAX_REINFORCEMENT_LINKS);
 
-    const linkedEvidenceIds = candidates
-      .filter(({ record }) => store.link(current.id, record.id))
-      .map(({ record }) => record.id);
+    const linkedEvidenceIds = await store.linkAll(
+      current.id,
+      candidates.map(({ record }) => record.id),
+    );
     if (linkedEvidenceIds.length > 0) {
       this.events.emit("pattern-reinforced", {
         workspaceId,

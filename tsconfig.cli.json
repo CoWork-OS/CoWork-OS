@@ -21,6 +21,12 @@
       "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src/cli/**/*", "src/shared/global-any.d.ts"],
+  "include": [
+    "src/cli/**/*",
+    "src/shared/global-any.d.ts",
+    "src/electron/database/fts-worker.ts",
+    "src/electron/database/async/database-worker.ts",
+    "src/electron/database/schema-bootstrap-worker.ts"
+  ],
   "exclude": ["node_modules", "dist", "**/__tests__/**", "**/*.test.ts"]
 }

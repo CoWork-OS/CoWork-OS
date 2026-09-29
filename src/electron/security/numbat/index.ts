@@ -1,4 +1,5 @@
 export * from "./AgentSecurityRepository";
+export * from "./agent-security-repository-facades";
 export * from "./NumbatBinaryResolver";
 export * from "./NumbatCommandClient";
 export * from "./NumbatEventAdapter";

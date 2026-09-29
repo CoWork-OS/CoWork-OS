@@ -59,6 +59,7 @@ describe("AgentDaemon structured input requests", () => {
         },
       ],
     });
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(daemonLike.updateTask).toHaveBeenCalledWith("task-1", {
       status: "paused",
@@ -81,6 +82,8 @@ describe("AgentDaemon structured input requests", () => {
         message: expect.stringContaining("User selected structured input options:"),
       }),
     );
+    // Permission evaluation reads storage before the approval row is created (DB6).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
     expect(daemonLike.logEvent).toHaveBeenCalledWith(
       "task-1",
       "assistant_message",
@@ -122,6 +125,7 @@ describe("AgentDaemon structured input requests", () => {
       runtime,
       "domain:http_request:api.example.com",
     );
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(daemonLike.logEvent).toHaveBeenCalledWith(
       "task-approval",
@@ -193,6 +197,7 @@ describe("AgentDaemon structured input requests", () => {
         },
       ],
     });
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     const response = await AgentDaemon.prototype.respondToInputRequest.call(daemonLike, {
       requestId: "req-dismiss-1",
@@ -231,6 +236,7 @@ describe("AgentDaemon structured input requests", () => {
         },
       ],
     });
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     const response = await AgentDaemon.prototype.respondToInputRequest.call(daemonLike, {
       requestId: "req-terminal-1",
@@ -248,6 +254,8 @@ describe("AgentDaemon structured input requests", () => {
         terminalTask: true,
       }),
     );
+    // Permission evaluation reads storage before the approval row is created (DB6).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
     expect(daemonLike.updateTask).toHaveBeenCalledTimes(1);
     expect(daemonLike.updateTask).toHaveBeenCalledWith("task-3", {
       status: "paused",
@@ -291,7 +299,7 @@ describe("AgentDaemon structured input requests", () => {
     );
   });
 
-  it("fails pending approval rows closed while rehydrating ordinary input rows", () => {
+  it("fails pending approval rows closed while rehydrating ordinary input rows", async () => {
     const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
     process.env.COWORK_APPROVAL_PROMPTS = "off";
     const daemonLike = {
@@ -323,7 +331,7 @@ describe("AgentDaemon structured input requests", () => {
     } as Any;
 
     try {
-      AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
+      await AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
     } finally {
       if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
       else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
@@ -350,7 +358,43 @@ describe("AgentDaemon structured input requests", () => {
     );
   });
 
-  it("fails assistant approval cards closed instead of rehydrating them after restart", () => {
+  it("reconciles pending approvals and inputs read through the async storage facades", async () => {
+    // The approval and input-request repositories are async facades (storage slice A):
+    // their pending lists arrive as promises.
+    const daemonLike = {
+      approvalRepo: {
+        findAllPending: vi.fn().mockResolvedValue([
+          {
+            id: "approval-async",
+            taskId: "task-async",
+            type: "run_command",
+            details: {},
+            status: "pending",
+          },
+        ]),
+        update: vi.fn().mockResolvedValue(undefined),
+      },
+      inputRequestRepo: {
+        findAllPending: vi.fn().mockResolvedValue([]),
+        resolve: vi.fn().mockResolvedValue(undefined),
+      },
+      taskRepo: {
+        findByStatus: vi.fn().mockReturnValue([]),
+        findById: vi.fn().mockReturnValue({ id: "task-async", status: "executing" }),
+        update: vi.fn(),
+      },
+      logEvent: vi.fn(),
+    } as Any;
+
+    await AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
+
+    expect(daemonLike.approvalRepo.findAllPending).toHaveBeenCalled();
+    expect(daemonLike.inputRequestRepo.findAllPending).toHaveBeenCalled();
+    // The pending approval was processed, whichever way the approval policy routes it.
+    expect(daemonLike.taskRepo.update).toHaveBeenCalledWith("task-async", expect.anything());
+  });
+
+  it("fails assistant approval cards closed instead of rehydrating them after restart", async () => {
     const daemonLike = {
       approvalRepo: {
         findAllPending: vi.fn().mockReturnValue([]),
@@ -390,7 +434,7 @@ describe("AgentDaemon structured input requests", () => {
       logEvent: vi.fn(),
     } as Any;
 
-    AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
+    await AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
 
     expect(daemonLike.inputRequestRepo.resolve).toHaveBeenCalledWith(
       "request-approval-restart",
@@ -410,7 +454,7 @@ describe("AgentDaemon structured input requests", () => {
     );
   });
 
-  it("requeues verification-gated tasks after a restart", () => {
+  it("requeues verification-gated tasks after a restart", async () => {
     const daemonLike = {
       taskRepo: {
         findByStatus: vi.fn().mockReturnValue([
@@ -428,7 +472,7 @@ describe("AgentDaemon structured input requests", () => {
       logEvent: vi.fn(),
     } as Any;
 
-    AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
+    await AgentDaemon.prototype["reconcileDurableWaitsOnStartup"].call(daemonLike);
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
       "task-verification",

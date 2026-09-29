@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 
 export interface HookSessionRecord {
   sessionKey: string;
@@ -7,9 +7,13 @@ export interface HookSessionRecord {
 }
 
 /**
- * Persists hook/mention session keys to make task creation idempotent.
+ * Hook and mention session keys, which make task creation idempotent, and their short-
+ * lived locks (async SQLite migration plan, DB6). As services-domain units these run in
+ * the database worker when the domain is routed there; callers use the async
+ * HookSessionRepository facade in hook-session-repository-facades.ts. Acquiring a lock
+ * clears expired locks in the same transaction.
  */
-export class HookSessionRepository {
+export class HookSessionStore {
   constructor(private db: Database.Database) {}
 
   findBySessionKey(sessionKey: string): HookSessionRecord | null {

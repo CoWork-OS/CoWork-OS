@@ -6,7 +6,8 @@ import type {
   AgentSecurityEnforcement,
   AgentSecurityFinding,
 } from "../../../shared/agent-security";
-import { AgentSecurityRepository } from "./AgentSecurityRepository";
+import type { AgentSecurityIngestOp } from "./AgentSecurityRepository";
+import type { AgentSecurityRepository } from "./agent-security-repository-facades";
 import { redactAgentSecurityRecord, redactAgentSecurityString } from "./NumbatRedaction";
 
 const MAX_RECORD_BYTES = 1024 * 1024;
@@ -97,7 +98,12 @@ export class NumbatRecordIngestor {
     if (cursorPath) fs.rmSync(cursorPath, { force: true });
   }
 
-  ingestFile(filePath: string, taskId?: string): NumbatIngestResult {
+  /**
+   * Ingest the complete records appended to a Numbat record file since the last read. The
+   * records are written in one unit, and the file cursor advances only after it commits,
+   * so a failed write re-reads the same records next time (the upserts are idempotent).
+   */
+  async ingestFile(filePath: string, taskId?: string): Promise<NumbatIngestResult> {
     const result: NumbatIngestResult = { findings: [], decisions: [], diagnostics: [] };
     if (!fs.existsSync(filePath)) return result;
     const stat = fs.statSync(filePath);
@@ -123,37 +129,34 @@ export class NumbatRecordIngestor {
     const committed = readBuffer.subarray(0, lastNewline + 1);
     const lines = committed.toString("utf8").split("\n");
     lines.pop();
-    this.saveCursor(filePath, {
-      offset: offset + committed.length,
-      dev: stat.dev,
-      ino: stat.ino,
-    });
-
+    const ops: AgentSecurityIngestOp[] = [];
     for (const line of lines) {
       if (!line.trim()) continue;
       if (Buffer.byteLength(line, "utf8") > MAX_RECORD_BYTES) {
-        result.diagnostics.push(
-          this.repository.addDiagnostic({
+        ops.push({
+          kind: "diagnostic",
+          diagnostic: {
             taskId,
             level: "error",
             code: "record_too_large",
             message: "Numbat record exceeded the CoWork ingestion limit",
-          }),
-        );
+          },
+        });
         continue;
       }
       let parsed: Record<string, unknown>;
       try {
         parsed = asRecord(JSON.parse(line));
       } catch {
-        result.diagnostics.push(
-          this.repository.addDiagnostic({
+        ops.push({
+          kind: "diagnostic",
+          diagnostic: {
             taskId,
             level: "warn",
             code: "invalid_ndjson",
             message: "Numbat emitted an invalid NDJSON record",
-          }),
-        );
+          },
+        });
         continue;
       }
       const redacted = asRecord(redactAgentSecurityRecord(parsed));
@@ -161,28 +164,37 @@ export class NumbatRecordIngestor {
       if (recordType === "finding") {
         const finding = this.toFinding(redacted, taskId);
         if (finding) {
-          this.repository.upsertFinding(finding);
+          ops.push({ kind: "finding", finding });
           result.findings.push(finding);
         }
       } else if (recordType === "enforcement") {
         const decision = this.toDecision(redacted, taskId);
         if (decision) {
-          this.repository.upsertDecision(decision);
+          ops.push({ kind: "decision", decision });
           result.decisions.push(decision);
         }
       } else if (recordType === "diagnostic") {
-        const diagnostic = this.repository.addDiagnostic({
-          taskId,
-          level: redacted.level === "error" ? "error" : redacted.level === "warn" ? "warn" : "info",
-          code: stringValue(redacted, "code") || "numbat_diagnostic",
-          message: redactAgentSecurityString(
-            stringValue(redacted, "message") || "Numbat diagnostic",
-            1_024,
-          ),
+        ops.push({
+          kind: "diagnostic",
+          diagnostic: {
+            taskId,
+            level:
+              redacted.level === "error" ? "error" : redacted.level === "warn" ? "warn" : "info",
+            code: stringValue(redacted, "code") || "numbat_diagnostic",
+            message: redactAgentSecurityString(
+              stringValue(redacted, "message") || "Numbat diagnostic",
+              1_024,
+            ),
+          },
         });
-        result.diagnostics.push(diagnostic);
       }
     }
+    if (ops.length > 0) result.diagnostics.push(...(await this.repository.applyIngest(ops)));
+    this.saveCursor(filePath, {
+      offset: offset + committed.length,
+      dev: stat.dev,
+      ino: stat.ino,
+    });
     return result;
   }
 

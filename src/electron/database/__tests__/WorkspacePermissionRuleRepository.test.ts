@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WorkspacePermissionRuleRepository } from "../repositories";
+import { WorkspacePermissionRuleStore } from "../repositories";
 
 vi.mock("uuid", () => ({
   v4: vi.fn(() => "rule-123"),
@@ -19,9 +19,9 @@ type MockRow = {
   updated_at: number;
 };
 
-describe("WorkspacePermissionRuleRepository", () => {
+describe("WorkspacePermissionRuleStore", () => {
   let rows: MockRow[];
-  let repository: WorkspacePermissionRuleRepository;
+  let repository: WorkspacePermissionRuleStore;
 
   beforeEach(() => {
     rows = [];
@@ -89,7 +89,7 @@ describe("WorkspacePermissionRuleRepository", () => {
       }),
     } as Any;
 
-    repository = new WorkspacePermissionRuleRepository(db);
+    repository = new WorkspacePermissionRuleStore(db);
   });
 
   afterEach(() => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PrincipalCapabilityMiddleware } from "../PrincipalCapabilityMiddleware";
-import type { SessionMembershipService } from "../../workspaces/SessionMembershipService";
+import type { SessionMembershipService } from "../../workspaces/workspaces-repository-facades";
 
 function createMiddleware() {
   const authorizeTaskAction = vi.fn((taskId: string) => {
@@ -18,22 +18,22 @@ function createMiddleware() {
 }
 
 describe("PrincipalCapabilityMiddleware", () => {
-  it("filters before applying the requested offset and reports visible totals", () => {
+  it("filters before applying the requested offset and reports visible totals", async () => {
     const { middleware, authorizeTaskAction } = createMiddleware();
     const rows = [{ id: "hidden-1" }, { id: "visible-1" }, { id: "hidden-2" }, { id: "visible-2" }];
     const loadPage = vi.fn((_: number, offset: number) => (offset === 0 ? rows : []));
 
-    const result = middleware.filterAndPaginateTasks(loadPage, "view", "guest-1", 1, 1);
+    const result = await middleware.filterAndPaginateTasks(loadPage, "view", "guest-1", 1, 1);
 
     expect(result).toEqual({ tasks: [{ id: "visible-2" }], total: 2 });
     expect(authorizeTaskAction).toHaveBeenCalledTimes(4);
   });
 
-  it("keeps the local-owner fast path on the repository page", () => {
+  it("keeps the local-owner fast path on the repository page", async () => {
     const { middleware } = createMiddleware();
     const loadPage = vi.fn(() => [{ id: "task-1" }]);
 
-    const result = middleware.filterAndPaginateTasks(loadPage, "view", "local-1", 25, 10);
+    const result = await middleware.filterAndPaginateTasks(loadPage, "view", "local-1", 25, 10);
 
     expect(result).toEqual({ tasks: [{ id: "task-1" }] });
     expect(loadPage).toHaveBeenCalledWith(25, 10);

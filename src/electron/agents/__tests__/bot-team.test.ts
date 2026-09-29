@@ -39,8 +39,10 @@ describeWithSqlite("default CoWork bot team", () => {
   });
 
   it("seeds a reusable roster and workspace-scoped persistent team idempotently", async () => {
-    const [{ WorkspaceRepository }, { ensureDefaultBotTeam, DEFAULT_BOT_TEAM_NAME }] =
-      await Promise.all([import("../../database/repositories"), import("../bot-team")]);
+    const [
+      { WorkspaceStore: WorkspaceRepository },
+      { ensureDefaultBotTeam, DEFAULT_BOT_TEAM_NAME },
+    ] = await Promise.all([import("../../database/repositories"), import("../bot-team")]);
     const workspace = new WorkspaceRepository(manager.getDatabase()).create(
       "Bot Team Workspace",
       tmpDir,

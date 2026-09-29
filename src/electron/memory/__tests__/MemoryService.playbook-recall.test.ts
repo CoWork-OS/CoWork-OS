@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ app: { getPath: vi.fn().mockReturnValue("/tmp/test-cowork") } }));
 vi.mock("../MemoryObservationService", () => ({
-  MemoryObservationService: { isPromptSuppressed: () => false, initialize: vi.fn() },
+  MemoryObservationService: {
+    isPromptSuppressed: async () => false,
+    suppressedIds: async () => new Set<string>(),
+    initialize: vi.fn(),
+  },
 }));
 
 import { MemoryService } from "../MemoryService";
@@ -46,15 +50,20 @@ function install() {
 }
 
 describe("MemoryService generic recall excludes generated Playbook rows", () => {
-  it("recent recall", () => {
+  it("recent recall", async () => {
     install();
-    expect(MemoryService.getRecentForPromptRecall("ws").map((row) => row.id)).toEqual(["u1", "u2"]);
+    expect((await MemoryService.getRecentForPromptRecall("ws")).map((row) => row.id)).toEqual([
+      "u1",
+      "u2",
+    ]);
   });
 
-  it("fast search recall", () => {
+  it("fast search recall", async () => {
     install();
     expect(
-      MemoryService.searchForPromptRecallFast("ws", "reconcile invoices", 10).map((row) => row.id),
+      (await MemoryService.searchForPromptRecallFast("ws", "reconcile invoices", 10)).map(
+        (row) => row.id,
+      ),
     ).toEqual(["u1", "u2"]);
   });
 });

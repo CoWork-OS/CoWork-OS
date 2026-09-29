@@ -161,12 +161,14 @@ export class LayeredMemoryIndexService {
         };
       });
 
-    const markdownHits = MemoryService.searchWorkspaceMarkdown(
-      params.workspaceId,
-      params.workspacePath,
-      params.taskPrompt,
-      topicLimit,
-      params.readGuard,
+    const markdownHits = (
+      await MemoryService.searchWorkspaceMarkdown(
+        params.workspaceId,
+        params.workspacePath,
+        params.taskPrompt,
+        topicLimit,
+        params.readGuard,
+      )
     )
       .slice(0, topicLimit)
       .map((entry, index) => {
@@ -212,7 +214,7 @@ export class LayeredMemoryIndexService {
       7,
       params.readGuard,
     );
-    const curatedContext = CuratedMemoryService.getPromptEntries(params.workspaceId, 5)
+    const curatedContext = (await CuratedMemoryService.getPromptEntries(params.workspaceId, 5))
       .map((entry) => `- [${entry.target}/${entry.kind}] ${entry.content}`)
       .join("\n");
     const archiveContext = (await searchPromptRecallSafe(params.workspaceId, params.taskPrompt, 3))

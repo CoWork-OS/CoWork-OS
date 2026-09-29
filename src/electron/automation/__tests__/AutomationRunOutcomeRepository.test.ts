@@ -19,12 +19,12 @@ describeWithSqlite("AutomationRunOutcomeRepository", () => {
   it("stores outcomes and summarizes usefulness counts", async () => {
     const [{ default: Database }, { AutomationRunOutcomeRepository }] = await Promise.all([
       import("better-sqlite3"),
-      import("../AutomationRunOutcomeRepository"),
+      import("../automation-outcome-repository-facades"),
     ]);
     const db = new Database(":memory:");
     const repo = new AutomationRunOutcomeRepository(db);
 
-    const actionable = repo.create({
+    const actionable = await repo.create({
       source: "heartbeat",
       title: "Heartbeat created work",
       summary: "Created one task.",
@@ -34,7 +34,7 @@ describeWithSqlite("AutomationRunOutcomeRepository", () => {
       metrics: { dispatchedTaskCount: 1 },
       evidenceRefs: [{ type: "task", id: "task-1", label: "created" }],
     });
-    repo.create({
+    await repo.create({
       source: "strategic_planner",
       title: "Planner checked work",
       summary: "No changes.",
@@ -43,13 +43,13 @@ describeWithSqlite("AutomationRunOutcomeRepository", () => {
       notificationRecommended: false,
     });
 
-    expect(repo.list({ limit: 5 })).toHaveLength(2);
-    expect(repo.list({ source: "heartbeat" })[0]).toMatchObject({
+    expect(await repo.list({ limit: 5 })).toHaveLength(2);
+    expect((await repo.list({ source: "heartbeat" }))[0]).toMatchObject({
       id: actionable.id,
       metrics: { dispatchedTaskCount: 1 },
       evidenceRefs: [{ type: "task", id: "task-1", label: "created" }],
     });
-    expect(repo.summarize()).toEqual({
+    expect(await repo.summarize()).toEqual({
       total: 2,
       actionable: 1,
       informational: 1,
@@ -63,7 +63,7 @@ describeWithSqlite("AutomationRunOutcomeRepository", () => {
   it("keeps explicit notification keys scoped to their owning job", async () => {
     const [{ default: Database }, { AutomationRunOutcomeRepository }] = await Promise.all([
       import("better-sqlite3"),
-      import("../AutomationRunOutcomeRepository"),
+      import("../automation-outcome-repository-facades"),
     ]);
     const db = new Database(":memory:");
     const repo = new AutomationRunOutcomeRepository(db);
@@ -78,13 +78,13 @@ describeWithSqlite("AutomationRunOutcomeRepository", () => {
       workspaceId: "workspace-1",
     };
 
-    repo.create({ ...base, agentRoleId: "agent-a", createdAt: 1 });
-    repo.create({ ...base, agentRoleId: "agent-b", createdAt: 2 });
+    await repo.create({ ...base, agentRoleId: "agent-a", createdAt: 1 });
+    await repo.create({ ...base, agentRoleId: "agent-b", createdAt: 2 });
 
-    expect(repo.findLatestByNotificationKey("shared-key", "agent:agent-a")?.agentRoleId).toBe(
+    expect((await repo.findLatestByNotificationKey("shared-key", "agent:agent-a"))?.agentRoleId).toBe(
       "agent-a",
     );
-    expect(repo.findLatestByNotificationKey("shared-key", "agent:agent-b")?.agentRoleId).toBe(
+    expect((await repo.findLatestByNotificationKey("shared-key", "agent:agent-b"))?.agentRoleId).toBe(
       "agent-b",
     );
 

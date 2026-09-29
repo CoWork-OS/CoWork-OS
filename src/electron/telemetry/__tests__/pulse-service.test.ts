@@ -13,7 +13,7 @@ describe("CoWork Pulse privacy categorization", () => {
 });
 
 describe("CoWork Pulse synthetic sample exclusion", () => {
-  it("omits sample tasks and their tool and model errors from the daily package", () => {
+  it("omits sample tasks and their tool and model errors from the daily package", async () => {
     const db = new Database(":memory:");
     try {
       db.exec(`
@@ -44,13 +44,13 @@ describe("CoWork Pulse synthetic sample exclusion", () => {
         runtime: "desktop",
         now: () => now + 86_400_000,
       });
-      const daily = (
+      const daily = await (
         service as unknown as {
-          buildPackage(id: string): {
+          buildPackage(id: string): Promise<{
             activity: { tasksStarted: number; usefulTasks: number };
             tools: { filesystem: number };
             reliability: { llmErrors: number };
-          };
+          }>;
         }
       ).buildPackage("install");
       expect(daily.activity.tasksStarted).toBe(1);

@@ -2,13 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentSecurityRepository } from "../AgentSecurityRepository";
+import type { AgentSecurityRepository } from "../agent-security-repository-facades";
 import { NumbatRecordIngestor } from "../NumbatRecordIngestor";
 
 const temporaryRoots: string[] = [];
 
 function repositoryDouble() {
-  return {
+  const double = {
     upsertFinding: vi.fn(),
     upsertDecision: vi.fn(),
     addDiagnostic: vi.fn((input: Record<string, unknown>) => ({
@@ -16,7 +16,18 @@ function repositoryDouble() {
       id: `diagnostic-${Math.random()}`,
       createdAt: Date.now(),
     })),
-  } as unknown as AgentSecurityRepository;
+    // One unit per record file (DB6): applies the writes in order, like the store.
+    applyIngest: vi.fn(async (ops: Array<Record<string, Any>>) => {
+      const diagnostics: unknown[] = [];
+      for (const op of ops) {
+        if (op.kind === "finding") double.upsertFinding(op.finding);
+        else if (op.kind === "decision") double.upsertDecision(op.decision);
+        else diagnostics.push(double.addDiagnostic(op.diagnostic));
+      }
+      return diagnostics;
+    }),
+  };
+  return double as unknown as AgentSecurityRepository;
 }
 
 function temporaryFile(): string {
@@ -32,7 +43,7 @@ afterEach(() => {
 });
 
 describe("NumbatRecordIngestor", () => {
-  it("ingests findings and enforcement records incrementally", () => {
+  it("ingests findings and enforcement records incrementally", async () => {
     const repository = repositoryDouble();
     const ingestor = new NumbatRecordIngestor(repository);
     const filePath = temporaryFile();
@@ -52,7 +63,7 @@ describe("NumbatRecordIngestor", () => {
     };
     fs.writeFileSync(filePath, `${JSON.stringify(finding)}\n{"record_type":"enforcement",`);
 
-    const first = ingestor.ingestFile(filePath, "task-1");
+    const first = await ingestor.ingestFile(filePath, "task-1");
     expect(first.findings).toHaveLength(1);
     expect(first.decisions).toHaveLength(0);
     expect(first.findings[0].record.api_key).toBe("[REDACTED]");
@@ -74,7 +85,7 @@ describe("NumbatRecordIngestor", () => {
       }).slice(1)}\n`,
     );
 
-    const second = ingestor.ingestFile(filePath, "task-1");
+    const second = await ingestor.ingestFile(filePath, "task-1");
     expect(second.findings).toHaveLength(0);
     expect(second.decisions).toEqual([
       expect.objectContaining({
@@ -87,13 +98,13 @@ describe("NumbatRecordIngestor", () => {
     ]);
   });
 
-  it("records a bounded diagnostic for invalid NDJSON", () => {
+  it("records a bounded diagnostic for invalid NDJSON", async () => {
     const repository = repositoryDouble();
     const ingestor = new NumbatRecordIngestor(repository);
     const filePath = temporaryFile();
     fs.writeFileSync(filePath, "{not-json}\n");
 
-    const result = ingestor.ingestFile(filePath, "task-2");
+    const result = await ingestor.ingestFile(filePath, "task-2");
 
     expect(result.diagnostics).toEqual([
       expect.objectContaining({
@@ -104,7 +115,7 @@ describe("NumbatRecordIngestor", () => {
     ]);
   });
 
-  it("persists committed offsets across ingestor restarts", () => {
+  it("persists committed offsets across ingestor restarts", async () => {
     const repository = repositoryDouble();
     const filePath = temporaryFile();
     const cursorDir = path.join(path.dirname(filePath), "cursors");
@@ -120,10 +131,10 @@ describe("NumbatRecordIngestor", () => {
     fs.writeFileSync(filePath, `${JSON.stringify(record)}\n`);
 
     expect(
-      new NumbatRecordIngestor(repository, cursorDir).ingestFile(filePath).decisions,
+      (await new NumbatRecordIngestor(repository, cursorDir).ingestFile(filePath)).decisions,
     ).toHaveLength(1);
     expect(
-      new NumbatRecordIngestor(repository, cursorDir).ingestFile(filePath).decisions,
+      (await new NumbatRecordIngestor(repository, cursorDir).ingestFile(filePath)).decisions,
     ).toHaveLength(0);
   });
 });

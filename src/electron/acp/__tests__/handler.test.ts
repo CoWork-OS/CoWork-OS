@@ -71,6 +71,11 @@ class FakeDatabase {
   acpAgents: Array<Record<string, unknown>> = [];
   acpTasks: Array<Record<string, unknown>> = [];
 
+  // Units run in a transaction (DB6); the fake runs the body directly.
+  transaction<T extends (...args: never[]) => unknown>(fn: T): T {
+    return fn;
+  }
+
   prepare(sql: string) {
     const normalized = sql.replace(/\s+/g, " ").trim().toLowerCase();
     return {

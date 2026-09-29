@@ -5,6 +5,18 @@
  * Manages message flow: Security → Session → Task/Response
  */
 
+import { AgentRoleRepository } from "../agents/agent-repository-facades";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import {
+  ChannelRepository,
+  ChannelSessionRepository,
+  ChannelUserRepository,
+} from "../database/repository-facades";
+import {
+  ArtifactRepository,
+  ChannelMessageRepository,
+  ChannelSpecializationRepository,
+} from "../database/repository-facades";
 import type { BrowserWindow } from "electron";
 import * as fs from "fs";
 import * as path from "path";
@@ -24,18 +36,8 @@ import {
 import { TelegramAdapter } from "./channels/telegram";
 import { SecurityManager } from "./security";
 import { SessionManager } from "./session";
-import {
-  ChannelRepository,
-  ChannelUserRepository,
-  ChannelSessionRepository,
-  ChannelMessageRepository,
-  ChannelSpecializationRepository,
-  WorkspaceRepository,
-  TaskRepository,
-  ArtifactRepository,
-  Channel,
-} from "../database/repositories";
-import Database from "better-sqlite3";
+import { Channel } from "../database/repositories";
+import type Database from "better-sqlite3";
 import { AgentDaemon } from "../agent/daemon";
 import {
   Task,
@@ -47,7 +49,7 @@ import {
   IPC_CHANNELS,
   isTempWorkspaceId,
 } from "../../shared/types";
-import { AgentRoleRepository } from "../agents/AgentRoleRepository";
+
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import * as os from "os";
@@ -72,7 +74,7 @@ import {
 } from "../../shared/skill-slash-commands";
 import { formatTimelineActivityLabel } from "../../shared/timeline-v2";
 import { DEFAULT_QUIRKS } from "../../shared/types";
-import { formatChatTranscriptForPrompt } from "./chat-transcript";
+import { formatChatTranscriptForPrompt, prefetchTranscriptUsers } from "./chat-transcript";
 import { evaluateWorkspaceRouterRules } from "./router-rules";
 import { applyResearchChatRouting } from "./router-research-routing";
 import { extractJsonValues } from "../utils/json-utils";
@@ -308,10 +310,10 @@ export class MessageRouter {
         channelId
           ? this.getAdapterByChannelId(channelId) || this.adapters.get(channelType)
           : this.adapters.get(channelType),
-      getChannel: (channelType, channelId) =>
+      getChannel: async (channelType, channelId) =>
         channelId
-          ? this.channelRepo.findById(channelId) || undefined
-          : this.channelRepo.findByType(channelType) || undefined,
+          ? (await this.channelRepo.findById(channelId)) || undefined
+          : (await this.channelRepo.findByType(channelType)) || undefined,
       cleanupIdempotencyCache: () => this.cleanupIdempotencyCache(),
       getIdempotencyCacheKey: (channelType, message, channelId) =>
         this.getIdempotencyCacheKey(channelType, message, channelId),
@@ -327,15 +329,18 @@ export class MessageRouter {
         return rawSend ? rawSend(message) : adapter.sendMessage(message);
       },
       logOutgoingMessage: (input) => {
-        this.messageRepo.create({
-          channelId: input.channelId,
-          channelMessageId: input.channelMessageId,
-          chatId: input.chatId,
-          direction: "outgoing",
-          content: input.content,
-          attachments: this.toDbAttachments(input.attachments),
-          timestamp: Date.now(),
-        });
+        // One unit, started without holding up delivery; a failed log is reported.
+        void this.messageRepo
+          .create({
+            channelId: input.channelId,
+            channelMessageId: input.channelMessageId,
+            chatId: input.chatId,
+            direction: "outgoing",
+            content: input.content,
+            attachments: this.toDbAttachments(input.attachments),
+            timestamp: Date.now(),
+          })
+          .catch((error: unknown) => console.warn("Failed to log outgoing message:", error));
       },
       emitMessageSent: (input) => {
         this.emitEvent({
@@ -577,24 +582,24 @@ export class MessageRouter {
     return this.compactExternalChannelStatusUpdate(normalized);
   }
 
-  private getExternalProgressRelayMode(
+  private async getExternalProgressRelayMode(
     channelType: ChannelType | undefined,
     channelId?: string,
-  ): "minimal" | "curated" {
+  ): Promise<"minimal" | "curated"> {
     if (!channelType || !this.isTextOnlyChannel(channelType) || !channelId) {
       return "minimal";
     }
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     const configured = channel?.config as Record<string, unknown> | undefined;
     return configured?.progressRelayMode === "curated" ? "curated" : "minimal";
   }
 
-  private prepareTaskUpdateForChannel(
+  private async prepareTaskUpdateForChannel(
     channelType: ChannelType | undefined,
     channelId: string | undefined,
     text: string,
     isStreaming: boolean,
-  ): string | null {
+  ): Promise<string | null> {
     const normalized = String(text || "").trim();
     if (!normalized) {
       return null;
@@ -606,7 +611,7 @@ export class MessageRouter {
     }
 
     if (this.isTextOnlyChannel(channelType)) {
-      if (this.getExternalProgressRelayMode(channelType, channelId) === "curated") {
+      if ((await this.getExternalProgressRelayMode(channelType, channelId)) === "curated") {
         return this.curateExternalChannelStatusUpdate(normalized);
       }
       return this.compactExternalChannelStatusUpdate(normalized);
@@ -615,18 +620,18 @@ export class MessageRouter {
     return normalized;
   }
 
-  private shouldUseEditableProgressRelay(
+  private async shouldUseEditableProgressRelay(
     pending:
       | {
           adapter: ChannelAdapter;
           channelId: string;
         }
       | undefined,
-  ): boolean {
+  ): Promise<boolean> {
     if (!pending) return false;
     return (
-      this.getExternalProgressRelayMode(pending.adapter.type, pending.channelId) === "curated" &&
-      typeof pending.adapter.editMessage === "function"
+      (await this.getExternalProgressRelayMode(pending.adapter.type, pending.channelId)) ===
+        "curated" && typeof pending.adapter.editMessage === "function"
     );
   }
 
@@ -860,11 +865,11 @@ export class MessageRouter {
     return getChannelUiCopy(key, this.getMessageContext(), replacements);
   }
 
-  private ensureTempWorkspaceRecord(
+  private async ensureTempWorkspaceRecord(
     workspaceId: string,
     workspacePath: string,
     existing?: Workspace,
-  ): Workspace {
+  ): Promise<Workspace> {
     const safeWorkspacePath = ensureTempWorkspaceDirectoryPathSync(
       path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
       workspacePath,
@@ -882,23 +887,14 @@ export class MessageRouter {
       unrestrictedFileAccess: true,
     };
 
-    const stmt = this.db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        path = excluded.path,
-        last_used_at = excluded.last_used_at,
-        permissions = excluded.permissions
-    `);
-    stmt.run(
-      workspaceId,
-      TEMP_WORKSPACE_NAME,
-      safeWorkspacePath,
+    await this.workspaceRepo.upsertWithId({
+      id: workspaceId,
+      name: TEMP_WORKSPACE_NAME,
+      path: safeWorkspacePath,
       createdAt,
       lastUsedAt,
-      JSON.stringify(permissions),
-    );
+      permissions,
+    });
 
     return {
       id: workspaceId,
@@ -911,9 +907,9 @@ export class MessageRouter {
     };
   }
 
-  private isPersistedWorkspaceId(workspaceId: string | undefined): boolean {
+  private async isPersistedWorkspaceId(workspaceId: string | undefined): Promise<boolean> {
     if (!workspaceId || isTempWorkspaceId(workspaceId)) return false;
-    const workspace = this.workspaceRepo.findById(workspaceId);
+    const workspace = await this.workspaceRepo.findById(workspaceId);
     return !!workspace && this.isUserSelectableWorkspace(workspace);
   }
 
@@ -954,11 +950,11 @@ export class MessageRouter {
     }
   }
 
-  private canApplySpecializationToSession(
+  private async canApplySpecializationToSession(
     session: { taskId?: string } | undefined | null,
-  ): boolean {
+  ): Promise<boolean> {
     if (!session?.taskId) return true;
-    const task = this.taskRepo.findById(session.taskId);
+    const task = await this.taskRepo.findById(session.taskId);
     if (!task) return true;
     return !["pending", "planning", "executing", "paused"].includes(task.status);
   }
@@ -980,10 +976,10 @@ export class MessageRouter {
    * Get or create a temp workspace.
    * When a session ID is provided, each session gets its own dedicated temp folder.
    */
-  private getOrCreateTempWorkspace(
+  private async getOrCreateTempWorkspace(
     sessionId?: string,
     options?: { createNew?: boolean },
-  ): Workspace {
+  ): Promise<Workspace> {
     const createNew = options?.createNew === true;
     let workspace: Workspace;
     if (sessionId) {
@@ -996,20 +992,20 @@ export class MessageRouter {
           )
         : createScopedTempWorkspaceIdentity("gateway", sanitizeTempWorkspaceKey(sessionId));
       const workspaceId = identity.workspaceId;
-      const existing = this.workspaceRepo.findById(workspaceId);
+      const existing = await this.workspaceRepo.findById(workspaceId);
       if (existing) {
-        workspace = this.ensureTempWorkspaceRecord(workspaceId, existing.path, existing);
+        workspace = await this.ensureTempWorkspaceRecord(workspaceId, existing.path, existing);
       } else {
         const workspacePath =
           "path" in identity ? identity.path : path.join(tempRoot, identity.slug);
-        workspace = this.ensureTempWorkspaceRecord(workspaceId, workspacePath);
+        workspace = await this.ensureTempWorkspaceRecord(workspaceId, workspacePath);
       }
     } else {
-      const existingTemp = this.workspaceRepo
-        .findAll()
+      const existingTemp = (await this.workspaceRepo
+        .findAll())
         .find((candidate) => isTempWorkspaceInScope(candidate.id, "gateway"));
       if (existingTemp && !createNew) {
-        workspace = this.ensureTempWorkspaceRecord(
+        workspace = await this.ensureTempWorkspaceRecord(
           existingTemp.id,
           existingTemp.path,
           existingTemp,
@@ -1019,12 +1015,12 @@ export class MessageRouter {
           path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
           "gateway",
         );
-        workspace = this.ensureTempWorkspaceRecord(created.workspaceId, created.path);
+        workspace = await this.ensureTempWorkspaceRecord(created.workspaceId, created.path);
       }
     }
 
     try {
-      pruneTempWorkspaces({
+      await pruneTempWorkspaces({
         db: this.db,
         tempWorkspaceRoot: path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME),
         currentWorkspaceId: workspace.id,
@@ -1037,7 +1033,7 @@ export class MessageRouter {
     return workspace;
   }
 
-  private createDedicatedWorkspaceForScheduledJob(jobName: string): Workspace {
+  private async createDedicatedWorkspaceForScheduledJob(jobName: string): Promise<Workspace> {
     const root = path.join(getUserDataDir(), "scheduled-workspaces");
     fs.mkdirSync(root, { recursive: true });
 
@@ -1118,14 +1114,19 @@ export class MessageRouter {
         data: { status, error: error?.message },
       });
 
-      // Update channel status in database
-      const channel = this.getChannelForAdapter(adapter);
-      if (channel) {
-        this.channelRepo.update(channel.id, {
-          status,
-          botUsername: adapter.botUsername,
+      // Update channel status in database (best effort; the listener stays synchronous)
+      void this.getChannelForAdapter(adapter)
+        .then((channel) =>
+          channel
+            ? this.channelRepo.update(channel.id, {
+                status,
+                botUsername: adapter.botUsername,
+              })
+            : undefined,
+        )
+        .catch((updateError) => {
+          console.error(`[${adapter.type}] Failed to record channel status:`, updateError);
         });
-      }
 
       if (status === "connected") {
         void this.restorePendingTaskRoutes(adapter).catch((restoreError) => {
@@ -1182,11 +1183,11 @@ export class MessageRouter {
     return this.adapterChannelIds.get(adapter);
   }
 
-  private getChannelForAdapter(adapter: ChannelAdapter): Channel | undefined {
+  private async getChannelForAdapter(adapter: ChannelAdapter): Promise<Channel | undefined> {
     const channelId = this.getChannelIdForAdapter(adapter);
     return channelId
-      ? this.channelRepo.findById(channelId)
-      : this.channelRepo.findByType(adapter.type);
+      ? await this.channelRepo.findById(channelId)
+      : await this.channelRepo.findByType(adapter.type);
   }
 
   /**
@@ -1194,7 +1195,7 @@ export class MessageRouter {
    */
   async connectAll(options: ConnectAllOptions = {}): Promise<void> {
     this.shuttingDown = false;
-    const enabledChannels = this.channelRepo.findEnabled();
+    const enabledChannels = await this.channelRepo.findEnabled();
 
     await Promise.all(
       enabledChannels.map(async (channel) => {
@@ -1227,17 +1228,17 @@ export class MessageRouter {
   }
 
   private async restorePendingTaskRoutes(adapter: ChannelAdapter): Promise<void> {
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) return;
 
-    const sessions = this.sessionRepo.findActiveByChannelId(channel.id);
+    const sessions = await this.sessionRepo.findActiveByChannelId(channel.id);
     if (sessions.length === 0) return;
 
     for (const session of sessions) {
       if (!session.taskId) continue;
       if (this.pendingTaskResponses.has(session.taskId)) continue;
 
-      const task = this.taskRepo.findById(session.taskId);
+      const task = await this.taskRepo.findById(session.taskId);
       if (!task) continue;
       if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
         continue;
@@ -1348,7 +1349,7 @@ export class MessageRouter {
     ];
   }
 
-  private logUserFeedback(
+  private async logUserFeedback(
     taskId: string,
     data: {
       decision: "approved" | "rejected" | "edit" | "next";
@@ -1358,10 +1359,10 @@ export class MessageRouter {
       userId?: string;
       userName?: string;
     },
-  ): void {
+  ): Promise<void> {
     if (!this.agentDaemon) return;
 
-    const task = this.taskRepo.findById(taskId);
+    const task = await this.taskRepo.findById(taskId);
     const agentRoleId = task?.assignedAgentRoleId || null;
 
     try {
@@ -1416,22 +1417,22 @@ export class MessageRouter {
       : undefined;
   }
 
-  private resolveAgentRoleForSelector(selector: string): {
+  private async resolveAgentRoleForSelector(selector: string): Promise<{
     role?: AgentRole;
     matches: AgentRole[];
-  } {
+  }> {
     const normalized = selector.trim();
     if (!normalized) {
       return { role: undefined, matches: [] };
     }
 
-    const directMatch = this.agentRoleRepo.findById(normalized);
+    const directMatch = await this.agentRoleRepo.findById(normalized);
     if (directMatch) {
       return { role: directMatch, matches: [] };
     }
 
     const lower = normalized.toLowerCase();
-    const candidates = this.agentRoleRepo.findActive();
+    const candidates = await this.agentRoleRepo.findActive();
     const exactByName = candidates.find(
       (r) => r.name.toLowerCase() === lower || r.displayName.toLowerCase() === lower,
     );
@@ -1457,7 +1458,7 @@ export class MessageRouter {
    * Primary use: approvals for child tasks (sub-agents) should route back to the
    * originating chat session (usually the root task).
    */
-  private resolveRouteForTask(taskId: string):
+  private async resolveRouteForTask(taskId: string): Promise<
     | {
         adapter: ChannelAdapter;
         channelId: string;
@@ -1468,7 +1469,8 @@ export class MessageRouter {
         lastChannelMessageId?: string;
         routedTaskId: string;
       }
-    | undefined {
+    | undefined
+  > {
     const direct = this.pendingTaskResponses.get(taskId);
     if (direct) {
       return { ...direct, routedTaskId: taskId };
@@ -1481,9 +1483,9 @@ export class MessageRouter {
         return { ...pending, routedTaskId: currentTaskId };
       }
 
-      const session = this.sessionRepo.findByTaskId(currentTaskId);
+      const session = await this.sessionRepo.findByTaskId(currentTaskId);
       if (session) {
-        const channel = this.channelRepo.findById(session.channelId);
+        const channel = await this.channelRepo.findById(session.channelId);
         if (!channel) return undefined;
         const adapter =
           this.getAdapterByChannelId(channel.id) || this.adapters.get(channel.type as ChannelType);
@@ -1504,7 +1506,7 @@ export class MessageRouter {
         };
       }
 
-      const task = this.taskRepo.findById(currentTaskId);
+      const task = await this.taskRepo.findById(currentTaskId);
       currentTaskId = task?.parentTaskId;
     }
 
@@ -1543,7 +1545,7 @@ export class MessageRouter {
     message: OutgoingMessage,
     channelId?: string,
   ): Promise<string> {
-    const resolvedChannelId = channelId || this.getChannelForAdapter(adapter)?.id;
+    const resolvedChannelId = channelId || (await this.getChannelForAdapter(adapter))?.id;
     return this.sendMessage(adapter.type, message, resolvedChannelId);
   }
 
@@ -1942,7 +1944,7 @@ export class MessageRouter {
    */
   private async handleMessage(adapter: ChannelAdapter, message: IncomingMessage): Promise<void> {
     const channelType = adapter.type;
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
 
     if (!channel) {
       console.error(`No channel configuration found for ${channelType}`);
@@ -1972,7 +1974,7 @@ export class MessageRouter {
     }
 
     // Log incoming message (include resolved user row + sanitized attachment metadata)
-    this.messageRepo.create({
+    await this.messageRepo.create({
       channelId: channel.id,
       channelMessageId: message.messageId,
       chatId: message.chatId,
@@ -2010,14 +2012,14 @@ export class MessageRouter {
 
     // Update user's last seen
     if (securityResult.user) {
-      this.userRepo.update(securityResult.user.id, {
+      await this.userRepo.update(securityResult.user.id, {
         lastSeenAt: Date.now(),
       });
     }
 
     // Get or create session
     // Channel-level workspace override takes priority over router default
-    const channelSpecialization = this.resolveChannelSpecialization(channel.id, message);
+    const channelSpecialization = await this.resolveChannelSpecialization(channel.id, message);
     const sessionChatKey = this.getSessionChatKey(message);
     const channelDefaultWorkspaceId =
       typeof channel.config?.defaultWorkspaceId === "string"
@@ -2034,7 +2036,7 @@ export class MessageRouter {
 
     // Track last sender for this chat (useful for restoring after restarts).
     // Note: sessions are keyed by chatId (group chats share a session).
-    this.sessionManager.updateSessionContext(session.id, {
+    await this.sessionManager.updateSessionContext(session.id, {
       channelChatId: message.chatId,
       ...(message.threadId ? { channelThreadId: message.threadId } : {}),
       ...(channelSpecialization?.id ? { channelSpecializationId: channelSpecialization.id } : {}),
@@ -2141,7 +2143,7 @@ export class MessageRouter {
       return;
     }
 
-    let session = this.sessionRepo.findById(sessionId);
+    let session = await this.sessionRepo.findById(sessionId);
     const ctx = session?.context as Any;
     const pendingFeedback = ctx?.pendingFeedback as Any;
 
@@ -2157,19 +2159,19 @@ export class MessageRouter {
       const ageMs = Date.now() - createdAt;
 
       if (!kind || !taskId || ageMs > PENDING_FEEDBACK_TTL_MS) {
-        this.sessionManager.updateSessionContext(sessionId, {
+        await this.sessionManager.updateSessionContext(sessionId, {
           pendingFeedback: undefined,
         });
       } else if (requestingUserId && requestingUserId !== message.userId) {
         // In group chats, only the user who initiated the feedback flow can continue it.
         // For DMs, this is always the same user.
       } else if (kind === "reject_reason") {
-        this.sessionManager.updateSessionContext(sessionId, {
+        await this.sessionManager.updateSessionContext(sessionId, {
           pendingFeedback: undefined,
         });
 
         const reason = text.trim();
-        this.logUserFeedback(taskId, {
+        await this.logUserFeedback(taskId, {
           decision: "rejected",
           ...(reason.toLowerCase() !== "skip" ? { reason } : {}),
           source: "message",
@@ -2188,7 +2190,7 @@ export class MessageRouter {
         });
         return;
       } else if (kind === "edit") {
-        this.sessionManager.updateSessionContext(sessionId, {
+        await this.sessionManager.updateSessionContext(sessionId, {
           pendingFeedback: undefined,
         });
 
@@ -2202,7 +2204,7 @@ export class MessageRouter {
           return;
         }
 
-        this.logUserFeedback(taskId, {
+        await this.logUserFeedback(taskId, {
           decision: "edit",
           reason: instructions,
           source: "message",
@@ -2236,7 +2238,7 @@ export class MessageRouter {
 
       if (ageMs > PENDING_SELECTION_TTL_MS) {
         // Expired - clear and proceed normally.
-        this.sessionManager.updateSessionContext(sessionId, {
+        await this.sessionManager.updateSessionContext(sessionId, {
           pendingSelection: undefined,
         });
       } else {
@@ -2244,12 +2246,12 @@ export class MessageRouter {
         const looksLikeSelection = /^[0-9]+$/.test(text) || (!/\s/.test(text) && text.length <= 48);
         if (!looksLikeSelection) {
           // User likely sent a real task; clear pending selection and continue.
-          this.sessionManager.updateSessionContext(sessionId, {
+          await this.sessionManager.updateSessionContext(sessionId, {
             pendingSelection: undefined,
           });
         } else if (pendingSelection.type === "workspace") {
-          const workspaces = this.workspaceRepo
-            .findAll()
+          const workspaces = (await this.workspaceRepo
+            .findAll())
             .filter((workspace) => this.isUserSelectableWorkspace(workspace));
           const isNumeric = /^[0-9]+$/.test(text);
           const num = parseInt(text, 10);
@@ -2274,13 +2276,13 @@ export class MessageRouter {
           }
 
           if (workspace) {
-            this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+            await this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
             try {
-              this.workspaceRepo.updateLastUsedAt(workspace.id);
+              await this.workspaceRepo.updateLastUsedAt(workspace.id);
             } catch (error) {
               console.warn("Failed to update workspace last used time:", error);
             }
-            this.sessionManager.updateSessionContext(sessionId, {
+            await this.sessionManager.updateSessionContext(sessionId, {
               pendingSelection: undefined,
             });
             const selectedText = this.getUiCopy("workspaceSelected", {
@@ -2296,7 +2298,7 @@ export class MessageRouter {
           }
 
           // Not a valid selection; treat the next message as a normal task prompt.
-          this.sessionManager.updateSessionContext(sessionId, {
+          await this.sessionManager.updateSessionContext(sessionId, {
             pendingSelection: undefined,
           });
         } else if (pendingSelection.type === "provider") {
@@ -2337,11 +2339,11 @@ export class MessageRouter {
             }
 
             // Otherwise, treat as normal task prompt.
-            this.sessionManager.updateSessionContext(sessionId, {
+            await this.sessionManager.updateSessionContext(sessionId, {
               pendingSelection: undefined,
             });
           } else {
-            this.sessionManager.updateSessionContext(sessionId, {
+            await this.sessionManager.updateSessionContext(sessionId, {
               pendingSelection: undefined,
             });
             await this.handleProviderCommand(adapter, message, [text]);
@@ -2355,31 +2357,31 @@ export class MessageRouter {
 
     if (
       securityContext?.channelSpecialization?.workspaceId &&
-      this.canApplySpecializationToSession(session)
+      (await this.canApplySpecializationToSession(session))
     ) {
-      const specializedWorkspace = this.workspaceRepo.findById(
+      const specializedWorkspace = await this.workspaceRepo.findById(
         securityContext.channelSpecialization.workspaceId,
       );
       if (specializedWorkspace) {
-        this.sessionManager.setSessionWorkspace(sessionId, specializedWorkspace.id);
-        session = this.sessionRepo.findById(sessionId);
+        await this.sessionManager.setSessionWorkspace(sessionId, specializedWorkspace.id);
+        session = await this.sessionRepo.findById(sessionId);
       }
     }
 
     // Check if session has no workspace - might be workspace selection
     if (!session?.workspaceId) {
       // Check if this looks like workspace selection (number or short name)
-      const workspaces = this.workspaceRepo
-        .findAll()
+      const workspaces = (await this.workspaceRepo
+        .findAll())
         .filter((workspace) => this.isUserSelectableWorkspace(workspace));
       if (workspaces.length > 0) {
         // Try to match by number
         const num = parseInt(text, 10);
         if (!isNaN(num) && num > 0 && num <= workspaces.length) {
           const workspace = workspaces[num - 1];
-          this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+          await this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
           try {
-            this.workspaceRepo.updateLastUsedAt(workspace.id);
+            await this.workspaceRepo.updateLastUsedAt(workspace.id);
           } catch (error) {
             console.warn("Failed to update workspace last used time:", error);
           }
@@ -2402,10 +2404,10 @@ export class MessageRouter {
             ws.name.toLowerCase().startsWith(text.toLowerCase()),
         );
         if (matchedWorkspace) {
-          this.sessionManager.setSessionWorkspace(sessionId, matchedWorkspace.id);
+          await this.sessionManager.setSessionWorkspace(sessionId, matchedWorkspace.id);
           if (!matchedWorkspace.isTemp && !isTempWorkspaceId(matchedWorkspace.id)) {
             try {
-              this.workspaceRepo.updateLastUsedAt(matchedWorkspace.id);
+              await this.workspaceRepo.updateLastUsedAt(matchedWorkspace.id);
             } catch (error) {
               console.warn("Failed to update workspace last used time:", error);
             }
@@ -2424,16 +2426,16 @@ export class MessageRouter {
       }
 
       // No workspace match found - auto-assign temp workspace so tasks can proceed
-      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
-      this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
+      const tempWorkspace = await this.getOrCreateTempWorkspace(sessionId);
+      await this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
     }
 
     // Optional workspace-local router rules (.cowork/router/rules.monty)
     // Runs before forwarding to the agent (regular messages only).
     try {
-      const freshSession = this.sessionRepo.findById(sessionId);
+      const freshSession = await this.sessionRepo.findById(sessionId);
       const ws = freshSession?.workspaceId
-        ? this.workspaceRepo.findById(freshSession.workspaceId)
+        ? await this.workspaceRepo.findById(freshSession.workspaceId)
         : null;
       if (ws) {
         const ruleResult = await evaluateWorkspaceRouterRules({
@@ -2462,12 +2464,12 @@ export class MessageRouter {
             message.text = ruleResult.text;
           }
           if (ruleResult.action === "set_workspace") {
-            const nextWs = this.workspaceRepo.findById(ruleResult.workspaceId);
+            const nextWs = await this.workspaceRepo.findById(ruleResult.workspaceId);
             if (nextWs) {
-              this.sessionManager.setSessionWorkspace(sessionId, nextWs.id);
+              await this.sessionManager.setSessionWorkspace(sessionId, nextWs.id);
               if (!nextWs.isTemp && !isTempWorkspaceId(nextWs.id)) {
                 try {
-                  this.workspaceRepo.updateLastUsedAt(nextWs.id);
+                  await this.workspaceRepo.updateLastUsedAt(nextWs.id);
                 } catch (error) {
                   console.warn("Failed to update workspace last used time:", error);
                 }
@@ -2482,9 +2484,9 @@ export class MessageRouter {
             if (!securityContext) securityContext = {};
             securityContext.agentRoleId = ruleResult.agentRoleId;
             if (ruleResult.workspaceId) {
-              const nextWs = this.workspaceRepo.findById(ruleResult.workspaceId);
+              const nextWs = await this.workspaceRepo.findById(ruleResult.workspaceId);
               if (nextWs) {
-                this.sessionManager.setSessionWorkspace(sessionId, nextWs.id);
+                await this.sessionManager.setSessionWorkspace(sessionId, nextWs.id);
               }
             }
             if (typeof ruleResult.text === "string" && ruleResult.text.trim().length > 0) {
@@ -2499,9 +2501,11 @@ export class MessageRouter {
 
     // Research chat routing: when message is from a designated research chat (Telegram/WhatsApp),
     // route to research agent and inject the research prompt.
-    const sess = this.sessionRepo.findById(sessionId);
-    const channel = sess?.channelId ? this.channelRepo.findById(sess.channelId) : null;
+    const sess = await this.sessionRepo.findById(sessionId);
+    const channel = sess?.channelId ? await this.channelRepo.findById(sess.channelId) : null;
     const channelConfig = (channel?.config || {}) as Record<string, unknown>;
+    // The routing check is synchronous; resolve the roles it may name first.
+    const knownRoleIds = new Set((await this.agentRoleRepo.findAll(true)).map((role) => role.id));
     const researchResult = applyResearchChatRouting({
       channelType: adapter.type,
       channelConfig,
@@ -2509,7 +2513,7 @@ export class MessageRouter {
       originalText: message.text.trim(),
       currentAgentRoleId:
         securityContext?.agentRoleId || securityContext?.channelSpecialization?.agentRoleId,
-      roleExists: (id) => !!this.agentRoleRepo.findById(id),
+      roleExists: (id) => knownRoleIds.has(id),
     });
     if (researchResult) {
       message.text = researchResult.text;
@@ -2989,7 +2993,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
 
     if (!session?.taskId) {
       await adapter.sendMessage({
@@ -3000,9 +3004,9 @@ export class MessageRouter {
       return;
     }
 
-    const task = this.taskRepo.findById(session.taskId);
+    const task = await this.taskRepo.findById(session.taskId);
     if (!task) {
-      this.sessionManager.unlinkSessionFromTask(sessionId);
+      await this.sessionManager.unlinkSessionFromTask(sessionId);
       await adapter.sendMessage({
         chatId: message.chatId,
         text: this.getUiCopy("cancelNoActive"),
@@ -3096,7 +3100,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
 
     if (!session?.taskId) {
       await adapter.sendMessage({
@@ -3107,9 +3111,9 @@ export class MessageRouter {
       return;
     }
 
-    const task = this.taskRepo.findById(session.taskId);
+    const task = await this.taskRepo.findById(session.taskId);
     if (!task) {
-      this.sessionManager.unlinkSessionFromTask(sessionId);
+      await this.sessionManager.unlinkSessionFromTask(sessionId);
       await adapter.sendMessage({
         chatId: message.chatId,
         text: this.getUiCopy("cancelNoActive"),
@@ -3208,7 +3212,7 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     if (!session?.taskId) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3218,9 +3222,9 @@ export class MessageRouter {
       return;
     }
 
-    const task = this.taskRepo.findById(session.taskId);
+    const task = await this.taskRepo.findById(session.taskId);
     if (!task) {
-      this.sessionManager.unlinkSessionFromTask(sessionId);
+      await this.sessionManager.unlinkSessionFromTask(sessionId);
       await adapter.sendMessage({
         chatId: message.chatId,
         text: "No task is attached to this chat yet. Send a task message to start one.",
@@ -3229,7 +3233,7 @@ export class MessageRouter {
       return;
     }
 
-    const workspace = this.workspaceRepo.findById(task.workspaceId);
+    const workspace = await this.workspaceRepo.findById(task.workspaceId);
     const startedAt = formatLocalTimestamp(new Date(task.createdAt));
     const updatedAt = formatLocalTimestamp(new Date(task.updatedAt));
 
@@ -3298,7 +3302,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3351,10 +3355,10 @@ export class MessageRouter {
       ...channel.config,
       groupRoutingMode: mode,
     };
-    this.channelRepo.update(channel.id, { config: nextConfig });
+    await this.channelRepo.update(channel.id, { config: nextConfig });
 
     if (adapter.updateConfig) {
-      this.applyWhatsAppConfigPatch(adapter, channel, {
+      await this.applyWhatsAppConfigPatch(adapter, channel, {
         groupRoutingMode: mode,
       });
     }
@@ -3441,7 +3445,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3483,7 +3487,7 @@ export class MessageRouter {
       return;
     }
 
-    this.applyWhatsAppConfigPatch(adapter, channel, {
+    await this.applyWhatsAppConfigPatch(adapter, channel, {
       trustedGroupMemoryOptIn: next,
     });
 
@@ -3527,7 +3531,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3571,7 +3575,7 @@ export class MessageRouter {
       return;
     }
 
-    const nextConfig = this.applyWhatsAppConfigPatch(adapter, channel, {
+    const nextConfig = await this.applyWhatsAppConfigPatch(adapter, channel, {
       selfChatMode: nextMode,
     });
 
@@ -3599,7 +3603,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3640,7 +3644,7 @@ export class MessageRouter {
       return;
     }
 
-    this.applyWhatsAppConfigPatch(adapter, channel, { ambientMode: nextMode });
+    await this.applyWhatsAppConfigPatch(adapter, channel, { ambientMode: nextMode });
 
     await adapter.sendMessage({
       chatId: message.chatId,
@@ -3665,7 +3669,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3713,7 +3717,7 @@ export class MessageRouter {
       return;
     }
 
-    this.applyWhatsAppConfigPatch(adapter, channel, {
+    await this.applyWhatsAppConfigPatch(adapter, channel, {
       ingestNonSelfChatsInSelfChatMode: nextMode,
     });
 
@@ -3745,7 +3749,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3799,7 +3803,7 @@ export class MessageRouter {
       nextValue = rawValue;
     }
 
-    this.applyWhatsAppConfigPatch(adapter, channel, {
+    await this.applyWhatsAppConfigPatch(adapter, channel, {
       responsePrefix: nextValue,
     });
 
@@ -3827,7 +3831,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3840,7 +3844,7 @@ export class MessageRouter {
     const currentNumbers = this.getWhatsAppAllowedNumbers(channel.config);
     const request = args.join(" ").trim().toLowerCase();
     if (request === "clear" || request === "reset" || request === "off") {
-      this.applyWhatsAppConfigPatch(adapter, channel, { allowedNumbers: [] });
+      await this.applyWhatsAppConfigPatch(adapter, channel, { allowedNumbers: [] });
       await adapter.sendMessage({
         chatId: message.chatId,
         parseMode: "markdown",
@@ -3897,7 +3901,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -3959,7 +3963,7 @@ export class MessageRouter {
       return;
     }
 
-    this.applyWhatsAppConfigPatch(adapter, channel, { allowedNumbers: next });
+    await this.applyWhatsAppConfigPatch(adapter, channel, { allowedNumbers: next });
     const result =
       next.length === 0
         ? "Allowlist is now empty (all numbers allowed)."
@@ -4005,11 +4009,11 @@ export class MessageRouter {
     return [...new Set(values)];
   }
 
-  private applyWhatsAppConfigPatch(
+  private async applyWhatsAppConfigPatch(
     adapter: ChannelAdapter,
     channel: { id: string; config?: unknown },
     patch: Partial<ChannelConfig>,
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     const current =
       typeof channel.config === "object" && channel.config !== null
         ? (channel.config as Record<string, unknown>)
@@ -4018,7 +4022,7 @@ export class MessageRouter {
       ...current,
       ...patch,
     };
-    this.channelRepo.update(channel.id, { config: nextConfig });
+    await this.channelRepo.update(channel.id, { config: nextConfig });
     if (adapter.updateConfig) {
       adapter.updateConfig(patch as ChannelConfig);
     }
@@ -4031,8 +4035,8 @@ export class MessageRouter {
     sessionId: string,
     args: string[],
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
-    const roles = this.agentRoleRepo.findActive();
+    const session = await this.sessionRepo.findById(sessionId);
+    const roles = await this.agentRoleRepo.findActive();
     const selectedRoleId = this.getSessionPreferredAgentRoleId(session);
     const selectedRole = selectedRoleId
       ? roles.find((role) => role.id === selectedRoleId)
@@ -4077,7 +4081,7 @@ export class MessageRouter {
     }
 
     if (action === "clear" || action === "reset" || action === "default" || action === "off") {
-      this.sessionManager.updateSessionContext(sessionId, {
+      await this.sessionManager.updateSessionContext(sessionId, {
         preferredAgentRoleId: null,
       });
       await adapter.sendMessage({
@@ -4101,7 +4105,7 @@ export class MessageRouter {
     }
 
     const selector = args.join(" ").trim();
-    const { role, matches } = this.resolveAgentRoleForSelector(selector);
+    const { role, matches } = await this.resolveAgentRoleForSelector(selector);
 
     if (!role) {
       if (matches.length > 0) {
@@ -4126,7 +4130,7 @@ export class MessageRouter {
       return;
     }
 
-    this.sessionManager.updateSessionContext(sessionId, {
+    await this.sessionManager.updateSessionContext(sessionId, {
       preferredAgentRoleId: role.id,
     });
     await adapter.sendMessage({
@@ -4143,11 +4147,11 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     let statusText = `✅ ${this.getUiCopy("statusHeader")}\n\n`;
 
     if (session?.workspaceId) {
-      const workspace = this.workspaceRepo.findById(session.workspaceId);
+      const workspace = await this.workspaceRepo.findById(session.workspaceId);
       if (workspace) {
         statusText += this.getUiCopy("workspaceCurrent", {
           workspaceName: workspace.name,
@@ -4160,7 +4164,7 @@ export class MessageRouter {
     }
 
     if (session?.taskId) {
-      const task = this.taskRepo.findById(session.taskId);
+      const task = await this.taskRepo.findById(session.taskId);
       if (task) {
         statusText += `\n${this.getUiCopy("statusActiveTask", { taskTitle: task.title, status: task.status })}`;
       }
@@ -4425,15 +4429,15 @@ export class MessageRouter {
       return;
     }
 
-    let session = this.sessionRepo.findById(sessionId);
+    let session = await this.sessionRepo.findById(sessionId);
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
-      this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
-      session = this.sessionRepo.findById(sessionId);
+      const tempWorkspace = await this.getOrCreateTempWorkspace(sessionId);
+      await this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
+      session = await this.sessionRepo.findById(sessionId);
     }
 
     let workspace = session?.workspaceId
-      ? this.workspaceRepo.findById(session.workspaceId)
+      ? await this.workspaceRepo.findById(session.workspaceId)
       : undefined;
     if (!workspace) {
       await adapter.sendMessage({
@@ -4460,7 +4464,7 @@ export class MessageRouter {
       "*",
     ]);
 
-    const task = this.taskRepo.create({
+    const task = await this.taskRepo.create({
       workspaceId: workspace.id,
       title: params.title,
       prompt: params.prompt,
@@ -4479,7 +4483,7 @@ export class MessageRouter {
       ),
     });
 
-    const routedChannel = this.getChannelForAdapter(adapter);
+    const routedChannel = await this.getChannelForAdapter(adapter);
     if (!routedChannel) {
       console.error(`No channel configuration found for ${adapter.type}`);
       return;
@@ -4562,15 +4566,15 @@ export class MessageRouter {
       return;
     }
 
-    let session = this.sessionRepo.findById(sessionId);
+    let session = await this.sessionRepo.findById(sessionId);
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
-      this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
-      session = this.sessionRepo.findById(sessionId);
+      const tempWorkspace = await this.getOrCreateTempWorkspace(sessionId);
+      await this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
+      session = await this.sessionRepo.findById(sessionId);
     }
 
     let workspace = session?.workspaceId
-      ? this.workspaceRepo.findById(session.workspaceId)
+      ? await this.workspaceRepo.findById(session.workspaceId)
       : undefined;
     if (!workspace) {
       await adapter.sendMessage({
@@ -4592,7 +4596,7 @@ export class MessageRouter {
       securityContext?.deniedTools?.filter((t) => typeof t === "string" && t.trim().length > 0),
     );
 
-    const task = this.taskRepo.create({
+    const task = await this.taskRepo.create({
       workspaceId: workspace.id,
       title: params.title,
       prompt: params.prompt,
@@ -4607,7 +4611,7 @@ export class MessageRouter {
       ),
     });
 
-    const routedChannel = this.getChannelForAdapter(adapter);
+    const routedChannel = await this.getChannelForAdapter(adapter);
     if (!routedChannel) {
       console.error(`No channel configuration found for ${adapter.type}`);
       return;
@@ -4695,7 +4699,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -4733,12 +4737,12 @@ export class MessageRouter {
       }
     }
 
-    const raw = this.messageRepo.findByChatId(channel.id, message.chatId, fetchLimit);
+    const raw = await this.messageRepo.findByChatId(channel.id, message.chatId, fetchLimit);
     const agentName = this.getMessageContext().agentName || "Assistant";
 
     const inferredIsGroup = message.isGroup ?? message.chatId !== message.userId;
     const rendered = formatChatTranscriptForPrompt(raw, {
-      lookupUser: (id) => this.userRepo.findById(id),
+      lookupUser: await prefetchTranscriptUsers(raw, (id) => this.userRepo.findById(id)),
       agentName,
       sinceMs,
       untilMs: nowMs,
@@ -4826,7 +4830,7 @@ export class MessageRouter {
       return;
     }
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -4864,10 +4868,10 @@ export class MessageRouter {
       }
     }
 
-    const raw = this.messageRepo.findByChatId(channel.id, message.chatId, fetchLimit);
+    const raw = await this.messageRepo.findByChatId(channel.id, message.chatId, fetchLimit);
 
     const rendered = formatChatTranscriptForPrompt(raw, {
-      lookupUser: (id) => this.userRepo.findById(id),
+      lookupUser: await prefetchTranscriptUsers(raw, (id) => this.userRepo.findById(id)),
       sinceMs,
       untilMs: nowMs,
       includeOutgoing: false,
@@ -5029,7 +5033,7 @@ export class MessageRouter {
       return;
     }
 
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     const sessionWorkspaceId = session?.workspaceId;
 
     const delivery = {
@@ -5054,12 +5058,12 @@ export class MessageRouter {
         job.delivery.channelId === message.chatId,
     );
 
-    const workspaceId = (() => {
+    const workspaceId = await (async () => {
       const existing = existingJobs[0]?.workspaceId;
-      if (existing && this.isPersistedWorkspaceId(existing)) return existing;
-      if (sessionWorkspaceId && this.isPersistedWorkspaceId(sessionWorkspaceId))
+      if (existing && (await this.isPersistedWorkspaceId(existing))) return existing;
+      if (sessionWorkspaceId && (await this.isPersistedWorkspaceId(sessionWorkspaceId)))
         return sessionWorkspaceId;
-      return this.createDedicatedWorkspaceForScheduledJob(jobName).id;
+      return (await this.createDedicatedWorkspaceForScheduledJob(jobName)).id;
     })();
 
     const result =
@@ -5447,7 +5451,7 @@ export class MessageRouter {
       return;
     }
 
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     const sessionWorkspaceId = session?.workspaceId;
 
     const inferredIsGroup = message.isGroup ?? message.chatId !== message.userId;
@@ -5493,12 +5497,12 @@ export class MessageRouter {
         job.name.toLowerCase() === name.toLowerCase(),
     );
 
-    const workspaceId = (() => {
+    const workspaceId = await (async () => {
       const existing = existingJobs[0]?.workspaceId;
-      if (existing && this.isPersistedWorkspaceId(existing)) return existing;
-      if (sessionWorkspaceId && this.isPersistedWorkspaceId(sessionWorkspaceId))
+      if (existing && (await this.isPersistedWorkspaceId(existing))) return existing;
+      if (sessionWorkspaceId && (await this.isPersistedWorkspaceId(sessionWorkspaceId)))
         return sessionWorkspaceId;
-      return this.createDedicatedWorkspaceForScheduledJob(name).id;
+      return (await this.createDedicatedWorkspaceForScheduledJob(name)).id;
     })();
 
     const result =
@@ -5738,8 +5742,8 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const workspaces = this.workspaceRepo
-      .findAll()
+    const workspaces = (await this.workspaceRepo
+      .findAll())
       .filter((workspace) => this.isUserSelectableWorkspace(workspace));
 
     if (workspaces.length === 0) {
@@ -5768,7 +5772,7 @@ export class MessageRouter {
 
       // Allow a plain numeric reply (e.g., "1") to select a workspace even when
       // one is already set (important for WhatsApp/iMessage UX).
-      this.sessionManager.updateSessionContext(sessionId, {
+      await this.sessionManager.updateSessionContext(sessionId, {
         pendingSelection: { type: "workspace", createdAt: Date.now() },
       });
       return;
@@ -5818,17 +5822,17 @@ export class MessageRouter {
   ): Promise<void> {
     if (args.length === 0) {
       // Show current workspace
-      let session = this.sessionRepo.findById(sessionId);
+      let session = await this.sessionRepo.findById(sessionId);
 
       // Auto-assign temp workspace if none selected
       if (!session?.workspaceId) {
-        const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
-        this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
-        session = this.sessionRepo.findById(sessionId);
+        const tempWorkspace = await this.getOrCreateTempWorkspace(sessionId);
+        await this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
+        session = await this.sessionRepo.findById(sessionId);
       }
 
       if (session?.workspaceId) {
-        const workspace = this.workspaceRepo.findById(session.workspaceId);
+        const workspace = await this.workspaceRepo.findById(session.workspaceId);
         if (workspace) {
           const isTempWorkspace = workspace.isTemp || isTempWorkspaceId(workspace.id);
           const displayName = isTempWorkspace
@@ -5853,8 +5857,8 @@ export class MessageRouter {
       return;
     }
 
-    const workspaces = this.workspaceRepo
-      .findAll()
+    const workspaces = (await this.workspaceRepo
+      .findAll())
       .filter((workspace) => this.isUserSelectableWorkspace(workspace));
     const selector = args.join(" ");
     let workspace;
@@ -5877,9 +5881,9 @@ export class MessageRouter {
     }
 
     // Update session workspace
-    this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+    await this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
     try {
-      this.workspaceRepo.updateLastUsedAt(workspace.id);
+      await this.workspaceRepo.updateLastUsedAt(workspace.id);
     } catch (error) {
       console.warn("Failed to update workspace last used time:", error);
     }
@@ -5945,11 +5949,11 @@ export class MessageRouter {
     }
 
     // Check if workspace already exists
-    const existingWorkspaces = this.workspaceRepo.findAll();
+    const existingWorkspaces = await this.workspaceRepo.findAll();
     const existing = existingWorkspaces.find((ws) => ws.path === workspacePath);
     if (existing) {
       // Workspace exists, just select it
-      this.sessionManager.setSessionWorkspace(sessionId, existing.id);
+      await this.sessionManager.setSessionWorkspace(sessionId, existing.id);
       await adapter.sendMessage({
         chatId: message.chatId,
         text: this.getUiCopy("workspaceAlreadyExists", {
@@ -5966,7 +5970,7 @@ export class MessageRouter {
 
     // Create new workspace with default permissions
     // Note: network is enabled by default for browser tools (web access)
-    const workspace = this.workspaceRepo.create(workspaceName, workspacePath, {
+    const workspace = await this.workspaceRepo.create(workspaceName, workspacePath, {
       read: true,
       write: true,
       delete: false, // Requires approval
@@ -5975,7 +5979,7 @@ export class MessageRouter {
     });
 
     // Set as current workspace
-    this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+    await this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
 
     // Notify desktop app
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
@@ -6581,7 +6585,7 @@ export class MessageRouter {
     message: IncomingMessage,
     code: string,
   ): Promise<void> {
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     if (!channel) return;
 
     const result = await this.securityManager.verifyPairingCode(channel, message.userId, code);
@@ -6626,22 +6630,23 @@ export class MessageRouter {
     sessionId: string,
     securityContext?: MessageSecurityContext,
   ): Promise<void> {
-    let session = this.sessionRepo.findById(sessionId);
+    let session = await this.sessionRepo.findById(sessionId);
 
     // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
       const specializedWorkspaceId = securityContext?.channelSpecialization?.workspaceId;
       const specializedWorkspace = specializedWorkspaceId
-        ? this.workspaceRepo.findById(specializedWorkspaceId)
+        ? await this.workspaceRepo.findById(specializedWorkspaceId)
         : undefined;
-      const workspaceToSet = specializedWorkspace || this.getOrCreateTempWorkspace(sessionId);
-      this.sessionManager.setSessionWorkspace(sessionId, workspaceToSet.id);
-      session = this.sessionRepo.findById(sessionId);
+      const workspaceToSet =
+        specializedWorkspace || (await this.getOrCreateTempWorkspace(sessionId));
+      await this.sessionManager.setSessionWorkspace(sessionId, workspaceToSet.id);
+      session = await this.sessionRepo.findById(sessionId);
     }
 
     // Get workspace
     let workspace = session?.workspaceId
-      ? this.workspaceRepo.findById(session.workspaceId)
+      ? await this.workspaceRepo.findById(session.workspaceId)
       : undefined;
     if (!workspace) {
       await adapter.sendMessage({
@@ -6680,7 +6685,7 @@ export class MessageRouter {
       if (this.agentDaemon && session?.taskId) {
         for (const att of savedAttachments) {
           try {
-            this.agentDaemon.registerArtifact(
+            await this.agentDaemon.registerArtifact(
               session.taskId,
               att.absPath,
               att.mimeType || "application/octet-stream",
@@ -6705,7 +6710,7 @@ export class MessageRouter {
 
     // Check if there's an existing task for this session (active or completed)
     if (session!.taskId) {
-      const existingTask = this.taskRepo.findById(session!.taskId);
+      const existingTask = await this.taskRepo.findById(session!.taskId);
       if (existingTask) {
         // For active tasks, send follow-up message
         // For completed tasks, also allow follow-up (continues the conversation)
@@ -6751,14 +6756,14 @@ export class MessageRouter {
         }
         // Task is completed/failed/cancelled - unlink and create a new task so
         // current channel specialization can be re-resolved.
-        this.sessionManager.unlinkSessionFromTask(sessionId);
+        await this.sessionManager.unlinkSessionFromTask(sessionId);
         if (securityContext?.channelSpecialization?.workspaceId) {
-          const specializedWorkspace = this.workspaceRepo.findById(
+          const specializedWorkspace = await this.workspaceRepo.findById(
             securityContext.channelSpecialization.workspaceId,
           );
           if (specializedWorkspace) {
-            this.sessionManager.setSessionWorkspace(sessionId, specializedWorkspace.id);
-            session = this.sessionRepo.findById(sessionId);
+            await this.sessionManager.setSessionWorkspace(sessionId, specializedWorkspace.id);
+            session = await this.sessionRepo.findById(sessionId);
             workspace = specializedWorkspace;
           }
         }
@@ -6793,7 +6798,7 @@ export class MessageRouter {
     );
 
     // Resolve agent role: router rule > session preference > channel default
-    const routedChannel = this.getChannelForAdapter(adapter);
+    const routedChannel = await this.getChannelForAdapter(adapter);
     const trustedGroupMemoryOptIn =
       routedChannel?.config?.trustedGroupMemoryOptIn === true ||
       securityContext?.channelSpecialization?.allowSharedContextMemory === true;
@@ -6806,7 +6811,7 @@ export class MessageRouter {
         ? routedChannel.config.defaultAgentRoleId
         : undefined);
 
-    const task = this.taskRepo.create({
+    const task = await this.taskRepo.create({
       workspaceId: workspace.id,
       title: taskTitle,
       prompt: taskPrompt,
@@ -6835,15 +6840,15 @@ export class MessageRouter {
 
     // Apply agent role assignment when routing determines one.
     if (resolvedAgentRoleId) {
-      this.taskRepo.update(task.id, {
+      await this.taskRepo.update(task.id, {
         assignedAgentRoleId: resolvedAgentRoleId,
       } as Any);
       (task as Any).assignedAgentRoleId = resolvedAgentRoleId;
     }
 
     // Link session to task
-    this.sessionManager.linkSessionToTask(sessionId, task.id);
-    this.sessionManager.updateSessionContext(sessionId, {
+    await this.sessionManager.linkSessionToTask(sessionId, task.id);
+    await this.sessionManager.updateSessionContext(sessionId, {
       taskRequesterUserId: message.userId,
       taskRequesterUserName: message.userName,
     });
@@ -6870,7 +6875,7 @@ export class MessageRouter {
     if (this.agentDaemon && savedAttachments.length > 0) {
       for (const att of savedAttachments) {
         try {
-          this.agentDaemon.registerArtifact(
+          await this.agentDaemon.registerArtifact(
             task.id,
             att.absPath,
             att.mimeType || "application/octet-stream",
@@ -6928,7 +6933,7 @@ export class MessageRouter {
 
       // Cleanup
       this.pendingTaskResponses.delete(task.id);
-      this.sessionManager.unlinkSessionFromTask(sessionId);
+      await this.sessionManager.unlinkSessionFromTask(sessionId);
     }
   }
 
@@ -6956,7 +6961,7 @@ export class MessageRouter {
         return;
       }
 
-      const preparedText = this.prepareTaskUpdateForChannel(
+      const preparedText = await this.prepareTaskUpdateForChannel(
         pending.adapter.type,
         pending.channelId,
         trimmed,
@@ -7070,7 +7075,7 @@ export class MessageRouter {
 
     if (
       options?.allowEditableProgressRelay !== false &&
-      this.shouldUseEditableProgressRelay(pendingEntry)
+      (await this.shouldUseEditableProgressRelay(pendingEntry))
     ) {
       if (pendingEntry.lastProgressMessageText === normalizedText) {
         return;
@@ -7216,9 +7221,9 @@ export class MessageRouter {
       this.telegramDraftStreamTouchedTasks.delete(taskId);
 
       try {
-        const channel = this.channelRepo.findById(pending.channelId);
+        const channel = await this.channelRepo.findById(pending.channelId);
         if (channel && finalizedMessageId) {
-          this.messageRepo.create({
+          await this.messageRepo.create({
             channelId: channel.id,
             channelMessageId: finalizedMessageId,
             chatId: pending.chatId,
@@ -7312,7 +7317,7 @@ export class MessageRouter {
     await this.clearProgressRelayMessage(taskId);
 
     try {
-      const task = this.taskRepo.findById(taskId);
+      const task = await this.taskRepo.findById(taskId);
       const taskGatewayContext = task?.agentConfig?.gatewayContext;
       const contextType: "dm" | "group" =
         taskGatewayContext === "group" || taskGatewayContext === "public" ? "group" : "dm";
@@ -7341,9 +7346,9 @@ export class MessageRouter {
 
         // Log outgoing message so transcript-based features can see assistant output.
         try {
-          const channel = this.channelRepo.findById(pending.channelId);
+          const channel = await this.channelRepo.findById(pending.channelId);
           if (channel && finalizedMessageId) {
-            this.messageRepo.create({
+            await this.messageRepo.create({
               channelId: channel.id,
               channelMessageId: finalizedMessageId,
               chatId: pending.chatId,
@@ -7485,7 +7490,7 @@ export class MessageRouter {
     chatId: string,
   ): Promise<void> {
     try {
-      const artifacts = this.artifactRepo.findByTaskId(taskId);
+      const artifacts = await this.artifactRepo.findByTaskId(taskId);
       if (artifacts.length === 0) return;
 
       // Image extensions
@@ -7590,9 +7595,9 @@ export class MessageRouter {
 
       // Only unlink the session if it is actually linked to this task.
       // Some one-shot command tasks intentionally do not attach to the chat session.
-      const session = this.sessionRepo.findById(pending.sessionId);
+      const session = await this.sessionRepo.findById(pending.sessionId);
       if (session?.taskId === taskId) {
-        this.sessionManager.unlinkSessionFromTask(pending.sessionId);
+        await this.sessionManager.unlinkSessionFromTask(pending.sessionId);
       }
     } catch (err) {
       console.error("Error sending task failure:", err);
@@ -7611,9 +7616,9 @@ export class MessageRouter {
     const pending = this.pendingTaskResponses.get(taskId);
     if (!pending) {
       // Best-effort cleanup if the response tracking entry was already removed.
-      const session = this.sessionRepo.findByTaskId(taskId);
+      const session = await this.sessionRepo.findByTaskId(taskId);
       if (session) {
-        this.sessionManager.unlinkSessionFromTask(session.id);
+        await this.sessionManager.unlinkSessionFromTask(session.id);
       }
       this.suppressedTaskUpdateIds.delete(taskId);
       this.detachedTaskResponseIds.delete(taskId);
@@ -7654,9 +7659,9 @@ export class MessageRouter {
       });
 
       // Only unlink the session if it is actually linked to this task.
-      const session = this.sessionRepo.findById(pending.sessionId);
+      const session = await this.sessionRepo.findById(pending.sessionId);
       if (session?.taskId === taskId) {
-        this.sessionManager.unlinkSessionFromTask(pending.sessionId);
+        await this.sessionManager.unlinkSessionFromTask(pending.sessionId);
       }
     } catch (err) {
       console.error("Error sending task cancelled message:", err);
@@ -7674,10 +7679,10 @@ export class MessageRouter {
     // Approvals can be requested by sub-agent tasks that do not have their own
     // channel/session mapping. Route these approvals back to the originating
     // session (usually the root task that spawned them).
-    const route = this.resolveRouteForTask(taskId);
+    const route = await this.resolveRouteForTask(taskId);
     if (!route) return;
 
-    const task = this.taskRepo.findById(taskId);
+    const task = await this.taskRepo.findById(taskId);
     const taskGatewayContext = task?.agentConfig?.gatewayContext;
     const contextType: "dm" | "group" =
       taskGatewayContext === "group" || taskGatewayContext === "public" ? "group" : "dm";
@@ -7894,7 +7899,7 @@ export class MessageRouter {
     text: string,
     statusText: string,
   ): Promise<boolean> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     const taskId = session?.taskId;
     if (!taskId) {
       await adapter.sendMessage({
@@ -7905,7 +7910,7 @@ export class MessageRouter {
       return false;
     }
 
-    const task = this.taskRepo.findById(taskId);
+    const task = await this.taskRepo.findById(taskId);
     if (!task || ["failed", "cancelled"].includes(task.status)) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -7982,7 +7987,7 @@ export class MessageRouter {
     args: string[],
     securityContext?: MessageSecurityContext,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     const taskId = session?.taskId;
     if (!taskId) {
       await adapter.sendMessage({
@@ -8031,7 +8036,7 @@ export class MessageRouter {
     }
 
     if (action === "approve") {
-      this.logUserFeedback(taskId, {
+      await this.logUserFeedback(taskId, {
         decision: "approved",
         source: "command",
         channelType: adapter.type,
@@ -8048,7 +8053,7 @@ export class MessageRouter {
 
     if (action === "reject") {
       if (rest) {
-        this.logUserFeedback(taskId, {
+        await this.logUserFeedback(taskId, {
           decision: "rejected",
           reason: rest,
           source: "command",
@@ -8064,7 +8069,7 @@ export class MessageRouter {
         return;
       }
 
-      this.sessionManager.updateSessionContext(sessionId, {
+      await this.sessionManager.updateSessionContext(sessionId, {
         pendingFeedback: {
           kind: "reject_reason",
           taskId,
@@ -8082,7 +8087,7 @@ export class MessageRouter {
     }
 
     if (action === "edit") {
-      this.sessionManager.updateSessionContext(sessionId, {
+      await this.sessionManager.updateSessionContext(sessionId, {
         pendingFeedback: {
           kind: "edit",
           taskId,
@@ -8100,7 +8105,7 @@ export class MessageRouter {
     }
 
     // next / another
-    this.logUserFeedback(taskId, {
+    await this.logUserFeedback(taskId, {
       decision: "next",
       source: "command",
       channelType: adapter.type,
@@ -8406,12 +8411,12 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
 
     if (session?.taskId) {
       const taskId = session.taskId;
 
-      const task = this.taskRepo.findById(taskId);
+      const task = await this.taskRepo.findById(taskId);
       if (!task || ["completed", "failed", "cancelled"].includes(task.status)) {
         // No active task to cancel.
         await this.sendAdapterMessage(adapter, {
@@ -8451,7 +8456,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
       if (pending) {
         await this.handleTaskCancelled(taskId);
       } else {
-        this.sessionManager.unlinkSessionFromTask(sessionId);
+        await this.sessionManager.unlinkSessionFromTask(sessionId);
         this.pendingTaskResponses.delete(taskId);
         await this.sendAdapterMessage(adapter, {
           chatId: message.chatId,
@@ -8475,7 +8480,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     sessionId: string,
     args: string[] = [],
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     const mode = String(args[0] || "")
       .trim()
       .toLowerCase();
@@ -8487,15 +8492,15 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
       this.detachedTaskResponseIds.add(session.taskId);
       this.suppressedTaskUpdateIds.add(session.taskId);
       this.clearStreamingUpdate(session.taskId);
-      this.sessionManager.unlinkSessionFromTask(sessionId);
+      await this.sessionManager.unlinkSessionFromTask(sessionId);
       this.pendingTaskResponses.delete(session.taskId);
     }
 
     if (useFreshTempWorkspace) {
-      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId, {
+      const tempWorkspace = await this.getOrCreateTempWorkspace(sessionId, {
         createNew: true,
       });
-      this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
+      await this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
       await this.sendAdapterMessage(adapter, {
         chatId: message.chatId,
         text: "🆕 Ready for a new temporary session.\n\nSend me a message describing what you want to do.",
@@ -8524,7 +8529,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
       return;
     }
 
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     if (!session?.taskId) {
       await adapter.sendMessage({
         chatId: message.chatId,
@@ -8537,7 +8542,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
       taskId: session.taskId,
       branchLabel: args.join(" ").trim() || undefined,
     });
-    this.sessionManager.linkSessionToTask(sessionId, forkedTask.id);
+    await this.sessionManager.linkSessionToTask(sessionId, forkedTask.id);
     await adapter.sendMessage({
       chatId: message.chatId,
       text: `Forked a new session from the current task: ${forkedTask.title}`,
@@ -8563,7 +8568,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     }
 
     const workspaceName = args.join(" ");
-    const workspaces = this.workspaceRepo.findAll();
+    const workspaces = await this.workspaceRepo.findAll();
     const workspace = workspaces.find((w) => w.name.toLowerCase() === workspaceName.toLowerCase());
 
     if (!workspace) {
@@ -8575,14 +8580,14 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     }
 
     // Check if this is the current workspace for the session
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     if (session?.workspaceId === workspace.id) {
       // Clear the workspace from session
-      this.sessionRepo.update(sessionId, { workspaceId: undefined });
+      await this.sessionRepo.update(sessionId, { workspaceId: undefined });
     }
 
     // Remove the workspace
-    this.workspaceRepo.delete(workspace.id);
+    await this.workspaceRepo.delete(workspace.id);
 
     await adapter.sendMessage({
       chatId: message.chatId,
@@ -8600,17 +8605,17 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    let session = this.sessionRepo.findById(sessionId);
+    let session = await this.sessionRepo.findById(sessionId);
 
     // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
-      this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
-      session = this.sessionRepo.findById(sessionId);
+      const tempWorkspace = await this.getOrCreateTempWorkspace(sessionId);
+      await this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
+      session = await this.sessionRepo.findById(sessionId);
     }
 
     // Find the last task for this session's workspace that failed or was cancelled
-    const tasks = this.taskRepo.findByWorkspace(session!.workspaceId!);
+    const tasks = await this.taskRepo.findByWorkspace(session!.workspaceId!);
     const lastFailedTask = tasks
       .filter((t: Task) => t.status === "failed" || t.status === "cancelled")
       .sort(
@@ -8649,16 +8654,16 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    let session = this.sessionRepo.findById(sessionId);
+    let session = await this.sessionRepo.findById(sessionId);
 
     // Auto-assign temp workspace if none selected
     if (!session?.workspaceId) {
-      const tempWorkspace = this.getOrCreateTempWorkspace(sessionId);
-      this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
-      session = this.sessionRepo.findById(sessionId);
+      const tempWorkspace = await this.getOrCreateTempWorkspace(sessionId);
+      await this.sessionRepo.update(sessionId, { workspaceId: tempWorkspace.id });
+      session = await this.sessionRepo.findById(sessionId);
     }
 
-    const tasks = this.taskRepo.findByWorkspace(session!.workspaceId!);
+    const tasks = await this.taskRepo.findByWorkspace(session!.workspaceId!);
     const recentTasks = tasks
       .sort((a: Task, b: Task) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 10);
@@ -8889,7 +8894,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
       });
 
       // Allow a plain numeric reply (e.g., "1") to select provider.
-      this.sessionManager.updateSessionContext(sessionId, {
+      await this.sessionManager.updateSessionContext(sessionId, {
         pendingSelection: { type: "provider", createdAt: Date.now() },
       });
     } else {
@@ -8923,9 +8928,9 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     const workspace = session?.workspaceId
-      ? this.workspaceRepo.findById(session.workspaceId)
+      ? await this.workspaceRepo.findById(session.workspaceId)
       : null;
 
     const provider = LLMProviderFactory.getSelectedProvider();
@@ -8947,7 +8952,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     text += `🔧 Legacy command tools: ${session?.shellEnabled ? "✅" : "❌"}\n`;
     text += `📝 Debug mode: ${session?.debugMode ? "✅" : "❌"}\n`;
 
-    const channel = this.getChannelForAdapter(adapter);
+    const channel = await this.getChannelForAdapter(adapter);
     const channelConfig = (channel?.config || {}) as Record<string, unknown>;
     if (adapter.type === "whatsapp") {
       const rawMode =
@@ -9013,11 +9018,11 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
+    const session = await this.sessionRepo.findById(sessionId);
     const currentDebug = session?.debugMode || false;
     const newDebug = !currentDebug;
 
-    this.sessionRepo.update(sessionId, { debugMode: newDebug });
+    await this.sessionRepo.update(sessionId, { debugMode: newDebug });
 
     const statusText = newDebug ? "✅ enabled" : "❌ disabled";
     await adapter.sendMessage({
@@ -9063,13 +9068,13 @@ Node.js: \`${nodeVersion}\`
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const session = this.sessionRepo.findById(sessionId);
-    const workspaces = this.workspaceRepo.findAll();
+    const session = await this.sessionRepo.findById(sessionId);
+    const workspaces = await this.workspaceRepo.findAll();
 
     // WhatsApp/iMessage-optimized welcome flow (no inline keyboards)
     if (adapter.type === "whatsapp" || adapter.type === "imessage") {
       if (session?.workspaceId) {
-        const workspace = this.workspaceRepo.findById(session.workspaceId);
+        const workspace = await this.workspaceRepo.findById(session.workspaceId);
         await adapter.sendMessage({
           chatId: message.chatId,
           text: this.getUiCopy("welcomeBack", {
@@ -9086,7 +9091,7 @@ Node.js: \`${nodeVersion}\`
       } else if (workspaces.length === 1) {
         // Auto-select the only workspace
         const workspace = workspaces[0];
-        this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+        await this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
         await adapter.sendMessage({
           chatId: message.chatId,
           text: this.getUiCopy("welcomeSingleWorkspace", {
@@ -9157,7 +9162,7 @@ Node.js: \`${nodeVersion}\`
         }
       };
 
-      const channel = this.getChannelForAdapter(adapter);
+      const channel = await this.getChannelForAdapter(adapter);
       if (!channel) {
         console.error(`No channel configuration found for ${adapter.type}`);
         return;
@@ -9188,10 +9193,10 @@ Node.js: \`${nodeVersion}\`
 
       // Get or create session for this chat
       // Find existing session or create one
-      let session = this.sessionRepo.findByChatId(channel.id, chatId);
+      let session = await this.sessionRepo.findByChatId(channel.id, chatId);
       if (!session) {
         // Create a minimal session for handling callback
-        session = this.sessionRepo.create({
+        session = await this.sessionRepo.create({
           channelId: channel.id,
           chatId,
           state: "idle",
@@ -9282,7 +9287,7 @@ Node.js: \`${nodeVersion}\`
     sessionId: string,
     workspaceId: string,
   ): Promise<void> {
-    const workspace = this.workspaceRepo.findById(workspaceId);
+    const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace) {
       await adapter.sendMessage({
         chatId: query.chatId,
@@ -9292,7 +9297,7 @@ Node.js: \`${nodeVersion}\`
     }
 
     // Update session workspace
-    this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
+    await this.sessionManager.setSessionWorkspace(sessionId, workspace.id);
 
     // Update the original message with the selection
     if (adapter.editMessageWithKeyboard) {
@@ -9550,7 +9555,7 @@ Node.js: \`${nodeVersion}\`
 
     if (action === "approve") {
       this.pendingFeedbackRequests.delete(key);
-      this.logUserFeedback(taskId, {
+      await this.logUserFeedback(taskId, {
         decision: "approved",
         source: "inline",
         channelType: adapter.type,
@@ -9566,7 +9571,7 @@ Node.js: \`${nodeVersion}\`
 
     if (action === "reject") {
       this.pendingFeedbackRequests.delete(key);
-      this.sessionManager.updateSessionContext(req.sessionId, {
+      await this.sessionManager.updateSessionContext(req.sessionId, {
         pendingFeedback: {
           kind: "reject_reason",
           taskId,
@@ -9584,7 +9589,7 @@ Node.js: \`${nodeVersion}\`
 
     if (action === "edit") {
       this.pendingFeedbackRequests.delete(key);
-      this.sessionManager.updateSessionContext(req.sessionId, {
+      await this.sessionManager.updateSessionContext(req.sessionId, {
         pendingFeedback: {
           kind: "edit",
           taskId,
@@ -9602,7 +9607,7 @@ Node.js: \`${nodeVersion}\`
 
     if (action === "next") {
       this.pendingFeedbackRequests.delete(key);
-      this.logUserFeedback(taskId, {
+      await this.logUserFeedback(taskId, {
         decision: "next",
         source: "inline",
         channelType: adapter.type,

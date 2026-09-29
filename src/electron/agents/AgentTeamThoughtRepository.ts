@@ -6,7 +6,7 @@ import { AgentThought, CreateAgentThoughtRequest, ThoughtPhase } from "../../sha
  * Repository for managing collaborative thoughts during team runs.
  * Each thought represents an agent's analysis or reasoning shared with the team.
  */
-export class AgentTeamThoughtRepository {
+export class AgentTeamThoughtStore {
   constructor(private db: Database.Database) {}
 
   /**

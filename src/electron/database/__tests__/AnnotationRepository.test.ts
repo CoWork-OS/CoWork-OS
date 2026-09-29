@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AnnotationRepository } from "../repositories";
+import { AnnotationStore } from "../repositories";
 
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {
@@ -17,9 +17,9 @@ const nativeSqliteAvailable = await import("better-sqlite3")
 
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
-describeWithSqlite("AnnotationRepository", () => {
+describeWithSqlite("AnnotationStore", () => {
   let db: Database.Database;
-  let repo: AnnotationRepository;
+  let repo: AnnotationStore;
 
   beforeEach(() => {
     db = new Database(":memory:");
@@ -43,7 +43,7 @@ describeWithSqlite("AnnotationRepository", () => {
         resolved_by_event_id TEXT
       );
     `);
-    repo = new AnnotationRepository(db);
+    repo = new AnnotationStore(db);
   });
 
   afterEach(() => {

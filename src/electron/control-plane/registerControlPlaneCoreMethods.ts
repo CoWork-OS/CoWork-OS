@@ -30,13 +30,13 @@ export function registerControlPlaneCoreMethods(options: {
 
   server.registerMethod(Methods.COMPANY_LIST, async (client) => {
     requireScope(client, "read");
-    return { companies: core.listCompanies() };
+    return { companies: await core.listCompanies() };
   });
 
   server.registerMethod(Methods.COMPANY_GET, async (client, params) => {
     requireScope(client, "read");
     const companyId = requireString((params as Any)?.companyId, "companyId");
-    const company = core.getCompany(companyId);
+    const company = await core.getCompany(companyId);
     if (!company) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Company not found: ${companyId}` };
     }
@@ -47,7 +47,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "admin");
     const p = (params || {}) as Any;
     const companyId = requireString(p.companyId, "companyId");
-    const company = core.updateCompany(companyId, {
+    const company = await core.updateCompany(companyId, {
       name: optionalString(p.name),
       slug: optionalString(p.slug),
       description: p.description === null ? "" : optionalString(p.description),
@@ -62,13 +62,13 @@ export function registerControlPlaneCoreMethods(options: {
   server.registerMethod(Methods.GOAL_LIST, async (client, params) => {
     requireScope(client, "read");
     const companyId = optionalString((params as Any)?.companyId);
-    return { goals: core.listGoals(companyId) };
+    return { goals: await core.listGoals(companyId) };
   });
 
   server.registerMethod(Methods.GOAL_GET, async (client, params) => {
     requireScope(client, "read");
     const goalId = requireString((params as Any)?.goalId, "goalId");
-    const goal = core.getGoal(goalId);
+    const goal = await core.getGoal(goalId);
     if (!goal) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Goal not found: ${goalId}` };
     }
@@ -79,7 +79,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "admin");
     const p = (params || {}) as Any;
     return {
-      goal: core.createGoal({
+      goal: await core.createGoal({
         companyId: optionalString(p.companyId),
         title: requireString(p.title, "title"),
         description: optionalString(p.description),
@@ -94,7 +94,7 @@ export function registerControlPlaneCoreMethods(options: {
     const p = (params || {}) as Any;
     const goalId = requireString(p.goalId, "goalId");
     return {
-      goal: core.updateGoal(goalId, {
+      goal: await core.updateGoal(goalId, {
         companyId: optionalString(p.companyId),
         title: optionalString(p.title),
         description: p.description === null ? "" : optionalString(p.description),
@@ -108,7 +108,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "read");
     const p = (params || {}) as Any;
     return {
-      projects: core.listProjects({
+      projects: await core.listProjects({
         companyId: optionalString(p.companyId),
         goalId: optionalString(p.goalId),
         includeArchived: p.includeArchived === true,
@@ -119,7 +119,7 @@ export function registerControlPlaneCoreMethods(options: {
   server.registerMethod(Methods.PROJECT_GET, async (client, params) => {
     requireScope(client, "read");
     const projectId = requireString((params as Any)?.projectId, "projectId");
-    const project = core.getProject(projectId);
+    const project = await core.getProject(projectId);
     if (!project) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Project not found: ${projectId}` };
     }
@@ -130,7 +130,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "admin");
     const p = (params || {}) as Any;
     return {
-      project: core.createProject({
+      project: await core.createProject({
         companyId: optionalString(p.companyId),
         goalId: optionalString(p.goalId),
         name: requireString(p.name, "name"),
@@ -147,7 +147,7 @@ export function registerControlPlaneCoreMethods(options: {
     const p = (params || {}) as Any;
     const projectId = requireString(p.projectId, "projectId");
     return {
-      project: core.updateProject(projectId, {
+      project: await core.updateProject(projectId, {
         companyId: optionalString(p.companyId),
         goalId: p.goalId === null ? "" : optionalString(p.goalId),
         name: optionalString(p.name),
@@ -163,14 +163,14 @@ export function registerControlPlaneCoreMethods(options: {
   server.registerMethod(Methods.PROJECT_WORKSPACE_LIST, async (client, params) => {
     requireScope(client, "read");
     const projectId = requireString((params as Any)?.projectId, "projectId");
-    return { links: core.listProjectWorkspaces(projectId) };
+    return { links: await core.listProjectWorkspaces(projectId) };
   });
 
   server.registerMethod(Methods.PROJECT_WORKSPACE_LINK, async (client, params) => {
     requireScope(client, "admin");
     const p = (params || {}) as Any;
     return {
-      link: core.linkProjectWorkspace({
+      link: await core.linkProjectWorkspace({
         projectId: requireString(p.projectId, "projectId"),
         workspaceId: requireString(p.workspaceId, "workspaceId"),
         isPrimary: p.isPrimary === true,
@@ -182,7 +182,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "admin");
     const p = (params || {}) as Any;
     return {
-      ok: core.unlinkProjectWorkspace(
+      ok: await core.unlinkProjectWorkspace(
         requireString(p.projectId, "projectId"),
         requireString(p.workspaceId, "workspaceId"),
       ),
@@ -193,7 +193,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "admin");
     const p = (params || {}) as Any;
     return {
-      link: core.setPrimaryProjectWorkspace(
+      link: await core.setPrimaryProjectWorkspace(
         requireString(p.projectId, "projectId"),
         requireString(p.workspaceId, "workspaceId"),
       ),
@@ -204,7 +204,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "read");
     const p = (params || {}) as Any;
     return {
-      issues: core.listIssues({
+      issues: await core.listIssues({
         companyId: optionalString(p.companyId),
         goalId: optionalString(p.goalId),
         projectId: optionalString(p.projectId),
@@ -222,7 +222,7 @@ export function registerControlPlaneCoreMethods(options: {
   server.registerMethod(Methods.ISSUE_GET, async (client, params) => {
     requireScope(client, "read");
     const issueId = requireString((params as Any)?.issueId, "issueId");
-    const issue = core.getIssue(issueId);
+    const issue = await core.getIssue(issueId);
     if (!issue) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Issue not found: ${issueId}` };
     }
@@ -233,7 +233,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "admin");
     const p = (params || {}) as Any;
     return {
-      issue: core.createIssue({
+      issue: await core.createIssue({
         companyId: optionalString(p.companyId),
         goalId: optionalString(p.goalId),
         projectId: optionalString(p.projectId),
@@ -257,7 +257,7 @@ export function registerControlPlaneCoreMethods(options: {
     const p = (params || {}) as Any;
     const issueId = requireString(p.issueId, "issueId");
     return {
-      issue: core.updateIssue(issueId, {
+      issue: await core.updateIssue(issueId, {
         goalId: p.goalId === null ? "" : optionalString(p.goalId),
         projectId: p.projectId === null ? "" : optionalString(p.projectId),
         parentIssueId: p.parentIssueId === null ? "" : optionalString(p.parentIssueId),
@@ -285,7 +285,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "admin");
     const p = (params || {}) as Any;
     return {
-      comment: core.createIssueComment({
+      comment: await core.createIssueComment({
         issueId: requireString(p.issueId, "issueId"),
         authorType: requireString(p.authorType, "authorType") as Any,
         authorAgentRoleId: optionalString(p.authorAgentRoleId),
@@ -297,7 +297,7 @@ export function registerControlPlaneCoreMethods(options: {
   server.registerMethod(Methods.ISSUE_COMMENT_LIST, async (client, params) => {
     requireScope(client, "read");
     const issueId = requireString((params as Any)?.issueId, "issueId");
-    return { comments: core.listIssueComments(issueId) };
+    return { comments: await core.listIssueComments(issueId) };
   });
 
   server.registerMethod(Methods.ISSUE_CHECKOUT, async (client, params) => {
@@ -326,7 +326,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "read");
     const p = (params || {}) as Any;
     return {
-      runs: core.listRuns({
+      runs: await core.listRuns({
         companyId: optionalString(p.companyId),
         projectId: optionalString(p.projectId),
         issueId: optionalString(p.issueId),
@@ -343,20 +343,20 @@ export function registerControlPlaneCoreMethods(options: {
   server.registerMethod(Methods.RUN_GET, async (client, params) => {
     requireScope(client, "read");
     const runId = requireString((params as Any)?.runId, "runId");
-    return { run: core.getRun(runId) };
+    return { run: await core.getRun(runId) };
   });
 
   server.registerMethod(Methods.RUN_EVENTS, async (client, params) => {
     requireScope(client, "read");
     const runId = requireString((params as Any)?.runId, "runId");
-    return { events: core.getRunEvents(runId) };
+    return { events: await core.getRunEvents(runId) };
   });
 
   server.registerMethod(Methods.COST_SUMMARY, async (client, params) => {
     requireScope(client, "read");
     const p = (params || {}) as Any;
     return {
-      summary: core.summarizeCosts({
+      summary: await core.summarizeCosts({
         scopeType: requireString(p.scopeType, "scopeType") as Any,
         scopeId: requireString(p.scopeId, "scopeId"),
         windowStart: optionalNumber(p.windowStart),
@@ -369,7 +369,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "read");
     const p = (params || {}) as Any;
     return {
-      summary: core.summarizeCostsByAgent(
+      summary: await core.summarizeCostsByAgent(
         requireString(p.agentRoleId, "agentRoleId"),
         optionalNumber(p.windowStart),
         optionalNumber(p.windowEnd),
@@ -381,7 +381,7 @@ export function registerControlPlaneCoreMethods(options: {
     requireScope(client, "read");
     const p = (params || {}) as Any;
     return {
-      summary: core.summarizeCostsByProject(
+      summary: await core.summarizeCostsByProject(
         requireString(p.projectId, "projectId"),
         optionalNumber(p.windowStart),
         optionalNumber(p.windowEnd),
@@ -392,7 +392,7 @@ export function registerControlPlaneCoreMethods(options: {
   server.registerMethod(Methods.COMPANY_TEMPLATE_EXPORT, async (client, params) => {
     requireScope(client, "read");
     const companyId = requireString((params as Any)?.companyId, "companyId");
-    return { template: core.exportCompanyTemplate(companyId) };
+    return { template: await core.exportCompanyTemplate(companyId) };
   });
 
   server.registerMethod(Methods.COMPANY_TEMPLATE_IMPORT, async (client, params) => {
@@ -401,6 +401,6 @@ export function registerControlPlaneCoreMethods(options: {
     if (!template || typeof template !== "object") {
       throw { code: ErrorCodes.INVALID_PARAMS, message: "template is required" };
     }
-    return { result: core.importCompanyTemplate(template as Any) };
+    return { result: await core.importCompanyTemplate(template as Any) };
   });
 }

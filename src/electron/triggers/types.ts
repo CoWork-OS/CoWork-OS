@@ -100,6 +100,19 @@ export interface TriggerHistoryEntry {
   sourceLabel?: string;
 }
 
+/**
+ * The trigger operations routines use to manage their backing triggers. Declared here so
+ * type-only consumers (routine types shared with the renderer) do not import the service.
+ */
+export interface EventTriggerRegistry {
+  getTrigger(id: string): EventTrigger | undefined;
+  addTrigger(
+    input: Omit<EventTrigger, "id" | "fireCount" | "createdAt" | "updatedAt">,
+  ): Promise<EventTrigger>;
+  updateTrigger(id: string, updates: Partial<EventTrigger>): Promise<EventTrigger | null>;
+  removeTrigger(id: string): Promise<boolean>;
+}
+
 export interface EventTriggerServiceDeps {
   createTask: (params: {
     title: string;

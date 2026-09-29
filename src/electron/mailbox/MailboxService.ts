@@ -1,4 +1,12 @@
-import Database from "better-sqlite3";
+import { AgentRoleRepository } from "../agents/agent-repository-facades";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import { ChannelRepository } from "../database/repository-facades";
+import {
+  bindStatementContext,
+  detachedStatementContext,
+} from "../database/statements/statement-burst";
+import type Database from "better-sqlite3";
+import { createMailboxStatementPort, type MailboxStatementPort } from "./mailbox-statement-port";
 import {
   createCipheriv,
   createDecipheriv,
@@ -11,8 +19,8 @@ import { createLogger } from "../utils/logger";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { ChannelRepository, TaskRepository, WorkspaceRepository } from "../database/repositories";
-import { AgentRoleRepository } from "../agents/AgentRoleRepository";
+import { ChannelStore } from "../database/repositories";
+
 import { LLMProviderFactory } from "../agent/llm/provider-factory";
 import { recordLlmCallError, recordLlmCallSuccess } from "../agent/llm/usage-telemetry";
 import type { LLMMessage, LLMProviderType } from "../agent/llm/types";
@@ -32,14 +40,16 @@ import { PlaybookService } from "../memory/PlaybookService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { getHeartbeatService } from "../agents/HeartbeatService";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
-import { ContactIdentityService } from "../identity/ContactIdentityService";
+import { ContactIdentityService } from "../identity/identity-repository-facades";
 import { MailboxAutomationHub } from "./MailboxAutomationHub";
 import { MailboxAutomationRegistry } from "./MailboxAutomationRegistry";
 import {
   buildMailboxAskNoEvidenceAnswer,
+  ensureMailboxEmbeddingTable,
   MailboxAgentSearchService,
   type MailboxSearchQueryPlan,
 } from "./MailboxAgentSearchService";
+import type { MailboxThreadWrite } from "./mailbox-units";
 import { AgentMailClient } from "../agentmail/AgentMailClient";
 import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { mailboxLlmQuickReplies, mailboxLlmSimilarThreadIds } from "./mailbox-inbox-product-llm";
@@ -718,9 +728,16 @@ function ensureMailboxCipherState(): MailboxCipherState {
   return mailboxCipherState;
 }
 
+// The derivation inputs are fixed for the process, so the key is derived once instead of
+// once per value (100k PBKDF2 rounds took ~20 ms of host CPU for every field of a sync).
+let derivedMailboxCipherKey: { machineId: string; key: Buffer } | null = null;
+
 function deriveMailboxCipherKey(machineId: string): Buffer {
+  if (derivedMailboxCipherKey?.machineId === machineId) return derivedMailboxCipherKey.key;
   // machineId is the secret (password); MAILBOX_CIPHER_SALT is the domain separator (salt).
-  return pbkdf2Sync(machineId, MAILBOX_CIPHER_SALT, 100000, 32, "sha512");
+  const key = pbkdf2Sync(machineId, MAILBOX_CIPHER_SALT, 100000, 32, "sha512");
+  derivedMailboxCipherKey = { machineId, key };
+  return key;
 }
 
 function encryptMailboxValue(value: string | null | undefined): string | null {
@@ -1887,6 +1904,8 @@ export class MailboxService {
   }
 
   private channelRepo: ChannelRepository;
+  // `hasEmailChannel` feeds the synchronous availability check, so it reads on the host.
+  private channelStore: ChannelStore;
   private taskRepo: TaskRepository;
   private workspaceRepo: WorkspaceRepository;
   private agentRoleRepo: AgentRoleRepository;
@@ -1912,11 +1931,17 @@ export class MailboxService {
   private mailboxSearchIndexBackfillAttempted = false;
   private mailboxAgentSearchService: MailboxAgentSearchService | null = null;
 
-  constructor(
-    private db: Database.Database,
-    options: MailboxServiceOptions = {},
-  ) {
+  /**
+   * The mailbox domain's database access (DB6): catalogued statements, run in the database
+   * worker when the runtime routes the domain there, on this connection otherwise.
+   */
+  private readonly sql: MailboxStatementPort;
+
+  constructor(db: Database.Database, options: MailboxServiceOptions = {}) {
+    this.sql = createMailboxStatementPort(db);
+    ensureMailboxEmbeddingTable(db);
     this.channelRepo = new ChannelRepository(db);
+    this.channelStore = new ChannelStore(db);
     this.taskRepo = new TaskRepository(db);
     this.workspaceRepo = new WorkspaceRepository(db);
     this.agentRoleRepo = new AgentRoleRepository(db);
@@ -1940,7 +1965,7 @@ export class MailboxService {
 
   private getMailboxAgentSearchService(): MailboxAgentSearchService {
     if (!this.mailboxAgentSearchService) {
-      this.mailboxAgentSearchService = new MailboxAgentSearchService(this.db, {
+      this.mailboxAgentSearchService = new MailboxAgentSearchService(this.sql, {
         getThread: (threadId) => this.getThread(threadId),
         getAttachment: (attachmentId, includeText) =>
           this.getMailboxAttachment(attachmentId, includeText),
@@ -1988,8 +2013,11 @@ export class MailboxService {
 
   private runInBackground(work: () => Promise<unknown>): void {
     if (this.stopped) return;
+    // Scheduled work is an operation of its own, not part of the one that scheduled it.
     const run = Promise.resolve()
-      .then(() => (this.stopped ? undefined : work()))
+      .then(() =>
+        this.stopped ? undefined : detachedStatementContext("MailboxService.background", work),
+      )
       .then(() => undefined)
       .catch((error) => {
         mailboxLogger.warn("Mailbox background work failed:", error);
@@ -2152,18 +2180,13 @@ export class MailboxService {
     return null;
   }
 
-  private getExistingMailboxAccounts(
+  private async getExistingMailboxAccounts(
     provider: MailboxProvider,
     status?: MailboxAccount["status"],
-  ): MailboxAccount[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at
-         FROM mailbox_accounts
-         WHERE provider = ?
-         ORDER BY updated_at DESC`,
-      )
-      .all(provider) as MailboxAccountRow[];
+  ): Promise<MailboxAccount[]> {
+    const rows = (await this.sql.all("getExistingMailboxAccounts_1", [
+      provider,
+    ])) as MailboxAccountRow[];
     return rows.map((row) => {
       const account = this.mapAccountRow(row);
       return status ? { ...account, status } : account;
@@ -2181,15 +2204,12 @@ export class MailboxService {
     );
   }
 
-  private getObsoleteDuplicateMailboxAccountIds(rows?: MailboxAccountRow[]): string[] {
+  private async getObsoleteDuplicateMailboxAccountIds(
+    rows?: MailboxAccountRow[],
+  ): Promise<string[]> {
     const accountRows =
       rows ||
-      (this.db
-        .prepare(
-          `SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at
-           FROM mailbox_accounts`,
-        )
-        .all() as MailboxAccountRow[]);
+      ((await this.sql.all("getObsoleteDuplicateMailboxAccountIds_1", [])) as MailboxAccountRow[]);
     const graphAddresses = new Set(
       accountRows
         .filter((row) => this.isMicrosoftGraphAccountRow(row))
@@ -2204,8 +2224,10 @@ export class MailboxService {
       .map((row) => row.id);
   }
 
-  private filterVisibleMailboxAccountRows(rows: MailboxAccountRow[]): MailboxAccountRow[] {
-    const obsoleteIds = new Set(this.getObsoleteDuplicateMailboxAccountIds(rows));
+  private async filterVisibleMailboxAccountRows(
+    rows: MailboxAccountRow[],
+  ): Promise<MailboxAccountRow[]> {
+    const obsoleteIds = new Set(await this.getObsoleteDuplicateMailboxAccountIds(rows));
     return rows.filter((row) => !obsoleteIds.has(row.id));
   }
 
@@ -2249,69 +2271,45 @@ export class MailboxService {
     this.gmailTransientSyncSuppressedCount = 0;
   }
 
-  private isLoomEmailChannel(): boolean {
-    const channel = this.channelRepo.findByType("email");
+  private async isLoomEmailChannel(): Promise<boolean> {
+    const channel = await this.channelRepo.findByType("email");
     const cfg = (channel?.config as Any) || {};
     return Boolean(channel?.enabled && asString(cfg.protocol) === "loom");
   }
 
   async getSyncStatus(): Promise<MailboxSyncStatus> {
-    const accountRows = this.db
-      .prepare(
-        `SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at
-         FROM mailbox_accounts
-         ORDER BY updated_at DESC`,
-      )
-      .all() as MailboxAccountRow[];
+    const accountRows = (await this.sql.all("getSyncStatus_1", [])) as MailboxAccountRow[];
 
     const googleWorkspaceAuthIssue = this.getGoogleWorkspaceAuthIssue();
     const gmailTransientSyncActive = this.gmailTransientSyncBackoffUntil > Date.now();
-    const visibleAccountRows = this.filterVisibleMailboxAccountRows(accountRows);
+    const visibleAccountRows = await this.filterVisibleMailboxAccountRows(accountRows);
     const accounts = visibleAccountRows.map((row) => {
       const account = this.mapAccountRow(row);
       return (googleWorkspaceAuthIssue || gmailTransientSyncActive) && account.provider === "gmail"
         ? { ...account, status: "degraded" as const }
         : account;
     });
-    const inboxVisibleFilter = this.buildInboxVisibleThreadFilter();
-    const joinedInboxVisibleFilter = this.buildInboxVisibleThreadFilter("mt");
-    const countsRow = this.db
-      .prepare(
-        `SELECT
-           COUNT(*) AS thread_count,
-           COALESCE(SUM(unread_count), 0) AS unread_count,
-           COALESCE(SUM(CASE WHEN needs_reply = 1 THEN 1 ELSE 0 END), 0) AS needs_reply_count,
-           COALESCE(
-             SUM(CASE WHEN classification_state IN ('pending', 'backfill_pending') THEN 1 ELSE 0 END),
-             0
-           ) AS classification_pending_count
-         FROM mailbox_threads
-         WHERE ${inboxVisibleFilter.sql}`,
-      )
-      .get(...inboxVisibleFilter.params) as {
+    const inboxVisibleFilter = await this.buildInboxVisibleThreadFilter();
+    const countsRow = (await this.sql.get(
+      "syncStatusThreadCounts",
+      inboxVisibleFilter.params,
+      inboxVisibleFilter.shape,
+    )) as {
       thread_count: number;
       unread_count: number;
       needs_reply_count: number;
       classification_pending_count: number;
     };
-    const proposalCountRow = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM mailbox_action_proposals map
-         JOIN mailbox_threads mt ON mt.id = map.thread_id
-         WHERE map.status = 'suggested'
-           AND ${joinedInboxVisibleFilter.sql}`,
-      )
-      .get(...joinedInboxVisibleFilter.params) as { count: number };
-    const commitmentCountRow = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM mailbox_commitments mc
-         JOIN mailbox_threads mt ON mt.id = mc.thread_id
-         WHERE mc.state IN ('suggested', 'accepted')
-           AND ${joinedInboxVisibleFilter.sql}`,
-      )
-      .get(...joinedInboxVisibleFilter.params) as { count: number };
+    const proposalCountRow = (await this.sql.get(
+      "visibleSuggestedProposalCount",
+      inboxVisibleFilter.params,
+      inboxVisibleFilter.shape,
+    )) as { count: number };
+    const commitmentCountRow = (await this.sql.get(
+      "visibleOpenCommitmentCount",
+      inboxVisibleFilter.params,
+      inboxVisibleFilter.shape,
+    )) as { count: number };
 
     const lastSyncedAt =
       accounts.map((account) => account.lastSyncedAt || 0).sort((a, b) => b - a)[0] || undefined;
@@ -2350,24 +2348,24 @@ export class MailboxService {
     const status = await this.getSyncStatus();
     return {
       accounts: status.accounts,
-      syncHealth: this.getMailboxSyncHealth(status.accounts),
-      folders: this.listMailboxFolders(),
-      labels: this.listMailboxLabels(),
-      identities: this.listMailboxIdentities(),
-      signatures: this.listMailboxSignatures(),
-      composeDrafts: this.listMailboxComposeDrafts(),
-      queuedActions: this.listMailboxQueuedActions(),
-      outgoing: this.listMailboxOutgoingMessages(),
-      settings: this.getMailboxClientSettings(),
+      syncHealth: await this.getMailboxSyncHealth(status.accounts),
+      folders: await this.listMailboxFolders(),
+      labels: await this.listMailboxLabels(),
+      identities: await this.listMailboxIdentities(),
+      signatures: await this.listMailboxSignatures(),
+      composeDrafts: await this.listMailboxComposeDrafts(),
+      queuedActions: await this.listMailboxQueuedActions(),
+      outgoing: await this.listMailboxOutgoingMessages(),
+      settings: await this.getMailboxClientSettings(),
     };
   }
 
-  getMailboxDraft(draftId: string): MailboxComposeDraft | null {
+  async getMailboxDraft(draftId: string): Promise<MailboxComposeDraft | null> {
     return this.getMailboxComposeDraft(draftId);
   }
 
   async createMailboxDraft(input: MailboxComposeDraftInput): Promise<MailboxComposeDraft> {
-    const accountId = this.resolveComposeAccountId(input.accountId, input.threadId);
+    const accountId = await this.resolveComposeAccountId(input.accountId, input.threadId);
     const now = Date.now();
     const seedThread = input.threadId ? await this.getThread(input.threadId) : null;
     const recipients =
@@ -2383,42 +2381,39 @@ export class MailboxService {
           : this.prefixMailboxSubject(seedThread.subject, "Re:")
         : "");
     const id = randomUUID();
-    const workspaceId = this.resolveComposeDraftWorkspaceIdForCreate(accountId, input.threadId);
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_compose_drafts
-          (id, account_id, thread_id, provider_draft_id, mode, status, subject, body_text, body_html, to_json, cc_json, bcc_json, identity_id, signature_id, attachments_json, scheduled_at, send_after, latest_error, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, NULL, ?, 'local', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        accountId,
-        input.threadId || null,
-        input.mode,
-        subject,
-        input.bodyText || "",
-        input.bodyHtml || null,
-        JSON.stringify(this.normalizeRecipients(recipients)),
-        JSON.stringify(this.normalizeRecipients(input.cc || [])),
-        JSON.stringify(this.normalizeRecipients(input.bcc || [])),
-        input.identityId || null,
-        input.signatureId || null,
-        JSON.stringify([]),
-        JSON.stringify({
-          source: "mailbox_compose",
-          ...(workspaceId ? { workspaceId } : {}),
-        }),
-        now,
-        now,
-      );
-    return this.getMailboxComposeDraft(id)!;
+    const workspaceId = await this.resolveComposeDraftWorkspaceIdForCreate(
+      accountId,
+      input.threadId,
+    );
+    await this.sql.run("createMailboxDraft_1", [
+      id,
+      accountId,
+      input.threadId || null,
+      input.mode,
+      subject,
+      input.bodyText || "",
+      input.bodyHtml || null,
+      JSON.stringify(this.normalizeRecipients(recipients)),
+      JSON.stringify(this.normalizeRecipients(input.cc || [])),
+      JSON.stringify(this.normalizeRecipients(input.bcc || [])),
+      input.identityId || null,
+      input.signatureId || null,
+      JSON.stringify([]),
+      JSON.stringify({
+        source: "mailbox_compose",
+        ...(workspaceId ? { workspaceId } : {}),
+      }),
+      now,
+      now,
+    ]);
+    return (await this.getMailboxComposeDraft(id))!;
   }
 
   async updateMailboxDraft(
     draftId: string,
     patch: MailboxComposeDraftPatch,
   ): Promise<MailboxComposeDraft> {
-    const draft = this.getMailboxComposeDraft(draftId);
+    const draft = await this.getMailboxComposeDraft(draftId);
     if (!draft) throw new Error("Mailbox compose draft not found");
     const next = {
       subject: patch.subject ?? draft.subject,
@@ -2433,69 +2428,60 @@ export class MailboxService {
       scheduledAt:
         patch.scheduledAt === undefined ? draft.scheduledAt : patch.scheduledAt || undefined,
     };
-    this.db
-      .prepare(
-        `UPDATE mailbox_compose_drafts
-         SET subject = ?, body_text = ?, body_html = ?, to_json = ?, cc_json = ?, bcc_json = ?,
-             identity_id = ?, signature_id = ?, scheduled_at = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        next.subject,
-        next.bodyText,
-        next.bodyHtml || null,
-        JSON.stringify(this.normalizeRecipients(next.to)),
-        JSON.stringify(this.normalizeRecipients(next.cc)),
-        JSON.stringify(this.normalizeRecipients(next.bcc)),
-        next.identityId || null,
-        next.signatureId || null,
-        next.scheduledAt || null,
-        Date.now(),
-        draftId,
-      );
-    return this.getMailboxComposeDraft(draftId)!;
+    await this.sql.run("updateMailboxDraft_1", [
+      next.subject,
+      next.bodyText,
+      next.bodyHtml || null,
+      JSON.stringify(this.normalizeRecipients(next.to)),
+      JSON.stringify(this.normalizeRecipients(next.cc)),
+      JSON.stringify(this.normalizeRecipients(next.bcc)),
+      next.identityId || null,
+      next.signatureId || null,
+      next.scheduledAt || null,
+      Date.now(),
+      draftId,
+    ]);
+    return (await this.getMailboxComposeDraft(draftId))!;
   }
 
   async addMailboxDraftAttachment(
     draftId: string,
     input: MailboxDraftAttachmentInput,
   ): Promise<MailboxComposeDraft> {
-    const draft = this.getMailboxComposeDraft(draftId);
+    const draft = await this.getMailboxComposeDraft(draftId);
     if (!draft) throw new Error("Mailbox compose draft not found");
-    const attachment = this.normalizeComposeAttachmentInput(
+    const attachment = await this.normalizeComposeAttachmentInput(
       input,
-      this.resolveComposeDraftWorkspaceId(draft),
+      await this.resolveComposeDraftWorkspaceId(draft),
     );
     const attachments = [...draft.attachments, attachment];
-    this.db
-      .prepare(
-        `UPDATE mailbox_compose_drafts
-         SET attachments_json = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(JSON.stringify(attachments), Date.now(), draftId);
-    return this.getMailboxComposeDraft(draftId)!;
+    await this.sql.run("addMailboxDraftAttachment_1", [
+      JSON.stringify(attachments),
+      Date.now(),
+      draftId,
+    ]);
+    return (await this.getMailboxComposeDraft(draftId))!;
   }
 
   async removeMailboxDraftAttachment(
     draftId: string,
     attachmentId: string,
   ): Promise<MailboxComposeDraft> {
-    const draft = this.getMailboxComposeDraft(draftId);
+    const draft = await this.getMailboxComposeDraft(draftId);
     if (!draft) throw new Error("Mailbox compose draft not found");
     const attachments = draft.attachments.filter((attachment) => attachment.id !== attachmentId);
-    this.db
-      .prepare(
-        `UPDATE mailbox_compose_drafts
-         SET attachments_json = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(JSON.stringify(attachments), Date.now(), draftId);
-    return this.getMailboxComposeDraft(draftId)!;
+    await this.sql.run("addMailboxDraftAttachment_1", [
+      JSON.stringify(attachments),
+      Date.now(),
+      draftId,
+    ]);
+    return (await this.getMailboxComposeDraft(draftId))!;
   }
 
-  updateMailboxClientSettings(patch: MailboxClientSettingsPatch): MailboxClientState["settings"] {
-    const current = this.getMailboxClientSettings();
+  async updateMailboxClientSettings(
+    patch: MailboxClientSettingsPatch,
+  ): Promise<MailboxClientState["settings"]> {
+    const current = await this.getMailboxClientSettings();
     const next: MailboxClientState["settings"] = {
       remoteContentPolicy: ["load", "block", "ask"].includes(String(patch.remoteContentPolicy))
         ? patch.remoteContentPolicy!
@@ -2515,62 +2501,44 @@ export class MailboxService {
         ? patch.notifications!
         : current.notifications,
     };
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_client_settings
-          (id, remote_content_policy, send_delay_seconds, sync_recent_days, attachment_cache, notifications, updated_at)
-         VALUES ('default', ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           remote_content_policy = excluded.remote_content_policy,
-           send_delay_seconds = excluded.send_delay_seconds,
-           sync_recent_days = excluded.sync_recent_days,
-           attachment_cache = excluded.attachment_cache,
-           notifications = excluded.notifications,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        next.remoteContentPolicy,
-        next.sendDelaySeconds,
-        next.syncRecentDays,
-        next.attachmentCache,
-        next.notifications,
-        Date.now(),
-      );
+    await this.sql.run("updateMailboxClientSettings_1", [
+      next.remoteContentPolicy,
+      next.sendDelaySeconds,
+      next.syncRecentDays,
+      next.attachmentCache,
+      next.notifications,
+      Date.now(),
+    ]);
     return this.getMailboxClientSettings();
   }
 
   async sendMailboxDraft(draftId: string): Promise<MailboxOutgoingMessage> {
-    const draft = this.getMailboxComposeDraft(draftId);
+    const draft = await this.getMailboxComposeDraft(draftId);
     if (!draft) throw new Error("Mailbox compose draft not found");
     if (!draft.to.length && !draft.cc.length && !draft.bcc.length) {
       throw new Error("Add at least one recipient before sending.");
     }
-    const settings = this.getMailboxClientSettings();
+    const settings = await this.getMailboxClientSettings();
     const now = Date.now();
     const sendAfter = Math.max(draft.scheduledAt || 0, now + settings.sendDelaySeconds * 1000);
     const outgoingId = randomUUID();
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_outgoing_messages
-          (id, draft_id, account_id, status, provider_message_id, scheduled_at, send_after, latest_error, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, 'queued', NULL, ?, ?, NULL, ?, ?, ?)`,
-      )
-      .run(
-        outgoingId,
-        draft.id,
-        draft.accountId,
-        draft.scheduledAt || null,
-        sendAfter,
-        JSON.stringify({ undoable: true }),
-        now,
-        now,
-      );
-    this.db
-      .prepare(
-        "UPDATE mailbox_compose_drafts SET status = ?, send_after = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(draft.scheduledAt ? "scheduled" : "queued", sendAfter, now, draft.id);
-    this.enqueueMailboxAction({
+    await this.sql.run("sendMailboxDraft_1", [
+      outgoingId,
+      draft.id,
+      draft.accountId,
+      draft.scheduledAt || null,
+      sendAfter,
+      JSON.stringify({ undoable: true }),
+      now,
+      now,
+    ]);
+    await this.sql.run("sendMailboxDraft_2", [
+      draft.scheduledAt ? "scheduled" : "queued",
+      sendAfter,
+      now,
+      draft.id,
+    ]);
+    await this.enqueueMailboxAction({
       accountId: draft.accountId,
       threadId: draft.threadId,
       draftId: draft.id,
@@ -2579,7 +2547,7 @@ export class MailboxService {
       nextAttemptAt: sendAfter,
     });
     void this.processMailboxQueue();
-    return this.getMailboxOutgoingMessage(outgoingId)!;
+    return (await this.getMailboxOutgoingMessage(outgoingId))!;
   }
 
   async scheduleMailboxSend(draftId: string, scheduledAt: number): Promise<MailboxComposeDraft> {
@@ -2591,36 +2559,20 @@ export class MailboxService {
 
   async discardMailboxDraft(draftId: string): Promise<boolean> {
     const now = Date.now();
-    const result = this.db
-      .prepare(
-        "UPDATE mailbox_compose_drafts SET status = 'discarded', updated_at = ? WHERE id = ? AND status != 'sent'",
-      )
-      .run(now, draftId);
-    this.db
-      .prepare(
-        "UPDATE mailbox_queued_actions SET status = 'cancelled', updated_at = ? WHERE draft_id = ? AND status IN ('queued', 'failed')",
-      )
-      .run(now, draftId);
-    this.db
-      .prepare(
-        "UPDATE mailbox_outgoing_messages SET status = 'cancelled', updated_at = ? WHERE draft_id = ? AND status IN ('queued', 'failed')",
-      )
-      .run(now, draftId);
+    const result = await this.sql.run("discardMailboxDraft_1", [now, draftId]);
+    await this.sql.run("discardMailboxDraft_2", [now, draftId]);
+    await this.sql.run("discardMailboxDraft_3", [now, draftId]);
     return result.changes > 0;
   }
 
   async undoMailboxAction(actionId: string): Promise<MailboxQueuedAction> {
-    const existing = this.getMailboxQueuedAction(actionId);
+    const existing = await this.getMailboxQueuedAction(actionId);
     if (!existing) throw new Error("Mailbox action not found");
     const now = Date.now();
     if (existing.type === "send" && existing.draftId) {
       await this.discardMailboxDraft(existing.draftId);
     }
-    this.db
-      .prepare(
-        "UPDATE mailbox_queued_actions SET status = 'cancelled', updated_at = ? WHERE id = ? AND status IN ('queued', 'failed')",
-      )
-      .run(now, actionId);
+    await this.sql.run("undoMailboxAction_1", [now, actionId]);
     return this.enqueueMailboxAction({
       accountId: existing.accountId,
       threadId: existing.threadId,
@@ -2632,20 +2584,14 @@ export class MailboxService {
   }
 
   async retryMailboxAction(actionId: string): Promise<MailboxQueuedAction> {
-    const existing = this.getMailboxQueuedAction(actionId);
+    const existing = await this.getMailboxQueuedAction(actionId);
     if (!existing) throw new Error("Mailbox action not found");
     if (existing.status !== "failed") {
       return existing;
     }
-    this.db
-      .prepare(
-        `UPDATE mailbox_queued_actions
-         SET status = 'queued', next_attempt_at = ?, latest_error = NULL, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(Date.now(), Date.now(), actionId);
+    await this.sql.run("retryMailboxAction_1", [Date.now(), Date.now(), actionId]);
     void this.processMailboxQueue();
-    return this.getMailboxQueuedAction(actionId)!;
+    return (await this.getMailboxQueuedAction(actionId))!;
   }
 
   async processMailboxQueue(
@@ -2657,17 +2603,10 @@ export class MailboxService {
     let succeeded = 0;
     let failed = 0;
     try {
-      const rows = this.db
-        .prepare(
-          `SELECT id, account_id, thread_id, draft_id, action_type, status, payload_json, attempts, next_attempt_at,
-                  latest_error, undo_of_action_id, created_at, updated_at
-           FROM mailbox_queued_actions
-           WHERE status = 'queued'
-             AND COALESCE(next_attempt_at, 0) <= ?
-           ORDER BY next_attempt_at ASC, created_at ASC
-           LIMIT ?`,
-        )
-        .all(Date.now(), Math.min(Math.max(limit, 1), 100)) as MailboxQueuedActionRow[];
+      const rows = (await this.sql.all("processMailboxQueue_1", [
+        Date.now(),
+        Math.min(Math.max(limit, 1), 100),
+      ])) as MailboxQueuedActionRow[];
       for (const row of rows) {
         processed += 1;
         try {
@@ -2675,7 +2614,7 @@ export class MailboxService {
           succeeded += 1;
         } catch (error) {
           failed += 1;
-          this.markMailboxQueuedActionFailed(row, error);
+          await this.markMailboxQueuedActionFailed(row, error);
         }
       }
     } finally {
@@ -2685,37 +2624,14 @@ export class MailboxService {
   }
 
   async listMailboxEvents(limit = 50, threadId?: string): Promise<MailboxEvent[]> {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           fingerprint,
-           workspace_id,
-           event_type,
-           account_id,
-           thread_id,
-           provider,
-           subject,
-           summary_text,
-           evidence_refs_json,
-           payload_json,
-           duplicate_count,
-           created_at,
-           last_seen_at
-         FROM mailbox_events
-         WHERE workspace_id = ?
-           AND (? IS NULL OR thread_id = ?)
-         ORDER BY last_seen_at DESC
-         LIMIT ?`,
-      )
-      .all(
-        workspaceId,
-        threadId || null,
-        threadId || null,
-        Math.min(Math.max(limit, 1), 200),
-      ) as MailboxEventRow[];
+    const rows = (await this.sql.all("listMailboxEvents_1", [
+      workspaceId,
+      threadId || null,
+      threadId || null,
+      Math.min(Math.max(limit, 1), 200),
+    ])) as MailboxEventRow[];
     return rows.map((row) => ({
       id: row.id,
       fingerprint: row.fingerprint,
@@ -2737,7 +2653,7 @@ export class MailboxService {
     threadId?: string;
   }): Promise<MailboxAutomationRecord[]> {
     return MailboxAutomationRegistry.listAutomations({
-      workspaceId: input?.workspaceId || this.resolveDefaultWorkspaceId(),
+      workspaceId: input?.workspaceId || (await this.resolveDefaultWorkspaceId()),
       threadId: input?.threadId,
     });
   }
@@ -2749,7 +2665,7 @@ export class MailboxService {
   async createMailboxRule(recipe: MailboxRuleRecipe): Promise<MailboxAutomationRecord> {
     return MailboxAutomationRegistry.createRule({
       ...recipe,
-      workspaceId: recipe.workspaceId || this.resolveDefaultWorkspaceId(),
+      workspaceId: recipe.workspaceId || (await this.resolveDefaultWorkspaceId()),
       source: "mailbox_event",
     });
   }
@@ -2768,14 +2684,14 @@ export class MailboxService {
   async createMailboxSchedule(recipe: MailboxScheduleRecipe): Promise<MailboxAutomationRecord> {
     return MailboxAutomationRegistry.createSchedule({
       ...recipe,
-      workspaceId: recipe.workspaceId || this.resolveDefaultWorkspaceId(),
+      workspaceId: recipe.workspaceId || (await this.resolveDefaultWorkspaceId()),
     });
   }
 
   async createMailboxForward(recipe: MailboxForwardRecipe): Promise<MailboxAutomationRecord> {
     return MailboxAutomationRegistry.createForward({
       ...recipe,
-      workspaceId: recipe.workspaceId || this.resolveDefaultWorkspaceId(),
+      workspaceId: recipe.workspaceId || (await this.resolveDefaultWorkspaceId()),
     });
   }
 
@@ -2820,9 +2736,10 @@ export class MailboxService {
     if (!detail) return null;
 
     const workspaceId =
-      this.resolveThreadWorkspaceId(detail.accountId) || this.resolveDefaultWorkspaceId();
-    const companyCandidates = this.buildMissionControlCompanyCandidates(detail);
-    const operatorRecommendations = this.buildMissionControlOperatorRecommendations(
+      (await this.resolveThreadWorkspaceId(detail.accountId)) ||
+      (await this.resolveDefaultWorkspaceId());
+    const companyCandidates = await this.buildMissionControlCompanyCandidates(detail);
+    const operatorRecommendations = await this.buildMissionControlOperatorRecommendations(
       detail,
       companyCandidates[0]?.companyId,
     );
@@ -2845,7 +2762,7 @@ export class MailboxService {
       recommendedOperatorRoleId: operatorRecommendations[0]?.agentRoleId,
       sensitiveContentRedacted,
       evidenceRefs,
-      existingHandoffs: this.listMissionControlHandoffs(threadId),
+      existingHandoffs: await this.listMissionControlHandoffs(threadId),
     };
   }
 
@@ -2857,12 +2774,12 @@ export class MailboxService {
       throw new Error("Mailbox thread not found");
     }
 
-    const company = this.controlPlaneCore.getCompany(request.companyId);
+    const company = await this.controlPlaneCore.getCompany(request.companyId);
     if (!company) {
       throw new Error("Company not found for inbox handoff");
     }
 
-    const operator = this.agentRoleRepo.findById(request.operatorRoleId);
+    const operator = await this.agentRoleRepo.findById(request.operatorRoleId);
     // Companies are no longer user-managed: any active agent without a company can
     // take the handoff; agents explicitly linked to a different company still cannot.
     if (
@@ -2873,7 +2790,7 @@ export class MailboxService {
       throw new Error("Selected operator is not available for the chosen company");
     }
 
-    const existing = this.findActiveMissionControlHandoff(
+    const existing = await this.findActiveMissionControlHandoff(
       request.threadId,
       company.id,
       operator.id,
@@ -2883,9 +2800,9 @@ export class MailboxService {
     }
 
     const workspaceId =
-      this.resolveThreadWorkspaceId(detail.accountId) ||
+      (await this.resolveThreadWorkspaceId(detail.accountId)) ||
       company.defaultWorkspaceId ||
-      this.resolveDefaultWorkspaceId();
+      (await this.resolveDefaultWorkspaceId());
     if (!workspaceId) {
       throw new Error("No workspace available for inbox handoff");
     }
@@ -2922,7 +2839,7 @@ export class MailboxService {
       },
     } satisfies Record<string, unknown>;
 
-    const issue = this.controlPlaneCore.createIssue({
+    const issue = await this.controlPlaneCore.createIssue({
       companyId: company.id,
       workspaceId,
       title: request.issueTitle.trim(),
@@ -2942,7 +2859,7 @@ export class MailboxService {
       wakeOutcome = result.status;
     }
 
-    const record = this.persistMissionControlHandoff({
+    const record = await this.persistMissionControlHandoff({
       threadId: detail.id,
       workspaceId,
       companyId: company.id,
@@ -2956,7 +2873,7 @@ export class MailboxService {
     });
 
     const primaryContact = detail.research?.primaryContact || detail.participants[0];
-    this.emitMailboxEvent({
+    await this.emitMailboxEvent({
       type: "mission_control_handoff_created",
       threadId: detail.id,
       accountId: detail.accountId,
@@ -2981,34 +2898,17 @@ export class MailboxService {
     return record;
   }
 
-  listMissionControlHandoffs(threadId: string): MailboxMissionControlHandoffRecord[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           thread_id,
-           workspace_id,
-           company_id,
-           company_name,
-           operator_role_id,
-           operator_display_name,
-           issue_id,
-           issue_title,
-           source,
-           latest_outcome,
-           latest_wake_at,
-           created_at,
-           updated_at
-         FROM mailbox_mission_control_handoffs
-         WHERE thread_id = ?
-         ORDER BY updated_at DESC`,
-      )
-      .all(threadId) as MailboxMissionControlHandoffRow[];
-    return rows.map((row) => this.mapMissionControlHandoffRow(row));
+  async listMissionControlHandoffs(
+    threadId: string,
+  ): Promise<MailboxMissionControlHandoffRecord[]> {
+    const rows = (await this.sql.all("listMissionControlHandoffs_1", [
+      threadId,
+    ])) as MailboxMissionControlHandoffRow[];
+    return Promise.all(rows.map((row) => this.mapMissionControlHandoffRow(row)));
   }
 
   async getMailboxDigest(workspaceId?: string): Promise<MailboxDigestSnapshot> {
-    const resolvedWorkspaceId = workspaceId || this.resolveDefaultWorkspaceId();
+    const resolvedWorkspaceId = workspaceId || (await this.resolveDefaultWorkspaceId());
     if (!resolvedWorkspaceId) {
       return {
         workspaceId: "",
@@ -3033,27 +2933,12 @@ export class MailboxService {
       };
     }
 
-    const inboxVisibleFilter = this.buildInboxVisibleThreadFilter(
-      "mailbox_threads",
-      resolvedWorkspaceId,
-    );
-    const joinedInboxVisibleFilter = this.buildInboxVisibleThreadFilter("mt", resolvedWorkspaceId);
-    const counts = this.db
-      .prepare(
-        `SELECT
-           COALESCE(COUNT(*), 0) AS thread_count,
-           COALESCE(SUM(message_count), 0) AS message_count,
-           COALESCE(SUM(unread_count), 0) AS unread_count,
-           COALESCE(SUM(CASE WHEN needs_reply = 1 THEN 1 ELSE 0 END), 0) AS needs_reply_count,
-           COALESCE(
-             SUM(CASE WHEN classification_state IN ('pending', 'backfill_pending') THEN 1 ELSE 0 END),
-             0
-           ) AS classification_pending_count,
-           COALESCE(SUM(CASE WHEN sensitive_content_json IS NOT NULL AND sensitive_content_json != '' THEN 1 ELSE 0 END), 0) AS sensitive_thread_count
-         FROM mailbox_threads
-         WHERE ${inboxVisibleFilter.sql}`,
-      )
-      .get(...inboxVisibleFilter.params) as {
+    const inboxVisibleFilter = await this.buildInboxVisibleThreadFilter(resolvedWorkspaceId);
+    const counts = (await this.sql.get(
+      "digestThreadCounts",
+      inboxVisibleFilter.params,
+      inboxVisibleFilter.shape,
+    )) as {
       thread_count: number;
       message_count: number;
       unread_count: number;
@@ -3061,66 +2946,35 @@ export class MailboxService {
       classification_pending_count: number;
       sensitive_thread_count: number;
     };
-    const proposalCountRow = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM mailbox_action_proposals map
-         JOIN mailbox_threads mt ON mt.id = map.thread_id
-         WHERE map.status = 'suggested'
-           AND ${joinedInboxVisibleFilter.sql}`,
-      )
-      .get(...joinedInboxVisibleFilter.params) as { count: number };
-    const commitmentCountRow = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM mailbox_commitments mc
-         JOIN mailbox_threads mt ON mt.id = mc.thread_id
-         WHERE mc.state IN ('suggested', 'accepted')
-           AND ${joinedInboxVisibleFilter.sql}`,
-      )
-      .get(...joinedInboxVisibleFilter.params) as { count: number };
-    const draftCountRow = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM mailbox_drafts md
-         JOIN mailbox_threads mt ON mt.id = md.thread_id
-         WHERE ${joinedInboxVisibleFilter.sql}`,
-      )
-      .get(...joinedInboxVisibleFilter.params) as { count: number };
-    const overdueCommitmentCountRow = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM mailbox_commitments mc
-         JOIN mailbox_threads mt ON mt.id = mc.thread_id
-         WHERE mc.state IN ('suggested', 'accepted')
-           AND mc.due_at IS NOT NULL
-           AND mc.due_at < ?
-           AND ${joinedInboxVisibleFilter.sql}`,
-      )
-      .get(Date.now(), ...joinedInboxVisibleFilter.params) as { count: number };
-    const eventCountRow = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM mailbox_events
-         WHERE workspace_id = ?`,
-      )
-      .get(resolvedWorkspaceId) as { count: number };
-    const recentEventRows = this.db
-      .prepare(
-        `SELECT event_type, COUNT(*) AS count
-         FROM mailbox_events
-         WHERE workspace_id = ?
-         GROUP BY event_type
-         ORDER BY MAX(last_seen_at) DESC
-         LIMIT 6`,
-      )
-      .all(resolvedWorkspaceId) as Array<{ event_type: MailboxEventType; count: number }>;
-    const lastSyncedRow = this.db
-      .prepare(
-        `SELECT MAX(last_synced_at) AS last_synced_at
-         FROM mailbox_accounts`,
-      )
-      .get() as { last_synced_at: number | null };
+    const proposalCountRow = (await this.sql.get(
+      "visibleSuggestedProposalCount",
+      inboxVisibleFilter.params,
+      inboxVisibleFilter.shape,
+    )) as { count: number };
+    const commitmentCountRow = (await this.sql.get(
+      "visibleOpenCommitmentCount",
+      inboxVisibleFilter.params,
+      inboxVisibleFilter.shape,
+    )) as { count: number };
+    const draftCountRow = (await this.sql.get(
+      "visibleDraftCount",
+      inboxVisibleFilter.params,
+      inboxVisibleFilter.shape,
+    )) as { count: number };
+    const overdueCommitmentCountRow = (await this.sql.get(
+      "visibleOverdueCommitmentCount",
+      [Date.now(), ...inboxVisibleFilter.params],
+      inboxVisibleFilter.shape,
+    )) as { count: number };
+    const eventCountRow = (await this.sql.get("getMailboxDigest_1", [resolvedWorkspaceId])) as {
+      count: number;
+    };
+    const recentEventRows = (await this.sql.all("getMailboxDigest_2", [
+      resolvedWorkspaceId,
+    ])) as Array<{ event_type: MailboxEventType; count: number }>;
+    const lastSyncedRow = (await this.sql.get("getMailboxDigest_3", [])) as {
+      last_synced_at: number | null;
+    };
     const clientState = await this.getMailboxClientState();
     const queuedActionCount = clientState.queuedActions.filter(
       (action) => action.status === "queued",
@@ -3173,7 +3027,7 @@ export class MailboxService {
       VALID_MAILBOX_TODAY_BUCKETS.map(async (bucket) => ({
         bucket,
         label: labels[bucket],
-        count: this.countThreadsByTodayBucket(bucket),
+        count: await this.countThreadsByTodayBucket(bucket),
         threads: await this.listThreads({
           todayBucket: bucket,
           mailboxView: "inbox",
@@ -3182,15 +3036,10 @@ export class MailboxService {
         }),
       })),
     );
-    const domainRows = this.db
-      .prepare(
-        `SELECT domain_category, COUNT(*) AS count
-         FROM mailbox_threads
-         WHERE local_inbox_hidden = 0
-         GROUP BY domain_category
-         ORDER BY count DESC`,
-      )
-      .all() as Array<{ domain_category: MailboxDomainCategory; count: number }>;
+    const domainRows = (await this.sql.all("getMailboxTodayDigest_1", [])) as Array<{
+      domain_category: MailboxDomainCategory;
+      count: number;
+    }>;
     const clientState = await this.getMailboxClientState();
     return {
       buckets,
@@ -3211,13 +3060,13 @@ export class MailboxService {
     };
   }
 
-  private countThreadsByTodayBucket(bucket: MailboxTodayBucket): number {
-    const inboxVisibleFilter = this.buildInboxVisibleThreadFilter();
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count FROM mailbox_threads WHERE today_bucket = ? AND ${inboxVisibleFilter.sql}`,
-      )
-      .get(bucket, ...inboxVisibleFilter.params) as { count: number } | undefined;
+  private async countThreadsByTodayBucket(bucket: MailboxTodayBucket): Promise<number> {
+    const inboxVisibleFilter = await this.buildInboxVisibleThreadFilter();
+    const row = (await this.sql.get(
+      "visibleTodayBucketCount",
+      [bucket, ...inboxVisibleFilter.params],
+      inboxVisibleFilter.shape,
+    )) as { count: number } | undefined;
     return row?.count || 0;
   }
 
@@ -3225,27 +3074,7 @@ export class MailboxService {
     input: { limit?: number } = {},
   ): Promise<MailboxSenderCleanupDigest> {
     const limit = Math.min(Math.max(input.limit ?? 8, 1), 25);
-    const rows = this.db
-      .prepare(
-        `SELECT
-           LOWER(COALESCE(m.from_email, '')) AS email,
-           MAX(m.from_name) AS name,
-           COUNT(DISTINCT t.id) AS thread_count,
-           SUM(t.unread_count) AS unread_count,
-           SUM(CASE WHEN t.cleanup_candidate = 1 THEN 1 ELSE 0 END) AS cleanup_count,
-           SUM(CASE WHEN t.needs_reply = 1 THEN 1 ELSE 0 END) AS needs_reply_count,
-           MAX(t.last_message_at) AS last_message_at
-         FROM mailbox_messages m
-         JOIN mailbox_threads t ON t.id = m.thread_id
-         WHERE m.direction = 'incoming'
-           AND m.from_email IS NOT NULL
-           AND t.local_inbox_hidden = 0
-         GROUP BY LOWER(m.from_email)
-         HAVING thread_count >= 2 OR cleanup_count > 0
-         ORDER BY cleanup_count DESC, thread_count DESC, last_message_at DESC
-         LIMIT ?`,
-      )
-      .all(limit) as Array<{
+    const rows = (await this.sql.all("getMailboxSenderCleanupDigest_1", [limit])) as Array<{
       email: string;
       name: string | null;
       thread_count: number;
@@ -3254,20 +3083,13 @@ export class MailboxService {
       needs_reply_count: number | null;
       last_message_at: number;
     }>;
-    const senders = rows.map((row) => {
-      const threadRows = this.db
-        .prepare(
-          `SELECT DISTINCT t.*
-           FROM mailbox_threads t
-           JOIN mailbox_messages m ON m.thread_id = t.id
-           WHERE LOWER(m.from_email) = ?
-             AND t.local_inbox_hidden = 0
-           ORDER BY t.cleanup_candidate DESC, t.last_message_at DESC
-           LIMIT 4`,
-        )
-        .all(row.email) as MailboxThreadRow[];
+    const senders: MailboxSenderCleanupDigest["senders"] = [];
+    for (const row of rows) {
+      const threadRows = (await this.sql.all("getMailboxSenderCleanupDigest_2", [
+        row.email,
+      ])) as MailboxThreadRow[];
       const cleanupCount = row.cleanup_count || 0;
-      return {
+      senders.push({
         email: row.email,
         name: row.name || undefined,
         threadCount: row.thread_count,
@@ -3282,11 +3104,9 @@ export class MailboxService {
             : row.unread_count
               ? ("mark_read" as const)
               : ("archive" as const),
-        threads: threadRows.map((thread) =>
-          this.mapThreadRow(thread, this.getSummaryForThread(thread.id)),
-        ),
-      };
-    });
+        threads: await this.mapThreadRowsWithSummaries(threadRows),
+      });
+    }
     return { generatedAt: Date.now(), senders };
   }
 
@@ -3465,30 +3285,26 @@ export class MailboxService {
     };
   }
 
-  private searchMailboxRows(
+  private async searchMailboxRows(
     query: string,
     limit: number,
-  ): Array<{
-    thread_id: string;
-    attachment_id: string | null;
-    snippet: string;
-    score: number;
-  }> {
-    this.ensureMailboxSearchIndexBackfilled();
+  ): Promise<
+    Array<{
+      thread_id: string;
+      attachment_id: string | null;
+      snippet: string;
+      score: number;
+    }>
+  > {
+    await this.ensureMailboxSearchIndexBackfilled();
     const tokens = tokenizeMailboxQuery(query);
     const ftsQuery = buildMailboxFtsQuery(query);
     if (ftsQuery) {
       try {
-        const rows = this.db
-          .prepare(
-            `SELECT thread_id, attachment_id, snippet(mailbox_search_fts, 7, '[', ']', ' … ', 16) AS snippet,
-                    subject, sender, body, attachment_filename, attachment_text, bm25(mailbox_search_fts) AS fts_score
-             FROM mailbox_search_fts
-             WHERE mailbox_search_fts MATCH ?
-             ORDER BY fts_score ASC
-             LIMIT ?`,
-          )
-          .all(ftsQuery, Math.max(limit * 12, 80)) as Array<{
+        const rows = (await this.sql.all("searchMailboxRows_1", [
+          ftsQuery,
+          Math.max(limit * 12, 80),
+        ])) as Array<{
           thread_id: string;
           attachment_id: string | null;
           snippet: string;
@@ -3513,20 +3329,7 @@ export class MailboxService {
       }
     }
     const needle = `%${normalizeMailboxSearchText(query)}%`;
-    return this.db
-      .prepare(
-        `SELECT DISTINCT t.id AS thread_id, ma.id AS attachment_id,
-                COALESCE(ma.filename, t.snippet) AS snippet,
-                0 AS score
-         FROM mailbox_threads t
-         LEFT JOIN mailbox_messages m ON m.thread_id = t.id
-         LEFT JOIN mailbox_attachments ma ON ma.thread_id = t.id
-         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
-         WHERE LOWER(t.subject || ' ' || t.snippet || ' ' || COALESCE(m.body_text, '') || ' ' || COALESCE(ma.filename, '') || ' ' || COALESCE(mat.text_content, '')) LIKE ?
-         ORDER BY t.last_message_at DESC
-         LIMIT ?`,
-      )
-      .all(needle, Math.max(limit * 3, 12)) as Array<{
+    return (await this.sql.all("searchMailboxRows_2", [needle, Math.max(limit * 3, 12)])) as Array<{
       thread_id: string;
       attachment_id: string | null;
       snippet: string;
@@ -3589,7 +3392,7 @@ export class MailboxService {
     if (!modelSelection) {
       return { usedLlm: false };
     }
-    const workspaceId = this.resolveDefaultWorkspaceId() || "";
+    const workspaceId = (await this.resolveDefaultWorkspaceId()) || "";
     try {
       const provider = LLMProviderFactory.createProvider();
       const evidence = await Promise.all(
@@ -3775,7 +3578,7 @@ export class MailboxService {
         threadResult.data,
       );
       if (!normalized) continue;
-      this.upsertThread(normalized);
+      await this.upsertThread(normalized);
       const detail = await this.getThread(normalized.id);
       if (detail) {
         results.push({
@@ -3793,7 +3596,7 @@ export class MailboxService {
     limit: number,
   ): Promise<Array<{ thread: MailboxThreadDetail; snippet?: string; score?: number }>> {
     if (limit <= 0) return [];
-    const channel = this.channelRepo.findByType("email");
+    const channel = await this.channelRepo.findByType("email");
     if (!channel || !channel.enabled) return [];
     const config = (channel.config as Any) || {};
     if (asString(config.authMethod) !== "oauth" || asString(config.oauthProvider) !== "microsoft")
@@ -3804,7 +3607,7 @@ export class MailboxService {
       "outlook"
     ).toLowerCase();
     const accountId = `outlook-graph:${address}`;
-    this.upsertAccount({
+    await this.upsertAccount({
       id: accountId,
       provider: "outlook_graph",
       address,
@@ -3849,7 +3652,7 @@ export class MailboxService {
 
     const results: Array<{ thread: MailboxThreadDetail; snippet?: string; score?: number }> = [];
     for (const normalized of normalizedThreads) {
-      this.upsertThread(normalized);
+      await this.upsertThread(normalized);
       const detail = await this.getThread(normalized.id);
       if (detail) results.push({ thread: detail, snippet: detail.snippet, score: 52 });
     }
@@ -3869,59 +3672,7 @@ export class MailboxService {
     const limit = Math.min(Math.max(input.limit ?? 5, 1), MAILBOX_SENT_FOLLOWUP_MAX_LIMIT);
     const now = Date.now();
     const cutoff = now - thresholdHours * 60 * 60 * 1000;
-    const rows = this.db
-      .prepare(
-        `SELECT
-           t.id,
-           t.account_id,
-           t.provider,
-           t.provider_thread_id,
-           t.subject,
-           t.snippet,
-           t.participants_json,
-           t.labels_json,
-           t.category,
-           t.today_bucket,
-           t.domain_category,
-           t.classification_rationale,
-           t.priority_score,
-           t.urgency_score,
-           t.needs_reply,
-           t.stale_followup,
-           t.cleanup_candidate,
-           t.handled,
-           t.local_inbox_hidden,
-           t.unread_count,
-           t.message_count,
-           t.last_message_at,
-           t.sensitive_content_json,
-           t.classification_state,
-           m.id AS latest_outbound_message_id,
-           m.subject AS latest_outbound_subject,
-           m.to_json AS latest_outbound_to_json,
-           m.cc_json AS latest_outbound_cc_json,
-           m.received_at AS latest_outbound_at
-         FROM mailbox_threads t
-         JOIN mailbox_messages m ON m.thread_id = t.id
-         WHERE m.direction = 'outgoing'
-           AND m.received_at = (
-             SELECT MAX(m2.received_at)
-             FROM mailbox_messages m2
-             WHERE m2.thread_id = t.id
-               AND m2.direction = 'outgoing'
-           )
-           AND m.received_at <= ?
-           AND NOT EXISTS (
-             SELECT 1
-             FROM mailbox_messages mi
-             WHERE mi.thread_id = t.id
-               AND mi.direction = 'incoming'
-               AND mi.received_at > m.received_at
-           )
-         ORDER BY t.priority_score DESC, t.urgency_score DESC, m.received_at ASC
-         LIMIT ?`,
-      )
-      .all(cutoff, limit * 3) as Array<
+    const rows = (await this.sql.all("createSentFollowupDrafts_1", [cutoff, limit * 3])) as Array<
       MailboxThreadRow & {
         latest_outbound_message_id: string;
         latest_outbound_subject: string | null;
@@ -3936,17 +3687,9 @@ export class MailboxService {
 
     for (const row of rows) {
       if (drafts.length >= limit) break;
-      const existingDraft = this.db
-        .prepare(
-          `SELECT id FROM mailbox_drafts WHERE thread_id = ?
-           UNION
-           SELECT id
-           FROM mailbox_compose_drafts
-           WHERE thread_id = ?
-             AND status NOT IN ('discarded', 'sent')
-           LIMIT 1`,
-        )
-        .get(row.id, row.id) as { id: string } | undefined;
+      const existingDraft = (await this.sql.get("createSentFollowupDrafts_2", [row.id, row.id])) as
+        | { id: string }
+        | undefined;
       if (existingDraft) {
         skippedExistingDraftCount += 1;
         continue;
@@ -3961,35 +3704,29 @@ export class MailboxService {
       const cc = this.normalizeRecipients(
         parseJsonArray<MailboxRecipientInput>(row.latest_outbound_cc_json),
       );
-      const thread = this.mapThreadRow(row, this.getSummaryForThread(row.id));
+      const thread = await this.mapThreadRow(row, await this.getSummaryForThread(row.id));
       const waitHours = Math.max(1, Math.floor((now - row.latest_outbound_at) / (60 * 60 * 1000)));
       const subject = this.prefixMailboxSubject(row.latest_outbound_subject || row.subject, "Re:");
       const bodyText = this.buildSentFollowupDraftBody(thread, to, waitHours);
       const reason = `No inbound reply detected ${waitHours} hours after your last sent message. Prioritized by mailbox priority and urgency.`;
       const draftId = randomUUID();
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_drafts
-            (id, thread_id, subject, body_text, tone, rationale, schedule_notes, metadata_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'concise', ?, NULL, ?, ?, ?)`,
-        )
-        .run(
-          draftId,
-          row.id,
-          subject,
-          encryptMailboxValue(bodyText),
-          reason,
-          JSON.stringify({
-            source: "sent_followup_scan",
-            latestOutboundMessageId: row.latest_outbound_message_id,
-            thresholdHours,
-            waitHours,
-            to,
-            cc,
-          }),
-          now,
-          now,
-        );
+      await this.sql.run("createSentFollowupDrafts_3", [
+        draftId,
+        row.id,
+        subject,
+        encryptMailboxValue(bodyText),
+        reason,
+        JSON.stringify({
+          source: "sent_followup_scan",
+          latestOutboundMessageId: row.latest_outbound_message_id,
+          thresholdHours,
+          waitHours,
+          to,
+          cc,
+        }),
+        now,
+        now,
+      ]);
       const draft = {
         id: draftId,
         threadId: row.id,
@@ -4007,7 +3744,7 @@ export class MailboxService {
         waitHours,
         reason,
       });
-      this.emitMailboxEvent({
+      await this.emitMailboxEvent({
         type: "draft_created",
         threadId: row.id,
         accountId: row.account_id,
@@ -4055,7 +3792,7 @@ export class MailboxService {
       return fallback;
     }
 
-    const workspaceId = this.resolveDefaultWorkspaceId() || "";
+    const workspaceId = (await this.resolveDefaultWorkspaceId()) || "";
     try {
       const provider = LLMProviderFactory.createProvider();
       const response = await provider.createMessage({
@@ -4239,16 +3976,10 @@ export class MailboxService {
       /\b(invoice|contract|receipt|pdf|docx|attachment|file|statement|extract|payment|credit|card|bill|ekstre|hesap|odeme|ödeme|kredi|kart)\b/i.test(
         query,
       );
-    const rows = this.db
-      .prepare(
-        `SELECT *
-         FROM mailbox_attachments
-         WHERE extraction_status IN ('not_indexed', 'error')
-           AND (? = 1 OR LOWER(filename) LIKE ?)
-         ORDER BY updated_at DESC
-         LIMIT 3`,
-      )
-      .all(broadAttachmentQuery ? 1 : 0, needle) as MailboxAttachmentRow[];
+    const rows = (await this.sql.all("extractCandidateAttachmentsForAsk_1", [
+      broadAttachmentQuery ? 1 : 0,
+      needle,
+    ])) as MailboxAttachmentRow[];
     for (const row of rows) {
       if (!isSupportedMailboxAttachment(row.filename, row.mime_type)) continue;
       try {
@@ -4259,82 +3990,64 @@ export class MailboxService {
     }
   }
 
-  getMailboxAttachment(attachmentId: string, includeText = false): MailboxAttachmentRecord | null {
-    const row = this.db
-      .prepare(
-        `SELECT ma.*, mat.text_content, mat.extraction_mode
-         FROM mailbox_attachments ma
-         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
-         WHERE ma.id = ?`,
-      )
-      .get(attachmentId) as MailboxAttachmentRow | undefined;
+  async getMailboxAttachment(
+    attachmentId: string,
+    includeText = false,
+  ): Promise<MailboxAttachmentRecord | null> {
+    const row = (await this.sql.get("getMailboxAttachment_1", [attachmentId])) as
+      | MailboxAttachmentRow
+      | undefined;
     if (!row) return null;
     return this.mapAttachmentRow(row, includeText);
   }
 
   async extractMailboxAttachmentText(attachmentId: string): Promise<MailboxAttachmentRecord> {
-    const row = this.db
-      .prepare(`SELECT * FROM mailbox_attachments WHERE id = ?`)
-      .get(attachmentId) as MailboxAttachmentRow | undefined;
+    const row = (await this.sql.get("extractMailboxAttachmentText_1", [attachmentId])) as
+      | MailboxAttachmentRow
+      | undefined;
     if (!row) {
       throw new Error("Attachment not found");
     }
     const now = Date.now();
     if (!isSupportedMailboxAttachment(row.filename, row.mime_type)) {
-      this.db
-        .prepare(
-          `UPDATE mailbox_attachments SET extraction_status = 'unsupported', extraction_error = NULL, updated_at = ? WHERE id = ?`,
-        )
-        .run(now, attachmentId);
-      const unsupported = this.getMailboxAttachment(attachmentId, true);
+      await this.sql.run("extractMailboxAttachmentText_2", [now, attachmentId]);
+      const unsupported = await this.getMailboxAttachment(attachmentId, true);
       if (!unsupported) throw new Error("Attachment not found");
       return unsupported;
     }
     if (row.size && row.size > MAILBOX_ATTACHMENT_TEXT_MAX_BYTES) {
-      this.db
-        .prepare(
-          `UPDATE mailbox_attachments SET extraction_status = 'error', extraction_error = ?, updated_at = ? WHERE id = ?`,
-        )
-        .run("Attachment is too large for local text extraction.", now, attachmentId);
-      const tooLarge = this.getMailboxAttachment(attachmentId, true);
+      await this.sql.run("extractMailboxAttachmentText_3", [
+        "Attachment is too large for local text extraction.",
+        now,
+        attachmentId,
+      ]);
+      const tooLarge = await this.getMailboxAttachment(attachmentId, true);
       if (!tooLarge) throw new Error("Attachment not found");
       return tooLarge;
     }
 
     try {
-      this.db
-        .prepare(
-          `UPDATE mailbox_attachments SET extraction_status = 'pending', extraction_error = NULL, updated_at = ? WHERE id = ?`,
-        )
-        .run(now, attachmentId);
+      await this.sql.run("extractMailboxAttachmentText_4", [now, attachmentId]);
       const bytes = await this.fetchMailboxAttachmentBytes(row);
       const extracted = await this.extractTextFromAttachmentBytes(row, bytes);
       const text = normalizeWhitespace(extracted.text, MAILBOX_ATTACHMENT_TEXT_MAX_CHARS);
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_attachment_text (attachment_id, text_content, extraction_mode, extracted_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(attachment_id) DO UPDATE SET
-             text_content = excluded.text_content,
-             extraction_mode = excluded.extraction_mode,
-             extracted_at = excluded.extracted_at`,
-        )
-        .run(attachmentId, encryptMailboxValue(text), extracted.mode, Date.now());
-      this.db
-        .prepare(
-          `UPDATE mailbox_attachments SET extraction_status = 'indexed', extraction_error = NULL, updated_at = ? WHERE id = ?`,
-        )
-        .run(Date.now(), attachmentId);
-      this.upsertAttachmentSearchIndex(attachmentId);
+      await this.sql.run("extractMailboxAttachmentText_5", [
+        attachmentId,
+        encryptMailboxValue(text),
+        extracted.mode,
+        Date.now(),
+      ]);
+      await this.sql.run("extractMailboxAttachmentText_6", [Date.now(), attachmentId]);
+      await this.upsertAttachmentSearchIndex(attachmentId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.db
-        .prepare(
-          `UPDATE mailbox_attachments SET extraction_status = 'error', extraction_error = ?, updated_at = ? WHERE id = ?`,
-        )
-        .run(normalizeWhitespace(message, 240), Date.now(), attachmentId);
+      await this.sql.run("extractMailboxAttachmentText_3", [
+        normalizeWhitespace(message, 240),
+        Date.now(),
+        attachmentId,
+      ]);
     }
-    const updated = this.getMailboxAttachment(attachmentId, true);
+    const updated = await this.getMailboxAttachment(attachmentId, true);
     if (!updated) throw new Error("Attachment not found");
     return updated;
   }
@@ -4415,92 +4128,47 @@ export class MailboxService {
     };
   }
 
-  private resolveDefaultWorkspaceId(): string | undefined {
-    const workspaces = this.workspaceRepo.findAll();
+  private async resolveDefaultWorkspaceId(): Promise<string | undefined> {
+    const workspaces = await this.workspaceRepo.findAll();
     const preferred = workspaces.find(
       (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
     );
     return preferred?.id || workspaces[0]?.id;
   }
 
-  private buildInboxVisibleThreadFilter(
-    threadAlias = "mailbox_threads",
-    workspaceId = this.resolveDefaultWorkspaceId(),
-  ): { sql: string; params: unknown[] } {
-    const threadRef = `${threadAlias}.id`;
-    const conditions = [
-      `${threadAlias}.local_inbox_hidden = 0`,
-      `EXISTS (
-        SELECT 1
-        FROM mailbox_messages m
-        WHERE m.thread_id = ${threadRef}
-          AND m.direction = 'incoming'
-      )`,
-    ];
-    const params: unknown[] = [];
-    if (workspaceId) {
-      conditions.push(
-        `(
-          ${threadAlias}.provider != 'agentmail'
-          OR EXISTS (
-            SELECT 1
-            FROM agentmail_inboxes ai
-            WHERE ai.workspace_id = ?
-              AND ('agentmail:' || ai.pod_id || ':' || ai.inbox_id) = ${threadAlias}.account_id
-          )
-        )`,
-      );
-      params.push(workspaceId);
-    }
-    if (workspaceId) {
-      // A thread is hidden from inbox if it belongs to at least one view with
-      // show_in_inbox=0, but does NOT also belong to any view with show_in_inbox=1.
-      conditions.push(
-        `NOT (
-          EXISTS (
-            SELECT 1
-            FROM mailbox_saved_view_threads svt
-            INNER JOIN mailbox_saved_views sv ON sv.id = svt.view_id
-            WHERE svt.thread_id = ${threadRef}
-              AND sv.workspace_id = ?
-              AND sv.show_in_inbox = 0
-          )
-          AND NOT EXISTS (
-            SELECT 1
-            FROM mailbox_saved_view_threads svt2
-            INNER JOIN mailbox_saved_views sv2 ON sv2.id = svt2.view_id
-            WHERE svt2.thread_id = ${threadRef}
-              AND sv2.workspace_id = ?
-              AND sv2.show_in_inbox != 0
-          )
-        )`,
-      );
-      params.push(workspaceId, workspaceId);
-    }
-    const obsoleteAccountIds = this.getObsoleteDuplicateMailboxAccountIds();
-    if (obsoleteAccountIds.length > 0) {
-      conditions.push(
-        `${threadAlias}.account_id NOT IN (${obsoleteAccountIds.map(() => "?").join(",")})`,
-      );
-      params.push(...obsoleteAccountIds);
-    }
-    return { sql: conditions.join(" AND "), params };
+  /**
+   * Parameters and shape of the inbox visibility filter; the SQL comes from the catalog
+   * (`inboxVisibleThreadFilterSql`), so it is identical on the host and in the worker.
+   */
+  private async buildInboxVisibleThreadFilter(
+    requestedWorkspaceId?: string,
+  ): Promise<{ shape: { withWorkspace: boolean; obsoleteAccounts: number }; params: string[] }> {
+    const workspaceId =
+      requestedWorkspaceId === undefined
+        ? await this.resolveDefaultWorkspaceId()
+        : requestedWorkspaceId;
+    const params: string[] = [];
+    if (workspaceId) params.push(workspaceId, workspaceId, workspaceId);
+    const obsoleteAccountIds = await this.getObsoleteDuplicateMailboxAccountIds();
+    params.push(...obsoleteAccountIds);
+    return {
+      shape: { withWorkspace: Boolean(workspaceId), obsoleteAccounts: obsoleteAccountIds.length },
+      params,
+    };
   }
 
   /** Drops unknown or stale thread ids (e.g. hallucinated LLM output) before persisting saved views. */
-  private filterValidMailboxThreadIds(threadIds: string[], accountId?: string): string[] {
+  private async filterValidMailboxThreadIds(
+    threadIds: string[],
+    accountId?: string,
+  ): Promise<string[]> {
     const ids = [...new Set(threadIds.map((id) => id?.trim()).filter(Boolean))] as string[];
     if (!ids.length) return [];
-    const placeholders = ids.map(() => "?").join(",");
-    const conditions = [`id IN (${placeholders})`];
-    const values: unknown[] = [...ids];
-    if (accountId) {
-      conditions.push("account_id = ?");
-      values.push(accountId);
-    }
-    const rows = this.db
-      .prepare(`SELECT id FROM mailbox_threads WHERE ${conditions.join(" AND ")}`)
-      .all(...values) as { id: string }[];
+    const rows = await this.sql.all<{ id: string }>("existingThreadIds", [
+      JSON.stringify(ids),
+      accountId || null,
+      accountId || null,
+    ]);
     const allowed = new Set(rows.map((r) => r.id));
     return ids.filter((id) => allowed.has(id));
   }
@@ -4523,29 +4191,18 @@ export class MailboxService {
     return scoreOverlap(tokenize(subject), 3) + scoreOverlap(tokenize(snippet), 1);
   }
 
-  private pruneMailboxTriageFeedback(workspaceId: string): void {
+  private async pruneMailboxTriageFeedback(workspaceId: string): Promise<void> {
     const maxAgeMs = 90 * 24 * 60 * 60 * 1000;
     const maxRows = 12_000;
     const cutoff = Date.now() - maxAgeMs;
     try {
-      this.db
-        .prepare(`DELETE FROM mailbox_triage_feedback WHERE workspace_id = ? AND created_at < ?`)
-        .run(workspaceId, cutoff);
-      const countRow = this.db
-        .prepare(`SELECT COUNT(*) AS c FROM mailbox_triage_feedback WHERE workspace_id = ?`)
-        .get(workspaceId) as { c: number };
+      await this.sql.run("pruneMailboxTriageFeedback_1", [workspaceId, cutoff]);
+      const countRow = (await this.sql.get("pruneMailboxTriageFeedback_2", [workspaceId])) as {
+        c: number;
+      };
       if (countRow.c > maxRows) {
         const excess = countRow.c - maxRows;
-        this.db
-          .prepare(
-            `DELETE FROM mailbox_triage_feedback WHERE rowid IN (
-              SELECT rowid FROM mailbox_triage_feedback
-              WHERE workspace_id = ?
-              ORDER BY created_at ASC
-              LIMIT ?
-            )`,
-          )
-          .run(workspaceId, excess);
+        await this.sql.run("pruneMailboxTriageFeedback_3", [workspaceId, excess]);
       }
     } catch {
       // best-effort retention
@@ -4560,8 +4217,10 @@ export class MailboxService {
     return parseMailboxSensitiveContent(row.sensitive_content_json);
   }
 
-  private buildMailboxEventRecord(event: MailboxEventRecordInput): MailboxEventRecordResult | null {
-    const workspaceId = event.workspaceId || this.resolveDefaultWorkspaceId();
+  private async buildMailboxEventRecord(
+    event: MailboxEventRecordInput,
+  ): Promise<MailboxEventRecordResult | null> {
+    const workspaceId = event.workspaceId || (await this.resolveDefaultWorkspaceId());
     if (!workspaceId) return null;
 
     const evidenceRefs = normalizeMailboxEvidenceRefs(event.evidenceRefs);
@@ -4576,23 +4235,13 @@ export class MailboxService {
     };
     const fingerprint = buildMailboxEventFingerprint(event.type, workspaceId, payload);
     const timestamp = event.timestamp || Date.now();
-    const existing = this.db
-      .prepare(
-        `SELECT id, duplicate_count
-         FROM mailbox_events
-         WHERE fingerprint = ?`,
-      )
-      .get(fingerprint) as { id: string; duplicate_count: number } | undefined;
+    const existing = (await this.sql.get("buildMailboxEventRecord_1", [fingerprint])) as
+      | { id: string; duplicate_count: number }
+      | undefined;
 
     if (existing) {
       const duplicateCount = (existing.duplicate_count || 0) + 1;
-      this.db
-        .prepare(
-          `UPDATE mailbox_events
-           SET duplicate_count = ?, last_seen_at = ?
-           WHERE id = ?`,
-        )
-        .run(duplicateCount, timestamp, existing.id);
+      await this.sql.run("buildMailboxEventRecord_2", [duplicateCount, timestamp, existing.id]);
       return {
         event: {
           id: existing.id,
@@ -4614,28 +4263,22 @@ export class MailboxService {
     }
 
     const id = randomUUID();
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_events
-          (id, fingerprint, workspace_id, event_type, account_id, thread_id, provider, subject, summary_text, evidence_refs_json, payload_json, duplicate_count, created_at, last_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        fingerprint,
-        workspaceId,
-        event.type,
-        event.accountId || null,
-        event.threadId || null,
-        event.provider || null,
-        event.subject || null,
-        event.summary || null,
-        evidenceRefs.length ? JSON.stringify(evidenceRefs) : null,
-        JSON.stringify(payload),
-        0,
-        timestamp,
-        timestamp,
-      );
+    await this.sql.run("buildMailboxEventRecord_3", [
+      id,
+      fingerprint,
+      workspaceId,
+      event.type,
+      event.accountId || null,
+      event.threadId || null,
+      event.provider || null,
+      event.subject || null,
+      event.summary || null,
+      evidenceRefs.length ? JSON.stringify(evidenceRefs) : null,
+      JSON.stringify(payload),
+      0,
+      timestamp,
+      timestamp,
+    ]);
 
     return {
       event: {
@@ -4657,37 +4300,29 @@ export class MailboxService {
     };
   }
 
-  private emitMailboxEvent(event: MailboxEventRecordInput): MailboxEvent | null {
-    const record = this.buildMailboxEventRecord(event);
+  private async emitMailboxEvent(event: MailboxEventRecordInput): Promise<MailboxEvent | null> {
+    const record = await this.buildMailboxEventRecord(event);
     if (!record) return null;
     if (!record.isDuplicate) {
-      MailboxAutomationHub.handleMailboxEvent(record.event);
+      await MailboxAutomationHub.handleMailboxEvent(record.event);
     }
     return record.event;
   }
 
-  private countPendingMailboxClassifications(accountIds: string[]): number {
+  private async countPendingMailboxClassifications(accountIds: string[]): Promise<number> {
     const ids = Array.from(new Set(accountIds.filter(Boolean)));
     if (ids.length === 0) return 0;
-    const placeholders = ids.map(() => "?").join(", ");
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM mailbox_threads
-         WHERE account_id IN (${placeholders})
-           AND classification_state IN ('pending', 'backfill_pending')`,
-      )
-      .get(...ids) as { count: number } | undefined;
+    const row = await this.sql.get<{ count: number }>("pendingClassificationCountForAccounts", [
+      JSON.stringify(ids),
+    ]);
     return row?.count || 0;
   }
 
-  private listMailboxAccountIds(): string[] {
-    const rows = this.db
-      .prepare(`SELECT id FROM mailbox_accounts ORDER BY updated_at DESC`)
-      .all() as Array<{
+  private async listMailboxAccountIds(): Promise<string[]> {
+    const rows = (await this.sql.all("listMailboxAccountIds_1", [])) as Array<{
       id: string;
     }>;
-    const obsoleteIds = new Set(this.getObsoleteDuplicateMailboxAccountIds());
+    const obsoleteIds = new Set(await this.getObsoleteDuplicateMailboxAccountIds());
     return rows.map((row) => row.id).filter((id) => Boolean(id) && !obsoleteIds.has(id));
   }
 
@@ -4697,7 +4332,7 @@ export class MailboxService {
   ): Promise<MailboxReclassifyResult> {
     const ids = Array.from(new Set(accountIds.filter(Boolean)));
     const cappedLimit = Math.min(Math.max(limit, 1), 200);
-    const pendingCount = this.countPendingMailboxClassifications(ids);
+    const pendingCount = await this.countPendingMailboxClassifications(ids);
     if (ids.length === 0 || pendingCount === 0) {
       return { accountId: "all", scannedThreads: 0, reclassifiedThreads: 0 };
     }
@@ -4798,7 +4433,7 @@ export class MailboxService {
         if (options.source === "auto" && this.gmailTransientSyncBackoffUntil > Date.now()) {
           const label = this.noteGmailTransientSyncBackoff();
           syncErrors.push({ message: label, transient: true });
-          accounts.push(...this.getExistingMailboxAccounts("gmail", "degraded"));
+          accounts.push(...(await this.getExistingMailboxAccounts("gmail", "degraded")));
         } else {
           try {
             const result = await this.syncGmail(limit);
@@ -4814,7 +4449,7 @@ export class MailboxService {
             if (isMailboxConnectionError(error)) {
               const label = this.noteGmailTransientSyncFailure(error);
               syncErrors.push({ message: label, transient: true });
-              accounts.push(...this.getExistingMailboxAccounts("gmail", "degraded"));
+              accounts.push(...(await this.getExistingMailboxAccounts("gmail", "degraded")));
             } else {
               syncErrors.push({
                 message: `Gmail sync failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -4866,7 +4501,7 @@ export class MailboxService {
             transient: isMailboxConnectionError(error),
           });
           if (isMailboxConnectionError(error)) {
-            accounts.push(...this.getExistingMailboxAccounts("imap", "degraded"));
+            accounts.push(...(await this.getExistingMailboxAccounts("imap", "degraded")));
           }
         }
       }
@@ -4911,7 +4546,7 @@ export class MailboxService {
         options.source === "auto"
           ? { scannedThreads: 0, reclassifiedThreads: 0 }
           : await this.classifyPendingMailboxBacklog(
-              this.listMailboxAccountIds(),
+              await this.listMailboxAccountIds(),
               MAILBOX_CLASSIFIER_MAX_BATCH,
             );
 
@@ -4934,9 +4569,9 @@ export class MailboxService {
         skippedThreads: 0,
         label: syncWarning ? `${doneLabel} · ${syncWarning}` : doneLabel,
       });
-      this.emitMailboxEvent({
+      await this.emitMailboxEvent({
         type: "sync_completed",
-        workspaceId: this.resolveDefaultWorkspaceId(),
+        workspaceId: await this.resolveDefaultWorkspaceId(),
         accountId: accounts[0]?.id,
         provider: accounts[0]?.provider,
         summary: syncWarning
@@ -4993,14 +4628,11 @@ export class MailboxService {
     };
   }
 
-  private getAgentMailBindings(): Array<{ workspace_id: string; pod_id: string }> {
-    return this.db
-      .prepare(
-        `SELECT workspace_id, pod_id
-         FROM agentmail_workspace_pods
-         ORDER BY updated_at DESC`,
-      )
-      .all() as Array<{ workspace_id: string; pod_id: string }>;
+  private async getAgentMailBindings(): Promise<Array<{ workspace_id: string; pod_id: string }>> {
+    return (await this.sql.all("getAgentMailBindings_1", [])) as Array<{
+      workspace_id: string;
+      pod_id: string;
+    }>;
   }
 
   private buildAgentMailAccount(
@@ -5039,11 +4671,11 @@ export class MailboxService {
       .map((entry) => entry.toLowerCase());
   }
 
-  private normalizeAgentMailThread(
+  private async normalizeAgentMailThread(
     _workspaceId: string,
     podId: string,
     threadPayload: unknown,
-  ): NormalizedThreadInput | null {
+  ): Promise<NormalizedThreadInput | null> {
     const thread = asObject(threadPayload);
     if (!thread) return null;
 
@@ -5054,9 +4686,9 @@ export class MailboxService {
     }
 
     const accountId = this.buildAgentMailAccountId(podId, inboxId);
-    const accountRow = this.db
-      .prepare("SELECT address FROM mailbox_accounts WHERE id = ?")
-      .get(accountId) as { address: string } | undefined;
+    const accountRow = (await this.sql.get("normalizeAgentMailThread_1", [accountId])) as
+      | { address: string }
+      | undefined;
     const accountEmail =
       normalizeEmailAddress(accountRow?.address || inboxId) || inboxId.toLowerCase();
     const threadLabels = this.normalizeAgentMailLabels(thread.labels);
@@ -5181,18 +4813,12 @@ export class MailboxService {
     threadPayload: unknown,
     options?: { classify?: boolean },
   ): Promise<{ account: MailboxAccount; syncedMessages: number; isNewThread: boolean } | null> {
-    const normalized = this.normalizeAgentMailThread(_workspaceId, podId, threadPayload);
+    const normalized = await this.normalizeAgentMailThread(_workspaceId, podId, threadPayload);
     if (!normalized) return null;
 
     const inboxParts = this.parseAgentMailAccountId(normalized.accountId);
     const inboxRow = inboxParts
-      ? (this.db
-          .prepare(
-            `SELECT email, display_name
-             FROM agentmail_inboxes
-             WHERE pod_id = ? AND inbox_id = ?`,
-          )
-          .get(inboxParts.podId, inboxParts.inboxId) as
+      ? ((await this.sql.get("ingestAgentMailThread_1", [inboxParts.podId, inboxParts.inboxId])) as
           | { email: string | null; display_name: string | null }
           | undefined)
       : undefined;
@@ -5203,8 +4829,8 @@ export class MailboxService {
       inboxRow?.email || inboxParts?.inboxId,
       inboxRow?.display_name || undefined,
     );
-    this.upsertAccount(account);
-    const upsertResult = this.upsertThread(normalized);
+    await this.upsertAccount(account);
+    const upsertResult = await this.upsertThread(normalized);
     if (upsertResult.shouldClassify && options?.classify !== false) {
       await this.classifyMailboxThreadsForAccount(account.id, {
         includeBackfill: true,
@@ -5212,9 +4838,7 @@ export class MailboxService {
       });
     }
 
-    this.db
-      .prepare("UPDATE mailbox_accounts SET last_synced_at = ?, updated_at = ? WHERE id = ?")
-      .run(Date.now(), Date.now(), account.id);
+    await this.sql.run("ingestAgentMailThread_2", [Date.now(), Date.now(), account.id]);
 
     return {
       account,
@@ -5226,12 +4850,12 @@ export class MailboxService {
   private async syncAgentMail(
     limit: number,
   ): Promise<{ accounts: MailboxAccount[]; syncedThreads: number; syncedMessages: number } | null> {
-    const bindings = this.getAgentMailBindings();
+    const bindings = await this.getAgentMailBindings();
     if (bindings.length === 0) {
       return null;
     }
 
-    const adminService = new AgentMailAdminService(this.db);
+    const adminService = new AgentMailAdminService(this.sql);
     const client = this.getAgentMailClient();
     const accountsById = new Map<string, MailboxAccount>();
     const classificationCandidates = new Set<string>();
@@ -5259,7 +4883,7 @@ export class MailboxService {
           inbox.email,
           inbox.displayName,
         );
-        this.upsertAccount(account);
+        await this.upsertAccount(account);
         accountsById.set(account.id, account);
       }
 
@@ -5316,15 +4940,15 @@ export class MailboxService {
   }
 
   async reclassifyThread(threadId: string): Promise<MailboxReclassifyResult> {
-    const thread = this.db
-      .prepare("SELECT account_id FROM mailbox_threads WHERE id = ?")
-      .get(threadId) as { account_id: string } | undefined;
+    const thread = (await this.sql.get("reclassifyThread_1", [threadId])) as
+      | { account_id: string }
+      | undefined;
     if (!thread) {
       throw new Error("Thread not found");
     }
     const updated = await this.classifyThreadById(threadId, { force: true });
     if (updated) {
-      this.recordMailboxTriageFeedback(threadId, "reclassify");
+      await this.recordMailboxTriageFeedback(threadId, "reclassify");
     }
     return {
       accountId: thread.account_id,
@@ -5355,257 +4979,126 @@ export class MailboxService {
     });
 
     if (force) {
-      this.db
-        .prepare(
-          `UPDATE mailbox_accounts
-           SET classification_initial_batch_at = COALESCE(classification_initial_batch_at, ?),
-               updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(Date.now(), Date.now(), accountId);
+      await this.sql.run("reclassifyAccount_1", [Date.now(), Date.now(), accountId]);
     }
 
     return result;
   }
 
   async listThreads(input: MailboxListThreadsInput = {}): Promise<MailboxThreadListItem[]> {
+    // Condition keys from the catalog's thread-list vocabulary, in parameter order (DB6).
     const conditions: string[] = [];
-    const values: unknown[] = [];
+    const values: Array<string | number> = [];
+    let visibleShape: { withWorkspace: boolean; obsoleteAccounts: number } | undefined;
     const queryText = input.query?.trim() || "";
 
     if (input.accountId) {
-      conditions.push("account_id = ?");
+      conditions.push("account");
       values.push(input.accountId);
     }
     if (input.category && input.category !== "all") {
-      conditions.push("category = ?");
+      conditions.push("category");
       values.push(input.category);
     }
     if (input.todayBucket && input.todayBucket !== "all") {
-      conditions.push("today_bucket = ?");
+      conditions.push("todayBucket");
       values.push(input.todayBucket);
     }
     if (input.domainCategory && input.domainCategory !== "all") {
-      conditions.push("domain_category = ?");
+      conditions.push("domainCategory");
       values.push(input.domainCategory);
     }
     if (input.folderId) {
-      conditions.push(`(labels_json LIKE ? OR metadata_json LIKE ?)`);
+      conditions.push("folder");
       values.push(`%"${input.folderId}"%`, `%"folderId":"${input.folderId}"%`);
     }
     if (input.labelId) {
-      conditions.push(`(labels_json LIKE ? OR metadata_json LIKE ?)`);
+      conditions.push("label");
       values.push(`%"${input.labelId}"%`, `%"labelId":"${input.labelId}"%`);
     }
-    if (input.scheduledOnly) {
-      conditions.push(
-        `EXISTS (
-          SELECT 1 FROM mailbox_compose_drafts mcd
-          WHERE mcd.thread_id = mailbox_threads.id
-            AND mcd.status = 'scheduled'
-        )`,
-      );
-    }
-    if (input.draftOnly) {
-      conditions.push(
-        `EXISTS (
-          SELECT 1 FROM mailbox_compose_drafts mcd
-          WHERE mcd.thread_id = mailbox_threads.id
-            AND mcd.status NOT IN ('discarded', 'sent')
-        )`,
-      );
-    }
-    if (input.queuedOnly) {
-      conditions.push(
-        `EXISTS (
-          SELECT 1 FROM mailbox_queued_actions mqa
-          WHERE mqa.thread_id = mailbox_threads.id
-            AND mqa.status IN ('queued', 'running', 'failed')
-        )`,
-      );
-    }
+    if (input.scheduledOnly) conditions.push("scheduledOnly");
+    if (input.draftOnly) conditions.push("draftOnly");
+    if (input.queuedOnly) conditions.push("queuedOnly");
     const mailboxView: MailboxThreadMailboxView = input.mailboxView || "inbox";
     if (mailboxView === "inbox") {
-      const inboxVisibleFilter = this.buildInboxVisibleThreadFilter();
-      conditions.push(inboxVisibleFilter.sql);
+      const inboxVisibleFilter = await this.buildInboxVisibleThreadFilter();
+      conditions.push("inboxVisible");
       values.push(...inboxVisibleFilter.params);
+      visibleShape = inboxVisibleFilter.shape;
     } else if (mailboxView === "sent") {
-      conditions.push(
-        `NOT EXISTS (
-          SELECT 1
-          FROM mailbox_messages m
-          WHERE m.thread_id = mailbox_threads.id
-            AND m.direction = 'incoming'
-        )`,
-      );
+      conditions.push("sentOnly");
     }
     if (typeof input.unreadOnly === "boolean") {
-      conditions.push(input.unreadOnly ? "unread_count > 0" : "unread_count = 0");
+      conditions.push(input.unreadOnly ? "unread" : "read");
     }
     if (typeof input.needsReply === "boolean") {
-      conditions.push("needs_reply = ?");
+      conditions.push("needsReply");
       values.push(input.needsReply ? 1 : 0);
     }
     if (typeof input.hasSuggestedProposal === "boolean") {
-      conditions.push(
-        input.hasSuggestedProposal
-          ? `EXISTS (
-              SELECT 1
-              FROM mailbox_action_proposals map
-              WHERE map.thread_id = mailbox_threads.id
-                AND map.status = 'suggested'
-            )`
-          : `NOT EXISTS (
-              SELECT 1
-              FROM mailbox_action_proposals map
-              WHERE map.thread_id = mailbox_threads.id
-                AND map.status = 'suggested'
-            )`,
-      );
+      conditions.push(input.hasSuggestedProposal ? "hasSuggestedProposal" : "noSuggestedProposal");
     }
     if (typeof input.hasOpenCommitment === "boolean") {
-      conditions.push(
-        input.hasOpenCommitment
-          ? `EXISTS (
-              SELECT 1
-              FROM mailbox_commitments mc
-              WHERE mc.thread_id = mailbox_threads.id
-                AND mc.state IN ('suggested', 'accepted')
-            )`
-          : `NOT EXISTS (
-              SELECT 1
-              FROM mailbox_commitments mc
-              WHERE mc.thread_id = mailbox_threads.id
-                AND mc.state IN ('suggested', 'accepted')
-            )`,
-      );
+      conditions.push(input.hasOpenCommitment ? "hasOpenCommitment" : "noOpenCommitment");
     }
     if (typeof input.cleanupCandidate === "boolean") {
-      conditions.push("cleanup_candidate = ?");
+      conditions.push("cleanupCandidate");
       values.push(input.cleanupCandidate ? 1 : 0);
     }
     if (typeof input.hasAttachment === "boolean") {
-      conditions.push(
-        input.hasAttachment
-          ? `EXISTS (SELECT 1 FROM mailbox_attachments ma WHERE ma.thread_id = mailbox_threads.id)`
-          : `NOT EXISTS (SELECT 1 FROM mailbox_attachments ma WHERE ma.thread_id = mailbox_threads.id)`,
-      );
+      conditions.push(input.hasAttachment ? "hasAttachment" : "noAttachment");
     }
     const attachmentQuery = input.attachmentQuery?.trim();
-    if (attachmentQuery) {
-      conditions.push(
-        `EXISTS (SELECT 1 FROM mailbox_attachments ma WHERE ma.thread_id = mailbox_threads.id)`,
-      );
-    }
+    if (attachmentQuery) conditions.push("hasAttachment");
     const savedViewId = input.savedViewId?.trim();
     if (savedViewId) {
-      conditions.push(
-        `EXISTS (
-          SELECT 1 FROM mailbox_saved_view_threads svt
-          WHERE svt.view_id = ? AND svt.thread_id = mailbox_threads.id
-        )`,
-      );
+      conditions.push("savedView");
       values.push(savedViewId);
     }
 
     const limit = Math.min(Math.max(input.limit ?? 40, 1), 100);
     const sortBy: MailboxThreadSortOrder = input.sortBy === "recent" ? "recent" : "priority";
-    const orderBy =
-      sortBy === "recent"
-        ? "last_message_at DESC, priority_score DESC, urgency_score DESC"
-        : "priority_score DESC, urgency_score DESC, last_message_at DESC";
     const hasPostFilters = Boolean(queryText || attachmentQuery);
-    const limitClause = hasPostFilters ? "" : " LIMIT ?";
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           account_id,
-           provider,
-           provider_thread_id,
-           subject,
-           snippet,
-           participants_json,
-           labels_json,
-           category,
-           today_bucket,
-           domain_category,
-           classification_rationale,
-           priority_score,
-           urgency_score,
-           needs_reply,
-           stale_followup,
-           cleanup_candidate,
-           handled,
-           local_inbox_hidden,
-           unread_count,
-           message_count,
-           last_message_at,
-           sensitive_content_json,
-           classification_state
-         FROM mailbox_threads
-         ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
-         ORDER BY ${orderBy}${limitClause}`,
-      )
-      .all(...(hasPostFilters ? values : [...values, limit])) as MailboxThreadRow[];
+    const rows = await this.sql.all<MailboxThreadRow>(
+      "listThreads",
+      hasPostFilters ? values : [...values, limit],
+      {
+        conditions: conditions.join(","),
+        sortBy,
+        limit: !hasPostFilters,
+        ...(visibleShape ?? { withWorkspace: false, obsoleteAccounts: 0 }),
+      },
+    );
 
-    const filteredRows = rows.filter((row) => {
-      if (queryText && !this.threadMatchesQuery(row, queryText)) return false;
-      if (attachmentQuery && !this.threadMatchesAttachmentQuery(row.id, attachmentQuery))
-        return false;
-      return true;
-    });
+    const filteredRows: MailboxThreadRow[] = [];
+    for (const row of rows) {
+      if (filteredRows.length >= limit) break;
+      if (queryText && !(await this.threadMatchesQuery(row, queryText))) continue;
+      if (attachmentQuery && !(await this.threadMatchesAttachmentQuery(row.id, attachmentQuery))) {
+        continue;
+      }
+      filteredRows.push(row);
+    }
 
-    return filteredRows
-      .slice(0, limit)
-      .map((row) => this.mapThreadRow(row, this.getSummaryForThread(row.id) ?? undefined));
+    return this.mapThreadRowsWithSummaries(filteredRows);
   }
 
   async getThread(threadId: string): Promise<MailboxThreadDetail | null> {
-    const row = this.db
-      .prepare(
-        `SELECT
-           id,
-           account_id,
-           provider,
-           provider_thread_id,
-           subject,
-           snippet,
-           participants_json,
-           labels_json,
-           category,
-           today_bucket,
-           domain_category,
-           classification_rationale,
-           priority_score,
-           urgency_score,
-           needs_reply,
-           stale_followup,
-           cleanup_candidate,
-           handled,
-           local_inbox_hidden,
-           unread_count,
-           message_count,
-           last_message_at,
-           sensitive_content_json,
-           classification_state
-         FROM mailbox_threads
-         WHERE id = ?`,
-      )
-      .get(threadId) as MailboxThreadRow | undefined;
+    const row = (await this.sql.get("getThread_1", [threadId])) as MailboxThreadRow | undefined;
     if (!row) return null;
 
-    const summary = this.getSummaryForThread(threadId) ?? (await this.summarizeThread(threadId));
-    const messages = this.getMessagesForThread(threadId);
-    const drafts = this.getDraftsForThread(threadId);
-    const proposals = this.getProposalsForThread(threadId);
-    const commitments = this.getCommitmentsForThread(threadId);
-    const contactMemory = this.getPrimaryContactMemory(threadId);
+    const summary =
+      (await this.getSummaryForThread(threadId)) ?? (await this.summarizeThread(threadId));
+    const messages = await this.getMessagesForThread(threadId);
+    const drafts = await this.getDraftsForThread(threadId);
+    const proposals = await this.getProposalsForThread(threadId);
+    const commitments = await this.getCommitmentsForThread(threadId);
+    const contactMemory = await this.getPrimaryContactMemory(threadId);
     const research = await this.researchContact(threadId);
     const sensitiveContent = this.readThreadSensitiveContent(row);
 
     return {
-      ...this.mapThreadRow(row, summary || undefined),
+      ...(await this.mapThreadRow(row, summary || undefined)),
       messages,
       drafts,
       proposals,
@@ -5655,29 +5148,17 @@ export class MailboxService {
     const updatedAt = Date.now();
     const primaryContact = detail.participants[0];
 
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_summaries
-          (thread_id, summary_text, key_asks_json, extracted_questions_json, suggested_next_action, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(thread_id) DO UPDATE SET
-           summary_text = excluded.summary_text,
-           key_asks_json = excluded.key_asks_json,
-           extracted_questions_json = excluded.extracted_questions_json,
-           suggested_next_action = excluded.suggested_next_action,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        threadId,
-        encryptMailboxValue(normalizeWhitespace(summaryText, 340)),
-        JSON.stringify(asks),
-        JSON.stringify(questions),
-        nextAction,
-        updatedAt,
-      );
+    await this.sql.run("summarizeThread_1", [
+      threadId,
+      encryptMailboxValue(normalizeWhitespace(summaryText, 340)),
+      JSON.stringify(asks),
+      JSON.stringify(questions),
+      nextAction,
+      updatedAt,
+    ]);
 
-    this.refreshThreadProposals(detail);
-    this.emitMailboxEvent({
+    await this.refreshThreadProposals(detail);
+    await this.emitMailboxEvent({
       type: "thread_summarized",
       threadId,
       accountId: detail.accountId,
@@ -5719,13 +5200,14 @@ export class MailboxService {
       );
     }
 
-    const summary = this.getSummaryForThread(threadId) || (await this.summarizeThread(threadId));
+    const summary =
+      (await this.getSummaryForThread(threadId)) || (await this.summarizeThread(threadId));
     const scheduleSuggestion =
       options.includeAvailability !== false && detail.category === "calendar"
         ? await this.getScheduleSuggestion()
         : null;
     const resolution = await this.resolveContactIdentity(threadId);
-    const scopedCompanyId = this.getPrimaryContactMemory(threadId)?.company;
+    const scopedCompanyId = (await this.getPrimaryContactMemory(threadId))?.company;
     const relationshipContext = RelationshipMemoryService.buildPromptContext({
       maxPerLayer: 1,
       maxChars: 420,
@@ -5744,24 +5226,16 @@ export class MailboxService {
     const primaryContact = detail.participants[0];
     const styleProfile = this.buildDraftStyleProfile({
       outgoingMessages: contactEmail
-        ? this.db
-            .prepare(
-              `SELECT m.body_text
-               FROM mailbox_messages m
-               JOIN mailbox_threads t ON t.id = m.thread_id
-               WHERE t.account_id = ? AND t.participants_json LIKE ? AND m.direction = 'outgoing'
-               ORDER BY m.received_at ASC`,
-            )
-            .all(detail.accountId, `%${contactEmail}%`)
-            .map((row) =>
+        ? (await this.sql.all("generateDraft_1", [detail.accountId, `%${contactEmail}%`])).map(
+            (row) =>
               normalizeWhitespace(
                 decryptMailboxValue((row as { body_text: string }).body_text) || "",
                 600,
               ),
-            )
+          )
         : [],
       averageResponseHours: contactEmail
-        ? this.getPrimaryContactMemory(threadId)?.averageResponseHours
+        ? (await this.getPrimaryContactMemory(threadId))?.averageResponseHours
         : undefined,
     });
     const greetingPrefix = styleProfile.greeting?.match(/^(Hi|Hello|Hey)\b/i)?.[1] || "Hi";
@@ -5833,29 +5307,23 @@ export class MailboxService {
       `Drafted from latest thread context and mailbox memory${styleProfile.styleSignals.length ? ` (${styleProfile.styleSignals.join("; ")})` : ""}.`;
     const scheduleNotes = scheduleSuggestion?.summary;
 
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_drafts
-          (id, thread_id, subject, body_text, tone, rationale, schedule_notes, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        draftId,
-        threadId,
-        detail.subject.startsWith("Re:") ? detail.subject : `Re: ${detail.subject}`,
-        encryptMailboxValue(body),
-        tone,
-        rationale,
-        scheduleNotes || null,
-        JSON.stringify({
-          source: "mailbox-draft-engine",
-          includeAvailability: Boolean(scheduleSuggestion),
-        }),
-        now,
-        now,
-      );
+    await this.sql.run("generateDraft_2", [
+      draftId,
+      threadId,
+      detail.subject.startsWith("Re:") ? detail.subject : `Re: ${detail.subject}`,
+      encryptMailboxValue(body),
+      tone,
+      rationale,
+      scheduleNotes || null,
+      JSON.stringify({
+        source: "mailbox-draft-engine",
+        includeAvailability: Boolean(scheduleSuggestion),
+      }),
+      now,
+      now,
+    ]);
 
-    this.upsertProposal({
+    await this.upsertProposal({
       threadId,
       type: "reply",
       title: "Review reply draft",
@@ -5865,7 +5333,7 @@ export class MailboxService {
         subject: detail.subject.startsWith("Re:") ? detail.subject : `Re: ${detail.subject}`,
       },
     });
-    this.emitMailboxEvent({
+    await this.emitMailboxEvent({
       type: "draft_created",
       threadId,
       accountId: detail.accountId,
@@ -5917,36 +5385,30 @@ export class MailboxService {
     }
 
     const existingTitles = new Set(
-      this.getCommitmentsForThread(threadId).map((item) => item.title.toLowerCase()),
+      (await this.getCommitmentsForThread(threadId)).map((item) => item.title.toLowerCase()),
     );
     const created: MailboxCommitment[] = [];
     const now = Date.now();
     const primaryContact = detail.participants[0];
     const resolution = await this.resolveContactIdentity(threadId);
-    const companyScope = this.getPrimaryContactMemory(threadId)?.company;
+    const companyScope = (await this.getPrimaryContactMemory(threadId))?.company;
 
     for (const candidate of candidates.slice(0, 6)) {
       if (existingTitles.has(candidate.title.toLowerCase())) continue;
       const id = randomUUID();
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_commitments
-            (id, thread_id, message_id, title, due_at, state, owner_email, source_excerpt, metadata_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          id,
-          threadId,
-          null,
-          candidate.title,
-          candidate.dueAt || null,
-          "suggested",
-          detail.participants[0]?.email || null,
-          encryptMailboxValue(candidate.sourceExcerpt || null),
-          JSON.stringify({ source: "mailbox-extraction" }),
-          now,
-          now,
-        );
+      await this.sql.run("extractCommitments_1", [
+        id,
+        threadId,
+        null,
+        candidate.title,
+        candidate.dueAt || null,
+        "suggested",
+        detail.participants[0]?.email || null,
+        encryptMailboxValue(candidate.sourceExcerpt || null),
+        JSON.stringify({ source: "mailbox-extraction" }),
+        now,
+        now,
+      ]);
       RelationshipMemoryService.rememberMailboxInsights({
         commitments: [
           {
@@ -5970,9 +5432,9 @@ export class MailboxService {
       });
     }
 
-    this.updateContactOpenCommitments(threadId);
+    await this.updateContactOpenCommitments(threadId);
     if (created.length > 0) {
-      this.emitMailboxEvent({
+      await this.emitMailboxEvent({
         type: "commitments_extracted",
         threadId,
         accountId: detail.accountId,
@@ -5999,32 +5461,20 @@ export class MailboxService {
     state: MailboxCommitmentState,
   ): Promise<MailboxCommitment | null> {
     const now = Date.now();
-    const result = this.db.transaction(() => {
-      const row = this.db
-        .prepare(
-          `SELECT
-             id,
-             thread_id,
-             message_id,
-             title,
-             due_at,
-             state,
-             owner_email,
-             source_excerpt,
-             metadata_json,
-             created_at,
-             updated_at
-           FROM mailbox_commitments
-           WHERE id = ?`,
-        )
-        .get(commitmentId) as MailboxCommitmentRow | undefined;
+    // DB6: no host transaction here. It used to span keychain-backed relationship
+    // memory and task creation; the commitment row now commits on its own (in the
+    // worker when routed), and the follow-up task is ensured idempotently from it.
+    const result = await (async (): Promise<MailboxCommitment | null> => {
+      const row = (await this.sql.get("updateCommitmentState_1", [commitmentId])) as
+        | MailboxCommitmentRow
+        | undefined;
       if (!row) return null;
 
       const metadata = parseCommitmentMetadata(row.metadata_json);
       let nextMetadata: MailboxCommitmentMetadata = { ...metadata };
 
       if (state === "accepted") {
-        const followUpTask = this.ensureFollowUpTaskForCommitment(row, metadata);
+        const followUpTask = await this.ensureFollowUpTaskForCommitment(row, metadata);
         if (followUpTask) {
           nextMetadata = {
             ...nextMetadata,
@@ -6034,7 +5484,7 @@ export class MailboxService {
               nextMetadata.followUpTaskWorkspaceId ?? followUpTask.workspaceId,
           };
           if (row.due_at != null) {
-            this.taskRepo.update(followUpTask.id, {
+            await this.taskRepo.update(followUpTask.id, {
               dueDate: row.due_at,
             });
           }
@@ -6045,20 +5495,19 @@ export class MailboxService {
         const followUpTaskId = metadata.followUpTaskId;
         if (followUpTaskId) {
           const status = state === "done" ? "completed" : "cancelled";
-          this.taskRepo.update(followUpTaskId, {
+          await this.taskRepo.update(followUpTaskId, {
             status,
             completedAt: state === "done" ? now : undefined,
           });
         }
       }
 
-      this.db
-        .prepare(
-          `UPDATE mailbox_commitments
-           SET state = ?, metadata_json = ?, updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(state, JSON.stringify(nextMetadata), now, commitmentId);
+      await this.sql.run("updateCommitmentState_2", [
+        state,
+        JSON.stringify(nextMetadata),
+        now,
+        commitmentId,
+      ]);
 
       if (state === "done") {
         const text = row.title;
@@ -6073,35 +5522,20 @@ export class MailboxService {
         }
       }
 
-      const updatedRow = this.db
-        .prepare(
-          `SELECT
-             id,
-             thread_id,
-             message_id,
-             title,
-             due_at,
-             state,
-             owner_email,
-             source_excerpt,
-             metadata_json,
-             created_at,
-             updated_at
-           FROM mailbox_commitments
-           WHERE id = ?`,
-        )
-        .get(commitmentId) as MailboxCommitmentRow | undefined;
+      const updatedRow = (await this.sql.get("updateCommitmentState_1", [commitmentId])) as
+        | MailboxCommitmentRow
+        | undefined;
       if (!updatedRow) return null;
 
-      this.updateContactOpenCommitments(updatedRow.thread_id);
+      await this.updateContactOpenCommitments(updatedRow.thread_id);
       return this.mapCommitmentRow(updatedRow);
     })();
 
     if (result) {
-      const accountRow = this.db
-        .prepare("SELECT account_id FROM mailbox_threads WHERE id = ?")
-        .get(result.threadId) as { account_id: string } | undefined;
-      this.emitMailboxEvent({
+      const accountRow = (await this.sql.get("reclassifyThread_1", [result.threadId])) as
+        | { account_id: string }
+        | undefined;
+      await this.emitMailboxEvent({
         type: "commitment_updated",
         threadId: result.threadId,
         accountId: accountRow?.account_id,
@@ -6131,24 +5565,9 @@ export class MailboxService {
     },
   ): Promise<MailboxCommitment | null> {
     const now = Date.now();
-    const row = this.db
-      .prepare(
-        `SELECT
-           id,
-           thread_id,
-           message_id,
-           title,
-           due_at,
-           state,
-           owner_email,
-           source_excerpt,
-           metadata_json,
-           created_at,
-           updated_at
-         FROM mailbox_commitments
-         WHERE id = ?`,
-      )
-      .get(commitmentId) as MailboxCommitmentRow | undefined;
+    const row = (await this.sql.get("updateCommitmentDetails_1", [commitmentId])) as
+      | MailboxCommitmentRow
+      | undefined;
     if (!row) {
       throw new Error("Commitment not found");
     }
@@ -6165,7 +5584,7 @@ export class MailboxService {
     const metadata = parseCommitmentMetadata(row.metadata_json);
 
     if (nextState === "accepted") {
-      const followUpTask = this.ensureFollowUpTaskForCommitment(
+      const followUpTask = await this.ensureFollowUpTaskForCommitment(
         {
           ...row,
           due_at: nextDueAt || null,
@@ -6176,51 +5595,30 @@ export class MailboxService {
         metadata,
       );
       if (followUpTask && nextDueAt != null) {
-        this.taskRepo.update(followUpTask.id, {
+        await this.taskRepo.update(followUpTask.id, {
           dueDate: nextDueAt,
         });
       }
     }
 
-    this.db
-      .prepare(
-        `UPDATE mailbox_commitments
-         SET title = ?, due_at = ?, state = ?, owner_email = ?, source_excerpt = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        nextTitle,
-        nextDueAt || null,
-        nextState,
-        nextOwnerEmail || null,
-        nextSourceExcerpt || null,
-        now,
-        commitmentId,
-      );
+    await this.sql.run("updateCommitmentDetails_2", [
+      nextTitle,
+      nextDueAt || null,
+      nextState,
+      nextOwnerEmail || null,
+      nextSourceExcerpt || null,
+      now,
+      commitmentId,
+    ]);
 
-    const updated = this.db
-      .prepare(
-        `SELECT
-           id,
-           thread_id,
-           message_id,
-           title,
-           due_at,
-           state,
-           owner_email,
-           source_excerpt,
-           metadata_json,
-           created_at,
-           updated_at
-         FROM mailbox_commitments
-         WHERE id = ?`,
-      )
-      .get(commitmentId) as MailboxCommitmentRow | undefined;
+    const updated = (await this.sql.get("updateCommitmentDetails_1", [commitmentId])) as
+      | MailboxCommitmentRow
+      | undefined;
     if (!updated) return null;
 
-    this.updateContactOpenCommitments(updated.thread_id);
+    await this.updateContactOpenCommitments(updated.thread_id);
     const mapped = this.mapCommitmentRow(updated);
-    this.emitMailboxEvent({
+    await this.emitMailboxEvent({
       type: "commitment_updated",
       threadId: updated.thread_id,
       subject: mapped.title,
@@ -6238,43 +5636,12 @@ export class MailboxService {
   }
 
   async proposeCleanup(limit = 20): Promise<MailboxActionProposal[]> {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           account_id,
-           provider,
-           provider_thread_id,
-           subject,
-           snippet,
-           participants_json,
-           labels_json,
-           category,
-           today_bucket,
-           domain_category,
-           classification_rationale,
-           priority_score,
-           urgency_score,
-           needs_reply,
-           stale_followup,
-           cleanup_candidate,
-           handled,
-           local_inbox_hidden,
-           unread_count,
-           message_count,
-           last_message_at,
-           sensitive_content_json,
-           classification_state
-         FROM mailbox_threads
-         WHERE local_inbox_hidden = 0
-           AND (cleanup_candidate = 1 OR (handled = 1 AND category IN ('promotions', 'updates')))
-         ORDER BY last_message_at ASC
-         LIMIT ?`,
-      )
-      .all(Math.min(Math.max(limit, 1), 100)) as MailboxThreadRow[];
+    const rows = (await this.sql.all("proposeCleanup_1", [
+      Math.min(Math.max(limit, 1), 100),
+    ])) as MailboxThreadRow[];
 
     for (const row of rows) {
-      this.upsertProposal({
+      await this.upsertProposal({
         threadId: row.id,
         type: "cleanup",
         title: `Queue cleanup for ${row.subject}`,
@@ -6287,50 +5654,22 @@ export class MailboxService {
       });
     }
 
-    return rows.flatMap((row) =>
-      this.getProposalsForThread(row.id).filter((proposal) => proposal.type === "cleanup"),
-    );
+    const proposals: MailboxActionProposal[] = [];
+    for (const row of rows) {
+      for (const proposal of await this.getProposalsForThread(row.id)) {
+        if (proposal.type === "cleanup") proposals.push(proposal);
+      }
+    }
+    return proposals;
   }
 
   async proposeFollowups(limit = 20): Promise<MailboxActionProposal[]> {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           account_id,
-           provider,
-           provider_thread_id,
-           subject,
-           snippet,
-           participants_json,
-           labels_json,
-           category,
-           today_bucket,
-           domain_category,
-           classification_rationale,
-           priority_score,
-           urgency_score,
-           needs_reply,
-           stale_followup,
-           cleanup_candidate,
-           handled,
-           local_inbox_hidden,
-           unread_count,
-           message_count,
-           last_message_at,
-           sensitive_content_json,
-           classification_state
-         FROM mailbox_threads
-         WHERE local_inbox_hidden = 0
-           AND needs_reply = 1
-           AND stale_followup = 1
-         ORDER BY urgency_score DESC, last_message_at ASC
-         LIMIT ?`,
-      )
-      .all(Math.min(Math.max(limit, 1), 100)) as MailboxThreadRow[];
+    const rows = (await this.sql.all("proposeFollowups_1", [
+      Math.min(Math.max(limit, 1), 100),
+    ])) as MailboxThreadRow[];
 
     for (const row of rows) {
-      this.upsertProposal({
+      await this.upsertProposal({
         threadId: row.id,
         type: "follow_up",
         title: `Follow up on ${row.subject}`,
@@ -6342,9 +5681,13 @@ export class MailboxService {
       });
     }
 
-    return rows.flatMap((row) =>
-      this.getProposalsForThread(row.id).filter((proposal) => proposal.type === "follow_up"),
-    );
+    const proposals: MailboxActionProposal[] = [];
+    for (const row of rows) {
+      for (const proposal of await this.getProposalsForThread(row.id)) {
+        if (proposal.type === "follow_up") proposals.push(proposal);
+      }
+    }
+    return proposals;
   }
 
   async reviewBulkAction(input: MailboxBulkReviewInput): Promise<MailboxBulkReviewResult> {
@@ -6366,7 +5709,7 @@ export class MailboxService {
       throw new Error("Mailbox thread not found");
     }
     const suggestion = await this.getScheduleSuggestion();
-    this.upsertProposal({
+    await this.upsertProposal({
       threadId,
       type: "schedule",
       title: "Review suggested meeting slots",
@@ -6388,8 +5731,8 @@ export class MailboxService {
     if (!detail) return null;
 
     const primary = detail.participants[0] || null;
-    const workspaceId = this.resolveThreadWorkspaceId(detail.accountId);
-    const contactMemory = this.getPrimaryContactMemory(threadId);
+    const workspaceId = await this.resolveThreadWorkspaceId(detail.accountId);
+    const contactMemory = await this.getPrimaryContactMemory(threadId);
     if (!primary?.email || !workspaceId) {
       return {
         identity: null,
@@ -6417,47 +5760,47 @@ export class MailboxService {
     });
   }
 
-  getContactIdentity(identityId: string): ContactIdentity | null {
+  async getContactIdentity(identityId: string): Promise<ContactIdentity | null> {
     return this.contactIdentityService.getIdentity(identityId);
   }
 
-  listContactIdentities(workspaceId?: string): ContactIdentity[] {
+  async listContactIdentities(workspaceId?: string): Promise<ContactIdentity[]> {
     return this.contactIdentityService.listIdentities(
-      workspaceId || this.resolveDefaultWorkspaceId(),
+      workspaceId || (await this.resolveDefaultWorkspaceId()),
     );
   }
 
-  listIdentityCandidates(
+  async listIdentityCandidates(
     workspaceId?: string,
     status?: ContactIdentityCandidate["status"],
-  ): ContactIdentityCandidate[] {
+  ): Promise<ContactIdentityCandidate[]> {
     return this.contactIdentityService.listCandidates(
-      workspaceId || this.resolveDefaultWorkspaceId(),
+      workspaceId || (await this.resolveDefaultWorkspaceId()),
       status,
     );
   }
 
-  confirmIdentityLink(candidateId: string): ContactIdentityCandidate | null {
+  async confirmIdentityLink(candidateId: string): Promise<ContactIdentityCandidate | null> {
     return this.contactIdentityService.confirmCandidate(candidateId);
   }
 
-  rejectIdentityLink(candidateId: string): ContactIdentityCandidate | null {
+  async rejectIdentityLink(candidateId: string): Promise<ContactIdentityCandidate | null> {
     return this.contactIdentityService.rejectCandidate(candidateId);
   }
 
-  unlinkIdentityHandle(handleId: string): boolean {
+  async unlinkIdentityHandle(handleId: string): Promise<boolean> {
     return this.contactIdentityService.unlinkHandle(handleId);
   }
 
-  searchIdentityLinkTargets(
+  async searchIdentityLinkTargets(
     workspaceId: string,
     query: string,
     limit?: number,
-  ): ContactIdentitySearchResult[] {
+  ): Promise<ContactIdentitySearchResult[]> {
     return this.contactIdentityService.searchLinkTargets(workspaceId, query, limit);
   }
 
-  linkIdentityHandle(input: {
+  async linkIdentityHandle(input: {
     workspaceId: string;
     contactIdentityId: string;
     handleType: ContactIdentityHandleType;
@@ -6467,25 +5810,25 @@ export class MailboxService {
     channelId?: string;
     channelType?: string;
     channelUserId?: string;
-  }): ContactIdentity | null {
-    const handle = this.contactIdentityService.linkManualHandle(input);
-    return handle ? this.contactIdentityService.getIdentity(input.contactIdentityId) : null;
+  }): Promise<ContactIdentity | null> {
+    const handle = await this.contactIdentityService.linkManualHandle(input);
+    return handle ? await this.contactIdentityService.getIdentity(input.contactIdentityId) : null;
   }
 
-  getIdentityCoverageStats(workspaceId?: string): ContactIdentityCoverageStats {
+  async getIdentityCoverageStats(workspaceId?: string): Promise<ContactIdentityCoverageStats> {
     return this.contactIdentityService.getCoverageStats(
-      workspaceId || this.resolveDefaultWorkspaceId(),
+      workspaceId || (await this.resolveDefaultWorkspaceId()),
     );
   }
 
-  getChannelPreferenceSummary(contactIdentityId: string): ChannelPreferenceSummary {
+  async getChannelPreferenceSummary(contactIdentityId: string): Promise<ChannelPreferenceSummary> {
     return this.contactIdentityService.getChannelPreferenceSummary(contactIdentityId);
   }
 
   async getReplyTargets(threadId: string): Promise<ContactIdentityReplyTarget[]> {
     const contactResolution = await this.resolveContactIdentity(threadId);
     return contactResolution?.identity?.id
-      ? this.contactIdentityService.getReplyTargets(contactResolution.identity.id)
+      ? await this.contactIdentityService.getReplyTargets(contactResolution.identity.id)
       : [];
   }
 
@@ -6504,9 +5847,12 @@ export class MailboxService {
       });
     }
     if (query.companyHint) {
-      const workspaceId = this.resolveDefaultWorkspaceId();
+      const workspaceId = await this.resolveDefaultWorkspaceId();
       const match = workspaceId
-        ? this.contactIdentityService.findIdentityByCompanyHint(workspaceId, query.companyHint)
+        ? await this.contactIdentityService.findIdentityByCompanyHint(
+            workspaceId,
+            query.companyHint,
+          )
         : null;
       if (match?.id) {
         return this.contactIdentityService.getTimeline({
@@ -6526,20 +5872,20 @@ export class MailboxService {
     const primary = detail.participants[0] || null;
     const domain = primary?.email?.split("@")[1];
     const company = companyFromEmail(primary?.email);
-    const contactMemory = this.getPrimaryContactMemory(threadId);
+    const contactMemory = await this.getPrimaryContactMemory(threadId);
     const resolution = await this.resolveContactIdentity(threadId);
     const identity = resolution?.identity || null;
     const channelPreference =
       identity?.id &&
       (identity.handles.some((handle) => handle.handleType !== "email") ||
         (resolution?.confidence || 0) >= 0.86)
-        ? this.contactIdentityService.getChannelPreferenceSummary(identity.id)
+        ? await this.contactIdentityService.getChannelPreferenceSummary(identity.id)
         : undefined;
     const unifiedTimeline =
       identity?.id &&
       (identity.handles.some((handle) => handle.handleType !== "email") ||
         (resolution?.confidence || 0) >= 0.86)
-        ? this.contactIdentityService.getTimeline({
+        ? await this.contactIdentityService.getTimeline({
             threadId,
             contactIdentityId: identity.id,
             limit: 12,
@@ -6604,9 +5950,11 @@ export class MailboxService {
       channelPreference,
       unifiedTimeline,
       identityCandidates: (resolution?.candidates || []).slice(0, 6),
-      replyTargets: identity?.id ? this.contactIdentityService.getReplyTargets(identity.id) : [],
+      replyTargets: identity?.id
+        ? await this.contactIdentityService.getReplyTargets(identity.id)
+        : [],
     };
-    this.emitMailboxEvent({
+    await this.emitMailboxEvent({
       type: "contact_researched",
       threadId,
       accountId: detail.accountId,
@@ -6634,15 +5982,15 @@ export class MailboxService {
     input: MailboxApplyActionInput,
   ): Promise<{ success: boolean; action: string; threadId?: string }> {
     if (input.type === "dismiss_proposal" && input.proposalId) {
-      this.updateProposalStatus(input.proposalId, "dismissed");
-      const dismissThreadId = input.threadId || this.threadIdFromProposal(input.proposalId);
+      await this.updateProposalStatus(input.proposalId, "dismissed");
+      const dismissThreadId = input.threadId || (await this.threadIdFromProposal(input.proposalId));
       if (dismissThreadId) {
-        this.recordMailboxTriageFeedback(dismissThreadId, "dismiss_proposal");
+        await this.recordMailboxTriageFeedback(dismissThreadId, "dismiss_proposal");
       }
       return { success: true, action: input.type };
     }
 
-    const threadId = input.threadId || this.threadIdFromProposal(input.proposalId);
+    const threadId = input.threadId || (await this.threadIdFromProposal(input.proposalId));
     if (!threadId) {
       throw new Error("Missing threadId or proposalId for mailbox action");
     }
@@ -6656,7 +6004,7 @@ export class MailboxService {
     try {
       switch (input.type) {
         case "cleanup_local":
-          this.applyLocalCleanup(thread);
+          await this.applyLocalCleanup(thread);
           break;
         case "mark_done":
           await this.applyMarkDone(thread);
@@ -6675,7 +6023,7 @@ export class MailboxService {
           break;
         case "move":
           if (!input.folderId) throw new Error("Missing folder for move action");
-          this.enqueueMailboxAction({
+          await this.enqueueMailboxAction({
             accountId: thread.accountId,
             threadId: thread.id,
             type: "move",
@@ -6689,7 +6037,7 @@ export class MailboxService {
         case "remove_label":
           if (!input.label && !input.labelId)
             throw new Error("Missing label for remove label action");
-          this.enqueueMailboxAction({
+          await this.enqueueMailboxAction({
             accountId: thread.accountId,
             threadId: thread.id,
             type: "remove_label",
@@ -6698,29 +6046,23 @@ export class MailboxService {
           break;
         case "snooze":
           if (!input.snoozeUntil) throw new Error("Missing snooze time");
-          this.enqueueMailboxAction({
+          await this.enqueueMailboxAction({
             accountId: thread.accountId,
             threadId: thread.id,
             type: "snooze",
             payload: { snoozeUntil: input.snoozeUntil },
             nextAttemptAt: input.snoozeUntil,
           });
-          this.db
-            .prepare("UPDATE mailbox_threads SET handled = 1, updated_at = ? WHERE id = ?")
-            .run(Date.now(), thread.id);
+          await this.sql.run("applyAction_1", [Date.now(), thread.id]);
           break;
         case "waiting_on":
-          this.enqueueMailboxAction({
+          await this.enqueueMailboxAction({
             accountId: thread.accountId,
             threadId: thread.id,
             type: "waiting_on",
             payload: { commitmentId: input.commitmentId },
           });
-          this.db
-            .prepare(
-              "UPDATE mailbox_threads SET needs_reply = 0, handled = 1, today_bucket = 'good_to_know', updated_at = ? WHERE id = ?",
-            )
-            .run(Date.now(), thread.id);
+          await this.sql.run("applyAction_2", [Date.now(), thread.id]);
           break;
         case "undo":
           if (!input.actionId) throw new Error("Missing action id for undo");
@@ -6757,10 +6099,10 @@ export class MailboxService {
     }
 
     if (input.proposalId) {
-      this.updateProposalStatus(input.proposalId, "applied");
+      await this.updateProposalStatus(input.proposalId, "applied");
     }
 
-    this.emitMailboxEvent({
+    await this.emitMailboxEvent({
       type: "action_applied",
       threadId,
       accountId: thread.accountId,
@@ -6794,7 +6136,7 @@ export class MailboxService {
       input.type === "send_message" ||
       input.type === "send_draft"
     ) {
-      this.recordMailboxTriageFeedback(threadId, input.type);
+      await this.recordMailboxTriageFeedback(threadId, input.type);
     }
 
     return {
@@ -6821,15 +6163,11 @@ export class MailboxService {
 
     const accountId = `gmail:${emailAddress.toLowerCase()}`;
     const now = Date.now();
-    const existingAccount = this.db
-      .prepare(
-        `SELECT classification_initial_batch_at
-         FROM mailbox_accounts
-         WHERE id = ?`,
-      )
-      .get(accountId) as { classification_initial_batch_at: number | null } | undefined;
+    const existingAccount = (await this.sql.get("syncGmail_1", [accountId])) as
+      | { classification_initial_batch_at: number | null }
+      | undefined;
     const initialClassificationNeeded = !existingAccount?.classification_initial_batch_at;
-    this.upsertAccount({
+    await this.upsertAccount({
       id: accountId,
       provider: "gmail",
       address: emailAddress.toLowerCase(),
@@ -6912,7 +6250,7 @@ export class MailboxService {
         threadResult.data,
       );
       if (!normalized) continue;
-      const upsertResult = this.upsertThread(normalized);
+      const upsertResult = await this.upsertThread(normalized);
       if (upsertResult.shouldClassify) {
         classificationCandidates.push(normalized.id);
       }
@@ -7023,12 +6361,7 @@ export class MailboxService {
 
     return {
       account: this.mapAccountRow(
-        this.db
-          .prepare(
-            `SELECT id, provider, address, display_name, status, capabilities_json, classification_initial_batch_at, last_synced_at
-             FROM mailbox_accounts WHERE id = ?`,
-          )
-          .get(accountId) as MailboxAccountRow,
+        (await this.sql.get("syncGmail_2", [accountId])) as MailboxAccountRow,
       ),
       syncedThreads: threadIds.length,
       syncedMessages,
@@ -7213,11 +6546,11 @@ export class MailboxService {
     return `outlook-graph-thread:${conversationId}`;
   }
 
-  private hideMicrosoftGraphJunkThreads(
+  private async hideMicrosoftGraphJunkThreads(
     accountId: string,
     messages: Any[],
     visibleInboxThreadIds: Set<string>,
-  ): number {
+  ): Promise<number> {
     const junkThreadIds = new Set<string>();
     for (const message of messages) {
       const threadId = this.getMicrosoftGraphThreadIdFromMessage(message);
@@ -7227,19 +6560,10 @@ export class MailboxService {
     if (junkThreadIds.size === 0) return 0;
 
     const now = Date.now();
-    const update = this.db.prepare(
-      `UPDATE mailbox_threads
-       SET local_inbox_hidden = 1,
-           handled = 1,
-           cleanup_candidate = 0,
-           updated_at = ?
-       WHERE account_id = ?
-         AND provider = 'outlook_graph'
-         AND id = ?`,
-    );
     let hidden = 0;
     for (const threadId of junkThreadIds) {
-      hidden += update.run(now, accountId, threadId).changes;
+      hidden += (await this.sql.run("hideMicrosoftGraphJunkThread", [now, accountId, threadId]))
+        .changes;
     }
     return hidden;
   }
@@ -7262,15 +6586,11 @@ export class MailboxService {
 
     const accountId = `outlook-graph:${address}`;
     const now = Date.now();
-    const existingAccount = this.db
-      .prepare(
-        `SELECT classification_initial_batch_at
-         FROM mailbox_accounts
-         WHERE id = ?`,
-      )
-      .get(accountId) as { classification_initial_batch_at: number | null } | undefined;
+    const existingAccount = (await this.sql.get("syncGmail_1", [accountId])) as
+      | { classification_initial_batch_at: number | null }
+      | undefined;
     const initialClassificationNeeded = !existingAccount?.classification_initial_batch_at;
-    this.upsertAccount({
+    await this.upsertAccount({
       id: accountId,
       provider: "outlook_graph",
       address,
@@ -7346,7 +6666,7 @@ export class MailboxService {
         .map((message) => this.getMicrosoftGraphThreadIdFromMessage(message))
         .filter((threadId): threadId is string => Boolean(threadId)),
     );
-    const hiddenJunkThreads = this.hideMicrosoftGraphJunkThreads(
+    const hiddenJunkThreads = await this.hideMicrosoftGraphJunkThreads(
       accountId,
       Array.isArray(junkData?.value) ? junkData.value : [],
       inboxThreadIds,
@@ -7388,7 +6708,7 @@ export class MailboxService {
     });
 
     for (const thread of threads) {
-      const upsertResult = this.upsertThread(thread);
+      const upsertResult = await this.upsertThread(thread);
       if (upsertResult.shouldClassify) {
         classificationCandidates.push(thread.id);
       }
@@ -7439,12 +6759,7 @@ export class MailboxService {
 
     return {
       account: this.mapAccountRow(
-        this.db
-          .prepare(
-            `SELECT id, provider, address, display_name, status, capabilities_json, classification_initial_batch_at, last_synced_at
-             FROM mailbox_accounts WHERE id = ?`,
-          )
-          .get(accountId) as MailboxAccountRow,
+        (await this.sql.get("syncGmail_2", [accountId])) as MailboxAccountRow,
       ),
       syncedThreads: threads.length,
       syncedMessages: messages.length,
@@ -7456,7 +6771,7 @@ export class MailboxService {
     syncedThreads: number;
     syncedMessages: number;
   } | null> {
-    const channel = this.channelRepo.findByType("email");
+    const channel = await this.channelRepo.findByType("email");
     if (!channel || !channel.enabled) return null;
     const cfg = (channel.config as Any) || {};
     if (this.isMicrosoftEmailOAuthConfig(cfg)) {
@@ -7481,15 +6796,11 @@ export class MailboxService {
       });
       const messages = await client.fetchRecentEmails(Math.min(Math.max(limit, 5), 50));
       const accountId = `imap:${identity.toLowerCase()}`;
-      const existingAccount = this.db
-        .prepare(
-          `SELECT classification_initial_batch_at
-           FROM mailbox_accounts
-           WHERE id = ?`,
-        )
-        .get(accountId) as { classification_initial_batch_at: number | null } | undefined;
+      const existingAccount = (await this.sql.get("syncImap_1", [accountId])) as
+        | { classification_initial_batch_at: number | null }
+        | undefined;
       const initialClassificationNeeded = !existingAccount?.classification_initial_batch_at;
-      this.upsertAccount({
+      await this.upsertAccount({
         id: accountId,
         provider: "imap",
         address: identity.toLowerCase(),
@@ -7518,7 +6829,7 @@ export class MailboxService {
             : "No new threads found",
       });
       for (const thread of threads) {
-        const upsertResult = this.upsertThread(thread);
+        const upsertResult = await this.upsertThread(thread);
         if (upsertResult.shouldClassify) {
           classificationCandidates.push(thread.id);
         }
@@ -7612,12 +6923,7 @@ export class MailboxService {
       });
       return {
         account: this.mapAccountRow(
-          this.db
-            .prepare(
-              `SELECT id, provider, address, display_name, status, capabilities_json, classification_initial_batch_at, last_synced_at
-               FROM mailbox_accounts WHERE id = ?`,
-            )
-            .get(accountId) as MailboxAccountRow,
+          (await this.sql.get("syncImap_2", [accountId])) as MailboxAccountRow,
         ),
         syncedThreads: threads.length,
         syncedMessages: messages.length,
@@ -7635,15 +6941,11 @@ export class MailboxService {
     const client = this.createStandardEmailClient(channel.id, cfg);
     const messages = await client.fetchRecentEmails(Math.min(Math.max(limit, 5), 50));
     const accountId = `imap:${email.toLowerCase()}`;
-    const existingAccount = this.db
-      .prepare(
-        `SELECT classification_initial_batch_at
-         FROM mailbox_accounts
-         WHERE id = ?`,
-      )
-      .get(accountId) as { classification_initial_batch_at: number | null } | undefined;
+    const existingAccount = (await this.sql.get("syncGmail_1", [accountId])) as
+      | { classification_initial_batch_at: number | null }
+      | undefined;
     const initialClassificationNeeded = !existingAccount?.classification_initial_batch_at;
-    this.upsertAccount({
+    await this.upsertAccount({
       id: accountId,
       provider: "imap",
       address: email.toLowerCase(),
@@ -7672,7 +6974,7 @@ export class MailboxService {
           : "No new threads found",
     });
     for (const thread of threads) {
-      const upsertResult = this.upsertThread(thread);
+      const upsertResult = await this.upsertThread(thread);
       if (upsertResult.shouldClassify) {
         classificationCandidates.push(thread.id);
       }
@@ -7766,12 +7068,7 @@ export class MailboxService {
 
     return {
       account: this.mapAccountRow(
-        this.db
-          .prepare(
-            `SELECT id, provider, address, display_name, status, capabilities_json, classification_initial_batch_at, last_synced_at
-             FROM mailbox_accounts WHERE id = ?`,
-          )
-          .get(accountId) as MailboxAccountRow,
+        (await this.sql.get("syncGmail_2", [accountId])) as MailboxAccountRow,
       ),
       syncedThreads: threads.length,
       syncedMessages: messages.length,
@@ -7901,52 +7198,33 @@ export class MailboxService {
     });
   }
 
-  private upsertAccount(account: MailboxAccount): void {
+  private async upsertAccount(account: MailboxAccount): Promise<void> {
     const now = Date.now();
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_accounts
-          (id, provider, address, display_name, status, capabilities_json, sync_cursor, last_synced_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           provider = excluded.provider,
-           address = excluded.address,
-           display_name = excluded.display_name,
-           status = excluded.status,
-           capabilities_json = excluded.capabilities_json,
-           last_synced_at = excluded.last_synced_at,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        account.id,
-        account.provider,
-        account.address,
-        account.displayName || null,
-        account.status,
-        JSON.stringify(account.capabilities),
-        null,
-        account.lastSyncedAt || null,
-        now,
-        now,
-      );
+    await this.sql.run("upsertAccount_1", [
+      account.id,
+      account.provider,
+      account.address,
+      account.displayName || null,
+      account.status,
+      JSON.stringify(account.capabilities),
+      null,
+      account.lastSyncedAt || null,
+      now,
+      now,
+    ]);
   }
 
-  private reconcileMailboxMessageIdentity(
+  private async reconcileMailboxMessageIdentity(
     accountId: string,
     targetThreadId: string,
     targetMessageId: string,
     providerMessageId: string,
-  ): void {
-    const duplicates = this.db
-      .prepare(
-        `SELECT m.id, m.thread_id
-           FROM mailbox_messages m
-           JOIN mailbox_threads t ON t.id = m.thread_id
-          WHERE t.account_id = ?
-            AND m.provider_message_id = ?
-            AND m.id != ?`,
-      )
-      .all(accountId, providerMessageId, targetMessageId) as Array<{
+  ): Promise<void> {
+    const duplicates = (await this.sql.all("reconcileMailboxMessageIdentity_1", [
+      accountId,
+      providerMessageId,
+      targetMessageId,
+    ])) as Array<{
       id: string;
       thread_id: string;
     }>;
@@ -7955,36 +7233,34 @@ export class MailboxService {
 
     const orphanedThreadIds = new Set<string>();
     for (const duplicate of duplicates) {
-      this.db.prepare("DELETE FROM mailbox_messages WHERE id = ?").run(duplicate.id);
+      await this.sql.run("reconcileMailboxMessageIdentity_2", [duplicate.id]);
       if (duplicate.thread_id !== targetThreadId) {
         orphanedThreadIds.add(duplicate.thread_id);
       }
     }
 
     for (const threadId of orphanedThreadIds) {
-      this.deleteThreadIfEmpty(threadId);
+      await this.deleteThreadIfEmpty(threadId);
     }
   }
 
-  private deleteThreadIfEmpty(threadId: string): void {
-    const row = this.db
-      .prepare("SELECT COUNT(*) AS count FROM mailbox_messages WHERE thread_id = ?")
-      .get(threadId) as { count: number } | undefined;
+  private async deleteThreadIfEmpty(threadId: string): Promise<void> {
+    const row = (await this.sql.get("deleteThreadIfEmpty_1", [threadId])) as
+      | { count: number }
+      | undefined;
     if ((row?.count || 0) > 0) return;
 
-    this.db.prepare("DELETE FROM mailbox_summaries WHERE thread_id = ?").run(threadId);
-    this.db.prepare("DELETE FROM mailbox_drafts WHERE thread_id = ?").run(threadId);
-    this.db.prepare("DELETE FROM mailbox_action_proposals WHERE thread_id = ?").run(threadId);
-    this.db.prepare("DELETE FROM mailbox_commitments WHERE thread_id = ?").run(threadId);
-    this.db.prepare("DELETE FROM mailbox_events WHERE thread_id = ?").run(threadId);
-    this.db.prepare("DELETE FROM mailbox_automations WHERE thread_id = ?").run(threadId);
-    this.db
-      .prepare("DELETE FROM mailbox_mission_control_handoffs WHERE thread_id = ?")
-      .run(threadId);
-    this.db.prepare("DELETE FROM mailbox_threads WHERE id = ?").run(threadId);
+    await this.sql.run("deleteThreadIfEmpty_2", [threadId]);
+    await this.sql.run("deleteThreadIfEmpty_3", [threadId]);
+    await this.sql.run("deleteThreadIfEmpty_4", [threadId]);
+    await this.sql.run("deleteThreadIfEmpty_5", [threadId]);
+    await this.sql.run("deleteThreadIfEmpty_6", [threadId]);
+    await this.sql.run("deleteThreadIfEmpty_7", [threadId]);
+    await this.sql.run("deleteThreadIfEmpty_8", [threadId]);
+    await this.sql.run("deleteThreadIfEmpty_9", [threadId]);
   }
 
-  private upsertThread(thread: NormalizedThreadInput): ThreadUpsertResult {
+  private async upsertThread(thread: NormalizedThreadInput): Promise<ThreadUpsertResult> {
     const now = Date.now();
     const fingerprint = mailboxClassificationFingerprint({
       threadId: thread.id,
@@ -8006,36 +7282,19 @@ export class MailboxService {
         unread: message.unread,
       })),
     });
-    const existing = this.db
-      .prepare(
-        `SELECT
-           category,
-           priority_score,
-           urgency_score,
-           needs_reply,
-           stale_followup,
-           cleanup_candidate,
-           handled,
-           local_inbox_hidden,
-           unread_count,
-           last_message_at,
-           message_count,
-           classification_state,
-           classification_fingerprint,
-           classification_model_key,
-           classification_prompt_version,
-           classification_confidence,
-           classification_updated_at,
-           classification_error,
-           classification_json /* raw LLM response — debug/replay only, not used in runtime logic */
-           ,
-           today_bucket,
-           domain_category,
-           classification_rationale
-         FROM mailbox_threads
-         WHERE id = ?`,
-      )
-      .get(thread.id) as
+    // Every row the upsert consults, in one snapshot (DB6); the writes follow in one unit.
+    const state = await this.sql.unit("mailbox_threadUpsertState", [
+      {
+        threadId: thread.id,
+        accountId: thread.accountId,
+        messages: thread.messages.map((message) => ({
+          id: message.id,
+          providerMessageId: message.providerMessageId,
+          attachmentIds: (message.attachments || []).map((attachment) => attachment.id),
+        })),
+      },
+    ]);
+    const existing = state.existing as
       | {
           category: MailboxThreadCategory;
           priority_score: number;
@@ -8088,9 +7347,7 @@ export class MailboxService {
         : thread.localInboxHidden
           ? 1
           : 0;
-    const localMessageRows = this.db
-      .prepare("SELECT id, is_unread FROM mailbox_messages WHERE thread_id = ?")
-      .all(thread.id) as Array<{ id: string; is_unread: number }>;
+    const localMessageRows = state.localMessages;
     const locallyReadMessageIds = new Set(
       localMessageRows.filter((message) => message.is_unread === 0).map((message) => message.id),
     );
@@ -8130,122 +7387,71 @@ export class MailboxService {
       text: baseText,
     });
 
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_threads
-          (id, account_id, provider_thread_id, provider, subject, snippet, participants_json, labels_json, category, today_bucket, domain_category, classification_rationale, priority_score, urgency_score, needs_reply, stale_followup, cleanup_candidate, handled, local_inbox_hidden, unread_count, message_count, last_message_at, last_synced_at, classification_state, classification_fingerprint, classification_model_key, classification_prompt_version, classification_confidence, classification_updated_at, classification_error, classification_json, sensitive_content_json, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           account_id = excluded.account_id,
-           provider_thread_id = excluded.provider_thread_id,
-           provider = excluded.provider,
-           subject = excluded.subject,
-           snippet = excluded.snippet,
-           participants_json = excluded.participants_json,
-           labels_json = excluded.labels_json,
-           category = excluded.category,
-           today_bucket = excluded.today_bucket,
-           domain_category = excluded.domain_category,
-           classification_rationale = excluded.classification_rationale,
-           priority_score = excluded.priority_score,
-           urgency_score = excluded.urgency_score,
-           needs_reply = excluded.needs_reply,
-           stale_followup = excluded.stale_followup,
-           cleanup_candidate = excluded.cleanup_candidate,
-           handled = excluded.handled,
-           local_inbox_hidden = excluded.local_inbox_hidden,
-           unread_count = excluded.unread_count,
-           message_count = excluded.message_count,
-           last_message_at = excluded.last_message_at,
-           last_synced_at = excluded.last_synced_at,
-           classification_state = excluded.classification_state,
-           classification_fingerprint = excluded.classification_fingerprint,
-           classification_model_key = excluded.classification_model_key,
-           classification_prompt_version = excluded.classification_prompt_version,
-           classification_confidence = excluded.classification_confidence,
-           classification_updated_at = excluded.classification_updated_at,
-           classification_error = excluded.classification_error,
-           classification_json = excluded.classification_json,
-           sensitive_content_json = excluded.sensitive_content_json,
-           metadata_json = excluded.metadata_json,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        thread.id,
-        thread.accountId,
-        thread.providerThreadId,
-        thread.provider,
-        thread.subject,
-        thread.snippet,
-        JSON.stringify(thread.participants),
-        JSON.stringify(thread.labels),
-        classificationValues?.category || thread.category,
-        classificationValues?.today_bucket || fallbackTodayBucket,
-        classificationValues?.domain_category || fallbackDomainCategory,
-        classificationValues?.classification_rationale || null,
-        classificationValues?.priority_score ?? thread.priorityScore,
-        classificationValues?.urgency_score ?? thread.urgencyScore,
-        classificationValues?.needs_reply ?? (thread.needsReply ? 1 : 0),
-        classificationValues?.stale_followup ?? (thread.staleFollowup ? 1 : 0),
-        classificationValues?.cleanup_candidate ?? (thread.cleanupCandidate ? 1 : 0),
-        nextHandled,
-        nextLocalInboxHidden,
-        nextUnreadCount,
-        thread.messages.length,
-        thread.lastMessageAt,
-        now,
-        nextClassificationState,
-        fingerprint,
-        classificationValues?.classification_model_key || null,
-        classificationValues?.classification_prompt_version || null,
-        classificationValues?.classification_confidence ?? 0,
-        classificationValues?.classification_updated_at || null,
-        classificationValues?.classification_error || null,
-        classificationValues?.classification_json || null,
-        JSON.stringify(sensitiveContent),
-        JSON.stringify({
-          priorityBand: priorityBandFromScore(
-            classificationValues?.priority_score ?? thread.priorityScore,
-          ),
-        }),
-        now,
-        now,
-      );
+    const writes: MailboxThreadWrite[] = [];
+    writes.push({
+      kind: "run",
+      name: "upsertThread_3",
+      params: [
+      thread.id,
+      thread.accountId,
+      thread.providerThreadId,
+      thread.provider,
+      thread.subject,
+      thread.snippet,
+      JSON.stringify(thread.participants),
+      JSON.stringify(thread.labels),
+      classificationValues?.category || thread.category,
+      classificationValues?.today_bucket || fallbackTodayBucket,
+      classificationValues?.domain_category || fallbackDomainCategory,
+      classificationValues?.classification_rationale || null,
+      classificationValues?.priority_score ?? thread.priorityScore,
+      classificationValues?.urgency_score ?? thread.urgencyScore,
+      classificationValues?.needs_reply ?? (thread.needsReply ? 1 : 0),
+      classificationValues?.stale_followup ?? (thread.staleFollowup ? 1 : 0),
+      classificationValues?.cleanup_candidate ?? (thread.cleanupCandidate ? 1 : 0),
+      nextHandled,
+      nextLocalInboxHidden,
+      nextUnreadCount,
+      thread.messages.length,
+      thread.lastMessageAt,
+      now,
+      nextClassificationState,
+      fingerprint,
+      classificationValues?.classification_model_key || null,
+      classificationValues?.classification_prompt_version || null,
+      classificationValues?.classification_confidence ?? 0,
+      classificationValues?.classification_updated_at || null,
+      classificationValues?.classification_error || null,
+      classificationValues?.classification_json || null,
+      JSON.stringify(sensitiveContent),
+      JSON.stringify({
+        priorityBand: priorityBandFromScore(
+          classificationValues?.priority_score ?? thread.priorityScore,
+        ),
+      }),
+      now,
+      now,
+      ],
+    });
 
     for (const message of thread.messages) {
-      const previousMessageThread = this.db
-        .prepare("SELECT thread_id FROM mailbox_messages WHERE id = ?")
-        .get(message.id) as { thread_id: string } | undefined;
-      this.reconcileMailboxMessageIdentity(
-        thread.accountId,
-        thread.id,
-        message.id,
-        message.providerMessageId,
-      );
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_messages
-            (id, thread_id, provider_message_id, direction, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, body_text, body_html, received_at, is_unread, metadata_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             thread_id = excluded.thread_id,
-             provider_message_id = excluded.provider_message_id,
-             direction = excluded.direction,
-             from_name = excluded.from_name,
-             from_email = excluded.from_email,
-             to_json = excluded.to_json,
-             cc_json = excluded.cc_json,
-             bcc_json = excluded.bcc_json,
-             subject = excluded.subject,
-             snippet = excluded.snippet,
-             body_text = excluded.body_text,
-             body_html = excluded.body_html,
-             received_at = excluded.received_at,
-             is_unread = excluded.is_unread,
-             metadata_json = excluded.metadata_json,
-             updated_at = excluded.updated_at`,
-        )
-        .run(
+      const consulted = state.messages[message.id];
+      // Messages elsewhere with this provider id are this message's stale copies.
+      const orphanedThreadIds = new Set<string>();
+      for (const duplicate of consulted?.duplicates || []) {
+        writes.push({
+          kind: "run",
+          name: "reconcileMailboxMessageIdentity_2",
+          params: [duplicate.id],
+        });
+        if (duplicate.thread_id !== thread.id) orphanedThreadIds.add(duplicate.thread_id);
+      }
+      for (const threadId of orphanedThreadIds)
+        writes.push({ kind: "deleteThreadIfEmpty", threadId });
+      writes.push({
+        kind: "run",
+        name: "upsertThread_5",
+        params: [
           message.id,
           thread.id,
           message.providerMessageId,
@@ -8264,22 +7470,32 @@ export class MailboxService {
           JSON.stringify(message.metadata || {}),
           now,
           now,
-        );
-      this.upsertMessageSearchIndex(thread, message);
-      this.upsertMessageAttachments(thread, message, now);
-      if (previousMessageThread?.thread_id && previousMessageThread.thread_id !== thread.id) {
-        this.deleteThreadIfEmpty(previousMessageThread.thread_id);
+        ],
+      });
+      writes.push(...this.messageSearchIndexWrites(thread, message, consulted?.embeddingHash));
+      writes.push(
+        ...this.messageAttachmentWrites(
+          thread,
+          message,
+          now,
+          consulted?.existingAttachmentIds || [],
+          state.attachments,
+        ),
+      );
+      if (consulted?.previousThreadId && consulted.previousThreadId !== thread.id) {
+        writes.push({ kind: "deleteThreadIfEmpty", threadId: consulted.previousThreadId });
       }
     }
+    await this.sql.unit("mailbox_applyThreadWrites", [writes]);
 
-    this.upsertPrimaryContact(thread);
+    await this.upsertPrimaryContact(thread);
     RelationshipMemoryService.rememberMailboxInsights({
       facts: thread.participants
         .slice(0, 1)
         .map((participant) => `Recent email contact: ${participant.name || participant.email}`),
     });
     if (keepExistingClassification) {
-      this.refreshThreadProposals({
+      await this.refreshThreadProposals({
         id: thread.id,
         subject: thread.subject,
         needsReply: Boolean(classificationValues?.needs_reply),
@@ -8288,14 +7504,7 @@ export class MailboxService {
         category: classificationValues?.category || thread.category,
       });
     } else {
-      this.db
-        .prepare(
-          `DELETE FROM mailbox_action_proposals
-           WHERE thread_id = ?
-             AND status = 'suggested'
-             AND proposal_type IN ('reply', 'cleanup', 'follow_up', 'schedule')`,
-        )
-        .run(thread.id);
+      await this.sql.run("upsertThread_6", [thread.id]);
     }
 
     return {
@@ -8304,28 +7513,162 @@ export class MailboxService {
     };
   }
 
-  private upsertMessageSearchIndex(
+  /** Search index and embedding writes for a message, best effort (DB6 thread upsert). */
+  private messageSearchIndexWrites(
     thread: NormalizedThreadInput,
     message: NormalizedMailboxMessage,
-  ): void {
+    existingEmbeddingHash: string | null | undefined,
+  ): MailboxThreadWrite[] {
+    const sender = [message.from?.name, message.from?.email].filter(Boolean).join(" ");
+    const body = `${message.snippet || ""}\n${message.bodyHtml ? stripHtml(message.bodyHtml) : message.body || ""}`;
+    const writes: MailboxThreadWrite[] = [
+      {
+        kind: "optional",
+        statements: [
+          { name: "upsertMessageSearchIndex_1", params: [message.id] },
+          {
+            name: "upsertMessageSearchIndex_2",
+            params: [
+              message.id,
+              thread.id,
+              message.id,
+              message.subject || thread.subject,
+              sender,
+              body,
+            ],
+          },
+        ],
+      },
+    ];
+    const embedding = MailboxAgentSearchService.prepareEmbeddingParams(
+      {
+        recordType: "message",
+        recordId: message.id,
+        accountId: thread.accountId,
+        threadId: thread.id,
+        messageId: message.id,
+        subject: message.subject || thread.subject,
+        sender,
+        body,
+      },
+      existingEmbeddingHash,
+    );
+    if (embedding) {
+      writes.push({
+        kind: "optional",
+        statements: [{ name: "search_upsertEmbeddingForPlainText_2", params: embedding }],
+      });
+    }
+    return writes;
+  }
+
+  /**
+   * Attachment writes for a message (DB6 thread upsert): drop the attachments it no longer
+   * has, upsert the rest, and re-index each with its stored extracted text.
+   */
+  private messageAttachmentWrites(
+    thread: NormalizedThreadInput,
+    message: NormalizedMailboxMessage,
+    now: number,
+    existingAttachmentIds: string[],
+    consulted: Record<string, { textContent: string | null; embeddingHash: string | null }>,
+  ): MailboxThreadWrite[] {
+    const writes: MailboxThreadWrite[] = [];
+    const nextAttachments = message.attachments || [];
+    const nextIds = new Set(nextAttachments.map((attachment) => attachment.id));
+    for (const existingId of existingAttachmentIds) {
+      if (nextIds.has(existingId)) continue;
+      writes.push({
+        kind: "optional",
+        statements: [{ name: "upsertMessageAttachments_2", params: [existingId] }],
+      });
+      writes.push({
+        kind: "optional",
+        statements: [{ name: "upsertMessageAttachments_3", params: [existingId] }],
+      });
+      writes.push({ kind: "run", name: "upsertMessageAttachments_4", params: [existingId] });
+      writes.push({ kind: "run", name: "upsertMessageAttachments_5", params: [existingId] });
+    }
+    for (const attachment of nextAttachments) {
+      writes.push({
+        kind: "run",
+        name: "upsertMessageAttachments_6",
+        params: [
+          attachment.id,
+          thread.id,
+          message.id,
+          thread.provider,
+          message.providerMessageId,
+          attachment.providerAttachmentId || null,
+          attachment.filename,
+          attachment.mimeType || null,
+          attachment.size ?? null,
+          JSON.stringify({ source: "mailbox_sync" }),
+          now,
+          now,
+        ],
+      });
+      const attachmentText = decryptMailboxValue(consulted[attachment.id]?.textContent || "") || "";
+      writes.push({
+        kind: "optional",
+        statements: [
+          { name: "upsertMessageAttachments_2", params: [attachment.id] },
+          {
+            name: "upsertAttachmentSearchIndex_1",
+            params: [
+              attachment.id,
+              thread.id,
+              message.id,
+              attachment.id,
+              attachment.filename,
+              attachmentText,
+            ],
+          },
+        ],
+      });
+      const embedding = MailboxAgentSearchService.prepareEmbeddingParams(
+        {
+          recordType: "attachment",
+          recordId: attachment.id,
+          threadId: thread.id,
+          messageId: message.id,
+          attachmentId: attachment.id,
+          attachmentFilename: attachment.filename,
+          attachmentText,
+        },
+        consulted[attachment.id]?.embeddingHash,
+      );
+      if (embedding) {
+        writes.push({
+          kind: "optional",
+          statements: [{ name: "search_upsertEmbeddingForPlainText_2", params: embedding }],
+        });
+      }
+    }
+    return writes;
+  }
+
+  private async upsertMessageSearchIndex(
+    thread: NormalizedThreadInput,
+    message: NormalizedMailboxMessage,
+  ): Promise<void> {
     const sender = [message.from?.name, message.from?.email].filter(Boolean).join(" ");
     const body = `${message.snippet || ""}\n${message.bodyHtml ? stripHtml(message.bodyHtml) : message.body || ""}`;
     try {
-      this.db
-        .prepare(`DELETE FROM mailbox_search_fts WHERE record_type = 'message' AND record_id = ?`)
-        .run(message.id);
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_search_fts
-             (record_type, record_id, thread_id, message_id, attachment_id, subject, sender, body, attachment_filename, attachment_text)
-           VALUES ('message', ?, ?, ?, NULL, ?, ?, ?, '', '')`,
-        )
-        .run(message.id, thread.id, message.id, message.subject || thread.subject, sender, body);
+      await this.sql.run("upsertMessageSearchIndex_1", [message.id]);
+      await this.sql.run("upsertMessageSearchIndex_2", [
+        message.id,
+        thread.id,
+        message.id,
+        message.subject || thread.subject,
+        sender,
+        body,
+      ]);
     } catch {
       // FTS is optional; mailbox search falls back to row scanning.
     }
     try {
-      MailboxAgentSearchService.upsertEmbeddingForPlainText(this.db, {
+      await MailboxAgentSearchService.upsertEmbeddingForPlainText(this.sql, {
         recordType: "message",
         recordId: message.id,
         accountId: thread.accountId,
@@ -8340,33 +7683,12 @@ export class MailboxService {
     }
   }
 
-  private ensureMailboxSearchIndexBackfilled(): void {
+  private async ensureMailboxSearchIndexBackfilled(): Promise<void> {
     if (this.mailboxSearchIndexBackfillAttempted) return;
     this.mailboxSearchIndexBackfillAttempted = true;
 
     try {
-      const messageRows = this.db
-        .prepare(
-          `SELECT
-             m.id,
-             m.thread_id,
-             m.from_name,
-             m.from_email,
-             m.subject,
-             m.snippet,
-             m.body_text,
-             m.body_html,
-             t.subject AS thread_subject
-           FROM mailbox_messages m
-           INNER JOIN mailbox_threads t ON t.id = m.thread_id
-           WHERE NOT EXISTS (
-             SELECT 1
-             FROM mailbox_search_fts f
-             WHERE f.record_type = 'message'
-               AND f.record_id = m.id
-           )`,
-        )
-        .all() as Array<
+      const messageRows = (await this.sql.all("ensureMailboxSearchIndexBackfilled_1", [])) as Array<
         Pick<
           MailboxMessageRow,
           | "id"
@@ -8379,146 +7701,97 @@ export class MailboxService {
           | "body_html"
         > & { thread_subject: string }
       >;
-      const insertMessage = this.db.prepare(
-        `INSERT INTO mailbox_search_fts
-           (record_type, record_id, thread_id, message_id, attachment_id, subject, sender, body, attachment_filename, attachment_text)
-         VALUES ('message', ?, ?, ?, NULL, ?, ?, ?, '', '')`,
-      );
       for (const row of messageRows) {
         const bodyHtml = decryptMailboxValue(row.body_html || "");
         const bodyText = decryptMailboxValue(row.body_text || "");
-        insertMessage.run(
+        await this.sql.run("insertMessageSearchRow", [
           row.id,
           row.thread_id,
           row.id,
           row.subject || row.thread_subject,
           [row.from_name, row.from_email].filter(Boolean).join(" "),
           `${row.snippet || ""}\n${bodyHtml ? stripHtml(bodyHtml) : bodyText || ""}`,
-        );
+        ]);
       }
 
-      const attachmentRows = this.db
-        .prepare(
-          `SELECT ma.*, mat.text_content, mat.extraction_mode
-           FROM mailbox_attachments ma
-           INNER JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
-           WHERE NOT EXISTS (
-             SELECT 1
-             FROM mailbox_search_fts f
-             WHERE f.record_type = 'attachment'
-               AND f.record_id = ma.id
-           )`,
-        )
-        .all() as MailboxAttachmentRow[];
+      const attachmentRows = (await this.sql.all(
+        "ensureMailboxSearchIndexBackfilled_2",
+        [],
+      )) as MailboxAttachmentRow[];
       for (const row of attachmentRows) {
-        this.upsertAttachmentSearchIndex(row.id);
+        await this.upsertAttachmentSearchIndex(row.id);
       }
     } catch {
       // FTS is optional; mailbox search falls back to row scanning.
     }
   }
 
-  private upsertMessageAttachments(
+  private async upsertMessageAttachments(
     thread: NormalizedThreadInput,
     message: NormalizedMailboxMessage,
     now: number,
-  ): void {
+  ): Promise<void> {
     const nextAttachments = message.attachments || [];
     const nextIds = new Set(nextAttachments.map((attachment) => attachment.id));
-    const existingRows = this.db
-      .prepare(`SELECT id FROM mailbox_attachments WHERE message_id = ?`)
-      .all(message.id) as Array<{ id: string }>;
+    const existingRows = (await this.sql.all("upsertMessageAttachments_1", [message.id])) as Array<{
+      id: string;
+    }>;
     for (const existing of existingRows) {
       if (nextIds.has(existing.id)) continue;
       try {
-        this.db
-          .prepare(
-            `DELETE FROM mailbox_search_fts WHERE record_type = 'attachment' AND record_id = ?`,
-          )
-          .run(existing.id);
+        await this.sql.run("upsertMessageAttachments_2", [existing.id]);
       } catch {
         // Optional FTS table may be unavailable.
       }
       try {
-        this.db
-          .prepare(
-            `DELETE FROM mailbox_search_embeddings WHERE record_type = 'attachment' AND record_id = ?`,
-          )
-          .run(existing.id);
+        await this.sql.run("upsertMessageAttachments_3", [existing.id]);
       } catch {
         // Semantic search index is additive.
       }
-      this.db
-        .prepare(`DELETE FROM mailbox_attachment_text WHERE attachment_id = ?`)
-        .run(existing.id);
-      this.db.prepare(`DELETE FROM mailbox_attachments WHERE id = ?`).run(existing.id);
+      await this.sql.run("upsertMessageAttachments_4", [existing.id]);
+      await this.sql.run("upsertMessageAttachments_5", [existing.id]);
     }
 
     for (const attachment of nextAttachments) {
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_attachments
-            (id, thread_id, message_id, provider, provider_message_id, provider_attachment_id, filename, mime_type, size, extraction_status, extraction_error, metadata_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_indexed', NULL, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             thread_id = excluded.thread_id,
-             message_id = excluded.message_id,
-             provider = excluded.provider,
-             provider_message_id = excluded.provider_message_id,
-             provider_attachment_id = excluded.provider_attachment_id,
-             filename = excluded.filename,
-             mime_type = excluded.mime_type,
-             size = excluded.size,
-             metadata_json = excluded.metadata_json,
-             updated_at = excluded.updated_at`,
-        )
-        .run(
-          attachment.id,
-          thread.id,
-          message.id,
-          thread.provider,
-          message.providerMessageId,
-          attachment.providerAttachmentId || null,
-          attachment.filename,
-          attachment.mimeType || null,
-          attachment.size ?? null,
-          JSON.stringify({ source: "mailbox_sync" }),
-          now,
-          now,
-        );
-      this.upsertAttachmentSearchIndex(attachment.id);
+      await this.sql.run("upsertMessageAttachments_6", [
+        attachment.id,
+        thread.id,
+        message.id,
+        thread.provider,
+        message.providerMessageId,
+        attachment.providerAttachmentId || null,
+        attachment.filename,
+        attachment.mimeType || null,
+        attachment.size ?? null,
+        JSON.stringify({ source: "mailbox_sync" }),
+        now,
+        now,
+      ]);
+      await this.upsertAttachmentSearchIndex(attachment.id);
     }
   }
 
-  private upsertAttachmentSearchIndex(attachmentId: string): void {
-    const row = this.db
-      .prepare(
-        `SELECT ma.*, mat.text_content, mat.extraction_mode
-         FROM mailbox_attachments ma
-         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
-         WHERE ma.id = ?`,
-      )
-      .get(attachmentId) as MailboxAttachmentRow | undefined;
+  private async upsertAttachmentSearchIndex(attachmentId: string): Promise<void> {
+    const row = (await this.sql.get("getMailboxAttachment_1", [attachmentId])) as
+      | MailboxAttachmentRow
+      | undefined;
     if (!row) return;
     const attachmentText = decryptMailboxValue(row.text_content || "") || "";
     try {
-      this.db
-        .prepare(
-          `DELETE FROM mailbox_search_fts WHERE record_type = 'attachment' AND record_id = ?`,
-        )
-        .run(row.id);
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_search_fts
-             (record_type, record_id, thread_id, message_id, attachment_id, subject, sender, body, attachment_filename, attachment_text)
-           VALUES ('attachment', ?, ?, ?, ?, '', '', '', ?, ?)`,
-        )
-        .run(row.id, row.thread_id, row.message_id, row.id, row.filename, attachmentText);
+      await this.sql.run("upsertMessageAttachments_2", [row.id]);
+      await this.sql.run("upsertAttachmentSearchIndex_1", [
+        row.id,
+        row.thread_id,
+        row.message_id,
+        row.id,
+        row.filename,
+        attachmentText,
+      ]);
     } catch {
       // FTS is optional.
     }
     try {
-      MailboxAgentSearchService.upsertEmbeddingForPlainText(this.db, {
+      await MailboxAgentSearchService.upsertEmbeddingForPlainText(this.sql, {
         recordType: "attachment",
         recordId: row.id,
         threadId: row.thread_id,
@@ -8643,13 +7916,7 @@ export class MailboxService {
   ): Promise<MailboxClassificationResult | null> {
     const snapshot = this.buildClassificationSnapshot(thread);
     const fingerprint = mailboxClassificationFingerprint(snapshot);
-    const existing = this.db
-      .prepare(
-        `SELECT classification_state, classification_fingerprint, classification_prompt_version
-         FROM mailbox_threads
-         WHERE id = ?`,
-      )
-      .get(thread.id) as
+    const existing = (await this.sql.get("classifyThreadWithLLM_1", [thread.id])) as
       | {
           classification_state: MailboxClassificationState;
           classification_fingerprint: string | null;
@@ -8682,7 +7949,8 @@ export class MailboxService {
       model: modelSelection.modelId,
     });
     const workspaceId =
-      this.resolveThreadWorkspaceId(thread.accountId) || this.resolveDefaultWorkspaceId();
+      (await this.resolveThreadWorkspaceId(thread.accountId)) ||
+      (await this.resolveDefaultWorkspaceId());
     const system = [
       "You classify inbox threads for triage.",
       "Return compact strict JSON only with this shape:",
@@ -8774,74 +8042,49 @@ export class MailboxService {
     }
   }
 
-  private persistThreadClassification(
+  private async persistThreadClassification(
     threadId: string,
     result: MailboxClassificationResult,
     fingerprint: string,
     modelKey: string | null,
     existingState: MailboxClassificationState,
     rawJson?: string,
-  ): void {
+  ): Promise<void> {
     const now = Date.now();
-    this.db
-      .prepare(
-        `UPDATE mailbox_threads
-         SET category = ?,
-             today_bucket = ?,
-             domain_category = ?,
-             classification_rationale = ?,
-             priority_score = ?,
-             urgency_score = ?,
-             needs_reply = ?,
-             stale_followup = ?,
-             cleanup_candidate = ?,
-             handled = ?,
-             classification_state = 'classified',
-             classification_fingerprint = ?,
-             classification_model_key = ?,
-             classification_prompt_version = ?,
-             classification_confidence = ?,
-             classification_updated_at = ?,
-             classification_error = NULL,
-             classification_json = ?,
-             metadata_json = ?,
-             updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        result.category,
-        result.todayBucket,
-        result.domainCategory,
-        result.rationale || null,
-        clampScore(result.priorityScore),
-        clampScore(result.urgencyScore),
-        result.needsReply ? 1 : 0,
-        result.staleFollowup ? 1 : 0,
-        result.cleanupCandidate ? 1 : 0,
-        result.handled ? 1 : 0,
-        fingerprint,
-        modelKey,
-        MAILBOX_CLASSIFIER_PROMPT_VERSION,
-        clampConfidence(result.confidence),
-        now,
-        rawJson || JSON.stringify(result),
-        JSON.stringify({
-          priorityBand: priorityBandFromScore(result.priorityScore),
-          todayBucket: result.todayBucket,
-          domainCategory: result.domainCategory,
-          classification: {
-            state: "classified",
-            modelKey,
-            promptVersion: MAILBOX_CLASSIFIER_PROMPT_VERSION,
-            confidence: clampConfidence(result.confidence),
-            fingerprint,
-            classifiedAt: now,
-            previousState: existingState,
-          },
-        }),
-        now,
-        threadId,
-      );
+    await this.sql.run("persistThreadClassification_1", [
+      result.category,
+      result.todayBucket,
+      result.domainCategory,
+      result.rationale || null,
+      clampScore(result.priorityScore),
+      clampScore(result.urgencyScore),
+      result.needsReply ? 1 : 0,
+      result.staleFollowup ? 1 : 0,
+      result.cleanupCandidate ? 1 : 0,
+      result.handled ? 1 : 0,
+      fingerprint,
+      modelKey,
+      MAILBOX_CLASSIFIER_PROMPT_VERSION,
+      clampConfidence(result.confidence),
+      now,
+      rawJson || JSON.stringify(result),
+      JSON.stringify({
+        priorityBand: priorityBandFromScore(result.priorityScore),
+        todayBucket: result.todayBucket,
+        domainCategory: result.domainCategory,
+        classification: {
+          state: "classified",
+          modelKey,
+          promptVersion: MAILBOX_CLASSIFIER_PROMPT_VERSION,
+          confidence: clampConfidence(result.confidence),
+          fingerprint,
+          classifiedAt: now,
+          previousState: existingState,
+        },
+      }),
+      now,
+      threadId,
+    ]);
   }
 
   private async classifyThreadById(
@@ -8852,13 +8095,7 @@ export class MailboxService {
     if (!detail) return false;
     const snapshot = this.buildClassificationSnapshot(detail);
     const fingerprint = mailboxClassificationFingerprint(snapshot);
-    const existing = this.db
-      .prepare(
-        `SELECT classification_state, classification_fingerprint, classification_prompt_version
-         FROM mailbox_threads
-         WHERE id = ?`,
-      )
-      .get(threadId) as
+    const existing = (await this.sql.get("classifyThreadWithLLM_1", [threadId])) as
       | {
           classification_state: MailboxClassificationState;
           classification_fingerprint: string | null;
@@ -8879,7 +8116,7 @@ export class MailboxService {
     if (!result) return false;
 
     const modelSelection = this.chooseMailboxClassifierModel();
-    this.persistThreadClassification(
+    await this.persistThreadClassification(
       threadId,
       result,
       fingerprint,
@@ -8888,7 +8125,7 @@ export class MailboxService {
       JSON.stringify(result),
     );
 
-    this.refreshThreadProposals({
+    await this.refreshThreadProposals({
       id: detail.id,
       subject: detail.subject,
       needsReply: result.needsReply,
@@ -8896,12 +8133,12 @@ export class MailboxService {
       staleFollowup: result.staleFollowup,
       category: result.category,
     });
-    this.upsertPrimaryContact({
+    await this.upsertPrimaryContact({
       ...detail,
       needsReply: result.needsReply,
     } as unknown as NormalizedThreadInput);
     const primaryContact = detail.participants[0];
-    this.emitMailboxEvent({
+    await this.emitMailboxEvent({
       type: "thread_classified",
       threadId,
       accountId: detail.accountId,
@@ -8936,13 +8173,9 @@ export class MailboxService {
     options?: { includeBackfill?: boolean; limit?: number; force?: boolean },
   ): Promise<MailboxReclassifyResult> {
     const limit = Math.min(Math.max(options?.limit ?? MAILBOX_CLASSIFIER_MAX_BATCH, 1), 200);
-    const account = this.db
-      .prepare(
-        `SELECT id, classification_initial_batch_at
-         FROM mailbox_accounts
-         WHERE id = ?`,
-      )
-      .get(accountId) as { id: string; classification_initial_batch_at: number | null } | undefined;
+    const account = (await this.sql.get("classifyMailboxThreadsForAccount_1", [accountId])) as
+      | { id: string; classification_initial_batch_at: number | null }
+      | undefined;
     if (!account) {
       return { accountId, scannedThreads: 0, reclassifiedThreads: 0 };
     }
@@ -8951,36 +8184,14 @@ export class MailboxService {
       options?.includeBackfill === true || !account.classification_initial_batch_at;
     const includeAll = options?.force === true && options?.includeBackfill === true;
     const rows = includeAll
-      ? (this.db
-          .prepare(
-            `SELECT id
-             FROM mailbox_threads
-             WHERE account_id = ?
-             ORDER BY unread_count DESC, last_message_at DESC
-             LIMIT ?`,
-          )
-          .all(accountId, limit) as Array<{ id: string }>)
-      : (this.db
-          .prepare(
-            `SELECT id
-             FROM mailbox_threads
-             WHERE account_id = ?
-               AND classification_state IN (${(canBackfill
-                 ? ["pending", "backfill_pending"]
-                 : ["pending"]
-               )
-                 .map(() => "?")
-                 .join(", ")})
-             ORDER BY unread_count DESC, last_message_at DESC
-             LIMIT ?`,
-          )
-          .all(
-            accountId,
-            ...(canBackfill ? ["pending", "backfill_pending"] : ["pending"]),
-            limit,
-          ) as Array<{
+      ? ((await this.sql.all("classifyMailboxThreadsForAccount_2", [accountId, limit])) as Array<{
           id: string;
-        }>);
+        }>)
+      : await this.sql.all<{ id: string }>("classificationCandidatesInStates", [
+          accountId,
+          JSON.stringify(canBackfill ? ["pending", "backfill_pending"] : ["pending"]),
+          limit,
+        ]);
 
     let reclassifiedThreads = 0;
     for (const row of rows) {
@@ -8991,14 +8202,7 @@ export class MailboxService {
     }
 
     if (!account.classification_initial_batch_at && canBackfill) {
-      this.db
-        .prepare(
-          `UPDATE mailbox_accounts
-           SET classification_initial_batch_at = COALESCE(classification_initial_batch_at, ?),
-               updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(Date.now(), Date.now(), accountId);
+      await this.sql.run("reclassifyAccount_1", [Date.now(), Date.now(), accountId]);
     }
 
     return {
@@ -9008,23 +8212,16 @@ export class MailboxService {
     };
   }
 
-  private refreshThreadProposals(
+  private async refreshThreadProposals(
     thread: Pick<
       NormalizedThreadInput,
       "id" | "subject" | "needsReply" | "cleanupCandidate" | "staleFollowup" | "category"
     >,
-  ): void {
-    this.db
-      .prepare(
-        `DELETE FROM mailbox_action_proposals
-         WHERE thread_id = ?
-           AND status = 'suggested'
-           AND proposal_type IN ('reply', 'cleanup', 'follow_up', 'schedule')`,
-      )
-      .run(thread.id);
+  ): Promise<void> {
+    await this.sql.run("refreshThreadProposals_1", [thread.id]);
 
     if (thread.needsReply) {
-      this.upsertProposal({
+      await this.upsertProposal({
         threadId: thread.id,
         type: "reply",
         title: `Reply to ${thread.subject}`,
@@ -9032,7 +8229,7 @@ export class MailboxService {
       });
     }
     if (thread.cleanupCandidate) {
-      this.upsertProposal({
+      await this.upsertProposal({
         threadId: thread.id,
         type: "cleanup",
         title: `Clean up ${thread.subject}`,
@@ -9041,7 +8238,7 @@ export class MailboxService {
       });
     }
     if (thread.staleFollowup) {
-      this.upsertProposal({
+      await this.upsertProposal({
         threadId: thread.id,
         type: "follow_up",
         title: `Follow up on ${thread.subject}`,
@@ -9049,7 +8246,7 @@ export class MailboxService {
       });
     }
     if (thread.category === "calendar") {
-      this.upsertProposal({
+      await this.upsertProposal({
         threadId: thread.id,
         type: "schedule",
         title: `Propose meeting slots for ${thread.subject}`,
@@ -9058,7 +8255,7 @@ export class MailboxService {
     }
   }
 
-  private upsertPrimaryContact(thread: NormalizedThreadInput): void {
+  private async upsertPrimaryContact(thread: NormalizedThreadInput): Promise<void> {
     const primary = thread.participants[0];
     if (!primary?.email) return;
     const now = Date.now();
@@ -9075,186 +8272,70 @@ export class MailboxService {
       company ? `Company: ${company}` : null,
     ].filter((entry): entry is string => Boolean(entry));
 
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_contacts
-          (id, account_id, email, name, company, role, encryption_preference, policy_flags_json, crm_links_json, learned_facts_json, response_tendency, last_interaction_at, open_commitments, updated_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(email) DO UPDATE SET
-           account_id = excluded.account_id,
-           name = COALESCE(excluded.name, mailbox_contacts.name),
-           company = COALESCE(excluded.company, mailbox_contacts.company),
-           encryption_preference = CASE
-             WHEN mailbox_contacts.encryption_preference IS NULL THEN excluded.encryption_preference
-             ELSE mailbox_contacts.encryption_preference
-           END,
-           policy_flags_json = CASE
-             WHEN mailbox_contacts.policy_flags_json IS NULL THEN excluded.policy_flags_json
-             ELSE mailbox_contacts.policy_flags_json
-           END,
-           learned_facts_json = excluded.learned_facts_json,
-           last_interaction_at = excluded.last_interaction_at,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        `contact:${primary.email}`,
-        thread.accountId,
-        primary.email,
-        primary.name || null,
-        company || null,
-        null,
-        sensitiveContent.hasSensitiveContent ? "preferred" : null,
-        JSON.stringify(sensitiveContent.hasSensitiveContent ? ["sensitive_content"] : []),
-        JSON.stringify([]),
-        JSON.stringify(learnedFacts),
-        thread.needsReply ? "awaiting_reply" : "fyi",
-        thread.lastMessageAt,
-        this.getCommitmentsForThread(thread.id).filter((item) => item.state !== "done").length,
-        now,
-        now,
-      );
+    await this.sql.run("upsertPrimaryContact_1", [
+      `contact:${primary.email}`,
+      thread.accountId,
+      primary.email,
+      primary.name || null,
+      company || null,
+      null,
+      sensitiveContent.hasSensitiveContent ? "preferred" : null,
+      JSON.stringify(sensitiveContent.hasSensitiveContent ? ["sensitive_content"] : []),
+      JSON.stringify([]),
+      JSON.stringify(learnedFacts),
+      thread.needsReply ? "awaiting_reply" : "fyi",
+      thread.lastMessageAt,
+      (await this.getCommitmentsForThread(thread.id)).filter((item) => item.state !== "done")
+        .length,
+      now,
+      now,
+    ]);
   }
 
-  private getSummaryForThread(threadId: string): MailboxSummaryCard | null {
-    const row = this.db
-      .prepare(
-        `SELECT
-           thread_id,
-           summary_text,
-           key_asks_json,
-           extracted_questions_json,
-           suggested_next_action,
-           updated_at
-         FROM mailbox_summaries
-         WHERE thread_id = ?`,
-      )
-      .get(threadId) as MailboxSummaryRow | undefined;
+  private async getSummaryForThread(threadId: string): Promise<MailboxSummaryCard | null> {
+    const row = (await this.sql.get("getSummaryForThread_1", [threadId])) as
+      | MailboxSummaryRow
+      | undefined;
     if (!row) return null;
     return this.mapSummaryRow(row);
   }
 
-  private getMessagesForThread(threadId: string): MailboxMessage[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           thread_id,
-           provider_message_id,
-           direction,
-           from_name,
-           from_email,
-           to_json,
-           cc_json,
-           bcc_json,
-           subject,
-           snippet,
-           body_text,
-           body_html,
-           received_at,
-           is_unread,
-           metadata_json
-         FROM mailbox_messages
-         WHERE thread_id = ?
-         ORDER BY received_at ASC`,
-      )
-      .all(threadId) as MailboxMessageRow[];
+  private async getMessagesForThread(threadId: string): Promise<MailboxMessage[]> {
+    const rows = (await this.sql.all("getMessagesForThread_1", [threadId])) as MailboxMessageRow[];
     return rows.map((row) => this.mapMessageRow(row));
   }
 
-  private getDraftsForThread(threadId: string): MailboxDraftSuggestion[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           thread_id,
-           subject,
-           body_text,
-           tone,
-           rationale,
-           schedule_notes,
-           created_at,
-           updated_at
-         FROM mailbox_drafts
-         WHERE thread_id = ?
-         ORDER BY updated_at DESC`,
-      )
-      .all(threadId) as MailboxDraftRow[];
+  private async getDraftsForThread(threadId: string): Promise<MailboxDraftSuggestion[]> {
+    const rows = (await this.sql.all("getDraftsForThread_1", [threadId])) as MailboxDraftRow[];
     return rows.map((row) => this.mapDraftRow(row));
   }
 
-  private getProposalsForThread(threadId: string): MailboxActionProposal[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           thread_id,
-           proposal_type,
-           title,
-           reasoning,
-           preview_json,
-           status,
-           created_at,
-           updated_at
-         FROM mailbox_action_proposals
-         WHERE thread_id = ?
-         ORDER BY updated_at DESC`,
-      )
-      .all(threadId) as MailboxProposalRow[];
+  private async getProposalsForThread(threadId: string): Promise<MailboxActionProposal[]> {
+    const rows = (await this.sql.all("getProposalsForThread_1", [
+      threadId,
+    ])) as MailboxProposalRow[];
     return rows.map((row) => this.mapProposalRow(row));
   }
 
-  private getCommitmentsForThread(threadId: string): MailboxCommitment[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           thread_id,
-           message_id,
-           title,
-           due_at,
-           state,
-           owner_email,
-           source_excerpt,
-           metadata_json,
-           created_at,
-           updated_at
-         FROM mailbox_commitments
-         WHERE thread_id = ?
-         ORDER BY updated_at DESC`,
-      )
-      .all(threadId) as MailboxCommitmentRow[];
+  private async getCommitmentsForThread(threadId: string): Promise<MailboxCommitment[]> {
+    const rows = (await this.sql.all("getCommitmentsForThread_1", [
+      threadId,
+    ])) as MailboxCommitmentRow[];
     return rows.map((row) => this.mapCommitmentRow(row));
   }
 
-  private getPrimaryContactMemory(threadId: string): MailboxContactMemory | null {
-    const thread = this.db
-      .prepare("SELECT account_id, participants_json FROM mailbox_threads WHERE id = ?")
-      .get(threadId) as { account_id: string; participants_json: string | null } | undefined;
+  private async getPrimaryContactMemory(threadId: string): Promise<MailboxContactMemory | null> {
+    const thread = (await this.sql.get("getPrimaryContactMemory_1", [threadId])) as
+      | { account_id: string; participants_json: string | null }
+      | undefined;
     const email = parseJsonArray<MailboxParticipant>(thread?.participants_json).find(
       Boolean,
     )?.email;
     if (!thread?.account_id || !email) return null;
-    const row = this.db
-      .prepare(
-        `SELECT
-           id,
-           account_id,
-           email,
-           name,
-           company,
-           role,
-           encryption_preference,
-           policy_flags_json,
-           crm_links_json,
-           learned_facts_json,
-           response_tendency,
-           last_interaction_at,
-           open_commitments
-         FROM mailbox_contacts
-         WHERE email = ?`,
-      )
-      .get(email) as MailboxContactRow | undefined;
-    const insights = this.getContactInsights(thread.account_id, email);
+    const row = (await this.sql.get("getPrimaryContactMemory_2", [email])) as
+      | MailboxContactRow
+      | undefined;
+    const insights = await this.getContactInsights(thread.account_id, email);
     if (!row) {
       const participant = parseJsonArray<MailboxParticipant>(thread.participants_json).find(
         Boolean,
@@ -9267,7 +8348,7 @@ export class MailboxService {
         company: companyFromEmail(email),
         crmLinks: [],
         learnedFacts: [],
-        openCommitments: this.getCommitmentsForThread(threadId).filter(
+        openCommitments: (await this.getCommitmentsForThread(threadId)).filter(
           (commitment) => commitment.state === "suggested" || commitment.state === "accepted",
         ).length,
         ...insights,
@@ -9311,43 +8392,30 @@ export class MailboxService {
     return [...candidates];
   }
 
-  private getContactInsights(
+  private async getContactInsights(
     accountId: string,
     email: string,
-  ): Pick<
-    MailboxContactMemory,
-    | "totalThreads"
-    | "totalMessages"
-    | "averageResponseHours"
-    | "lastOutboundAt"
-    | "recentSubjects"
-    | "styleSignals"
-    | "recentOutboundExample"
-    | "responseTendency"
+  ): Promise<
+    Pick<
+      MailboxContactMemory,
+      | "totalThreads"
+      | "totalMessages"
+      | "averageResponseHours"
+      | "lastOutboundAt"
+      | "recentSubjects"
+      | "styleSignals"
+      | "recentOutboundExample"
+      | "responseTendency"
+    >
   > {
     const like = `%${email}%`;
-    const threadRows = this.db
-      .prepare(
-        `SELECT id, subject, last_message_at
-         FROM mailbox_threads
-         WHERE account_id = ? AND participants_json LIKE ?
-         ORDER BY last_message_at DESC`,
-      )
-      .all(accountId, like) as Array<{ id: string; subject: string; last_message_at: number }>;
+    const threadRows = (await this.sql.all("getContactInsights_1", [accountId, like])) as Array<{
+      id: string;
+      subject: string;
+      last_message_at: number;
+    }>;
 
-    const messageRows = this.db
-      .prepare(
-        `SELECT
-           m.thread_id,
-           m.direction,
-           m.body_text,
-           m.received_at
-         FROM mailbox_messages m
-         JOIN mailbox_threads t ON t.id = m.thread_id
-         WHERE t.account_id = ? AND t.participants_json LIKE ?
-         ORDER BY m.received_at ASC`,
-      )
-      .all(accountId, like) as Array<{
+    const messageRows = (await this.sql.all("getContactInsights_2", [accountId, like])) as Array<{
       thread_id: string;
       direction: "incoming" | "outgoing";
       body_text: string;
@@ -9445,55 +8513,21 @@ export class MailboxService {
   private async getThreadCore(
     threadId: string,
   ): Promise<(MailboxThreadListItem & { messages: MailboxMessage[] }) | null> {
-    const row = this.db
-      .prepare(
-        `SELECT
-           id,
-           account_id,
-           provider,
-           provider_thread_id,
-           subject,
-           snippet,
-           participants_json,
-           labels_json,
-           category,
-           today_bucket,
-           domain_category,
-           classification_rationale,
-           priority_score,
-           urgency_score,
-           needs_reply,
-           stale_followup,
-           cleanup_candidate,
-           handled,
-           local_inbox_hidden,
-           unread_count,
-           message_count,
-           last_message_at,
-           sensitive_content_json,
-           classification_state
-         FROM mailbox_threads
-         WHERE id = ?`,
-      )
-      .get(threadId) as MailboxThreadRow | undefined;
+    const row = (await this.sql.get("getThread_1", [threadId])) as MailboxThreadRow | undefined;
     if (!row) return null;
     return {
-      ...this.mapThreadRow(row, this.getSummaryForThread(threadId) || undefined),
-      messages: this.getMessagesForThread(threadId),
+      ...(await this.mapThreadRow(row, (await this.getSummaryForThread(threadId)) || undefined)),
+      messages: await this.getMessagesForThread(threadId),
     };
   }
 
-  private resolveThreadWorkspaceId(_accountId?: string): string | undefined {
+  private async resolveThreadWorkspaceId(_accountId?: string): Promise<string | undefined> {
     const agentMail = this.parseAgentMailAccountId(_accountId);
     if (agentMail) {
-      const row = this.db
-        .prepare(
-          `SELECT workspace_id
-           FROM agentmail_inboxes
-           WHERE pod_id = ? AND inbox_id = ?
-           LIMIT 1`,
-        )
-        .get(agentMail.podId, agentMail.inboxId) as { workspace_id: string } | undefined;
+      const row = (await this.sql.get("resolveThreadWorkspaceId_1", [
+        agentMail.podId,
+        agentMail.inboxId,
+      ])) as { workspace_id: string } | undefined;
       if (row?.workspace_id) {
         return row.workspace_id;
       }
@@ -9572,10 +8606,10 @@ export class MailboxService {
     return refs;
   }
 
-  private buildMissionControlCompanyCandidates(
+  private async buildMissionControlCompanyCandidates(
     detail: MailboxThreadDetail,
-  ): MailboxCompanyCandidate[] {
-    const companies = this.controlPlaneCore.listCompanies();
+  ): Promise<MailboxCompanyCandidate[]> {
+    const companies = await this.controlPlaneCore.listCompanies();
     const email = detail.research?.primaryContact?.email || detail.participants[0]?.email;
     const domain = (detail.research?.domain || email?.split("@")[1] || "").toLowerCase();
     const companyHint = (
@@ -9633,12 +8667,12 @@ export class MailboxService {
     return scored.slice(0, 5);
   }
 
-  private buildMissionControlOperatorRecommendations(
+  private async buildMissionControlOperatorRecommendations(
     detail: MailboxThreadDetail,
     companyId?: string,
-  ): MailboxOperatorRecommendation[] {
-    const roles = this.agentRoleRepo
-      .findAll(false)
+  ): Promise<MailboxOperatorRecommendation[]> {
+    const roles = (await this.agentRoleRepo
+      .findAll(false))
       .filter(
         (role) =>
           role.isActive !== false &&
@@ -9749,7 +8783,7 @@ export class MailboxService {
     }
   }
 
-  private persistMissionControlHandoff(input: {
+  private async persistMissionControlHandoff(input: {
     threadId: string;
     workspaceId: string;
     companyId: string;
@@ -9760,75 +8794,51 @@ export class MailboxService {
     issueTitle: string;
     latestOutcome?: string;
     latestWakeAt?: number;
-  }): MailboxMissionControlHandoffRecord {
+  }): Promise<MailboxMissionControlHandoffRecord> {
     const id = randomUUID();
     const now = Date.now();
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_mission_control_handoffs (
-           id,
-           thread_id,
-           workspace_id,
-           company_id,
-           company_name,
-           operator_role_id,
-           operator_display_name,
-           issue_id,
-           issue_title,
-           source,
-           latest_outcome,
-           latest_wake_at,
-           created_at,
-           updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'mailbox_handoff', ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        input.threadId,
-        input.workspaceId,
-        input.companyId,
-        input.companyName,
-        input.operatorRoleId,
-        input.operatorDisplayName,
-        input.issueId,
-        input.issueTitle,
-        input.latestOutcome || null,
-        input.latestWakeAt || null,
-        now,
-        now,
-      );
-    const row = this.db
-      .prepare(`SELECT * FROM mailbox_mission_control_handoffs WHERE id = ?`)
-      .get(id) as MailboxMissionControlHandoffRow;
+    await this.sql.run("persistMissionControlHandoff_1", [
+      id,
+      input.threadId,
+      input.workspaceId,
+      input.companyId,
+      input.companyName,
+      input.operatorRoleId,
+      input.operatorDisplayName,
+      input.issueId,
+      input.issueTitle,
+      input.latestOutcome || null,
+      input.latestWakeAt || null,
+      now,
+      now,
+    ]);
+    const row = (await this.sql.get("persistMissionControlHandoff_2", [
+      id,
+    ])) as MailboxMissionControlHandoffRow;
     return this.mapMissionControlHandoffRow(row);
   }
 
-  private findActiveMissionControlHandoff(
+  private async findActiveMissionControlHandoff(
     threadId: string,
     companyId: string,
     operatorRoleId: string,
-  ): MailboxMissionControlHandoffRecord | null {
-    const rows = this.db
-      .prepare(
-        `SELECT *
-         FROM mailbox_mission_control_handoffs
-         WHERE thread_id = ?
-           AND company_id = ?
-           AND operator_role_id = ?
-         ORDER BY updated_at DESC`,
-      )
-      .all(threadId, companyId, operatorRoleId) as MailboxMissionControlHandoffRow[];
+  ): Promise<MailboxMissionControlHandoffRecord | null> {
+    const rows = (await this.sql.all("findActiveMissionControlHandoff_1", [
+      threadId,
+      companyId,
+      operatorRoleId,
+    ])) as MailboxMissionControlHandoffRow[];
     for (const row of rows) {
-      const record = this.mapMissionControlHandoffRow(row);
+      const record = await this.mapMissionControlHandoffRow(row);
       if (record.issueStatus === "open") return record;
     }
     return null;
   }
 
-  private mapMissionControlHandoffRow(
+  private async mapMissionControlHandoffRow(
     row: MailboxMissionControlHandoffRow,
-  ): MailboxMissionControlHandoffRecord {
-    const issue = this.controlPlaneCore.getIssue(row.issue_id);
+  ): Promise<MailboxMissionControlHandoffRecord> {
+    const issue = await this.controlPlaneCore.getIssue(row.issue_id);
     const issueStatus: MailboxMissionControlHandoffRecord["issueStatus"] =
       issue?.status === "done" ? "done" : issue?.status === "cancelled" ? "cancelled" : "open";
     return {
@@ -9948,14 +8958,14 @@ export class MailboxService {
         },
       );
     } else if (thread.provider === "outlook_graph") {
-      const archiveFolder = this.listMailboxFolders().find(
+      const archiveFolder = (await this.listMailboxFolders()).find(
         (folder) => folder.accountId === thread.accountId && folder.role === "archive",
       );
       const latestMessage = [...thread.messages].sort((a, b) => b.receivedAt - a.receivedAt)[0];
       if (!latestMessage || !archiveFolder) {
         throw new Error("Unable to resolve Outlook archive target.");
       }
-      await this.microsoftGraphRequest(this.resolveMicrosoftGraphChannelId(), {
+      await this.microsoftGraphRequest(await this.resolveMicrosoftGraphChannelId(), {
         method: "POST",
         path: `/me/messages/${encodeURIComponent(latestMessage.providerMessageId)}/move`,
         scopes: MICROSOFT_GRAPH_READWRITE_SCOPES,
@@ -9965,51 +8975,28 @@ export class MailboxService {
       throw new Error("Archive is not supported for the current IMAP adapter.");
     }
 
-    this.db
-      .prepare(
-        "UPDATE mailbox_threads SET handled = 1, cleanup_candidate = 0, local_inbox_hidden = 1, updated_at = ? WHERE id = ?",
-      )
-      .run(Date.now(), thread.id);
+    await this.sql.run("applyArchive_1", [Date.now(), thread.id]);
   }
 
-  private applyLocalCleanup(
+  private async applyLocalCleanup(
     thread: MailboxThreadDetail | (MailboxThreadListItem & { messages: MailboxMessage[] }),
-  ): void {
-    this.db
-      .prepare(
-        "UPDATE mailbox_threads SET handled = 1, cleanup_candidate = 0, local_inbox_hidden = 1, updated_at = ? WHERE id = ?",
-      )
-      .run(Date.now(), thread.id);
+  ): Promise<void> {
+    await this.sql.run("applyArchive_1", [Date.now(), thread.id]);
   }
 
   private async applyMarkDone(
     thread: MailboxThreadDetail | (MailboxThreadListItem & { messages: MailboxMessage[] }),
   ): Promise<void> {
     const now = Date.now();
-    const openCommitments = this.db
-      .prepare(
-        `SELECT id
-         FROM mailbox_commitments
-         WHERE thread_id = ?
-           AND state IN ('suggested', 'accepted')`,
-      )
-      .all(thread.id) as Array<{ id: string }>;
+    const openCommitments = (await this.sql.all("applyMarkDone_1", [thread.id])) as Array<{
+      id: string;
+    }>;
     for (const commitment of openCommitments) {
       await this.updateCommitmentState(commitment.id, "done");
     }
-    this.db
-      .prepare(
-        `UPDATE mailbox_threads
-         SET needs_reply = 0,
-             stale_followup = 0,
-             handled = 1,
-             today_bucket = CASE WHEN today_bucket = 'needs_action' THEN 'good_to_know' ELSE today_bucket END,
-             updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(now, thread.id);
-    this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
-    this.updateProposalStatusByThreadAndType(thread.id, "follow_up", "dismissed");
+    await this.sql.run("applyMarkDone_2", [now, thread.id]);
+    await this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
+    await this.updateProposalStatusByThreadAndType(thread.id, "follow_up", "dismissed");
   }
 
   private async applyTrash(
@@ -10037,7 +9024,7 @@ export class MailboxService {
     } else if (thread.provider === "outlook_graph") {
       const latestMessage = [...thread.messages].sort((a, b) => b.receivedAt - a.receivedAt)[0];
       if (!latestMessage) throw new Error("Unable to resolve Outlook message for trash.");
-      await this.microsoftGraphRequest(this.resolveMicrosoftGraphChannelId(), {
+      await this.microsoftGraphRequest(await this.resolveMicrosoftGraphChannelId(), {
         method: "DELETE",
         path: `/me/messages/${encodeURIComponent(latestMessage.providerMessageId)}`,
         scopes: MICROSOFT_GRAPH_READWRITE_SCOPES,
@@ -10046,11 +9033,7 @@ export class MailboxService {
       throw new Error("Trash is not supported for the current IMAP adapter.");
     }
 
-    this.db
-      .prepare(
-        "UPDATE mailbox_threads SET handled = 1, cleanup_candidate = 0, local_inbox_hidden = 1, updated_at = ? WHERE id = ?",
-      )
-      .run(Date.now(), thread.id);
+    await this.sql.run("applyArchive_1", [Date.now(), thread.id]);
   }
 
   private async applyMarkRead(
@@ -10078,7 +9061,7 @@ export class MailboxService {
         });
       }
     } else {
-      const channel = this.channelRepo.findByType("email");
+      const channel = await this.channelRepo.findByType("email");
       if (!channel) throw new Error("Email channel is not configured");
       const cfg = (channel.config as Any) || {};
       if (thread.provider === "outlook_graph") {
@@ -10114,19 +9097,13 @@ export class MailboxService {
       }
     }
 
-    this.markThreadReadLocally(thread.id);
+    await this.markThreadReadLocally(thread.id);
   }
 
-  private markThreadReadLocally(threadId: string): void {
+  private async markThreadReadLocally(threadId: string): Promise<void> {
     const now = Date.now();
-    this.db
-      .prepare("UPDATE mailbox_messages SET is_unread = 0, updated_at = ? WHERE thread_id = ?")
-      .run(now, threadId);
-    this.db
-      .prepare(
-        "UPDATE mailbox_threads SET unread_count = 0, handled = CASE WHEN needs_reply = 0 THEN 1 ELSE handled END, updated_at = ? WHERE id = ?",
-      )
-      .run(now, threadId);
+    await this.sql.run("markThreadReadLocally_1", [now, threadId]);
+    await this.sql.run("markThreadReadLocally_2", [now, threadId]);
   }
 
   private async applyMarkUnread(
@@ -10156,7 +9133,7 @@ export class MailboxService {
         },
       );
     } else {
-      const channel = this.channelRepo.findByType("email");
+      const channel = await this.channelRepo.findByType("email");
       if (!channel) throw new Error("Email channel is not configured");
       const cfg = (channel.config as Any) || {};
       if (thread.provider === "outlook_graph") {
@@ -10193,17 +9170,9 @@ export class MailboxService {
 
     const targetMessageId = latestMessage?.id || null;
     if (targetMessageId) {
-      this.db
-        .prepare(
-          "UPDATE mailbox_messages SET is_unread = CASE WHEN id = ? THEN 1 ELSE is_unread END, updated_at = ? WHERE thread_id = ?",
-        )
-        .run(targetMessageId, Date.now(), thread.id);
+      await this.sql.run("applyMarkUnread_1", [targetMessageId, Date.now(), thread.id]);
     }
-    this.db
-      .prepare(
-        "UPDATE mailbox_threads SET unread_count = 1, handled = 0, updated_at = ? WHERE id = ?",
-      )
-      .run(Date.now(), thread.id);
+    await this.sql.run("applyMarkUnread_2", [Date.now(), thread.id]);
   }
 
   private async applyMicrosoftGraphReadState(
@@ -10211,17 +9180,7 @@ export class MailboxService {
     threadId: string,
     read: boolean,
   ): Promise<void> {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           provider_message_id,
-           metadata_json
-         FROM mailbox_messages
-         WHERE thread_id = ?
-         ORDER BY is_unread DESC, received_at DESC`,
-      )
-      .all(threadId) as Array<
+    const rows = (await this.sql.all("applyMicrosoftGraphReadState_1", [threadId])) as Array<
       Pick<MailboxMessageRow, "id" | "provider_message_id" | "metadata_json">
     >;
 
@@ -10247,7 +9206,7 @@ export class MailboxService {
         );
         if (!graphMessageId) continue;
         await this.updateMicrosoftGraphMessageReadState(channelId, graphMessageId, read);
-        this.persistResolvedMicrosoftGraphMessageId(row, graphMessageId, messageId);
+        await this.persistResolvedMicrosoftGraphMessageId(row, graphMessageId, messageId);
         mailboxLogger.warn("Recovered Microsoft Graph message id for mailbox read-state update", {
           threadId,
           mailboxMessageId: row.id,
@@ -10296,23 +9255,21 @@ export class MailboxService {
     });
   }
 
-  private persistResolvedMicrosoftGraphMessageId(
+  private async persistResolvedMicrosoftGraphMessageId(
     row: Pick<MailboxMessageRow, "id" | "metadata_json">,
     microsoftGraphMessageId: string,
     rfcMessageId?: string,
-  ): void {
+  ): Promise<void> {
     const previous = parseMailboxMessageMetadata(row.metadata_json);
-    this.db
-      .prepare("UPDATE mailbox_messages SET metadata_json = ?, updated_at = ? WHERE id = ?")
-      .run(
-        JSON.stringify({
-          ...previous,
-          microsoftGraphMessageId,
-          rfcMessageId: rfcMessageId || previous.rfcMessageId,
-        }),
-        Date.now(),
-        row.id,
-      );
+    await this.sql.run("persistResolvedMicrosoftGraphMessageId_1", [
+      JSON.stringify({
+        ...previous,
+        microsoftGraphMessageId,
+        rfcMessageId: rfcMessageId || previous.rfcMessageId,
+      }),
+      Date.now(),
+      row.id,
+    ]);
   }
 
   private async applyStandardImapReadState(
@@ -10320,17 +9277,7 @@ export class MailboxService {
     client: EmailClient,
     read: boolean,
   ): Promise<void> {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           id,
-           provider_message_id,
-           metadata_json
-         FROM mailbox_messages
-         WHERE thread_id = ?
-         ORDER BY is_unread DESC, received_at DESC`,
-      )
-      .all(threadId) as Array<
+    const rows = (await this.sql.all("applyMicrosoftGraphReadState_1", [threadId])) as Array<
       Pick<MailboxMessageRow, "id" | "provider_message_id" | "metadata_json">
     >;
 
@@ -10356,7 +9303,7 @@ export class MailboxService {
           ? await client.markMessageIdAsRead(messageId)
           : await client.markMessageIdAsUnread(messageId);
         if (uid === null || !Number.isFinite(uid)) continue;
-        this.persistResolvedImapMessageUid(row, uid, messageId);
+        await this.persistResolvedImapMessageUid(row, uid, messageId);
         mailboxLogger.warn("Recovered legacy IMAP UID for mailbox read-state update", {
           threadId,
           mailboxMessageId: row.id,
@@ -10381,23 +9328,21 @@ export class MailboxService {
     return Number.isFinite(metadata.imapUid) ? metadata.imapUid || null : null;
   }
 
-  private persistResolvedImapMessageUid(
+  private async persistResolvedImapMessageUid(
     row: Pick<MailboxMessageRow, "id" | "metadata_json">,
     uid: number,
     rfcMessageId?: string,
-  ): void {
+  ): Promise<void> {
     const previous = parseMailboxMessageMetadata(row.metadata_json);
-    this.db
-      .prepare("UPDATE mailbox_messages SET metadata_json = ?, updated_at = ? WHERE id = ?")
-      .run(
-        JSON.stringify({
-          ...previous,
-          imapUid: uid,
-          rfcMessageId: rfcMessageId || previous.rfcMessageId,
-        }),
-        Date.now(),
-        row.id,
-      );
+    await this.sql.run("persistResolvedMicrosoftGraphMessageId_1", [
+      JSON.stringify({
+        ...previous,
+        imapUid: uid,
+        rfcMessageId: rfcMessageId || previous.rfcMessageId,
+      }),
+      Date.now(),
+      row.id,
+    ]);
   }
 
   private async applyLabel(
@@ -10431,9 +9376,7 @@ export class MailboxService {
     }
 
     const labels = Array.from(new Set([...thread.labels, label]));
-    this.db
-      .prepare("UPDATE mailbox_threads SET labels_json = ?, updated_at = ? WHERE id = ?")
-      .run(JSON.stringify(labels), Date.now(), thread.id);
+    await this.sql.run("applyLabel_1", [JSON.stringify(labels), Date.now(), thread.id]);
   }
 
   private async applyRemoveLabel(
@@ -10466,9 +9409,7 @@ export class MailboxService {
       throw new Error("Remove label is only supported for Gmail- or AgentMail-backed threads.");
     }
     const labels = thread.labels.filter((entry) => entry !== label);
-    this.db
-      .prepare("UPDATE mailbox_threads SET labels_json = ?, updated_at = ? WHERE id = ?")
-      .run(JSON.stringify(labels), Date.now(), thread.id);
+    await this.sql.run("applyLabel_1", [JSON.stringify(labels), Date.now(), thread.id]);
   }
 
   private async applyMove(
@@ -10476,7 +9417,7 @@ export class MailboxService {
     folderId: string,
   ): Promise<void> {
     if (!folderId) throw new Error("Missing folder for move action");
-    const folder = this.listMailboxFolders().find(
+    const folder = (await this.listMailboxFolders()).find(
       (entry) => entry.id === folderId || entry.providerFolderId === folderId,
     );
     const target = folder?.providerFolderId || folderId;
@@ -10491,7 +9432,7 @@ export class MailboxService {
     } else if (thread.provider === "outlook_graph") {
       const message = [...thread.messages].sort((a, b) => b.receivedAt - a.receivedAt)[0];
       if (!message) throw new Error("Unable to resolve Outlook message for move.");
-      await this.microsoftGraphRequest(this.resolveMicrosoftGraphChannelId(), {
+      await this.microsoftGraphRequest(await this.resolveMicrosoftGraphChannelId(), {
         method: "POST",
         path: `/me/messages/${encodeURIComponent(message.providerMessageId)}/move`,
         scopes: MICROSOFT_GRAPH_READWRITE_SCOPES,
@@ -10500,9 +9441,7 @@ export class MailboxService {
     } else {
       throw new Error("Move is only supported for Gmail and Microsoft Graph mailboxes.");
     }
-    this.db
-      .prepare("UPDATE mailbox_threads SET handled = 1, updated_at = ? WHERE id = ?")
-      .run(Date.now(), thread.id);
+    await this.sql.run("applyAction_1", [Date.now(), thread.id]);
   }
 
   private async applySendDraft(
@@ -10510,7 +9449,7 @@ export class MailboxService {
     draftId?: string,
     override?: { subject?: string; body?: string },
   ): Promise<void> {
-    const drafts = this.getDraftsForThread(thread.id);
+    const drafts = await this.getDraftsForThread(thread.id);
     const draft = draftId ? drafts.find((entry) => entry.id === draftId) : drafts[0];
     if (!draft) throw new Error("Draft not found");
 
@@ -10521,15 +9460,7 @@ export class MailboxService {
     const body = override?.body ?? draft.body;
 
     if (subject !== draft.subject || body !== draft.body) {
-      this.db
-        .prepare(
-          `UPDATE mailbox_drafts
-           SET subject = ?,
-               body_text = ?,
-               updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(subject, body, Date.now(), draft.id);
+      await this.sql.run("applySendDraft_1", [subject, body, Date.now(), draft.id]);
     }
 
     if (thread.provider === "gmail") {
@@ -10574,7 +9505,7 @@ export class MailboxService {
         },
       );
     } else {
-      const channel = this.channelRepo.findByType("email");
+      const channel = await this.channelRepo.findByType("email");
       if (!channel) throw new Error("Email channel is not configured");
       const cfg = (channel.config as Any) || {};
       const client = this.createStandardEmailClient(channel.id, cfg);
@@ -10585,18 +9516,9 @@ export class MailboxService {
       });
     }
 
-    this.db.prepare("DELETE FROM mailbox_drafts WHERE id = ?").run(draft.id);
-    this.db
-      .prepare(
-        `UPDATE mailbox_threads
-         SET needs_reply = 0,
-             handled = 1,
-             today_bucket = CASE WHEN today_bucket = 'needs_action' THEN 'good_to_know' ELSE today_bucket END,
-             updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(Date.now(), thread.id);
-    this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
+    await this.sql.run("applySendDraft_2", [draft.id]);
+    await this.sql.run("applySendDraft_3", [Date.now(), thread.id]);
+    await this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
   }
 
   private async applySendMessage(
@@ -10667,7 +9589,7 @@ export class MailboxService {
         },
       );
     } else {
-      const channel = this.channelRepo.findByType("email");
+      const channel = await this.channelRepo.findByType("email");
       if (!channel) throw new Error("Email channel is not configured");
       const cfg = (channel.config as Any) || {};
       const client = this.createStandardEmailClient(channel.id, cfg);
@@ -10681,17 +9603,8 @@ export class MailboxService {
     }
 
     if (input.mode !== "forward") {
-      this.db
-        .prepare(
-          `UPDATE mailbox_threads
-           SET needs_reply = 0,
-               handled = 1,
-               today_bucket = CASE WHEN today_bucket = 'needs_action' THEN 'good_to_know' ELSE today_bucket END,
-               updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(Date.now(), thread.id);
-      this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
+      await this.sql.run("applySendMessage_1", [Date.now(), thread.id]);
+      await this.updateProposalStatusByThreadAndType(thread.id, "reply", "applied");
     }
   }
 
@@ -10699,13 +9612,13 @@ export class MailboxService {
     thread: MailboxThreadDetail | (MailboxThreadListItem & { messages: MailboxMessage[] }),
     draftId?: string,
   ): Promise<void> {
-    const drafts = this.getDraftsForThread(thread.id);
+    const drafts = await this.getDraftsForThread(thread.id);
     const draft = draftId ? drafts.find((entry) => entry.id === draftId) : drafts[0];
     if (!draft) throw new Error("Draft not found");
 
-    this.db.prepare("DELETE FROM mailbox_drafts WHERE id = ?").run(draft.id);
+    await this.sql.run("applySendDraft_2", [draft.id]);
 
-    this.updateProposalStatusByThreadAndType(thread.id, "reply", "dismissed");
+    await this.updateProposalStatusByThreadAndType(thread.id, "reply", "dismissed");
   }
 
   private async applyScheduleEvent(
@@ -10716,7 +9629,7 @@ export class MailboxService {
       throw new Error("Google Calendar must be connected before creating schedule events.");
     }
     const proposal = proposalId
-      ? this.getProposalsForThread(thread.id).find((entry) => entry.id === proposalId)
+      ? (await this.getProposalsForThread(thread.id)).find((entry) => entry.id === proposalId)
       : undefined;
     const previewOptions = Array.isArray(proposal?.preview?.slotOptions)
       ? proposal.preview.slotOptions
@@ -10749,111 +9662,84 @@ export class MailboxService {
       },
     });
 
-    this.updateProposalStatusByThreadAndType(thread.id, "schedule", "applied");
+    await this.updateProposalStatusByThreadAndType(thread.id, "schedule", "applied");
   }
 
-  private updateProposalStatus(proposalId: string, status: MailboxProposalStatus): void {
-    this.db
-      .prepare(
-        `UPDATE mailbox_action_proposals
-         SET status = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(status, Date.now(), proposalId);
+  private async updateProposalStatus(
+    proposalId: string,
+    status: MailboxProposalStatus,
+  ): Promise<void> {
+    await this.sql.run("updateProposalStatus_1", [status, Date.now(), proposalId]);
   }
 
-  private updateProposalStatusByThreadAndType(
+  private async updateProposalStatusByThreadAndType(
     threadId: string,
     type: MailboxProposalType,
     status: MailboxProposalStatus,
-  ): void {
-    this.db
-      .prepare(
-        `UPDATE mailbox_action_proposals
-         SET status = ?, updated_at = ?
-         WHERE thread_id = ? AND proposal_type = ?`,
-      )
-      .run(status, Date.now(), threadId, type);
+  ): Promise<void> {
+    await this.sql.run("updateProposalStatusByThreadAndType_1", [
+      status,
+      Date.now(),
+      threadId,
+      type,
+    ]);
   }
 
-  private threadIdFromProposal(proposalId?: string): string | undefined {
+  private async threadIdFromProposal(proposalId?: string): Promise<string | undefined> {
     if (!proposalId) return undefined;
-    const row = this.db
-      .prepare("SELECT thread_id FROM mailbox_action_proposals WHERE id = ?")
-      .get(proposalId) as { thread_id: string } | undefined;
+    const row = (await this.sql.get("threadIdFromProposal_1", [proposalId])) as
+      | { thread_id: string }
+      | undefined;
     return row?.thread_id;
   }
 
-  private updateContactOpenCommitments(threadId: string): void {
-    const contact = this.getPrimaryContactMemory(threadId);
+  private async updateContactOpenCommitments(threadId: string): Promise<void> {
+    const contact = await this.getPrimaryContactMemory(threadId);
     if (!contact) return;
-    const openCount = this.getCommitmentsForThread(threadId).filter(
+    const openCount = (await this.getCommitmentsForThread(threadId)).filter(
       (item) => item.state === "suggested" || item.state === "accepted",
     ).length;
-    this.db
-      .prepare(
-        `UPDATE mailbox_contacts
-         SET open_commitments = ?, updated_at = ?
-         WHERE email = ?`,
-      )
-      .run(openCount, Date.now(), contact.email);
+    await this.sql.run("updateContactOpenCommitments_1", [openCount, Date.now(), contact.email]);
   }
 
-  private upsertProposal(input: {
+  private async upsertProposal(input: {
     threadId: string;
     type: MailboxProposalType;
     title: string;
     reasoning: string;
     preview?: Record<string, unknown>;
-  }): void {
-    const existing = this.db
-      .prepare(
-        `SELECT id
-         FROM mailbox_action_proposals
-         WHERE thread_id = ? AND proposal_type = ? AND status = 'suggested'
-         LIMIT 1`,
-      )
-      .get(input.threadId, input.type) as { id: string } | undefined;
+  }): Promise<void> {
+    const existing = (await this.sql.get("upsertProposal_1", [input.threadId, input.type])) as
+      | { id: string }
+      | undefined;
     const now = Date.now();
     if (existing?.id) {
-      this.db
-        .prepare(
-          `UPDATE mailbox_action_proposals
-           SET title = ?, reasoning = ?, preview_json = ?, updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          input.title,
-          input.reasoning,
-          input.preview ? JSON.stringify(input.preview) : null,
-          now,
-          existing.id,
-        );
-      return;
-    }
-
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_action_proposals
-          (id, thread_id, proposal_type, title, reasoning, preview_json, status, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        randomUUID(),
-        input.threadId,
-        input.type,
+      await this.sql.run("upsertProposal_2", [
         input.title,
         input.reasoning,
         input.preview ? JSON.stringify(input.preview) : null,
-        "suggested",
-        JSON.stringify({ source: "mailbox-service" }),
         now,
-        now,
-      );
+        existing.id,
+      ]);
+      return;
+    }
+
+    await this.sql.run("upsertProposal_3", [
+      randomUUID(),
+      input.threadId,
+      input.type,
+      input.title,
+      input.reasoning,
+      input.preview ? JSON.stringify(input.preview) : null,
+      "suggested",
+      JSON.stringify({ source: "mailbox-service" }),
+      now,
+      now,
+    ]);
   }
 
   private hasEmailChannel(): boolean {
-    const channel = this.channelRepo.findByType("email");
+    const channel = this.channelStore.findByType("email");
     return Boolean(channel?.enabled);
   }
 
@@ -10916,7 +9802,7 @@ export class MailboxService {
     channelId: string,
     requiredScopes: readonly string[] = MICROSOFT_GRAPH_READWRITE_SCOPES,
   ): Promise<string> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel || channel.type !== "email") {
       throw new Error("Email channel not found");
     }
@@ -10973,12 +9859,12 @@ export class MailboxService {
         refreshed.scopes || (config.scopes as string[] | undefined),
       ),
     };
-    this.channelRepo.update(channelId, { config: nextConfig });
+    await this.channelRepo.update(channelId, { config: nextConfig });
     return refreshed.accessToken;
   }
 
   private async getEmailOAuthAccessToken(channelId: string): Promise<string> {
-    const channel = this.channelRepo.findById(channelId);
+    const channel = await this.channelRepo.findById(channelId);
     if (!channel || channel.type !== "email") {
       throw new Error("Email channel not found");
     }
@@ -11024,7 +9910,7 @@ export class MailboxService {
         refreshed.scopes || (config.scopes as string[] | undefined),
       ),
     };
-    this.channelRepo.update(channelId, { config: nextConfig });
+    await this.channelRepo.update(channelId, { config: nextConfig });
     return refreshed.accessToken;
   }
 
@@ -11050,22 +9936,17 @@ export class MailboxService {
     });
   }
 
-  private getMailboxSyncHealth(accounts: MailboxAccount[]): MailboxSyncHealth[] {
-    const queueRows = this.db
-      .prepare(
-        `SELECT account_id, status, COUNT(*) AS count
-         FROM mailbox_queued_actions
-         GROUP BY account_id, status`,
-      )
-      .all() as Array<{ account_id: string | null; status: string; count: number }>;
-    const draftRows = this.db
-      .prepare(
-        `SELECT account_id, status, COUNT(*) AS count
-         FROM mailbox_compose_drafts
-         WHERE status NOT IN ('discarded', 'sent')
-         GROUP BY account_id, status`,
-      )
-      .all() as Array<{ account_id: string; status: string; count: number }>;
+  private async getMailboxSyncHealth(accounts: MailboxAccount[]): Promise<MailboxSyncHealth[]> {
+    const queueRows = (await this.sql.all("getMailboxSyncHealth_1", [])) as Array<{
+      account_id: string | null;
+      status: string;
+      count: number;
+    }>;
+    const draftRows = (await this.sql.all("getMailboxSyncHealth_2", [])) as Array<{
+      account_id: string;
+      status: string;
+      count: number;
+    }>;
 
     return accounts.map((account) => {
       const queuedActionCount = queueRows
@@ -11102,22 +9983,12 @@ export class MailboxService {
     });
   }
 
-  private listMailboxFolders(): MailboxFolder[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, account_id, provider_folder_id, name, role, unread_count, total_count, created_at, updated_at
-         FROM mailbox_folders
-         ORDER BY account_id, role, name`,
-      )
-      .all() as MailboxFolderRow[];
+  private async listMailboxFolders(): Promise<MailboxFolder[]> {
+    const rows = (await this.sql.all("listMailboxFolders_1", [])) as MailboxFolderRow[];
     const persisted = rows.map((row) => this.mapMailboxFolderRow(row));
     const existingKeys = new Set(persisted.map((folder) => `${folder.accountId}:${folder.role}`));
     const synthetic: MailboxFolder[] = [];
-    const accounts = this.db
-      .prepare(
-        `SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at FROM mailbox_accounts`,
-      )
-      .all() as MailboxAccountRow[];
+    const accounts = (await this.sql.all("listMailboxFolders_2", [])) as MailboxAccountRow[];
     const standard: Array<{ role: MailboxFolder["role"]; name: string }> = [
       { role: "inbox", name: "Inbox" },
       { role: "sent", name: "Sent" },
@@ -11128,7 +9999,7 @@ export class MailboxService {
       { role: "spam", name: "Spam" },
     ];
     const now = Date.now();
-    for (const account of this.filterVisibleMailboxAccountRows(accounts)) {
+    for (const account of await this.filterVisibleMailboxAccountRows(accounts)) {
       for (const folder of standard) {
         if (existingKeys.has(`${account.id}:${folder.role}`)) continue;
         synthetic.push({
@@ -11145,36 +10016,20 @@ export class MailboxService {
     return [...persisted, ...synthetic];
   }
 
-  private listMailboxLabels(): MailboxLabel[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, account_id, provider_label_id, name, color, unread_count, total_count, created_at, updated_at
-         FROM mailbox_labels
-         ORDER BY account_id, name`,
-      )
-      .all() as MailboxLabelRow[];
+  private async listMailboxLabels(): Promise<MailboxLabel[]> {
+    const rows = (await this.sql.all("listMailboxLabels_1", [])) as MailboxLabelRow[];
     return rows.map((row) => this.mapMailboxLabelRow(row));
   }
 
-  private listMailboxIdentities(): MailboxIdentity[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, account_id, provider_identity_id, email, display_name, signature_id, is_default, created_at, updated_at
-         FROM mailbox_identities
-         ORDER BY account_id, is_default DESC, email`,
-      )
-      .all() as MailboxIdentityRow[];
+  private async listMailboxIdentities(): Promise<MailboxIdentity[]> {
+    const rows = (await this.sql.all("listMailboxIdentities_1", [])) as MailboxIdentityRow[];
     const identities = rows.map((row) => this.mapMailboxIdentityRow(row));
     const existingAccounts = new Set(identities.map((identity) => identity.accountId));
-    const accounts = this.db
-      .prepare(
-        `SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at FROM mailbox_accounts`,
-      )
-      .all() as MailboxAccountRow[];
+    const accounts = (await this.sql.all("listMailboxFolders_2", [])) as MailboxAccountRow[];
     const now = Date.now();
     return [
       ...identities,
-      ...this.filterVisibleMailboxAccountRows(accounts)
+      ...(await this.filterVisibleMailboxAccountRows(accounts))
         .filter((account) => !existingAccounts.has(account.id))
         .map((account) => ({
           id: `${account.id}:default`,
@@ -11188,67 +10043,31 @@ export class MailboxService {
     ];
   }
 
-  private listMailboxSignatures(): MailboxSignature[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, account_id, name, body_html, body_text, is_default, created_at, updated_at
-         FROM mailbox_signatures
-         ORDER BY account_id, is_default DESC, name`,
-      )
-      .all() as MailboxSignatureRow[];
+  private async listMailboxSignatures(): Promise<MailboxSignature[]> {
+    const rows = (await this.sql.all("listMailboxSignatures_1", [])) as MailboxSignatureRow[];
     return rows.map((row) => this.mapMailboxSignatureRow(row));
   }
 
-  private listMailboxComposeDrafts(): MailboxComposeDraft[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, account_id, thread_id, provider_draft_id, mode, status, subject, body_text, body_html,
-                to_json, cc_json, bcc_json, identity_id, signature_id, attachments_json, scheduled_at,
-                send_after, latest_error, metadata_json, created_at, updated_at
-         FROM mailbox_compose_drafts
-         WHERE status != 'discarded'
-         ORDER BY updated_at DESC
-         LIMIT 100`,
-      )
-      .all() as MailboxComposeDraftRow[];
+  private async listMailboxComposeDrafts(): Promise<MailboxComposeDraft[]> {
+    const rows = (await this.sql.all("listMailboxComposeDrafts_1", [])) as MailboxComposeDraftRow[];
     return rows.map((row) => this.mapMailboxComposeDraftRow(row));
   }
 
-  private listMailboxQueuedActions(): MailboxQueuedAction[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, account_id, thread_id, draft_id, action_type, status, payload_json, attempts, next_attempt_at,
-                latest_error, undo_of_action_id, created_at, updated_at
-         FROM mailbox_queued_actions
-         WHERE status IN ('queued', 'running', 'failed')
-         ORDER BY updated_at DESC
-         LIMIT 100`,
-      )
-      .all() as MailboxQueuedActionRow[];
+  private async listMailboxQueuedActions(): Promise<MailboxQueuedAction[]> {
+    const rows = (await this.sql.all("listMailboxQueuedActions_1", [])) as MailboxQueuedActionRow[];
     return rows.map((row) => this.mapMailboxQueuedActionRow(row));
   }
 
-  private listMailboxOutgoingMessages(): MailboxOutgoingMessage[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, draft_id, account_id, status, provider_message_id, scheduled_at, send_after, latest_error, created_at, updated_at
-         FROM mailbox_outgoing_messages
-         WHERE status IN ('queued', 'sending', 'running', 'failed')
-         ORDER BY updated_at DESC
-         LIMIT 100`,
-      )
-      .all() as MailboxOutgoingMessageRow[];
+  private async listMailboxOutgoingMessages(): Promise<MailboxOutgoingMessage[]> {
+    const rows = (await this.sql.all(
+      "listMailboxOutgoingMessages_1",
+      [],
+    )) as MailboxOutgoingMessageRow[];
     return rows.map((row) => this.mapMailboxOutgoingMessageRow(row));
   }
 
-  private getMailboxClientSettings(): MailboxClientState["settings"] {
-    const row = this.db
-      .prepare(
-        `SELECT remote_content_policy, send_delay_seconds, sync_recent_days, attachment_cache, notifications
-         FROM mailbox_client_settings
-         WHERE id = 'default'`,
-      )
-      .get() as
+  private async getMailboxClientSettings(): Promise<MailboxClientState["settings"]> {
+    const row = (await this.sql.get("getMailboxClientSettings_1", [])) as
       | {
           remote_content_policy: MailboxClientState["settings"]["remoteContentPolicy"];
           send_delay_seconds: number;
@@ -11266,43 +10085,28 @@ export class MailboxService {
     };
   }
 
-  private getMailboxComposeDraft(draftId: string): MailboxComposeDraft | null {
-    const row = this.db
-      .prepare(
-        `SELECT id, account_id, thread_id, provider_draft_id, mode, status, subject, body_text, body_html,
-                to_json, cc_json, bcc_json, identity_id, signature_id, attachments_json, scheduled_at,
-                send_after, latest_error, metadata_json, created_at, updated_at
-         FROM mailbox_compose_drafts
-         WHERE id = ?`,
-      )
-      .get(draftId) as MailboxComposeDraftRow | undefined;
+  private async getMailboxComposeDraft(draftId: string): Promise<MailboxComposeDraft | null> {
+    const row = (await this.sql.get("getMailboxComposeDraft_1", [draftId])) as
+      | MailboxComposeDraftRow
+      | undefined;
     return row ? this.mapMailboxComposeDraftRow(row) : null;
   }
 
-  private getMailboxOutgoingMessage(id: string): MailboxOutgoingMessage | null {
-    const row = this.db
-      .prepare(
-        `SELECT id, draft_id, account_id, status, provider_message_id, scheduled_at, send_after, latest_error, created_at, updated_at
-         FROM mailbox_outgoing_messages
-         WHERE id = ?`,
-      )
-      .get(id) as MailboxOutgoingMessageRow | undefined;
+  private async getMailboxOutgoingMessage(id: string): Promise<MailboxOutgoingMessage | null> {
+    const row = (await this.sql.get("getMailboxOutgoingMessage_1", [id])) as
+      | MailboxOutgoingMessageRow
+      | undefined;
     return row ? this.mapMailboxOutgoingMessageRow(row) : null;
   }
 
-  private getMailboxQueuedAction(actionId: string): MailboxQueuedAction | null {
-    const row = this.db
-      .prepare(
-        `SELECT id, account_id, thread_id, draft_id, action_type, status, payload_json, attempts, next_attempt_at,
-                latest_error, undo_of_action_id, created_at, updated_at
-         FROM mailbox_queued_actions
-         WHERE id = ?`,
-      )
-      .get(actionId) as MailboxQueuedActionRow | undefined;
+  private async getMailboxQueuedAction(actionId: string): Promise<MailboxQueuedAction | null> {
+    const row = (await this.sql.get("getMailboxQueuedAction_1", [actionId])) as
+      | MailboxQueuedActionRow
+      | undefined;
     return row ? this.mapMailboxQueuedActionRow(row) : null;
   }
 
-  private enqueueMailboxAction(input: {
+  private async enqueueMailboxAction(input: {
     accountId?: string;
     threadId?: string;
     draftId?: string;
@@ -11310,46 +10114,32 @@ export class MailboxService {
     payload: Record<string, unknown>;
     nextAttemptAt?: number;
     undoOfActionId?: string;
-  }): MailboxQueuedAction {
+  }): Promise<MailboxQueuedAction> {
     const now = Date.now();
     const id = randomUUID();
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_queued_actions
-          (id, account_id, thread_id, draft_id, action_type, status, payload_json, attempts, next_attempt_at, latest_error, undo_of_action_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'queued', ?, 0, ?, NULL, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        input.accountId || null,
-        input.threadId || null,
-        input.draftId || null,
-        input.type,
-        JSON.stringify(input.payload || {}),
-        input.nextAttemptAt || Date.now(),
-        input.undoOfActionId || null,
-        now,
-        now,
-      );
-    return this.getMailboxQueuedAction(id)!;
+    await this.sql.run("enqueueMailboxAction_1", [
+      id,
+      input.accountId || null,
+      input.threadId || null,
+      input.draftId || null,
+      input.type,
+      JSON.stringify(input.payload || {}),
+      input.nextAttemptAt || Date.now(),
+      input.undoOfActionId || null,
+      now,
+      now,
+    ]);
+    return (await this.getMailboxQueuedAction(id))!;
   }
 
   private async processMailboxQueuedAction(action: MailboxQueuedAction): Promise<void> {
     const now = Date.now();
-    this.db
-      .prepare(
-        "UPDATE mailbox_queued_actions SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ? AND status = 'queued'",
-      )
-      .run(now, action.id);
+    await this.sql.run("processMailboxQueuedAction_1", [now, action.id]);
 
     if (action.type === "send") {
       await this.executeQueuedDraftSend(action);
     } else if (action.type === "undo") {
-      this.db
-        .prepare(
-          "UPDATE mailbox_queued_actions SET status = 'succeeded', latest_error = NULL, updated_at = ? WHERE id = ?",
-        )
-        .run(Date.now(), action.id);
+      await this.sql.run("processMailboxQueuedAction_2", [Date.now(), action.id]);
     } else if (action.threadId) {
       await this.executeQueuedThreadAction(action);
     } else {
@@ -11357,81 +10147,56 @@ export class MailboxService {
     }
   }
 
-  private markMailboxQueuedActionFailed(row: MailboxQueuedActionRow, error: unknown): void {
+  private async markMailboxQueuedActionFailed(
+    row: MailboxQueuedActionRow,
+    error: unknown,
+  ): Promise<void> {
     const attempts = row.attempts + 1;
     const terminal = attempts >= MAILBOX_OUTBOX_MAX_ATTEMPTS;
     const message = error instanceof Error ? error.message : String(error);
     const nextAttemptAt = terminal
       ? null
       : Date.now() + Math.min(60_000 * 2 ** Math.max(attempts - 1, 0), 30 * 60_000);
-    this.db
-      .prepare(
-        `UPDATE mailbox_queued_actions
-         SET status = ?, attempts = ?, next_attempt_at = ?, latest_error = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(terminal ? "failed" : "queued", attempts, nextAttemptAt, message, Date.now(), row.id);
+    await this.sql.run("markMailboxQueuedActionFailed_1", [
+      terminal ? "failed" : "queued",
+      attempts,
+      nextAttemptAt,
+      message,
+      Date.now(),
+      row.id,
+    ]);
     if (row.draft_id) {
-      this.db
-        .prepare(
-          `UPDATE mailbox_compose_drafts
-           SET status = 'failed', latest_error = ?, updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(message, Date.now(), row.draft_id);
-      this.db
-        .prepare(
-          `UPDATE mailbox_outgoing_messages
-           SET status = 'failed', latest_error = ?, updated_at = ?
-           WHERE draft_id = ?
-             AND status IN ('queued', 'sending', 'running', 'failed')`,
-        )
-        .run(message, Date.now(), row.draft_id);
+      await this.sql.run("markMailboxQueuedActionFailed_2", [message, Date.now(), row.draft_id]);
+      await this.sql.run("markMailboxQueuedActionFailed_3", [message, Date.now(), row.draft_id]);
     }
   }
 
   private async executeQueuedDraftSend(action: MailboxQueuedAction): Promise<void> {
     if (!action.draftId) throw new Error("Queued send is missing draft id.");
-    const draft = this.getMailboxComposeDraft(action.draftId);
+    const draft = await this.getMailboxComposeDraft(action.draftId);
     if (!draft) throw new Error("Mailbox compose draft not found");
     const outgoingId = asString(action.payload.outgoingId);
     const now = Date.now();
-    this.db
-      .prepare(
-        "UPDATE mailbox_compose_drafts SET status = 'sending', latest_error = NULL, updated_at = ? WHERE id = ?",
-      )
-      .run(now, draft.id);
+    await this.sql.run("executeQueuedDraftSend_1", [now, draft.id]);
     if (outgoingId) {
-      this.db
-        .prepare(
-          "UPDATE mailbox_outgoing_messages SET status = 'sending', latest_error = NULL, updated_at = ? WHERE id = ?",
-        )
-        .run(now, outgoingId);
+      await this.sql.run("executeQueuedDraftSend_2", [now, outgoingId]);
     }
 
     const result = await this.sendComposeDraftThroughProvider(draft);
-    this.db
-      .prepare(
-        `UPDATE mailbox_compose_drafts
-         SET status = 'sent', provider_draft_id = COALESCE(?, provider_draft_id), latest_error = NULL, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(result.providerDraftId || null, Date.now(), draft.id);
+    await this.sql.run("executeQueuedDraftSend_3", [
+      result.providerDraftId || null,
+      Date.now(),
+      draft.id,
+    ]);
     if (outgoingId) {
-      this.db
-        .prepare(
-          `UPDATE mailbox_outgoing_messages
-           SET status = 'sent', provider_message_id = ?, latest_error = NULL, updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(result.providerMessageId || null, Date.now(), outgoingId);
+      await this.sql.run("executeQueuedDraftSend_4", [
+        result.providerMessageId || null,
+        Date.now(),
+        outgoingId,
+      ]);
     }
-    this.db
-      .prepare(
-        "UPDATE mailbox_queued_actions SET status = 'succeeded', latest_error = NULL, updated_at = ? WHERE id = ?",
-      )
-      .run(Date.now(), action.id);
-    this.applyPostSendLocalState(draft, result.providerMessageId);
+    await this.sql.run("processMailboxQueuedAction_2", [Date.now(), action.id]);
+    await this.applyPostSendLocalState(draft, result.providerMessageId);
   }
 
   private async executeQueuedThreadAction(action: MailboxQueuedAction): Promise<void> {
@@ -11453,20 +10218,18 @@ export class MailboxService {
       default:
         throw new Error(`Unsupported queued mailbox action: ${action.type}`);
     }
-    this.db
-      .prepare(
-        "UPDATE mailbox_queued_actions SET status = 'succeeded', latest_error = NULL, updated_at = ? WHERE id = ?",
-      )
-      .run(Date.now(), action.id);
+    await this.sql.run("processMailboxQueuedAction_2", [Date.now(), action.id]);
   }
 
   private async sendComposeDraftThroughProvider(
     draft: MailboxComposeDraft,
   ): Promise<{ providerMessageId?: string; providerDraftId?: string }> {
-    const account = this.getMailboxAccount(draft.accountId);
+    const account = await this.getMailboxAccount(draft.accountId);
     if (!account) throw new Error("Mailbox account not found");
-    const providerThreadId = draft.threadId ? this.getProviderThreadId(draft.threadId) : undefined;
-    const attachments = this.readComposeDraftAttachments(draft);
+    const providerThreadId = draft.threadId
+      ? await this.getProviderThreadId(draft.threadId)
+      : undefined;
+    const attachments = await this.readComposeDraftAttachments(draft);
     if (account.provider === "gmail") {
       const raw = this.buildRawMimeMessage(draft, attachments);
       const draftResult = await gmailRequest(GoogleWorkspaceSettingsManager.loadSettings(), {
@@ -11494,7 +10257,7 @@ export class MailboxService {
       const graphDraft = await this.microsoftGraphCreateDraft(draft, attachments);
       const graphDraftId = asString(graphDraft?.id);
       if (!graphDraftId) throw new Error("Microsoft Graph did not return a draft id.");
-      await this.microsoftGraphRequest(this.resolveMicrosoftGraphChannelId(), {
+      await this.microsoftGraphRequest(await this.resolveMicrosoftGraphChannelId(), {
         method: "POST",
         path: `/me/messages/${encodeURIComponent(graphDraftId)}/send`,
         scopes: MICROSOFT_GRAPH_SEND_SCOPES,
@@ -11504,7 +10267,7 @@ export class MailboxService {
     if (account.provider === "agentmail") {
       return this.sendAgentMailDraft(draft);
     }
-    const channel = this.channelRepo.findByType("email");
+    const channel = await this.channelRepo.findByType("email");
     if (!channel) throw new Error("Email channel is not configured");
     const client = this.createStandardEmailClient(channel.id, (channel.config as Any) || {});
     const providerMessageId = await client.sendEmail({
@@ -11526,7 +10289,7 @@ export class MailboxService {
     const toRecipients = draft.to.map((recipient) => this.toGraphRecipient(recipient));
     const ccRecipients = draft.cc.map((recipient) => this.toGraphRecipient(recipient));
     const bccRecipients = draft.bcc.map((recipient) => this.toGraphRecipient(recipient));
-    return this.microsoftGraphRequest(this.resolveMicrosoftGraphChannelId(), {
+    return this.microsoftGraphRequest(await this.resolveMicrosoftGraphChannelId(), {
       method: "POST",
       path: "/me/messages",
       scopes: MICROSOFT_GRAPH_SEND_SCOPES,
@@ -11584,10 +10347,10 @@ export class MailboxService {
     return { providerMessageId: asString(result?.id) || latestInbound.providerMessageId };
   }
 
-  private normalizeComposeAttachmentInput(
+  private async normalizeComposeAttachmentInput(
     input: MailboxDraftAttachmentInput,
     workspaceId?: string,
-  ): MailboxComposeDraft["attachments"][number] {
+  ): Promise<MailboxComposeDraft["attachments"][number]> {
     const rawPath = asString(input.path);
     if (!rawPath || !path.isAbsolute(rawPath)) {
       throw new Error("Mailbox draft attachments must use an absolute local file path.");
@@ -11597,7 +10360,7 @@ export class MailboxService {
     if (!stat.isFile()) {
       throw new Error("Mailbox draft attachment must be a file.");
     }
-    this.assertMailboxAttachmentPathAllowed(realPath, workspaceId);
+    await this.assertMailboxAttachmentPathAllowed(realPath, workspaceId);
     if (stat.size > MAILBOX_COMPOSE_ATTACHMENT_MAX_BYTES) {
       throw new Error(
         `Mailbox draft attachment exceeds ${MAILBOX_COMPOSE_ATTACHMENT_MAX_BYTES} bytes.`,
@@ -11614,35 +10377,42 @@ export class MailboxService {
     };
   }
 
-  private resolveComposeDraftWorkspaceId(draft: MailboxComposeDraft): string | undefined {
+  private async resolveComposeDraftWorkspaceId(
+    draft: MailboxComposeDraft,
+  ): Promise<string | undefined> {
     if (draft.workspaceId) return draft.workspaceId;
     if (draft.threadId) {
-      const row = this.db
-        .prepare("SELECT account_id FROM mailbox_threads WHERE id = ?")
-        .get(draft.threadId) as { account_id: string } | undefined;
-      const workspaceId = row ? this.resolveThreadWorkspaceId(row.account_id) : undefined;
+      const row = (await this.sql.get("reclassifyThread_1", [draft.threadId])) as
+        | { account_id: string }
+        | undefined;
+      const workspaceId = row ? await this.resolveThreadWorkspaceId(row.account_id) : undefined;
       if (workspaceId) return workspaceId;
     }
-    const accountWorkspaceId = this.resolveThreadWorkspaceId(draft.accountId);
-    return accountWorkspaceId || this.resolveDefaultWorkspaceId();
+    const accountWorkspaceId = await this.resolveThreadWorkspaceId(draft.accountId);
+    return accountWorkspaceId || (await this.resolveDefaultWorkspaceId());
   }
 
-  private resolveComposeDraftWorkspaceIdForCreate(
+  private async resolveComposeDraftWorkspaceIdForCreate(
     accountId: string,
     threadId?: string,
-  ): string | undefined {
+  ): Promise<string | undefined> {
     if (threadId) {
-      const row = this.db
-        .prepare("SELECT account_id FROM mailbox_threads WHERE id = ?")
-        .get(threadId) as { account_id: string } | undefined;
-      const workspaceId = row ? this.resolveThreadWorkspaceId(row.account_id) : undefined;
+      const row = (await this.sql.get("reclassifyThread_1", [threadId])) as
+        | { account_id: string }
+        | undefined;
+      const workspaceId = row ? await this.resolveThreadWorkspaceId(row.account_id) : undefined;
       if (workspaceId) return workspaceId;
     }
-    return this.resolveThreadWorkspaceId(accountId) || this.resolveDefaultWorkspaceId();
+    return (
+      (await this.resolveThreadWorkspaceId(accountId)) || (await this.resolveDefaultWorkspaceId())
+    );
   }
 
-  private assertMailboxAttachmentPathAllowed(realPath: string, workspaceId?: string): void {
-    const workspace = workspaceId ? this.workspaceRepo.findById(workspaceId) : undefined;
+  private async assertMailboxAttachmentPathAllowed(
+    realPath: string,
+    workspaceId?: string,
+  ): Promise<void> {
+    const workspace = workspaceId ? await this.workspaceRepo.findById(workspaceId) : undefined;
     if (!workspace) {
       throw new Error("Mailbox draft attachment workspace could not be resolved.");
     }
@@ -11658,29 +10428,30 @@ export class MailboxService {
     }
   }
 
-  private readComposeDraftAttachments(draft: MailboxComposeDraft): EmailAttachment[] {
-    return draft.attachments
-      .filter((attachment) => attachment.localPath)
-      .map((attachment) => {
-        const localPath = attachment.localPath!;
-        const realPath = fs.realpathSync(localPath);
-        this.assertMailboxAttachmentPathAllowed(
-          realPath,
-          this.resolveComposeDraftWorkspaceId(draft),
-        );
-        const stat = fs.statSync(realPath);
-        if (!stat.isFile())
-          throw new Error(`Draft attachment is not a file: ${attachment.filename}`);
-        if (stat.size > MAILBOX_COMPOSE_ATTACHMENT_MAX_BYTES) {
-          throw new Error(`Draft attachment is too large: ${attachment.filename}`);
-        }
-        return {
-          filename: attachment.filename,
-          contentType: attachment.mimeType || guessMimeType(attachment.filename),
-          size: stat.size,
-          content: fs.readFileSync(realPath),
-        };
+  private async readComposeDraftAttachments(
+    draft: MailboxComposeDraft,
+  ): Promise<EmailAttachment[]> {
+    const workspaceId = await this.resolveComposeDraftWorkspaceId(draft);
+    const attachments: EmailAttachment[] = [];
+    for (const attachment of draft.attachments) {
+      if (!attachment.localPath) continue;
+      const realPath = fs.realpathSync(attachment.localPath);
+      // The access check reads the workspace through the async storage facade; it must
+      // settle before the file is read.
+      await this.assertMailboxAttachmentPathAllowed(realPath, workspaceId);
+      const stat = fs.statSync(realPath);
+      if (!stat.isFile()) throw new Error(`Draft attachment is not a file: ${attachment.filename}`);
+      if (stat.size > MAILBOX_COMPOSE_ATTACHMENT_MAX_BYTES) {
+        throw new Error(`Draft attachment is too large: ${attachment.filename}`);
+      }
+      attachments.push({
+        filename: attachment.filename,
+        contentType: attachment.mimeType || guessMimeType(attachment.filename),
+        size: stat.size,
+        content: fs.readFileSync(realPath),
       });
+    }
+    return attachments;
   }
 
   private buildRawMimeMessage(draft: MailboxComposeDraft, attachments: EmailAttachment[]): string {
@@ -11730,21 +10501,17 @@ export class MailboxService {
       .replace(/=+$/, "");
   }
 
-  private getMailboxAccount(accountId: string): MailboxAccount | null {
-    const row = this.db
-      .prepare(
-        `SELECT id, provider, address, display_name, status, capabilities_json, sync_cursor, classification_initial_batch_at, last_synced_at
-         FROM mailbox_accounts
-         WHERE id = ?`,
-      )
-      .get(accountId) as MailboxAccountRow | undefined;
+  private async getMailboxAccount(accountId: string): Promise<MailboxAccount | null> {
+    const row = (await this.sql.get("getMailboxAccount_1", [accountId])) as
+      | MailboxAccountRow
+      | undefined;
     return row ? this.mapAccountRow(row) : null;
   }
 
-  private getProviderThreadId(threadId: string): string | undefined {
-    const row = this.db
-      .prepare("SELECT provider_thread_id FROM mailbox_threads WHERE id = ?")
-      .get(threadId) as { provider_thread_id: string } | undefined;
+  private async getProviderThreadId(threadId: string): Promise<string | undefined> {
+    const row = (await this.sql.get("getProviderThreadId_1", [threadId])) as
+      | { provider_thread_id: string }
+      | undefined;
     return row?.provider_thread_id;
   }
 
@@ -11761,7 +10528,7 @@ export class MailboxService {
       if (!providerLabelId || !name) continue;
       const role = this.gmailLabelRole(providerLabelId, name);
       if (role) {
-        this.upsertMailboxFolder({
+        await this.upsertMailboxFolder({
           accountId,
           providerFolderId: providerLabelId,
           name,
@@ -11771,7 +10538,7 @@ export class MailboxService {
           now,
         });
       } else {
-        this.upsertMailboxLabel({
+        await this.upsertMailboxLabel({
           accountId,
           providerLabelId,
           name,
@@ -11799,7 +10566,7 @@ export class MailboxService {
       const providerFolderId = asString(folder?.id);
       const name = asString(folder?.displayName);
       if (!providerFolderId || !name) continue;
-      this.upsertMailboxFolder({
+      await this.upsertMailboxFolder({
         accountId,
         providerFolderId,
         name,
@@ -11811,7 +10578,7 @@ export class MailboxService {
     }
   }
 
-  private upsertMailboxFolder(input: {
+  private async upsertMailboxFolder(input: {
     accountId: string;
     providerFolderId: string;
     name: string;
@@ -11819,63 +10586,40 @@ export class MailboxService {
     unreadCount?: number;
     totalCount?: number;
     now: number;
-  }): void {
+  }): Promise<void> {
     const id = `${input.accountId}:folder:${input.providerFolderId}`;
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_folders
-          (id, account_id, provider_folder_id, name, role, unread_count, total_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(account_id, provider_folder_id) DO UPDATE SET
-           name = excluded.name,
-           role = excluded.role,
-           unread_count = excluded.unread_count,
-           total_count = excluded.total_count,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        id,
-        input.accountId,
-        input.providerFolderId,
-        input.name,
-        input.role,
-        input.unreadCount ?? null,
-        input.totalCount ?? null,
-        input.now,
-        input.now,
-      );
+    await this.sql.run("upsertMailboxFolder_1", [
+      id,
+      input.accountId,
+      input.providerFolderId,
+      input.name,
+      input.role,
+      input.unreadCount ?? null,
+      input.totalCount ?? null,
+      input.now,
+      input.now,
+    ]);
   }
 
-  private upsertMailboxLabel(input: {
+  private async upsertMailboxLabel(input: {
     accountId: string;
     providerLabelId: string;
     name: string;
     unreadCount?: number;
     totalCount?: number;
     now: number;
-  }): void {
+  }): Promise<void> {
     const id = `${input.accountId}:label:${input.providerLabelId}`;
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_labels
-          (id, account_id, provider_label_id, name, color, unread_count, total_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
-         ON CONFLICT(account_id, provider_label_id) DO UPDATE SET
-           name = excluded.name,
-           unread_count = excluded.unread_count,
-           total_count = excluded.total_count,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        id,
-        input.accountId,
-        input.providerLabelId,
-        input.name,
-        input.unreadCount ?? null,
-        input.totalCount ?? null,
-        input.now,
-        input.now,
-      );
+    await this.sql.run("upsertMailboxLabel_1", [
+      id,
+      input.accountId,
+      input.providerLabelId,
+      input.name,
+      input.unreadCount ?? null,
+      input.totalCount ?? null,
+      input.now,
+      input.now,
+    ]);
   }
 
   private gmailLabelRole(id: string, name: string): MailboxFolder["role"] | null {
@@ -11900,8 +10644,8 @@ export class MailboxService {
     return "custom";
   }
 
-  private resolveMicrosoftGraphChannelId(): string {
-    const channel = this.channelRepo.findByType("email");
+  private async resolveMicrosoftGraphChannelId(): Promise<string> {
+    const channel = await this.channelRepo.findByType("email");
     if (!channel || !this.isMicrosoftEmailOAuthConfig((channel.config as Any) || {})) {
       throw new Error(
         "Microsoft Graph mailbox requires an Outlook email channel connected with OAuth.",
@@ -11910,71 +10654,53 @@ export class MailboxService {
     return channel.id;
   }
 
-  private applyPostSendLocalState(draft: MailboxComposeDraft, providerMessageId?: string): void {
+  private async applyPostSendLocalState(
+    draft: MailboxComposeDraft,
+    providerMessageId?: string,
+  ): Promise<void> {
     const now = Date.now();
     if (draft.threadId) {
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_messages
-            (id, thread_id, provider_message_id, direction, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, body_text, received_at, is_unread, metadata_json, created_at, updated_at)
-           VALUES (?, ?, ?, 'outgoing', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-        )
-        .run(
-          randomUUID(),
-          draft.threadId,
-          providerMessageId || `local-outgoing-${now}`,
-          this.getMailboxAccount(draft.accountId)?.address || "",
-          JSON.stringify(draft.to),
-          JSON.stringify(draft.cc),
-          JSON.stringify(draft.bcc),
-          draft.subject,
-          normalizeWhitespace(draft.bodyText, 180),
-          encryptMailboxValue(draft.bodyText),
-          now,
-          JSON.stringify({ source: "mailbox_outbox", draftId: draft.id }),
-          now,
-          now,
-        );
-      this.db
-        .prepare(
-          `UPDATE mailbox_threads
-           SET message_count = message_count + 1,
-               last_message_at = ?,
-               updated_at = ?,
-               needs_reply = CASE WHEN ? = 1 THEN needs_reply ELSE 0 END,
-               handled = CASE WHEN ? = 1 THEN handled ELSE 1 END,
-               today_bucket = CASE
-                 WHEN ? = 1 THEN today_bucket
-                 WHEN today_bucket = 'needs_action' THEN 'good_to_know'
-                 ELSE today_bucket
-               END
-           WHERE id = ?`,
-        )
-        .run(
-          now,
-          now,
-          draft.mode === "forward" ? 1 : 0,
-          draft.mode === "forward" ? 1 : 0,
-          draft.mode === "forward" ? 1 : 0,
-          draft.threadId,
-        );
+      await this.sql.run("applyPostSendLocalState_1", [
+        randomUUID(),
+        draft.threadId,
+        providerMessageId || `local-outgoing-${now}`,
+        (await this.getMailboxAccount(draft.accountId))?.address || "",
+        JSON.stringify(draft.to),
+        JSON.stringify(draft.cc),
+        JSON.stringify(draft.bcc),
+        draft.subject,
+        normalizeWhitespace(draft.bodyText, 180),
+        encryptMailboxValue(draft.bodyText),
+        now,
+        JSON.stringify({ source: "mailbox_outbox", draftId: draft.id }),
+        now,
+        now,
+      ]);
+      await this.sql.run("applyPostSendLocalState_2", [
+        now,
+        now,
+        draft.mode === "forward" ? 1 : 0,
+        draft.mode === "forward" ? 1 : 0,
+        draft.mode === "forward" ? 1 : 0,
+        draft.threadId,
+      ]);
       if (draft.mode !== "forward") {
-        this.updateProposalStatusByThreadAndType(draft.threadId, "reply", "applied");
+        await this.updateProposalStatusByThreadAndType(draft.threadId, "reply", "applied");
       }
     }
   }
 
-  private resolveComposeAccountId(accountId?: string, threadId?: string): string {
+  private async resolveComposeAccountId(accountId?: string, threadId?: string): Promise<string> {
     if (accountId) return accountId;
     if (threadId) {
-      const row = this.db
-        .prepare("SELECT account_id FROM mailbox_threads WHERE id = ?")
-        .get(threadId) as { account_id: string } | undefined;
+      const row = (await this.sql.get("reclassifyThread_1", [threadId])) as
+        | { account_id: string }
+        | undefined;
       if (row?.account_id) return row.account_id;
     }
-    const firstAccount = this.db
-      .prepare("SELECT id FROM mailbox_accounts ORDER BY updated_at DESC LIMIT 1")
-      .get() as { id: string } | undefined;
+    const firstAccount = (await this.sql.get("resolveComposeAccountId_1", [])) as
+      | { id: string }
+      | undefined;
     if (!firstAccount?.id) throw new Error("Connect a mailbox account before composing.");
     return firstAccount.id;
   }
@@ -12164,7 +10890,7 @@ export class MailboxService {
     };
   }
 
-  private threadMatchesQuery(row: MailboxThreadRow, query: string): boolean {
+  private async threadMatchesQuery(row: MailboxThreadRow, query: string): Promise<boolean> {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
 
@@ -12180,14 +10906,10 @@ export class MailboxService {
       .join(" ")
       .toLowerCase();
     if (threadText.includes(needle)) return true;
-    const attachmentRows = this.db
-      .prepare(
-        `SELECT ma.filename, mat.text_content
-         FROM mailbox_attachments ma
-         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
-         WHERE ma.thread_id = ?`,
-      )
-      .all(row.id) as Array<{ filename: string; text_content: string | null }>;
+    const attachmentRows = (await this.sql.all("threadMatchesQuery_1", [row.id])) as Array<{
+      filename: string;
+      text_content: string | null;
+    }>;
     if (
       attachmentRows.some((attachment) =>
         `${attachment.filename} ${decryptMailboxValue(attachment.text_content || "")}`
@@ -12198,7 +10920,7 @@ export class MailboxService {
       return true;
     }
 
-    return this.getMessagesForThread(row.id).some((message) => {
+    return (await this.getMessagesForThread(row.id)).some((message) => {
       const messageText = [
         message.subject,
         message.snippet,
@@ -12219,18 +10941,14 @@ export class MailboxService {
     });
   }
 
-  private threadMatchesAttachmentQuery(threadId: string, query: string): boolean {
+  private async threadMatchesAttachmentQuery(threadId: string, query: string): Promise<boolean> {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
 
-    const attachmentRows = this.db
-      .prepare(
-        `SELECT ma.filename, mat.text_content
-         FROM mailbox_attachments ma
-         LEFT JOIN mailbox_attachment_text mat ON mat.attachment_id = ma.id
-         WHERE ma.thread_id = ?`,
-      )
-      .all(threadId) as Array<{ filename: string; text_content: string | null }>;
+    const attachmentRows = (await this.sql.all("threadMatchesQuery_1", [threadId])) as Array<{
+      filename: string;
+      text_content: string | null;
+    }>;
     return attachmentRows.some((attachment) =>
       `${attachment.filename} ${decryptMailboxValue(attachment.text_content || "")}`
         .toLowerCase()
@@ -12238,10 +10956,23 @@ export class MailboxService {
     );
   }
 
-  private mapThreadRow(
+  /** Map rows with their summaries, in order (DB6: each lookup awaits the port). */
+  private async mapThreadRowsWithSummaries(
+    rows: MailboxThreadRow[],
+  ): Promise<MailboxThreadListItem[]> {
+    const items: MailboxThreadListItem[] = [];
+    for (const row of rows) {
+      items.push(
+        await this.mapThreadRow(row, (await this.getSummaryForThread(row.id)) ?? undefined),
+      );
+    }
+    return items;
+  }
+
+  private async mapThreadRow(
     row: MailboxThreadRow,
     summary?: MailboxSummaryCard | null,
-  ): MailboxThreadListItem {
+  ): Promise<MailboxThreadListItem> {
     const sensitiveContent = this.readThreadSensitiveContent(row);
     return {
       id: row.id,
@@ -12267,21 +10998,19 @@ export class MailboxService {
       lastMessageAt: row.last_message_at,
       hasSensitiveContent: sensitiveContent.hasSensitiveContent,
       summary: summary ?? undefined,
-      attachments: this.getAttachmentSummariesForThread(row.id),
+      attachments: await this.getAttachmentSummariesForThread(row.id),
       classificationState: row.classification_state,
     };
   }
 
-  private getAttachmentSummariesForThread(threadId: string, limit = 6): MailboxAttachmentSummary[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, message_id, filename, mime_type, size, extraction_status
-         FROM mailbox_attachments
-         WHERE thread_id = ?
-         ORDER BY updated_at DESC
-         LIMIT ?`,
-      )
-      .all(threadId, Math.min(Math.max(limit, 1), 20)) as Array<{
+  private async getAttachmentSummariesForThread(
+    threadId: string,
+    limit = 6,
+  ): Promise<MailboxAttachmentSummary[]> {
+    const rows = (await this.sql.all("getAttachmentSummariesForThread_1", [
+      threadId,
+      Math.min(Math.max(limit, 1), 20),
+    ])) as Array<{
       id: string;
       message_id: string;
       filename: string;
@@ -12382,25 +11111,19 @@ export class MailboxService {
     };
   }
 
-  private ensureFollowUpTaskForCommitment(
+  private async ensureFollowUpTaskForCommitment(
     row: MailboxCommitmentRow,
     metadata: MailboxCommitmentMetadata,
-  ): Task | null {
+  ): Promise<Task | null> {
     if (metadata.followUpTaskId) {
-      const existing = this.taskRepo.findById(metadata.followUpTaskId);
+      const existing = await this.taskRepo.findById(metadata.followUpTaskId);
       if (existing) return existing;
     }
 
-    const thread = this.db
-      .prepare(
-        `SELECT id, subject, participants_json
-         FROM mailbox_threads
-         WHERE id = ?`,
-      )
-      .get(row.thread_id) as
+    const thread = (await this.sql.get("ensureFollowUpTaskForCommitment_1", [row.thread_id])) as
       | { id: string; subject: string; participants_json: string | null }
       | undefined;
-    const workspaceId = this.resolveFollowUpWorkspaceId();
+    const workspaceId = await this.resolveFollowUpWorkspaceId();
     if (!workspaceId) {
       throw new Error("No workspace available to create a follow-up task");
     }
@@ -12419,7 +11142,7 @@ export class MailboxService {
       "Track this as a real follow-up item and close it when the commitment is complete.",
     ].filter((part): part is string => Boolean(part));
 
-    const task = this.taskRepo.create({
+    const task = await this.taskRepo.create({
       title,
       prompt: promptParts.join("\n"),
       rawPrompt: promptParts.join("\n"),
@@ -12430,66 +11153,48 @@ export class MailboxService {
       agentConfig: taskAgentConfigForCreation(undefined, PermissionSettingsManager.loadSettings()),
     });
 
-    this.db
-      .prepare(
-        `UPDATE mailbox_commitments
-         SET metadata_json = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        JSON.stringify({
-          ...metadata,
-          followUpTaskId: task.id,
-          followUpTaskCreatedAt: Date.now(),
-          followUpTaskWorkspaceId: workspaceId,
-        }),
-        Date.now(),
-        row.id,
-      );
+    await this.sql.run("ensureFollowUpTaskForCommitment_2", [
+      JSON.stringify({
+        ...metadata,
+        followUpTaskId: task.id,
+        followUpTaskCreatedAt: Date.now(),
+        followUpTaskWorkspaceId: workspaceId,
+      }),
+      Date.now(),
+      row.id,
+    ]);
 
     return task;
   }
 
-  private recordMailboxTriageFeedback(
+  private async recordMailboxTriageFeedback(
     threadId: string,
     feedbackKind: string,
     payload?: Record<string, unknown>,
-  ): void {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+  ): Promise<void> {
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) return;
     const id = randomUUID();
     const now = Date.now();
     try {
-      this.db
-        .prepare(
-          `INSERT INTO mailbox_triage_feedback (id, workspace_id, thread_id, feedback_kind, payload_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          id,
-          workspaceId,
-          threadId,
-          feedbackKind,
-          payload ? JSON.stringify(payload) : null,
-          now,
-        );
-      this.pruneMailboxTriageFeedback(workspaceId);
+      await this.sql.run("recordMailboxTriageFeedback_1", [
+        id,
+        workspaceId,
+        threadId,
+        feedbackKind,
+        payload ? JSON.stringify(payload) : null,
+        now,
+      ]);
+      await this.pruneMailboxTriageFeedback(workspaceId);
     } catch {
       // Best-effort
     }
   }
 
-  listMailboxSnippets(): MailboxSnippetRecord[] {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+  async listMailboxSnippets(): Promise<MailboxSnippetRecord[]> {
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT id, workspace_id, shortcut, body_text, subject_hint, created_at, updated_at
-         FROM mailbox_snippets
-         WHERE workspace_id = ?
-         ORDER BY updated_at DESC`,
-      )
-      .all(workspaceId) as Array<{
+    const rows = (await this.sql.all("listMailboxSnippets_1", [workspaceId])) as Array<{
       id: string;
       workspace_id: string;
       shortcut: string;
@@ -12509,8 +11214,10 @@ export class MailboxService {
     }));
   }
 
-  upsertMailboxSnippet(input: MailboxSnippetInput & { id?: string }): MailboxSnippetRecord {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+  async upsertMailboxSnippet(
+    input: MailboxSnippetInput & { id?: string },
+  ): Promise<MailboxSnippetRecord> {
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) {
       throw new Error("No workspace for mailbox snippets");
     }
@@ -12521,25 +11228,29 @@ export class MailboxService {
     }
     const id = input.id?.trim() || randomUUID();
     const now = Date.now();
-    const existing = this.db
-      .prepare(`SELECT id FROM mailbox_snippets WHERE id = ? AND workspace_id = ?`)
-      .get(id, workspaceId) as { id: string } | undefined;
+    const existing = (await this.sql.get("upsertMailboxSnippet_1", [id, workspaceId])) as
+      | { id: string }
+      | undefined;
     try {
       if (existing) {
-        this.db
-          .prepare(
-            `UPDATE mailbox_snippets
-             SET shortcut = ?, body_text = ?, subject_hint = ?, updated_at = ?
-             WHERE id = ? AND workspace_id = ?`,
-          )
-          .run(shortcut, body, input.subjectHint?.trim() || null, now, id, workspaceId);
+        await this.sql.run("upsertMailboxSnippet_2", [
+          shortcut,
+          body,
+          input.subjectHint?.trim() || null,
+          now,
+          id,
+          workspaceId,
+        ]);
       } else {
-        this.db
-          .prepare(
-            `INSERT INTO mailbox_snippets (id, workspace_id, shortcut, body_text, subject_hint, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(id, workspaceId, shortcut, body, input.subjectHint?.trim() || null, now, now);
+        await this.sql.run("upsertMailboxSnippet_3", [
+          id,
+          workspaceId,
+          shortcut,
+          body,
+          input.subjectHint?.trim() || null,
+          now,
+          now,
+        ]);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -12550,9 +11261,7 @@ export class MailboxService {
       }
       throw err;
     }
-    const row = this.db
-      .prepare(`SELECT * FROM mailbox_snippets WHERE id = ? AND workspace_id = ?`)
-      .get(id, workspaceId) as {
+    const row = (await this.sql.get("upsertMailboxSnippet_4", [id, workspaceId])) as {
       id: string;
       workspace_id: string;
       shortcut: string;
@@ -12572,26 +11281,17 @@ export class MailboxService {
     };
   }
 
-  deleteMailboxSnippet(id: string): boolean {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+  async deleteMailboxSnippet(id: string): Promise<boolean> {
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) return false;
-    const result = this.db
-      .prepare(`DELETE FROM mailbox_snippets WHERE id = ? AND workspace_id = ?`)
-      .run(id, workspaceId);
+    const result = await this.sql.run("deleteMailboxSnippet_1", [id, workspaceId]);
     return result.changes > 0;
   }
 
-  listMailboxSavedViews(): MailboxSavedViewRecord[] {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+  async listMailboxSavedViews(): Promise<MailboxSavedViewRecord[]> {
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT id, workspace_id, name, instructions, seed_thread_id, show_in_inbox, created_at, updated_at
-         FROM mailbox_saved_views
-         WHERE workspace_id = ?
-         ORDER BY updated_at DESC`,
-      )
-      .all(workspaceId) as Array<{
+    const rows = (await this.sql.all("listMailboxSavedViews_1", [workspaceId])) as Array<{
       id: string;
       workspace_id: string;
       name: string;
@@ -12619,12 +11319,13 @@ export class MailboxService {
     instructions: string;
   }): Promise<MailboxSavedViewPreviewResult> {
     const seedAccountId = (
-      this.db
-        .prepare(`SELECT account_id FROM mailbox_threads WHERE id = ?`)
-        .get(input.seedThreadId) as { account_id: string } | undefined
+      (await this.sql.get("reclassifyThread_1", [input.seedThreadId])) as
+        | { account_id: string }
+        | undefined
     )?.account_id;
     const workspaceId =
-      this.resolveThreadWorkspaceId(seedAccountId || "") || this.resolveDefaultWorkspaceId();
+      (await this.resolveThreadWorkspaceId(seedAccountId || "")) ||
+      (await this.resolveDefaultWorkspaceId());
     if (!workspaceId) {
       return { threadIds: [] };
     }
@@ -12632,7 +11333,7 @@ export class MailboxService {
     if (!seed) {
       return { threadIds: [] };
     }
-    const summary = this.getSummaryForThread(input.seedThreadId);
+    const summary = await this.getSummaryForThread(input.seedThreadId);
     const seedSummaryText = stripMailboxSummaryHtmlArtifacts(summary?.summary || seed.snippet);
     const seedTokens = new Set(
       [input.name, input.instructions, seed.subject, seed.snippet, seedSummaryText]
@@ -12643,16 +11344,10 @@ export class MailboxService {
         .filter((token) => token.length >= 3)
         .slice(0, 120),
     );
-    const candidateRows = this.db
-      .prepare(
-        `SELECT id, subject, snippet, last_message_at
-         FROM mailbox_threads
-         WHERE account_id = ?
-           AND id != ?
-         ORDER BY last_message_at DESC
-         LIMIT 300`,
-      )
-      .all(seed.accountId, input.seedThreadId) as Array<{
+    const candidateRows = (await this.sql.all("previewMailboxLabelSimilar_1", [
+      seed.accountId,
+      input.seedThreadId,
+    ])) as Array<{
       id: string;
       subject: string;
       snippet: string;
@@ -12687,7 +11382,7 @@ export class MailboxService {
       instructions: input.instructions.trim() || "Similar threads to the open conversation.",
       candidates: candidateList,
     });
-    const validIds = this.filterValidMailboxThreadIds(result.threadIds, seed.accountId);
+    const validIds = await this.filterValidMailboxThreadIds(result.threadIds, seed.accountId);
     return {
       threadIds: validIds,
       rationale: result.rationale,
@@ -12702,7 +11397,7 @@ export class MailboxService {
     threadIds: string[];
     showInInbox?: boolean;
   }): Promise<MailboxSavedViewRecord> {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) {
       throw new Error("No workspace for saved views");
     }
@@ -12713,43 +11408,34 @@ export class MailboxService {
     }
     const seedAccountId = input.seedThreadId?.trim()
       ? (
-          this.db
-            .prepare(`SELECT account_id FROM mailbox_threads WHERE id = ?`)
-            .get(input.seedThreadId.trim()) as { account_id: string } | undefined
+          (await this.sql.get("reclassifyThread_1", [input.seedThreadId.trim()])) as
+            | { account_id: string }
+            | undefined
         )?.account_id
       : undefined;
     const rawIds = [...input.threadIds];
     if (input.seedThreadId?.trim()) {
       rawIds.push(input.seedThreadId.trim());
     }
-    const validThreadIds = this.filterValidMailboxThreadIds(rawIds, seedAccountId);
+    const validThreadIds = await this.filterValidMailboxThreadIds(rawIds, seedAccountId);
     if (validThreadIds.length === 0) {
       throw new Error("Saved views need at least one valid thread. Preview again before saving.");
     }
     const id = randomUUID();
     const now = Date.now();
     const showIn = input.showInInbox !== false ? 1 : 0;
-    this.db
-      .prepare(
-        `INSERT INTO mailbox_saved_views
-          (id, workspace_id, name, instructions, seed_thread_id, show_in_inbox, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        workspaceId,
-        name,
-        instructions,
-        input.seedThreadId?.trim() || null,
-        showIn,
-        now,
-        now,
-      );
-    const insertMember = this.db.prepare(
-      `INSERT OR REPLACE INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, ?)`,
-    );
+    await this.sql.run("createMailboxSavedView_1", [
+      id,
+      workspaceId,
+      name,
+      instructions,
+      input.seedThreadId?.trim() || null,
+      showIn,
+      now,
+      now,
+    ]);
     for (const threadId of validThreadIds) {
-      insertMember.run(id, threadId, 1);
+      await this.sql.run("addSavedViewThread", [id, threadId, 1]);
     }
     return {
       id,
@@ -12763,12 +11449,10 @@ export class MailboxService {
     };
   }
 
-  deleteMailboxSavedView(viewId: string): boolean {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+  async deleteMailboxSavedView(viewId: string): Promise<boolean> {
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) return false;
-    const result = this.db
-      .prepare(`DELETE FROM mailbox_saved_views WHERE id = ? AND workspace_id = ?`)
-      .run(viewId, workspaceId);
+    const result = await this.sql.run("deleteMailboxSavedView_1", [viewId, workspaceId]);
     return result.changes > 0;
   }
 
@@ -12781,9 +11465,10 @@ export class MailboxService {
       return { suggestions: [] };
     }
     const workspaceId =
-      this.resolveThreadWorkspaceId(detail.accountId) || this.resolveDefaultWorkspaceId();
+      (await this.resolveThreadWorkspaceId(detail.accountId)) ||
+      (await this.resolveDefaultWorkspaceId());
     if (!workspaceId) return { suggestions: [] };
-    const summary = this.getSummaryForThread(threadId);
+    const summary = await this.getSummaryForThread(threadId);
     const summaryText = stripMailboxSummaryHtmlArtifacts(summary?.summary || detail.snippet);
     const latest =
       detail.messages.filter((m) => m.direction === "incoming").slice(-1)[0] ||
@@ -12799,15 +11484,14 @@ export class MailboxService {
   }
 
   async createReviewScheduleForSavedView(viewId: string): Promise<MailboxAutomationRecord> {
-    const workspaceId = this.resolveDefaultWorkspaceId();
+    const workspaceId = await this.resolveDefaultWorkspaceId();
     if (!workspaceId) {
       throw new Error("No workspace for mailbox automation");
     }
-    const row = this.db
-      .prepare(
-        `SELECT id, name, instructions FROM mailbox_saved_views WHERE id = ? AND workspace_id = ?`,
-      )
-      .get(viewId, workspaceId) as { id: string; name: string; instructions: string } | undefined;
+    const row = (await this.sql.get("createReviewScheduleForSavedView_1", [
+      viewId,
+      workspaceId,
+    ])) as { id: string; name: string; instructions: string } | undefined;
     if (!row) {
       throw new Error("Saved view not found");
     }
@@ -12841,8 +11525,8 @@ export class MailboxService {
     }
   }
 
-  private resolveFollowUpWorkspaceId(): string | null {
-    const workspaces = this.workspaceRepo.findAll();
+  private async resolveFollowUpWorkspaceId(): Promise<string | null> {
+    const workspaces = await this.workspaceRepo.findAll();
     const preferred = workspaces.find(
       (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
     );
@@ -12867,3 +11551,6 @@ export class MailboxService {
     };
   }
 }
+
+// Each call is one mailbox operation for the statement burst gate (DB6).
+bindStatementContext(MailboxService.prototype, "MailboxService");

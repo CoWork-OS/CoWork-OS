@@ -27,10 +27,10 @@ describeWithSqlite("SessionRetentionService", () => {
   let previousUserDataDir: string | undefined;
   let manager: import("../../database/schema").DatabaseManager;
   let db: ReturnType<import("../../database/schema").DatabaseManager["getDatabase"]>;
-  let taskRepo: import("../../database/repositories").TaskRepository;
+  let taskRepo: import("../../database/repositories").TaskStore;
   let eventRepo: import("../../database/repositories").TaskEventRepository;
-  let metadataRepo: import("../../database/repositories").TaskSessionMetadataRepository;
-  let workspaceRepo: import("../../database/repositories").WorkspaceRepository;
+  let metadataRepo: import("../../database/repositories").TaskSessionMetadataStore;
+  let workspaceRepo: import("../../database/repositories").WorkspaceStore;
   let service: import("../SessionRetentionService").SessionRetentionService;
   let workspaceId: string;
 
@@ -47,10 +47,10 @@ describeWithSqlite("SessionRetentionService", () => {
 
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new repositories.TaskRepository(db);
+    taskRepo = new repositories.TaskStore(db);
     eventRepo = new repositories.TaskEventRepository(db);
-    metadataRepo = new repositories.TaskSessionMetadataRepository(db);
-    workspaceRepo = new repositories.WorkspaceRepository(db);
+    metadataRepo = new repositories.TaskSessionMetadataStore(db);
+    workspaceRepo = new repositories.WorkspaceStore(db);
     service = new sessionRetention.SessionRetentionService(
       taskRepo,
       eventRepo,

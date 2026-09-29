@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import type {
@@ -65,6 +65,11 @@ export interface RecurringApprovalCreateInput extends RecurringApprovalFingerpri
   createdByApprovalId?: string;
   fingerprint?: string;
   operationJson?: string;
+  /**
+   * When the user made the decision. A rule revoked after it stays revoked: a late
+   * write of an earlier approval cannot re-activate it. Defaults to now.
+   */
+  decidedAt?: number;
 }
 
 export interface RecurringApprovalMatch {
@@ -116,7 +121,15 @@ export function fingerprintRecurringApprovalOperation(
     .digest("hex");
 }
 
-export class RecurringApprovalService {
+/**
+ * Recurring approval rules: a user's standing allow or deny for one fingerprinted
+ * operation (async SQLite migration plan, DB6). As services-domain units these run in
+ * the database worker when the domain is routed there; callers use the async
+ * RecurringApprovalService facade in recurring-approval-repository-facades.ts and await
+ * every lookup before authorizing a tool. Creating a rule keeps a revocation that
+ * happened after the decision.
+ */
+export class RecurringApprovalStore {
   constructor(private readonly db: Database.Database) {}
 
   fingerprint(input: RecurringApprovalFingerprintInput): {
@@ -172,7 +185,11 @@ export class RecurringApprovalService {
            operation_json = excluded.operation_json,
            expires_at = excluded.expires_at,
            revoked_at = NULL,
-           created_by_approval_id = excluded.created_by_approval_id`,
+           created_by_approval_id = excluded.created_by_approval_id
+         -- A decision made before the rule was revoked must not revive it (DB5):
+         -- the revocation is the later decision.
+         WHERE recurring_approval_rules.revoked_at IS NULL
+            OR recurring_approval_rules.revoked_at <= ?`,
       )
       .run(
         id,
@@ -186,6 +203,7 @@ export class RecurringApprovalService {
         now,
         expiresAt,
         input.createdByApprovalId || null,
+        Number.isFinite(input.decidedAt) ? Number(input.decidedAt) : now,
       );
     const row = this.db
       .prepare("SELECT * FROM recurring_approval_rules WHERE fingerprint = ?")

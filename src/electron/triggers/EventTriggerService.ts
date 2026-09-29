@@ -7,7 +7,15 @@
  */
 
 import { randomUUID } from "crypto";
-import { EventTrigger, TriggerEvent, TriggerHistoryEntry, EventTriggerServiceDeps } from "./types";
+import type Database from "better-sqlite3";
+import { serviceStatements, type ServiceStatementPort } from "../database/service-statements";
+import {
+  EventTrigger,
+  TriggerEvent,
+  TriggerHistoryEntry,
+  EventTriggerServiceDeps,
+  type EventTriggerRegistry,
+} from "./types";
 import { evaluateConditions, substituteEventVariables } from "./condition-evaluator";
 
 const DEFAULT_COOLDOWN_MS = 60_000; // 1 minute
@@ -24,12 +32,15 @@ function triggerMatchesEventSource(triggerSource: string, eventSource: string): 
   return false;
 }
 
-export class EventTriggerService {
+export class EventTriggerService implements EventTriggerRegistry {
   private triggers: Map<string, EventTrigger> = new Map();
   private history: Map<string, TriggerHistoryEntry[]> = new Map(); // triggerId → entries
   private running = false;
   private deps: EventTriggerServiceDeps;
   private db: Any; // better-sqlite3 database instance
+  /** Trigger persistence as services-domain units (DB6); null without a database. */
+  private sql: ServiceStatementPort | null;
+  private ready: Promise<void> = Promise.resolve();
   private queueTimer: NodeJS.Timeout | null = null;
   private drainingQueue = false;
   private drainPromise: Promise<void> | null = null;
@@ -43,24 +54,29 @@ export class EventTriggerService {
   constructor(deps: EventTriggerServiceDeps, db?: Any) {
     this.deps = deps;
     this.db = db;
+    this.sql = db ? serviceStatements(db as Database.Database) : null;
     this.ensureSchema();
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────
 
-  start(): void {
-    if (this.running) return;
+  /** Load the triggers and requeue interrupted events; events wait until this is done. */
+  start(): Promise<void> {
+    if (this.running) return this.ready;
     this.running = true;
-    this.loadFromDB();
-    if (this.db) {
-      this.db
-        .prepare(
-          `UPDATE event_trigger_queue
-           SET status = 'pending', available_at = ?,
-               error = COALESCE(error, 'Recovered after application restart.'), updated_at = ?
-           WHERE status = 'processing'`,
-        )
-        .run(Date.now(), Date.now());
+    this.ready = this.startNow();
+    return this.ready;
+  }
+
+  private async startNow(): Promise<void> {
+    await this.loadFromDB();
+    if (this.sql) {
+      try {
+        await this.sql.unit("eventTrigger_recoverProcessing", [Date.now()]);
+      } catch (error) {
+        this.log("[EventTriggerService] Failed to recover queued events:", error);
+      }
+      if (!this.running) return;
       this.queueTimer = setInterval(() => void this.drainQueuedEvents(), 1_000);
       void this.drainQueuedEvents();
     }
@@ -95,9 +111,9 @@ export class EventTriggerService {
 
   // ── CRUD ────────────────────────────────────────────────────────
 
-  addTrigger(
+  async addTrigger(
     input: Omit<EventTrigger, "id" | "fireCount" | "createdAt" | "updatedAt">,
-  ): EventTrigger {
+  ): Promise<EventTrigger> {
     const now = Date.now();
     const trigger: EventTrigger = {
       ...input,
@@ -107,11 +123,11 @@ export class EventTriggerService {
       updatedAt: now,
     };
     this.triggers.set(trigger.id, trigger);
-    this.saveToDB(trigger);
+    await this.saveToDB(trigger);
     return trigger;
   }
 
-  updateTrigger(id: string, updates: Partial<EventTrigger>): EventTrigger | null {
+  async updateTrigger(id: string, updates: Partial<EventTrigger>): Promise<EventTrigger | null> {
     const existing = this.triggers.get(id);
     if (!existing) return null;
     const updated: EventTrigger = {
@@ -122,13 +138,13 @@ export class EventTriggerService {
       updatedAt: Date.now(),
     };
     this.triggers.set(id, updated);
-    this.saveToDB(updated);
+    await this.saveToDB(updated);
     return updated;
   }
 
-  removeTrigger(id: string): boolean {
+  async removeTrigger(id: string): Promise<boolean> {
     const deleted = this.triggers.delete(id);
-    if (deleted) this.deleteFromDB(id);
+    if (deleted) await this.deleteFromDB(id);
     return deleted;
   }
 
@@ -156,10 +172,11 @@ export class EventTriggerService {
    */
   async evaluateEvent(event: TriggerEvent): Promise<void> {
     if (!this.running) return;
+    await this.ready;
 
     const activeCount = this.deps.getActiveTaskCount?.() ?? 0;
-    if (activeCount >= 4 && this.db) {
-      this.enqueueEvent(event);
+    if (activeCount >= 4 && this.sql) {
+      await this.enqueueEvent(event);
       return;
     }
 
@@ -195,7 +212,7 @@ export class EventTriggerService {
     const now = Date.now();
     trigger.lastFiredAt = now;
     trigger.fireCount += 1;
-    this.saveToDB(trigger);
+    await this.saveToDB(trigger);
 
     const historyEntry: TriggerHistoryEntry = {
       id: randomUUID(),
@@ -289,7 +306,8 @@ export class EventTriggerService {
     if (entries.length > MAX_HISTORY_PER_TRIGGER) {
       entries.length = MAX_HISTORY_PER_TRIGGER;
     }
-    this.saveHistoryToDB(historyEntry);
+    // History is kept in memory as well; its row is written without delaying the hook.
+    void this.saveHistoryToDB(historyEntry);
     try {
       this.deps.onTriggerFired?.({ trigger, event, historyEntry });
     } catch (error) {
@@ -297,25 +315,24 @@ export class EventTriggerService {
     }
   }
 
-  private enqueueEvent(event: TriggerEvent): void {
-    if (!this.db) return;
+  private async enqueueEvent(event: TriggerEvent): Promise<void> {
+    if (!this.sql) return;
     const id = randomUUID();
     const dedupeKey = `${event.source}:${event.timestamp}:${stableStringify(event.fields)}`;
     try {
-      this.db
-        .prepare(
-          `INSERT OR IGNORE INTO event_trigger_queue
-           (id, dedupe_key, event_json, status, attempt_count, available_at, created_at, updated_at)
-           VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
-        )
-        .run(id, dedupeKey, JSON.stringify(event), Date.now(), Date.now(), Date.now());
+      await this.sql.unit("eventTrigger_enqueue", [
+        id,
+        dedupeKey,
+        JSON.stringify(event),
+        Date.now(),
+      ]);
     } catch (error) {
       this.log("[EventTriggerService] Failed to queue event:", error);
     }
   }
 
   private drainQueuedEvents(): Promise<void> {
-    if (!this.running || !this.db) return Promise.resolve();
+    if (!this.running || !this.sql) return Promise.resolve();
     if (this.drainPromise) return this.drainPromise;
 
     const promise = this.runDrainQueuedEvents().catch((error) => {
@@ -334,52 +351,25 @@ export class EventTriggerService {
   }
 
   private async runDrainQueuedEvents(): Promise<void> {
-    if (!this.running || !this.db || this.drainingQueue) return;
+    const sql = this.sql;
+    if (!this.running || !sql || this.drainingQueue) return;
     if ((this.deps.getActiveTaskCount?.() ?? 0) >= 4) return;
     this.drainingQueue = true;
     try {
       while (this.running && (this.deps.getActiveTaskCount?.() ?? 0) < 4) {
-        const now = Date.now();
-        const row = this.db
-          .prepare(
-            `SELECT * FROM event_trigger_queue
-             WHERE status = 'pending' AND available_at <= ?
-             ORDER BY created_at ASC LIMIT 1`,
-          )
-          .get(now) as Any | undefined;
+        const row = (await sql.unit("eventTrigger_claimNext", [Date.now()])) as Any | undefined;
         if (!row) return;
-        this.db
-          .prepare(
-            "UPDATE event_trigger_queue SET status = 'processing', attempt_count = attempt_count + 1, updated_at = ? WHERE id = ?",
-          )
-          .run(now, row.id);
         try {
           const event = JSON.parse(String(row.event_json)) as TriggerEvent;
           await this.evaluateEventNow(event);
           if (!this.running) return;
-          this.db.prepare("DELETE FROM event_trigger_queue WHERE id = ?").run(row.id);
+          await sql.unit("eventTrigger_completeQueued", [row.id]);
         } catch (error) {
           if (!this.running) return;
+          // The claim already counted this attempt.
           const attemptCount = Number(row.attempt_count || 0) + 1;
           const message = error instanceof Error ? error.message : String(error);
-          if (attemptCount >= 5) {
-            this.db
-              .prepare(
-                "UPDATE event_trigger_queue SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
-              )
-              .run(message, Date.now(), row.id);
-          } else {
-            this.db
-              .prepare(
-                "UPDATE event_trigger_queue SET status = 'pending', error = ?, available_at = ?, updated_at = ? WHERE id = ?",
-              )
-              .run(
-                message,
-                Date.now() + Math.min(60_000, 1_000 * 2 ** attemptCount),
-                Date.now(),
-                row.id,
-              );
-          }
+          await sql.unit("eventTrigger_retryQueued", [row.id, message, attemptCount, Date.now()]);
         }
       }
     } finally {
@@ -441,10 +431,10 @@ export class EventTriggerService {
     }
   }
 
-  private loadFromDB(): void {
-    if (!this.db) return;
+  private async loadFromDB(): Promise<void> {
+    if (!this.sql) return;
     try {
-      const rows = this.db.prepare("SELECT * FROM event_triggers").all() as Any[];
+      const rows = (await this.sql.unit("eventTrigger_loadTriggerRows", [])) as Any[];
       for (const row of rows) {
         let conditions: Any[];
         let action: Any;
@@ -483,63 +473,28 @@ export class EventTriggerService {
     }
   }
 
-  private saveToDB(trigger: EventTrigger): void {
-    if (!this.db) return;
+  private async saveToDB(trigger: EventTrigger): Promise<void> {
+    if (!this.sql) return;
     try {
-      this.db
-        .prepare(
-          `INSERT OR REPLACE INTO event_triggers
-           (id, name, description, enabled, source, conditions, condition_logic, action,
-            workspace_id, cooldown_ms, last_fired_at, fire_count, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          trigger.id,
-          trigger.name,
-          trigger.description || null,
-          trigger.enabled ? 1 : 0,
-          trigger.source,
-          JSON.stringify(trigger.conditions),
-          trigger.conditionLogic || "all",
-          JSON.stringify(trigger.action),
-          trigger.workspaceId,
-          trigger.cooldownMs ?? DEFAULT_COOLDOWN_MS,
-          trigger.lastFiredAt || null,
-          trigger.fireCount,
-          trigger.createdAt,
-          trigger.updatedAt,
-        );
+      await this.sql.unit("eventTrigger_saveTrigger", [trigger]);
     } catch (err) {
       this.log("[EventTriggerService] Failed to save trigger:", err);
     }
   }
 
-  private deleteFromDB(id: string): void {
-    if (!this.db) return;
+  private async deleteFromDB(id: string): Promise<void> {
+    if (!this.sql) return;
     try {
-      this.db.prepare("DELETE FROM event_triggers WHERE id = ?").run(id);
-      this.db.prepare("DELETE FROM event_trigger_history WHERE trigger_id = ?").run(id);
+      await this.sql.unit("eventTrigger_deleteTrigger", [id]);
     } catch (err) {
       this.log("[EventTriggerService] Failed to delete trigger:", err);
     }
   }
 
-  private saveHistoryToDB(entry: TriggerHistoryEntry): void {
-    if (!this.db) return;
+  private async saveHistoryToDB(entry: TriggerHistoryEntry): Promise<void> {
+    if (!this.sql) return;
     try {
-      this.db
-        .prepare(
-          `INSERT INTO event_trigger_history (id, trigger_id, fired_at, event_data, action_result, task_id)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          entry.id,
-          entry.triggerId,
-          entry.firedAt,
-          JSON.stringify(entry.eventData),
-          entry.actionResult || null,
-          entry.taskId || null,
-        );
+      await this.sql.unit("eventTrigger_saveHistory", [entry]);
     } catch (err) {
       this.log("[EventTriggerService] Failed to save history:", err);
     }

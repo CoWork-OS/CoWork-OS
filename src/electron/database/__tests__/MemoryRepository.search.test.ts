@@ -5,7 +5,7 @@ vi.mock("better-sqlite3", () => ({
   default: class MockBetterSqlite3 {},
 }));
 
-import { MemoryRepository } from "../repositories";
+import { MemoryStore } from "../repositories";
 
 describe("MemoryRepository.search", () => {
   it("skips raw FTS for long natural-language prompts and uses a relaxed OR query", () => {
@@ -37,7 +37,7 @@ describe("MemoryRepository.search", () => {
       prepare: vi.fn(() => ({ all })),
     };
 
-    const repo = new MemoryRepository(mockDb as Any);
+    const repo = new MemoryStore(mockDb as Any);
 
     const query =
       "I need to write an email to the class teacher about PMNL sessions. " +
@@ -73,7 +73,7 @@ describe("MemoryRepository.search", () => {
       prepare: vi.fn(() => ({ all })),
     };
 
-    const repo = new MemoryRepository(mockDb as Any);
+    const repo = new MemoryStore(mockDb as Any);
 
     const results = repo.search("ws-1", "PMNL, Portuguese support, Enes", 20, true);
 
@@ -104,7 +104,7 @@ describe("MemoryRepository.search", () => {
       prepare: vi.fn(() => ({ all })),
     };
 
-    const repo = new MemoryRepository(mockDb as Any);
+    const repo = new MemoryStore(mockDb as Any);
     const results = repo.searchImportedGlobal("PMNL Portuguese support", 10, true);
 
     expect(results).toHaveLength(1);
@@ -115,7 +115,7 @@ describe("MemoryRepository.search", () => {
   it("uses provider-agnostic imported filter SQL", () => {
     const all = vi.fn(() => []);
     const prepare = vi.fn(() => ({ all }));
-    const repo = new MemoryRepository({ prepare } as Any);
+    const repo = new MemoryStore({ prepare } as Any);
 
     repo.searchImportedGlobal("any query", 10, true);
 
@@ -127,7 +127,7 @@ describe("MemoryRepository.search", () => {
   it("excludes private memories from marker lookup", () => {
     const all = vi.fn(() => []);
     const prepare = vi.fn(() => ({ all }));
-    const repo = new MemoryRepository({ prepare } as Any);
+    const repo = new MemoryStore({ prepare } as Any);
 
     repo.searchByContentMarker("ws-1", "[SUGGESTION]", 50);
 

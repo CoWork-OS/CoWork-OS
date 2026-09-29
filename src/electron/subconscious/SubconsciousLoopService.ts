@@ -1,16 +1,27 @@
-import Database from "better-sqlite3";
+import {
+  SubconsciousBacklogRepository,
+  SubconsciousCritiqueRepository,
+  SubconsciousDecisionRepository,
+  SubconsciousDispatchRepository,
+  SubconsciousHypothesisRepository,
+  SubconsciousRunRepository,
+  SubconsciousTargetRepository,
+  SubconsciousRepository,
+} from "./subconscious-repository-facades";
+import { AutomationProfileRepository } from "../agents/agent-repository-facades";
+import type Database from "better-sqlite3";
 import { createHash, randomUUID } from "crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentDaemon } from "../agent/daemon";
 import { ProactiveSuggestionsService } from "../agent/ProactiveSuggestionsService";
-import { AutomationProfileRepository } from "../agents/AutomationProfileRepository";
+
 import { buildCoreAutomationAgentConfig } from "../agents/autonomy-policy";
 import { CoreMemoryCandidateService } from "../core/CoreMemoryCandidateService";
 import { CoreMemoryDistiller } from "../core/CoreMemoryDistiller";
 import { CoreLearningPipelineService } from "../core/CoreLearningPipelineService";
 import { CoreTraceService } from "../core/CoreTraceService";
-import { WorkspaceRepository } from "../database/repositories";
+import { WorkspaceStore } from "../database/repositories";
 import { MemoryService } from "../memory/MemoryService";
 import { getCronStorePath, loadCronStoreSync } from "../cron/store";
 import type { EventTriggerService } from "../triggers/EventTriggerService";
@@ -55,17 +66,7 @@ import {
 } from "../../shared/subconscious";
 import { SubconsciousArtifactStore } from "./SubconsciousArtifactStore";
 import { SubconsciousMigrationService } from "./SubconsciousMigrationService";
-import {
-  SubconsciousBacklogRepository,
-  SubconsciousCritiqueRepository,
-  clearSubconsciousTargetData,
-  clearSubconsciousHistoryData,
-  SubconsciousDecisionRepository,
-  SubconsciousDispatchRepository,
-  SubconsciousHypothesisRepository,
-  SubconsciousRunRepository,
-  SubconsciousTargetRepository,
-} from "./SubconsciousRepositories";
+
 import { SubconsciousSettingsManager } from "./SubconsciousSettingsManager";
 
 type Any = any;
@@ -281,8 +282,11 @@ async function normalizeComparablePath(value: string): Promise<string> {
 }
 
 export class SubconsciousLoopService {
-  private readonly workspaceRepo: WorkspaceRepository;
+  // Workspace paths resolve synchronously for the artifact store (storage slice C).
+  private readonly workspaceRepo: WorkspaceStore;
   private readonly targetRepo: SubconsciousTargetRepository;
+  // The loop's own SQL (evidence, rekey, cleanup), through services-domain units (DB6).
+  private readonly subconsciousRows: SubconsciousRepository;
   private readonly runRepo: SubconsciousRunRepository;
   private readonly hypothesisRepo: SubconsciousHypothesisRepository;
   private readonly critiqueRepo: SubconsciousCritiqueRepository;
@@ -302,8 +306,9 @@ export class SubconsciousLoopService {
     private readonly db: Database.Database,
     private readonly deps: SubconsciousLoopServiceDeps = {},
   ) {
-    this.workspaceRepo = new WorkspaceRepository(db);
+    this.workspaceRepo = new WorkspaceStore(db);
     this.targetRepo = new SubconsciousTargetRepository(db);
+    this.subconsciousRows = new SubconsciousRepository(db);
     this.runRepo = new SubconsciousRunRepository(db);
     this.hypothesisRepo = new SubconsciousHypothesisRepository(db);
     this.critiqueRepo = new SubconsciousCritiqueRepository(db);
@@ -322,13 +327,13 @@ export class SubconsciousLoopService {
     target?: SubconsciousTargetRef,
     sourceRunId?: string,
   ): Promise<void> {
-    this.deps.coreMemoryCandidateService?.extractFromTrace(traceId, {
+    await this.deps.coreMemoryCandidateService?.extractFromTrace(traceId, {
       target,
       sourceRunId,
     });
-    this.deps.coreMemoryCandidateService?.autoAcceptHighSignalCandidates(traceId);
+    await this.deps.coreMemoryCandidateService?.autoAcceptHighSignalCandidates(traceId);
     await this.deps.coreMemoryDistiller?.runHotPath(traceId);
-    this.deps.coreLearningPipelineService?.processTrace(traceId);
+    await this.deps.coreLearningPipelineService?.processTrace(traceId);
   }
 
   async start(agentDaemon: AgentDaemon): Promise<void> {
@@ -336,14 +341,14 @@ export class SubconsciousLoopService {
     this.started = true;
     this.agentDaemon = agentDaemon;
     this.migrationService.runOnce();
-    this.normalizeLegacyOutcomeVocabulary();
-    this.pruneSessionOnlyState();
+    await this.normalizeLegacyOutcomeVocabulary();
+    await this.pruneSessionOnlyState();
     await this.refreshTargets();
     logger.info("Service started", {
       enabled: this.getSettings().enabled,
       autoRun: this.getSettings().autoRun,
       cadenceMinutes: this.getSettings().cadenceMinutes,
-      targetCount: this.targetRepo.list().length,
+      targetCount: (await this.targetRepo.list()).length,
     });
   }
 
@@ -362,13 +367,12 @@ export class SubconsciousLoopService {
     return this.getSettings();
   }
 
-  getBrainSummary(): SubconsciousBrainSummary {
+  async getBrainSummary(): Promise<SubconsciousBrainSummary> {
     const settings = this.getSettings();
-    const targets = this.targetRepo.list();
-    const activeRunCount = this.runRepo.list({ activeOnly: true }).length;
+    const targets = await this.targetRepo.list();
+    const activeRunCount = (await this.runRepo.list({ activeOnly: true })).length;
     const lastRunAt = pick(
-      this.runRepo
-        .list({ limit: 1 })
+      (await this.runRepo.list({ limit: 1 }))
         .map((run) => run.completedAt || run.startedAt)
         .filter((value): value is number => typeof value === "number"),
     );
@@ -385,28 +389,28 @@ export class SubconsciousLoopService {
     };
   }
 
-  listTargets(workspaceId?: string): SubconsciousTargetSummary[] {
+  async listTargets(workspaceId?: string): Promise<SubconsciousTargetSummary[]> {
     return this.targetRepo.list({ workspaceId });
   }
 
-  listRuns(targetKey?: string): SubconsciousRun[] {
+  async listRuns(targetKey?: string): Promise<SubconsciousRun[]> {
     return this.runRepo.list({ targetKey });
   }
 
   async getTargetDetail(targetKey: string): Promise<SubconsciousTargetDetail | null> {
-    const target = this.targetRepo.findByKey(targetKey);
+    const target = await this.targetRepo.findByKey(targetKey);
     if (!target) return null;
-    const recentRuns = this.runRepo.list({ targetKey, limit: 12 });
+    const recentRuns = await this.runRepo.list({ targetKey, limit: 12 });
     const latestRun = pick(recentRuns);
     return {
       target,
       latestEvidence: this.latestEvidenceByTarget.get(targetKey) || [],
       recentRuns,
-      latestHypotheses: latestRun ? this.hypothesisRepo.listByRun(latestRun.id) : [],
-      latestCritiques: latestRun ? this.critiqueRepo.listByRun(latestRun.id) : [],
-      latestDecision: latestRun ? this.decisionRepo.findByRun(latestRun.id) : undefined,
-      backlog: this.backlogRepo.listByTarget(targetKey, 50),
-      dispatchHistory: this.dispatchRepo.listByTarget(targetKey, 30),
+      latestHypotheses: latestRun ? await this.hypothesisRepo.listByRun(latestRun.id) : [],
+      latestCritiques: latestRun ? await this.critiqueRepo.listByRun(latestRun.id) : [],
+      latestDecision: latestRun ? await this.decisionRepo.findByRun(latestRun.id) : undefined,
+      backlog: await this.backlogRepo.listByTarget(targetKey, 50),
+      dispatchHistory: await this.dispatchRepo.listByTarget(targetKey, 30),
       journal: await this.artifactStore.readJournalEntries(targetKey, 40),
       memory: await this.artifactStore.readMemoryIndex(targetKey, target.target),
       dreams: await this.artifactStore.readDreamArtifacts(target.target, 5),
@@ -416,11 +420,11 @@ export class SubconsciousLoopService {
   async refreshTargets(): Promise<SubconsciousRefreshResult> {
     const settings = this.getSettings();
     const collected = await this.collectTargets(settings.enabledTargetKinds);
-    const existingKeys = new Set(this.targetRepo.list().map((target) => target.key));
+    const existingKeys = new Set((await this.targetRepo.list()).map((target) => target.key));
     const collectedKeys = new Set(collected.keys());
     const staleKeys = Array.from(existingKeys).filter((key) => !collectedKeys.has(key));
     if (staleKeys.length) {
-      clearSubconsciousTargetData(this.db, staleKeys);
+      await this.subconsciousRows.clearTargetData(staleKeys);
       for (const key of staleKeys) {
         this.latestEvidenceByTarget.delete(key);
       }
@@ -428,9 +432,9 @@ export class SubconsciousLoopService {
     let evidenceCount = 0;
     for (const [targetKey, data] of collected.entries()) {
       if (data.target.kind === "code_workspace") {
-        this.backlogRepo.deleteLegacyNoiseByTarget(targetKey);
+        await this.backlogRepo.deleteLegacyNoiseByTarget(targetKey);
       }
-      this.backlogRepo.dedupeOpenByTarget(targetKey);
+      await this.backlogRepo.dedupeOpenByTarget(targetKey);
       const evidence = data.evidence
         .sort((a, b) => b.createdAt - a.createdAt)
         .filter(
@@ -439,22 +443,22 @@ export class SubconsciousLoopService {
         );
       evidenceCount += evidence.length;
       this.latestEvidenceByTarget.set(targetKey, evidence);
-      const backlogCount = this.backlogRepo.countOpenByTarget(targetKey);
-      const summary = this.buildTargetSummary(
+      const backlogCount = await this.backlogRepo.countOpenByTarget(targetKey);
+      const summary = await this.buildTargetSummary(
         data.target,
         evidence,
         backlogCount,
-        this.targetRepo.findByKey(targetKey),
+        await this.targetRepo.findByKey(targetKey),
       );
-      this.targetRepo.upsert(summary);
+      await this.targetRepo.upsert(summary);
       await this.artifactStore.writeTargetState(
         summary,
         evidence,
-        this.backlogRepo.listByTarget(targetKey, 50),
+        await this.backlogRepo.listByTarget(targetKey, 50),
       );
     }
-    const targets = this.targetRepo.list();
-    await this.artifactStore.writeBrainState(this.getBrainSummary(), targets);
+    const targets = await this.targetRepo.list();
+    await this.artifactStore.writeBrainState(await this.getBrainSummary(), targets);
     this.pruneStaleMapEntries();
     logger.info("Refreshed targets", {
       targetCount: targets.length,
@@ -483,7 +487,9 @@ export class SubconsciousLoopService {
     const settings = this.getSettings();
     if (!settings.enabled) return null;
     await this.refreshTargets();
-    const target = targetKey ? this.targetRepo.findByKey(targetKey) : this.pickTargetForRun();
+    const target = targetKey
+      ? await this.targetRepo.findByKey(targetKey)
+      : await this.pickTargetForRun();
     if (!target) {
       logger.info("Run skipped: no eligible target", { requestedTargetKey: targetKey || null });
       return null;
@@ -496,15 +502,15 @@ export class SubconsciousLoopService {
         createdAt: item.createdAt,
       })),
     );
-    const deduped = this.runRepo.findLatestByFingerprint(target.key, evidenceFingerprint);
+    const deduped = await this.runRepo.findLatestByFingerprint(target.key, evidenceFingerprint);
     if (
       deduped &&
       ["sleep", "suggest", "dispatch", "notify", "defer", "dismiss"].includes(deduped.outcome || "")
     ) {
-      this.targetRepo.update(target.key, {
+      await this.targetRepo.update(target.key, {
         nextEligibleAt: this.computeNextEligibleAt(target, now()),
         lastActionAt: now(),
-        backlogCount: this.backlogRepo.countOpenByTarget(target.key),
+        backlogCount: await this.backlogRepo.countOpenByTarget(target.key),
       });
       logger.info("Run deduplicated", {
         targetKey: target.key,
@@ -515,8 +521,8 @@ export class SubconsciousLoopService {
     }
 
     this.brainStatus = "running";
-    const profile = this.resolveAutomationProfileForTarget(target.target);
-    let run = this.runRepo.create({
+    const profile = await this.resolveAutomationProfileForTarget(target.target);
+    let run = await this.runRepo.create({
       targetKey: target.key,
       workspaceId: target.target.workspaceId,
       stage: "collecting_evidence",
@@ -530,7 +536,7 @@ export class SubconsciousLoopService {
       startedAt: now(),
     });
     const coreTrace = profile
-      ? this.deps.coreTraceService?.startTrace({
+      ? await this.deps.coreTraceService?.startTrace({
           profileId: profile.id,
           workspaceId: target.target.workspaceId,
           targetKey: target.key,
@@ -559,7 +565,7 @@ export class SubconsciousLoopService {
           ? `Collected ${evidence.length} evidence signal(s).`
           : "No fresh evidence was collected.",
       });
-      this.targetRepo.update(target.key, {
+      await this.targetRepo.update(target.key, {
         state: "active",
         evidenceFingerprint,
         lastObservedAt: pick(evidence)?.createdAt || now(),
@@ -567,14 +573,14 @@ export class SubconsciousLoopService {
 
       if (evidence.length === 0) {
         if (coreTrace) {
-          this.deps.coreTraceService?.appendPhaseEvent(
+          await this.deps.coreTraceService?.appendPhaseEvent(
             coreTrace.id,
             "evidence",
             "subconscious.no_evidence",
             "No fresh evidence was worth acting on right now.",
           );
         }
-        run = this.completeSleepRun(run, "No fresh evidence was worth acting on right now.");
+        run = await this.completeSleepRun(run, "No fresh evidence was worth acting on right now.");
         await this.appendJournal({
           runId: run.id,
           targetKey: target.key,
@@ -596,7 +602,7 @@ export class SubconsciousLoopService {
         await this.finalizeTargetAfterRun(target, run, undefined, null, evidence);
         await this.maybeRunDream(target.target);
         if (coreTrace) {
-          this.deps.coreTraceService?.completeTrace(
+          await this.deps.coreTraceService?.completeTrace(
             coreTrace.id,
             "completed",
             "No fresh evidence was worth acting on right now.",
@@ -616,7 +622,7 @@ export class SubconsciousLoopService {
 
       run = await this.advanceRun(run.id, { stage: "ideating" });
       if (coreTrace) {
-        this.deps.coreTraceService?.appendPhaseEvent(
+        await this.deps.coreTraceService?.appendPhaseEvent(
           coreTrace.id,
           "evidence",
           "subconscious.evidence_collected",
@@ -632,9 +638,9 @@ export class SubconsciousLoopService {
         evidence,
         settings.maxHypothesesPerRun,
       ).map((item) => ({ ...item, runId: run.id }));
-      this.hypothesisRepo.replaceForRun(run.id, hypotheses);
+      await this.hypothesisRepo.replaceForRun(run.id, hypotheses);
       if (coreTrace) {
-        this.deps.coreTraceService?.appendPhaseEvent(
+        await this.deps.coreTraceService?.appendPhaseEvent(
           coreTrace.id,
           "decision",
           "subconscious.hypotheses_generated",
@@ -647,9 +653,9 @@ export class SubconsciousLoopService {
         ...item,
         runId: run.id,
       }));
-      this.critiqueRepo.replaceForRun(run.id, critiques);
+      await this.critiqueRepo.replaceForRun(run.id, critiques);
       if (coreTrace) {
-        this.deps.coreTraceService?.appendPhaseEvent(
+        await this.deps.coreTraceService?.appendPhaseEvent(
           coreTrace.id,
           "decision",
           "subconscious.critiques_generated",
@@ -663,7 +669,7 @@ export class SubconsciousLoopService {
         runId: run.id,
       };
       if (coreTrace) {
-        this.deps.coreTraceService?.appendPhaseEvent(
+        await this.deps.coreTraceService?.appendPhaseEvent(
           coreTrace.id,
           "decision",
           "subconscious.decision_synthesized",
@@ -673,7 +679,7 @@ export class SubconsciousLoopService {
           },
         );
       }
-      this.decisionRepo.upsert(decision);
+      await this.decisionRepo.upsert(decision);
       await this.appendJournal({
         runId: run.id,
         targetKey: target.key,
@@ -682,7 +688,7 @@ export class SubconsciousLoopService {
         details: decision.recommendation,
       });
       const dispatchKind = this.resolveDispatchKind(target.target, evidence);
-      const backlog = this.materializeBacklog(target.key, decision, dispatchKind);
+      const backlog = await this.materializeBacklog(target.key, decision, dispatchKind);
       const policy = this.evaluatePolicy(target, decision, evidence, dispatchKind);
       const autoDispatchAllowed = await this.shouldAutoDispatchDecision({
         settings,
@@ -691,7 +697,7 @@ export class SubconsciousLoopService {
         policy,
         evidence,
       });
-      this.runRepo.update(run.id, {
+      await this.runRepo.update(run.id, {
         confidence: policy.confidence,
         riskLevel: policy.riskLevel,
         evidenceSources: policy.evidenceSources,
@@ -721,7 +727,7 @@ export class SubconsciousLoopService {
         backlog,
         dispatch: placeholderDispatch,
       });
-      this.runRepo.update(run.id, {
+      await this.runRepo.update(run.id, {
         artifactRoot,
       });
 
@@ -738,7 +744,7 @@ export class SubconsciousLoopService {
       if (autoDispatchAllowed && dispatchKind) {
         run = await this.advanceRun(run.id, { stage: "dispatching" });
         if (coreTrace) {
-          this.deps.coreTraceService?.appendPhaseEvent(
+          await this.deps.coreTraceService?.appendPhaseEvent(
             coreTrace.id,
             "dispatch",
             "subconscious.dispatch_started",
@@ -750,7 +756,7 @@ export class SubconsciousLoopService {
         }
         dispatchRecord = await this.dispatchDecision(target.target, decision, evidence);
         if (dispatchRecord) {
-          this.dispatchRepo.create(dispatchRecord);
+          await this.dispatchRepo.create(dispatchRecord);
           outcome =
             dispatchRecord.status === "failed"
               ? "failed"
@@ -766,12 +772,12 @@ export class SubconsciousLoopService {
       } else {
         dispatchRecord = await this.dispatchSuggestionForReview(target.target, decision, evidence);
         if (dispatchRecord) {
-          this.dispatchRepo.create(dispatchRecord);
+          await this.dispatchRepo.create(dispatchRecord);
           outcome = dispatchRecord.status === "skipped" ? "defer" : "suggest";
         }
       }
 
-      this.runRepo.update(run.id, {
+      await this.runRepo.update(run.id, {
         stage: finalStage,
         outcome,
         dispatchKind: dispatchRecord?.kind,
@@ -785,7 +791,7 @@ export class SubconsciousLoopService {
         completedAt: now(),
         rejectedHypothesisIds: decision.rejectedHypothesisIds,
       });
-      const finalRun = this.runRepo.findById(run.id) || run;
+      const finalRun = (await this.runRepo.findById(run.id)) || run;
       this.brainStatus = "idle";
       await this.artifactStore.writeRunArtifacts({
         target: target.target,
@@ -794,14 +800,14 @@ export class SubconsciousLoopService {
         hypotheses,
         critiques,
         decision: { ...decision, outcome },
-        backlog: this.backlogRepo.listByTarget(target.key, 50),
+        backlog: await this.backlogRepo.listByTarget(target.key, 50),
         dispatch: dispatchRecord,
       });
       await this.finalizeTargetAfterRun(target, finalRun, decision, dispatchRecord, evidence);
       await this.notifyForRun(target.target, finalRun, decision, dispatchRecord);
       await this.maybeRunDream(target.target);
       if (coreTrace) {
-        this.deps.coreTraceService?.appendPhaseEvent(
+        await this.deps.coreTraceService?.appendPhaseEvent(
           coreTrace.id,
           dispatchRecord ? "dispatch" : "complete",
           dispatchRecord ? "subconscious.dispatch_completed" : "subconscious.run_completed",
@@ -811,7 +817,7 @@ export class SubconsciousLoopService {
             outcome,
           },
         );
-        this.deps.coreTraceService?.completeTrace(
+        await this.deps.coreTraceService?.completeTrace(
           coreTrace.id,
           "completed",
           finalRun.outcome || outcome,
@@ -828,17 +834,17 @@ export class SubconsciousLoopService {
         dispatchStatus: finalRun.dispatchStatus || null,
         permissionDecision: finalRun.permissionDecision || null,
       });
-      return this.runRepo.findById(run.id) || finalRun;
+      return (await this.runRepo.findById(run.id)) || finalRun;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.brainStatus = "idle";
-      this.runRepo.update(run.id, {
+      await this.runRepo.update(run.id, {
         stage: "failed",
         outcome: "failed",
         error: message,
         completedAt: now(),
       });
-      this.targetRepo.update(target.key, {
+      await this.targetRepo.update(target.key, {
         state: "idle",
         health: "blocked",
       });
@@ -850,15 +856,18 @@ export class SubconsciousLoopService {
         details: message,
         outcome: "failed",
       });
-      await this.artifactStore.writeBrainState(this.getBrainSummary(), this.targetRepo.list());
+      await this.artifactStore.writeBrainState(
+        await this.getBrainSummary(),
+        await this.targetRepo.list(),
+      );
       if (coreTrace) {
-        this.deps.coreTraceService?.appendPhaseEvent(
+        await this.deps.coreTraceService?.appendPhaseEvent(
           coreTrace.id,
           "error",
           "subconscious.error",
           message,
         );
-        this.deps.coreTraceService?.failTrace(coreTrace.id, message);
+        await this.deps.coreTraceService?.failTrace(coreTrace.id, message);
         await this.finalizeCoreLearning(coreTrace.id, target.target, run.id);
       }
       logger.error("Run failed", {
@@ -867,7 +876,7 @@ export class SubconsciousLoopService {
         targetLabel: target.target.label,
         error: message,
       });
-      return this.runRepo.findById(run.id) || null;
+      return (await this.runRepo.findById(run.id)) || null;
     }
   }
 
@@ -875,7 +884,7 @@ export class SubconsciousLoopService {
     const settings = this.getSettings();
     if (!settings.enabled || !settings.autoRun) return null;
     await this.refreshTargets();
-    const target = this.pickTargetForRun(workspaceId);
+    const target = await this.pickTargetForRun(workspaceId);
     if (!target) {
       logger.info("Heartbeat-triggered reflection skipped: no eligible target", {
         workspaceId: workspaceId || null,
@@ -885,19 +894,19 @@ export class SubconsciousLoopService {
     return this.runNow(target.key);
   }
 
-  private resolveAutomationProfileForTarget(target: SubconsciousTargetRef) {
+  private async resolveAutomationProfileForTarget(target: SubconsciousTargetRef) {
     const repo = this.deps.automationProfileRepo;
     if (!repo) return undefined;
     if (target.agentRoleId) {
       return repo.findByAgentRoleId(target.agentRoleId);
     }
-    const enabled = repo.listEnabled();
+    const enabled = await repo.listEnabled();
     if (!enabled.length) return undefined;
     return enabled[0];
   }
 
   async retryRun(runId: string): Promise<SubconsciousRun | null> {
-    const prior = this.runRepo.findById(runId);
+    const prior = await this.runRepo.findById(runId);
     if (!prior) return null;
     return this.runNow(prior.targetKey);
   }
@@ -906,10 +915,10 @@ export class SubconsciousLoopService {
     runId: string,
     reviewStatus: "accepted" | "dismissed",
   ): Promise<SubconsciousRun | undefined> {
-    const run = this.runRepo.findById(runId);
+    const run = await this.runRepo.findById(runId);
     if (!run) return undefined;
     if (reviewStatus === "dismissed") {
-      this.runRepo.update(runId, {
+      await this.runRepo.update(runId, {
         stage: "blocked",
         outcome: "dismiss",
         blockedReason: "Dismissed during compatibility review.",
@@ -923,10 +932,10 @@ export class SubconsciousLoopService {
     return (await this.retryRun(runId)) || run;
   }
 
-  dismissTarget(targetKey: string): SubconsciousTargetSummary | undefined {
-    const target = this.targetRepo.findByKey(targetKey);
+  async dismissTarget(targetKey: string): Promise<SubconsciousTargetSummary | undefined> {
+    const target = await this.targetRepo.findByKey(targetKey);
     if (!target) return undefined;
-    this.targetRepo.update(targetKey, {
+    await this.targetRepo.update(targetKey, {
       state: "stale",
       health: "watch",
       lastDispatchStatus: "skipped",
@@ -937,7 +946,7 @@ export class SubconsciousLoopService {
   }
 
   async resetHistory(): Promise<SubconsciousHistoryResetResult> {
-    const deleted = clearSubconsciousHistoryData(this.db);
+    const deleted = await this.subconsciousRows.clearHistoryData();
     this.latestEvidenceByTarget.clear();
     for (const workspace of this.workspaceRepo.findAll()) {
       if (!workspace.path) continue;
@@ -1003,8 +1012,8 @@ export class SubconsciousLoopService {
     };
   }
 
-  listImprovementCandidates(workspaceId?: string): ImprovementCandidate[] {
-    return this.listTargets(workspaceId).map((target) => ({
+  async listImprovementCandidates(workspaceId?: string): Promise<ImprovementCandidate[]> {
+    return (await this.listTargets(workspaceId)).map((target) => ({
       id: target.key,
       workspaceId: target.target.workspaceId || workspaceId || "global",
       fingerprint: target.evidenceFingerprint || target.key,
@@ -1036,11 +1045,13 @@ export class SubconsciousLoopService {
     }));
   }
 
-  listImprovementCampaigns(workspaceId?: string): ImprovementCampaign[] {
-    const targets = new Map(this.listTargets(workspaceId).map((item) => [item.key, item]));
-    return this.runRepo.list({ workspaceId }).map((run) => {
+  async listImprovementCampaigns(workspaceId?: string): Promise<ImprovementCampaign[]> {
+    const targets = new Map((await this.listTargets(workspaceId)).map((item) => [item.key, item]));
+    const runs = await this.runRepo.list({ workspaceId });
+    const decisions = await Promise.all(runs.map((run) => this.decisionRepo.findByRun(run.id)));
+    return runs.map((run, runIndex) => {
       const target = targets.get(run.targetKey);
-      const decision = this.decisionRepo.findByRun(run.id);
+      const decision = decisions[runIndex];
       return {
         id: run.id,
         candidateId: run.targetKey,
@@ -1095,14 +1106,13 @@ export class SubconsciousLoopService {
     };
   }
 
-  private pruneSessionOnlyState(): void {
+  private async pruneSessionOnlyState(): Promise<void> {
     const durableKinds = new Set(this.getSettings().durableTargetKinds);
-    const staleKeys = this.targetRepo
-      .list()
+    const staleKeys = (await this.targetRepo.list())
       .filter((target) => !durableKinds.has(target.target.kind))
       .map((target) => target.key);
     if (staleKeys.length) {
-      clearSubconsciousTargetData(this.db, staleKeys);
+      await this.subconsciousRows.clearTargetData(staleKeys);
     }
   }
 
@@ -1134,8 +1144,8 @@ export class SubconsciousLoopService {
     return latestEvidenceAt + 30 * 24 * 60 * 60 * 1000;
   }
 
-  private completeSleepRun(run: SubconsciousRun, reason: string): SubconsciousRun {
-    this.runRepo.update(run.id, {
+  private async completeSleepRun(run: SubconsciousRun, reason: string): Promise<SubconsciousRun> {
+    await this.runRepo.update(run.id, {
       stage: "completed",
       outcome: "sleep",
       blockedReason: reason,
@@ -1147,23 +1157,13 @@ export class SubconsciousLoopService {
       permissionDecision: "blocked",
       notificationIntent: "input_needed",
     });
-    const finalRun = this.runRepo.findById(run.id) || run;
+    const finalRun = (await this.runRepo.findById(run.id)) || run;
     return finalRun;
   }
 
-  private normalizeLegacyOutcomeVocabulary(): void {
-    const statements = [
-      "UPDATE subconscious_runs SET outcome = 'dispatch' WHERE outcome = 'completed'",
-      "UPDATE subconscious_runs SET outcome = 'suggest' WHERE outcome = 'completed_no_dispatch'",
-      "UPDATE subconscious_decisions SET outcome = 'dispatch' WHERE outcome = 'completed'",
-      "UPDATE subconscious_decisions SET outcome = 'suggest' WHERE outcome = 'completed_no_dispatch'",
-      "UPDATE subconscious_targets SET last_meaningful_outcome = 'dispatch' WHERE last_meaningful_outcome = 'completed'",
-      "UPDATE subconscious_targets SET last_meaningful_outcome = 'suggest' WHERE last_meaningful_outcome = 'completed_no_dispatch'",
-    ];
+  private async normalizeLegacyOutcomeVocabulary(): Promise<void> {
     try {
-      for (const sql of statements) {
-        this.db.prepare(sql).run();
-      }
+      await this.subconsciousRows.normalizeLegacyOutcomeVocabulary();
     } catch (error) {
       logger.warn("Skipping legacy outcome vocabulary normalization:", error);
     }
@@ -1349,15 +1349,15 @@ export class SubconsciousLoopService {
       lastEvidenceAt: pick(evidence)?.createdAt || target.lastEvidenceAt,
       lastObservedAt: pick(evidence)?.createdAt || now(),
       lastActionAt: run.completedAt || now(),
-      backlogCount: this.backlogRepo.countOpenByTarget(target.key),
+      backlogCount: await this.backlogRepo.countOpenByTarget(target.key),
       lastDispatchKind: dispatchRecord?.kind,
       lastDispatchStatus: dispatchRecord?.status,
       nextEligibleAt: this.computeNextEligibleAt(target, run.completedAt || now()),
       expiresAt: this.computeExpiryAt(pick(evidence)?.createdAt || target.lastEvidenceAt),
       lastMeaningfulOutcome: run.outcome,
     };
-    this.targetRepo.update(target.key, updated);
-    const nextTarget = this.targetRepo.findByKey(target.key) || { ...target, ...updated };
+    await this.targetRepo.update(target.key, updated);
+    const nextTarget = (await this.targetRepo.findByKey(target.key)) || { ...target, ...updated };
     await this.appendJournal({
       runId: run.id,
       targetKey: target.key,
@@ -1369,9 +1369,12 @@ export class SubconsciousLoopService {
     await this.artifactStore.writeTargetState(
       nextTarget,
       evidence,
-      this.backlogRepo.listByTarget(target.key, 50),
+      await this.backlogRepo.listByTarget(target.key, 50),
     );
-    await this.artifactStore.writeBrainState(this.getBrainSummary(), this.targetRepo.list());
+    await this.artifactStore.writeBrainState(
+      await this.getBrainSummary(),
+      await this.targetRepo.list(),
+    );
   }
 
   private async maybeRunDream(target?: SubconsciousTargetRef): Promise<void> {
@@ -1420,7 +1423,7 @@ export class SubconsciousLoopService {
         (entry) => entry,
       ).slice(0, 5),
       targetHealthSummary: target
-        ? `${target.label} is currently ${this.targetRepo.findByKey(target.key)?.health || "healthy"}.`
+        ? `${target.label} is currently ${(await this.targetRepo.findByKey(target.key))?.health || "healthy"}.`
         : `Global brain reviewed ${journal.length} journal entries.`,
       memoryUpdates,
     };
@@ -1435,7 +1438,10 @@ export class SubconsciousLoopService {
       details: digest.join(" | "),
     });
     this.lastDreamAt = artifact.createdAt;
-    await this.artifactStore.writeBrainState(this.getBrainSummary(), this.targetRepo.list());
+    await this.artifactStore.writeBrainState(
+      await this.getBrainSummary(),
+      await this.targetRepo.list(),
+    );
     logger.info("Reflection distilled", {
       targetKey: target?.key || null,
       digestCount: artifact.digest.length,
@@ -1557,11 +1563,11 @@ export class SubconsciousLoopService {
     return targetsByWorkspaceId;
   }
 
-  private mergeTargetSummaries(
+  private async mergeTargetSummaries(
     target: SubconsciousTargetRef,
     current: SubconsciousTargetSummary | undefined,
     legacy: SubconsciousTargetSummary | undefined,
-  ): SubconsciousTargetSummary {
+  ): Promise<SubconsciousTargetSummary> {
     if (!current && !legacy) {
       return this.buildTargetSummary(target, [], 0);
     }
@@ -1598,40 +1604,21 @@ export class SubconsciousLoopService {
     };
   }
 
-  private rekeyTargetRecords(oldKey: string, nextTarget: SubconsciousTargetRef): void {
+  private async rekeyTargetRecords(
+    oldKey: string,
+    nextTarget: SubconsciousTargetRef,
+  ): Promise<void> {
     if (oldKey === nextTarget.key) return;
-    const legacySummary = this.targetRepo.findByKey(oldKey);
+    const legacySummary = await this.targetRepo.findByKey(oldKey);
     if (!legacySummary) return;
-    const currentSummary = this.targetRepo.findByKey(nextTarget.key);
-    const merged = this.mergeTargetSummaries(nextTarget, currentSummary, legacySummary);
-
-    const rekeyTx = this.db.transaction(() => {
-      this.targetRepo.upsert({
-        ...merged,
-        backlogCount: Math.max(currentSummary?.backlogCount || 0, legacySummary.backlogCount || 0),
-      });
-
-      const updates = [
-        "UPDATE subconscious_runs SET target_key = ? WHERE target_key = ?",
-        "UPDATE subconscious_hypotheses SET target_key = ? WHERE target_key = ?",
-        "UPDATE subconscious_critiques SET target_key = ? WHERE target_key = ?",
-        "UPDATE subconscious_decisions SET target_key = ? WHERE target_key = ?",
-        "UPDATE subconscious_backlog_items SET target_key = ? WHERE target_key = ?",
-        "UPDATE subconscious_dispatch_records SET target_key = ? WHERE target_key = ?",
-      ];
-      for (const sql of updates) {
-        this.db.prepare(sql).run(nextTarget.key, oldKey);
-      }
-
-      this.db.prepare("DELETE FROM subconscious_targets WHERE target_key = ?").run(oldKey);
-
-      this.targetRepo.upsert({
-        ...merged,
-        backlogCount: this.backlogRepo.countOpenByTarget(nextTarget.key),
-      });
-    });
-
-    rekeyTx();
+    const currentSummary = await this.targetRepo.findByKey(nextTarget.key);
+    const merged = await this.mergeTargetSummaries(nextTarget, currentSummary, legacySummary);
+    // Moving the target's records and merging its summary is one unit (DB6).
+    await this.subconsciousRows.rekeyTarget(
+      oldKey,
+      merged,
+      Math.max(currentSummary?.backlogCount || 0, legacySummary.backlogCount || 0),
+    );
   }
 
   private async collectTargets(enabledKinds: SubconsciousTargetKind[]) {
@@ -1665,6 +1652,9 @@ export class SubconsciousLoopService {
       label: "Global brain",
     };
     ensure(globalTarget);
+    // Every evidence source is read in one reporting unit, off the host when the services
+    // domain is routed to the worker (DB6).
+    const evidence = await this.subconsciousRows.evidenceRows();
 
     const workspaces = this.workspaceRepo.findAll().filter((item) => !item.isTemp && item.path);
     const codeTargetsByWorkspaceId = await this.collectCodeWorkspaceTargets(workspaces);
@@ -1680,19 +1670,12 @@ export class SubconsciousLoopService {
       const codeTarget = codeTargetsByWorkspaceId.get(workspace.id);
       if (codeTarget) {
         ensure(codeTarget);
-        this.rekeyTargetRecords(`code_workspace:${workspace.id}`, codeTarget);
+        await this.rekeyTargetRecords(`code_workspace:${workspace.id}`, codeTarget);
       }
     }
 
-    if (this.hasTable("tasks")) {
-      const taskRows = this.db
-        .prepare(
-          `SELECT id, workspace_id, title, status, failure_class, result_summary, updated_at, source
-           FROM tasks
-           ORDER BY updated_at DESC
-           LIMIT 200`,
-        )
-        .all() as Any[];
+    if (evidence.tasks) {
+      const taskRows = evidence.tasks;
       for (const row of taskRows) {
         if (isSelfGeneratedSubconsciousTask(row)) {
           continue;
@@ -1736,16 +1719,8 @@ export class SubconsciousLoopService {
       }
     }
 
-    if (this.hasTable("memory_markdown_files")) {
-      const rows = this.db
-        .prepare(
-          `SELECT workspace_id, path, updated_at
-           FROM memory_markdown_files
-           WHERE path LIKE '%.cowork/%' OR path LIKE '%playbook%'
-           ORDER BY updated_at DESC
-           LIMIT 100`,
-        )
-        .all() as Any[];
+    if (evidence.memoryMarkdownFiles) {
+      const rows = evidence.memoryMarkdownFiles;
       for (const row of rows) {
         const workspace = this.workspaceRepo.findById(String(row.workspace_id));
         if (!workspace || workspace.isTemp) continue;
@@ -1766,16 +1741,8 @@ export class SubconsciousLoopService {
       }
     }
 
-    if (this.hasTable("mailbox_events")) {
-      const rows = this.db
-        .prepare(
-          `SELECT thread_id, workspace_id, subject, summary_text, created_at, last_seen_at
-           FROM mailbox_events
-           WHERE thread_id IS NOT NULL
-           ORDER BY last_seen_at DESC
-           LIMIT 50`,
-        )
-        .all() as Any[];
+    if (evidence.mailboxEvents) {
+      const rows = evidence.mailboxEvents;
       for (const row of rows) {
         const workspace = this.workspaceRepo.findById(String(row.workspace_id));
         const target: SubconsciousTargetRef = {
@@ -1794,22 +1761,8 @@ export class SubconsciousLoopService {
       }
     }
 
-    if (this.hasTable("automation_profiles") && this.hasTable("agent_roles")) {
-      const rows = this.db
-        .prepare(
-          `SELECT ap.agent_role_id AS id,
-                  ar.name,
-                  ar.display_name,
-                  ap.last_heartbeat_at,
-                  ap.heartbeat_status,
-                  ap.heartbeat_last_pulse_result
-           FROM automation_profiles ap
-           JOIN agent_roles ar ON ar.id = ap.agent_role_id
-           WHERE ap.enabled = 1
-             AND COALESCE(ar.is_active, 1) = 1
-             AND COALESCE(ar.role_kind, 'custom') != 'persona_template'`,
-        )
-        .all() as Any[];
+    if (evidence.automationProfiles) {
+      const rows = evidence.automationProfiles;
       for (const row of rows) {
         const label = String(row.display_name || row.name || row.id);
         const target: SubconsciousTargetRef = {
@@ -1839,15 +1792,8 @@ export class SubconsciousLoopService {
       }
     }
 
-    if (this.hasTable("heartbeat_runs")) {
-      const rows = this.db
-        .prepare(
-          `SELECT id, workspace_id, agent_role_id, run_type, dispatch_kind, reason, status, summary, error, updated_at
-           FROM heartbeat_runs
-           ORDER BY updated_at DESC
-           LIMIT 50`,
-        )
-        .all() as Any[];
+    if (evidence.heartbeatRuns) {
+      const rows = evidence.heartbeatRuns;
       for (const row of rows) {
         if (!isActionableHeartbeatRun(row)) {
           continue;
@@ -1878,14 +1824,8 @@ export class SubconsciousLoopService {
       }
     }
 
-    if (this.hasTable("event_triggers")) {
-      const rows = this.db
-        .prepare(
-          `SELECT id, name, workspace_id, enabled, source, updated_at
-           FROM event_triggers
-           ORDER BY updated_at DESC`,
-        )
-        .all() as Any[];
+    if (evidence.eventTriggers) {
+      const rows = evidence.eventTriggers;
       for (const row of rows) {
         const workspaceId =
           typeof row.workspace_id === "string" && row.workspace_id.trim().length > 0
@@ -1925,13 +1865,8 @@ export class SubconsciousLoopService {
       });
     }
 
-    if (this.hasTable("briefing_config")) {
-      const rows = this.db
-        .prepare(
-          `SELECT workspace_id, enabled, schedule_time, updated_at
-           FROM briefing_config`,
-        )
-        .all() as Any[];
+    if (evidence.briefingConfig) {
+      const rows = evidence.briefingConfig;
       for (const row of rows) {
         const workspace = this.workspaceRepo.findById(String(row.workspace_id));
         const target: SubconsciousTargetRef = {
@@ -1956,16 +1891,8 @@ export class SubconsciousLoopService {
       }
     }
 
-    if (this.hasTable("improvement_runs")) {
-      const rows = this.db
-        .prepare(
-          `SELECT id, workspace_id, status, review_status, promotion_status, promotion_error, pull_request, completed_at, created_at
-           FROM improvement_runs
-           WHERE pull_request IS NOT NULL AND pull_request != ''
-           ORDER BY COALESCE(completed_at, created_at) DESC
-           LIMIT 50`,
-        )
-        .all() as Any[];
+    if (evidence.improvementRuns) {
+      const rows = evidence.improvementRuns;
       for (const row of rows) {
         const pullRequest = this.safeJsonParseRecord(row.pull_request);
         const prNumber = pullRequest?.number || pullRequest?.url || row.id;
@@ -2019,14 +1946,14 @@ export class SubconsciousLoopService {
     return collected;
   }
 
-  private buildTargetSummary(
+  private async buildTargetSummary(
     target: SubconsciousTargetRef,
     evidence: SubconsciousEvidence[],
     backlogCount: number,
     current?: SubconsciousTargetSummary,
-  ): SubconsciousTargetSummary {
-    const lastDecision = this.decisionRepo.findLatestByTarget(target.key);
-    const lastDispatch = pick(this.dispatchRepo.listByTarget(target.key, 1));
+  ): Promise<SubconsciousTargetSummary> {
+    const lastDecision = await this.decisionRepo.findLatestByTarget(target.key);
+    const lastDispatch = pick(await this.dispatchRepo.listByTarget(target.key, 1));
     const lastEvidenceAt = pick(evidence)?.createdAt || current?.lastEvidenceAt;
     const settings = this.getSettings();
     const persistence = settings.durableTargetKinds.includes(target.kind)
@@ -2055,7 +1982,7 @@ export class SubconsciousLoopService {
       jitterMs,
       lastMeaningfulOutcome: current?.lastMeaningfulOutcome,
       lastWinner: lastDecision?.winnerSummary || current?.lastWinner,
-      lastRunAt: this.runRepo.list({ targetKey: target.key, limit: 1 })[0]?.completedAt,
+      lastRunAt: (await this.runRepo.list({ targetKey: target.key, limit: 1 }))[0]?.completedAt,
       lastEvidenceAt,
       backlogCount,
       evidenceFingerprint: evidence.length
@@ -2091,10 +2018,11 @@ export class SubconsciousLoopService {
     );
   }
 
-  private listEligibleTargetsForRun(workspaceId?: string): SubconsciousTargetSummary[] {
+  private async listEligibleTargetsForRun(
+    workspaceId?: string,
+  ): Promise<SubconsciousTargetSummary[]> {
     const currentTime = now();
-    return this.targetRepo
-      .list()
+    return (await this.targetRepo.list())
       .filter((target) => target.key !== "global:brain")
       .filter(
         (target) =>
@@ -2111,8 +2039,10 @@ export class SubconsciousLoopService {
       });
   }
 
-  private pickTargetForRun(workspaceId?: string): SubconsciousTargetSummary | undefined {
-    return this.listEligibleTargetsForRun(workspaceId)[0];
+  private async pickTargetForRun(
+    workspaceId?: string,
+  ): Promise<SubconsciousTargetSummary | undefined> {
+    return (await this.listEligibleTargetsForRun(workspaceId))[0];
   }
 
   private generateHypotheses(
@@ -2248,22 +2178,26 @@ export class SubconsciousLoopService {
     };
   }
 
-  private materializeBacklog(
+  private async materializeBacklog(
     targetKey: string,
     decision: SubconsciousDecision,
     executorKind?: SubconsciousDispatchKind,
-  ): SubconsciousBacklogItem[] {
-    const items = decision.nextBacklog.map((entry, index) =>
-      this.backlogRepo.createOrRefreshOpen({
-        targetKey,
-        title: index === 0 ? "Keep the winner durable" : `Backlog step ${index + 1}`,
-        summary: entry,
-        status: "open",
-        priority: Math.max(1, 100 - index * 10),
-        executorKind,
-        sourceRunId: decision.runId,
-      }),
-    );
+  ): Promise<SubconsciousBacklogItem[]> {
+    // One at a time, in order: each create dedupes against the open items before it.
+    const items: SubconsciousBacklogItem[] = [];
+    for (const [index, entry] of decision.nextBacklog.entries()) {
+      items.push(
+        await this.backlogRepo.createOrRefreshOpen({
+          targetKey,
+          title: index === 0 ? "Keep the winner durable" : `Backlog step ${index + 1}`,
+          summary: entry,
+          status: "open",
+          priority: Math.max(1, 100 - index * 10),
+          executorKind,
+          sourceRunId: decision.runId,
+        }),
+      );
+    }
     return items;
   }
 
@@ -2593,8 +2527,8 @@ export class SubconsciousLoopService {
     id: string,
     updates: Partial<SubconsciousRun>,
   ): Promise<SubconsciousRun> {
-    this.runRepo.update(id, updates);
-    return this.runRepo.findById(id)!;
+    await this.runRepo.update(id, updates);
+    return (await this.runRepo.findById(id))!;
   }
 
   private safeJsonParseRecord(value: unknown): Record<string, any> | undefined {
@@ -2604,12 +2538,5 @@ export class SubconsciousLoopService {
     } catch {
       return undefined;
     }
-  }
-
-  private hasTable(name: string): boolean {
-    const row = this.db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-      .get(name);
-    return Boolean(row);
   }
 }

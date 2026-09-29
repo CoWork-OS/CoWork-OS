@@ -3,6 +3,8 @@ import type { Task, TaskEvent } from "../../shared/types";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import { usageLocalDateKey } from "../../shared/usageInsightsDates";
 import { createLogger } from "../utils/logger";
+import { providerLogPayloadAt, routingPayloadAt } from "./usage-sql";
+import type { DatabaseClient } from "../database/async/DatabaseClient";
 
 const logger = createLogger("UsageInsightsProjector");
 
@@ -12,6 +14,25 @@ const TASK_WATERMARK_KEY = "task_watermark_ms";
 const EVENT_WATERMARK_KEY = "event_watermark_ms";
 const LLM_WATERMARK_KEY = "llm_watermark_ms";
 const USAGE_INSIGHTS_SCHEMA_VERSION = "1";
+/** Legacy usage/error events copied per backfill pass (a few milliseconds each). */
+const LEGACY_TELEMETRY_CHUNK = 1_000;
+/** Workspace-days rebuilt per worker command, so one command stays short. */
+const ROLLUP_ITEMS_PER_COMMAND = 16;
+
+type RollupPair = { workspaceId: string; dateKey: string };
+
+interface UsageRollupBackend {
+  resetRollups(): Promise<void>;
+  legacyTelemetryChunk(
+    cursor: { successAfter: number; errorAfter: number },
+    limit: number,
+  ): Promise<{ successAfter: number; errorAfter: number; done: boolean }>;
+  collectPairs(): Promise<RollupPair[]>;
+  rebuildDates(items: RollupPair[]): Promise<void>;
+}
+
+/** A macrotask yield: timers, I/O, and IPC run before the next bounded step. */
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 const RELEVANT_EVENT_TYPES = new Set([
   "skill_used",
@@ -150,7 +171,78 @@ export class UsageInsightsProjector {
   private backfillComplete = false;
   private shuttingDown = false;
 
+  private rollupWorker: DatabaseClient | null = null;
+  private reportReader: DatabaseClient | null = null;
+  private asyncFlush: Promise<void> | null = null;
+  private backendReady: Promise<void> = Promise.resolve();
+
   private constructor(private db: Database.Database) {}
+
+  /**
+   * A projector over another connection, never registered as the singleton. The database
+   * worker uses it to run rollup and report work on its own connection (DB4).
+   */
+  static createDetached(db: Database.Database): UsageInsightsProjector {
+    return new UsageInsightsProjector(db);
+  }
+
+  /**
+   * Run rollup rebuilds (backfill and refreshes) in the write worker and report scans in
+   * the reporting reader, once `workers` settles; a backfill waits for it so the backend
+   * is chosen once for the run. A null result keeps everything on this connection.
+   */
+  attachDatabaseWorkers(
+    workers: Promise<{ writer: DatabaseClient; reader: DatabaseClient } | null>,
+  ): void {
+    this.backendReady = workers
+      .then((attached) => {
+        if (!attached || this.shuttingDown) return;
+        this.rollupWorker = attached.writer;
+        this.reportReader = attached.reader;
+      })
+      .catch((error) => {
+        logger.warn("Usage insights workers unavailable; rollups stay on the host:", error);
+      });
+  }
+
+  getReportReader(): DatabaseClient | null {
+    return this.reportReader;
+  }
+
+  /**
+   * Apply pending refreshes before a report. With a worker attached the rebuilds run
+   * there; otherwise this is the synchronous flush.
+   */
+  async flushPendingRefreshesAsync(): Promise<void> {
+    if (!this.rollupWorker) {
+      this.flushPendingRefreshes();
+      return;
+    }
+    while (this.asyncFlush) await this.asyncFlush;
+    if (this.shuttingDown || !this.isBackfillComplete() || this.pendingRefreshes.size === 0) return;
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    const items = Array.from(this.pendingRefreshes).map((pair) => {
+      const [workspaceId, dateKey] = pair.split("|");
+      return { workspaceId, dateKey };
+    });
+    this.pendingRefreshes.clear();
+    this.asyncFlush = (async () => {
+      try {
+        await this.rollupBackend().rebuildDates(items);
+        this.invalidate();
+      } catch (error) {
+        // Keep the work: the next flush retries these workspace-days.
+        for (const item of items) this.pendingRefreshes.add(`${item.workspaceId}|${item.dateKey}`);
+        logger.warn("Failed to flush pending usage insight refreshes in the worker:", error);
+      } finally {
+        this.asyncFlush = null;
+      }
+    })();
+    await this.asyncFlush;
+  }
 
   warm(): void {
     if (this.shuttingDown) return;
@@ -196,7 +288,16 @@ export class UsageInsightsProjector {
     return entry.value as T;
   }
 
-  setCachedReport<T>(key: string, value: T): void {
+  getCacheVersion(): number {
+    return this.version;
+  }
+
+  /**
+   * Cache a report. An async report passes the version it started from, so a report
+   * computed across a change is not cached as current.
+   */
+  setCachedReport<T>(key: string, value: T, computedAtVersion = this.version): void {
+    if (computedAtVersion !== this.version) return;
     this.cache.set(key, { version: this.version, value });
   }
 
@@ -288,6 +389,9 @@ export class UsageInsightsProjector {
 
   flushPendingRefreshes(): void {
     if (this.shuttingDown) return;
+    // With a worker attached, rebuilds never run on this thread; the timer or the next
+    // report flushes them asynchronously.
+    if (this.rollupWorker) return;
     if (!this.isBackfillComplete() || this.pendingRefreshes.size === 0) {
       return;
     }
@@ -324,7 +428,12 @@ export class UsageInsightsProjector {
     if (this.shuttingDown || this.refreshTimer) return;
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
-      this.flushPendingRefreshes();
+      if (this.rollupWorker) {
+        void this.flushPendingRefreshesAsync().catch((error: unknown) => {
+          console.warn("[UsageInsightsProjector] Rollup refresh failed:", error);
+        });
+      }
+      else this.flushPendingRefreshes();
     }, 250);
   }
 
@@ -365,6 +474,8 @@ export class UsageInsightsProjector {
   }
 
   private async backfillAll(): Promise<void> {
+    await this.backendReady;
+    if (this.shuttingDown) return;
     const { schemaVersion, taskWatermarkMs, eventWatermarkMs, llmWatermarkMs } =
       this.getWatermarks();
     const shouldResetRollups =
@@ -374,8 +485,9 @@ export class UsageInsightsProjector {
         eventWatermarkMs <= 0 &&
         llmWatermarkMs <= 0);
 
+    const backend = this.rollupBackend();
     if (shouldResetRollups) {
-      this.resetRollups();
+      await backend.resetRollups();
       this.setState(TASK_WATERMARK_KEY, "0");
       this.setState(EVENT_WATERMARK_KEY, "0");
       this.setState(LLM_WATERMARK_KEY, "0");
@@ -386,8 +498,14 @@ export class UsageInsightsProjector {
     this.backfillComplete = false;
     this.backfillCompleteKnown = true;
 
-    await Promise.resolve();
-    this.backfillLegacyLlmTelemetry();
+    let cursor = { successAfter: 0, errorAfter: 0 };
+    for (;;) {
+      await yieldToEventLoop();
+      if (this.shuttingDown) return;
+      const next = await backend.legacyTelemetryChunk(cursor, LEGACY_TELEMETRY_CHUNK);
+      if (next.done) break;
+      cursor = next;
+    }
     this.setState(LLM_WATERMARK_KEY, String(this.getMaxTimestamp("llm_call_events")));
     await this.rebuildAllRollupsIncremental(
       shouldResetRollups || taskWatermarkMs <= 0 ? null : usageLocalDateKey(taskWatermarkMs),
@@ -400,8 +518,17 @@ export class UsageInsightsProjector {
     this.invalidate();
   }
 
-  private backfillLegacyLlmTelemetry(): void {
+  /**
+   * One bounded pass of the legacy telemetry backfill: copies up to `limit` usage and
+   * error events after the given rowids into llm_call_events (idempotent by event id).
+   * Callers repeat until `done`, inside a write transaction of their choice.
+   */
+  backfillLegacyLlmTelemetryChunk(
+    cursor: { successAfter: number; errorAfter: number },
+    limit: number,
+  ): { successAfter: number; errorAfter: number; done: boolean } {
     type SuccessRow = {
+      row_id: number;
       id: string;
       task_id: string;
       workspace_id: string;
@@ -412,6 +539,7 @@ export class UsageInsightsProjector {
       provider_log_payload: string | null;
     };
     type ErrorRow = {
+      row_id: number;
       id: string;
       task_id: string;
       workspace_id: string;
@@ -463,43 +591,15 @@ export class UsageInsightsProjector {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)`,
     );
 
-    const tx = this.db.transaction(() => {
-      let successRows: SuccessRow[] = [];
-      let errorRows: ErrorRow[] = [];
+    let successRows: SuccessRow[] = [];
+    let errorRows: ErrorRow[] = [];
+    let successChunk = { lastRowid: cursor.successAfter, scanned: 0 };
+    let errorChunk = { lastRowid: cursor.errorAfter, scanned: 0 };
+    {
       try {
-        successRows = this.db
-          .prepare(
-            `SELECT
-               te.id,
-               te.task_id,
-               t.workspace_id,
-               te.timestamp,
-               te.payload,
-               t.agent_config,
-               (
-                 SELECT te2.payload
-                 FROM task_events te2
-                 WHERE te2.task_id = te.task_id
-                   AND (te2.type = 'llm_routing_changed' OR te2.legacy_type = 'llm_routing_changed')
-                   AND te2.timestamp <= te.timestamp
-                 ORDER BY te2.timestamp DESC
-                 LIMIT 1
-               ) as routing_payload,
-               (
-                 SELECT te3.payload
-                 FROM task_events te3
-                 WHERE te3.task_id = te.task_id
-                   AND (te3.type = 'log' OR te3.legacy_type = 'log')
-                   AND te3.timestamp <= te.timestamp
-                   AND te3.payload LIKE '%provider=%'
-                 ORDER BY te3.timestamp DESC
-                 LIMIT 1
-               ) as provider_log_payload
-             FROM task_events te
-             JOIN tasks t ON t.id = te.task_id
-             WHERE te.type = 'llm_usage' OR te.legacy_type = 'llm_usage'`,
-          )
-          .all() as SuccessRow[];
+        const chunk = this.loadLegacyChunk<SuccessRow>("llm_usage", cursor.successAfter, limit);
+        successRows = chunk.rows;
+        successChunk = chunk;
       } catch (error) {
         logger.warn("Unable to load legacy llm_usage rows for backfill:", error);
       }
@@ -544,39 +644,9 @@ export class UsageInsightsProjector {
       }
 
       try {
-        errorRows = this.db
-          .prepare(
-            `SELECT
-               te.id,
-               te.task_id,
-               t.workspace_id,
-               te.timestamp,
-               te.payload,
-               t.agent_config,
-               (
-                 SELECT te2.payload
-                 FROM task_events te2
-                 WHERE te2.task_id = te.task_id
-                   AND (te2.type = 'llm_routing_changed' OR te2.legacy_type = 'llm_routing_changed')
-                   AND te2.timestamp <= te.timestamp
-                 ORDER BY te2.timestamp DESC
-                 LIMIT 1
-               ) as routing_payload,
-               (
-                 SELECT te3.payload
-                 FROM task_events te3
-                 WHERE te3.task_id = te.task_id
-                   AND (te3.type = 'log' OR te3.legacy_type = 'log')
-                   AND te3.timestamp <= te.timestamp
-                   AND te3.payload LIKE '%provider=%'
-                 ORDER BY te3.timestamp DESC
-                 LIMIT 1
-               ) as provider_log_payload
-             FROM task_events te
-             JOIN tasks t ON t.id = te.task_id
-             WHERE te.type = 'llm_error' OR te.legacy_type = 'llm_error'`,
-          )
-          .all() as ErrorRow[];
+        const chunk = this.loadLegacyChunk<ErrorRow>("llm_error", cursor.errorAfter, limit);
+        errorRows = chunk.rows;
+        errorChunk = chunk;
       } catch (error) {
         logger.warn("Unable to load legacy llm_error rows for backfill:", error);
       }
@@ -614,16 +684,63 @@ export class UsageInsightsProjector {
           // Ignore malformed legacy error rows.
         }
       }
-    });
-
-    try {
-      tx();
-    } catch (error) {
-      logger.warn("Legacy llm_call_events backfill transaction failed:", error);
     }
+
+    return {
+      successAfter: successChunk.lastRowid,
+      errorAfter: errorChunk.lastRowid,
+      done: successChunk.scanned < limit && errorChunk.scanned < limit,
+    };
   }
 
-  private resetRollups(): void {
+  /**
+   * The next `limit` events of one legacy type after `afterRowid`, with their task and
+   * routing lookups. The chunk is picked by a forward rowid scan in a subquery first:
+   * with the type filter in the outer statement SQLite used the type index and sorted,
+   * which ran the correlated lookups for every matching row before applying the limit
+   * (13 s for one chunk on the heavy benchmark profile). The unary `+` keeps the chunk
+   * scan off the type indexes. Events whose task is gone advance the cursor but are not
+   * returned, as before.
+   */
+  private loadLegacyChunk<Row>(
+    type: "llm_usage" | "llm_error",
+    afterRowid: number,
+    limit: number,
+  ): { rows: Row[]; lastRowid: number; scanned: number } {
+    const rows = this.db
+      .prepare(
+        `SELECT
+           chunk.row_id,
+           te.id,
+           te.task_id,
+           t.id AS task_row_id,
+           t.workspace_id,
+           te.timestamp,
+           te.payload,
+           t.agent_config,
+           ${routingPayloadAt("te")} as routing_payload,
+           ${providerLogPayloadAt("te")} as provider_log_payload
+         FROM (
+           SELECT rowid AS row_id FROM task_events
+           WHERE rowid > ? AND (+type = ? OR +legacy_type = ?)
+           ORDER BY rowid
+           LIMIT ?
+         ) chunk
+         JOIN task_events te ON te.rowid = chunk.row_id
+         LEFT JOIN tasks t ON t.id = te.task_id
+         ORDER BY chunk.row_id`,
+      )
+      .all(afterRowid, type, type, limit) as Array<{ row_id: number; task_row_id: string | null }>;
+    return {
+      rows: rows.filter((row) => row.task_row_id !== null) as Row[],
+      // A short chunk means this type is exhausted: park its cursor past every rowid so
+      // later chunks (still walking the other type) do not rescan the table for it.
+      lastRowid: rows.length < limit ? Number.MAX_SAFE_INTEGER : rows[rows.length - 1].row_id,
+      scanned: rows.length,
+    };
+  }
+
+  resetRollups(): void {
     this.db.exec("DELETE FROM usage_insights_day");
     this.db.exec("DELETE FROM usage_insights_hour");
     this.db.exec("DELETE FROM usage_insights_skill_day");
@@ -633,41 +750,69 @@ export class UsageInsightsProjector {
   }
 
   private async rebuildAllRollupsIncremental(resumeAfterDateKey: string | null): Promise<void> {
-    const pairs = this.collectWorkspaceDatePairs().filter(
+    const backend = this.rollupBackend();
+    const pairs = (await backend.collectPairs()).filter(
       (item) => !resumeAfterDateKey || item.dateKey > resumeAfterDateKey,
     );
     if (pairs.length === 0) {
       return;
     }
 
-    const tx = this.db.transaction((items: Array<{ workspaceId: string; dateKey: string }>) => {
-      for (const item of items) {
-        this.rebuildWorkspaceDate(item.workspaceId, item.dateKey);
-      }
-    });
-
+    // One date per batch; a real event-loop yield between batches (a resolved promise
+    // alone never lets timers or I/O run, so the old loop blocked for the whole backfill).
     let currentDateKey: string | null = null;
     let batch: Array<{ workspaceId: string; dateKey: string }> = [];
+    const commit = async () => {
+      if (!currentDateKey || batch.length === 0) return;
+      await backend.rebuildDates(batch);
+      this.setDateWatermarks(currentDateKey);
+      this.invalidate();
+      batch = [];
+      await yieldToEventLoop();
+    };
     for (const item of pairs) {
-      if (currentDateKey && item.dateKey !== currentDateKey && batch.length > 0) {
-        tx(batch);
-        this.setDateWatermarks(currentDateKey);
-        this.invalidate();
-        batch = [];
-        await Promise.resolve();
-      }
+      if (this.shuttingDown) return;
+      if (currentDateKey && item.dateKey !== currentDateKey) await commit();
       currentDateKey = item.dateKey;
       batch.push(item);
     }
-
-    if (currentDateKey && batch.length > 0) {
-      tx(batch);
-      this.setDateWatermarks(currentDateKey);
-      this.invalidate();
-    }
+    await commit();
   }
 
-  private collectWorkspaceDatePairs(): Array<{ workspaceId: string; dateKey: string }> {
+  /**
+   * Where rollup work runs: the database worker when one is attached (DB4), otherwise
+   * this connection in bounded transactions.
+   */
+  private rollupBackend(): UsageRollupBackend {
+    const writer = this.rollupWorker;
+    const reader = this.reportReader;
+    if (writer) {
+      return {
+        resetRollups: async () => {
+          await writer.execute("usage.resetRollups", undefined);
+        },
+        legacyTelemetryChunk: (cursor, limit) =>
+          writer.execute("usage.backfillLegacyTelemetryChunk", { ...cursor, limit }),
+        collectPairs: () => (reader ?? writer).execute("usage.collectRollupPairs", undefined),
+        rebuildDates: async (items) => {
+          for (let index = 0; index < items.length; index += ROLLUP_ITEMS_PER_COMMAND) {
+            await writer.execute("usage.rebuildRollupDates", {
+              items: items.slice(index, index + ROLLUP_ITEMS_PER_COMMAND),
+            });
+          }
+        },
+      };
+    }
+    return {
+      resetRollups: async () => this.db.transaction(() => this.resetRollups())(),
+      legacyTelemetryChunk: async (cursor, limit) =>
+        this.db.transaction(() => this.backfillLegacyLlmTelemetryChunk(cursor, limit))(),
+      collectPairs: async () => this.collectWorkspaceDatePairs(),
+      rebuildDates: async (items) => this.db.transaction(() => this.rebuildWorkspaceDates(items))(),
+    };
+  }
+
+  collectWorkspaceDatePairs(): Array<{ workspaceId: string; dateKey: string }> {
     const pairs = new Set<string>();
 
     const addPair = (
@@ -747,6 +892,11 @@ export class UsageInsightsProjector {
     } catch {
       return 0;
     }
+  }
+
+  /** Rebuild the rollups of several workspace-days (inside the caller's transaction). */
+  rebuildWorkspaceDates(items: Array<{ workspaceId: string; dateKey: string }>): void {
+    for (const item of items) this.rebuildWorkspaceDate(item.workspaceId, item.dateKey);
   }
 
   private rebuildWorkspaceDate(workspaceId: string, dateKey: string): void {

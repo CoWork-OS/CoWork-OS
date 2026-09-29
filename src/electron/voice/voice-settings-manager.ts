@@ -8,7 +8,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import {
   VoiceSettings,
   VoiceProvider,

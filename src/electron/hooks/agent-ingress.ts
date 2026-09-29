@@ -1,9 +1,10 @@
+import { WorkspaceRepository } from "../database/repository-facades";
 import path from "path";
 import * as fs from "fs/promises";
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
 import { AgentConfig, Workspace } from "../../shared/types";
-import { WorkspaceRepository } from "../database/repositories";
+
 import {
   createScopedTempWorkspaceIdentity,
   sanitizeTempWorkspaceKey,
@@ -14,7 +15,7 @@ import {
   touchTempWorkspaceLease,
 } from "../utils/temp-workspace-lease";
 import { ensureTempWorkspaceDirectoryPathSync, pruneTempWorkspaces } from "../utils/temp-workspace";
-import { HookSessionRepository } from "./HookSessionRepository";
+import { HookSessionRepository } from "./hook-session-repository-facades";
 import { TEMP_WORKSPACE_NAME, TEMP_WORKSPACE_ROOT_DIR_NAME } from "../../shared/types";
 
 export interface AgentIngressAction {
@@ -89,7 +90,7 @@ export class HookAgentIngress {
     const sessionKey = String(action.sessionKey || "").trim();
     let lockHeld = false;
     if (sessionKey) {
-      const existing = this.sessionRepo.findBySessionKey(sessionKey);
+      const existing = await this.sessionRepo.findBySessionKey(sessionKey);
       if (existing) {
         const existingTask = this.agentDaemon.getTask(existing.taskId);
         return {
@@ -99,7 +100,7 @@ export class HookAgentIngress {
         };
       }
 
-      lockHeld = this.sessionRepo.acquireLock(sessionKey, SESSION_LOCK_TTL_MS);
+      lockHeld = await this.sessionRepo.acquireLock(sessionKey, SESSION_LOCK_TTL_MS);
       if (!lockHeld) {
         const settled = await this.waitForSessionResolution(sessionKey);
         if (settled) {
@@ -110,7 +111,7 @@ export class HookAgentIngress {
             duplicate: true,
           };
         }
-        lockHeld = this.sessionRepo.acquireLock(sessionKey, SESSION_LOCK_TTL_MS);
+        lockHeld = await this.sessionRepo.acquireLock(sessionKey, SESSION_LOCK_TTL_MS);
         if (!lockHeld) {
           throw new Error(`Session key "${sessionKey}" is already being processed`);
         }
@@ -119,7 +120,7 @@ export class HookAgentIngress {
 
     try {
       if (sessionKey) {
-        const existing = this.sessionRepo.findBySessionKey(sessionKey);
+        const existing = await this.sessionRepo.findBySessionKey(sessionKey);
         if (existing) {
           const existingTask = this.agentDaemon.getTask(existing.taskId);
           return {
@@ -147,9 +148,9 @@ export class HookAgentIngress {
       });
 
       if (sessionKey) {
-        const created = this.sessionRepo.create(sessionKey, task.id);
+        const created = await this.sessionRepo.create(sessionKey, task.id);
         if (!created) {
-          const existing = this.sessionRepo.findBySessionKey(sessionKey);
+          const existing = await this.sessionRepo.findBySessionKey(sessionKey);
           if (existing) {
             this.logger?.(
               "[HookIngress] Session key already mapped; returning existing task",
@@ -179,7 +180,7 @@ export class HookAgentIngress {
       };
     } finally {
       if (lockHeld && sessionKey) {
-        this.sessionRepo.releaseLock(sessionKey);
+        await this.sessionRepo.releaseLock(sessionKey);
       }
     }
   }
@@ -202,25 +203,16 @@ export class HookAgentIngress {
       unrestrictedFileAccess: true,
     };
 
-    const db = this.agentDaemon.getDatabase();
-    db.prepare(`
-      INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        path = excluded.path,
-        last_used_at = excluded.last_used_at,
-        permissions = excluded.permissions
-    `).run(
-      identity.workspaceId,
-      TEMP_WORKSPACE_NAME,
-      safeWorkspacePath,
-      now,
-      now,
-      JSON.stringify(permissions),
-    );
+    await this.workspaceRepo.upsertWithId({
+      id: identity.workspaceId,
+      name: TEMP_WORKSPACE_NAME,
+      path: safeWorkspacePath,
+      createdAt: now,
+      lastUsedAt: now,
+      permissions,
+    });
 
-    const workspace = this.workspaceRepo.findById(identity.workspaceId) ?? {
+    const workspace = (await this.workspaceRepo.findById(identity.workspaceId)) ?? {
       id: identity.workspaceId,
       name: TEMP_WORKSPACE_NAME,
       path: safeWorkspacePath,
@@ -231,8 +223,8 @@ export class HookAgentIngress {
     };
 
     try {
-      pruneTempWorkspaces({
-        db,
+      await pruneTempWorkspaces({
+        db: this.agentDaemon.getDatabase(),
         tempWorkspaceRoot: this.tempWorkspaceRoot,
         currentWorkspaceId: workspace.id,
         protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
@@ -248,13 +240,13 @@ export class HookAgentIngress {
   private async waitForSessionResolution(sessionKey: string): Promise<{ taskId: string } | null> {
     const deadline = Date.now() + SESSION_WAIT_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      const existing = this.sessionRepo.findBySessionKey(sessionKey);
+      const existing = await this.sessionRepo.findBySessionKey(sessionKey);
       if (existing) {
         return { taskId: existing.taskId };
       }
       await new Promise((resolve) => setTimeout(resolve, SESSION_WAIT_POLL_MS));
     }
-    const existing = this.sessionRepo.findBySessionKey(sessionKey);
+    const existing = await this.sessionRepo.findBySessionKey(sessionKey);
     return existing ? { taskId: existing.taskId } : null;
   }
 }

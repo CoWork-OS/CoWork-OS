@@ -24,11 +24,11 @@ const nativeSqliteAvailable = (() => {
 
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
-describeWithSqlite("ChannelRepository.delete", () => {
+describeWithSqlite("ChannelStore.delete", () => {
   let tempDir: string;
   let previousUserDataDir: string | undefined;
   let manager: import("../schema").DatabaseManager;
-  let ChannelRepository: typeof import("../repositories").ChannelRepository;
+  let ChannelStore: typeof import("../repositories").ChannelStore;
 
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-channel-delete-"));
@@ -40,7 +40,7 @@ describeWithSqlite("ChannelRepository.delete", () => {
       import("../repositories"),
     ]);
     manager = new DatabaseManager();
-    ChannelRepository = repositories.ChannelRepository;
+    ChannelStore = repositories.ChannelStore;
 
     // This table exists in older mailbox databases and was missing a cascade.
     manager.getDatabase().exec(`
@@ -78,7 +78,7 @@ describeWithSqlite("ChannelRepository.delete", () => {
 
   it("removes legacy communication-thread references before deleting a channel", () => {
     const db = manager.getDatabase();
-    const repository = new ChannelRepository(db);
+    const repository = new ChannelStore(db);
     const channel = repository.create({
       type: "discord",
       name: "Discord Bot",

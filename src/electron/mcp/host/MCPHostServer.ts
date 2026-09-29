@@ -50,7 +50,7 @@ const SERVER_INFO: MCPServerInfo = {
 export interface ToolProvider {
   getTools(): MCPTool[];
   executeTool(name: string, args: Record<string, Any>): Promise<Any>;
-  getResources?(): MCPResource[];
+  getResources?(): MCPResource[] | Promise<MCPResource[]>;
   readResource?(uri: string): Promise<MCPResourceReadResult>;
 }
 
@@ -337,7 +337,7 @@ export class MCPHostServer extends EventEmitter {
 
         case MCP_METHODS.RESOURCES_LIST:
           this.requireInitialized();
-          result = this.handleResourcesList();
+          result = await this.handleResourcesList();
           break;
 
         case MCP_METHODS.RESOURCES_READ:
@@ -426,11 +426,11 @@ export class MCPHostServer extends EventEmitter {
     return { tools };
   }
 
-  private handleResourcesList(): { resources: MCPResource[] } {
+  private async handleResourcesList(): Promise<{ resources: MCPResource[] }> {
     if (!this.toolProvider?.getResources) {
       return { resources: [] };
     }
-    const resources = this.toolProvider.getResources();
+    const resources = await this.toolProvider.getResources();
     logger.debug(`Listing ${resources.length} resources`);
     return { resources };
   }

@@ -20,7 +20,7 @@ export type { HooksServerConfig, HooksServerHandlers } from "./server";
 
 // Shared ingress/idempotency
 export { HookAgentIngress, initializeHookAgentIngress, getHookAgentIngress } from "./agent-ingress";
-export { HookSessionRepository } from "./HookSessionRepository";
+export { HookSessionRepository } from "./hook-session-repository-facades";
 
 // Gmail Watcher
 export {

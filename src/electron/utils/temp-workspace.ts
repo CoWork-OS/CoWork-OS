@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 import type Database from "better-sqlite3";
+import { serviceStatements } from "../database/service-statements";
+import type { TempWorkspaceRow } from "./temp-workspace-sql";
 import { TEMP_WORKSPACE_ID, TEMP_WORKSPACE_ID_PREFIX } from "../../shared/types";
 
 export interface TempWorkspacePruneOptions {
@@ -35,13 +37,6 @@ export interface TempWorkspaceDirectoryResult {
   workspaceId: string;
 }
 
-interface TempWorkspaceRow {
-  id: string;
-  path: string;
-  last_used_at: number;
-  created_at: number;
-}
-
 interface TempDirectoryEntry {
   path: string;
   mtimeMs: number;
@@ -62,8 +57,6 @@ const DEFAULT_ACTIVE_TASK_STATUSES = [
   "paused",
   "blocked",
 ];
-const TEMP_ID_PREFIX_LENGTH = TEMP_WORKSPACE_ID_PREFIX.length;
-const SAFE_SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const isSafeTempSubPath = (candidatePath: string, rootPath: string): boolean => {
   const resolvedRoot = path.resolve(rootPath);
@@ -192,123 +185,6 @@ export function createUniqueScopedTempWorkspaceDirectorySync(
   };
 }
 
-const quoteSqlIdentifier = (identifier: string): string => `"${identifier}"`;
-
-const deleteRowsByIds = (
-  db: Database.Database,
-  tableName: string,
-  columnName: string,
-  ids: string[],
-): void => {
-  if (ids.length === 0) return;
-  const placeholders = ids.map(() => "?").join(", ");
-  db.prepare(
-    `DELETE FROM ${quoteSqlIdentifier(tableName)} WHERE ${quoteSqlIdentifier(columnName)} IN (${placeholders})`,
-  ).run(...ids);
-};
-
-const deleteWorkspaceAndRelatedData = (db: Database.Database, workspaceId: string): boolean => {
-  try {
-    const runCleanup = db.transaction(() => {
-      const tableRows = db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-        .all() as Array<{ name?: string }>;
-
-      const tables = tableRows
-        .map((row) => String(row.name || ""))
-        .filter(
-          (name) =>
-            !!name &&
-            !name.startsWith("sqlite_") &&
-            SAFE_SQL_IDENTIFIER.test(name) &&
-            name !== "workspaces",
-        );
-
-      const tableColumns = new Map<string, Set<string>>();
-      for (const tableName of tables) {
-        const columnRows = db
-          .prepare(`PRAGMA table_info(${quoteSqlIdentifier(tableName)})`)
-          .all() as Array<{ name?: string }>;
-        const columns = new Set(
-          columnRows
-            .map((row) => String(row.name || ""))
-            .filter((name) => SAFE_SQL_IDENTIFIER.test(name)),
-        );
-        tableColumns.set(tableName, columns);
-      }
-
-      const taskIds = (
-        db.prepare("SELECT id FROM tasks WHERE workspace_id = ?").all(workspaceId) as Array<{
-          id?: string;
-        }>
-      )
-        .map((row) => String(row.id || ""))
-        .filter(Boolean);
-      const sessionIds = (
-        db
-          .prepare("SELECT id FROM channel_sessions WHERE workspace_id = ?")
-          .all(workspaceId) as Array<{
-          id?: string;
-        }>
-      )
-        .map((row) => String(row.id || ""))
-        .filter(Boolean);
-
-      for (const tableName of tables) {
-        const columns = tableColumns.get(tableName);
-        if (!columns) continue;
-        if (columns.has("task_id")) {
-          deleteRowsByIds(db, tableName, "task_id", taskIds);
-        }
-        if (columns.has("session_id")) {
-          deleteRowsByIds(db, tableName, "session_id", sessionIds);
-        }
-      }
-
-      for (const tableName of tables) {
-        const columns = tableColumns.get(tableName);
-        if (!columns || !columns.has("workspace_id")) continue;
-        db.prepare(`DELETE FROM ${quoteSqlIdentifier(tableName)} WHERE workspace_id = ?`).run(
-          workspaceId,
-        );
-      }
-
-      db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
-    });
-
-    runCleanup();
-    return true;
-  } catch {
-    try {
-      db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-};
-
-const hasWorkspaceReferences = (
-  db: Database.Database,
-  workspaceId: string,
-  activeTaskStatuses: string[],
-  sessionActiveCutoffMs: number,
-): boolean => {
-  const statusPlaceholders = activeTaskStatuses.map(() => "?").join(", ");
-  const taskRef = db
-    .prepare(
-      `SELECT 1 FROM tasks WHERE workspace_id = ? AND status IN (${statusPlaceholders}) LIMIT 1`,
-    )
-    .get(workspaceId, ...activeTaskStatuses);
-  if (taskRef) return true;
-  const sessionRef = db
-    .prepare(
-      "SELECT 1 FROM channel_sessions WHERE workspace_id = ? AND (state != 'idle' OR COALESCE(last_activity_at, created_at) >= ?) LIMIT 1",
-    )
-    .get(workspaceId, sessionActiveCutoffMs);
-  return !!sessionRef;
-};
-
 const listTempDirectories = (rootPath: string): TempDirectoryEntry[] => {
   if (!fs.existsSync(rootPath)) return [];
   const entries = fs.readdirSync(rootPath, { withFileTypes: true });
@@ -332,7 +208,15 @@ const listTempDirectories = (rootPath: string): TempDirectoryEntry[] => {
   return dirs;
 };
 
-export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWorkspacePruneResult {
+/**
+ * Prune stale temp workspaces: their directories on the host, their rows (and dependent
+ * rows) through services-domain units (DB6). A workspace an active task or session uses is
+ * kept; the check and the delete share one unit.
+ */
+export async function pruneTempWorkspaces(
+  options: TempWorkspacePruneOptions,
+): Promise<TempWorkspacePruneResult> {
+  const sql = serviceStatements(options.db);
   const nowMs = options.nowMs ?? Date.now();
   const dryRun = options.dryRun === true;
   const keepRecent = Math.max(0, options.keepRecent ?? DEFAULT_KEEP_RECENT);
@@ -364,58 +248,12 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
 
   const resolvedRoot = ensureTempWorkspaceRootSync(options.tempWorkspaceRoot);
 
-  const rows = options.db
-    .prepare(`
-    SELECT id, path, created_at, COALESCE(last_used_at, created_at) AS last_used_at
-    FROM workspaces
-    WHERE id = ? OR substr(id, 1, ?) = ?
-    ORDER BY COALESCE(last_used_at, created_at) DESC
-  `)
-    .all(TEMP_WORKSPACE_ID, TEMP_ID_PREFIX_LENGTH, TEMP_WORKSPACE_ID_PREFIX) as TempWorkspaceRow[];
-
-  const taskStatusPlaceholders = activeTaskStatuses.map(() => "?").join(", ");
-  const taskRefRows = activeTaskStatuses.length
-    ? (options.db
-        .prepare(`
-    SELECT DISTINCT workspace_id
-    FROM tasks
-    WHERE (workspace_id = ? OR substr(workspace_id, 1, ?) = ?)
-      AND status IN (${taskStatusPlaceholders})
-  `)
-        .all(
-          TEMP_WORKSPACE_ID,
-          TEMP_ID_PREFIX_LENGTH,
-          TEMP_WORKSPACE_ID_PREFIX,
-          ...activeTaskStatuses,
-        ) as Array<{
-        workspace_id: string | null;
-      }>)
-    : [];
+  const rows = await sql.unit("tempWorkspace_tempWorkspaceRows", []);
   const taskReferencedWorkspaceIds = new Set(
-    taskRefRows
-      .map((row) => (typeof row.workspace_id === "string" ? row.workspace_id : ""))
-      .filter(Boolean),
+    await sql.unit("tempWorkspace_activeTaskWorkspaceIds", [activeTaskStatuses]),
   );
-
-  const sessionRefRows = options.db
-    .prepare(`
-    SELECT DISTINCT workspace_id
-    FROM channel_sessions
-    WHERE (workspace_id = ? OR substr(workspace_id, 1, ?) = ?)
-      AND (state != 'idle' OR COALESCE(last_activity_at, created_at) >= ?)
-  `)
-    .all(
-      TEMP_WORKSPACE_ID,
-      TEMP_ID_PREFIX_LENGTH,
-      TEMP_WORKSPACE_ID_PREFIX,
-      sessionActiveCutoffMs,
-    ) as Array<{
-    workspace_id: string | null;
-  }>;
   const sessionReferencedWorkspaceIds = new Set(
-    sessionRefRows
-      .map((row) => (typeof row.workspace_id === "string" ? row.workspace_id : ""))
-      .filter(Boolean),
+    await sql.unit("tempWorkspace_activeSessionWorkspaceIds", [sessionActiveCutoffMs]),
   );
 
   const protectedWorkspaceIds = new Set<string>();
@@ -474,7 +312,11 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     if (!row) continue;
 
     if (
-      hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)
+      await sql.unit("tempWorkspace_isReferenced", [
+        workspaceId,
+        activeTaskStatuses,
+        sessionActiveCutoffMs,
+      ])
     ) {
       continue;
     }
@@ -497,7 +339,13 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     }
 
     try {
-      if (deleteWorkspaceAndRelatedData(options.db, workspaceId)) {
+      if (
+        await sql.unit("tempWorkspace_deleteUnreferencedWorkspace", [
+          workspaceId,
+          activeTaskStatuses,
+          sessionActiveCutoffMs,
+        ])
+      ) {
         removedRows += 1;
       }
     } catch {
@@ -507,18 +355,7 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
 
   const rowsAfterDbPrune = dryRun
     ? rows.filter((row) => !candidateWorkspaceIds.has(row.id))
-    : (options.db
-        .prepare(`
-    SELECT id, path, created_at, COALESCE(last_used_at, created_at) AS last_used_at
-    FROM workspaces
-    WHERE id = ? OR substr(id, 1, ?) = ?
-    ORDER BY COALESCE(last_used_at, created_at) DESC
-  `)
-        .all(
-          TEMP_WORKSPACE_ID,
-          TEMP_ID_PREFIX_LENGTH,
-          TEMP_WORKSPACE_ID_PREFIX,
-        ) as TempWorkspaceRow[]);
+    : await sql.unit("tempWorkspace_tempWorkspaceRows", []);
 
   const protectedPaths = new Set<string>();
   const workspaceIdsByPath = new Map<string, string[]>();
@@ -531,7 +368,7 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     workspaceIdsByPath.set(resolvedPath, existing);
   }
 
-  const deleteDirectoryAndStaleRows = (directoryPath: string): boolean => {
+  const deleteDirectoryAndStaleRows = async (directoryPath: string): Promise<boolean> => {
     if (!isSafeExistingTempDirectory(directoryPath, resolvedRoot)) return false;
 
     const workspaceIds = workspaceIdsByPath.get(directoryPath) ?? [];
@@ -539,7 +376,11 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
       candidateDirPaths.add(path.resolve(directoryPath));
       for (const workspaceId of workspaceIds) {
         if (
-          hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)
+          await sql.unit("tempWorkspace_isReferenced", [
+            workspaceId,
+            activeTaskStatuses,
+            sessionActiveCutoffMs,
+          ])
         ) {
           continue;
         }
@@ -556,15 +397,25 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     }
 
     for (const workspaceId of workspaceIds) {
-      if (
-        hasWorkspaceReferences(options.db, workspaceId, activeTaskStatuses, sessionActiveCutoffMs)
-      ) {
-        continue;
-      }
-      candidateWorkspaceIds.add(workspaceId);
       try {
-        if (deleteWorkspaceAndRelatedData(options.db, workspaceId)) {
+        if (
+          await sql.unit("tempWorkspace_deleteUnreferencedWorkspace", [
+            workspaceId,
+            activeTaskStatuses,
+            sessionActiveCutoffMs,
+          ])
+        ) {
+          candidateWorkspaceIds.add(workspaceId);
           removedRows += 1;
+        } else if (
+          !(await sql.unit("tempWorkspace_isReferenced", [
+            workspaceId,
+            activeTaskStatuses,
+            sessionActiveCutoffMs,
+          ]))
+        ) {
+          // Not referenced, but the delete did not happen: still a candidate, as before.
+          candidateWorkspaceIds.add(workspaceId);
         }
       } catch {
         // Best-effort DB cleanup.
@@ -582,7 +433,7 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
   for (const entry of orphanDirectories) {
     const ageMs = nowMs - entry.mtimeMs;
     if (ageMs > maxAgeMs) {
-      deleteDirectoryAndStaleRows(entry.path);
+      await deleteDirectoryAndStaleRows(entry.path);
     }
   }
 
@@ -598,7 +449,7 @@ export function pruneTempWorkspaces(options: TempWorkspacePruneOptions): TempWor
     for (const entry of candidateDirs) {
       if (remainingDirCount <= targetAfterPrune) break;
       if (nowMs - entry.mtimeMs < minAgeForHardPruneMs) continue;
-      if (deleteDirectoryAndStaleRows(entry.path)) {
+      if (await deleteDirectoryAndStaleRows(entry.path)) {
         remainingDirCount -= 1;
       }
     }

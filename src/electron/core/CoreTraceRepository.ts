@@ -13,7 +13,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-export class CoreTraceRepository {
+export class CoreTraceStore {
   constructor(private readonly db: Database.Database) {}
 
   create(

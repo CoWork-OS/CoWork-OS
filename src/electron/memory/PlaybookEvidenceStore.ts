@@ -114,13 +114,23 @@ export function hashMemoryContent(content: string): string {
  * Narrow learning index for Playbook outcomes. General memory storage stays in
  * MemoryService; this ledger only records which independent executions succeeded or
  * failed, and which later executions reinforced which earlier ones.
+ *
+ * This is the synchronous store the memory domain's transaction units run (async SQLite
+ * migration plan, DB6), on the host connection or in the database worker; services use
+ * the async `PlaybookEvidenceLedger`.
  */
 export class PlaybookEvidenceStore {
   constructor(
     private readonly db: Database.Database,
     private readonly now: () => number = Date.now,
+    /** Units run on a profile whose ledger schema the host already created. */
+    ensureSchema = true,
   ) {
-    this.db.exec(`
+    if (ensureSchema) PlaybookEvidenceStore.ensureSchema(db);
+  }
+
+  static ensureSchema(db: Database.Database): void {
+    db.exec(`
       CREATE TABLE IF NOT EXISTS playbook_evidence (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL,
@@ -328,6 +338,23 @@ export class PlaybookEvidenceStore {
          WHERE workspace_id = ? AND task_id = ? AND outcome = 'success' AND invalidated_at IS NULL`,
       )
       .run(this.now(), reason, workspaceId, taskId).changes;
+  }
+
+  /** Active successes whose source memory still exists unchanged; others are invalidated. */
+  verifiedSuccesses(workspaceId: string, excludeExecutionKey?: string): PlaybookEvidenceRecord[] {
+    return this.listActiveSuccesses(workspaceId)
+      .filter((record) => record.executionKey !== excludeExecutionKey)
+      .filter((record) => this.verifySource(record));
+  }
+
+  /** Active failures whose source memory still exists unchanged; others are invalidated. */
+  verifiedFailures(workspaceId: string): PlaybookEvidenceRecord[] {
+    return this.listActiveFailures(workspaceId).filter((record) => this.verifySource(record));
+  }
+
+  /** Link `evidenceId` to each earlier execution; returns the ids newly linked, in order. */
+  linkAll(evidenceId: string, reinforcesEvidenceIds: string[]): string[] {
+    return reinforcesEvidenceIds.filter((id) => this.link(evidenceId, id));
   }
 
   /**

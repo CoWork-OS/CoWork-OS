@@ -245,18 +245,57 @@ function stableTimelineSort(a: RelationshipTimelineEvent, b: RelationshipTimelin
   return a.id.localeCompare(b.id);
 }
 
-export class ContactIdentityService {
+export interface MailboxContactInput {
+  workspaceId: string;
+  email?: string | null;
+  displayName?: string | null;
+  companyHint?: string | null;
+  phoneHints?: string[];
+  crmHints?: string[];
+  learnedFacts?: string[];
+}
+
+/**
+ * The knowledge-graph person matching a mailbox contact (DB6). It searches the host's
+ * knowledge graph, so it runs before `ContactIdentityStore.resolveMailboxContact`, which
+ * may run in the database worker.
+ */
+export async function findMailboxContactPersonEntityId(
+  input: MailboxContactInput,
+): Promise<string | undefined> {
+  const workspaceId = String(input.workspaceId || "").trim();
+  const email = normalizeEmail(input.email);
+  if (!workspaceId || !email) return undefined;
+  const displayName = compactText(input.displayName, 120) || email || "Mailbox contact";
+  const companyHint = compactText(input.companyHint, 120) || undefined;
+  if (!KnowledgeGraphService.isInitialized()) return undefined;
+  const queries = uniqueStrings([email, displayName, companyHint]);
+  for (const query of queries) {
+    const result = (await KnowledgeGraphService.search(workspaceId, query, 8)).find(
+      ({ entity }) => {
+        if (entity.entityTypeName !== "person") return false;
+        const entityEmail = normalizeEmail(String(entity.properties?.email || ""));
+        if (entityEmail && entityEmail === email) return true;
+        return normalizeName(entity.name) === normalizeName(displayName);
+      },
+    );
+    if (result?.entity?.id) return result.entity.id;
+  }
+  return undefined;
+}
+
+export class ContactIdentityStore {
   constructor(private db: Database.Database) {}
 
-  resolveMailboxContact(input: {
-    workspaceId: string;
-    email?: string | null;
-    displayName?: string | null;
-    companyHint?: string | null;
-    phoneHints?: string[];
-    crmHints?: string[];
-    learnedFacts?: string[];
-  }): ContactIdentityResolution {
+  /**
+   * Resolve a mailbox contact to an identity, creating or refreshing it, its handles and
+   * its candidates. `kgEntityId` comes from `findMailboxContactPersonEntityId` on the
+   * host. As a services-domain unit the whole resolution is one transaction.
+   */
+  resolveMailboxContact(
+    input: MailboxContactInput,
+    kgEntityId?: string,
+  ): ContactIdentityResolution {
     const workspaceId = String(input.workspaceId || "").trim();
     const email = normalizeEmail(input.email);
     const displayName = compactText(input.displayName, 120) || email || "Mailbox contact";
@@ -325,12 +364,6 @@ export class ContactIdentityService {
       reasonCodes.push("crm_hint_match");
     }
 
-    const kgEntityId = this.findPersonEntityId({
-      workspaceId,
-      email,
-      displayName,
-      companyHint,
-    });
     if (kgEntityId && !identity.kgEntityId) {
       this.touchIdentity(identity.id, { kgEntityId });
       identity = this.getIdentity(identity.id) || identity;
@@ -1740,27 +1773,5 @@ export class ContactIdentityService {
         input.detail ? JSON.stringify(input.detail) : null,
         Date.now(),
       );
-  }
-
-  private findPersonEntityId(input: {
-    workspaceId: string;
-    email: string;
-    displayName: string;
-    companyHint?: string;
-  }): string | undefined {
-    if (!KnowledgeGraphService.isInitialized()) return undefined;
-    const queries = uniqueStrings([input.email, input.displayName, input.companyHint]);
-    for (const query of queries) {
-      const result = KnowledgeGraphService.search(input.workspaceId, query, 8).find(
-        ({ entity }) => {
-          if (entity.entityTypeName !== "person") return false;
-          const entityEmail = normalizeEmail(String(entity.properties?.email || ""));
-          if (entityEmail && entityEmail === input.email) return true;
-          return normalizeName(entity.name) === normalizeName(input.displayName);
-        },
-      );
-      if (result?.entity?.id) return result.entity.id;
-    }
-    return undefined;
   }
 }

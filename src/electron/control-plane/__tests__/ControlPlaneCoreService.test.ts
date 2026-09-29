@@ -24,8 +24,8 @@ describeWithSqlite("ControlPlaneCoreService", () => {
   let previousUserDataDir: string | undefined;
   let manager: import("../../database/schema").DatabaseManager;
   let service: import("../ControlPlaneCoreService").ControlPlaneCoreService;
-  let agentRoleRepo: import("../../agents/AgentRoleRepository").AgentRoleRepository;
-  let taskRepo: import("../../database/repositories").TaskRepository;
+  let agentRoleRepo: import("../../agents/AgentRoleRepository").AgentRoleStore;
+  let taskRepo: import("../../database/repositories").TaskStore;
   let db: ReturnType<import("../../database/schema").DatabaseManager["getDatabase"]>;
 
   const insertWorkspace = (name = "main") => {
@@ -73,8 +73,8 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     const [
       { DatabaseManager },
       { ControlPlaneCoreService },
-      { AgentRoleRepository },
-      { TaskRepository },
+      { AgentRoleStore: AgentRoleRepository },
+      { TaskStore: TaskRepository },
     ] = await Promise.all([
       import("../../database/schema"),
       import("../ControlPlaneCoreService"),
@@ -99,32 +99,32 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("seeds a default company and round-trips export/import with collision-safe renaming", () => {
+  it("seeds a default company and round-trips export/import with collision-safe renaming", async () => {
     const workspace = insertWorkspace();
-    const company = service.getDefaultCompany();
+    const company = await service.getDefaultCompany();
 
     expect(company.name).toBe("Local Company");
     expect(company.slug).toBe("local");
     expect(company.isDefault).toBe(true);
 
-    const goal = service.createGoal({
+    const goal = await service.createGoal({
       companyId: company.id,
       title: "Ship the control plane",
       description: "Expose the company/project/issue graph to operators.",
     });
-    const project = service.createProject({
+    const project = await service.createProject({
       companyId: company.id,
       goalId: goal.id,
       name: "Mission Control",
       description: "Desktop and remote control plane surfaces.",
       monthlyBudgetCost: 75,
     });
-    service.linkProjectWorkspace({
+    await service.linkProjectWorkspace({
       projectId: project.id,
       workspaceId: workspace.id,
       isPrimary: true,
     });
-    const issue = service.createIssue({
+    const issue = await service.createIssue({
       companyId: company.id,
       goalId: goal.id,
       projectId: project.id,
@@ -133,14 +133,14 @@ describeWithSqlite("ControlPlaneCoreService", () => {
       description: "Board state should reflect issue status, not raw task status.",
       priority: 2,
     });
-    service.createIssueComment({
+    await service.createIssueComment({
       issueId: issue.id,
       authorType: "user",
       body: "Do not backfill historical tasks.",
     });
 
-    const exported = service.exportCompanyTemplate(company.id);
-    const imported = service.importCompanyTemplate(exported);
+    const exported = await service.exportCompanyTemplate(company.id);
+    const imported = await service.importCompanyTemplate(exported);
 
     expect(exported.goals).toHaveLength(1);
     expect(exported.projects).toHaveLength(1);
@@ -156,11 +156,11 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(imported.projectCount).toBe(1);
     expect(imported.issueCount).toBe(1);
 
-    const importedProjects = service.listProjects({
+    const importedProjects = await service.listProjects({
       companyId: imported.company.id,
       includeArchived: true,
     });
-    const importedIssues = service.listIssues({ companyId: imported.company.id, limit: 20 });
+    const importedIssues = await service.listIssues({ companyId: imported.company.id, limit: 20 });
 
     expect(importedProjects).toHaveLength(1);
     expect(importedProjects[0].name).toBe(project.name);
@@ -168,15 +168,15 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(importedIssues[0].title).toBe(issue.title);
   });
 
-  it("provisions a default workspace for companies and auto-links projects to it", () => {
-    const company = service.createCompany({
+  it("provisions a default workspace for companies and auto-links projects to it", async () => {
+    const company = await service.createCompany({
       name: "Workspace Co",
       slug: "workspace-co",
     });
 
     expect(company.defaultWorkspaceId).toBeTruthy();
 
-    const reloaded = service.getCompany(company.id);
+    const reloaded = await service.getCompany(company.id);
     expect(reloaded?.defaultWorkspaceId).toBe(company.defaultWorkspaceId);
 
     const workspace = reloaded?.defaultWorkspaceId
@@ -188,21 +188,21 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(fs.existsSync(path.join(workspace.path, ".cowork"))).toBe(true);
     expect(fs.existsSync(path.join(workspace.path, "projects"))).toBe(true);
 
-    const project = service.createProject({
+    const project = await service.createProject({
       companyId: company.id,
       name: "Default Workspace Project",
     });
 
-    const links = service.listProjectWorkspaces(project.id);
+    const links = await service.listProjectWorkspaces(project.id);
     expect(links).toHaveLength(1);
     expect(links[0]?.workspaceId).toBe(company.defaultWorkspaceId);
     expect(links[0]?.isPrimary).toBe(true);
   });
 
-  it("creates companies directly with collision-safe names and a single default", () => {
-    const seededCompany = service.getDefaultCompany();
+  it("creates companies directly with collision-safe names and a single default", async () => {
+    const seededCompany = await service.getDefaultCompany();
 
-    const created = service.createCompany({
+    const created = await service.createCompany({
       name: seededCompany.name,
       slug: seededCompany.slug,
       isDefault: true,
@@ -214,9 +214,9 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(created.isDefault).toBe(true);
     expect(created.monthlyBudgetCost).toBe(250);
 
-    const refreshedSeeded = service.getCompany(seededCompany.id);
+    const refreshedSeeded = await service.getCompany(seededCompany.id);
     expect(refreshedSeeded?.isDefault).toBe(false);
-    expect(service.getDefaultCompany().id).toBe(created.id);
+    expect((await service.getDefaultCompany()).id).toBe(created.id);
   });
 
   it("normalizes canonical prompt fields when task callers omit rawPrompt and userPrompt", () => {
@@ -237,29 +237,29 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(reloaded?.userPrompt).toBe("Keep this as the canonical request.");
   });
 
-  it("enforces single active issue checkout and syncs task lifecycle into runs", () => {
+  it("enforces single active issue checkout and syncs task lifecycle into runs", async () => {
     const workspace = insertWorkspace();
-    const company = service.getDefaultCompany();
-    const issue = service.createIssue({
+    const company = await service.getDefaultCompany();
+    const issue = await service.createIssue({
       companyId: company.id,
       workspaceId: workspace.id,
       title: "Claim one operator issue",
       description: "Only one active run should exist for the issue.",
     });
 
-    const checkout = service.checkoutIssue({
+    const checkout = await service.checkoutIssue({
       issueId: issue.id,
       workspaceId: workspace.id,
     });
 
     expect(checkout.issue.status).toBe("in_progress");
     expect(checkout.run.status).toBe("queued");
-    expect(() =>
+    await expect(
       service.checkoutIssue({
         issueId: issue.id,
         workspaceId: workspace.id,
       }),
-    ).toThrow(/already checked out/i);
+    ).rejects.toThrow(/already checked out/i);
 
     const task = taskRepo.create({
       title: "Execute issue",
@@ -269,7 +269,7 @@ describeWithSqlite("ControlPlaneCoreService", () => {
       source: "manual",
     });
 
-    const attached = service.attachTaskToRun(checkout.run.id, task.id);
+    const attached = await service.attachTaskToRun(checkout.run.id, task.id);
     const hydratedTask = taskRepo.findById(task.id);
     expect(attached.task.issueId).toBe(issue.id);
     expect(attached.task.heartbeatRunId).toBe(checkout.run.id);
@@ -282,14 +282,14 @@ describeWithSqlite("ControlPlaneCoreService", () => {
       terminalStatus: "ok",
       resultSummary: "Completed successfully",
     });
-    service.syncTaskLifecycle(task.id, {
+    await service.syncTaskLifecycle(task.id, {
       status: "completed",
       resultSummary: "Completed successfully",
     });
 
-    const completedIssue = service.getIssue(issue.id);
-    const completedRun = service.getRun(checkout.run.id);
-    const runEvents = service.getRunEvents(checkout.run.id);
+    const completedIssue = await service.getIssue(issue.id);
+    const completedRun = await service.getRun(checkout.run.id);
+    const runEvents = await service.getRunEvents(checkout.run.id);
 
     expect(completedIssue?.status).toBe("done");
     expect(completedIssue?.activeRunId).toBeUndefined();
@@ -299,9 +299,9 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(runEvents.some((event) => event.type === "task.completed")).toBe(true);
   });
 
-  it("rolls up project and agent cost usage and auto-pauses agents over budget", () => {
+  it("rolls up project and agent cost usage and auto-pauses agents over budget", async () => {
     const workspace = insertWorkspace();
-    const company = service.getDefaultCompany();
+    const company = await service.getDefaultCompany();
     const agent = agentRoleRepo.create({
       name: "ops",
       displayName: "Ops",
@@ -310,19 +310,19 @@ describeWithSqlite("ControlPlaneCoreService", () => {
       heartbeatEnabled: true,
       monthlyBudgetCost: 0.1,
     });
-    const project = service.createProject({
+    const project = await service.createProject({
       companyId: company.id,
       name: "Budget Guardrails",
       description: "Cost-based auto-pause coverage.",
     });
-    const issue = service.createIssue({
+    const issue = await service.createIssue({
       companyId: company.id,
       projectId: project.id,
       workspaceId: workspace.id,
       assigneeAgentRoleId: agent.id,
       title: "Pause heartbeat agent after budget breach",
     });
-    const checkout = service.checkoutIssue({
+    const checkout = await service.checkoutIssue({
       issueId: issue.id,
       agentRoleId: agent.id,
       workspaceId: workspace.id,
@@ -336,7 +336,7 @@ describeWithSqlite("ControlPlaneCoreService", () => {
       assignedAgentRoleId: agent.id,
     });
 
-    service.attachTaskToRun(checkout.run.id, task.id);
+    await service.attachTaskToRun(checkout.run.id, task.id);
     insertUsageEvent(task.id, {
       delta: {
         cost: 0.25,
@@ -345,9 +345,9 @@ describeWithSqlite("ControlPlaneCoreService", () => {
       },
     });
 
-    const projectCost = service.summarizeCostsByProject(project.id);
-    const agentCost = service.summarizeCostsByAgent(agent.id);
-    const paused = service.enforceAgentBudgets([agent.id]);
+    const projectCost = await service.summarizeCostsByProject(project.id);
+    const agentCost = await service.summarizeCostsByAgent(agent.id);
+    const paused = await service.enforceAgentBudgets([agent.id]);
     const updatedAgent = agentRoleRepo.findById(agent.id);
 
     expect(projectCost.totalCost).toBeCloseTo(0.25, 5);

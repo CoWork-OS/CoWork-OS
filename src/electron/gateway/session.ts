@@ -4,8 +4,9 @@
  * Manages channel sessions linking chats to CoWork tasks.
  */
 
-import Database from "better-sqlite3";
-import { ChannelSessionRepository, ChannelSession, Channel } from "../database/repositories";
+import { ChannelSessionRepository } from "../database/repository-facades";
+import type Database from "better-sqlite3";
+import { ChannelSession, Channel } from "../database/repositories";
 
 export class SessionManager {
   private sessionRepo: ChannelSessionRepository;
@@ -23,48 +24,38 @@ export class SessionManager {
     userId?: string,
     defaultWorkspaceId?: string,
   ): Promise<ChannelSession> {
-    // Look for existing session
-    let session = this.sessionRepo.findByChatId(channel.id, chatId);
-
-    if (session) {
-      // Update last activity
-      this.sessionRepo.update(session.id, {
-        lastActivityAt: Date.now(),
-      });
-      return { ...session, lastActivityAt: Date.now() };
-    }
-
-    // Create new session
-    session = this.sessionRepo.create({
+    // The existing session with its activity touched, or a new one, in one unit.
+    return await this.sessionRepo.findOrCreateByChat({
       channelId: channel.id,
       chatId,
       userId,
       workspaceId: defaultWorkspaceId,
       state: "idle",
     });
-
-    return session;
   }
 
   /**
    * Get session by ID
    */
-  getSession(sessionId: string): ChannelSession | undefined {
+  async getSession(sessionId: string): Promise<ChannelSession | undefined> {
     return this.sessionRepo.findById(sessionId);
   }
 
   /**
    * Get session by task ID
    */
-  getSessionByTaskId(taskId: string): ChannelSession | undefined {
+  async getSessionByTaskId(taskId: string): Promise<ChannelSession | undefined> {
     return this.sessionRepo.findByTaskId(taskId);
   }
 
   /**
    * Update session state
    */
-  updateSessionState(sessionId: string, state: "idle" | "active" | "waiting_approval"): void {
-    this.sessionRepo.update(sessionId, {
+  async updateSessionState(
+    sessionId: string,
+    state: "idle" | "active" | "waiting_approval",
+  ): Promise<void> {
+    await this.sessionRepo.update(sessionId, {
       state,
       lastActivityAt: Date.now(),
     });
@@ -73,8 +64,8 @@ export class SessionManager {
   /**
    * Link a session to a task
    */
-  linkSessionToTask(sessionId: string, taskId: string): void {
-    this.sessionRepo.update(sessionId, {
+  async linkSessionToTask(sessionId: string, taskId: string): Promise<void> {
+    await this.sessionRepo.update(sessionId, {
       taskId,
       state: "active",
       lastActivityAt: Date.now(),
@@ -84,8 +75,8 @@ export class SessionManager {
   /**
    * Unlink session from task
    */
-  unlinkSessionFromTask(sessionId: string): void {
-    this.sessionRepo.update(sessionId, {
+  async unlinkSessionFromTask(sessionId: string): Promise<void> {
+    await this.sessionRepo.update(sessionId, {
       taskId: undefined,
       state: "idle",
       lastActivityAt: Date.now(),
@@ -95,8 +86,8 @@ export class SessionManager {
   /**
    * Set session workspace
    */
-  setSessionWorkspace(sessionId: string, workspaceId: string): void {
-    this.sessionRepo.update(sessionId, {
+  async setSessionWorkspace(sessionId: string, workspaceId: string): Promise<void> {
+    await this.sessionRepo.update(sessionId, {
       workspaceId,
       lastActivityAt: Date.now(),
     });
@@ -105,30 +96,27 @@ export class SessionManager {
   /**
    * Update session context
    */
-  updateSessionContext(sessionId: string, context: Record<string, unknown>): void {
-    const session = this.sessionRepo.findById(sessionId);
-    if (session) {
-      const mergedContext = { ...session.context, ...context };
-      this.sessionRepo.update(sessionId, {
-        context: mergedContext,
-        lastActivityAt: Date.now(),
-      });
-    }
+  async updateSessionContext(sessionId: string, context: Record<string, unknown>): Promise<void> {
+    // `update` merges the context into the stored one within its own unit.
+    await this.sessionRepo.update(sessionId, {
+      context,
+      lastActivityAt: Date.now(),
+    });
   }
 
   /**
    * Get active sessions for a channel
    */
-  getActiveSessions(channelId: string): ChannelSession[] {
+  async getActiveSessions(channelId: string): Promise<ChannelSession[]> {
     return this.sessionRepo.findActiveByChannelId(channelId);
   }
 
   /**
    * Clean up old idle sessions
    */
-  cleanupOldSessions(maxAgeMs: number = 24 * 60 * 60 * 1000): void {
+  async cleanupOldSessions(maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<void> {
     const cutoff = Date.now() - Math.max(0, maxAgeMs);
-    const removed = this.sessionRepo.deleteIdleOlderThan(cutoff);
+    const removed = await this.sessionRepo.deleteIdleOlderThan(cutoff);
     if (removed > 0) {
       console.log(`[SessionManager] Cleaned up ${removed} stale idle sessions`);
     }

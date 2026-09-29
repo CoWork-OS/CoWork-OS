@@ -1,4 +1,5 @@
-import Database from "better-sqlite3";
+import { bindStatementContext } from "../database/statements/statement-burst";
+import type { MailboxStatementPort } from "../mailbox/mailbox-statement-port";
 import {
   AgentMailApiKeySummary,
   AgentMailConnectionTestResult,
@@ -13,10 +14,13 @@ import {
 import { AgentMailSettingsManager } from "../settings/agentmail-manager";
 import { AgentMailClient } from "./AgentMailClient";
 
-type AgentMailRealtimeStatusProvider = () => Pick<
+type AgentMailRealtimeStatus = Pick<
   AgentMailStatus,
   "realtimeConnected" | "connectionState" | "lastEventAt" | "error"
 >;
+type AgentMailRealtimeStatusProvider = () =>
+  | AgentMailRealtimeStatus
+  | Promise<AgentMailRealtimeStatus>;
 
 function asObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -164,7 +168,7 @@ function mapApiKey(payload: unknown): AgentMailApiKeySummary {
 
 export class AgentMailAdminService {
   constructor(
-    private readonly db: Database.Database,
+    private readonly sql: MailboxStatementPort,
     private readonly getRealtimeStatus?: AgentMailRealtimeStatusProvider,
   ) {}
 
@@ -181,14 +185,8 @@ export class AgentMailAdminService {
     return new AgentMailClient(AgentMailSettingsManager.loadSettings());
   }
 
-  private getWorkspaceBindingRow(workspaceId: string) {
-    return this.db
-      .prepare(
-        `SELECT workspace_id, pod_id, pod_name, created_at, updated_at
-         FROM agentmail_workspace_pods
-         WHERE workspace_id = ?`,
-      )
-      .get(workspaceId) as
+  private async getWorkspaceBindingRow(workspaceId: string) {
+    return (await this.sql.get("agentmailAdmin_getWorkspaceBindingRow_1", [workspaceId])) as
       | {
           workspace_id: string;
           pod_id: string;
@@ -199,8 +197,8 @@ export class AgentMailAdminService {
       | undefined;
   }
 
-  private ensureWorkspaceBinding(workspaceId: string): AgentMailWorkspaceBinding {
-    const row = this.getWorkspaceBindingRow(workspaceId);
+  private async ensureWorkspaceBinding(workspaceId: string): Promise<AgentMailWorkspaceBinding> {
+    const row = await this.getWorkspaceBindingRow(workspaceId);
     if (!row) {
       throw new Error("This workspace is not bound to an AgentMail pod yet.");
     }
@@ -213,56 +211,36 @@ export class AgentMailAdminService {
     };
   }
 
-  private persistWorkspaceBinding(binding: AgentMailWorkspaceBinding): void {
-    this.db
-      .prepare(
-        `INSERT INTO agentmail_workspace_pods
-          (workspace_id, pod_id, pod_name, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(workspace_id) DO UPDATE SET
-           pod_id = excluded.pod_id,
-           pod_name = excluded.pod_name,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        binding.workspaceId,
-        binding.podId,
-        binding.podName || null,
-        binding.createdAt,
-        binding.updatedAt,
-      );
+  private async persistWorkspaceBinding(binding: AgentMailWorkspaceBinding): Promise<void> {
+    await this.sql.run("agentmailAdmin_persistWorkspaceBinding_1", [
+      binding.workspaceId,
+      binding.podId,
+      binding.podName || null,
+      binding.createdAt,
+      binding.updatedAt,
+    ]);
   }
 
-  private persistInboxes(workspaceId: string, podId: string, inboxes: AgentMailInbox[]): void {
+  private async persistInboxes(
+    workspaceId: string,
+    podId: string,
+    inboxes: AgentMailInbox[],
+  ): Promise<void> {
     const now = Date.now();
     const existingIds = new Set(inboxes.map((inbox) => inbox.inboxId));
-    const deleteStatement = this.db.prepare(
-      `DELETE FROM agentmail_inboxes WHERE workspace_id = ? AND pod_id = ? AND inbox_id = ?`,
-    );
-    const upsertStatement = this.db.prepare(
-      `INSERT INTO agentmail_inboxes
-        (workspace_id, pod_id, inbox_id, email, display_name, client_id, metadata_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(pod_id, inbox_id) DO UPDATE SET
-         workspace_id = excluded.workspace_id,
-         email = excluded.email,
-         display_name = excluded.display_name,
-         client_id = excluded.client_id,
-         metadata_json = excluded.metadata_json,
-         updated_at = excluded.updated_at`,
-    );
-    const currentRows = this.db
-      .prepare("SELECT inbox_id FROM agentmail_inboxes WHERE workspace_id = ? AND pod_id = ?")
-      .all(workspaceId, podId) as Array<{ inbox_id: string }>;
+    const currentRows = (await this.sql.all("agentmailAdmin_persistInboxes_1", [
+      workspaceId,
+      podId,
+    ])) as Array<{ inbox_id: string }>;
 
     for (const row of currentRows) {
       if (!existingIds.has(row.inbox_id)) {
-        deleteStatement.run(workspaceId, podId, row.inbox_id);
+        await this.sql.run("agentmailAdmin_deleteInbox", [workspaceId, podId, row.inbox_id]);
       }
     }
 
     for (const inbox of inboxes) {
-      upsertStatement.run(
+      await this.sql.run("agentmailAdmin_upsertInbox", [
         workspaceId,
         podId,
         inbox.inboxId,
@@ -272,41 +250,30 @@ export class AgentMailAdminService {
         JSON.stringify(inbox),
         inbox.createdAt || now,
         inbox.updatedAt || now,
-      );
+      ]);
     }
   }
 
-  private persistDomains(workspaceId: string, podId: string, domains: AgentMailDomain[]): void {
+  private async persistDomains(
+    workspaceId: string,
+    podId: string,
+    domains: AgentMailDomain[],
+  ): Promise<void> {
     const now = Date.now();
     const existingIds = new Set(domains.map((domain) => domain.domainId));
-    const currentRows = this.db
-      .prepare("SELECT domain_id FROM agentmail_domains WHERE workspace_id = ? AND pod_id = ?")
-      .all(workspaceId, podId) as Array<{ domain_id: string }>;
+    const currentRows = (await this.sql.all("agentmailAdmin_persistDomains_1", [
+      workspaceId,
+      podId,
+    ])) as Array<{ domain_id: string }>;
 
     for (const row of currentRows) {
       if (!existingIds.has(row.domain_id)) {
-        this.db.prepare("DELETE FROM agentmail_domains WHERE domain_id = ?").run(row.domain_id);
+        await this.sql.run("agentmailAdmin_persistDomains_2", [row.domain_id]);
       }
     }
 
-    const upsert = this.db.prepare(
-      `INSERT INTO agentmail_domains
-        (domain_id, workspace_id, pod_id, domain, status, feedback_enabled, records_json, client_id, metadata_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(domain_id) DO UPDATE SET
-         workspace_id = excluded.workspace_id,
-         pod_id = excluded.pod_id,
-         domain = excluded.domain,
-         status = excluded.status,
-         feedback_enabled = excluded.feedback_enabled,
-         records_json = excluded.records_json,
-         client_id = excluded.client_id,
-         metadata_json = excluded.metadata_json,
-         updated_at = excluded.updated_at`,
-    );
-
     for (const domain of domains) {
-      upsert.run(
+      await this.sql.run("agentmailAdmin_upsertDomain", [
         domain.domainId,
         workspaceId,
         podId,
@@ -318,11 +285,14 @@ export class AgentMailAdminService {
         JSON.stringify(domain),
         domain.createdAt || now,
         domain.updatedAt || now,
-      );
+      ]);
     }
   }
 
-  private persistListEntries(workspaceId: string, entries: AgentMailListEntry[]): void {
+  private async persistListEntries(
+    workspaceId: string,
+    entries: AgentMailListEntry[],
+  ): Promise<void> {
     for (const entry of entries) {
       const id = listEntryId(
         workspaceId,
@@ -331,88 +301,63 @@ export class AgentMailAdminService {
         entry.listType,
         entry.entry,
       );
-      this.db
-        .prepare(
-          `INSERT INTO agentmail_lists
-            (id, workspace_id, pod_id, inbox_id, direction, list_type, entry_value, entry_type, reason, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             pod_id = excluded.pod_id,
-             inbox_id = excluded.inbox_id,
-             entry_type = excluded.entry_type,
-             reason = excluded.reason,
-             updated_at = excluded.updated_at`,
-        )
-        .run(
-          id,
-          workspaceId,
-          entry.podId || null,
-          entry.inboxId || null,
-          entry.direction,
-          entry.listType,
-          entry.entry,
-          entry.entryType || null,
-          entry.reason || null,
-          entry.createdAt || Date.now(),
-          Date.now(),
-        );
+      await this.sql.run("agentmailAdmin_persistListEntries_1", [
+        id,
+        workspaceId,
+        entry.podId || null,
+        entry.inboxId || null,
+        entry.direction,
+        entry.listType,
+        entry.entry,
+        entry.entryType || null,
+        entry.reason || null,
+        entry.createdAt || Date.now(),
+        Date.now(),
+      ]);
     }
   }
 
-  private deleteListEntryRecord(
+  private async deleteListEntryRecord(
     workspaceId: string,
     inboxId: string | undefined,
     direction: AgentMailListEntry["direction"],
     listType: AgentMailListEntry["listType"],
     entry: string,
-  ): void {
-    this.db
-      .prepare("DELETE FROM agentmail_lists WHERE id = ?")
-      .run(listEntryId(workspaceId, inboxId, direction, listType, entry));
+  ): Promise<void> {
+    await this.sql.run("agentmailAdmin_deleteListEntryRecord_1", [
+      listEntryId(workspaceId, inboxId, direction, listType, entry),
+    ]);
   }
 
-  private persistApiKeys(
+  private async persistApiKeys(
     workspaceId: string,
     inboxId: string,
     apiKeys: AgentMailApiKeySummary[],
-  ): void {
+  ): Promise<void> {
     const seen = new Set(apiKeys.map((item) => item.apiKeyId));
-    const currentRows = this.db
-      .prepare("SELECT api_key_id FROM agentmail_api_keys WHERE workspace_id = ? AND inbox_id = ?")
-      .all(workspaceId, inboxId) as Array<{ api_key_id: string }>;
+    const currentRows = (await this.sql.all("agentmailAdmin_persistApiKeys_1", [
+      workspaceId,
+      inboxId,
+    ])) as Array<{ api_key_id: string }>;
 
     for (const row of currentRows) {
       if (!seen.has(row.api_key_id)) {
-        this.db.prepare("DELETE FROM agentmail_api_keys WHERE api_key_id = ?").run(row.api_key_id);
+        await this.sql.run("agentmailAdmin_persistApiKeys_2", [row.api_key_id]);
       }
     }
 
     for (const apiKey of apiKeys) {
-      this.db
-        .prepare(
-          `INSERT INTO agentmail_api_keys
-            (api_key_id, workspace_id, pod_id, inbox_id, name, prefix, permissions_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(api_key_id) DO UPDATE SET
-             workspace_id = excluded.workspace_id,
-             pod_id = excluded.pod_id,
-             inbox_id = excluded.inbox_id,
-             name = excluded.name,
-             prefix = excluded.prefix,
-             permissions_json = excluded.permissions_json,
-             updated_at = excluded.updated_at`,
-        )
-        .run(
-          apiKey.apiKeyId,
-          workspaceId,
-          apiKey.podId || null,
-          apiKey.inboxId || inboxId,
-          apiKey.name || null,
-          apiKey.prefix,
-          JSON.stringify(apiKey.permissions || {}),
-          apiKey.createdAt || Date.now(),
-          Date.now(),
-        );
+      await this.sql.run("agentmailAdmin_persistApiKeys_3", [
+        apiKey.apiKeyId,
+        workspaceId,
+        apiKey.podId || null,
+        apiKey.inboxId || inboxId,
+        apiKey.name || null,
+        apiKey.prefix,
+        JSON.stringify(apiKey.permissions || {}),
+        apiKey.createdAt || Date.now(),
+        Date.now(),
+      ]);
     }
   }
 
@@ -456,7 +401,7 @@ export class AgentMailAdminService {
 
   async getStatus(): Promise<AgentMailStatus> {
     const settings = AgentMailSettingsManager.loadSettings();
-    const realtime = this.getRealtimeStatus?.() || {
+    const realtime = (await this.getRealtimeStatus?.()) || {
       realtimeConnected: false,
       connectionState: "disconnected" as const,
       lastEventAt: undefined,
@@ -476,15 +421,13 @@ export class AgentMailAdminService {
       };
     }
 
-    const domainCountRow = this.db
-      .prepare("SELECT COUNT(*) AS count FROM agentmail_domains")
-      .get() as { count: number };
-    const inboxCountRow = this.db
-      .prepare("SELECT COUNT(*) AS count FROM agentmail_inboxes")
-      .get() as { count: number };
-    const podCountRow = this.db
-      .prepare("SELECT COUNT(*) AS count FROM agentmail_workspace_pods")
-      .get() as { count: number };
+    const domainCountRow = (await this.sql.get("agentmailAdmin_getStatus_1", [])) as {
+      count: number;
+    };
+    const inboxCountRow = (await this.sql.get("agentmailAdmin_getStatus_2", [])) as {
+      count: number;
+    };
+    const podCountRow = (await this.sql.get("agentmailAdmin_getStatus_3", [])) as { count: number };
 
     try {
       const result = await this.testConnection();
@@ -525,8 +468,8 @@ export class AgentMailAdminService {
       .filter((pod) => pod.podId);
   }
 
-  getWorkspaceBinding(workspaceId: string): AgentMailWorkspaceBinding | null {
-    const row = this.getWorkspaceBindingRow(workspaceId);
+  async getWorkspaceBinding(workspaceId: string): Promise<AgentMailWorkspaceBinding | null> {
+    const row = await this.getWorkspaceBindingRow(workspaceId);
     if (!row) return null;
     return {
       workspaceId: row.workspace_id,
@@ -544,10 +487,10 @@ export class AgentMailAdminService {
       workspaceId,
       podId: pod.podId,
       podName: pod.name,
-      createdAt: this.getWorkspaceBindingRow(workspaceId)?.created_at || now,
+      createdAt: (await this.getWorkspaceBindingRow(workspaceId))?.created_at || now,
       updatedAt: now,
     };
-    this.persistWorkspaceBinding(binding);
+    await this.persistWorkspaceBinding(binding);
     await this.refreshWorkspace(workspaceId);
     return binding;
   }
@@ -569,7 +512,7 @@ export class AgentMailAdminService {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    this.persistWorkspaceBinding(binding);
+    await this.persistWorkspaceBinding(binding);
     await this.refreshWorkspace(workspaceId);
     return binding;
   }
@@ -579,7 +522,7 @@ export class AgentMailAdminService {
     inboxes: AgentMailInbox[];
     domains: AgentMailDomain[];
   }> {
-    const binding = this.ensureWorkspaceBinding(workspaceId);
+    const binding = await this.ensureWorkspaceBinding(workspaceId);
     const client = this.getClient();
     const [inboxResponse, domainResponse, podResponse] = await Promise.all([
       client.listPodInboxes(binding.podId, 100),
@@ -592,7 +535,7 @@ export class AgentMailAdminService {
       podName: pod.name || binding.podName,
       updatedAt: Date.now(),
     };
-    this.persistWorkspaceBinding(nextBinding);
+    await this.persistWorkspaceBinding(nextBinding);
 
     const inboxes = (Array.isArray(inboxResponse.inboxes) ? inboxResponse.inboxes : [])
       .map((inbox) => mapInbox(inbox, workspaceId))
@@ -601,8 +544,8 @@ export class AgentMailAdminService {
       .map((domain) => mapDomain(domain, workspaceId))
       .filter((domain) => domain.domainId);
 
-    this.persistInboxes(workspaceId, binding.podId, inboxes);
-    this.persistDomains(workspaceId, binding.podId, domains);
+    await this.persistInboxes(workspaceId, binding.podId, inboxes);
+    await this.persistDomains(workspaceId, binding.podId, domains);
 
     return {
       binding: nextBinding,
@@ -611,15 +554,8 @@ export class AgentMailAdminService {
     };
   }
 
-  listInboxes(workspaceId: string): AgentMailInbox[] {
-    const rows = this.db
-      .prepare(
-        `SELECT pod_id, inbox_id, email, display_name, client_id, created_at, updated_at
-         FROM agentmail_inboxes
-         WHERE workspace_id = ?
-         ORDER BY email COLLATE NOCASE ASC`,
-      )
-      .all(workspaceId) as Array<{
+  async listInboxes(workspaceId: string): Promise<AgentMailInbox[]> {
+    const rows = (await this.sql.all("agentmailAdmin_listInboxes_1", [workspaceId])) as Array<{
       pod_id: string;
       inbox_id: string;
       email: string | null;
@@ -645,12 +581,15 @@ export class AgentMailAdminService {
     workspaceId: string,
     input: { username?: string; domain?: string; displayName?: string; clientId?: string },
   ): Promise<AgentMailInbox> {
-    const binding = this.ensureWorkspaceBinding(workspaceId);
+    const binding = await this.ensureWorkspaceBinding(workspaceId);
     const inbox = mapInbox(
       await this.getClient().createPodInbox(binding.podId, input),
       workspaceId,
     );
-    this.persistInboxes(workspaceId, binding.podId, [...this.listInboxes(workspaceId), inbox]);
+    await this.persistInboxes(workspaceId, binding.podId, [
+      ...(await this.listInboxes(workspaceId)),
+      inbox,
+    ]);
     return inbox;
   }
 
@@ -659,7 +598,7 @@ export class AgentMailAdminService {
     inboxId: string,
     input: { displayName: string },
   ): Promise<AgentMailInbox> {
-    this.ensureWorkspaceBinding(workspaceId);
+    await this.ensureWorkspaceBinding(workspaceId);
     const inbox = mapInbox(await this.getClient().updateInbox(inboxId, input), workspaceId);
     await this.refreshWorkspace(workspaceId);
     return inbox;
@@ -667,21 +606,12 @@ export class AgentMailAdminService {
 
   async deleteInbox(workspaceId: string, inboxId: string): Promise<{ success: boolean }> {
     await this.getClient().deleteInbox(inboxId);
-    this.db
-      .prepare("DELETE FROM agentmail_inboxes WHERE workspace_id = ? AND inbox_id = ?")
-      .run(workspaceId, inboxId);
+    await this.sql.run("agentmailAdmin_deleteInbox_1", [workspaceId, inboxId]);
     return { success: true };
   }
 
-  listDomains(workspaceId: string): AgentMailDomain[] {
-    const rows = this.db
-      .prepare(
-        `SELECT domain_id, workspace_id, pod_id, domain, status, feedback_enabled, records_json, client_id, created_at, updated_at
-         FROM agentmail_domains
-         WHERE workspace_id = ?
-         ORDER BY domain COLLATE NOCASE ASC`,
-      )
-      .all(workspaceId) as Array<{
+  async listDomains(workspaceId: string): Promise<AgentMailDomain[]> {
+    const rows = (await this.sql.all("agentmailAdmin_listDomains_1", [workspaceId])) as Array<{
       domain_id: string;
       workspace_id: string;
       pod_id: string;
@@ -712,7 +642,7 @@ export class AgentMailAdminService {
     workspaceId: string,
     input: { domain: string; feedbackEnabled?: boolean },
   ): Promise<AgentMailDomain> {
-    const binding = this.ensureWorkspaceBinding(workspaceId);
+    const binding = await this.ensureWorkspaceBinding(workspaceId);
     const domain = mapDomain(
       await this.getClient().createPodDomain(binding.podId, {
         domain: input.domain,
@@ -725,16 +655,16 @@ export class AgentMailAdminService {
   }
 
   async verifyDomain(workspaceId: string, domainId: string): Promise<AgentMailDomain | null> {
-    const binding = this.ensureWorkspaceBinding(workspaceId);
+    const binding = await this.ensureWorkspaceBinding(workspaceId);
     await this.getClient().verifyPodDomain(binding.podId, domainId);
     const refreshed = await this.refreshWorkspace(workspaceId);
     return refreshed.domains.find((domain) => domain.domainId === domainId) || null;
   }
 
   async deleteDomain(workspaceId: string, domainId: string): Promise<{ success: boolean }> {
-    const binding = this.ensureWorkspaceBinding(workspaceId);
+    const binding = await this.ensureWorkspaceBinding(workspaceId);
     await this.getClient().deletePodDomain(binding.podId, domainId);
-    this.db.prepare("DELETE FROM agentmail_domains WHERE domain_id = ?").run(domainId);
+    await this.sql.run("agentmailAdmin_persistDomains_2", [domainId]);
     return { success: true };
   }
 
@@ -774,7 +704,7 @@ export class AgentMailAdminService {
     }
 
     if (entries.length > 0) {
-      this.persistListEntries(workspaceId, entries);
+      await this.persistListEntries(workspaceId, entries);
     }
 
     return entries.sort((a, b) => a.entry.localeCompare(b.entry));
@@ -809,7 +739,7 @@ export class AgentMailAdminService {
     if (!entry) {
       throw new Error("AgentMail returned an invalid list entry payload.");
     }
-    this.persistListEntries(workspaceId, [entry]);
+    await this.persistListEntries(workspaceId, [entry]);
     return entry;
   }
 
@@ -832,7 +762,7 @@ export class AgentMailAdminService {
     } else {
       await this.getClient().deleteListEntry(input.direction, input.listType, input.entry);
     }
-    this.deleteListEntryRecord(
+    await this.deleteListEntryRecord(
       workspaceId,
       input.inboxId,
       input.direction,
@@ -847,7 +777,7 @@ export class AgentMailAdminService {
     const keys = (Array.isArray(response.api_keys) ? response.api_keys : [])
       .map((item) => mapApiKey(item))
       .filter((item) => item.apiKeyId);
-    this.persistApiKeys(workspaceId, inboxId, keys);
+    await this.persistApiKeys(workspaceId, inboxId, keys);
     return keys;
   }
 
@@ -858,7 +788,7 @@ export class AgentMailAdminService {
   ): Promise<AgentMailApiKeySummary & { apiKey?: string }> {
     const response = await this.getClient().createInboxApiKey(inboxId, input);
     const summary = mapApiKey(response);
-    this.persistApiKeys(workspaceId, inboxId, [summary]);
+    await this.persistApiKeys(workspaceId, inboxId, [summary]);
     return {
       ...summary,
       apiKey: asString(asObject(response)?.api_key),
@@ -871,7 +801,10 @@ export class AgentMailAdminService {
     apiKeyId: string,
   ): Promise<{ success: boolean }> {
     await this.getClient().deleteInboxApiKey(inboxId, apiKeyId);
-    this.db.prepare("DELETE FROM agentmail_api_keys WHERE api_key_id = ?").run(apiKeyId);
+    await this.sql.run("agentmailAdmin_persistApiKeys_2", [apiKeyId]);
     return { success: true };
   }
 }
+
+// Each call is one mailbox operation for the statement burst gate (DB6).
+bindStatementContext(AgentMailAdminService.prototype, "AgentMailAdminService");

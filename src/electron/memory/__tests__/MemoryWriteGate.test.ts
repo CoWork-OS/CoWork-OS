@@ -74,7 +74,7 @@ const serviceMocks = vi.hoisted(() => ({
   mirrorMemory: vi.fn(),
 }));
 
-vi.mock("../../database/repositories", () => ({
+vi.mock("../../database/repository-facades", () => ({
   PendingMemoryWriteRepository: class {
     create = repoMock.create;
     list = repoMock.list;
@@ -143,23 +143,23 @@ describe("MemoryWriteGate", () => {
     delete process.env.COWORK_APPROVAL_PROMPTS;
   });
 
-  it("allows writes when approval mode is off", () => {
+  it("allows writes when approval mode is off", async () => {
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,
       heartbeatMaintenanceEnabled: true,
       memoryWriteApprovalMode: "off",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "curated",
     });
 
     expect(decision).toEqual({ allowed: true });
-    expect(MemoryWriteGate.listPending("ws-1")).toHaveLength(0);
+    expect(await MemoryWriteGate.listPending("ws-1")).toHaveLength(0);
   });
 
-  it("auto-commits saved review settings when approval prompts are disabled", () => {
+  it("auto-commits saved review settings when approval prompts are disabled", async () => {
     process.env.COWORK_APPROVAL_PROMPTS = "off";
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,
@@ -167,35 +167,35 @@ describe("MemoryWriteGate", () => {
       memoryWriteApprovalMode: "all",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "curated",
     });
 
     expect(decision).toEqual({ allowed: true });
-    expect(MemoryWriteGate.pendingCount("ws-1")).toBe(0);
+    expect(await MemoryWriteGate.pendingCount("ws-1")).toBe(0);
   });
 
-  it("stages curated writes in curated_only mode", () => {
+  it("stages curated writes in curated_only mode", async () => {
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,
       heartbeatMaintenanceEnabled: true,
       memoryWriteApprovalMode: "curated_only",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "curated",
     });
 
     expect(decision.allowed).toBe(false);
-    const pending = MemoryWriteGate.listPending("ws-1");
+    const pending = await MemoryWriteGate.listPending("ws-1");
     expect(pending).toHaveLength(1);
     expect(pending[0]?.target).toBe("curated");
     expect(pending[0]?.proposedValue).toBe("Important project fact");
   });
 
-  it("stages external writes when overridden by environment", () => {
+  it("stages external writes when overridden by environment", async () => {
     process.env.COWORK_MEMORY_WRITE_APPROVAL_MODE = "external_only";
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,
@@ -203,24 +203,24 @@ describe("MemoryWriteGate", () => {
       memoryWriteApprovalMode: "off",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "external",
       action: "remember",
     });
 
     expect(decision.allowed).toBe(false);
-    expect(MemoryWriteGate.listPending("ws-1")[0]?.action).toBe("remember");
+    expect((await MemoryWriteGate.listPending("ws-1"))[0]?.action).toBe("remember");
   });
 
-  it("blocks sensitive external writes without storing pending payloads", () => {
+  it("blocks sensitive external writes without storing pending payloads", async () => {
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,
       heartbeatMaintenanceEnabled: true,
       memoryWriteApprovalMode: "off",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "external",
       action: "remember",
@@ -231,7 +231,7 @@ describe("MemoryWriteGate", () => {
 
     expect(decision.allowed).toBe(false);
     expect("blocked" in decision && decision.blocked).toBe(true);
-    expect(MemoryWriteGate.listPending("ws-1")).toHaveLength(0);
+    expect(await MemoryWriteGate.listPending("ws-1")).toHaveLength(0);
   });
 
   it("applies archive pending writes with the write gate bypassed", async () => {
@@ -241,7 +241,7 @@ describe("MemoryWriteGate", () => {
       memoryWriteApprovalMode: "all",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "archive",
       payload: {
@@ -268,14 +268,14 @@ describe("MemoryWriteGate", () => {
     );
   });
 
-  it("rejects pending writes without replaying the payload", () => {
+  it("rejects pending writes without replaying the payload", async () => {
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,
       heartbeatMaintenanceEnabled: true,
       memoryWriteApprovalMode: "curated_only",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "curated",
       payload: {
@@ -288,7 +288,7 @@ describe("MemoryWriteGate", () => {
     expect(decision.allowed).toBe(false);
     if (decision.allowed || !("staged" in decision)) throw new Error("Expected staged decision");
 
-    const rejected = MemoryWriteGate.rejectForDisplay(decision.pendingId, {
+    const rejected = await MemoryWriteGate.rejectForDisplay(decision.pendingId, {
       workspaceId: "ws-1",
       reviewedBy: "test",
       resolution: "Not useful",
@@ -298,28 +298,28 @@ describe("MemoryWriteGate", () => {
     expect(serviceMocks.curate).not.toHaveBeenCalled();
   });
 
-  it("rejects the pending backlog without replaying any payload", () => {
+  it("rejects the pending backlog without replaying any payload", async () => {
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,
       heartbeatMaintenanceEnabled: true,
       memoryWriteApprovalMode: "all",
     });
 
-    const first = MemoryWriteGate.evaluate({
+    const first = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "archive",
     });
-    const second = MemoryWriteGate.evaluate({
+    const second = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "curated",
     });
     expect(first.allowed).toBe(false);
     expect(second.allowed).toBe(false);
 
-    const rejected = MemoryWriteGate.rejectAllPending({ reviewedBy: "migration-test" });
+    const rejected = await MemoryWriteGate.rejectAllPending({ reviewedBy: "migration-test" });
 
     expect(rejected).toBe(2);
-    expect(MemoryWriteGate.pendingCount("ws-1")).toBe(0);
+    expect(await MemoryWriteGate.pendingCount("ws-1")).toBe(0);
     expect(repoMock.rejectPending).toHaveBeenCalledWith({
       workspaceId: undefined,
       reviewedBy: "migration-test",
@@ -338,7 +338,7 @@ describe("MemoryWriteGate", () => {
       memoryWriteApprovalMode: "off",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "external",
       action: "remember",
@@ -370,7 +370,7 @@ describe("MemoryWriteGate", () => {
       memoryWriteApprovalMode: "curated_only",
     });
 
-    const decision = MemoryWriteGate.evaluate({
+    const decision = await MemoryWriteGate.evaluate({
       ...baseRequest,
       target: "curated",
       action: "upsert",

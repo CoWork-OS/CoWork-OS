@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TaskEventRepository, TaskRepository } from "../../database/repositories";
+import { TaskEventRepository, TaskStore } from "../../database/repositories";
 import { DatabaseManager } from "../../database/schema";
 import { StaleWorkSessionTurnError } from "../../database/WorkSessionProtocolRepository";
 import { WorkSessionProtocolService, mapTaskEventKind } from "../WorkSessionProtocolService";
@@ -26,7 +26,7 @@ describeWithSqlite("WorkSessionProtocolService", () => {
   let previousUserDataDir: string | undefined;
   let manager: DatabaseManager;
   let db: Database.Database;
-  let taskRepo: TaskRepository;
+  let taskRepo: TaskStore;
   let eventRepo: TaskEventRepository;
   let service: WorkSessionProtocolService;
 
@@ -36,7 +36,7 @@ describeWithSqlite("WorkSessionProtocolService", () => {
     process.env.COWORK_USER_DATA_DIR = tempDir;
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     eventRepo = new TaskEventRepository(db);
     service = new WorkSessionProtocolService(db);
     db.prepare(

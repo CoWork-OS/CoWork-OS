@@ -18,14 +18,14 @@ const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
 describeWithSqlite("RoutineWorkflowEngine", () => {
   let db: import("better-sqlite3").Database;
-  let Repository: typeof import("../repository").RoutineWorkflowRepository;
+  let Repository: typeof import("../repository").RoutineWorkflowStore;
   let Engine: typeof import("../engine").RoutineWorkflowEngine;
   let routine: Routine;
 
   beforeEach(async () => {
     const Database = (await import("better-sqlite3")).default;
     db = new Database(":memory:");
-    ({ RoutineWorkflowRepository: Repository } = await import("../repository"));
+    ({ RoutineWorkflowStore: Repository } = await import("../repository"));
     ({ RoutineWorkflowEngine: Engine } = await import("../engine"));
     routine = {
       id: "routine-1",
@@ -229,7 +229,7 @@ describeWithSqlite("RoutineWorkflowEngine", () => {
     });
     await vi.waitFor(() => expect(repository.listRuns()[0]?.status).toBe("running"));
 
-    engine.cancel(repository.listRuns()[0].id);
+    await engine.cancel(repository.listRuns()[0].id);
     const run = await startPromise;
 
     expect(observedSignal?.aborted).toBe(true);
@@ -255,7 +255,7 @@ describeWithSqlite("RoutineWorkflowEngine", () => {
     expect((run.output?.summary as Any)?.apiKey).toBe("[redacted]");
   });
 
-  it("recovers an interrupted step into explicit outcome verification", () => {
+  it("recovers an interrupted step into explicit outcome verification", async () => {
     const repository = new Repository(db);
     const engine = new Engine(repository);
     const definition = externalWriteWorkflow();
@@ -270,7 +270,7 @@ describeWithSqlite("RoutineWorkflowEngine", () => {
     repository.updateStep(step.id, { status: "running", attemptCount: 1 });
     repository.updateRun(run.id, { status: "running", startedAt: 1 });
 
-    const recovered = engine.recoverInterruptedRun(definition, run.id);
+    const recovered = await engine.recoverInterruptedRun(definition, run.id);
 
     expect(recovered?.status).toBe("waiting_for_approval");
     expect(repository.getStep(step.id)?.status).toBe("waiting_for_approval");

@@ -22,14 +22,14 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
   let tmpDir: string;
   let previousUserDataDir: string | undefined;
   let manager: import("../../database/schema").DatabaseManager;
-  let agentRoleRepo: import("../AgentRoleRepository").AgentRoleRepository;
+  let agentRoleRepo: import("../AgentRoleRepository").AgentRoleStore;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-agent-role-"));
     previousUserDataDir = process.env.COWORK_USER_DATA_DIR;
     process.env.COWORK_USER_DATA_DIR = tmpDir;
 
-    const [{ DatabaseManager }, { AgentRoleRepository }] = await Promise.all([
+    const [{ DatabaseManager }, { AgentRoleStore: AgentRoleRepository }] = await Promise.all([
       import("../../database/schema"),
       import("../AgentRoleRepository"),
     ]);

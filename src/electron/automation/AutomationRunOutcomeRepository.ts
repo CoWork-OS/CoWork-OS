@@ -16,9 +16,19 @@ function parseJson<T>(value: unknown, fallback: T): T {
   }
 }
 
-export class AutomationRunOutcomeRepository {
-  constructor(private readonly db: Database.Database) {
-    this.ensureSchema();
+/**
+ * Automation run outcomes and their notification state (async SQLite migration plan,
+ * DB6). As services-domain units these run in the database worker when the domain is
+ * routed there; callers use the async AutomationRunOutcomeRepository facade in
+ * automation-outcome-repository-facades.ts. Units build the store with ensureSchema:
+ * false; the facade ensures the table on the host once.
+ */
+export class AutomationRunOutcomeStore {
+  constructor(
+    private readonly db: Database.Database,
+    options: { ensureSchema?: boolean } = {},
+  ) {
+    if (options.ensureSchema !== false) this.ensureSchema();
   }
 
   create(input: CreateAutomationRunOutcomeInput): AutomationRunOutcome {

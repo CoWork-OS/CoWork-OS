@@ -1,5 +1,5 @@
+import { CoreLearningsRepository } from "./core-repository-facades";
 import type { CoreLearningsEntry, ListCoreLearningsRequest } from "../../shared/types";
-import { CoreLearningsRepository } from "./CoreLearningsRepository";
 
 export class CoreLearningsService {
   constructor(private readonly repo: CoreLearningsRepository) {}

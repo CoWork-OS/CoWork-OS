@@ -184,7 +184,14 @@ After applying fixes, re-running the same "what new in gemini based on google IO
 | `src/electron/memory/EvolutionMetricsService.ts`       | Switched to `searchByContentMarker()`                                                                                                                                                              |
 | `src/electron/memory/PlaybookSkillPromoter.ts`         | Switched to `searchByContentMarker()`                                                                                                                                                              |
 
+## Worker-Backed Search
+
+FTS now runs off the main thread. Lexical recall and marker lookups run in the memory FTS worker (a read-only `worker_threads` connection started in the desktop app, the daemon and the CLI). The host only ranks the results with the semantic stage.
+
+- **No host fallback:** if the worker fails, `searchAsync` returns semantic-only results instead of rerunning FTS on the host. A failed marker lookup rejects.
+- **Writes in the worker:** memory capture and embedding writes run in the database write worker (the `memory` domain). Each write reports the ids it wrote to the FTS worker's embedding cache.
+- **Measurements:** in the heavy-profile read benchmark (`npm run qa:db:reads`), the longest host stall around a hybrid search fell from 69 ms to 6 ms. See the [async SQLite baseline](async-sqlite-db0-baseline-2026-09-27.md).
+
 ## Future Work
 
-- **Worker-backed search (PR 2)**: Move FTS off the main thread entirely using a `worker_threads` read-only SQLite connection behind a `workerSearchEnabled` feature flag, with short timeouts for prompt recall.
 - **FTS table partitioning**: Split prompt-recall-eligible memory from archival/imported memory into a smaller recall-specific FTS table (deferred — skipping imported-global achieves most of the benefit without a schema migration).

@@ -12,7 +12,7 @@ const DEFAULT_LABEL_COLOR = "#6366f1";
 /**
  * Repository for managing task labels in the database
  */
-export class TaskLabelRepository {
+export class TaskLabelStore {
   constructor(private db: Database.Database) {}
 
   /**

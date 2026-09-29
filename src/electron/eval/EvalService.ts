@@ -12,6 +12,7 @@ import type {
   WorkSessionStatus,
   WorkSessionTurnStatus,
 } from "../../shared/types";
+import { invalidateTaskRowReads } from "../database/repositories";
 import { WorkSessionProtocolRepository } from "../database/WorkSessionProtocolRepository";
 import { mapTaskEventKind } from "../sessions/WorkSessionProtocolService";
 import {
@@ -156,7 +157,13 @@ function extractTaskChangedPaths(events: TaskEvent[]): Set<string> {
   return changed;
 }
 
-export class EvalService {
+/**
+ * Eval cases, suites and runs (async SQLite migration plan, DB6). As services-domain
+ * units these run in the database worker when the domain is routed there; callers use
+ * the async `EvalService` facade in `eval-repository-facades.ts`. A suite run grades
+ * every case and records its results in one unit.
+ */
+export class EvalStore {
   constructor(private db: Database.Database) {}
 
   private mapEvalCase(row: Any): EvalCase {
@@ -426,6 +433,7 @@ export class EvalService {
     this.db
       .prepare("UPDATE tasks SET eval_case_id = ?, updated_at = ? WHERE id = ?")
       .run(evalCase.id, Date.now(), taskId);
+    invalidateTaskRowReads(this.db);
 
     const suiteId = this.getOrCreateDefaultSuiteId();
     this.addCaseToSuite(suiteId, evalCase.id);

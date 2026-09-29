@@ -59,7 +59,7 @@ describe("NumbatService policy caching and maintenance", () => {
     expect(ingestFile).not.toHaveBeenCalled();
   });
 
-  it("prunes retained records immediately and every day while enabled", () => {
+  it("prunes retained records immediately and every day while enabled", async () => {
     vi.useFakeTimers();
     loadPoliciesMock.mockReturnValue({ runtime: { agentSecurity: policy(true) } });
     const prune = vi.fn();
@@ -71,16 +71,16 @@ describe("NumbatService policy caching and maintenance", () => {
     service.retentionTimer = null;
     service.scheduledScanRunning = false;
 
-    service.configureScheduledScan();
+    await service.configureScheduledScan();
     expect(prune).toHaveBeenCalledWith(30);
 
-    vi.advanceTimersByTime(24 * 60 * 60 * 1_000);
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
     expect(prune).toHaveBeenCalledTimes(2);
 
     service.shutdown();
   });
 
-  it("continues retention pruning when live agent security is disabled", () => {
+  it("continues retention pruning when live agent security is disabled", async () => {
     vi.useFakeTimers();
     loadPoliciesMock.mockReturnValue({ runtime: { agentSecurity: policy(false) } });
     const prune = vi.fn();
@@ -92,7 +92,7 @@ describe("NumbatService policy caching and maintenance", () => {
     service.retentionTimer = null;
     service.scheduledScanRunning = false;
 
-    service.configureScheduledScan();
+    await service.configureScheduledScan();
 
     expect(prune).toHaveBeenCalledWith(30);
     expect(service.scheduledScanTimer).toBeNull();

@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import type {
   EvalBaselineMetrics,
@@ -23,7 +23,7 @@ function safeJsonParse<T>(jsonString: string | null, defaultValue: T): T {
   }
 }
 
-export class ImprovementCandidateRepository {
+export class ImprovementCandidateStore {
   constructor(private db: Database.Database) {}
 
   create(
@@ -228,7 +228,7 @@ export class ImprovementCandidateRepository {
   }
 }
 
-export class ImprovementRunRepository {
+export class ImprovementRunStore {
   constructor(private db: Database.Database) {}
 
   create(
@@ -385,7 +385,7 @@ export class ImprovementRunRepository {
   }
 }
 
-export class ImprovementCampaignRepository {
+export class ImprovementCampaignStore {
   constructor(private db: Database.Database) {}
 
   create(
@@ -598,7 +598,7 @@ export class ImprovementCampaignRepository {
   }
 }
 
-export class ImprovementVariantRunRepository {
+export class ImprovementVariantRunStore {
   constructor(private db: Database.Database) {}
 
   create(
@@ -731,7 +731,7 @@ export class ImprovementVariantRunRepository {
   }
 }
 
-export class ImprovementJudgeVerdictRepository {
+export class ImprovementJudgeVerdictStore {
   constructor(private db: Database.Database) {}
 
   upsert(
@@ -799,7 +799,7 @@ export class ImprovementJudgeVerdictRepository {
   }
 }
 
-export function clearImprovementHistoryData(
+function clearImprovementHistoryRows(
   db: Database.Database,
 ): ImprovementHistoryResetResult["deleted"] {
   const countTable = (table: string): number => {
@@ -826,6 +826,65 @@ export function clearImprovementHistoryData(
   })();
 
   return deleted;
+}
+
+/** Improvement history reset and the recent signals candidates are rebuilt from. */
+export class ImprovementHistoryStore {
+  constructor(private db: Database.Database) {}
+
+  /** Count and delete every improvement row; as a unit the counts match the deletes. */
+  clearHistory(): ImprovementHistoryResetResult["deleted"] {
+    return clearImprovementHistoryRows(this.db);
+  }
+
+  /**
+   * Merge a duplicate candidate into another: its runs move to the survivor, the survivor
+   * takes `updates`, and the duplicate is deleted, in one transaction.
+   */
+  mergeCandidates(
+    duplicateId: string,
+    survivorId: string,
+    updates: Partial<ImprovementCandidate>,
+  ): void {
+    new ImprovementRunStore(this.db).reassignCandidate(duplicateId, survivorId);
+    const candidates = new ImprovementCandidateStore(this.db);
+    candidates.update(survivorId, updates);
+    candidates.delete(duplicateId);
+  }
+
+  /** Recent top-level work and the failure and feedback events since `since`. */
+  recentSignalRows(since: number): {
+    taskIds: string[];
+    // oxlint-disable-next-line typescript/no-explicit-any -- rows are parsed by the service
+    eventRows: any[];
+  } {
+    const taskIds = (
+      this.db
+        .prepare(
+          `
+        SELECT id
+        FROM tasks
+        WHERE created_at >= ?
+        ORDER BY created_at DESC
+        LIMIT 300
+      `,
+        )
+        .all(since) as Array<{ id: string }>
+    ).map((task) => task.id);
+    const eventRows = this.db
+      .prepare(
+        `
+        SELECT task_id, type, payload, id, timestamp
+        FROM task_events
+        WHERE timestamp >= ?
+          AND COALESCE(legacy_type, type) IN ('verification_failed', 'safety_stop_triggered', 'user_feedback')
+        ORDER BY timestamp DESC
+        LIMIT 400
+      `,
+      )
+      .all(since);
+    return { taskIds, eventRows };
+  }
 }
 
 function buildFilterSql(

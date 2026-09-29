@@ -1,9 +1,12 @@
+import { WorkspaceRepository } from "../database/repository-facades";
+import { ChannelRepository } from "../database/repository-facades";
+import type Database from "better-sqlite3";
 import type { BrowserWindow } from "electron";
 import type { Message } from "discord.js";
-import { ActivityRepository } from "../activity/ActivityRepository";
+import { ActivityRepository } from "../activity/activity-repository-facades";
 import type { AgentDaemon } from "../agent/daemon";
-import { ChannelRepository, type Channel, WorkspaceRepository } from "../database/repositories";
-import { SupervisorExchangeRepository } from "./SupervisorExchangeRepository";
+import { type Channel } from "../database/repositories";
+import { SupervisorExchangeRepository } from "./supervisor-repository-facades";
 import type {
   DiscordSupervisorConfig,
   ResolveSupervisorExchangeRequest,
@@ -127,7 +130,7 @@ export class DiscordSupervisorService {
   private malformedCooldown = new Map<string, number>();
 
   constructor(
-    private db: import("better-sqlite3").Database,
+    private db: Database.Database,
     private agentDaemon: AgentDaemon,
     private getMainWindow: () => BrowserWindow | null,
     private getDiscordAdapter?: () => DiscordAdapter | undefined,
@@ -143,21 +146,26 @@ export class DiscordSupervisorService {
     });
     this.agentDaemon.on(
       "task_completed",
-      async (data: {
+      (data: {
         taskId: string;
         resultSummary?: string;
         verificationVerdict?: string;
         verificationReport?: string;
         message?: string;
       }) => {
-        await this.handleTaskCompleted(data);
+        void this.handleTaskCompleted(data).catch((error: unknown) => {
+          logger.warn("Failed to handle task completion:", error);
+        });
       },
     );
     this.agentDaemon.on(
       "error",
-      async (data: { taskId?: string; error?: string; message?: string }) => {
+      (data: { taskId?: string; error?: string; message?: string }) => {
         if (!data?.taskId) return;
-        await this.handleTaskFailed(data.taskId, data.error || data.message || "Unknown error");
+        void this.handleTaskFailed(
+          data.taskId,
+          data.error || data.message || "Unknown error",
+        ).catch((error: unknown) => logger.warn("Failed to handle task failure:", error));
       },
     );
   }
@@ -167,7 +175,7 @@ export class DiscordSupervisorService {
   }
 
   async resolveExchange(request: ResolveSupervisorExchangeRequest): Promise<SupervisorExchange> {
-    const existing = this.exchangeRepo.findById(request.id);
+    const existing = await this.exchangeRepo.findById(request.id);
     if (!existing) {
       throw new Error("Supervisor exchange not found");
     }
@@ -176,9 +184,9 @@ export class DiscordSupervisorService {
     }
 
     const mirrorTarget = request.mirrorToDiscord
-      ? this.getDiscordMirrorTarget(existing)
+      ? await this.getDiscordMirrorTarget(existing)
       : undefined;
-    const next = this.exchangeRepo.update(existing.id, {
+    const next = await this.exchangeRepo.update(existing.id, {
       status: "closed",
       humanResolution: request.resolution.trim(),
       terminalReason: existing.terminalReason || "human_resolved",
@@ -189,7 +197,7 @@ export class DiscordSupervisorService {
     }
 
     this.emitSupervisorEvent("resolved", next);
-    this.createActivity(next, "Supervisor exchange resolved", request.resolution.trim(), {
+    await this.createActivity(next, "Supervisor exchange resolved", request.resolution.trim(), {
       exchangeId: next.id,
       exchangeStatus: next.status,
     });
@@ -206,7 +214,7 @@ export class DiscordSupervisorService {
     message: IncomingMessage,
   ): Promise<void> {
     this.activeDiscordAdapter = adapter;
-    const channel = this.channelRepo.findByType("discord");
+    const channel = await this.channelRepo.findByType("discord");
     if (!channel) return;
     const config = this.getSupervisorConfig(channel);
     if (!config?.enabled) return;
@@ -248,15 +256,15 @@ export class DiscordSupervisorService {
     };
   }
 
-  private resolveWorkspaceId(channel: Channel): string | null {
+  private async resolveWorkspaceId(channel: Channel): Promise<string | null> {
     const configuredId =
       typeof channel.config?.defaultWorkspaceId === "string"
         ? channel.config.defaultWorkspaceId
         : null;
-    if (configuredId && this.workspaceRepo.findById(configuredId)) {
+    if (configuredId && (await this.workspaceRepo.findById(configuredId))) {
       return configuredId;
     }
-    return this.workspaceRepo.findAll()[0]?.id || null;
+    return (await this.workspaceRepo.findAll())[0]?.id || null;
   }
 
   private async handleWatchedOutput(
@@ -267,13 +275,13 @@ export class DiscordSupervisorService {
     peerUserId: string,
     sourceChannelId: string,
   ): Promise<void> {
-    if (this.exchangeRepo.findBySourceMessageId(message.messageId)) {
+    if (await this.exchangeRepo.findBySourceMessageId(message.messageId)) {
       return;
     }
-    const workspaceId = this.resolveWorkspaceId(channel);
+    const workspaceId = await this.resolveWorkspaceId(channel);
     if (!workspaceId) return;
 
-    const exchange = this.exchangeRepo.create({
+    const exchange = await this.exchangeRepo.create({
       workspaceId,
       coordinationChannelId: config.coordinationChannelId!,
       sourceChannelId,
@@ -293,7 +301,7 @@ export class DiscordSupervisorService {
     });
 
     this.emitSupervisorEvent("created", exchange);
-    this.createActivity(exchange, "Supervisor exchange opened", truncate(message.text, 220), {
+    await this.createActivity(exchange, "Supervisor exchange opened", truncate(message.text, 220), {
       exchangeId: exchange.id,
       exchangeStatus: exchange.status,
       sourceChannelId,
@@ -312,7 +320,7 @@ export class DiscordSupervisorService {
       parseMode: "markdown",
     });
 
-    this.exchangeRepo.addMessage({
+    await this.exchangeRepo.addMessage({
       exchangeId: exchange.id,
       discordMessageId: sentId,
       channelId: config.coordinationChannelId!,
@@ -321,7 +329,7 @@ export class DiscordSupervisorService {
       intent: "status_request",
       rawContent: outboundText,
     });
-    const updated = this.exchangeRepo.update(exchange.id, {
+    const updated = await this.exchangeRepo.update(exchange.id, {
       lastIntent: "status_request",
       turnCount: 1,
     });
@@ -345,10 +353,10 @@ export class DiscordSupervisorService {
     }
 
     const exchangeByReply = message.replyTo
-      ? this.exchangeRepo.findByDiscordMessageId(message.replyTo)
+      ? await this.exchangeRepo.findByDiscordMessageId(message.replyTo)
       : undefined;
     const exchangeByToken = parsed.exchangeId
-      ? this.exchangeRepo.findById(parsed.exchangeId)
+      ? await this.exchangeRepo.findById(parsed.exchangeId)
       : undefined;
     if (exchangeByReply && exchangeByToken && exchangeByReply.id !== exchangeByToken.id) {
       this.recordMalformedMessage(peerUserId, channelId, message.text);
@@ -366,15 +374,15 @@ export class DiscordSupervisorService {
         return;
       }
     } else {
-      const workspaceId = this.resolveWorkspaceId(channel);
+      const workspaceId = await this.resolveWorkspaceId(channel);
       if (!workspaceId) return;
 
-      const openCandidates = this.exchangeRepo
+      const openCandidates = (await this.exchangeRepo
         .list({
           workspaceId,
           status: "open",
           limit: 50,
-        })
+        }))
         .filter(
           (item) =>
             item.coordinationChannelId === channelId && item.sourcePeerUserId === peerUserId,
@@ -386,7 +394,7 @@ export class DiscordSupervisorService {
         this.recordMalformedMessage(peerUserId, channelId, message.text);
         return;
       } else {
-        exchange = this.exchangeRepo.create({
+        exchange = await this.exchangeRepo.create({
           workspaceId,
           coordinationChannelId: channelId,
           sourcePeerUserId: peerUserId,
@@ -398,7 +406,7 @@ export class DiscordSupervisorService {
       }
     }
 
-    const storedMessage = this.exchangeRepo.addMessage({
+    const storedMessage = await this.exchangeRepo.addMessage({
       exchangeId: exchange.id,
       discordMessageId: message.messageId,
       channelId,
@@ -409,23 +417,23 @@ export class DiscordSupervisorService {
     });
     if (!storedMessage) return;
 
-    const messageCount = this.exchangeRepo.listMessages(exchange.id).length;
+    const messageCount = (await this.exchangeRepo.listMessages(exchange.id)).length;
     exchange =
-      this.exchangeRepo.update(exchange.id, {
+      (await this.exchangeRepo.update(exchange.id, {
         lastIntent: parsed.intent,
         turnCount: messageCount,
-      }) || exchange;
+      })) || exchange;
     this.emitSupervisorEvent("updated", exchange);
 
     if (messageCount > 3) {
-      const closed = this.exchangeRepo.update(exchange.id, {
+      const closed = await this.exchangeRepo.update(exchange.id, {
         status: "closed",
         terminalReason: "max_turns_exceeded",
         closedAt: Date.now(),
       });
       if (closed) {
         this.emitSupervisorEvent("updated", closed);
-        this.createActivity(
+        await this.createActivity(
           closed,
           "Supervisor exchange closed",
           "Maximum exchange depth reached.",
@@ -439,14 +447,14 @@ export class DiscordSupervisorService {
     }
 
     if (parsed.intent === "ack") {
-      const closed = this.exchangeRepo.update(exchange.id, {
+      const closed = await this.exchangeRepo.update(exchange.id, {
         status: "acknowledged",
         terminalReason: "peer_acknowledged",
         closedAt: Date.now(),
       });
       if (closed) {
         this.emitSupervisorEvent("updated", closed);
-        this.createActivity(
+        await this.createActivity(
           closed,
           "Supervisor exchange acknowledged",
           stripProtocolEnvelope(message.text),
@@ -460,14 +468,14 @@ export class DiscordSupervisorService {
     }
 
     if (parsed.intent === "escalation_notice") {
-      const escalated = this.exchangeRepo.update(exchange.id, {
+      const escalated = await this.exchangeRepo.update(exchange.id, {
         status: "escalated",
         terminalReason: "peer_escalated",
         closedAt: Date.now(),
       });
       if (escalated) {
         this.emitSupervisorEvent("updated", escalated);
-        this.createActivity(
+        await this.createActivity(
           escalated,
           "Peer escalated supervisor exchange",
           stripProtocolEnvelope(message.text),
@@ -512,7 +520,7 @@ export class DiscordSupervisorService {
     responseMode: "worker" | "supervisor",
     replyToMessageId: string,
   ): Promise<void> {
-    const workspaceId = exchange.workspaceId || this.resolveWorkspaceId(channel);
+    const workspaceId = exchange.workspaceId || (await this.resolveWorkspaceId(channel));
     if (!workspaceId) return;
 
     const roleId =
@@ -527,7 +535,7 @@ export class DiscordSupervisorService {
       return;
     }
 
-    const messages = this.exchangeRepo.listMessages(exchange.id);
+    const messages = await this.exchangeRepo.listMessages(exchange.id);
     const latestPeerMessage = [...messages].reverse().find((item) => item.actorKind === "peer");
     const sourceSummary = exchange.evidenceRefs?.[0]?.summary || "";
     const prompt =
@@ -564,7 +572,7 @@ export class DiscordSupervisorService {
       replyToMessageId,
     });
 
-    const updated = this.exchangeRepo.update(exchange.id, { linkedTaskId: task.id });
+    const updated = await this.exchangeRepo.update(exchange.id, { linkedTaskId: task.id });
     if (updated) {
       this.emitSupervisorEvent("updated", updated);
     }
@@ -580,7 +588,7 @@ export class DiscordSupervisorService {
     const context = this.pendingTasks.get(data.taskId);
     if (!context) return;
     this.pendingTasks.delete(data.taskId);
-    const exchange = this.exchangeRepo.findById(context.exchangeId);
+    const exchange = await this.exchangeRepo.findById(context.exchangeId);
     if (!exchange) return;
 
     const rawOutput = buildTaskCompletionSummary({
@@ -608,7 +616,7 @@ export class DiscordSupervisorService {
         replyTo: context.replyToMessageId,
         parseMode: "markdown",
       });
-      this.exchangeRepo.addMessage({
+      await this.exchangeRepo.addMessage({
         exchangeId: exchange.id,
         discordMessageId: sentId,
         channelId: exchange.coordinationChannelId,
@@ -616,14 +624,14 @@ export class DiscordSupervisorService {
         intent: "review_request",
         rawContent: outboundText,
       });
-      const updated = this.exchangeRepo.update(exchange.id, {
+      const updated = await this.exchangeRepo.update(exchange.id, {
         lastIntent: "review_request",
-        turnCount: this.exchangeRepo.listMessages(exchange.id).length,
+        turnCount: (await this.exchangeRepo.listMessages(exchange.id)).length,
       });
       if (updated) {
         this.emitSupervisorEvent("updated", updated);
       }
-      this.createActivity(
+      await this.createActivity(
         exchange,
         "Worker responded to supervisor exchange",
         stripProtocolEnvelope(outboundText),
@@ -653,7 +661,7 @@ export class DiscordSupervisorService {
         replyTo: context.replyToMessageId,
         parseMode: "markdown",
       });
-      this.exchangeRepo.addMessage({
+      await this.exchangeRepo.addMessage({
         exchangeId: exchange.id,
         discordMessageId: sentId,
         channelId: exchange.coordinationChannelId,
@@ -661,16 +669,16 @@ export class DiscordSupervisorService {
         intent: "ack",
         rawContent: outboundText,
       });
-      const closed = this.exchangeRepo.update(exchange.id, {
+      const closed = await this.exchangeRepo.update(exchange.id, {
         status: "acknowledged",
         lastIntent: "ack",
-        turnCount: this.exchangeRepo.listMessages(exchange.id).length,
+        turnCount: (await this.exchangeRepo.listMessages(exchange.id)).length,
         terminalReason: "supervisor_ack",
         closedAt: Date.now(),
       });
       if (closed) {
         this.emitSupervisorEvent("updated", closed);
-        this.createActivity(
+        await this.createActivity(
           closed,
           "Supervisor exchange acknowledged",
           stripProtocolEnvelope(outboundText),
@@ -700,7 +708,8 @@ export class DiscordSupervisorService {
       this.latestTaskMessages.delete(taskId);
     }
     const exchange =
-      existingExchange || (context ? this.exchangeRepo.findById(context.exchangeId) : undefined);
+      existingExchange ||
+      (context ? await this.exchangeRepo.findById(context.exchangeId) : undefined);
     const adapter = existingAdapter || context?.adapter;
     const channel = context?.channel;
     if (!exchange || !adapter || !channel) return;
@@ -726,7 +735,7 @@ export class DiscordSupervisorService {
           messageText,
         );
         targetChannelId = `dm:${config.humanEscalationUserId}`;
-        this.exchangeRepo.addMessage({
+        await this.exchangeRepo.addMessage({
           exchangeId: exchange.id,
           discordMessageId: directMessageId,
           channelId: targetChannelId,
@@ -742,7 +751,7 @@ export class DiscordSupervisorService {
           text: fallbackText,
           parseMode: "markdown",
         });
-        this.exchangeRepo.addMessage({
+        await this.exchangeRepo.addMessage({
           exchangeId: exchange.id,
           discordMessageId: fallbackId,
           channelId: targetChannelId,
@@ -757,7 +766,7 @@ export class DiscordSupervisorService {
         text: messageText,
         parseMode: "markdown",
       });
-      this.exchangeRepo.addMessage({
+      await this.exchangeRepo.addMessage({
         exchangeId: exchange.id,
         discordMessageId: sentId,
         channelId: targetChannelId,
@@ -767,17 +776,17 @@ export class DiscordSupervisorService {
       });
     }
 
-    const escalated = this.exchangeRepo.update(exchange.id, {
+    const escalated = await this.exchangeRepo.update(exchange.id, {
       status: "escalated",
       lastIntent: "escalation_notice",
-      turnCount: this.exchangeRepo.listMessages(exchange.id).length,
+      turnCount: (await this.exchangeRepo.listMessages(exchange.id)).length,
       terminalReason: "human_escalation",
       closedAt: Date.now(),
       escalationTarget: config.humanEscalationChannelId || config.humanEscalationUserId,
     });
     if (escalated) {
       this.emitSupervisorEvent("updated", escalated);
-      this.createActivity(escalated, "Supervisor exchange escalated", body, {
+      await this.createActivity(escalated, "Supervisor exchange escalated", body, {
         exchangeId: escalated.id,
         exchangeStatus: escalated.status,
         escalationTarget: escalated.escalationTarget,
@@ -795,13 +804,13 @@ export class DiscordSupervisorService {
     return adapter;
   }
 
-  private getDiscordMirrorTarget(exchange: SupervisorExchange): {
+  private async getDiscordMirrorTarget(exchange: SupervisorExchange): Promise<{
     adapter: DiscordAdapter;
     targetChannelId: string;
     directUserId?: string;
-  } {
+  }> {
     const adapter = this.requireDiscordMirrorAdapter();
-    const channel = this.channelRepo.findByType("discord");
+    const channel = await this.channelRepo.findByType("discord");
     if (!channel) {
       throw new Error("Discord channel not found for supervisor resolution mirroring");
     }
@@ -822,8 +831,9 @@ export class DiscordSupervisorService {
 
   private async mirrorResolutionToDiscord(
     exchange: SupervisorExchange,
-    target = this.getDiscordMirrorTarget(exchange),
+    mirrorTarget?: Awaited<ReturnType<DiscordSupervisorService["getDiscordMirrorTarget"]>>,
   ): Promise<void> {
+    const target = mirrorTarget ?? (await this.getDiscordMirrorTarget(exchange));
     const resolutionText = `Supervisor resolution recorded:\n${exchange.humanResolution || "(no resolution text)"}`;
     if (target.directUserId) {
       await target.adapter.sendDirectMessageToUser(target.directUserId, resolutionText);
@@ -836,13 +846,13 @@ export class DiscordSupervisorService {
     });
   }
 
-  private createActivity(
+  private async createActivity(
     exchange: SupervisorExchange,
     title: string,
     description: string,
     metadata: Record<string, unknown>,
-  ): void {
-    const activity = this.activityRepo.create({
+  ): Promise<void> {
+    const activity = await this.activityRepo.create({
       workspaceId: exchange.workspaceId,
       taskId: exchange.linkedTaskId,
       agentRoleId: exchange.supervisorAgentRoleId || exchange.workerAgentRoleId,

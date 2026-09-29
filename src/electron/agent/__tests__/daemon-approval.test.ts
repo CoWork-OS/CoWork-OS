@@ -120,7 +120,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     loadSettings.mockRestore();
   });
 
-  it("allows automation write_file permission checks without prompting", () => {
+  it("allows automation write_file permission checks without prompting", async () => {
     const workspace = {
       id: "workspace-1",
       name: "Workspace",
@@ -154,7 +154,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       logEvent: vi.fn(),
     }) as Any;
 
-    const result = AgentDaemon.prototype.evaluateToolPermission.call(daemonLike, "task-auto", {
+    const result = await AgentDaemon.prototype.evaluateToolPermission.call(daemonLike, "task-auto", {
       approvalType: "external_service",
       toolName: "write_file",
       details: {
@@ -174,7 +174,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     );
   });
 
-  it("evaluates task-level shell access against the effective workspace", () => {
+  it("evaluates task-level shell access against the effective workspace", async () => {
     const workspace = {
       id: "workspace-temp",
       name: "Temporary Workspace",
@@ -211,7 +211,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       logEvent: vi.fn(),
     }) as Any;
 
-    const result = AgentDaemon.prototype.evaluateToolPermission.call(
+    const result = await AgentDaemon.prototype.evaluateToolPermission.call(
       daemonLike,
       "task-shell-override",
       {
@@ -413,6 +413,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       "Approve action",
       { tool: "web_fetch", params: { url: "https://blocked.example/page" } },
     );
+    // Permission evaluation reads storage before the approval row is created (DB6).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(approvalRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -484,6 +486,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       { tool: "x402_fetch" },
       { allowAutoApprove: false },
     );
+    // Permission evaluation reads storage before the approval row is created (DB6).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(approvalRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -549,6 +553,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       "Approve external side effect",
       { tool: "x402_fetch" },
     );
+    // Permission evaluation reads storage before the approval row is created (DB6).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(approvalRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -613,6 +619,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
         params: { url: "https://api.attacker.tld", method: "POST", body: "x" },
       },
     );
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(approvalRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -669,6 +676,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       { kind: "computer_use_app_grant", appName: "Safari" },
       { allowAutoApprove: false },
     );
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(approvalRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -731,6 +739,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       "Approve action",
       { tool: "x402_fetch" },
     );
+    // Permission evaluation reads storage before the approval row is created (DB6).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(updateTask).toHaveBeenCalledWith(
       "task-timeout",
@@ -824,6 +834,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       { tool: "write_file", path: "notes.md" },
       { signal: controller.signal },
     );
+    // Permission evaluation reads storage before the approval row is created (DB6).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
 
     expect(daemonLike.pendingApprovals.has("approval-aborted-tool")).toBe(true);
     const rejection = expect(approvalPromise).rejects.toThrow(
@@ -1011,7 +1023,7 @@ describe("AgentDaemon.buildPermissionRules", () => {
       },
     } as Any;
 
-    const rules = AgentDaemon.prototype["buildPermissionRules"].call(
+    const rules = await AgentDaemon.prototype["buildPermissionRules"].call(
       daemonLike,
       "task-1",
       undefined,
@@ -1044,7 +1056,7 @@ describe("AgentDaemon.buildPermissionRules", () => {
       },
     } as Any;
 
-    const rules = AgentDaemon.prototype["buildPermissionRules"].call(
+    const rules = await AgentDaemon.prototype["buildPermissionRules"].call(
       daemonLike,
       "task-empty-autonomy",
       {
@@ -1241,7 +1253,7 @@ describe("boundary authorization broker", () => {
     expect(daemon.logEvent.mock.calls.every((call: Any[]) => call[1] === "log")).toBe(true);
   });
 
-  it("rejects pending approval when its arguments or policy identity changed", () => {
+  it("rejects pending approval when its arguments or policy identity changed", async () => {
     const daemon = {
       taskRepo: { findById: vi.fn(() => ({ id: "task-a", status: "blocked" })) },
       evaluatePermissionRequest: vi.fn(() => ({
@@ -1251,7 +1263,7 @@ describe("boundary authorization broker", () => {
       })),
     } as Any;
     expect(
-      AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
+      await AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
         taskId: "task-a",
         type: "run_command",
         details: { command: "npm test", authorization: { version: 1, key: "original" } },
@@ -1259,7 +1271,7 @@ describe("boundary authorization broker", () => {
     ).toBe(false);
   });
 
-  it("rejects fingerprint-less legacy approval rows even when current policy permits review", () => {
+  it("rejects fingerprint-less legacy approval rows even when current policy permits review", async () => {
     const daemon = {
       taskRepo: { findById: vi.fn(() => ({ id: "task-legacy", status: "blocked" })) },
       evaluatePermissionRequest: vi.fn(() => ({
@@ -1268,7 +1280,7 @@ describe("boundary authorization broker", () => {
       })),
     } as Any;
     expect(
-      AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
+      await AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
         taskId: "task-legacy",
         type: "run_command",
         details: { command: "npm test" },
@@ -1280,13 +1292,13 @@ describe("boundary authorization broker", () => {
     undefined,
     { id: "task-a", status: "completed" },
     { id: "task-a", status: "cancelled" },
-  ])("rejects approval after the task has ended or disappeared (%j)", (task) => {
+  ])("rejects approval after the task has ended or disappeared (%j)", async (task) => {
     const daemon = {
       taskRepo: { findById: vi.fn(() => task) },
       evaluatePermissionRequest: vi.fn(() => ({ evaluation: { decision: "allow" } })),
     } as Any;
     expect(
-      AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
+      await AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
         taskId: "task-a",
         type: "run_command",
         details: { command: "npm test" },

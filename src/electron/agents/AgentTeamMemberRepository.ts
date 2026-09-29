@@ -9,7 +9,7 @@ import {
 /**
  * Repository for managing agent team members (teammates) in the database.
  */
-export class AgentTeamMemberRepository {
+export class AgentTeamMemberStore {
   constructor(private db: Database.Database) {}
 
   /**

@@ -13,7 +13,7 @@ import type {
 import { getPoliciesFileVersion, loadPolicies, watchPolicies } from "../../admin/policies";
 import { getUserDataDir } from "../../utils/user-data-dir";
 import { createLogger } from "../../utils/logger";
-import { AgentSecurityRepository } from "./AgentSecurityRepository";
+import { AgentSecurityRepository } from "./agent-security-repository-facades";
 import { buildAgentSecurityHookPayload } from "./NumbatEventAdapter";
 import { resolveNumbatBinary, type ResolvedNumbatBinary } from "./NumbatBinaryResolver";
 import { materializeStableNumbatBinary } from "./NumbatBinaryResolver";
@@ -107,8 +107,13 @@ export class NumbatService {
     this.cachedPolicy = loadPolicies().runtime.agentSecurity;
     this.policyFileVersion = getPoliciesFileVersion();
     this.ensureRuntimeDirectories();
-    this.configureScheduledScan();
-    this.policyWatcherCleanup = watchPolicies(() => this.configureScheduledScan());
+    // Scheduling reads and prunes stored records; it runs after construction.
+    const configure = () =>
+      void this.configureScheduledScan().catch((error: unknown) => {
+        logger.warn("Failed to configure scheduled Numbat scans:", error);
+      });
+    configure();
+    this.policyWatcherCleanup = watchPolicies(configure);
   }
 
   attachTaskEventEmitter(emitter: TaskEventEmitter): void {
@@ -119,7 +124,7 @@ export class NumbatService {
     return this.repository;
   }
 
-  configureScheduledScan(): void {
+  async configureScheduledScan(): Promise<void> {
     this.cachedPolicy = loadPolicies().runtime.agentSecurity;
     this.policyFileVersion = getPoliciesFileVersion();
     if (this.scheduledScanTimer) {
@@ -130,8 +135,14 @@ export class NumbatService {
       clearInterval(this.retentionTimer);
       this.retentionTimer = null;
     }
-    this.runRetentionPrune();
-    this.retentionTimer = setInterval(() => this.runRetentionPrune(), 24 * 60 * 60 * 1_000);
+    await this.runRetentionPrune();
+    this.retentionTimer = setInterval(
+      () =>
+        void this.runRetentionPrune().catch((error: unknown) =>
+          logger.warn("Numbat retention prune failed:", error),
+        ),
+      24 * 60 * 60 * 1_000,
+    );
     this.retentionTimer.unref?.();
 
     if (!this.isEnabled()) return;
@@ -144,7 +155,7 @@ export class NumbatService {
       this.scheduledScanRunning = true;
       void this.runScan()
         .catch((error) => {
-          this.repository.addDiagnostic({
+          return this.repository.addDiagnostic({
             level: "error",
             code: "scheduled_scan_failed",
             message: redactAgentSecurityString(
@@ -153,6 +164,7 @@ export class NumbatService {
             ),
           });
         })
+        .catch((error: unknown) => logger.warn("Failed to record a scan failure:", error))
         .finally(() => {
           this.scheduledScanRunning = false;
         });
@@ -254,7 +266,7 @@ export class NumbatService {
           subAgent: input.subAgent,
         });
         const response = await this.invoke(binary, payload, policy);
-        const ingested = this.ingestAndEmit(this.recordFile(input.taskId), input.taskId);
+        const ingested = await this.ingestAndEmit(this.recordFile(input.taskId), input.taskId);
         if (response.health === "degraded") {
           throw new Error("Numbat returned a degraded enforcement response");
         }
@@ -285,7 +297,7 @@ export class NumbatService {
           error instanceof Error ? error.message : String(error),
           512,
         );
-        this.repository.addDiagnostic({
+        await this.repository.addDiagnostic({
           taskId: input.taskId,
           level: "error",
           code: "pre_tool_evaluation_failed",
@@ -336,15 +348,15 @@ export class NumbatService {
           },
         });
         await this.invoke(binary, payload, policy);
-        this.ingestAndEmit(this.recordFile(input.taskId), input.taskId);
+        await this.ingestAndEmit(this.recordFile(input.taskId), input.taskId);
         if (input.decisionId) {
-          this.repository.updateDecisionHostOutcome(
+          await this.repository.updateDecisionHostOutcome(
             input.decisionId,
             input.success ? "executed" : "failed",
           );
         }
       } catch (error) {
-        this.repository.addDiagnostic({
+        await this.repository.addDiagnostic({
           taskId: input.taskId,
           level: "warn",
           code: "post_tool_observation_failed",
@@ -372,9 +384,9 @@ export class NumbatService {
           actor: input.actor,
         });
         await this.invoke(binary, payload, policy);
-        this.ingestAndEmit(this.recordFile(input.taskId), input.taskId);
+        await this.ingestAndEmit(this.recordFile(input.taskId), input.taskId);
       } catch (error) {
-        this.repository.addDiagnostic({
+        await this.repository.addDiagnostic({
           taskId: input.taskId,
           level: "warn",
           code: "lifecycle_observation_failed",
@@ -387,8 +399,8 @@ export class NumbatService {
     });
   }
 
-  recordBlockedDecision(decisionId?: string): void {
-    if (decisionId) this.repository.updateDecisionHostOutcome(decisionId, "blocked");
+  async recordBlockedDecision(decisionId?: string): Promise<void> {
+    if (decisionId) await this.repository.updateDecisionHostOutcome(decisionId, "blocked");
   }
 
   listFindings(query: AgentSecurityFindingQuery = {}) {
@@ -407,7 +419,7 @@ export class NumbatService {
     return this.repository.updateFindingStatus(findingId, status);
   }
 
-  async refreshInventory(): Promise<ReturnType<AgentSecurityRepository["listInventory"]>> {
+  async refreshInventory(): ReturnType<AgentSecurityRepository["listInventory"]> {
     const binary = resolveNumbatBinary();
     const { stdout } = await runNumbatCommand({
       binary,
@@ -436,7 +448,7 @@ export class NumbatService {
       const details = redactAgentSecurityRecord(row) as Record<string, unknown>;
       const setupHint = typeof row.setup_hint === "string" ? row.setup_hint : "";
       const hintedAgent = setupHint.match(/--agent\s+([a-z0-9-]+)/i)?.[1]?.toLowerCase();
-      this.repository.upsertInventory({
+      await this.repository.upsertInventory({
         agentId: hintedAgent || this.inventoryAgentId(agentId),
         present:
           row.present === true ||
@@ -459,7 +471,7 @@ export class NumbatService {
         checkedAt,
       });
     }
-    this.ingestExternalRecords();
+    await this.ingestExternalRecords();
     return this.repository.listInventory();
   }
 
@@ -483,7 +495,7 @@ export class NumbatService {
       for (const ruleDir of policy.customRuleDirs) args.push("--rules-dir", ruleDir);
     }
     await runNumbatCommand({ binary, args, timeoutMs: 120_000 });
-    const ingested = this.ingestor.ingestFile(outputFile);
+    const ingested = await this.ingestor.ingestFile(outputFile);
     return { outputFile, findings: ingested.findings.length };
   }
 
@@ -635,8 +647,8 @@ export class NumbatService {
     };
   }
 
-  prune(): ReturnType<AgentSecurityRepository["prune"]> {
-    this.pruneRuntimeArtifacts(this.cachedPolicy.retentionDays);
+  async prune(): ReturnType<AgentSecurityRepository["prune"]> {
+    await this.pruneRuntimeArtifacts(this.cachedPolicy.retentionDays);
     return this.repository.prune(this.cachedPolicy.retentionDays);
   }
 
@@ -665,8 +677,8 @@ export class NumbatService {
     });
   }
 
-  private ingestAndEmit(filePath: string, taskId: string): NumbatIngestResult {
-    const ingested = this.ingestor.ingestFile(filePath, taskId);
+  private async ingestAndEmit(filePath: string, taskId: string): Promise<NumbatIngestResult> {
+    const ingested = await this.ingestor.ingestFile(filePath, taskId);
     for (const finding of ingested.findings) {
       this.emitter?.(taskId, "security_finding", {
         findingId: finding.findingId,
@@ -693,11 +705,11 @@ export class NumbatService {
     return current;
   }
 
-  private runRetentionPrune(): void {
+  private async runRetentionPrune(): Promise<void> {
     try {
-      this.prune();
+      await this.prune();
     } catch (error) {
-      this.repository.addDiagnostic({
+      await this.repository.addDiagnostic({
         level: "warn",
         code: "automatic_retention_prune_failed",
         message: redactAgentSecurityString(
@@ -708,10 +720,10 @@ export class NumbatService {
     }
   }
 
-  private pruneRuntimeArtifacts(retentionDays: number): void {
+  private async pruneRuntimeArtifacts(retentionDays: number): Promise<void> {
     const cutoff = Date.now() - Math.max(1, retentionDays) * 86_400_000;
     const protectedTasks = new Set(
-      this.repository.listOpenFindingTaskIds().map((taskId) => this.taskKey(taskId)),
+      (await this.repository.listOpenFindingTaskIds()).map((taskId) => this.taskKey(taskId)),
     );
     const roots = [
       { dir: path.join(getUserDataDir(), "security", "numbat", "records"), protected: true },
@@ -887,12 +899,12 @@ export class NumbatService {
       .slice(0, 40);
   }
 
-  private ingestExternalRecords(): void {
+  private async ingestExternalRecords(): Promise<void> {
     const externalDir = path.join(getUserDataDir(), "security", "numbat", "external");
     if (!fs.existsSync(externalDir)) return;
     for (const entry of fs.readdirSync(externalDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".ndjson")) continue;
-      this.ingestor.ingestFile(path.join(externalDir, entry.name));
+      await this.ingestor.ingestFile(path.join(externalDir, entry.name));
     }
   }
 }

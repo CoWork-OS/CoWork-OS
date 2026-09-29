@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CoreFailureClusterService } from "../CoreFailureClusterService";
 
 describe("CoreFailureClusterService", () => {
-  it("creates a new cluster for the first matching failure", () => {
+  it("creates a new cluster for the first matching failure", async () => {
     const createdCluster = {
       id: "cluster-1",
       profileId: "profile-1",
@@ -28,7 +28,7 @@ describe("CoreFailureClusterService", () => {
     };
     const service = new CoreFailureClusterService(failureRepo as never, clusterRepo as never);
 
-    const result = service.upsertClusterForRecord({
+    const result = await service.upsertClusterForRecord({
       id: "failure-1",
       traceId: "trace-1",
       profileId: "profile-1",
@@ -52,7 +52,7 @@ describe("CoreFailureClusterService", () => {
     expect(failureRepo.update).toHaveBeenCalledWith("failure-1", { status: "clustered" });
   });
 
-  it("updates an existing cluster and promotes repeated failures to stable", () => {
+  it("updates an existing cluster and promotes repeated failures to stable", async () => {
     const existingCluster = {
       id: "cluster-2",
       profileId: "profile-2",
@@ -86,7 +86,7 @@ describe("CoreFailureClusterService", () => {
     };
     const service = new CoreFailureClusterService(failureRepo as never, clusterRepo as never);
 
-    const result = service.upsertClusterForRecord({
+    const result = await service.upsertClusterForRecord({
       id: "failure-2",
       traceId: "trace-2",
       profileId: "profile-2",

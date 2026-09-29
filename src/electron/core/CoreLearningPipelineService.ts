@@ -13,11 +13,11 @@ export class CoreLearningPipelineService {
     private readonly learnings: CoreLearningsService,
   ) {}
 
-  processTrace(traceId: string): void {
-    const failures = this.failureMining.mineTrace(traceId);
+  async processTrace(traceId: string): Promise<void> {
+    const failures = await this.failureMining.mineTrace(traceId);
     for (const failure of failures) {
-      const cluster = this.clusterService.upsertClusterForRecord(failure);
-      this.learnings.append({
+      const cluster = await this.clusterService.upsertClusterForRecord(failure);
+      await this.learnings.append({
         profileId: cluster.profileId,
         workspaceId: cluster.workspaceId,
         kind: "failure_cluster",
@@ -25,12 +25,12 @@ export class CoreLearningPipelineService {
         relatedClusterId: cluster.id,
         createdAt: Date.now(),
       });
-      const evalCases = this.evalService.syncEvalCasesForProfile(
+      const evalCases = await this.evalService.syncEvalCasesForProfile(
         cluster.profileId,
         cluster.workspaceId,
       );
       if (evalCases.some((item) => item.clusterId === cluster.id)) {
-        this.learnings.append({
+        await this.learnings.append({
           profileId: cluster.profileId,
           workspaceId: cluster.workspaceId,
           kind: "eval_case",
@@ -39,7 +39,7 @@ export class CoreLearningPipelineService {
           createdAt: Date.now(),
         });
       }
-      this.experimentService.proposeExperimentsForCluster(cluster.id);
+      await this.experimentService.proposeExperimentsForCluster(cluster.id);
     }
   }
 }

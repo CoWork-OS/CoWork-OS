@@ -138,6 +138,8 @@ function createCursorDb() {
   const key = (routineId: string, starterId: string) => `${routineId}:${starterId}`;
   return {
     exec: vi.fn(),
+    // Cursor reads and writes are units, which run in a transaction (DB6).
+    transaction: <T>(fn: T) => fn,
     prepare: (sql: string) => ({
       get: (routineId: string, starterId: string) => {
         if (!sql.includes("SELECT cursor_json")) return undefined;

@@ -10,6 +10,13 @@ type MockStatement = {
 
 function createMockDb(prepare: (sql: string) => Partial<MockStatement>) {
   return {
+    // The statement port runs units in a transaction; an in-memory name keeps it on the host.
+    memory: true,
+    name: ":memory:",
+    transaction<T>(fn: () => T) {
+      const run = () => fn();
+      return Object.assign(run, { immediate: run, deferred: run });
+    },
     prepare(sql: string): MockStatement {
       const statement = prepare(sql);
       return {
@@ -54,7 +61,7 @@ function metadataRow(overrides: Record<string, unknown> = {}): Record<string, un
 
 afterEach(() => {
   vi.restoreAllMocks();
-  (MemoryObservationService as Any).db = null;
+  (MemoryObservationService as Any).store = null;
   (MemoryObservationService as Any).status = {
     total: 0,
     processed: 0,
@@ -67,7 +74,7 @@ afterEach(() => {
 });
 
 describe("MemoryObservationService without native sqlite", () => {
-  it("does not run a write backfill during initialize", () => {
+  it("does not run a write backfill during initialize", async () => {
     const preparedSql: string[] = [];
     const db = createMockDb((sql) => {
       preparedSql.push(sql);
@@ -80,7 +87,7 @@ describe("MemoryObservationService without native sqlite", () => {
     MemoryObservationService.initialize(db);
 
     expect(preparedSql).toHaveLength(0);
-    const status = MemoryObservationService.getBackfillStatus();
+    const status = await MemoryObservationService.getBackfillStatus();
 
     expect(preparedSql.some((sql) => sql.includes("SELECT m.*"))).toBe(false);
     expect(
@@ -94,7 +101,7 @@ describe("MemoryObservationService without native sqlite", () => {
     });
   });
 
-  it("counts failed backfill rows when metadata creation returns null", () => {
+  it("counts failed backfill rows when metadata creation returns null", async () => {
     const db = createMockDb((sql) => {
       if (sql.includes("SELECT m.*")) {
         return {
@@ -132,7 +139,7 @@ describe("MemoryObservationService without native sqlite", () => {
     });
 
     MemoryObservationService.initialize(db);
-    const status = MemoryObservationService.startBackfill();
+    const status = await MemoryObservationService.startBackfill();
 
     expect(status.processed).toBe(0);
     expect(status.failed).toBe(1);
@@ -140,7 +147,7 @@ describe("MemoryObservationService without native sqlite", () => {
     expect(status.lastError).toContain("mem-1");
   });
 
-  it("soft-deletes only observations owned by the requested workspace", () => {
+  it("soft-deletes only observations owned by the requested workspace", async () => {
     let privacyState = "normal";
     const preparedSql: string[] = [];
     const db = createMockDb((sql) => {
@@ -172,15 +179,15 @@ describe("MemoryObservationService without native sqlite", () => {
 
     MemoryObservationService.initialize(db);
 
-    expect(MemoryObservationService.delete("ws-2", "mem-1")).toBe(false);
+    expect(await MemoryObservationService.delete("ws-2", "mem-1")).toBe(false);
     expect(privacyState).toBe("normal");
 
-    expect(MemoryObservationService.delete("ws-1", "mem-1")).toBe(true);
+    expect(await MemoryObservationService.delete("ws-1", "mem-1")).toBe(true);
     expect(privacyState).toBe("suppressed");
     expect(preparedSql.some((sql) => sql.includes("DELETE FROM memories"))).toBe(false);
   });
 
-  it("filters suppressed observations from recent prompt recall", () => {
+  it("filters suppressed observations from recent prompt recall", async () => {
     (MemoryService as Any).initialized = true;
     (MemoryService as Any).memoryRepo = {
       getRecentForWorkspace: vi.fn(() => [
@@ -208,12 +215,15 @@ describe("MemoryObservationService without native sqlite", () => {
         },
       ]),
     };
-    vi.spyOn(MemoryObservationService, "isPromptSuppressed").mockImplementation(
-      (memoryId) => memoryId === "mem-suppressed",
-    );
+    const suppressedIds = vi
+      .spyOn(MemoryObservationService, "suppressedIds")
+      .mockImplementation(async (ids) => new Set(ids.filter((id) => id === "mem-suppressed")));
 
-    const recent = MemoryService.getRecentForPromptRecall("ws-1", 10);
+    const recent = await MemoryService.getRecentForPromptRecall("ws-1", 10);
 
     expect(recent.map((memory) => memory.id)).toEqual(["mem-visible"]);
+    // One batched lookup for all candidates, not one per memory.
+    expect(suppressedIds).toHaveBeenCalledTimes(1);
+    expect(suppressedIds).toHaveBeenCalledWith(["mem-visible", "mem-suppressed"]);
   });
 });

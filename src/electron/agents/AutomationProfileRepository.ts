@@ -53,7 +53,7 @@ function normalizeInput(
   };
 }
 
-export class AutomationProfileRepository {
+export class AutomationProfileStore {
   constructor(private readonly db: Database.Database) {}
 
   private profileHasHistoricalDependencies(profileId: string): boolean {

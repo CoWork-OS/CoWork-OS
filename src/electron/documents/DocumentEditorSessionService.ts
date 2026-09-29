@@ -1,9 +1,11 @@
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import { ArtifactRepository } from "../database/repository-facades";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { AgentDaemon } from "../agent/daemon";
-import { ArtifactRepository, TaskRepository, WorkspaceRepository } from "../database/repositories";
+
 import type {
   DocumentEditorSession,
   DocumentEditRequest,
@@ -126,9 +128,9 @@ export class DocumentEditorSessionService {
       : undefined;
   }
 
-  listVersions(filePath: string, workspacePath?: string): DocumentVersionEntry[] {
+  async listVersions(filePath: string, workspacePath?: string): Promise<DocumentVersionEntry[]> {
     const resolvedPath = this.resolvePath(filePath, workspacePath);
-    const workspace = this.resolveWorkspaceForPath(resolvedPath, workspacePath);
+    const workspace = await this.resolveWorkspaceForPath(resolvedPath, workspacePath);
     const visiblePath = (candidate: string): boolean => {
       try {
         this.assertDocumentPathAccess(workspace, candidate, "read");
@@ -151,33 +153,38 @@ export class DocumentEditorSessionService {
       })
       .sort((a, b) => versionSortKey(a) - versionSortKey(b));
 
-    return entries.map((candidate) => {
-      const artifact = this.artifactRepo.findLatestByPath(candidate);
-      const stat = fsSync.statSync(candidate);
-      return {
-        path: candidate,
-        fileName: path.basename(candidate),
-        createdAt: artifact?.createdAt ?? stat.mtimeMs,
-        taskId: artifact?.taskId,
-        artifactId: artifact?.id,
-        isCurrent: candidate === entries[entries.length - 1],
-      };
-    });
+    return Promise.all(
+      entries.map(async (candidate) => {
+        const artifact = await this.artifactRepo.findLatestByPath(candidate);
+        const stat = fsSync.statSync(candidate);
+        return {
+          path: candidate,
+          fileName: path.basename(candidate),
+          createdAt: artifact?.createdAt ?? stat.mtimeMs,
+          taskId: artifact?.taskId,
+          artifactId: artifact?.id,
+          isCurrent: candidate === entries[entries.length - 1],
+        };
+      }),
+    );
   }
 
-  private buildNextVersionPath(currentPath: string): string {
-    const versions = this.listVersions(currentPath);
+  private async buildNextVersionPath(currentPath: string): Promise<string> {
+    const versions = await this.listVersions(currentPath);
     const latestPath = versions.length > 0 ? versions[versions.length - 1].path : currentPath;
     const { dir, ext, stem } = normalizeVersionBase(latestPath);
     const nextVersion = versions.length + 1;
     return path.join(dir, `${stem}-v${nextVersion}${ext}`);
   }
 
-  private resolveWorkspaceForPath(filePath: string, preferredWorkspacePath?: string): Workspace {
+  private async resolveWorkspaceForPath(
+    filePath: string,
+    preferredWorkspacePath?: string,
+  ): Promise<Workspace> {
     const normalizedPreferred = preferredWorkspacePath
       ? path.resolve(preferredWorkspacePath)
       : undefined;
-    const workspaces = this.workspaceRepo.findAll();
+    const workspaces = await this.workspaceRepo.findAll();
     const ordered = normalizedPreferred
       ? [...workspaces].sort((a, b) => {
           const aMatch = path.resolve(a.path) === normalizedPreferred ? 0 : 1;
@@ -259,24 +266,24 @@ export class DocumentEditorSessionService {
     }
   }
 
-  private createDirectDocumentTask(params: {
+  private async createDirectDocumentTask(params: {
     session: SessionRecord;
     workspace: Workspace;
     title: string;
     prompt: string;
     instruction: string;
-  }): Task {
+  }): Promise<Task> {
     const sourceTask = params.session.sourceTaskId
-      ? this.taskRepo.findById(params.session.sourceTaskId)
+      ? await this.taskRepo.findById(params.session.sourceTaskId)
       : undefined;
     const agentConfig = applyDefaultAccessProfile(
       sourceTask?.agentConfig,
       PermissionSettingsManager.loadSettings(),
     );
     const hasParent = Boolean(
-      params.session.sourceTaskId && this.taskRepo.findById(params.session.sourceTaskId),
+      params.session.sourceTaskId && (await this.taskRepo.findById(params.session.sourceTaskId)),
     );
-    const task = this.taskRepo.create({
+    const task = await this.taskRepo.create({
       title: params.title,
       prompt: params.prompt,
       rawPrompt: params.prompt,
@@ -354,7 +361,7 @@ export class DocumentEditorSessionService {
           h: selection.h,
         },
       });
-      this.agentDaemon.registerArtifact(task.id, destPath, "application/pdf");
+      await this.agentDaemon.registerArtifact(task.id, destPath, "application/pdf");
       this.agentDaemon.logEvent(task.id, "artifact_created", {
         path: destPath,
         mimeType: "application/pdf",
@@ -374,9 +381,11 @@ export class DocumentEditorSessionService {
         outputCount: 1,
         folders: [path.dirname(destPath)],
       };
-      this.agentDaemon.completeTask(task.id, `Created ${path.basename(destPath)}`, {
-        outputSummary,
-      });
+      void Promise.resolve(
+        this.agentDaemon.completeTask(task.id, `Created ${path.basename(destPath)}`, {
+          outputSummary,
+        }),
+      ).catch((error: unknown) => console.warn("[DocumentEditor] Failed to complete task:", error));
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Inline PDF edit failed.";
       this.agentDaemon.logEvent(task.id, "timeline_step_updated", {
@@ -401,13 +410,13 @@ export class DocumentEditorSessionService {
       throw new Error("Only PDF and DOCX files are editable.");
     }
 
-    const workspace = this.resolveWorkspaceForPath(resolvedPath, workspacePath);
-    const allVersions = this.listVersions(resolvedPath, workspace.path);
+    const workspace = await this.resolveWorkspaceForPath(resolvedPath, workspacePath);
+    const allVersions = await this.listVersions(resolvedPath, workspace.path);
     const sourceArtifact =
-      this.artifactRepo.findLatestByPath(allVersions[allVersions.length - 1]?.path || "") ||
-      this.artifactRepo.findLatestByPath(resolvedPath);
+      (await this.artifactRepo.findLatestByPath(allVersions[allVersions.length - 1]?.path || "")) ||
+      (await this.artifactRepo.findLatestByPath(resolvedPath));
     const sourceTask = sourceArtifact?.taskId
-      ? this.taskRepo.findById(sourceArtifact.taskId)
+      ? await this.taskRepo.findById(sourceArtifact.taskId)
       : undefined;
     const effectiveWorkspace = this.getEffectiveWorkspace(workspace, sourceTask);
     this.assertDocumentPathAccess(effectiveWorkspace, resolvedPath, "read");
@@ -507,21 +516,21 @@ export class DocumentEditorSessionService {
 
     const workspace =
       this.findWorkspaceById(session.workspaceId) ||
-      this.resolveWorkspaceForPath(session.currentPath, session.workspacePath);
+      (await this.resolveWorkspaceForPath(session.currentPath, session.workspacePath));
     const sourceTask = session.sourceTaskId
-      ? this.taskRepo.findById(session.sourceTaskId)
+      ? await this.taskRepo.findById(session.sourceTaskId)
       : undefined;
     const effectiveWorkspace = this.getEffectiveWorkspace(workspace, sourceTask);
     this.assertDocumentPathAccess(effectiveWorkspace, session.currentPath, "read");
 
     if (session.fileType === "pdf") {
       const selection = request.selection as PdfRegionSelection;
-      const destPathAbs = this.buildNextVersionPath(session.currentPath);
+      const destPathAbs = await this.buildNextVersionPath(session.currentPath);
       const prompt =
         `Apply this inline PDF edit directly without planner orchestration.\n` +
         `Source: ${session.currentPath}\nDestination: ${destPathAbs}\n` +
         `Instruction: ${instruction}\nSelection: ${this.selectionPrompt(selection)}`;
-      const task = this.createDirectDocumentTask({
+      const task = await this.createDirectDocumentTask({
         session,
         workspace,
         title: `Edit ${path.basename(session.currentPath)}`,
@@ -540,7 +549,7 @@ export class DocumentEditorSessionService {
       return task;
     }
 
-    const destPathAbs = this.buildNextVersionPath(session.currentPath);
+    const destPathAbs = await this.buildNextVersionPath(session.currentPath);
     const sourceRel = path.relative(workspace.path, session.currentPath);
     const destRel = path.relative(workspace.path, destPathAbs);
 
@@ -555,7 +564,7 @@ export class DocumentEditorSessionService {
 
     const title = `Edit ${path.basename(session.currentPath)}`;
     const task =
-      session.sourceTaskId && this.taskRepo.findById(session.sourceTaskId)
+      session.sourceTaskId && (await this.taskRepo.findById(session.sourceTaskId))
         ? await this.agentDaemon.createChildTask({
             title,
             prompt,

@@ -21,7 +21,7 @@ export interface SubscriptionListQuery {
  * Repository for managing task subscriptions
  * Agents subscribed to a task receive notifications when new activities occur
  */
-export class TaskSubscriptionRepository {
+export class TaskSubscriptionStore {
   constructor(private db: Database.Database) {}
 
   /**

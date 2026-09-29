@@ -23,7 +23,7 @@ vi.mock("../../settings/memory-features-manager", () => ({
 
 vi.mock("../../memory/DurableContextService", () => ({
   DurableContextService: {
-    recordHistory: vi.fn(),
+    recordHistory: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

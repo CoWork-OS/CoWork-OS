@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { HeartbeatEvent } from "../../../shared/types";
-import { MissionControlIntelligenceService } from "../MissionControlIntelligenceService";
+import { MissionControlIntelligenceService } from "../mission-control-repository-facades";
 
 type Any = any; // oxlint-disable-line typescript-eslint/no-explicit-any
 
@@ -124,7 +124,7 @@ function makeService() {
 }
 
 describe("MissionControlIntelligenceService", () => {
-  it("groups repeated heartbeat awareness signals into one awareness item", () => {
+  it("groups repeated heartbeat awareness signals into one awareness item", async () => {
     const service = makeService();
     const event: HeartbeatEvent = {
       type: "signal_merged",
@@ -149,19 +149,19 @@ describe("MissionControlIntelligenceService", () => {
       },
     };
 
-    service.recordHeartbeatEvent(event);
-    service.recordHeartbeatEvent({ ...event, timestamp: 1200 });
+    await service.recordHeartbeatEvent(event);
+    await service.recordHeartbeatEvent({ ...event, timestamp: 1200 });
 
-    const items = service.listItems({ categories: ["awareness"] });
+    const items = await service.listItems({ categories: ["awareness"] });
     expect(items).toHaveLength(1);
     expect(items[0].summary).toContain("14 signals");
     expect(items[0].title).toBe("Awareness noticed background activity");
   });
 
-  it("records review decisions from no-work heartbeat events", () => {
+  it("records review decisions from no-work heartbeat events", async () => {
     const service = makeService();
 
-    service.recordHeartbeatEvent({
+    await service.recordHeartbeatEvent({
       type: "no_work",
       agentRoleId: "agent-1",
       agentName: "Project Manager",
@@ -174,10 +174,10 @@ describe("MissionControlIntelligenceService", () => {
       } as Any,
     });
 
-    const items = service.listItems({ categories: ["reviews"] });
+    const items = await service.listItems({ categories: ["reviews"] });
     expect(items).toHaveLength(1);
     expect(items[0].summary).toContain("7 mentions");
     expect(items[0].decision).toBe("No action needed.");
-    expect(service.getEvidence(items[0].id)[0].sourceType).toBe("heartbeat_event");
+    expect((await service.getEvidence(items[0].id))[0].sourceType).toBe("heartbeat_event");
   });
 });

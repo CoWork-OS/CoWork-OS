@@ -63,7 +63,7 @@ describeWithSqlite("RoutineService", () => {
       getDefaultWorkspaceId: () => "ws-default",
       log: vi.fn(),
     });
-    eventTriggerService.start();
+    await eventTriggerService.start();
 
     routineService = new RoutineServiceCtor({
       db,
@@ -530,13 +530,13 @@ describeWithSqlite("RoutineService", () => {
     const trigger = routine.triggers.find((candidate) => candidate.type === "schedule");
     expect(trigger?.managedCronJobId).toBe("cron-1");
 
-    routineService.recordScheduledEvent({
+    await routineService.recordScheduledEvent({
       jobId: "cron-1",
       action: "started",
       runAtMs: 1_779_000_000_000,
       taskId: "task-running",
     });
-    routineService.recordScheduledEvent({
+    await routineService.recordScheduledEvent({
       jobId: "cron-1",
       action: "finished",
       runAtMs: 1_779_000_000_000,

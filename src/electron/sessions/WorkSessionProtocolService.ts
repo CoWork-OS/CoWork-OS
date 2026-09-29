@@ -12,7 +12,7 @@ import type {
   WorkSessionTurn,
   WorkSessionTurnStatus,
 } from "../../shared/types";
-import { TaskEventRepository, TaskRepository } from "../database/repositories";
+import { invalidateTaskRowReads, TaskEventRepository, TaskStore } from "../database/repositories";
 import {
   WorkSessionProtocolError,
   WorkSessionProtocolRepository,
@@ -286,13 +286,13 @@ export interface WorkSessionTaskEventResult {
 }
 
 export class WorkSessionProtocolService {
-  private readonly taskRepo: TaskRepository;
+  private readonly taskRepo: TaskStore;
   private readonly eventRepo: TaskEventRepository;
   private readonly repository: WorkSessionProtocolRepository;
   private readonly reliability: WorkSessionReliabilityService;
 
   constructor(private readonly db: Database.Database) {
-    this.taskRepo = new TaskRepository(db);
+    this.taskRepo = new TaskStore(db);
     this.eventRepo = new TaskEventRepository(db);
     this.repository = new WorkSessionProtocolRepository(db);
     this.reliability = new WorkSessionReliabilityService(db);
@@ -339,6 +339,7 @@ export class WorkSessionProtocolService {
       this.db
         .prepare("UPDATE tasks SET session_id = ? WHERE id = ?")
         .run(recovered.replacementSessionId, task.id);
+      invalidateTaskRowReads(this.db);
       task.sessionId = recovered.replacementSessionId;
       const recoveryEvent = this.eventRepo.create({
         taskId: task.id,
@@ -366,6 +367,7 @@ export class WorkSessionProtocolService {
           "UPDATE tasks SET session_id = ? WHERE id = ? AND (session_id IS NULL OR session_id = '')",
         )
         .run(sessionId, task.id);
+      invalidateTaskRowReads(this.db);
     }
     if (aggregate.items.length <= 1) {
       this.backfillTaskEvents(task, aggregate);
@@ -373,20 +375,29 @@ export class WorkSessionProtocolService {
     return this.repository.findById(aggregate.session.id) || aggregate;
   }
 
+  /**
+   * Project the task's existing events into a new session. With `through`, only events
+   * ordered at or before it are projected: when projections run behind inserts (in the
+   * database worker), later events already exist and must wait for their own turn, so
+   * the result matches projecting each event as it was logged.
+   */
   private backfillTaskEvents(
     task: Pick<Task, "id" | "workspaceId" | "sessionId" | "status">,
     aggregate: Pick<WorkSessionAggregate, "session">,
+    through?: TaskEvent,
   ): void {
+    const compare = (left: TaskEvent, right: TaskEvent) => {
+      const leftSeq = typeof left.seq === "number" ? left.seq : Number.MAX_SAFE_INTEGER;
+      const rightSeq = typeof right.seq === "number" ? right.seq : Number.MAX_SAFE_INTEGER;
+      return (
+        leftSeq - rightSeq || left.timestamp - right.timestamp || left.id.localeCompare(right.id)
+      );
+    };
     const events = this.eventRepo
       .findByTaskId(task.id)
       .filter((event) => !EPHEMERAL_EVENT_TYPES.has(event.type))
-      .sort((left, right) => {
-        const leftSeq = typeof left.seq === "number" ? left.seq : Number.MAX_SAFE_INTEGER;
-        const rightSeq = typeof right.seq === "number" ? right.seq : Number.MAX_SAFE_INTEGER;
-        return (
-          leftSeq - rightSeq || left.timestamp - right.timestamp || left.id.localeCompare(right.id)
-        );
-      });
+      .filter((event) => !through || compare(event, through) <= 0)
+      .sort(compare);
     for (const event of events) {
       this.recordTaskEventForAggregate(task, aggregate, event);
     }
@@ -647,7 +658,7 @@ export class WorkSessionProtocolService {
     }
     const sessionRef: Pick<WorkSessionAggregate, "session"> = { session };
     if (this.repository.countItems(session.id) <= 1) {
-      this.backfillTaskEvents(task, sessionRef);
+      this.backfillTaskEvents(task, sessionRef, event);
     }
     const currentSession = this.repository.getSessionById(session.id) || session;
     return this.recordTaskEventForAggregate(task, { session: currentSession }, event);

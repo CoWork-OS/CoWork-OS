@@ -1,3 +1,4 @@
+import { RoutineRepository } from "../routine-repository-facades";
 import type { RoutineWorkflowNode, WorkflowInputValue } from "../../../shared/routine-workflow";
 import type { Routine } from "../types";
 import type { RoutineService } from "../service";
@@ -21,6 +22,8 @@ type StarterCursor = {
 export class GoogleWorkspaceWorkflowStarterWatcher {
   private timer: NodeJS.Timeout | null = null;
   private polling = false;
+  /** Starter cursors, as services-domain units (DB6). */
+  private readonly cursors: RoutineRepository;
 
   constructor(
     private readonly db: Any,
@@ -28,6 +31,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
     private readonly pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   ) {
     this.ensureSchema();
+    this.cursors = new RoutineRepository(db);
   }
 
   start(): void {
@@ -47,9 +51,9 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
     if (!settings.enabled) return;
     this.polling = true;
     try {
-      for (const routine of this.routineService.list()) {
+      for (const routine of await this.routineService.list()) {
         if (!routine.enabled || !routine.activeWorkflowVersionId) continue;
-        const activeWorkflow = this.routineService.getActiveWorkflowDefinition(routine.id);
+        const activeWorkflow = await this.routineService.getActiveWorkflowDefinition(routine.id);
         if (!activeWorkflow) continue;
         const runtimeRoutine: Routine = { ...routine, workflow: activeWorkflow };
         const starter = activeWorkflow.nodes.find(
@@ -81,10 +85,10 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
   }
 
   private async pollGmail(routine: Routine, starter: RoutineWorkflowNode): Promise<void> {
-    const cursor = this.getCursor(routine.id, starter.id);
+    const cursor = await this.getCursor(routine.id, starter.id);
     const now = Date.now();
     if (!cursor.lastCheckedAt) {
-      this.setCursor(routine.id, starter.id, { lastCheckedAt: now });
+      await this.setCursor(routine.id, starter.id, { lastCheckedAt: now });
       return;
     }
     const configuredQuery = literalString(starter.config.query);
@@ -118,7 +122,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
           query: { format: "full" },
         });
         const payload = summarizeGmailMessage(message.data);
-        this.routineService.enqueueWorkflowEvent({
+        await this.routineService.enqueueWorkflowEvent({
           routineId: routine.id,
           triggerNodeId: starter.id,
           source: "gmail",
@@ -131,7 +135,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
       pageToken = String(listed.data?.nextPageToken || "");
       if (!pageToken) break;
     }
-    this.setCursor(
+    await this.setCursor(
       routine.id,
       starter.id,
       pageToken
@@ -146,7 +150,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
   }
 
   private async pollDriveChanges(routine: Routine, starter: RoutineWorkflowNode): Promise<void> {
-    const cursor = this.getCursor(routine.id, starter.id);
+    const cursor = await this.getCursor(routine.id, starter.id);
     const settings = this.googleSettingsFor(routine);
     if (!cursor.drivePageToken) {
       const token = await googleDriveRequest(settings, {
@@ -154,7 +158,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
         path: "/changes/startPageToken",
         query: { supportsAllDrives: true },
       });
-      this.setCursor(routine.id, starter.id, {
+      await this.setCursor(routine.id, starter.id, {
         ...cursor,
         drivePageToken: String(token.data?.startPageToken || ""),
         lastCheckedAt: Date.now(),
@@ -186,7 +190,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
             : starter.operation === "starter.form_response"
               ? "google_forms"
               : "google_drive";
-        this.routineService.enqueueWorkflowEvent({
+        await this.routineService.enqueueWorkflowEvent({
           routineId: routine.id,
           triggerNodeId: starter.id,
           source,
@@ -214,7 +218,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
       pageToken = result.data?.nextPageToken || "";
       newStartPageToken = result.data?.newStartPageToken || newStartPageToken;
     }
-    this.setCursor(routine.id, starter.id, {
+    await this.setCursor(routine.id, starter.id, {
       drivePageToken: pageToken || newStartPageToken,
       lastCheckedAt: Date.now(),
     });
@@ -262,7 +266,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
   }
 
   private async pollMeetingRelative(routine: Routine, starter: RoutineWorkflowNode): Promise<void> {
-    const cursor = this.getCursor(routine.id, starter.id);
+    const cursor = await this.getCursor(routine.id, starter.id);
     const now = Date.now();
     const lastCheckedAt = cursor.lastCheckedAt || now - this.pollIntervalMs * 2;
     const direction = literalString(starter.config.direction) === "after" ? "after" : "before";
@@ -288,7 +292,7 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
       const endMs = Date.parse(event.end?.dateTime || `${event.end?.date}T00:00:00`);
       const triggerAt = direction === "before" ? startMs - offsetMs : endMs + offsetMs;
       if (!Number.isFinite(triggerAt) || triggerAt <= lastCheckedAt || triggerAt > now) continue;
-      this.routineService.enqueueWorkflowEvent({
+      await this.routineService.enqueueWorkflowEvent({
         routineId: routine.id,
         triggerNodeId: starter.id,
         source: "google_calendar",
@@ -311,31 +315,30 @@ export class GoogleWorkspaceWorkflowStarterWatcher {
         summary: event.summary ? `Meeting: ${event.summary}` : "Calendar meeting",
       });
     }
-    this.setCursor(routine.id, starter.id, { ...cursor, lastCheckedAt: now });
+    await this.setCursor(routine.id, starter.id, { ...cursor, lastCheckedAt: now });
   }
 
-  private getCursor(routineId: string, starterNodeId: string): StarterCursor {
-    const row = this.db
-      .prepare(
-        "SELECT cursor_json FROM routine_starter_cursors WHERE routine_id = ? AND starter_node_id = ?",
-      )
-      .get(routineId, starterNodeId) as { cursor_json?: string } | undefined;
-    if (!row?.cursor_json) return {};
+  private async getCursor(routineId: string, starterNodeId: string): Promise<StarterCursor> {
+    const cursorJson = await this.cursors.getStarterCursorJson(routineId, starterNodeId);
+    if (!cursorJson) return {};
     try {
-      return JSON.parse(row.cursor_json) as StarterCursor;
+      return JSON.parse(cursorJson) as StarterCursor;
     } catch {
       return {};
     }
   }
 
-  private setCursor(routineId: string, starterNodeId: string, cursor: StarterCursor): void {
-    this.db
-      .prepare(
-        `INSERT OR REPLACE INTO routine_starter_cursors
-         (routine_id, starter_node_id, cursor_json, updated_at)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(routineId, starterNodeId, JSON.stringify(cursor), Date.now());
+  private async setCursor(
+    routineId: string,
+    starterNodeId: string,
+    cursor: StarterCursor,
+  ): Promise<void> {
+    await this.cursors.setStarterCursorJson(
+      routineId,
+      starterNodeId,
+      JSON.stringify(cursor),
+      Date.now(),
+    );
   }
 
   private ensureSchema(): void {

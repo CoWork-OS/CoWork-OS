@@ -5,7 +5,8 @@ import { recordJevCall } from "../decision-usage-telemetry";
 describe("Jev decision usage telemetry", () => {
   const run = vi.fn();
   const prepare = vi.fn(() => ({ run }));
-  const db = { prepare } as Any;
+  // Inserts run as units, in a transaction (DB6); the fake runs the body directly.
+  const db = { prepare, transaction: (fn: unknown) => fn } as Any;
 
   beforeEach(() => {
     vi.spyOn(DatabaseManager, "getInstance").mockReturnValue({

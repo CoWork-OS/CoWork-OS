@@ -1,9 +1,10 @@
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
-import { TaskRepository, WorkspaceRepository } from "../database/repositories";
+
 import type {
   ImprovementCandidate,
   ImprovementCandidateReadiness,
@@ -20,8 +21,12 @@ import {
   type DevLogEvent,
 } from "../../shared/dev-log";
 import { getImprovementResetBaselineAt } from "./ImprovementHistoryState";
-import { ImprovementCandidateRepository } from "./ImprovementRepositories";
-import { ImprovementRunRepository } from "./ImprovementRepositories";
+import {
+  ImprovementCandidateRepository,
+  ImprovementRunRepository,
+  improvementRecentSignalRows,
+  mergeImprovementCandidates,
+} from "./improvement-repository-facades";
 import { ImprovementSettingsManager } from "./ImprovementSettingsManager";
 
 const RECENT_WINDOW_DAYS = 14;
@@ -78,25 +83,25 @@ export class ImprovementCandidateService {
   async refresh(): Promise<{ candidateCount: number }> {
     await this.rebuildFromRecentSignals();
     await this.ingestDevLogs();
-    this.reconcileExistingCandidates();
+    await this.reconcileExistingCandidates();
     return {
-      candidateCount: this.listCandidates().length,
+      candidateCount: (await this.listCandidates()).length,
     };
   }
 
-  listCandidates(workspaceId?: string): ImprovementCandidate[] {
+  async listCandidates(workspaceId?: string): Promise<ImprovementCandidate[]> {
     return this.candidateRepo.list({ workspaceId });
   }
 
-  dismissCandidate(candidateId: string): ImprovementCandidate | undefined {
-    const existing = this.candidateRepo.findById(candidateId);
+  async dismissCandidate(candidateId: string): Promise<ImprovementCandidate | undefined> {
+    const existing = await this.candidateRepo.findById(candidateId);
     if (!existing) return undefined;
     const readiness = this.deriveReadiness({
       ...existing,
       status: "dismissed",
       resolvedAt: Date.now(),
     });
-    this.candidateRepo.update(candidateId, {
+    await this.candidateRepo.update(candidateId, {
       status: "dismissed",
       readiness: readiness.readiness,
       readinessReason: readiness.reason,
@@ -105,8 +110,8 @@ export class ImprovementCandidateService {
     return this.candidateRepo.findById(candidateId);
   }
 
-  markCandidateRunning(candidateId: string): void {
-    const existing = this.candidateRepo.findById(candidateId);
+  async markCandidateRunning(candidateId: string): Promise<void> {
+    const existing = await this.candidateRepo.findById(candidateId);
     const readiness = existing
       ? this.deriveReadiness({
           ...existing,
@@ -115,7 +120,7 @@ export class ImprovementCandidateService {
           resolvedAt: undefined,
         })
       : undefined;
-    this.candidateRepo.update(candidateId, {
+    await this.candidateRepo.update(candidateId, {
       status: "running",
       readiness: readiness?.readiness,
       readinessReason: readiness?.reason,
@@ -124,12 +129,12 @@ export class ImprovementCandidateService {
     });
   }
 
-  markCandidateReview(candidateId: string): void {
-    const existing = this.candidateRepo.findById(candidateId);
+  async markCandidateReview(candidateId: string): Promise<void> {
+    const existing = await this.candidateRepo.findById(candidateId);
     const readiness = existing
       ? this.deriveReadiness({ ...existing, status: "review", resolvedAt: Date.now() })
       : undefined;
-    this.candidateRepo.update(candidateId, {
+    await this.candidateRepo.update(candidateId, {
       status: "review",
       readiness: readiness?.readiness,
       readinessReason: readiness?.reason,
@@ -137,12 +142,12 @@ export class ImprovementCandidateService {
     });
   }
 
-  markCandidateResolved(candidateId: string): void {
-    const existing = this.candidateRepo.findById(candidateId);
+  async markCandidateResolved(candidateId: string): Promise<void> {
+    const existing = await this.candidateRepo.findById(candidateId);
     const readiness = existing
       ? this.deriveReadiness({ ...existing, status: "resolved", resolvedAt: Date.now() })
       : undefined;
-    this.candidateRepo.update(candidateId, {
+    await this.candidateRepo.update(candidateId, {
       status: "resolved",
       readiness: readiness?.readiness,
       readinessReason: readiness?.reason,
@@ -150,8 +155,8 @@ export class ImprovementCandidateService {
     });
   }
 
-  reopenCandidate(candidateId: string): void {
-    const existing = this.candidateRepo.findById(candidateId);
+  async reopenCandidate(candidateId: string): Promise<void> {
+    const existing = await this.candidateRepo.findById(candidateId);
     const reopened = existing
       ? ({
           ...existing,
@@ -163,7 +168,7 @@ export class ImprovementCandidateService {
         } satisfies ImprovementCandidate)
       : undefined;
     const readiness = reopened ? this.deriveReadiness(reopened) : undefined;
-    this.candidateRepo.update(candidateId, {
+    await this.candidateRepo.update(candidateId, {
       status: "open",
       readiness: readiness?.readiness,
       readinessReason: readiness?.reason,
@@ -174,8 +179,8 @@ export class ImprovementCandidateService {
     });
   }
 
-  markCandidateParked(candidateId: string, reason: string): void {
-    const existing = this.candidateRepo.findById(candidateId);
+  async markCandidateParked(candidateId: string, reason: string): Promise<void> {
+    const existing = await this.candidateRepo.findById(candidateId);
     const parked = existing
       ? ({
           ...existing,
@@ -186,7 +191,7 @@ export class ImprovementCandidateService {
         } satisfies ImprovementCandidate)
       : undefined;
     const readiness = parked ? this.deriveReadiness(parked) : undefined;
-    this.candidateRepo.update(candidateId, {
+    await this.candidateRepo.update(candidateId, {
       status: "parked",
       readiness: readiness?.readiness,
       readinessReason: readiness?.reason,
@@ -196,8 +201,8 @@ export class ImprovementCandidateService {
     });
   }
 
-  recordCandidateSkip(candidateId: string, reason: string): void {
-    const candidate = this.candidateRepo.findById(candidateId);
+  async recordCandidateSkip(candidateId: string, reason: string): Promise<void> {
+    const candidate = await this.candidateRepo.findById(candidateId);
     if (!candidate) return;
     const withSkip: ImprovementCandidate = {
       ...candidate,
@@ -205,7 +210,7 @@ export class ImprovementCandidateService {
       lastSkipAt: Date.now(),
     };
     const readiness = this.deriveReadiness(withSkip, reason);
-    this.candidateRepo.update(candidateId, {
+    await this.candidateRepo.update(candidateId, {
       lastSkipReason: reason,
       lastSkipAt: withSkip.lastSkipAt,
       readiness: readiness.readiness,
@@ -213,11 +218,11 @@ export class ImprovementCandidateService {
     });
   }
 
-  recordCampaignFailure(
+  async recordCampaignFailure(
     candidateId: string,
     params: { failureClass: ImprovementFailureClass; attemptFingerprint: string; reason?: string },
-  ): void {
-    const candidate = this.candidateRepo.findById(candidateId);
+  ): Promise<void> {
+    const candidate = await this.candidateRepo.findById(candidateId);
     if (!candidate) return;
 
     const sameFingerprint =
@@ -244,7 +249,7 @@ export class ImprovementCandidateService {
     };
     const readiness = this.deriveReadiness(nextCandidate);
 
-    this.candidateRepo.update(candidateId, {
+    await this.candidateRepo.update(candidateId, {
       status: shouldPark ? "parked" : "open",
       readiness: readiness.readiness,
       readinessReason: readiness.reason,
@@ -259,7 +264,9 @@ export class ImprovementCandidateService {
     });
   }
 
-  getTopCandidateForWorkspace(workspaceId: string): ImprovementCandidate | undefined {
+  async getTopCandidateForWorkspace(
+    workspaceId: string,
+  ): Promise<ImprovementCandidate | undefined> {
     const settings = ImprovementSettingsManager.loadSettings();
     return this.candidateRepo.getTopRunnableCandidate(
       workspaceId,
@@ -270,34 +277,10 @@ export class ImprovementCandidateService {
   private async rebuildFromRecentSignals(): Promise<void> {
     const baseline = getImprovementResetBaselineAt() || 0;
     const since = Math.max(Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000, baseline);
-    const recentTasks = this.db
-      .prepare(
-        `
-        SELECT id
-        FROM tasks
-        WHERE created_at >= ?
-        ORDER BY created_at DESC
-        LIMIT 300
-      `,
-      )
-      .all(since) as Array<{ id: string }>;
-
-    for (const task of recentTasks) {
-      await this.ingestTaskFailureCandidate(task.id);
+    const { taskIds: recentTaskIds, eventRows } = await improvementRecentSignalRows(this.db, since);
+    for (const taskId of recentTaskIds) {
+      await this.ingestTaskFailureCandidate(taskId);
     }
-
-    const eventRows = this.db
-      .prepare(
-        `
-        SELECT task_id, type, payload, id, timestamp
-        FROM task_events
-        WHERE timestamp >= ?
-          AND COALESCE(legacy_type, type) IN ('verification_failed', 'safety_stop_triggered', 'user_feedback')
-        ORDER BY timestamp DESC
-        LIMIT 400
-      `,
-      )
-      .all(since) as Any[];
 
     for (const row of eventRows) {
       const taskId = typeof row.task_id === "string" ? row.task_id : "";
@@ -323,7 +306,7 @@ export class ImprovementCandidateService {
   }
 
   private async ingestTaskFailureCandidate(taskId: string): Promise<void> {
-    const task = this.taskRepo.findById(taskId);
+    const task = await this.taskRepo.findById(taskId);
     if (!task || task.source === "improvement") return;
     if (isAutomatedTaskLike(task)) return;
 
@@ -358,7 +341,7 @@ export class ImprovementCandidateService {
     const blockerSignature = this.extractFailureSignature(summary, failureClass);
     const fingerprintKey = `${failureClass}:${normalizedTitle}:${blockerSignature}`;
 
-    this.upsertCandidate(task.workspaceId, {
+    await this.upsertCandidate(task.workspaceId, {
       source: "task_failure",
       title: `Fix repeated ${failureClass.replace(/_/g, " ")} failures`,
       summary: this.truncate(summary),
@@ -376,7 +359,7 @@ export class ImprovementCandidateService {
     source: ImprovementCandidateSource,
     payload: Any,
   ): Promise<void> {
-    const task = this.taskRepo.findById(taskId);
+    const task = await this.taskRepo.findById(taskId);
     if (!task || task.source === "improvement") return;
     if (isAutomatedTaskLike(task)) return;
 
@@ -409,7 +392,7 @@ export class ImprovementCandidateService {
     // using `source` alone as the fingerprint key groups all events of the same
     // type into a single candidate per workspace (they are already workspace-
     // scoped by workspaceId, so no cross-workspace merging occurs).
-    this.upsertCandidate(task.workspaceId, {
+    await this.upsertCandidate(task.workspaceId, {
       source,
       title:
         source === "verification_failure"
@@ -429,7 +412,7 @@ export class ImprovementCandidateService {
   }
 
   private async ingestFeedbackCandidate(taskId: string, payload: Any): Promise<void> {
-    const task = this.taskRepo.findById(taskId);
+    const task = await this.taskRepo.findById(taskId);
     if (!task || task.source === "improvement") return;
     if (isAutomatedTaskLike(task)) return;
 
@@ -452,7 +435,7 @@ export class ImprovementCandidateService {
       },
     };
 
-    this.upsertCandidate(task.workspaceId, {
+    await this.upsertCandidate(task.workspaceId, {
       source: "user_feedback",
       title: "Fix issues repeatedly flagged by the user",
       summary: this.truncate(reason),
@@ -469,7 +452,7 @@ export class ImprovementCandidateService {
     if (!settings.includeDevLogs) return;
     const baseline = getImprovementResetBaselineAt() || 0;
 
-    for (const workspace of this.workspaceRepo.findAll()) {
+    for (const workspace of await this.workspaceRepo.findAll()) {
       const latestJsonlPath = path.join(workspace.path, "logs", "dev-latest.jsonl");
       const latestTextPath = path.join(workspace.path, "logs", "dev-latest.log");
       const devLog = this.readLatestDevLogFailure(latestJsonlPath, latestTextPath, baseline);
@@ -486,7 +469,7 @@ export class ImprovementCandidateService {
           fingerprintKey: devLog.fingerprintKey,
         },
       };
-      this.upsertCandidate(workspace.id, {
+      await this.upsertCandidate(workspace.id, {
         source: "dev_log",
         title: "Investigate recurring dev log errors",
         summary: this.truncate(devLog.summary),
@@ -596,7 +579,7 @@ export class ImprovementCandidateService {
     }
   }
 
-  private upsertCandidate(
+  private async upsertCandidate(
     workspaceId: string,
     input: {
       source: ImprovementCandidateSource;
@@ -613,9 +596,9 @@ export class ImprovementCandidateService {
        *  regardless of how the LLM words its result summary each time. */
       fingerprintKey?: string;
     },
-  ): ImprovementCandidate {
+  ): Promise<ImprovementCandidate> {
     const fingerprint = this.buildFingerprint(input.source, input.fingerprintKey ?? input.summary);
-    const existing = this.candidateRepo.findByFingerprint(workspaceId, fingerprint);
+    const existing = await this.candidateRepo.findByFingerprint(workspaceId, fingerprint);
     const nextPriority = this.computePriorityScore(
       input.severity,
       (existing?.recurrenceCount || 0) + 1,
@@ -656,7 +639,7 @@ export class ImprovementCandidateService {
         resolvedAt: nextStatus === "open" ? undefined : existing.resolvedAt,
       };
       const readiness = this.deriveReadiness(nextCandidate);
-      this.candidateRepo.update(existing.id, {
+      await this.candidateRepo.update(existing.id, {
         status: nextStatus,
         readiness: readiness.readiness,
         readinessReason: readiness.reason,
@@ -672,7 +655,7 @@ export class ImprovementCandidateService {
         lastSeenAt: input.evidence.createdAt,
         resolvedAt: nextStatus === "open" ? (null as Any) : existing.resolvedAt,
       });
-      return this.candidateRepo.findById(existing.id)!;
+      return (await this.candidateRepo.findById(existing.id))!;
     }
 
     const createdCandidate: ImprovementCandidate = {
@@ -794,13 +777,13 @@ export class ImprovementCandidateService {
     return false;
   }
 
-  private reconcileExistingCandidates(): void {
-    const candidates = this.candidateRepo.list();
+  private async reconcileExistingCandidates(): Promise<void> {
+    const candidates = await this.candidateRepo.list();
     for (const candidate of candidates) {
       if (candidate.status !== "open") continue;
 
       if (this.isLikelySuccessOnlyCandidate(candidate)) {
-        this.candidateRepo.update(candidate.id, {
+        await this.candidateRepo.update(candidate.id, {
           status: "resolved",
           readiness: "unknown",
           readinessReason: "Candidate looked like a success-only checkpoint and was auto-resolved.",
@@ -817,14 +800,13 @@ export class ImprovementCandidateService {
       );
       if (normalizedFingerprint === candidate.fingerprint) continue;
 
-      const existing = this.candidateRepo.findByFingerprint(
+      const existing = await this.candidateRepo.findByFingerprint(
         candidate.workspaceId,
         normalizedFingerprint,
       );
       if (existing && existing.id !== candidate.id) {
-        this.db.transaction(() => {
-          this.runRepo.reassignCandidate(candidate.id, existing.id);
-          this.candidateRepo.update(existing.id, {
+        // Reassign the runs, fold the evidence in and drop the duplicate in one unit.
+        await mergeImprovementCandidates(this.db, candidate.id, existing.id, {
             recurrenceCount: existing.recurrenceCount + candidate.recurrenceCount,
             severity: Math.max(existing.severity, candidate.severity),
             fixabilityScore: Math.max(existing.fixabilityScore, candidate.fixabilityScore),
@@ -832,14 +814,12 @@ export class ImprovementCandidateService {
             evidence: [...existing.evidence, ...candidate.evidence]
               .sort((a, b) => a.createdAt - b.createdAt)
               .slice(-MAX_EVIDENCE_ITEMS),
-            lastSeenAt: Math.max(existing.lastSeenAt, candidate.lastSeenAt),
-          });
-          this.candidateRepo.delete(candidate.id);
-        })();
+          lastSeenAt: Math.max(existing.lastSeenAt, candidate.lastSeenAt),
+        });
         continue;
       }
 
-      this.candidateRepo.update(candidate.id, {
+      await this.candidateRepo.update(candidate.id, {
         fingerprint: normalizedFingerprint,
       });
     }

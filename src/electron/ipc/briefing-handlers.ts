@@ -19,7 +19,7 @@ export function setupBriefingHandlers(
   ipcMain.handle(
     IPC_CHANNELS.BRIEFING_GET_LATEST,
     async (_, workspaceId: string): Promise<Briefing | null> => {
-      return briefingService.getLatestBriefing(workspaceId) ?? null;
+      return (await briefingService.getLatestBriefing(workspaceId)) ?? null;
     },
   );
 
@@ -34,10 +34,10 @@ export function setupBriefingHandlers(
     IPC_CHANNELS.BRIEFING_SAVE_CONFIG,
     async (_, data: { workspaceId: string; config: Partial<BriefingConfig> }): Promise<void> => {
       const nextConfig = {
-        ...briefingService.getConfig(data.workspaceId),
+        ...(await briefingService.getConfig(data.workspaceId)),
         ...data.config,
       } as BriefingConfig;
-      briefingService.saveConfig(data.workspaceId, nextConfig);
+      await briefingService.saveConfig(data.workspaceId, nextConfig);
       await opts?.onConfigSaved?.(data.workspaceId, nextConfig);
     },
   );

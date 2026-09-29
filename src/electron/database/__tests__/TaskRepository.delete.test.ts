@@ -24,7 +24,7 @@ describeWithSqlite("TaskRepository.delete", () => {
   let previousUserDataDir: string | undefined;
   let manager: import("../schema").DatabaseManager;
   let db: ReturnType<import("../schema").DatabaseManager["getDatabase"]>;
-  let taskRepo: import("../repositories").TaskRepository;
+  let taskRepo: import("../repositories").TaskStore;
 
   const insertWorkspace = (name = "main") => {
     const workspace = {
@@ -64,7 +64,7 @@ describeWithSqlite("TaskRepository.delete", () => {
 
     manager = new DatabaseManager();
     db = manager.getDatabase();
-    taskRepo = new repositories.TaskRepository(db);
+    taskRepo = new repositories.TaskStore(db);
   });
 
   afterEach(() => {

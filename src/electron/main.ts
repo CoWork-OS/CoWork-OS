@@ -1,3 +1,28 @@
+import {
+  CoreEvalCaseRepository,
+  CoreFailureClusterRepository,
+  CoreFailureRecordRepository,
+  CoreHarnessExperimentRepository,
+  CoreLearningsRepository,
+  CoreMemoryCandidateRepository,
+  CoreMemoryDistillRunRepository,
+  CoreMemoryScopeStateRepository,
+  CoreRegressionGateRepository,
+  CoreTraceRepository,
+} from "./core/core-repository-facades";
+import {
+  AgentRoleRepository,
+  AutomationProfileRepository,
+  MentionRepository,
+  TaskSubscriptionRepository,
+  WorkingStateRepository,
+} from "./agents/agent-repository-facades";
+import { ChannelRepository, ChannelUserRepository } from "./database/repository-facades";
+import {
+  AnnotationRepository,
+  ChannelMessageRepository,
+  WorkspaceRepository,
+} from "./database/repository-facades";
 import path from "path";
 import os from "os";
 import * as fs from "fs/promises";
@@ -42,7 +67,7 @@ import { setupAgentSecurityHandlers } from "./ipc/agent-security-handlers";
 import { NumbatService } from "./security/numbat";
 import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
 import { ComparisonService } from "./git/ComparisonService";
-import { TaskSubscriptionRepository } from "./agents/TaskSubscriptionRepository";
+
 import { StandupReportService } from "./reports/StandupReportService";
 import { UsageInsightsProjector } from "./reports/UsageInsightsProjector";
 import { describeCronRunStatus } from "../shared/cron-outcomes";
@@ -52,57 +77,48 @@ import {
   HeartbeatServiceDeps,
   setHeartbeatService,
 } from "./agents/HeartbeatService";
-import { AgentRoleRepository } from "./agents/AgentRoleRepository";
+
 import { ensureDefaultBotRoles, ensureDefaultBotTeam } from "./agents/bot-team";
-import { MentionRepository } from "./agents/MentionRepository";
-import { ActivityRepository } from "./activity/ActivityRepository";
-import { WorkingStateRepository } from "./agents/WorkingStateRepository";
+
+import { ActivityRepository } from "./activity/activity-repository-facades";
+
 import { CrossSignalService } from "./agents/CrossSignalService";
 import { FeedbackService } from "./agents/FeedbackService";
 import { LoreService } from "./agents/LoreService";
-import { AutomationProfileRepository } from "./agents/AutomationProfileRepository";
-import { AutomationRunOutcomeRepository } from "./automation/AutomationRunOutcomeRepository";
+
+import { AutomationRunOutcomeRepository } from "./automation/automation-outcome-repository-facades";
 import { AutomationOutcomeService } from "./automation/AutomationOutcomeService";
-import { RecurringApprovalService } from "./security/recurring-approval-service";
+import { RecurringApprovalService } from "./security/recurring-approval-repository-facades";
 import { ProactiveSuggestionsService } from "./agent/ProactiveSuggestionsService";
 import { AgentDaemon } from "./agent/daemon";
 import { approvalPromptsDisabled } from "./agent/approval-policy";
-import { CoreMemoryCandidateRepository } from "./core/CoreMemoryCandidateRepository";
+
 import { CoreMemoryCandidateService } from "./core/CoreMemoryCandidateService";
-import { CoreMemoryDistillRunRepository } from "./core/CoreMemoryDistillRunRepository";
+
 import { CoreMemoryDistiller } from "./core/CoreMemoryDistiller";
-import { CoreEvalCaseRepository } from "./core/CoreEvalCaseRepository";
+
 import { CoreEvalCaseService } from "./core/CoreEvalCaseService";
-import { CoreFailureClusterRepository } from "./core/CoreFailureClusterRepository";
+
 import { CoreFailureClusterService } from "./core/CoreFailureClusterService";
 import { CoreFailureMiningService } from "./core/CoreFailureMiningService";
-import { CoreFailureRecordRepository } from "./core/CoreFailureRecordRepository";
-import { CoreHarnessExperimentRepository } from "./core/CoreHarnessExperimentRepository";
+
 import { CoreHarnessExperimentRunner } from "./core/CoreHarnessExperimentRunner";
 import { CoreHarnessExperimentService } from "./core/CoreHarnessExperimentService";
 import { CoreLearningPipelineService } from "./core/CoreLearningPipelineService";
-import { CoreLearningsRepository } from "./core/CoreLearningsRepository";
+
 import { CoreLearningsService } from "./core/CoreLearningsService";
-import { CoreRegressionGateRepository } from "./core/CoreRegressionGateRepository";
+
 import { CoreRegressionGateService } from "./core/CoreRegressionGateService";
 import { CoreMemoryScopeResolver } from "./core/CoreMemoryScopeResolver";
-import { CoreMemoryScopeStateRepository } from "./core/CoreMemoryScopeStateRepository";
-import { CoreTraceRepository } from "./core/CoreTraceRepository";
+
 import { CoreTraceService } from "./core/CoreTraceService";
-import {
-  ChannelMessageRepository,
-  ChannelRepository,
-  ChannelUserRepository,
-  AnnotationRepository,
-  TaskEventRepository,
-  TaskRepository,
-  WorkspaceRepository,
-} from "./database/repositories";
+// Runtime wiring keeps the host stores: its service callbacks are synchronous (storage slice C).
+import { TaskEventRepository, TaskStore, WorkspaceStore } from "./database/repositories";
 import { LLMProviderFactory } from "./agent/llm";
 import { ModelMetadataRefresher } from "./agent/llm/model-metadata-refresh";
 import { SearchProviderFactory } from "./agent/search";
 import { ChannelGateway } from "./gateway";
-import { formatChatTranscriptForPrompt } from "./gateway/chat-transcript";
+import { formatChatTranscriptForPrompt, prefetchTranscriptUsers } from "./gateway/chat-transcript";
 import { updateManager } from "./updater";
 import { importProcessEnvToSettings, migrateEnvToSettings } from "./utils/env-migration";
 import {
@@ -115,13 +131,13 @@ import type { Task } from "../shared/types";
 import { isAutomatedTaskLike } from "../shared/automated-task-detection";
 import { shouldUseNativeWindowFrame } from "../shared/native-window-frame";
 import { GuardrailManager } from "./guardrails/guardrail-manager";
-import { AppearanceManager } from "./settings/appearance-manager";
+import { AppearanceManager, getDevLogCaptureEnabled } from "./settings/appearance-manager";
 import { MemoryFeaturesManager } from "./settings/memory-features-manager";
 import { PersonalityManager } from "./settings/personality-manager";
 import { MCPClientManager } from "./mcp/client/MCPClientManager";
 import { InfraManager } from "./infra/infra-manager";
 import { trayManager } from "./tray";
-import { CronService, setCronService, getCronStorePath } from "./cron";
+import { CronService, setCronService, getCronStorePath, type CronEvent } from "./cron";
 import { resolveTaskResultText } from "./cron/result-text";
 import {
   StrategicPlannerService,
@@ -235,8 +251,19 @@ import { AwarenessService } from "./awareness/AwarenessService";
 import { AutonomyEngine } from "./awareness/AutonomyEngine";
 import { SubconsciousLoopService } from "./subconscious/SubconsciousLoopService";
 import { ManagedSessionService } from "./managed/ManagedSessionService";
-import { WorkContextService } from "./workspaces/WorkContextService";
+import { WorkContextService } from "./workspaces/workspaces-repository-facades";
 import { createLogger } from "./utils/logger";
+import { startHostPerfMonitor, type HostPerfMonitorHandle } from "./utils/host-perf-monitor";
+import {
+  MigrationLockTimeoutError,
+  UnsupportedSchemaVersionError,
+} from "./database/profile-lifecycle";
+import {
+  getDatabaseClient,
+  startDatabaseWorker,
+  startReportingReader,
+  stopDatabaseWorker,
+} from "./database/async/runtime";
 import { registerMediaProtocol, registerMediaScheme } from "./media";
 import { rememberApprovedImportFiles } from "./security/file-import-approvals";
 import { healMovedDesktopWorkspacePaths } from "./utils/workspace-path-healer";
@@ -260,10 +287,13 @@ import {
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
+/** Whether the database worker settled every accepted operation at shutdown (DB6). */
+let databaseWorkerDrained = true;
 let agentDaemon: AgentDaemon;
 let channelGateway: ChannelGateway;
 let cronService: CronService | null = null;
 let pulseService: PulseService | null = null;
+let hostPerfMonitor: HostPerfMonitorHandle | null = null;
 let councilService: CouncilService | null = null;
 let dailyBriefingService: DailyBriefingService | null = null;
 let ambientMonitoringService: AmbientMonitoringService | null = null;
@@ -377,82 +407,16 @@ interface MainWindowState {
   isFullScreen?: boolean;
 }
 
-function normalizeTemplatedRoleCoreBoundary(): void {
-  const db = dbManager.getDatabase();
-  const templatedRoles = db
-    .prepare(
-      `SELECT id
-       FROM agent_roles
-       WHERE COALESCE(source_template_id, '') != ''
-          OR name LIKE 'twin-%'
-          OR display_name LIKE '%Twin%'`,
-    )
-    .all() as Array<{ id?: string }>;
-
-  const roleIds = templatedRoles
-    .map((row) => (typeof row.id === "string" ? row.id : ""))
-    .filter(Boolean);
-  if (!roleIds.length) {
-    return;
-  }
-
-  const placeholders = roleIds.map(() => "?").join(", ");
-  const targetKeys = roleIds.map((id) => `agent_role:${id}`);
-  const now = Date.now();
-  let changes = 0;
-  const run = (sql: string, ...params: unknown[]): void => {
-    changes += Number(db.prepare(sql).run(...params).changes || 0);
-  };
-  db.exec("BEGIN");
+/** One unit (DB6); runs before core automation profiles are ensured. */
+async function normalizeTemplatedRoleCoreBoundary(): Promise<void> {
   try {
-    // Only touch rows that still need it, so repeat launches are no-ops.
-    run(
-      `UPDATE agent_roles
-       SET role_kind = 'persona_template',
-           heartbeat_enabled = 0,
-           heartbeat_status = 'idle',
-           heartbeat_last_pulse_result = NULL,
-           heartbeat_last_dispatch_kind = NULL,
-           updated_at = ?
-       WHERE id IN (${placeholders})
-         AND (COALESCE(role_kind, '') != 'persona_template'
-           OR COALESCE(heartbeat_enabled, 0) != 0
-           OR COALESCE(heartbeat_status, 'idle') != 'idle'
-           OR heartbeat_last_pulse_result IS NOT NULL
-           OR heartbeat_last_dispatch_kind IS NOT NULL)`,
-      now,
-      ...roleIds,
-    );
-    run(
-      `UPDATE automation_profiles
-       SET enabled = 0,
-           updated_at = ?
-       WHERE agent_role_id IN (${placeholders}) AND enabled != 0`,
-      now,
-      ...roleIds,
-    );
-    run(`DELETE FROM heartbeat_policies WHERE agent_role_id IN (${placeholders})`, ...roleIds);
-    for (const table of [
-      "subconscious_dispatch_records",
-      "subconscious_backlog_items",
-      "subconscious_decisions",
-      "subconscious_critiques",
-      "subconscious_hypotheses",
-      "subconscious_runs",
-      "subconscious_targets",
-    ]) {
-      run(`DELETE FROM ${table} WHERE target_key IN (${placeholders})`, ...targetKeys);
-    }
-
-    db.exec("COMMIT");
+    const { roleCount, changes } = await new AgentRoleRepository(
+      dbManager.getDatabase(),
+    ).detachTemplatedRolesFromCoreAutomation(Date.now());
     if (changes > 0) {
-      logger.info("Detached templated agent roles from core automation", {
-        roleCount: roleIds.length,
-        changes,
-      });
+      logger.info("Detached templated agent roles from core automation", { roleCount, changes });
     }
   } catch (error) {
-    db.exec("ROLLBACK");
     logger.error("Failed to detach templated agent roles from core automation:", error);
   }
 }
@@ -503,21 +467,21 @@ function buildDefaultAutomationProfile(role: import("../shared/types").AgentRole
   };
 }
 
-function ensureCoreAutomationProfiles(): void {
+async function ensureCoreAutomationProfiles(): Promise<void> {
   const db = dbManager.getDatabase();
   const agentRoleRepo = new AgentRoleRepository(db);
   const automationProfileRepo = new AutomationProfileRepository(db);
 
   // Seed the Grok-style custom bot roster before creating automation profiles
   // so the new roles participate in the same lifecycle as built-in agents.
-  ensureDefaultBotRoles(db);
-  const addedAgents = agentRoleRepo.syncNewDefaults();
+  await ensureDefaultBotRoles(db);
+  const addedAgents = await agentRoleRepo.syncNewDefaults();
   if (addedAgents.length > 0) {
     logger.info(`Added ${addedAgents.length} new default agent(s)`);
   }
 
-  const eligibleRoles = agentRoleRepo
-    .findAll(false)
+  const eligibleRoles = (await agentRoleRepo
+    .findAll(false))
     .filter(
       (role) =>
         role.roleKind !== "persona_template" &&
@@ -528,7 +492,7 @@ function ensureCoreAutomationProfiles(): void {
   }
 
   const existingProfiles = new Map(
-    automationProfileRepo.listAll().map((profile) => [profile.agentRoleId, profile]),
+    (await automationProfileRepo.listAll()).map((profile) => [profile.agentRoleId, profile]),
   );
 
   let createdCount = 0;
@@ -537,7 +501,7 @@ function ensureCoreAutomationProfiles(): void {
       continue;
     }
     const seeded = buildDefaultAutomationProfile(role);
-    const created = automationProfileRepo.create({
+    const created = await automationProfileRepo.create({
       agentRoleId: role.id,
       enabled: seeded.enabled,
       cadenceMinutes: seeded.cadenceMinutes,
@@ -551,22 +515,27 @@ function ensureCoreAutomationProfiles(): void {
     createdCount += 1;
   }
 
-  const totalProfiles = automationProfileRepo.listAll();
+  const totalProfiles = await automationProfileRepo.listAll();
   const enabledProfiles = totalProfiles.filter((profile) => profile.enabled);
   logger.info("Core automation profiles ready", {
     eligibleRoleCount: eligibleRoles.length,
     profileCount: totalProfiles.length,
     enabledProfileCount: enabledProfiles.length,
     createdCount,
-    enabledRoles: enabledProfiles
-      .map((profile) => agentRoleRepo.findById(profile.agentRoleId)?.name || profile.agentRoleId)
-      .slice(0, 10),
+    enabledRoles: await Promise.all(
+      enabledProfiles
+        .slice(0, 10)
+        .map(
+          async (profile) =>
+            (await agentRoleRepo.findById(profile.agentRoleId))?.name || profile.agentRoleId,
+        ),
+    ),
   });
 }
 
-function ensureCoreBotTeams(): void {
+async function ensureCoreBotTeams(): Promise<void> {
   const db = dbManager.getDatabase();
-  const workspaceRepo = new WorkspaceRepository(db);
+  const workspaceRepo = new WorkspaceStore(db);
   // Roles are global; the team is workspace-scoped. Seed the most recently
   // used workspace only and let bot conversation creation seed later
   // workspaces lazily. This avoids filling old/temporary QA workspaces with
@@ -574,7 +543,7 @@ function ensureCoreBotTeams(): void {
   const workspace = workspaceRepo.findAll()[0];
   if (!workspace) return;
   try {
-    ensureDefaultBotTeam(db, workspace.id);
+    await ensureDefaultBotTeam(db, workspace.id);
   } catch (error) {
     logger.warn("Unable to seed the CoWork bot team for workspace", {
       workspaceId: workspace.id,
@@ -611,12 +580,12 @@ app.on("web-contents-created", (_event, contents) => {
   });
 });
 
-const submitHeartbeatSignalForAll = (input: {
+const submitHeartbeatSignalForAll = async (input: {
   text?: string;
   mode?: "now" | "next-heartbeat";
   source?: "hook" | "cron" | "api" | "manual";
-}): void => {
-  heartbeatService?.submitWakeForAll(input);
+}): Promise<void> => {
+  await heartbeatService?.submitWakeForAll(input);
 };
 
 function getDevServerUrl(): string {
@@ -967,7 +936,9 @@ function installNativeApplicationMenu(): void {
       submenu: [
         {
           label: "CoWork OS on GitHub",
-          click: () => shell.openExternal("https://github.com/CoWork-OS/CoWork-OS"),
+          click: () => {
+            void shell.openExternal("https://github.com/CoWork-OS/CoWork-OS");
+          },
         },
       ],
     },
@@ -1556,7 +1527,7 @@ if (isMacSafeStorageMigrationWorker) {
           return;
         }
         if (process.env.NODE_ENV === "development") {
-          mainWindow.loadURL(getDevServerUrl());
+          void mainWindow.loadURL(getDevServerUrl());
           mainWindow.webContents.openDevTools();
           return;
         }
@@ -1592,9 +1563,9 @@ if (isMacSafeStorageMigrationWorker) {
   </div>
 </body>
 </html>`;
-          mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+          void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
         } else {
-          mainWindow.loadFile(rendererIndex);
+          void mainWindow.loadFile(rendererIndex);
         }
       };
 
@@ -1667,7 +1638,7 @@ if (isMacSafeStorageMigrationWorker) {
       });
     }
 
-    app.whenReady().then(async () => {
+    void app.whenReady().then(async () => {
       if (await primeMacSafeStorageContext()) {
         logger.info("Initialized macOS Keychain context before loading secure settings.");
       }
@@ -1756,7 +1727,37 @@ if (isMacSafeStorageMigrationWorker) {
 
       // Initialize database first - required for SecureSettingsRepository
       const coreInitStartedAt = Date.now();
-      dbManager = new DatabaseManager();
+      try {
+        // Schema initialization runs in a bootstrap worker (DB6).
+        dbManager = await DatabaseManager.open();
+      } catch (error) {
+        // DB6: a profile this build must not open (a newer schema, or another process
+        // stuck preparing it) fails clearly instead of leaving the app without a window.
+        if (
+          error instanceof UnsupportedSchemaVersionError ||
+          error instanceof MigrationLockTimeoutError
+        ) {
+          dialog.showErrorBox("CoWork OS cannot open this profile", error.message);
+          app.exit(1);
+          return;
+        }
+        throw error;
+      }
+      dbManager.beginRun("desktop");
+      // Database worker (async SQLite plan, DB2); starts after schema setup. Awaited so
+      // each domain's backend is chosen once for the run (DB7): a worker that fails to
+      // start leaves the whole run on the host backend.
+      await startDatabaseWorker({ dbPath: dbManager.getDatabasePath(), runtime: "desktop" });
+      // Reporting reader (DB4); report-style reads only, so it may become ready later.
+      const reportingReader = startReportingReader({
+        dbPath: dbManager.getDatabasePath(),
+        runtime: "desktop",
+      });
+      hostPerfMonitor = startHostPerfMonitor({
+        runtime: "desktop",
+        isSummaryEnabled: () =>
+          process.env.COWORK_DEV_LOG_CAPTURE === "1" || getDevLogCaptureEnabled(),
+      });
       automationOutcomeService = new AutomationOutcomeService({
         repo: new AutomationRunOutcomeRepository(dbManager.getDatabase()),
         notify: async (params) => {
@@ -1764,16 +1765,25 @@ if (isMacSafeStorageMigrationWorker) {
           await notificationService?.add(params);
         },
       });
-      UsageInsightsProjector.initialize(dbManager.getDatabase()).warm();
+      const usageInsightsProjector = UsageInsightsProjector.initialize(dbManager.getDatabase());
+      usageInsightsProjector.attachDatabaseWorkers(
+        Promise.all([getDatabaseClient(), reportingReader]).then(([writer, reader]) =>
+          writer && reader ? { writer, reader } : null,
+        ),
+      );
+      usageInsightsProjector.warm();
+      // DB4: maintenance chunks run in the database worker when this run uses it.
+      const runDatabaseMaintenance = async () =>
+        dbManager.runPostStartupMaintenance({ client: await getDatabaseClient() });
       if (startupQuietMode) {
-        await dbManager.runPostStartupMaintenance();
+        await runDatabaseMaintenance();
       } else {
-        deferStartupTask("database-maintenance", () => dbManager.runPostStartupMaintenance());
+        deferStartupTask("database-maintenance", runDatabaseMaintenance);
       }
       const tempWorkspaceRoot = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME);
-      const runTempWorkspacePrune = () => {
+      const runTempWorkspacePrune = async () => {
         try {
-          pruneTempWorkspaces({
+          await pruneTempWorkspaces({
             db: dbManager.getDatabase(),
             tempWorkspaceRoot,
             protectedWorkspaceIds: getActiveTempWorkspaceLeases(),
@@ -1782,9 +1792,10 @@ if (isMacSafeStorageMigrationWorker) {
           logger.warn("Failed to prune temp workspaces:", error);
         }
       };
-      runTempWorkspacePrune();
+      await runTempWorkspacePrune();
       tempWorkspacePruneTimer = setInterval(
-        runTempWorkspacePrune,
+        // The prune reports its own failures.
+        () => void runTempWorkspacePrune(),
         TEMP_WORKSPACE_PRUNE_INTERVAL_MS,
       );
       tempWorkspacePruneTimer.unref();
@@ -1842,7 +1853,7 @@ if (isMacSafeStorageMigrationWorker) {
       }
       healResettableSecureSettings();
       {
-        const workspaceRepo = new WorkspaceRepository(dbManager.getDatabase());
+        const workspaceRepo = new WorkspaceStore(dbManager.getDatabase());
         const repairs = healMovedDesktopWorkspacePaths(
           workspaceRepo.findAll(),
           (workspaceId, nextPath) => workspaceRepo.updatePath(workspaceId, nextPath),
@@ -1861,9 +1872,9 @@ if (isMacSafeStorageMigrationWorker) {
           });
         }
       }
-      normalizeTemplatedRoleCoreBoundary();
-      ensureCoreAutomationProfiles();
-      ensureCoreBotTeams();
+      await normalizeTemplatedRoleCoreBoundary();
+      await ensureCoreAutomationProfiles();
+      await ensureCoreBotTeams();
       try {
         const db = dbManager.getDatabase();
         const automationProfileRepo = new AutomationProfileRepository(db);
@@ -2005,7 +2016,7 @@ if (isMacSafeStorageMigrationWorker) {
           approvalPromptsDisabled() &&
           (!configuredMemoryReviewMode || configuredMemoryReviewMode === "off")
         ) {
-          const rejected = MemoryWriteGate.rejectAllPending({
+          const rejected = await MemoryWriteGate.rejectAllPending({
             reviewedBy: "system:no-prompt-migration",
             resolution:
               "Rejected by the no-prompt memory-write migration; stale queued data was not replayed.",
@@ -2019,7 +2030,7 @@ if (isMacSafeStorageMigrationWorker) {
 
         // Initialize FTS worker thread for off-main-thread memory search
         const { FtsWorkerClient } = await import("./database/FtsWorkerClient");
-        const ftsWorkerClient = new FtsWorkerClient(path.join(getUserDataDir(), "cowork-os.db"));
+        const ftsWorkerClient = new FtsWorkerClient(dbManager.getDatabasePath());
         MemoryService.initFtsWorker(ftsWorkerClient);
         app.on("will-quit", () => ftsWorkerClient.destroy());
 
@@ -2253,7 +2264,7 @@ if (isMacSafeStorageMigrationWorker) {
             }
             let resolvedType = params.channelType as string;
             if (params.channelDbId) {
-              const ch = channelGateway.getChannel(params.channelDbId);
+              const ch = await channelGateway.getChannel(params.channelDbId);
               if (ch) resolvedType = ch.type;
             }
             await channelGateway.sendMessage(
@@ -2275,12 +2286,12 @@ if (isMacSafeStorageMigrationWorker) {
       // Initialize Cron Service for scheduled task execution
       try {
         const db = dbManager.getDatabase();
-        const taskRepo = new TaskRepository(db);
+        const taskRepo = new TaskStore(db);
         const taskEventRepo = new TaskEventRepository(db);
         const channelRepo = new ChannelRepository(db);
         const channelUserRepo = new ChannelUserRepository(db);
         const channelMessageRepo = new ChannelMessageRepository(db);
-        const workspaceRepo = new WorkspaceRepository(db);
+        const workspaceRepo = new WorkspaceStore(db);
         const userDataDir = getUserDataDir();
 
         const ensureManagedWorkspaceForCronJob = async (
@@ -2298,6 +2309,91 @@ if (isMacSafeStorageMigrationWorker) {
           }
 
           return workspace;
+        };
+
+        // Cron events arrive through a void callback; this handler's rejections reach the
+        // process-level unhandledRejection logger, as they did when it was inline.
+        const forwardCronEvent = async (evt: CronEvent): Promise<void> => {
+          // Forward cron events to renderer
+          if (mainWindow?.webContents) {
+            mainWindow.webContents.send("cron:event", evt);
+          }
+          console.log("[Cron] Event:", evt.action, evt.jobId);
+          try {
+            await MailboxAutomationRegistry.recordCronEvent(evt);
+          } catch (error) {
+            logger.debug("[MailboxAutomationRegistry] Failed to record cron event:", error);
+          }
+          try {
+            await routineService?.recordScheduledEvent(evt);
+          } catch (error) {
+            logger.debug("[Routines] Failed to record cron routine run:", error);
+          }
+
+          if (
+            evt.action === "finished" &&
+            evt.taskId &&
+            councilService &&
+            (await councilService.isCouncilJob(evt.jobId))
+          ) {
+            await councilService.finalizeRunForTask(evt.taskId).catch((error) => {
+              console.error("[Council] Failed to finalize council run:", error);
+            });
+            return;
+          }
+
+          // Show desktop notification when scheduled task finishes
+          if (evt.action === "finished") {
+            const statusLabel = describeCronRunStatus(evt.status);
+            const statusEmoji = statusLabel.emoji;
+            const statusText = statusLabel.short;
+
+            // Add in-app notification
+            const notificationService = getNotificationService();
+            if (notificationService) {
+              try {
+                // Get job name for the notification
+                const job = cronService ? await cronService.get(evt.jobId) : null;
+                const jobName = job?.name || "Scheduled Task";
+                const task = evt.taskId ? taskRepo.findById(evt.taskId) : null;
+                const taskResult = resolveTaskResultText({
+                  summary: task?.resultSummary,
+                  semanticSummary: task?.semanticSummary,
+                  verificationVerdict: task?.verificationVerdict,
+                  verificationReport: task?.verificationReport,
+                });
+                await notificationService.add({
+                  type:
+                    evt.status === "ok"
+                      ? "task_completed"
+                      : evt.status === "partial_success" ||
+                          evt.status === "needs_user_action" ||
+                          evt.status === "cancelled" ||
+                          evt.status === "skipped" ||
+                          evt.status === "unknown"
+                        ? "warning"
+                        : "task_failed",
+                  title: `${statusEmoji} ${jobName} ${statusText}`,
+                  message:
+                    evt.error ||
+                    taskResult ||
+                    (evt.status === "ok"
+                      ? "Task completed successfully."
+                      : evt.status === "needs_user_action"
+                        ? "Task completed but is waiting on user action."
+                        : "Task did not complete."),
+                  taskId: evt.taskId,
+                  cronJobId: evt.jobId,
+                  workspaceId: job?.workspaceId,
+                });
+              } catch (err) {
+                console.error("[Cron] Failed to add in-app notification:", err);
+              }
+            }
+
+            // Custom overlay notification is shown automatically via
+            // notificationService.add() -> onEvent -> NotificationOverlayManager
+          }
         };
 
         cronService = new CronService({
@@ -2404,7 +2500,7 @@ if (isMacSafeStorageMigrationWorker) {
                 ),
                 source: "cron",
               });
-              councilService?.bindRunTask(preparedCouncilTask.runId, task.id);
+              await councilService?.bindRunTask(preparedCouncilTask.runId, task.id);
               return { id: task.id };
             }
             const allowUserInput = params.allowUserInput ?? false;
@@ -2467,7 +2563,7 @@ if (isMacSafeStorageMigrationWorker) {
             const chatId = chatContext?.channelId;
             if (!channelType || !chatId) return {};
 
-            const channel = channelRepo.findByType(channelType);
+            const channel = await channelRepo.findByType(channelType);
             if (!channel) return {};
 
             const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
@@ -2477,15 +2573,10 @@ if (isMacSafeStorageMigrationWorker) {
             );
 
             // Fetch a bounded window; formatting further caps message count/size.
-            const raw = channelMessageRepo.findByChatId(channel.id, chatId, 500);
-            const userCache = new Map<string, Any>();
-            const lookupUser = (id: string) => {
-              if (!id) return undefined;
-              if (userCache.has(id)) return userCache.get(id);
-              const u = channelUserRepo.findById(id);
-              userCache.set(id, u);
-              return u;
-            };
+            const raw = await channelMessageRepo.findByChatId(channel.id, chatId, 500);
+            const lookupUser = await prefetchTranscriptUsers(raw, (id) =>
+              channelUserRepo.findById(id),
+            );
 
             const rendered = formatChatTranscriptForPrompt(raw, {
               lookupUser,
@@ -2637,7 +2728,7 @@ if (isMacSafeStorageMigrationWorker) {
               // Resolve the actual channel type when a specific channel DB ID is provided
               let resolvedType = params.channelType as string;
               if (params.channelDbId) {
-                const ch = channelGateway.getChannel(params.channelDbId);
+                const ch = await channelGateway.getChannel(params.channelDbId);
                 if (ch) {
                   resolvedType = ch.type;
                 }
@@ -2657,86 +2748,8 @@ if (isMacSafeStorageMigrationWorker) {
               throw err;
             }
           },
-          onEvent: async (evt) => {
-            // Forward cron events to renderer
-            if (mainWindow?.webContents) {
-              mainWindow.webContents.send("cron:event", evt);
-            }
-            console.log("[Cron] Event:", evt.action, evt.jobId);
-            try {
-              await MailboxAutomationRegistry.recordCronEvent(evt);
-            } catch (error) {
-              logger.debug("[MailboxAutomationRegistry] Failed to record cron event:", error);
-            }
-            try {
-              routineService?.recordScheduledEvent(evt);
-            } catch (error) {
-              logger.debug("[Routines] Failed to record cron routine run:", error);
-            }
-
-            if (
-              evt.action === "finished" &&
-              evt.taskId &&
-              councilService?.isCouncilJob(evt.jobId)
-            ) {
-              await councilService.finalizeRunForTask(evt.taskId).catch((error) => {
-                console.error("[Council] Failed to finalize council run:", error);
-              });
-              return;
-            }
-
-            // Show desktop notification when scheduled task finishes
-            if (evt.action === "finished") {
-              const statusLabel = describeCronRunStatus(evt.status);
-              const statusEmoji = statusLabel.emoji;
-              const statusText = statusLabel.short;
-
-              // Add in-app notification
-              const notificationService = getNotificationService();
-              if (notificationService) {
-                try {
-                  // Get job name for the notification
-                  const job = cronService ? await cronService.get(evt.jobId) : null;
-                  const jobName = job?.name || "Scheduled Task";
-                  const task = evt.taskId ? taskRepo.findById(evt.taskId) : null;
-                  const taskResult = resolveTaskResultText({
-                    summary: task?.resultSummary,
-                    semanticSummary: task?.semanticSummary,
-                    verificationVerdict: task?.verificationVerdict,
-                    verificationReport: task?.verificationReport,
-                  });
-                  await notificationService.add({
-                    type:
-                      evt.status === "ok"
-                        ? "task_completed"
-                        : evt.status === "partial_success" ||
-                            evt.status === "needs_user_action" ||
-                            evt.status === "cancelled" ||
-                            evt.status === "skipped" ||
-                            evt.status === "unknown"
-                          ? "warning"
-                          : "task_failed",
-                    title: `${statusEmoji} ${jobName} ${statusText}`,
-                    message:
-                      evt.error ||
-                      taskResult ||
-                      (evt.status === "ok"
-                        ? "Task completed successfully."
-                        : evt.status === "needs_user_action"
-                          ? "Task completed but is waiting on user action."
-                          : "Task did not complete."),
-                    taskId: evt.taskId,
-                    cronJobId: evt.jobId,
-                    workspaceId: job?.workspaceId,
-                  });
-                } catch (err) {
-                  console.error("[Cron] Failed to add in-app notification:", err);
-                }
-              }
-
-              // Custom overlay notification is shown automatically via
-              // notificationService.add() -> onEvent -> NotificationOverlayManager
-            }
+          onEvent: (evt) => {
+            void forwardCronEvent(evt);
           },
           log: {
             debug: (msg, data) => logCron("debug", msg, data),
@@ -2752,12 +2765,10 @@ if (isMacSafeStorageMigrationWorker) {
           await cronService.start();
         }
         if (councilService) {
-          const db = dbManager.getDatabase();
-          const rows = db.prepare("SELECT id FROM council_configs").all() as Array<{ id: string }>;
-          for (const row of rows) {
-            await councilService.syncManagedJob(row.id).catch((error) => {
+          for (const councilId of await councilService.listAllIds()) {
+            await councilService.syncManagedJob(councilId).catch((error) => {
               console.error(
-                `[Council] Failed to sync managed cron job for council ${row.id}:`,
+                `[Council] Failed to sync managed cron job for council ${councilId}:`,
                 error,
               );
             });
@@ -2830,8 +2841,8 @@ if (isMacSafeStorageMigrationWorker) {
       const startXMentionBridge = () => {
         if (!xMentionBridgeService) {
           xMentionBridgeService = initializeXMentionBridgeService(agentDaemon, {
-            isNativeXChannelEnabled: () => {
-              const nativeX = channelGateway.getChannelByType("x");
+            isNativeXChannelEnabled: async () => {
+              const nativeX = await channelGateway.getChannelByType("x");
               return nativeX?.enabled === true && nativeX.status === "connected";
             },
           });
@@ -2849,8 +2860,8 @@ if (isMacSafeStorageMigrationWorker) {
         const workingStateRepo = new WorkingStateRepository(db);
 
         // Create repositories for heartbeat service
-        const taskRepo = new TaskRepository(db);
-        const workspaceRepo = new WorkspaceRepository(db);
+        const taskRepo = new TaskStore(db);
+        const workspaceRepo = new WorkspaceStore(db);
 
         const resolveDefaultWorkspace = ():
           | ReturnType<typeof workspaceRepo.findById>
@@ -2952,7 +2963,8 @@ if (isMacSafeStorageMigrationWorker) {
           },
           hasActiveForegroundTask,
           recordActivity: ({ workspaceId, agentRoleId, title, description, metadata }) => {
-            activityRepo.create({
+            void activityRepo
+              .create({
               workspaceId,
               agentRoleId,
               actorType: "system",
@@ -2960,7 +2972,8 @@ if (isMacSafeStorageMigrationWorker) {
               title,
               description,
               metadata,
-            });
+            })
+              .catch((error: unknown) => logger.warn("Failed to record activity:", error));
           },
           listWorkspaceContexts: () =>
             workspaceRepo
@@ -3046,7 +3059,7 @@ if (isMacSafeStorageMigrationWorker) {
         }
 
         setHeartbeatWakeSubmitter(async ({ text, mode }) => {
-          submitHeartbeatSignalForAll({ text, mode, source: "hook" });
+          await submitHeartbeatSignalForAll({ text, mode, source: "hook" });
         });
 
         autonomyEngine = AutonomyEngine.initialize({
@@ -3074,17 +3087,21 @@ if (isMacSafeStorageMigrationWorker) {
           hasActiveManualTask: (workspaceId) =>
             hasActiveForegroundTask(workspaceId) || hasActiveForegroundTask(),
           recordActivity: ({ workspaceId, title, description, metadata }) => {
-            activityRepo.create({
+            void activityRepo
+              .create({
               workspaceId,
               actorType: "system",
               activityType: "info",
               title,
               description,
               metadata,
-            });
+            })
+              .catch((error: unknown) => logger.warn("Failed to record activity:", error));
           },
           wakeHeartbeats: ({ text, mode }) => {
-            submitHeartbeatSignalForAll({ text, mode, source: "hook" });
+            void submitHeartbeatSignalForAll({ text, mode, source: "hook" }).catch((error) => {
+              logger.warn("Failed to wake heartbeats:", error);
+            });
           },
           log: (...args: unknown[]) => logger.debug("[Autonomy]", ...args),
         });
@@ -3100,7 +3117,7 @@ if (isMacSafeStorageMigrationWorker) {
           awarenessService = AwarenessService.initialize({
             getDefaultWorkspaceId: () => {
               try {
-                const workspaceRepo = new WorkspaceRepository(dbManager.getDatabase());
+                const workspaceRepo = new WorkspaceStore(dbManager.getDatabase());
                 const workspaces = workspaceRepo.findAll();
                 return (
                   workspaces.find(
@@ -3112,7 +3129,9 @@ if (isMacSafeStorageMigrationWorker) {
               }
             },
             onWakeHeartbeats: ({ text, mode }) => {
-              submitHeartbeatSignalForAll({ text, mode, source: "hook" });
+              void submitHeartbeatSignalForAll({ text, mode, source: "hook" }).catch((error) => {
+                logger.warn("Failed to wake heartbeats:", error);
+              });
             },
             onEventCaptured: (event) => {
               autonomyEngine?.notifyEvent(event);
@@ -3184,7 +3203,7 @@ if (isMacSafeStorageMigrationWorker) {
           const db = dbManager.getDatabase();
           const automationProfileRepo = new AutomationProfileRepository(db);
           const runCoreDistill = async () => {
-            for (const profile of automationProfileRepo.listEnabled()) {
+            for (const profile of await automationProfileRepo.listEnabled()) {
               try {
                 await coreMemoryDistiller?.runOffline({ profileId: profile.id });
               } catch (error) {
@@ -3295,7 +3314,7 @@ if (isMacSafeStorageMigrationWorker) {
         try {
           const channelInitStartedAt = Date.now();
           await channelGateway.initialize();
-          const channelStats = channelGateway.getStartupStats();
+          const channelStats = await channelGateway.getStartupStats();
           logger.info(
             `Channels summary: loaded=${channelStats.loaded}, enabled=${channelStats.enabled}, connected=${channelStats.connected}`,
           );
@@ -3372,7 +3391,7 @@ if (isMacSafeStorageMigrationWorker) {
 
         const channelInitStartedAt = Date.now();
         await channelGateway.initialize(mainWindow);
-        const channelStats = channelGateway.getStartupStats();
+        const channelStats = await channelGateway.getStartupStats();
         logger.info(
           `Channels summary: loaded=${channelStats.loaded}, enabled=${channelStats.enabled}, connected=${channelStats.connected}, autoConnect=deferred`,
         );
@@ -3382,7 +3401,7 @@ if (isMacSafeStorageMigrationWorker) {
         } else {
           deferStartupTask("channel-auto-connect", async () => {
             await channelGateway.connectEnabledChannels({ timeoutMs: 10000 });
-            const connectedStats = channelGateway.getStartupStats();
+            const connectedStats = await channelGateway.getStartupStats();
             logger.info(
               `Channels auto-connect complete: loaded=${connectedStats.loaded}, enabled=${connectedStats.enabled}, connected=${connectedStats.connected}`,
             );
@@ -3414,7 +3433,7 @@ if (isMacSafeStorageMigrationWorker) {
 
         // ── Gap features: triggers, briefing, file hub, web access ───────
         const db = dbManager.getDatabase();
-        const workspaceRepo = new WorkspaceRepository(db);
+        const workspaceRepo = new WorkspaceStore(db);
         const activityRepo = new ActivityRepository(db);
         const resolveDefaultWorkspace = ():
           | ReturnType<typeof workspaceRepo.findById>
@@ -3471,7 +3490,7 @@ if (isMacSafeStorageMigrationWorker) {
               return { id: task.id };
             },
             sendTaskMessage: async (params) => {
-              const taskRepoForTrigger = new TaskRepository(db);
+              const taskRepoForTrigger = new TaskStore(db);
               const task = taskRepoForTrigger.findById(params.taskId);
               if (!task) {
                 throw new Error(`Target task not found: ${params.taskId}`);
@@ -3501,8 +3520,12 @@ if (isMacSafeStorageMigrationWorker) {
             getActiveTaskCount: () => agentDaemon.getQueueStatus().runningTaskIds.length,
             log: (...args: unknown[]) => console.log("[EventTriggers]", ...args),
             onTriggerFired: (payload) => {
-              MailboxAutomationRegistry.recordTriggerFire(payload);
-              routineService?.recordEventTriggerFire(payload);
+              void MailboxAutomationRegistry.recordTriggerFire(payload).catch((error) => {
+                logger.warn("[EventTriggers] Could not record mailbox trigger fire:", error);
+              });
+              void routineService?.recordEventTriggerFire(payload).catch((error) => {
+                logger.warn("[EventTriggers] Could not record routine trigger fire:", error);
+              });
             },
           },
           db,
@@ -3531,7 +3554,7 @@ if (isMacSafeStorageMigrationWorker) {
           },
         });
         mailboxForwardingService.start();
-        currentTriggerService.start();
+        await currentTriggerService.start();
         setHookTriggerEmitter((event) => {
           void currentTriggerService.evaluateEvent(event);
         });
@@ -3586,7 +3609,7 @@ if (isMacSafeStorageMigrationWorker) {
         const managedSessionService = new ManagedSessionService(db, agentDaemon, {
           workContextService: new WorkContextService(db),
         });
-        const routineTaskRepo = new TaskRepository(db);
+        const routineTaskRepo = new TaskStore(db);
         const executeWorkflowAction = createRoutineWorkflowActionExecutor({
           createAgentTask: async (params) => {
             const task = await agentDaemon.createTask({
@@ -3642,8 +3665,8 @@ if (isMacSafeStorageMigrationWorker) {
           },
           createManagedSession: async (params) => {
             const agent = params.agentId
-              ? managedSessionService.getAgent(params.agentId)?.agent
-              : managedSessionService.listAgents({ limit: 1 })[0];
+              ? (await managedSessionService.getAgent(params.agentId))?.agent
+              : (await managedSessionService.listAgents({ limit: 1 }))[0];
             if (!agent) {
               throw new Error("No managed agents are available for routine execution");
             }
@@ -3663,7 +3686,7 @@ if (isMacSafeStorageMigrationWorker) {
             };
           },
           getManagedSessionSnapshot: async (sessionId) => {
-            const session = managedSessionService.getSession(sessionId);
+            const session = await managedSessionService.getSession(sessionId);
             if (!session) return null;
             return {
               status: session.status,
@@ -3693,7 +3716,7 @@ if (isMacSafeStorageMigrationWorker) {
           executeWorkflowAction,
         });
         setupRoutineHandlers(routineService);
-        routineService.startWorkflowRuntime();
+        await routineService.startWorkflowRuntime();
         workflowStarterWatcher = new GoogleWorkspaceWorkflowStarterWatcher(db, routineService);
         workflowStarterWatcher.start();
         currentTriggerService.setFireInterceptor((trigger, event) =>
@@ -3713,7 +3736,9 @@ if (isMacSafeStorageMigrationWorker) {
         agentDaemon.on("task_cancelled", refreshRoutineRunsForTask);
         agentDaemon.on("task_status", refreshRoutineRunsForTask);
         setHookAgentDispatchObserver((payload) => {
-          routineService?.recordApiTriggerDispatch(payload);
+          void routineService?.recordApiTriggerDispatch(payload).catch((error) => {
+            logger.warn("Failed to record a routine API dispatch:", error);
+          });
         });
         setHookWorkflowDispatchObserver(async ({ routineId, payload, metadata }) => {
           if (!routineService) throw new Error("Routine service is not available");
@@ -3746,20 +3771,24 @@ if (isMacSafeStorageMigrationWorker) {
               })),
           getDefaultWorkspaceId: () => resolveDefaultWorkspace()?.id ?? TEMP_WORKSPACE_ID,
           recordActivity: ({ workspaceId, activityType, title, description, metadata }) => {
-            activityRepo.create({
+            void activityRepo
+              .create({
               workspaceId,
               actorType: "system",
               activityType,
               title,
               description,
               metadata,
-            });
+            })
+              .catch((error: unknown) => logger.warn("Failed to record activity:", error));
           },
           emitTrigger: (event) => {
             void currentTriggerService.evaluateEvent(event);
           },
           wakeHeartbeats: ({ text, mode }) => {
-            submitHeartbeatSignalForAll({ text, mode, source: "hook" });
+            void submitHeartbeatSignalForAll({ text, mode, source: "hook" }).catch((error) => {
+              logger.warn("Failed to wake heartbeats:", error);
+            });
           },
           captureAwarenessEvent: ({
             source,
@@ -3789,7 +3818,7 @@ if (isMacSafeStorageMigrationWorker) {
           {
             getRecentTasks: (_workspaceId, _sinceMs) => {
               try {
-                const taskRepo = new TaskRepository(db);
+                const taskRepo = new TaskStore(db);
                 return (taskRepo.findByWorkspace(_workspaceId, 200) || []).filter(
                   (task) => typeof task.createdAt === "number" && task.createdAt >= _sinceMs,
                 );
@@ -3797,18 +3826,15 @@ if (isMacSafeStorageMigrationWorker) {
                 return [];
               }
             },
-            searchMemory: (workspaceId, query, limit) => {
-              try {
-                return MemoryService.search(workspaceId, query, limit).map((memory) => ({
-                  summary: memory.snippet,
-                  content: memory.snippet,
-                  snippet: memory.snippet,
-                  type: memory.type,
-                }));
-              } catch {
-                return [];
-              }
-            },
+            // Async (DB4): searches in the FTS worker when it runs. A failure skips the
+            // briefing section with a logged error instead of showing no memories.
+            searchMemory: async (workspaceId, query, limit) =>
+              (await MemoryService.searchAsync(workspaceId, query, limit)).map((memory) => ({
+                summary: memory.snippet,
+                content: memory.snippet,
+                snippet: memory.snippet,
+                type: memory.type,
+              })),
             refreshSuggestions: async (workspaceId) => {
               await ProactiveSuggestionsService.generateAll(workspaceId);
             },
@@ -3866,12 +3892,11 @@ if (isMacSafeStorageMigrationWorker) {
         if (!startupQuietMode) {
           deferStartupTask("daily-briefing-schedule-sync", async () => {
             if (!cronService) return;
-            const configuredRows = db
-              .prepare("SELECT workspace_id FROM briefing_config")
-              .all() as Array<{ workspace_id: string }>;
+            const configuredWorkspaceIds = dailyBriefingService
+              ? await dailyBriefingService.configuredWorkspaceIds()
+              : [];
             const targetWorkspaceIds = new Set(
-              configuredRows
-                .map((row) => row.workspace_id)
+              configuredWorkspaceIds
                 .filter((workspaceId) => typeof workspaceId === "string" && workspaceId.length > 0),
             );
             const jobs = await cronService.list({ includeDisabled: true });
@@ -3888,7 +3913,7 @@ if (isMacSafeStorageMigrationWorker) {
               await syncDailyBriefingCronJob(
                 cronService,
                 workspaceId,
-                activeDailyBriefingService.getConfig(workspaceId),
+                await activeDailyBriefingService.getConfig(workspaceId),
               );
             }
           });
@@ -3899,7 +3924,7 @@ if (isMacSafeStorageMigrationWorker) {
           {
             getWorkspacePath: (wsId) => {
               try {
-                const wsRepo = new WorkspaceRepository(db);
+                const wsRepo = new WorkspaceStore(db);
                 const ws =
                   (wsId ? wsRepo.findById(wsId) : null) ||
                   wsRepo
@@ -3965,8 +3990,8 @@ if (isMacSafeStorageMigrationWorker) {
           }
         };
 
-        const webAccessTaskRepo = new TaskRepository(db);
-        const webAccessWorkspaceRepo = new WorkspaceRepository(db);
+        const webAccessTaskRepo = new TaskStore(db);
+        const webAccessWorkspaceRepo = new WorkspaceStore(db);
 
         const getDefaultWebWorkspaceId = (): string => {
           const firstWorkspace = webAccessWorkspaceRepo
@@ -4184,7 +4209,7 @@ if (isMacSafeStorageMigrationWorker) {
         // Hook triggers into gateway message events
         channelGateway.onEvent((event) => {
           if (event.type === "message:received" && event.data) {
-            eventTriggerService?.evaluateEvent({
+            void eventTriggerService?.evaluateEvent({
               source: "channel_message",
               fields: {
                 channelType: event.channel || "",
@@ -4205,7 +4230,7 @@ if (isMacSafeStorageMigrationWorker) {
         // Show migration notification after window is ready
         if (migrationResult.migrated && migrationResult.migratedKeys.length > 0) {
           mainWindow.webContents.once("did-finish-load", () => {
-            dialog.showMessageBox(mainWindow!, {
+            void dialog.showMessageBox(mainWindow!, {
               type: "info",
               title: "Configuration Migrated",
               message: "Your API credentials have been migrated",
@@ -4395,7 +4420,21 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         { name: "local previews", run: () => getLocalPreviewProcessService().stopAll() },
-        { name: "database", requiresQuiescence: true, run: () => dbManager?.close() },
+        { name: "host perf monitor", run: () => hostPerfMonitor?.stop() },
+        {
+          name: "database worker",
+          requiresQuiescence: true,
+          run: async () => {
+            databaseWorkerDrained = (await stopDatabaseWorker()).drained;
+          },
+        },
+        {
+          name: "database",
+          requiresQuiescence: true,
+          // A failed step or an undrained worker leaves this run marked incomplete, so
+          // the next start reports it (DB6).
+          run: ({ quiescent }) => dbManager?.close({ clean: quiescent && databaseWorkerDrained }),
+        },
       ],
       (name, error) => console.error(`[Main] Failed to stop ${name}:`, error),
     );
@@ -4529,7 +4568,7 @@ if (isMacSafeStorageMigrationWorker) {
       });
     };
 
-    ipcMain.handle(IPC_CHANNELS.ANNOTATION_CREATE, (_event, data: Any) => {
+    ipcMain.handle(IPC_CHANNELS.ANNOTATION_CREATE, async (_event, data: Any) => {
       if (!data || typeof data !== "object") {
         throw new Error("Invalid annotation payload");
       }
@@ -4544,7 +4583,7 @@ if (isMacSafeStorageMigrationWorker) {
         throw new Error("Annotation targetRef is required");
       }
 
-      const annotation = getAnnotationRepo().create({
+      const annotation = await getAnnotationRepo().create({
         taskId,
         workspaceId: typeof data.workspaceId === "string" ? data.workspaceId : undefined,
         surfaceType: surfaceType as Any,
@@ -4562,9 +4601,9 @@ if (isMacSafeStorageMigrationWorker) {
       return annotation;
     });
 
-    ipcMain.handle(IPC_CHANNELS.ANNOTATION_LIST, (_event, query: Any) => {
+    ipcMain.handle(IPC_CHANNELS.ANNOTATION_LIST, async (_event, query: Any) => {
       const normalized = query && typeof query === "object" ? query : {};
-      return getAnnotationRepo().list({
+      return await getAnnotationRepo().list({
         taskId: typeof normalized.taskId === "string" ? normalized.taskId : undefined,
         workspaceId:
           typeof normalized.workspaceId === "string" ? normalized.workspaceId : undefined,
@@ -4576,19 +4615,19 @@ if (isMacSafeStorageMigrationWorker) {
       });
     });
 
-    ipcMain.handle(IPC_CHANNELS.ANNOTATION_UPDATE, (_event, data: Any) => {
+    ipcMain.handle(IPC_CHANNELS.ANNOTATION_UPDATE, async (_event, data: Any) => {
       const id = typeof data?.id === "string" ? data.id.trim() : "";
       if (!id) throw new Error("Annotation id is required");
       const patch = data?.patch && typeof data.patch === "object" ? data.patch : {};
-      const annotation = getAnnotationRepo().update(id, patch);
+      const annotation = await getAnnotationRepo().update(id, patch);
       if (annotation) logAnnotationEvent("annotation_updated", annotation);
       return annotation || null;
     });
 
-    ipcMain.handle(IPC_CHANNELS.ANNOTATION_RESOLVE, (_event, data: Any) => {
+    ipcMain.handle(IPC_CHANNELS.ANNOTATION_RESOLVE, async (_event, data: Any) => {
       const id = typeof data?.id === "string" ? data.id.trim() : "";
       if (!id) throw new Error("Annotation id is required");
-      const annotation = getAnnotationRepo().update(id, {
+      const annotation = await getAnnotationRepo().update(id, {
         status: "resolved",
         resolvedByEventId:
           typeof data?.resolvedByEventId === "string" ? data.resolvedByEventId : undefined,
@@ -4597,10 +4636,10 @@ if (isMacSafeStorageMigrationWorker) {
       return annotation || null;
     });
 
-    ipcMain.handle(IPC_CHANNELS.ANNOTATION_DISMISS, (_event, data: Any) => {
+    ipcMain.handle(IPC_CHANNELS.ANNOTATION_DISMISS, async (_event, data: Any) => {
       const id = typeof data?.id === "string" ? data.id.trim() : "";
       if (!id) throw new Error("Annotation id is required");
-      const annotation = getAnnotationRepo().update(id, { status: "dismissed" });
+      const annotation = await getAnnotationRepo().update(id, { status: "dismissed" });
       if (annotation) logAnnotationEvent("annotation_dismissed", annotation);
       return annotation || null;
     });
@@ -4638,7 +4677,7 @@ if (isMacSafeStorageMigrationWorker) {
 
       const recentWorkspaceCandidates = (() => {
         try {
-          return new WorkspaceRepository(dbManager.getDatabase())
+          return new WorkspaceStore(dbManager.getDatabase())
             .findAll()
             .filter((workspace) => {
               if (!workspace?.path || workspace.isTemp || isTempWorkspaceId(workspace.id)) {

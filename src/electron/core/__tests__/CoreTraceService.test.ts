@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CoreTraceService } from "../CoreTraceService";
 
 describe("CoreTraceService", () => {
-  it("reuses an existing open trace instead of creating a duplicate", () => {
+  it("reuses an existing open trace instead of creating a duplicate", async () => {
     const existingTrace = {
       id: "trace-1",
       profileId: "profile-1",
@@ -23,7 +23,7 @@ describe("CoreTraceService", () => {
     };
     const service = new CoreTraceService(traceRepo as never, candidateRepo as never);
 
-    const result = service.startTrace({
+    const result = await service.startTrace({
       profileId: "profile-1",
       workspaceId: "workspace-1",
       targetKey: "agent:planner",
@@ -44,7 +44,7 @@ describe("CoreTraceService", () => {
     expect(traceRepo.create).not.toHaveBeenCalled();
   });
 
-  it("returns trace details with events and memory candidates", () => {
+  it("returns trace details with events and memory candidates", async () => {
     const trace = {
       id: "trace-2",
       profileId: "profile-2",
@@ -74,7 +74,7 @@ describe("CoreTraceService", () => {
     };
     const service = new CoreTraceService(traceRepo as never, candidateRepo as never);
 
-    expect(service.getTrace("trace-2")).toEqual({
+    expect(await service.getTrace("trace-2")).toEqual({
       trace,
       events,
       candidates,

@@ -2,7 +2,21 @@ import Database from "better-sqlite3";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import { usageLocalDateKey } from "../../shared/usageInsightsDates";
 import { UsageInsightsProjector } from "./UsageInsightsProjector";
+import { providerLogPayloadAt, routingPayloadAt } from "./usage-sql";
 import { calculateCost, getCacheTokenAccounting, isModelPriced } from "../agent/llm/pricing";
+import type { DatabaseClient } from "../database/async/DatabaseClient";
+
+/**
+ * How a report is computed, decided on the host (which owns the projector state) and run
+ * wherever the connection is: the host, or the reporting reader worker (DB4).
+ */
+export type UsageReportPlan =
+  | { kind: "fast" }
+  | {
+      kind: "duringBackfill";
+      watermarks: { taskWatermarkMs: number; eventWatermarkMs: number; llmWatermarkMs: number };
+    }
+  | { kind: "raw"; canonical: boolean };
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -774,6 +788,10 @@ export class UsageInsightsService {
     out.byProvider.set(provider, byProvider);
   }
 
+  /**
+   * The earliest task in scope. Synchronous on this connection; hosts call
+   * `earliestActivityMs`, which runs it as a report unit on the reporting reader (DB6).
+   */
   getEarliestActivityMs(workspaceId: string | null): number | null {
     const ws = wsFilter(workspaceId, "");
     const row = this.db
@@ -809,20 +827,78 @@ export class UsageInsightsService {
     return this.generateRawWindow(workspaceId, periodDays);
   }
 
+  /**
+   * The report computed in the reporting reader: the host decides the plan from the
+   * projector state and the scans run on the reader's connection. A reader failure is
+   * raised to the caller, never replaced by a host scan or an empty report.
+   */
+  async generateInReader(
+    reader: DatabaseClient,
+    workspaceId: string | null,
+    periodDays = 7,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<UsageInsights> {
+    const candidateProjector = UsageInsightsProjector.getIfInitialized();
+    const projector = candidateProjector?.isForDatabase(this.db) ? candidateProjector : null;
+    if (!projector) {
+      return reader.execute(
+        "usage.generateReport",
+        { workspaceId, periodDays, plan: { kind: "raw", canonical: false } },
+        { signal: options.signal },
+      );
+    }
+    projector.warm();
+    await projector.flushPendingRefreshesAsync();
+    const cacheKey = `${workspaceId || "__all__"}|${periodDays}|jev-ledger-v1`;
+    const cached = projector.getCachedReport<UsageInsights>(cacheKey);
+    if (cached) return cached;
+    const version = projector.getCacheVersion();
+    const plan: UsageReportPlan = projector.isBackfillComplete()
+      ? { kind: "fast" }
+      : { kind: "duringBackfill", watermarks: projector.getWatermarks() };
+    const result = await reader.execute(
+      "usage.generateReport",
+      { workspaceId, periodDays, plan },
+      { signal: options.signal },
+    );
+    projector.setCachedReport(cacheKey, result, version);
+    return result;
+  }
+
+  /**
+   * Run a report plan on this service's connection. `nowMs` pins the period end, so two
+   * computations of the same plan (host and reader, in parity checks) cover one window.
+   */
+  generateWithPlan(
+    workspaceId: string | null,
+    periodDays: number,
+    plan: UsageReportPlan,
+    nowMs = Date.now(),
+  ): UsageInsights {
+    if (plan.kind === "fast") return this.generateFast(workspaceId, periodDays, nowMs);
+    if (plan.kind === "duringBackfill") {
+      return this.generateDuringBackfill(workspaceId, periodDays, plan.watermarks, nowMs);
+    }
+    return this.generateRawWindow(workspaceId, periodDays, plan.canonical, nowMs);
+  }
+
   private generateDuringBackfill(
     workspaceId: string | null,
     periodDays: number,
-    projector: UsageInsightsProjector,
+    source:
+      | UsageInsightsProjector
+      | Extract<UsageReportPlan, { kind: "duringBackfill" }>["watermarks"],
+    now = Date.now(),
   ): UsageInsights {
-    const now = Date.now();
     const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
-    const { taskWatermarkMs, eventWatermarkMs, llmWatermarkMs } = projector.getWatermarks();
+    const { taskWatermarkMs, eventWatermarkMs, llmWatermarkMs } =
+      source instanceof UsageInsightsProjector ? source.getWatermarks() : source;
     const nonLlmWatermarkMs =
       taskWatermarkMs > 0 && eventWatermarkMs > 0 ? Math.min(taskWatermarkMs, eventWatermarkMs) : 0;
 
     if (llmWatermarkMs <= 0 && nonLlmWatermarkMs <= 0) {
-      return this.generateRawWindow(workspaceId, periodDays);
+      return this.generateRawWindow(workspaceId, periodDays, undefined, now);
     }
 
     const nonLlm =
@@ -925,12 +1001,18 @@ export class UsageInsightsService {
     };
   }
 
-  private generateRawWindow(workspaceId: string | null, periodDays = 7): UsageInsights {
-    const now = Date.now();
+  private generateRawWindow(
+    workspaceId: string | null,
+    periodDays = 7,
+    canonical?: boolean,
+    now = Date.now(),
+  ): UsageInsights {
     const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
-    const candidateProjector = UsageInsightsProjector.getIfInitialized();
-    const projector = candidateProjector?.isForDatabase(this.db) ? candidateProjector : null;
+    const candidateProjector =
+      canonical === undefined ? UsageInsightsProjector.getIfInitialized() : null;
+    const projector =
+      canonical ?? (candidateProjector?.isForDatabase(this.db) ? candidateProjector : null);
 
     const taskMetrics = this.getTaskMetrics(workspaceId, periodStart, periodEnd);
     const llmScan = projector
@@ -1008,8 +1090,11 @@ export class UsageInsightsService {
     };
   }
 
-  private generateFast(workspaceId: string | null, periodDays = 7): UsageInsights {
-    const now = Date.now();
+  private generateFast(
+    workspaceId: string | null,
+    periodDays = 7,
+    now = Date.now(),
+  ): UsageInsights {
     const periodStart = now - periodDays * 24 * 60 * 60 * 1000;
     const periodEnd = now;
 
@@ -2156,25 +2241,8 @@ export class UsageInsightsService {
              te.timestamp as timestamp,
              te.payload as payload,
              t.agent_config as agent_config,
-             (
-               SELECT te2.payload
-               FROM task_events te2
-               WHERE te2.task_id = te.task_id
-                 AND (te2.type = 'llm_routing_changed' OR te2.legacy_type = 'llm_routing_changed')
-                 AND te2.timestamp <= te.timestamp
-               ORDER BY te2.timestamp DESC
-               LIMIT 1
-             ) as routing_payload,
-             (
-               SELECT te3.payload
-               FROM task_events te3
-               WHERE te3.task_id = te.task_id
-                 AND (te3.type = 'log' OR te3.legacy_type = 'log')
-                 AND te3.timestamp <= te.timestamp
-                 AND te3.payload LIKE '%provider=%'
-               ORDER BY te3.timestamp DESC
-               LIMIT 1
-             ) as provider_log_payload
+             ${routingPayloadAt("te")} as routing_payload,
+             ${providerLogPayloadAt("te")} as provider_log_payload
            FROM task_events te
            JOIN tasks t ON te.task_id = t.id
            WHERE ${ws.clause}(te.type = 'llm_usage' OR te.legacy_type = 'llm_usage')
@@ -2242,25 +2310,8 @@ export class UsageInsightsService {
                  lce.cached_tokens,
                  lce.cost,
                  t.agent_config as agent_config,
-                 (
-                   SELECT te.payload
-                   FROM task_events te
-                   WHERE te.task_id = lce.task_id
-                     AND (te.type = 'llm_routing_changed' OR te.legacy_type = 'llm_routing_changed')
-                     AND te.timestamp <= lce.timestamp
-                   ORDER BY te.timestamp DESC
-                   LIMIT 1
-                 ) as routing_payload,
-                 (
-                   SELECT te.payload
-                   FROM task_events te
-                   WHERE te.task_id = lce.task_id
-                     AND (te.type = 'log' OR te.legacy_type = 'log')
-                     AND te.timestamp <= lce.timestamp
-                     AND te.payload LIKE '%provider=%'
-                   ORDER BY te.timestamp DESC
-                   LIMIT 1
-                 ) as provider_log_payload
+                 ${routingPayloadAt("lce")} as routing_payload,
+                 ${providerLogPayloadAt("lce")} as provider_log_payload
                FROM llm_call_events lce
                LEFT JOIN tasks t ON t.id = lce.task_id
                WHERE success = 1
@@ -2294,25 +2345,8 @@ export class UsageInsightsService {
                  lce.cached_tokens,
                  lce.cost,
                  t.agent_config as agent_config,
-                 (
-                   SELECT te.payload
-                   FROM task_events te
-                   WHERE te.task_id = lce.task_id
-                     AND (te.type = 'llm_routing_changed' OR te.legacy_type = 'llm_routing_changed')
-                     AND te.timestamp <= lce.timestamp
-                   ORDER BY te.timestamp DESC
-                   LIMIT 1
-                 ) as routing_payload,
-                 (
-                   SELECT te.payload
-                   FROM task_events te
-                   WHERE te.task_id = lce.task_id
-                     AND (te.type = 'log' OR te.legacy_type = 'log')
-                     AND te.timestamp <= lce.timestamp
-                     AND te.payload LIKE '%provider=%'
-                   ORDER BY te.timestamp DESC
-                   LIMIT 1
-                 ) as provider_log_payload
+                 ${routingPayloadAt("lce")} as routing_payload,
+                 ${providerLogPayloadAt("lce")} as provider_log_payload
                FROM llm_call_events lce
                LEFT JOIN tasks t ON t.id = lce.task_id
                WHERE success = 1

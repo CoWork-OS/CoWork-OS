@@ -73,6 +73,19 @@ function createMockRepos() {
         updatedAt: Date.now(),
       });
     },
+    insertCaptured: (write: {
+      memory: Omit<Memory, "summary" | "taskId"> & {
+        summary: string | null;
+        taskId: string | null;
+      };
+    }) => {
+      mockMemories.set(write.memory.id, {
+        ...write.memory,
+        summary: write.memory.summary ?? undefined,
+        taskId: write.memory.taskId ?? undefined,
+      } as Memory);
+      return { observationStored: false };
+    },
     findById: (id: string): Memory | undefined => mockMemories.get(id),
     findByIds: (ids: string[]): Memory[] =>
       ids.map((id) => mockMemories.get(id)).filter(Boolean) as Memory[],
@@ -93,7 +106,7 @@ function createMockRepos() {
       }
       return count;
     },
-    getApproxStorageBytes: (_workspaceId: string): number => 0,
+    getApproxStorageBytes: vi.fn((_workspaceId: string): number => 0),
     getOldestForWorkspace: (_workspaceId: string, _limit = 200) =>
       [] as Array<{ id: string; createdAt: number; approxBytes: number }>,
     deleteOlderThan: (_workspaceId: string, _cutoffTimestamp: number): number => 0,
@@ -117,6 +130,9 @@ function createMockRepos() {
       return count;
     },
     searchLocalForPromptRecall: vi.fn(() => []),
+    search: vi.fn(() => []),
+    searchImportedGlobal: vi.fn(() => []),
+    searchByContentMarker: vi.fn(() => []),
   };
 
   const embeddingRepo = {
@@ -255,7 +271,7 @@ describe("MemoryService compression optimization", () => {
     expect(mockProvider.createMessage).toHaveBeenCalledTimes(1);
     expect(MemoryService.getCompressionDiagnostics(workspaceId).llmCalls).toBe(1);
 
-    const recent = MemoryService.getRecent(workspaceId, 10);
+    const recent = await MemoryService.getRecent(workspaceId, 10);
     expect(recent.some((memory) => memory.type === "summary")).toBe(true);
   });
 
@@ -300,6 +316,112 @@ describe("MemoryService compression optimization", () => {
       queries: 1,
       workerUnavailable: 1,
       workerFailures: 0,
+    });
+  });
+
+  describe("async search with the FTS worker", () => {
+    const hostFtsSpies = () => {
+      const repo = (MemoryService as Any).memoryRepo;
+      return [repo.search, repo.searchImportedGlobal, repo.searchByContentMarker];
+    };
+
+    it("runs the whole hybrid search in the worker, with no host FTS or ranking", async () => {
+      const hit = {
+        id: "m-1",
+        snippet: "hit",
+        type: "observation",
+        relevanceScore: 1,
+        createdAt: 1,
+        source: "db",
+      };
+      const worker = { hybridSearch: vi.fn(async () => [hit]) };
+      (MemoryService as Any).ftsWorker = worker;
+      const rankSpy = vi.spyOn(MemoryService as Any, "rankHybrid");
+
+      await expect(MemoryService.searchAsync(workspaceId, "release notes", 5)).resolves.toEqual([
+        hit,
+      ]);
+      expect(worker.hybridSearch).toHaveBeenCalledWith(workspaceId, "release notes", 5, true);
+      for (const spy of hostFtsSpies()) expect(spy).not.toHaveBeenCalled();
+      expect(rankSpy).not.toHaveBeenCalled();
+    });
+
+    it("raises a worker failure instead of searching on the host or returning nothing", async () => {
+      (MemoryService as Any).ftsWorker = {
+        hybridSearch: vi.fn(async () => {
+          throw new Error("worker down");
+        }),
+      };
+      const rankSpy = vi.spyOn(MemoryService as Any, "rankHybrid");
+
+      await expect(MemoryService.searchAsync(workspaceId, "release notes", 5)).rejects.toThrow(
+        "Memory search is unavailable: worker down",
+      );
+      for (const spy of hostFtsSpies()) expect(spy).not.toHaveBeenCalled();
+      expect(rankSpy).not.toHaveBeenCalled();
+    });
+
+    it("treats an empty worker marker search as final", async () => {
+      const worker = { searchByContentMarker: vi.fn(async () => []) };
+      (MemoryService as Any).ftsWorker = worker;
+
+      await expect(
+        MemoryService.searchByContentMarkerAsync(workspaceId, "[suggestion-feedback:acted_on]", 2),
+      ).resolves.toEqual([]);
+      expect(worker.searchByContentMarker).toHaveBeenCalledTimes(1);
+      for (const spy of hostFtsSpies()) expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("propagates worker marker search failures instead of scanning on the host", async () => {
+      (MemoryService as Any).ftsWorker = {
+        searchByContentMarker: vi.fn(async () => {
+          throw new Error("worker down");
+        }),
+      };
+
+      await expect(
+        MemoryService.searchByContentMarkerAsync(workspaceId, "[marker]", 2),
+      ).rejects.toThrow("worker down");
+      for (const spy of hostFtsSpies()) expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("keeps the synchronous hybrid search when no worker is running", async () => {
+      await MemoryService.searchAsync(workspaceId, "release notes", 5);
+      const repo = (MemoryService as Any).memoryRepo;
+      expect(repo.search).toHaveBeenCalledWith(workspaceId, "release notes", 5, true);
+      expect(repo.searchImportedGlobal).toHaveBeenCalledWith("release notes", 5, true);
+    });
+  });
+
+  describe("storage cap measurement", () => {
+    const measure = () => (MemoryService as Any).memoryRepo.getApproxStorageBytes;
+    const capture = (content: string) =>
+      MemoryService.capture(workspaceId, undefined, "observation", content, false, {
+        origin: "heartbeat",
+        batchable: false,
+        priority: "low",
+      });
+
+    it("measures once, then trusts the running estimate well below the cap", async () => {
+      await capture("first observation");
+      await capture("second observation");
+      await capture("third observation");
+      expect(measure()).toHaveBeenCalledTimes(1);
+    });
+
+    it("measures again once the estimate nears the cap", async () => {
+      mockSettings.set(workspaceId, { ...createDefaultSettings(workspaceId), maxStorageMb: 0.001 });
+      await capture("small");
+      // 1,049-byte cap: 900 added bytes cross the 80% headroom.
+      await capture("x".repeat(900));
+      expect(measure()).toHaveBeenCalledTimes(2);
+    });
+
+    it("measures again after the estimate expires", async () => {
+      await capture("first observation");
+      vi.setSystemTime(Date.now() + 5 * 60 * 1000);
+      await capture("second observation");
+      expect(measure()).toHaveBeenCalledTimes(2);
     });
   });
 });

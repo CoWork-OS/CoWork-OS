@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { KnowledgeGraphRepository } from "./KnowledgeGraphRepository";
+import { createMemoryStatementPort } from "../memory/memory-statement-port";
 import type { MailboxEvent } from "../../shared/mailbox";
 import type {
   KGEntity,
@@ -50,7 +51,7 @@ export class KnowledgeGraphService {
 
   static initialize(db: Database.Database): void {
     if (this.initialized) return;
-    this.repo = new KnowledgeGraphRepository(db);
+    this.repo = new KnowledgeGraphRepository(createMemoryStatementPort(db));
     this.initialized = true;
   }
 
@@ -67,54 +68,17 @@ export class KnowledgeGraphService {
 
   // ─── Entity Operations ────────────────────────────────────────────
 
+  /** Create an entity, or merge into the existing one of the same type and name. */
   static createEntity(
     workspaceId: string,
     input: CreateEntityInput,
     source: "manual" | "auto" | "agent" = "agent",
     sourceTaskId?: string,
-  ): KGEntity {
-    const repo = this.getRepo();
-
-    // Resolve or create entity type
-    const entityType = repo.getOrCreateEntityType(workspaceId, input.entityType);
-
-    // Check for existing entity (upsert: update if exists)
-    const existing = repo.getEntityByName(workspaceId, entityType.id, input.name.trim());
-    if (existing) {
-      // Merge: update description if provided, boost confidence
-      const patch: {
-        description?: string;
-        properties?: Record<string, unknown>;
-        confidence?: number;
-      } = {};
-      if (input.description && input.description !== existing.description) {
-        patch.description = input.description;
-      }
-      if (input.properties && Object.keys(input.properties).length > 0) {
-        patch.properties = { ...existing.properties, ...input.properties };
-      }
-      // Boost confidence on repeated creation (max 1.0)
-      patch.confidence = Math.min(1.0, (existing.confidence || 0.5) + 0.1);
-
-      if (Object.keys(patch).length > 0) {
-        return repo.updateEntity(existing.id, patch) || existing;
-      }
-      return existing;
-    }
-
-    return repo.createEntity(
-      workspaceId,
-      entityType.id,
-      input.name,
-      input.description,
-      input.properties,
-      input.confidence ?? (source === "auto" ? 0.85 : 1.0),
-      source,
-      sourceTaskId,
-    );
+  ): Promise<KGEntity> {
+    return this.getRepo().upsertEntity(workspaceId, input, source, sourceTaskId);
   }
 
-  static updateEntity(input: UpdateEntityInput): KGEntity | undefined {
+  static updateEntity(input: UpdateEntityInput): Promise<KGEntity | undefined> {
     const repo = this.getRepo();
     return repo.updateEntity(input.entityId, {
       description: input.description,
@@ -123,93 +87,31 @@ export class KnowledgeGraphService {
     });
   }
 
-  static deleteEntity(entityId: string): boolean {
+  static deleteEntity(entityId: string): Promise<boolean> {
     return this.getRepo().deleteEntity(entityId);
   }
 
-  static getEntity(entityId: string): KGEntity | undefined {
+  static getEntity(entityId: string): Promise<KGEntity | undefined> {
     return this.getRepo().getEntity(entityId);
   }
 
   // ─── Edge Operations ──────────────────────────────────────────────
 
+  /** Create an edge between existing entities, or return the matching current one. */
   static createEdge(
     workspaceId: string,
     input: CreateEdgeInput,
     source: "manual" | "auto" | "agent" = "agent",
     sourceTaskId?: string,
-  ): KGEdge {
-    const repo = this.getRepo();
-
-    // Validate entities exist
-    const sourceEntity = repo.getEntity(input.sourceEntityId);
-    if (!sourceEntity) {
-      throw new Error(`Source entity not found: ${input.sourceEntityId}`);
-    }
-    const targetEntity = repo.getEntity(input.targetEntityId);
-    if (!targetEntity) {
-      throw new Error(`Target entity not found: ${input.targetEntityId}`);
-    }
-
-    // Prevent self-loops
-    if (input.sourceEntityId === input.targetEntityId) {
-      throw new Error("Cannot create an edge from an entity to itself");
-    }
-
-    const now = Date.now();
-    const normalizedValidFrom = normalizeEdgeTime(input.validFrom, now);
-    const normalizedValidTo = Number.isFinite(input.validTo)
-      ? (input.validTo as number)
-      : undefined;
-    if (normalizedValidTo !== undefined && normalizedValidFrom >= normalizedValidTo) {
-      throw new Error("valid_to must be greater than valid_from");
-    }
-
-    // Check for duplicate edge
-    const existingEdges = repo.getRelationEdges(
-      workspaceId,
-      input.sourceEntityId,
-      input.targetEntityId,
-      input.edgeType,
-    );
-    const duplicateCurrent = existingEdges.find(
-      (edge) =>
-        edge.validTo === undefined &&
-        normalizedValidTo === undefined &&
-        input.validFrom === undefined &&
-        (edge.validFrom ?? edge.createdAt) <= now,
-    );
-    if (duplicateCurrent) {
-      return duplicateCurrent;
-    }
-    const duplicateInterval = existingEdges.find(
-      (edge) =>
-        (edge.validFrom ?? edge.createdAt) === normalizedValidFrom &&
-        (edge.validTo ?? undefined) === normalizedValidTo,
-    );
-    if (duplicateInterval) {
-      return duplicateInterval;
-    }
-
-    return repo.createEdge(
-      workspaceId,
-      input.sourceEntityId,
-      input.targetEntityId,
-      input.edgeType,
-      input.properties,
-      input.confidence ?? 1.0,
-      source,
-      sourceTaskId,
-      normalizedValidFrom,
-      normalizedValidTo,
-    );
+  ): Promise<KGEdge> {
+    return this.getRepo().createEdgeChecked(workspaceId, input, source, sourceTaskId, Date.now());
   }
 
-  static deleteEdge(edgeId: string): boolean {
+  static deleteEdge(edgeId: string): Promise<boolean> {
     return this.getRepo().deleteEdge(edgeId);
   }
 
-  static invalidateEdge(edgeId: string, validTo = Date.now()): KGEdge | undefined {
+  static invalidateEdge(edgeId: string, validTo = Date.now()): Promise<KGEdge | undefined> {
     return this.getRepo().invalidateEdge(edgeId, validTo);
   }
 
@@ -219,21 +121,13 @@ export class KnowledgeGraphService {
     input: AddObservationInput,
     source: "manual" | "auto" | "agent" = "agent",
     sourceTaskId?: string,
-  ): KGObservation {
-    const repo = this.getRepo();
-
-    // Validate entity exists
-    const entity = repo.getEntity(input.entityId);
-    if (!entity) {
-      throw new Error(`Entity not found: ${input.entityId}`);
-    }
-
-    return repo.addObservation(input.entityId, input.content, source, sourceTaskId);
+  ): Promise<KGObservation> {
+    return this.getRepo().addObservationChecked(input, source, sourceTaskId);
   }
 
   // ─── Search & Traversal ───────────────────────────────────────────
 
-  static search(workspaceId: string, query: string, limit = 10): KGSearchResult[] {
+  static search(workspaceId: string, query: string, limit = 10): Promise<KGSearchResult[]> {
     return this.getRepo().searchEntities(workspaceId, query, limit);
   }
 
@@ -242,15 +136,15 @@ export class KnowledgeGraphService {
     depth = 1,
     edgeTypes?: string[],
     asOf?: number,
-  ): KGNeighborResult[] {
+  ): Promise<KGNeighborResult[]> {
     return this.getRepo().getNeighbors(entityId, depth, edgeTypes, asOf);
   }
 
-  static getSubgraph(entityIds: string[], asOf?: number): KGSubgraph {
+  static getSubgraph(entityIds: string[], asOf?: number): Promise<KGSubgraph> {
     return this.getRepo().getSubgraph(entityIds, asOf);
   }
 
-  static getStats(workspaceId: string): KGStats {
+  static getStats(workspaceId: string): Promise<KGStats> {
     return this.getRepo().getStats(workspaceId);
   }
 
@@ -258,11 +152,11 @@ export class KnowledgeGraphService {
     return this.getRepo().getEntityTypes(workspaceId);
   }
 
-  static getObservations(entityId: string, limit = 20): KGObservation[] {
+  static getObservations(entityId: string, limit = 20): Promise<KGObservation[]> {
     return this.getRepo().getObservations(entityId, limit);
   }
 
-  static ingestMailboxEvent(workspaceId: string, event: MailboxEvent): void {
+  static async ingestMailboxEvent(workspaceId: string, event: MailboxEvent): Promise<void> {
     if (!this.initialized) return;
     try {
       const payload = event.payload || {};
@@ -294,7 +188,7 @@ export class KnowledgeGraphService {
 
       const person =
         primaryEmail || primaryName
-          ? this.createEntity(
+          ? await this.createEntity(
               workspaceId,
               {
                 entityType: "person",
@@ -314,7 +208,7 @@ export class KnowledgeGraphService {
 
       const org =
         company && company.length > 1
-          ? this.createEntity(
+          ? await this.createEntity(
               workspaceId,
               {
                 entityType: "organization",
@@ -334,7 +228,7 @@ export class KnowledgeGraphService {
       const projectName = projectHints[0];
       const project =
         projectName && projectName.length > 2
-          ? this.createEntity(
+          ? await this.createEntity(
               workspaceId,
               {
                 entityType: "project",
@@ -354,7 +248,7 @@ export class KnowledgeGraphService {
 
       if (person && org) {
         try {
-          this.createEdge(
+          await this.createEdge(
             workspaceId,
             {
               sourceEntityId: person.id,
@@ -373,7 +267,7 @@ export class KnowledgeGraphService {
 
       if (person && project) {
         try {
-          this.createEdge(
+          await this.createEdge(
             workspaceId,
             {
               sourceEntityId: person.id,
@@ -403,7 +297,7 @@ export class KnowledgeGraphService {
       );
 
       if (person && observationContent) {
-        this.addObservation(
+        await this.addObservation(
           {
             entityId: person.id,
             content: observationContent,
@@ -413,7 +307,7 @@ export class KnowledgeGraphService {
         );
       }
       if (org && observationContent) {
-        this.addObservation(
+        await this.addObservation(
           {
             entityId: org.id,
             content: observationContent,
@@ -423,7 +317,7 @@ export class KnowledgeGraphService {
         );
       }
       if (project && observationContent) {
-        this.addObservation(
+        await this.addObservation(
           {
             entityId: project.id,
             content: observationContent,
@@ -443,19 +337,25 @@ export class KnowledgeGraphService {
    * Build a concise knowledge graph context string for injection into an agent's
    * system prompt. Searches for entities relevant to the task prompt.
    */
-  static buildContextForTask(workspaceId: string, taskPrompt: string): string {
+  static async buildContextForTask(workspaceId: string, taskPrompt: string): Promise<string> {
     if (!this.initialized) return "";
 
     try {
       const temporalKnowledgeEnabled =
         MemoryFeaturesManager.loadSettings().temporalKnowledgeEnabled !== false;
       const asOf = temporalKnowledgeEnabled ? Date.now() : undefined;
-      const results = this.getRepo().searchEntities(workspaceId, taskPrompt, MAX_CONTEXT_ENTITIES);
+      // One snapshot: matching entities with their immediate relationships.
+      const results = await this.getRepo().contextEntities(
+        workspaceId,
+        taskPrompt,
+        MAX_CONTEXT_ENTITIES,
+        asOf,
+      );
       if (results.length === 0) return "";
 
       const lines: string[] = ["KNOWLEDGE GRAPH (known entities and relationships):"];
 
-      for (const result of results) {
+      for (const { result, neighbors } of results) {
         const e = result.entity;
         const typeName = e.entityTypeName || "entity";
         let line = `- [${typeName}] ${e.name}`;
@@ -464,7 +364,6 @@ export class KnowledgeGraphService {
         }
 
         // Add immediate relationships
-        const neighbors = this.getRepo().getNeighbors(e.id, 1, undefined, asOf);
         if (neighbors.length > 0) {
           const rels = neighbors
             .slice(0, 3)
@@ -497,12 +396,12 @@ export class KnowledgeGraphService {
    * pattern matching. This is a best-effort extraction that runs after
    * task completion. No LLM calls — uses regex-based heuristics.
    */
-  static extractEntitiesFromTaskResult(
+  static async extractEntitiesFromTaskResult(
     workspaceId: string,
     taskId: string,
     taskPrompt: string,
     resultSummary: string,
-  ): void {
+  ): Promise<void> {
     if (!this.initialized || !resultSummary) return;
 
     try {
@@ -515,7 +414,7 @@ export class KnowledgeGraphService {
 
       for (const tech of techMatches.slice(0, 5)) {
         try {
-          this.createEntity(
+          await this.createEntity(
             workspaceId,
             { entityType: "technology", name: tech, description: `Technology: ${tech}` },
             "auto",
@@ -533,7 +432,7 @@ export class KnowledgeGraphService {
 
       for (const filePath of fileMatches.slice(0, 5)) {
         try {
-          this.createEntity(
+          await this.createEntity(
             workspaceId,
             { entityType: "file", name: filePath, description: `File: ${filePath}` },
             "auto",
@@ -550,7 +449,7 @@ export class KnowledgeGraphService {
 
       for (const endpoint of apiMatches.slice(0, 3)) {
         try {
-          this.createEntity(
+          await this.createEntity(
             workspaceId,
             {
               entityType: "api_endpoint",
@@ -566,7 +465,7 @@ export class KnowledgeGraphService {
       }
 
       // Run decay periodically
-      this.maybeRunDecay(workspaceId);
+      await this.maybeRunDecay(workspaceId);
     } catch {
       // Non-critical — don't disrupt task flow
     }
@@ -577,20 +476,20 @@ export class KnowledgeGraphService {
   /**
    * Run confidence decay for auto-extracted entities if enough time has passed.
    */
-  private static maybeRunDecay(workspaceId: string): void {
+  private static async maybeRunDecay(workspaceId: string): Promise<void> {
     const lastRun = this.lastDecayRun.get(workspaceId) || 0;
     if (Date.now() - lastRun < DECAY_INTERVAL_MS) return;
 
     try {
-      this.getRepo().applyConfidenceDecay(workspaceId);
+      await this.getRepo().applyConfidenceDecay(workspaceId);
       this.lastDecayRun.set(workspaceId, Date.now());
     } catch {
       // best-effort
     }
   }
 
-  static runDecay(workspaceId: string): number {
-    const updated = this.getRepo().applyConfidenceDecay(workspaceId);
+  static async runDecay(workspaceId: string): Promise<number> {
+    const updated = await this.getRepo().applyConfidenceDecay(workspaceId);
     this.lastDecayRun.set(workspaceId, Date.now());
     return updated;
   }

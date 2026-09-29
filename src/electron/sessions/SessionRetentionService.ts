@@ -2,10 +2,10 @@ import type { Task, TaskEvent, Workspace } from "../../shared/types";
 import { isTerminalTaskStatus } from "../../shared/task-status";
 import {
   TaskEventRepository,
-  TaskRepository,
-  TaskSessionMetadataRepository,
+  TaskStore,
+  TaskSessionMetadataStore,
   type TaskSessionMetadata,
-  WorkspaceRepository,
+  WorkspaceStore,
 } from "../database/repositories";
 import {
   QueuedAttachmentStore,
@@ -71,10 +71,10 @@ export interface SessionPruneResult {
 
 export class SessionRetentionService {
   constructor(
-    private readonly taskRepo: TaskRepository,
+    private readonly taskRepo: TaskStore,
     private readonly eventRepo: TaskEventRepository,
-    private readonly metadataRepo: TaskSessionMetadataRepository,
-    private readonly workspaceRepo?: WorkspaceRepository,
+    private readonly metadataRepo: TaskSessionMetadataStore,
+    private readonly workspaceRepo?: WorkspaceStore,
     private queuedAttachmentStore?: QueuedAttachmentStore,
   ) {}
 

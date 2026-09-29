@@ -1621,7 +1621,7 @@ export class SystemTools {
             fsSync.existsSync(kitRoot) &&
             fsSync.statSync(kitRoot).isDirectory()
           ) {
-            mdResults = MemoryService.searchWorkspaceMarkdown(
+            mdResults = await MemoryService.searchWorkspaceMarkdown(
               this.workspace.id,
               kitRoot,
               input.query,
@@ -1701,7 +1701,7 @@ export class SystemTools {
     if (!progressiveRecallEnabled()) {
       throw new Error("Progressive memory recall is disabled in Memory settings.");
     }
-    const results = MemoryObservationService.search({
+    const results = await MemoryObservationService.search({
       workspaceId: this.workspace.id,
       query: input.query,
       limit: Math.min(input.limit || 20, 50),
@@ -1747,7 +1747,7 @@ export class SystemTools {
     if (!progressiveRecallEnabled()) {
       throw new Error("Progressive memory recall is disabled in Memory settings.");
     }
-    const results = MemoryObservationService.timeline({
+    const results = await MemoryObservationService.timeline({
       workspaceId: this.workspace.id,
       memoryId: input.memoryId,
       query: input.query,
@@ -1794,7 +1794,7 @@ export class SystemTools {
     if (!progressiveRecallEnabled()) {
       throw new Error("Progressive memory recall is disabled in Memory settings.");
     }
-    const details = MemoryObservationService.details(
+    const details = await MemoryObservationService.details(
       (input.ids || []).slice(0, 10),
       this.workspace.id,
     );
@@ -2092,7 +2092,7 @@ export class SystemTools {
     }
 
     try {
-      const results = DurableContextService.search({
+      const results = await DurableContextService.search({
         workspaceId: this.workspace.id,
         taskId: input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
         query: input.query,
@@ -2169,7 +2169,7 @@ export class SystemTools {
     }
 
     try {
-      const result = DurableContextService.describe({
+      const result = await DurableContextService.describe({
         workspaceId: this.workspace.id,
         taskId: input.taskId && input.explicitUserRequest === true ? input.taskId : this.taskId,
         id: input.id,

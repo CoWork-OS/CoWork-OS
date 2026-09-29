@@ -1577,7 +1577,7 @@ export class SkillRegistry {
     try {
       assertNetworkPolicyAllowed({ url: normalizedUrl, toolName: "skill_url_install" });
       if (/^https?:\/\/(?:www\.)?clawhub\.ai\//i.test(normalizedUrl)) {
-        return this.installFromClawHub(normalizedUrl);
+        return await this.installFromClawHub(normalizedUrl);
       }
       const response = await this.fetchWithTimeout(normalizedUrl);
       if (!response.ok) {

@@ -1,6 +1,7 @@
 import { Worker } from "worker_threads";
 import path from "path";
 import type { MemorySearchResult } from "./repositories";
+import type { EmbeddingInvalidation, MissingEmbeddingRow } from "../memory/memory-embedding-cache";
 
 export type PromptRecallWorkerResult = MemorySearchResult & {
   source: "db";
@@ -26,6 +27,8 @@ export class FtsWorkerClient {
   private crashCount = 0;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private handlingCrash = false;
+  private pendingInvalidations: EmbeddingInvalidation[] = [];
+  private invalidationScheduled = false;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -35,10 +38,11 @@ export class FtsWorkerClient {
   private spawnWorker(): void {
     if (this.destroyed) return;
     this.handlingCrash = false;
-    this.worker = new Worker(path.join(__dirname, "fts-worker.js"), {
+    const worker = new Worker(path.join(__dirname, "fts-worker.js"), {
       workerData: { dbPath: this.dbPath },
     });
-    this.worker.on("message", (msg: { id: string; result?: unknown; error?: string }) => {
+    this.worker = worker;
+    worker.on("message", (msg: { id: string; result?: unknown; error?: string }) => {
       const req = this.pending.get(msg.id);
       if (!req) return;
       this.pending.delete(msg.id);
@@ -50,9 +54,14 @@ export class FtsWorkerClient {
         req.resolve(msg.result);
       }
     });
-    this.worker.on("error", () => this.handleWorkerCrash());
-    this.worker.on("exit", (code) => {
-      if (code !== 0 && !this.destroyed) this.handleWorkerCrash();
+    // Events from a worker that has already been replaced must not affect its successor.
+    worker.on("error", () => {
+      if (this.worker === worker) this.handleWorkerCrash();
+    });
+    // Any exit, including code 0, is a loss of service: messages to an exited worker are
+    // dropped silently, so every later request would otherwise wait out the timeout.
+    worker.on("exit", () => {
+      if (this.worker === worker && !this.destroyed) this.handleWorkerCrash();
     });
   }
 
@@ -142,6 +151,51 @@ export class FtsWorkerClient {
     ])) as MemorySearchResult[];
   }
 
+  /** Full hybrid search (lexical + semantic + rerank) in the worker (DB4). */
+  async hybridSearch(
+    workspaceId: string,
+    query: string,
+    limit: number,
+    includePrivate: boolean,
+  ): Promise<MemorySearchResult[]> {
+    return (await this.request("hybridSearch", [
+      workspaceId,
+      query,
+      limit,
+      includePrivate,
+    ])) as MemorySearchResult[];
+  }
+
+  /**
+   * Memories whose embedding is missing or stale, for the host's embedding backfill;
+   * `null` selects imported memories across workspaces.
+   */
+  async findMissingEmbeddings(
+    workspaceId: string | null,
+    limit: number,
+  ): Promise<MissingEmbeddingRow[]> {
+    return (await this.request("findMissingEmbeddings", [
+      workspaceId,
+      limit,
+    ])) as MissingEmbeddingRow[];
+  }
+
+  /**
+   * Tell the worker's embedding cache which rows changed. Batched per tick, so the
+   * host's write has committed before the worker reloads; no reply is sent.
+   */
+  invalidateEmbeddings(change: EmbeddingInvalidation): void {
+    this.pendingInvalidations.push(change);
+    if (this.invalidationScheduled) return;
+    this.invalidationScheduled = true;
+    setImmediate(() => {
+      this.invalidationScheduled = false;
+      const changes = this.pendingInvalidations.splice(0);
+      if (changes.length === 0 || !this.worker || this.destroyed) return;
+      this.worker.postMessage({ method: "invalidateEmbeddings", args: changes });
+    });
+  }
+
   destroy(): void {
     this.destroyed = true;
     if (this.restartTimer) {
@@ -153,7 +207,7 @@ export class FtsWorkerClient {
       req.reject(new Error("FTS worker destroyed"));
       this.pending.delete(id);
     }
-    this.worker?.terminate();
+    void this.worker?.terminate();
     this.worker = null;
   }
 }

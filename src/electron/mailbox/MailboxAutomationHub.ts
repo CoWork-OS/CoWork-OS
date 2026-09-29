@@ -187,7 +187,7 @@ export class MailboxAutomationHub {
     this.deps = { ...EMPTY_DEPS };
   }
 
-  static handleMailboxEvent(event: MailboxEvent): void {
+  static async handleMailboxEvent(event: MailboxEvent): Promise<void> {
     const deps = this.deps;
     const workspaceId = event.workspaceId || deps.resolveDefaultWorkspaceId?.();
     if (!workspaceId) return;
@@ -199,7 +199,7 @@ export class MailboxAutomationHub {
     }
 
     try {
-      KnowledgeGraphService.ingestMailboxEvent(workspaceId, event);
+      await KnowledgeGraphService.ingestMailboxEvent(workspaceId, event);
     } catch (error) {
       deps.log?.("[MailboxAutomationHub] KG ingestion failed:", error);
     }
@@ -215,7 +215,9 @@ export class MailboxAutomationHub {
 
     try {
       const triggerEvent = createMailboxTriggerEvent(event);
-      deps.triggerService?.evaluateEvent(triggerEvent);
+      void deps.triggerService?.evaluateEvent(triggerEvent)?.catch((error: unknown) => {
+        deps.log?.("[MailboxAutomationHub] Trigger evaluation failed:", error);
+      });
     } catch (error) {
       deps.log?.("[MailboxAutomationHub] Trigger evaluation failed:", error);
     }
@@ -223,7 +225,7 @@ export class MailboxAutomationHub {
     const plan = buildSignalPlan(event);
     if (plan && deps.heartbeatService) {
       try {
-        deps.heartbeatService.submitSignalForAll({
+        await deps.heartbeatService.submitSignalForAll({
           workspaceId,
           signalFamily: plan.signalFamily,
           source: "hook",

@@ -3,7 +3,7 @@ import type { CoreMemoryScopeKind, CoreMemoryScopeState } from "../../shared/typ
 
 type Any = any;
 
-export class CoreMemoryScopeStateRepository {
+export class CoreMemoryScopeStateStore {
   constructor(private readonly db: Database.Database) {}
 
   get(scopeKind: CoreMemoryScopeKind, scopeRef: string): CoreMemoryScopeState | undefined {

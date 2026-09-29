@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { TaskRepository } from "../repositories";
+import { TaskStore } from "../repositories";
 
-describe("TaskRepository.findAll", () => {
+describe("TaskStore.findAll", () => {
   it("preserves the user preference independently of inferred execution in sidebar rows", () => {
     const { repository, all, prepare } = createRepository();
     all.mockReturnValue([
@@ -95,8 +95,8 @@ describe("TaskRepository.findAll", () => {
       if (sql.includes("SELECT * FROM tasks WHERE id = ?")) return { get };
       return { run };
     });
-    const repository = new TaskRepository({ prepare } as unknown as ConstructorParameters<
-      typeof TaskRepository
+    const repository = new TaskStore({ prepare } as unknown as ConstructorParameters<
+      typeof TaskStore
     >[0]);
 
     const touched = repository.touch("task-1", 1234);
@@ -122,8 +122,8 @@ describe("TaskRepository.findAll", () => {
       if (sql.includes("SELECT * FROM tasks WHERE id = ?")) return { get };
       return { run };
     });
-    const repository = new TaskRepository({ prepare } as unknown as ConstructorParameters<
-      typeof TaskRepository
+    const repository = new TaskStore({ prepare } as unknown as ConstructorParameters<
+      typeof TaskStore
     >[0]);
 
     repository.update("task-1", {
@@ -175,8 +175,8 @@ function createRepository() {
     },
   ]);
   const prepare = vi.fn(() => ({ all }));
-  const repository = new TaskRepository({ prepare } as unknown as ConstructorParameters<
-    typeof TaskRepository
+  const repository = new TaskStore({ prepare } as unknown as ConstructorParameters<
+    typeof TaskStore
   >[0]);
 
   return { repository, prepare, all };

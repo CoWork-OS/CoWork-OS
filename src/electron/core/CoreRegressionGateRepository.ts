@@ -13,7 +13,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-export class CoreRegressionGateRepository {
+export class CoreRegressionGateStore {
   constructor(private readonly db: Database.Database) {}
 
   create(input: Omit<CoreRegressionGateResult, "id"> & { id?: string }): CoreRegressionGateResult {

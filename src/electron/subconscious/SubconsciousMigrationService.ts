@@ -1,4 +1,11 @@
-import Database from "better-sqlite3";
+// The one-time legacy import runs synchronously at startup, so it keeps the host stores.
+import {
+  SubconsciousBacklogStore as SubconsciousBacklogRepository,
+  SubconsciousDecisionStore as SubconsciousDecisionRepository,
+  SubconsciousRunStore as SubconsciousRunRepository,
+  SubconsciousTargetStore as SubconsciousTargetRepository,
+} from "./SubconsciousRepositories";
+import type Database from "better-sqlite3";
 import { randomUUID, createHash } from "crypto";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import type {
@@ -9,12 +16,6 @@ import type {
   SubconsciousTargetRef,
   SubconsciousTargetSummary,
 } from "../../shared/subconscious";
-import {
-  SubconsciousBacklogRepository,
-  SubconsciousDecisionRepository,
-  SubconsciousRunRepository,
-  SubconsciousTargetRepository,
-} from "./SubconsciousRepositories";
 
 type Any = any;
 

@@ -231,7 +231,7 @@ describeWithSqlite("BoxBrainService", () => {
     expect(callServerTool).toHaveBeenCalledWith("box-server", "get_file_content", {
       file_id: "file-1",
     });
-    expect(service.listItems(workspace.id)[0]).toMatchObject({
+    expect((await service.listItems(workspace.id))[0]).toMatchObject({
       boxId: "file-1",
       status: "indexed",
       memoryId: "memory-1",
@@ -263,7 +263,7 @@ describeWithSqlite("BoxBrainService", () => {
     const fourth = await service.syncNow();
     expect(fourth).toMatchObject({ success: true, deletedCount: 1 });
     expect(deleteMemoryEntries).toHaveBeenCalledWith(workspace.id, ["memory-1"]);
-    expect(service.listItems(workspace.id)[0]).toMatchObject({
+    expect((await service.listItems(workspace.id))[0]).toMatchObject({
       boxId: "file-1",
       status: "deleted",
     });
@@ -371,7 +371,7 @@ describeWithSqlite("BoxBrainService", () => {
     });
 
     await service.syncNow();
-    expect(service.listItems(workspace.id)).toEqual(
+    expect(await service.listItems(workspace.id)).toEqual(
       expect.arrayContaining([expect.objectContaining({ boxId: "file-old", status: "indexed" })]),
     );
 
@@ -394,7 +394,7 @@ describeWithSqlite("BoxBrainService", () => {
       deletedCount: 0,
     });
     expect(deleteMemoryEntries).not.toHaveBeenCalled();
-    expect(service.listItems(workspace.id)).toEqual(
+    expect(await service.listItems(workspace.id)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ boxId: "file-old", status: "indexed" }),
         expect.objectContaining({ boxId: "file-new", status: "indexed" }),

@@ -1,3 +1,6 @@
+import { TaskRepository } from "../electron/database/repository-facades";
+import { ChannelRepository, ChannelUserRepository } from "../electron/database/repository-facades";
+import { ChannelMessageRepository } from "../electron/database/repository-facades";
 import path from "node:path";
 import * as fs from "node:fs/promises";
 import os from "node:os";
@@ -40,15 +43,11 @@ import { getExposureStatus } from "../electron/tailscale";
 import { MCPClientManager } from "../electron/mcp/client/MCPClientManager";
 import { CronService, setCronService, getCronStorePath } from "../electron/cron";
 import { resolveTaskResultText } from "../electron/cron/result-text";
+import { TaskEventRepository } from "../electron/database/repositories";
 import {
-  TaskEventRepository,
-  TaskRepository,
-  WorkspaceRepository as _WorkspaceRepository,
-  ChannelRepository,
-  ChannelUserRepository,
-  ChannelMessageRepository,
-} from "../electron/database/repositories";
-import { formatChatTranscriptForPrompt } from "../electron/gateway/chat-transcript";
+  formatChatTranscriptForPrompt,
+  prefetchTranscriptUsers,
+} from "../electron/gateway/chat-transcript";
 import { MemoryService } from "../electron/memory/MemoryService";
 import { CrossSignalService } from "../electron/agents/CrossSignalService";
 import { FeedbackService } from "../electron/agents/FeedbackService";
@@ -61,6 +60,9 @@ import {
 import { attachControlPlaneTaskLifecycleSync } from "../electron/control-plane/task-run-sync";
 import { NumbatService } from "../electron/security/numbat";
 import { runShutdownSteps, type ShutdownStep } from "../electron/utils/graceful-shutdown";
+import { startHostPerfMonitor } from "../electron/utils/host-perf-monitor";
+import { startDatabaseWorker, stopDatabaseWorker } from "../electron/database/async/runtime";
+import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
 
 interface StartedControlPlane {
   server: ControlPlaneServer;
@@ -243,7 +245,13 @@ async function main(): Promise<void> {
   console.log(`[Daemon] headless: ${HEADLESS}`);
 
   // Initialize database first - required for SecureSettingsRepository.
-  const dbManager = new DatabaseManager();
+  // Schema initialization runs in a bootstrap worker (DB6).
+  const dbManager = await DatabaseManager.open();
+  dbManager.beginRun("daemon");
+  let databaseWorkerDrained = true;
+  const hostPerfMonitor = startHostPerfMonitor({ runtime: "daemon" });
+  // Opt-in database worker (async SQLite plan, DB2); starts after schema setup.
+  await startDatabaseWorker({ dbPath: dbManager.getDatabasePath(), runtime: "daemon" });
   new SecureSettingsRepository(dbManager.getDatabase());
   console.log("[Daemon] SecureSettingsRepository initialized");
   // Opt-in telemetry must never block daemon startup.
@@ -314,6 +322,7 @@ async function main(): Promise<void> {
     }
   }
 
+  let ftsWorkerClient: FtsWorkerClient | null = null;
   // Initialize memory before queue recovery starts. AgentDaemon.initialize() can
   // immediately resume queued tasks, and their early timeline events capture to memory.
   try {
@@ -321,6 +330,13 @@ async function main(): Promise<void> {
     console.log("[Daemon] Memory Service initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Memory Service:", error);
+  }
+  try {
+    // Off-main-thread memory search, as on desktop; without it prompt recall returns nothing.
+    ftsWorkerClient = new FtsWorkerClient(dbManager.getDatabasePath());
+    MemoryService.initFtsWorker(ftsWorkerClient);
+  } catch (error) {
+    console.error("[Daemon] Failed to start the memory search worker:", error);
   }
 
   // Initialize agent daemon.
@@ -374,8 +390,8 @@ async function main(): Promise<void> {
   try {
     await channelGateway.initialize();
     xMentionBridgeService = initializeXMentionBridgeService(agentDaemon, {
-      isNativeXChannelEnabled: () => {
-        const nativeX = channelGateway.getChannelByType("x");
+      isNativeXChannelEnabled: async () => {
+        const nativeX = await channelGateway.getChannelByType("x");
         return nativeX?.enabled === true && nativeX.status === "connected";
       },
     });
@@ -423,7 +439,7 @@ async function main(): Promise<void> {
         return { id: task.id };
       },
       sendTaskMessage: async (params) => {
-        const task = taskRepo.findById(params.taskId);
+        const task = await taskRepo.findById(params.taskId);
         if (!task) {
           throw new Error(`Target task not found: ${params.taskId}`);
         }
@@ -463,7 +479,7 @@ async function main(): Promise<void> {
         const chatId = chatContext?.channelId;
         if (!channelType || !chatId) return {};
 
-        const channel = channelRepo.findByType(channelType as Any);
+        const channel = await channelRepo.findByType(channelType as Any);
         if (!channel) return {};
 
         const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
@@ -472,15 +488,8 @@ async function main(): Promise<void> {
           Number.isFinite(prevRunAtMs) ? prevRunAtMs! : runAtMs - sevenDaysMs,
         );
 
-        const raw = channelMessageRepo.findByChatId(channel.id, chatId, 500);
-        const userCache = new Map<string, Any>();
-        const lookupUser = (id: string) => {
-          if (!id) return undefined;
-          if (userCache.has(id)) return userCache.get(id);
-          const u = channelUserRepo.findById(id);
-          userCache.set(id, u);
-          return u;
-        };
+        const raw = await channelMessageRepo.findByChatId(channel.id, chatId, 500);
+        const lookupUser = await prefetchTranscriptUsers(raw, (id) => channelUserRepo.findById(id));
 
         const rendered = formatChatTranscriptForPrompt(raw, {
           lookupUser,
@@ -502,16 +511,17 @@ async function main(): Promise<void> {
         };
       },
       getTaskStatus: async (taskId) => {
-        const task = taskRepo.findById(taskId);
+        const task = await taskRepo.findById(taskId);
         if (!task) return null;
         return {
           status: task.status,
           error: task.error ?? null,
           resultSummary: task.resultSummary ?? null,
+          terminalStatus: task.terminalStatus ?? null,
         };
       },
       getTaskResultText: async (taskId) => {
-        const task = taskRepo.findById(taskId);
+        const task = await taskRepo.findById(taskId);
         const events = taskEventRepo.findByTaskId(taskId);
         return resolveTaskResultText({
           summary: task?.resultSummary,
@@ -737,10 +747,20 @@ async function main(): Promise<void> {
         },
         // Settle in-flight Pulse requests so no late callback writes to a closed database.
         { name: "pulse", run: () => pulseService?.shutdown() },
+        { name: "host perf monitor", run: () => hostPerfMonitor.stop() },
+        { name: "memory search worker", run: () => ftsWorkerClient?.destroy() },
+        {
+          name: "database worker",
+          requiresQuiescence: true,
+          run: async () => {
+            databaseWorkerDrained = (await stopDatabaseWorker()).drained;
+          },
+        },
         {
           name: "database",
           requiresQuiescence: true,
-          run: () => dbManager.close(),
+          // A failed step or an undrained worker leaves this run marked incomplete (DB6).
+          run: ({ quiescent }) => dbManager.close({ clean: quiescent && databaseWorkerDrained }),
         },
       ];
 

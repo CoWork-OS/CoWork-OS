@@ -655,6 +655,23 @@ Windows ARM64 note:
 - Setup now auto-tries x64 Electron emulation if ARM64 native rebuild fails.
 - To disable that fallback and force native ARM64 only, set `COWORK_SETUP_SKIP_X64_FALLBACK=1`.
 
+## Database worker errors
+
+SQLite runs in worker threads by default. See [Architecture: Database Ownership](architecture.md#database-ownership). Look for these lines in the log:
+
+- `Database worker ready (desktop)`, `(daemon)` or `(cli)`: the worker started. `Reporting reader ready` follows on desktop.
+- `Database worker unavailable`: the worker failed to start, so this run uses the host backend for every domain. Check the native module, as in the Windows section above, and the packaged worker files.
+- `overloaded`: the worker queue is full. The request was not accepted, so it is safe to retry later. Repeated overloads under normal load are a bug; capture the log.
+- `worker_exited` with outcome `unknown`: the worker stopped after the write may have committed. The app reconciles on its next read. Do not re-run the action blindly.
+
+To rule the workers out, quit the app so the worker drains, then restart on the host backend:
+
+```bash
+COWORK_DB_WORKER=0 npm run dev
+```
+
+To keep only one domain on the host, set its flag to `0` instead, for example `COWORK_DB_WORKER_MAILBOX=0`. Both backends use the same schema, so you can switch back by restarting without the variable. Never delete the app database to recover from a worker error; capture `logs/dev-latest.log` instead.
+
 ## App shows "vUnknown" or remote method error
 
 If the app opens but shows `vUnknown` or `Error invoking remote method 'app:getVersion'`, you likely connected to an older already-running instance.

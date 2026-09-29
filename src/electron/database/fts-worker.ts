@@ -5,15 +5,26 @@ import {
   isSafeFtsToken,
   buildMarkerFtsQuery,
   buildRelaxedTokenFtsQuery,
+  buildImportedMemoryFilterSql,
 } from "./fts-utils";
+import {
+  type EmbeddingInvalidation,
+  findMissingEmbeddingRows,
+  MemoryEmbeddingCache,
+} from "../memory/memory-embedding-cache";
+import { type HybridCandidateRow, rankHybridMemories } from "../memory/memory-hybrid-rank";
 
 interface FtsRequest {
-  id: string;
   method:
     | "search"
     | "searchImportedGlobal"
     | "searchLocalForPromptRecall"
-    | "searchByContentMarker";
+    | "searchByContentMarker"
+    | "hybridSearch"
+    | "findMissingEmbeddings"
+    | "invalidateEmbeddings";
+  /** Absent for notifications, which get no reply. */
+  id?: string;
   args: unknown[];
 }
 
@@ -95,7 +106,7 @@ function searchImportedGlobal(query: string, limit: number, includePrivate: bool
              bm25(memories_fts) as score
       FROM memories_fts f
       JOIN memories m ON f.rowid = m.rowid
-      WHERE memories_fts MATCH ? AND m.is_imported = 1 ${privacyFilter}
+      WHERE memories_fts MATCH ? AND ${buildImportedMemoryFilterSql("m.content")} ${privacyFilter}
       ORDER BY score
       LIMIT ?
     `);
@@ -202,7 +213,68 @@ function searchByContentMarker(workspaceId: string, marker: string, limit: numbe
   }));
 }
 
+const embeddingCache = new MemoryEmbeddingCache(db);
+
+function loadMemoryRows(ids: string[]): HybridCandidateRow[] {
+  if (ids.length === 0) return [];
+  const rows = db
+    .prepare(
+      `SELECT id, summary, content, type, created_at, task_id
+       FROM memories WHERE id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .all(...ids) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    id: row.id as string,
+    summary: (row.summary as string) || undefined,
+    content: (row.content as string) || "",
+    type: row.type as string,
+    createdAt: row.created_at as number,
+    taskId: (row.task_id as string) || undefined,
+  }));
+}
+
+/**
+ * The whole hybrid memory search (DB4): lexical candidates, the semantic scan over this
+ * worker's embedding cache, and the full-row rerank, the same stages the host's
+ * synchronous search runs.
+ */
+function hybridSearch(
+  workspaceId: string,
+  query: string,
+  limit: number,
+  includePrivate: boolean,
+): unknown[] {
+  const lexicalLimit = Math.min(Math.max(limit, 5), 50);
+  const lexicalLocal = search(workspaceId, query, lexicalLimit, includePrivate) as Array<{
+    id: string;
+  }>;
+  const lexicalImported = searchImportedGlobal(query, lexicalLimit, includePrivate) as Array<{
+    id: string;
+  }>;
+  return rankHybridMemories({
+    query,
+    limit,
+    lexicalLocal,
+    lexicalImportedGlobal: lexicalImported,
+    workspaceEmbeddings: embeddingCache.workspace(workspaceId).entries(),
+    importedEmbeddings: embeddingCache.importedGlobal().entries(),
+    loadRows: loadMemoryRows,
+  });
+}
+
 const handlers: Record<string, (...args: unknown[]) => unknown> = {
+  findMissingEmbeddings: (wid, lim) =>
+    findMissingEmbeddingRows(
+      db,
+      wid as string | null,
+      Math.min(Math.max(Number(lim) || 1, 1), 1_000),
+    ),
+  hybridSearch: (wid, q, lim, priv) =>
+    hybridSearch(wid as string, q as string, lim as number, priv as boolean),
+  invalidateEmbeddings: (...changes) => {
+    for (const change of changes) embeddingCache.invalidate(change as EmbeddingInvalidation);
+    return null;
+  },
   search: (wid, q, lim, priv) => search(wid as string, q as string, lim as number, priv as boolean),
   searchImportedGlobal: (q, lim, priv) =>
     searchImportedGlobal(q as string, lim as number, priv as boolean),
@@ -214,6 +286,14 @@ const handlers: Record<string, (...args: unknown[]) => unknown> = {
 
 parentPort?.on("message", (msg: FtsRequest) => {
   const handler = handlers[msg.method];
+  if (msg.id === undefined) {
+    try {
+      handler?.(...msg.args);
+    } catch {
+      // Notifications have no reply; a failed invalidation is repaired by the periodic reload.
+    }
+    return;
+  }
   if (!handler) {
     parentPort?.postMessage({
       id: msg.id,

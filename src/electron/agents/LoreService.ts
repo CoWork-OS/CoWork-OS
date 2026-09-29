@@ -1,8 +1,10 @@
+import { recentTaskEventsOfType } from "./agent-signal-reads";
+import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import fs from "fs";
 import path from "path";
 import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
-import { TaskRepository, WorkspaceRepository } from "../database/repositories";
+
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 
 type Any = any;
@@ -97,11 +99,16 @@ export class LoreService {
   private stateByWorkspace = new Map<string, WorkspaceState>();
   private agentDaemon: AgentDaemon | null = null;
   private started = false;
+  // The listener stays synchronous; the handler reads through the async storage facade.
   private readonly onTaskCompleted = (evt: Any) => {
+    void this.handleTaskCompleted(evt);
+  };
+
+  private readonly handleTaskCompleted = async (evt: Any) => {
     try {
       const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
       if (!taskId) return;
-      this.ingestTaskCompleted(taskId, evt, Date.now());
+      await this.ingestTaskCompleted(taskId, evt, Date.now());
     } catch {
       // ignore
     }
@@ -163,8 +170,12 @@ export class LoreService {
     }
   }
 
-  private ingestTaskCompleted(taskId: string, payload: Any, timestampMs: number): void {
-    const task = this.taskRepo.findById(taskId);
+  private async ingestTaskCompleted(
+    taskId: string,
+    payload: Any,
+    timestampMs: number,
+  ): Promise<void> {
+    const task = await this.taskRepo.findById(taskId);
     if (!task) return;
 
     // Only track private, top-level tasks with meaningful content.
@@ -175,7 +186,7 @@ export class LoreService {
     const workspaceId = task.workspaceId;
     if (!workspaceId) return;
 
-    const workspace = this.workspaceRepo.findById(workspaceId);
+    const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace?.path) return;
     if (!this.ensureKitDirExists(workspace.path)) return;
 
@@ -222,7 +233,7 @@ export class LoreService {
   }
 
   private async flushWorkspace(workspaceId: string): Promise<void> {
-    const workspace = this.workspaceRepo.findById(workspaceId);
+    const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace?.path) return;
     if (!this.ensureKitDirExists(workspace.path)) return;
 
@@ -283,20 +294,13 @@ export class LoreService {
 
   private async rebuildFromRecentCompletedTasks(): Promise<void> {
     const sinceMs = Date.now() - REBUILD_WINDOW_MS;
-    const stmt = this.db.prepare(`
-      SELECT e.task_id as taskId, e.timestamp as timestamp, e.payload as payload
-      FROM task_events e
-      WHERE (e.type = 'task_completed' OR e.legacy_type = 'task_completed')
-        AND e.timestamp >= ?
-      ORDER BY e.timestamp ASC
-      LIMIT ?
-    `);
-
-    const rows = stmt.all(sinceMs, STARTUP_REBUILD_LIMIT) as Array<{
-      taskId: string;
-      timestamp: number;
-      payload: string;
-    }>;
+    const rows = await recentTaskEventsOfType(
+      this.db,
+      "task_completed",
+      sinceMs,
+      STARTUP_REBUILD_LIMIT,
+      "asc",
+    );
     for (const row of rows) {
       const payload = row?.payload;
       if (!payload) continue;
@@ -306,7 +310,7 @@ export class LoreService {
       } catch {
         continue;
       }
-      this.ingestTaskCompleted(row.taskId, parsed, row.timestamp);
+      await this.ingestTaskCompleted(row.taskId, parsed, row.timestamp);
     }
   }
 }

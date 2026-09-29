@@ -1,11 +1,12 @@
+import { TaskStore } from "../../database/repositories";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TaskRepository } from "../../database/repositories";
+
 import { DatabaseManager } from "../../database/schema";
-import { WorkContextService } from "../WorkContextService";
+import { WorkContextService } from "../workspaces-repository-facades";
 
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {
@@ -27,7 +28,7 @@ describeWithSqlite("WorkContextService", () => {
   let manager: DatabaseManager;
   let db: Database.Database;
   let service: WorkContextService;
-  let taskRepo: TaskRepository;
+  let taskRepo: TaskStore;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-work-context-"));
@@ -36,7 +37,7 @@ describeWithSqlite("WorkContextService", () => {
     manager = new DatabaseManager();
     db = manager.getDatabase();
     service = new WorkContextService(db);
-    taskRepo = new TaskRepository(db);
+    taskRepo = new TaskStore(db);
     db.prepare(
       `
         INSERT INTO workspaces (id, name, path, created_at, permissions)
@@ -52,7 +53,7 @@ describeWithSqlite("WorkContextService", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("creates one durable context per task and attaches forked tasks to it", () => {
+  it("creates one durable context per task and attaches forked tasks to it", async () => {
     const primary = taskRepo.create({
       title: "Investigate release issue",
       prompt: "Investigate release issue",
@@ -60,8 +61,8 @@ describeWithSqlite("WorkContextService", () => {
       workspaceId: "workspace-1",
       source: "manual",
     });
-    const context = service.ensureForTask(primary);
-    const sameContext = service.ensureForTask(primary);
+    const context = await service.ensureForTask(primary);
+    const sameContext = await service.ensureForTask(primary);
     const fork = taskRepo.create({
       title: "Investigate release issue (docs)",
       prompt: "Investigate release issue (docs)",
@@ -71,14 +72,14 @@ describeWithSqlite("WorkContextService", () => {
     });
 
     expect(sameContext.id).toBe(context.id);
-    expect(service.attachForkedTask(fork, primary.id)).toMatchObject({
+    expect(await service.attachForkedTask(fork, primary.id)).toMatchObject({
       id: context.id,
       taskIds: [primary.id, fork.id],
     });
-    expect(service.list({ workspaceId: "workspace-1" })).toHaveLength(1);
+    expect(await service.list({ workspaceId: "workspace-1" })).toHaveLength(1);
   });
 
-  it("supports rename, state updates, and archive filtering", () => {
+  it("supports rename, state updates, and archive filtering", async () => {
     const task = taskRepo.create({
       title: "Prepare briefing",
       prompt: "Prepare briefing",
@@ -86,9 +87,9 @@ describeWithSqlite("WorkContextService", () => {
       workspaceId: "workspace-1",
       source: "manual",
     });
-    const context = service.ensureForTask(task);
+    const context = await service.ensureForTask(task);
 
-    const updated = service.update({
+    const updated = await service.update({
       contextId: context.id,
       name: "Weekly briefing",
       status: "paused",
@@ -104,22 +105,24 @@ describeWithSqlite("WorkContextService", () => {
       },
     });
 
-    expect(service.update({ contextId: context.id, status: "archived" })).toMatchObject({
+    expect(await service.update({ contextId: context.id, status: "archived" })).toMatchObject({
       archivedAt: expect.any(Number),
       status: "archived",
     });
-    expect(service.list({ workspaceId: "workspace-1" })).toEqual([]);
-    expect(service.list({ workspaceId: "workspace-1", includeArchived: true })).toHaveLength(1);
+    expect(await service.list({ workspaceId: "workspace-1" })).toEqual([]);
+    expect(await service.list({ workspaceId: "workspace-1", includeArchived: true })).toHaveLength(
+      1,
+    );
   });
 
-  it("rejects members from another workspace", () => {
+  it("rejects members from another workspace", async () => {
     db.prepare(
       `
         INSERT INTO workspaces (id, name, path, created_at, permissions)
         VALUES (?, ?, ?, ?, ?)
       `,
     ).run("workspace-2", "Other", path.join(tmpDir, "other"), Date.now(), "{}");
-    const context = service.create({ workspaceId: "workspace-1", name: "First" });
+    const context = await service.create({ workspaceId: "workspace-1", name: "First" });
     const task = taskRepo.create({
       title: "Other task",
       prompt: "Other task",
@@ -128,7 +131,7 @@ describeWithSqlite("WorkContextService", () => {
       source: "manual",
     });
 
-    expect(() => service.addMember({ contextId: context.id, taskId: task.id })).toThrow(
+    await expect(service.addMember({ contextId: context.id, taskId: task.id })).rejects.toThrow(
       "Task does not belong to this WorkContext workspace",
     );
   });

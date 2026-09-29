@@ -1,10 +1,10 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
-  RecurringApprovalService,
   canonicalizeRecurringApprovalOperation,
   fingerprintRecurringApprovalOperation,
 } from "../recurring-approval-service";
+import { RecurringApprovalService } from "../recurring-approval-repository-facades";
 
 function createDb(): Database.Database {
   const db = new Database(":memory:");
@@ -85,10 +85,10 @@ describe("RecurringApprovalService", () => {
     ).not.toBe(original);
   });
 
-  it("matches only active rules and revocation takes effect immediately", () => {
+  it("matches only active rules and revocation takes effect immediately", async () => {
     const db = createDb();
     const service = new RecurringApprovalService(db);
-    const created = service.create(
+    const created = await service.create(
       {
         ...baseInput,
         effect: "allow",
@@ -97,10 +97,10 @@ describe("RecurringApprovalService", () => {
       },
       1_000,
     );
-    expect(service.findActive(baseInput, 1_500)?.summary.id).toBe(created.id);
-    expect(service.findActive(baseInput, 2_000)).toBeNull();
+    expect((await service.findActive(baseInput, 1_500))?.summary.id).toBe(created.id);
+    expect(await service.findActive(baseInput, 2_000)).toBeNull();
 
-    service.create(
+    await service.create(
       {
         ...baseInput,
         effect: "allow",
@@ -109,8 +109,26 @@ describe("RecurringApprovalService", () => {
       },
       3_000,
     );
-    expect(service.revoke(created.id)).toBe(true);
-    expect(service.findActive(baseInput, 3_100)).toBeNull();
+    expect(await service.revoke(created.id)).toBe(true);
+    expect(await service.findActive(baseInput, 3_100)).toBeNull();
+    db.close();
+  });
+
+  it("keeps a revocation when an approval decided before it is written late", async () => {
+    const db = createDb();
+    const service = new RecurringApprovalService(db);
+    const input = { ...baseInput, effect: "allow" as const, scopePreview: "api.example.com" };
+    const created = await service.create({ ...input, expiresAt: 50_000 }, 1_000);
+    expect(await service.revoke(created.id, 5_000)).toBe(true);
+
+    // Decided at 4 000, before the revocation, but persisted at 6 000.
+    const late = await service.create({ ...input, expiresAt: 60_000, decidedAt: 4_000 }, 6_000);
+    expect(late.revokedAt).toBe(5_000);
+    expect(await service.findActive(baseInput, 6_100)).toBeNull();
+
+    // A decision made after the revocation grants again.
+    await service.create({ ...input, expiresAt: 60_000, decidedAt: 7_000 }, 7_000);
+    expect((await service.findActive(baseInput, 7_100))?.summary.id).toBe(created.id);
     db.close();
   });
 });

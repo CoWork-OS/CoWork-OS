@@ -1,11 +1,10 @@
+import { CoreEvalCaseRepository, CoreFailureClusterRepository } from "./core-repository-facades";
 import type {
   CoreEvalCase,
   CoreFailureCluster,
   ListCoreEvalCasesRequest,
   ReviewCoreEvalCaseRequest,
 } from "../../shared/types";
-import { CoreEvalCaseRepository } from "./CoreEvalCaseRepository";
-import { CoreFailureClusterRepository } from "./CoreFailureClusterRepository";
 
 export class CoreEvalCaseService {
   constructor(
@@ -13,8 +12,8 @@ export class CoreEvalCaseService {
     private readonly evalRepo: CoreEvalCaseRepository,
   ) {}
 
-  syncEvalCasesForProfile(profileId: string, workspaceId?: string): CoreEvalCase[] {
-    const clusters = this.clusterRepo.list({
+  async syncEvalCasesForProfile(profileId: string, workspaceId?: string): Promise<CoreEvalCase[]> {
+    const clusters = await this.clusterRepo.list({
       profileId,
       workspaceId,
       limit: 500,
@@ -22,10 +21,10 @@ export class CoreEvalCaseService {
     const created: CoreEvalCase[] = [];
     for (const cluster of clusters) {
       if (!this.shouldPromoteToEval(cluster)) continue;
-      const existing = this.evalRepo.findByClusterId(cluster.id);
+      const existing = await this.evalRepo.findByClusterId(cluster.id);
       if (existing) {
         if (cluster.linkedEvalCaseId !== existing.id) {
-          this.clusterRepo.update(cluster.id, {
+          await this.clusterRepo.update(cluster.id, {
             linkedEvalCaseId: existing.id,
             status: cluster.status === "open" ? "stable" : cluster.status,
             updatedAt: Date.now(),
@@ -35,7 +34,7 @@ export class CoreEvalCaseService {
         continue;
       }
       const now = Date.now();
-      const evalCase = this.evalRepo.create({
+      const evalCase = await this.evalRepo.create({
         profileId: cluster.profileId,
         workspaceId: cluster.workspaceId,
         clusterId: cluster.id,
@@ -53,7 +52,7 @@ export class CoreEvalCaseService {
         createdAt: now,
         updatedAt: now,
       });
-      this.clusterRepo.update(cluster.id, {
+      await this.clusterRepo.update(cluster.id, {
         linkedEvalCaseId: evalCase.id,
         status: "stable",
         updatedAt: now,

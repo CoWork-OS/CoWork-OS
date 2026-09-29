@@ -4,8 +4,10 @@ import { DatabaseManager } from "../../database/schema";
 import { UsageInsightsProjector } from "../../reports/UsageInsightsProjector";
 import { normalizeLlmProviderType } from "../../../shared/llmProviderDisplay";
 import { calculateCost, getCacheTokenAccounting } from "./pricing";
+import type { LlmCallRow } from "../../database/llm-call-events";
+import { serviceStatements } from "../../database/service-statements";
 
-type LlmCallTelemetryInput = {
+export type LlmCallTelemetryInput = {
   workspaceId?: string | null;
   taskId?: string | null;
   sourceKind: string;
@@ -39,13 +41,11 @@ function getDb() {
   }
 }
 
-export function recordLlmCallSuccess(
+/** Build the usage row for a successful call; the host or the database worker inserts it. */
+export function prepareLlmCallSuccess(
   input: LlmCallTelemetryInput,
   usage?: LLMResponse["usage"],
-): void {
-  const db = getDb();
-  if (!db) return;
-
+): LlmCallRow {
   const inputTokens = Math.max(0, Number(usage?.inputTokens || 0));
   const outputTokens = Math.max(0, Number(usage?.outputTokens || 0));
   const cachedTokens = Math.max(0, Number(usage?.cachedTokens || 0));
@@ -67,29 +67,11 @@ export function recordLlmCallSuccess(
           },
         )
       : 0;
-
-  try {
-    const timestamp = input.timestamp || Date.now();
-    db.prepare(
-      `INSERT INTO llm_call_events (
-        id,
-        timestamp,
-        workspace_id,
-        task_id,
-        source_kind,
-        source_id,
-        provider_type,
-        model_key,
-        model_id,
-        input_tokens,
-        output_tokens,
-        cached_tokens,
-        cost,
-        success,
-        error_code,
-        error_message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL)`,
-    ).run(
+  const timestamp = input.timestamp || Date.now();
+  return {
+    workspaceId: input.workspaceId || null,
+    timestamp,
+    params: [
       randomUUID(),
       timestamp,
       input.workspaceId || null,
@@ -103,20 +85,15 @@ export function recordLlmCallSuccess(
       outputTokens,
       cachedTokens,
       cost,
-    );
-    UsageInsightsProjector.getIfInitialized()?.enqueueLlmTelemetry(
-      input.workspaceId || null,
-      timestamp,
-    );
-  } catch {
-    // Best-effort telemetry only.
-  }
+      1,
+      null,
+      null,
+    ],
+  };
 }
 
-export function recordLlmCallError(input: LlmCallTelemetryInput, error: unknown): void {
-  const db = getDb();
-  if (!db) return;
-
+/** Build the usage row for a failed call; the host or the database worker inserts it. */
+export function prepareLlmCallError(input: LlmCallTelemetryInput, error: unknown): LlmCallRow {
   const errorObj =
     error && typeof error === "object"
       ? (error as { code?: unknown; message?: unknown; name?: unknown })
@@ -132,29 +109,11 @@ export function recordLlmCallError(input: LlmCallTelemetryInput, error: unknown)
       ? redactErrorMessage(errorObj.message)
       : redactErrorMessage(String(error || "LLM error"));
   const providerType = normalizeLlmProviderType(input.providerType) || null;
-
-  try {
-    const timestamp = input.timestamp || Date.now();
-    db.prepare(
-      `INSERT INTO llm_call_events (
-        id,
-        timestamp,
-        workspace_id,
-        task_id,
-        source_kind,
-        source_id,
-        provider_type,
-        model_key,
-        model_id,
-        input_tokens,
-        output_tokens,
-        cached_tokens,
-        cost,
-        success,
-        error_code,
-        error_message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)`,
-    ).run(
+  const timestamp = input.timestamp || Date.now();
+  return {
+    workspaceId: input.workspaceId || null,
+    timestamp,
+    params: [
       randomUUID(),
       timestamp,
       input.workspaceId || null,
@@ -164,13 +123,51 @@ export function recordLlmCallError(input: LlmCallTelemetryInput, error: unknown)
       providerType,
       input.modelKey || input.modelId || null,
       input.modelId || input.modelKey || null,
+      0,
+      0,
+      0,
+      0,
+      0,
       errorCode,
       errorMessage,
-    );
-    UsageInsightsProjector.getIfInitialized()?.enqueueLlmTelemetry(
-      input.workspaceId || null,
-      timestamp,
-    );
+    ],
+  };
+}
+
+/** Host-only follow-up once a usage row is committed. */
+export function afterLlmCallRow(row: LlmCallRow): void {
+  UsageInsightsProjector.getIfInitialized()?.enqueueLlmTelemetry(row.workspaceId, row.timestamp);
+}
+
+/**
+ * Insert a prepared usage row (best effort, like the recorders): one services-domain unit,
+ * started without holding up the caller; the host follow-up runs once it commits.
+ */
+export function commitLlmCallRow(row: LlmCallRow): void {
+  const db = getDb();
+  if (!db) return;
+  void serviceStatements(db)
+    .unit("usageTelemetry_insertLlmCall", [row])
+    .then(() => afterLlmCallRow(row))
+    .catch(() => {
+      // Best-effort telemetry only.
+    });
+}
+
+export function recordLlmCallSuccess(
+  input: LlmCallTelemetryInput,
+  usage?: LLMResponse["usage"],
+): void {
+  try {
+    commitLlmCallRow(prepareLlmCallSuccess(input, usage));
+  } catch {
+    // Best-effort telemetry only.
+  }
+}
+
+export function recordLlmCallError(input: LlmCallTelemetryInput, error: unknown): void {
+  try {
+    commitLlmCallRow(prepareLlmCallError(input, error));
   } catch {
     // Best-effort telemetry only.
   }
@@ -196,24 +193,15 @@ function percentile(sorted: number[], fraction: number): number {
  * a known cost). Returns null when there is too little history to say anything useful.
  * Nothing leaves the machine; this only reads the local llm_call_events table.
  */
-export function estimateTaskCost(modelId: string, minSamples = 3): TaskCostEstimate | null {
+export async function estimateTaskCost(
+  modelId: string,
+  minSamples = 3,
+): Promise<TaskCostEstimate | null> {
   const db = getDb();
   const model = String(modelId || "").trim();
   if (!db || !model) return null;
   try {
-    const rows = db
-      .prepare(
-        `SELECT task_id, SUM(cost) AS total
-           FROM llm_call_events
-          WHERE (model_id = ? OR model_key = ?) AND task_id IS NOT NULL AND success = 1
-          GROUP BY task_id
-         HAVING SUM(cost) > 0
-          ORDER BY MAX(timestamp) DESC
-          LIMIT 30`,
-      )
-      .all(model, model) as Array<{ task_id: string; total: number }>;
-    const totals = rows
-      .map((row) => Number(row.total))
+    const totals = (await serviceStatements(db).unit("usageTelemetry_taskCostTotals", [model]))
       .filter((value) => Number.isFinite(value) && value > 0)
       .sort((a, b) => a - b);
     if (totals.length < minSamples) return null;

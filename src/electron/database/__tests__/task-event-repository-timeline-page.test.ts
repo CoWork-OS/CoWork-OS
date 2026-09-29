@@ -368,12 +368,37 @@ class FakeTaskEventDb {
     const scopedTypes =
       typeCount > 0 ? args.slice(taskIdInCount, taskIdInCount + typeCount).map(String) : [];
     const cursorStart = taskIdInCount > 0 ? taskIdInCount + typeCount : 1;
-    const hasStableCursor = sql.includes("timestamp = ? AND id < ?");
+    const hasStableCursor = sql.includes("AND id < ?");
     const hasLegacyCursor = !hasStableCursor && sql.includes("timestamp < ?");
-    const cursorOrder = hasStableCursor || hasLegacyCursor ? Number(args[cursorStart]) : null;
-    const cursorTimestamp =
-      hasStableCursor || hasLegacyCursor ? Number(args[cursorStart + 2]) : null;
-    const cursorId = hasStableCursor ? String(args[cursorStart + 4] ?? "") : null;
+    // An id cursor re-resolves its position from the anchor row (falling back to the
+    // cursor's values when the row is gone): args are (id, task, order) twice, then
+    // (id, task, timestamp) twice, then the id.
+    const anchored = hasStableCursor && sql.includes("a.id = ? AND a.task_id = ?");
+    const anchorRow = anchored
+      ? this.rows.find(
+          (row) =>
+            row.id === String(args[cursorStart]) && row.task_id === String(args[cursorStart + 1]),
+        )
+      : undefined;
+    const cursorOrder = anchored
+      ? anchorRow
+        ? (anchorRow.seq ?? anchorRow.timestamp)
+        : Number(args[cursorStart + 2])
+      : hasStableCursor || hasLegacyCursor
+        ? Number(args[cursorStart])
+        : null;
+    const cursorTimestamp = anchored
+      ? anchorRow
+        ? anchorRow.timestamp
+        : Number(args[cursorStart + 8])
+      : hasStableCursor || hasLegacyCursor
+        ? Number(args[cursorStart + 2])
+        : null;
+    const cursorId = anchored
+      ? String(args[cursorStart + 12] ?? "")
+      : hasStableCursor
+        ? String(args[cursorStart + 4] ?? "")
+        : null;
 
     return this.rows
       .filter((row) => {

@@ -30,6 +30,7 @@ test("preserves history, snapshots, examples and compatibility references", () =
     "CHANGELOG.md",
     "docs/changelog.md",
     "docs/release-notes-0.2.0.md",
+    "docs/release-surface-reference.md",
     "docs/public-adoption-stats.md",
   ])
     assert.deepEqual(check("Latest release: 0.2.0", path), []);

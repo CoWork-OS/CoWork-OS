@@ -1,0 +1,19 @@
+{
+  "version": "v0.5.54",
+  "status": "stable",
+  "interactionChoices": [
+    { "label": "Smart", "runtimeValue": "smart" },
+    { "label": "Chat", "runtimeValue": "chat" }
+  ],
+  "missionControl": [
+    {
+      "interface": "Standard",
+      "availability": "available",
+      "path": "Main sidebar > Mission Control"
+    },
+    {
+      "interface": "Calm",
+      "availability": "not available"
+    }
+  ]
+}

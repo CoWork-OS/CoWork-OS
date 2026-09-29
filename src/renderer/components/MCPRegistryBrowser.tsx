@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // Types (matching electron mcp types)
 type MCPInstallMethod = "npm" | "pip" | "binary" | "docker" | "manual";
@@ -33,22 +33,27 @@ interface MCPRegistryBrowserProps {
   onInstall?: (serverId: string) => void;
   installedServerIds?: string[];
   installDisabled?: boolean;
+  initialServerId?: string;
+  initialServerName?: string;
 }
 
 export function MCPRegistryBrowser({
   onInstall,
   installedServerIds = [],
   installDisabled = false,
+  initialServerId,
+  initialServerName,
 }: MCPRegistryBrowserProps) {
   const [servers, setServers] = useState<MCPRegistryEntry[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(initialServerName || "");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [viewingDetails, setViewingDetails] = useState<MCPRegistryEntry | null>(null);
+  const focusedServerId = useRef<string | null>(null);
 
   useEffect(() => {
     loadRegistry();
@@ -96,6 +101,14 @@ export function MCPRegistryBrowser({
       console.error("Failed to search registry:", error);
     }
   };
+
+  useEffect(() => {
+    if (!initialServerId || focusedServerId.current === initialServerId) return;
+    const selected = servers.find((server) => server.id === initialServerId);
+    if (!selected) return;
+    focusedServerId.current = initialServerId;
+    setViewingDetails(selected);
+  }, [initialServerId, servers]);
 
   const handleInstall = async (entry: MCPRegistryEntry) => {
     if (installDisabled) return;

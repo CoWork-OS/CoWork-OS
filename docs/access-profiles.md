@@ -98,16 +98,17 @@ Agents Hub environments also have an **Access profile** field. It controls the
 profile inherited by managed sessions; command tools, filesystem access,
 network access, and approvals follow that profile.
 
-### Access profiles versus execution modes
+### Access profiles versus work choices
 
-An access profile answers **what the task may do**. The separate task modes and
-toggles answer **how the task runs**. `Chat`, `Plan`, `Analyze`, `Execute`, and
-`Verified` remain execution modes, while `Collaborative`, `Multi-LLM`, and
-`Check-ins` remain orchestration or interaction choices. The legacy
-`Autonomous` toggle can reduce optional pauses and enable eligible automatic
-approval behavior, but it cannot add a tool, widen a profile boundary, defeat
-an explicit deny, or bypass a hard guardrail. Choose **Full access** explicitly
-when a trusted task genuinely needs the full-access profile.
+An access profile answers **what the task may do**. The separate **Ask/Do**
+choice answers whether CoWork should discuss supplied content or work on a task;
+advanced runtime overrides and orchestration controls shape how task work runs.
+The legacy `chat`, `plan`, `analyze`, `execute`, and `verified` values remain in
+the runtime contract, but they are not five peer choices in the main composer.
+The legacy **Autonomous** toggle can reduce optional pauses and enable eligible
+automatic approval behavior, but it cannot add a tool, widen a profile boundary,
+defeat an explicit deny, or bypass a hard guardrail. Choose **Full access**
+explicitly when a trusted task genuinely needs the full-access profile.
 
 ## What a profile controls
 

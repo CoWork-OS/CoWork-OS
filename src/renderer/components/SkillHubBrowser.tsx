@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { AddToolsSelection } from "./AddToolsPanel";
 import {
   CapabilitySecurityReport,
   CustomSkill,
@@ -104,9 +105,14 @@ function getClawHubSlug(rawValue: string): string | null {
 interface SkillHubBrowserProps {
   onSkillInstalled?: (skill: CustomSkill) => void;
   onClose?: () => void;
+  initialSelection?: AddToolsSelection;
 }
 
-export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserProps) {
+export function SkillHubBrowser({
+  onSkillInstalled,
+  onClose,
+  initialSelection,
+}: SkillHubBrowserProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SkillRegistryEntry[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -126,6 +132,7 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
   );
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const focusedSelection = useRef<string | null>(null);
 
   useEffect(() => {
     loadSkillStatus();
@@ -240,6 +247,70 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
       setIsSearchingClawHub(false);
     }
   }, [clawHubQuery]);
+
+  useEffect(() => {
+    if (!initialSelection || focusedSelection.current === initialSelection.id) return;
+    const targetId = initialSelection.targetId || initialSelection.id;
+    const source = initialSelection.source.toLowerCase();
+    const isClawHub = source.includes("clawhub");
+    const isInstalled = ["bundled", "managed", "workspace", "local"].some((value) =>
+      source.includes(value),
+    );
+    if (isInstalled) {
+      setActiveTab("installed");
+      if (!skillStatus) return;
+      focusedSelection.current = initialSelection.id;
+      requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(`[data-skill-id="${CSS.escape(targetId)}"]`)
+          ?.scrollIntoView({ block: "center" });
+      });
+      return;
+    }
+
+    focusedSelection.current = initialSelection.id;
+    if (isClawHub) {
+      setActiveTab("clawhub");
+      setError(null);
+      setIsSearchingClawHub(true);
+      setClawHubQuery(initialSelection.name);
+      void window.electronAPI
+        .searchClawHubSkills(initialSelection.name)
+        .then((result) => {
+          setClawHubResults(result.results);
+          setSelectedSkill(
+            result.results.find(
+              (skill) =>
+                skill.id === targetId ||
+                skill.name.toLowerCase() === initialSelection.name.toLowerCase(),
+            ) || null,
+          );
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "ClawHub search failed");
+          setClawHubResults([]);
+        })
+        .finally(() => setIsSearchingClawHub(false));
+    } else {
+      setActiveTab("browse");
+      setSearchQuery(initialSelection.name);
+      setIsSearching(true);
+      void window.electronAPI
+        .searchSkillRegistry(initialSelection.name)
+        .then((result) => {
+          setSearchResults(result.results);
+          setSelectedSkill(
+            result.results.find(
+              (skill) =>
+                skill.id === targetId ||
+                skill.name.toLowerCase() === initialSelection.name.toLowerCase(),
+            ) || null,
+          );
+        })
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Search failed"))
+        .finally(() => setIsSearching(false));
+    }
+  }, [initialSelection, skillStatus]);
 
   useEffect(() => {
     if (activeTab !== "clawhub" || clawHubQuery.trim()) {
@@ -545,7 +616,10 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
         searchResults.length > 0 ? (
           renderSearchResults(searchResults, handleInstall)
         ) : (
-          <div className="settings-empty">No skills found. Try a different search term.</div>
+          <div className="settings-empty">
+            No results were returned. The registry may have no matches or its search may be
+            unavailable; try another term or refresh.
+          </div>
         )
       ) : searchQuery && isSearching ? (
         <div className="settings-empty">Searching registry...</div>
@@ -605,7 +679,8 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
         renderSearchResults(clawHubResults, handleClawHubInstall)
       ) : clawHubQuery && !isSearchingClawHub ? (
         <div className="settings-empty">
-          No ClawHub skills found. Try the exact slug, or paste the ClawHub page URL above.
+          No results were returned. ClawHub may have no matches or its search may be unavailable;
+          try the exact slug or paste a ClawHub page URL above.
         </div>
       ) : isSearchingClawHub ? (
         <div className="settings-empty">
@@ -791,14 +866,18 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
           if (skills.length === 0) return null;
 
           return (
-            <details key={source} className="skillhub-group" open={source !== "bundled"}>
+            <details
+              key={source}
+              className="skillhub-group"
+              open={source !== "bundled" || initialSelection?.source.toLowerCase().includes(source)}
+            >
               <summary>
                 <span className="skillhub-group-title">{source} Skills</span>
                 <span className="settings-badge settings-badge--neutral">{skills.length}</span>
               </summary>
               <div className="skillhub-group-content">
                 {skills.map((skill) => (
-                  <div key={skill.id} className="skillhub-group-item">
+                  <div key={skill.id} className="skillhub-group-item" data-skill-id={skill.id}>
                     <div className="skillhub-group-info">
                       <span>{skill.icon || "📦"}</span>
                       <span>{skill.name}</span>

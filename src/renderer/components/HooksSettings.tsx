@@ -5,8 +5,9 @@ import type {
   GmailHooksSettingsData,
   ResendHooksSettingsData,
 } from "../../shared/types";
+import { hookMappingRevision } from "./automation-library";
 
-export function HooksSettings() {
+export function HooksSettings({ focusHookId }: { focusHookId?: string }) {
   const [settings, setSettings] = useState<HooksSettingsData | null>(null);
   const [status, setStatus] = useState<HooksStatus | null>(null);
   const [gmailStatus, setGmailStatus] = useState<{
@@ -243,9 +244,36 @@ export function HooksSettings() {
   }
 
   const isEnabled = settings?.enabled && status?.serverRunning;
+  const focusParts = focusHookId ? /^legacy:([^:]+):(\d+)$/.exec(focusHookId) : null;
+  const hookMappings = settings?.mappings || [];
+  const isCurrentLegacyReference =
+    Boolean(focusParts && settings) && hookMappingRevision(hookMappings) === focusParts?.[1];
+  const focusedHook =
+    hookMappings.find((mapping) => mapping.id === focusHookId) ||
+    (isCurrentLegacyReference && focusParts
+      ? hookMappings[Number(focusParts[2])]?.id
+        ? undefined
+        : hookMappings[Number(focusParts[2])]
+      : undefined);
 
   return (
     <div className="settings-subsection">
+      {focusHookId && (
+        <div className="settings-message" role="status">
+          {focusedHook ? (
+            <>
+              Selected webhook rule: <strong>{focusedHook.name || focusHookId}</strong>
+              {focusedHook.match?.path ? ` · ${focusedHook.match.path}` : ""}. This page manages the
+              shared webhook receiver; it does not edit individual rules.
+            </>
+          ) : (
+            <>
+              Webhook rule {focusHookId} is no longer available at the selected configuration
+              revision.
+            </>
+          )}
+        </div>
+      )}
       {/* Status Messages */}
       {success && (
         <div className="settings-message success">

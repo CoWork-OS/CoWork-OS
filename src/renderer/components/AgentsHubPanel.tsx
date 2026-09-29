@@ -999,6 +999,28 @@ function getTemplateGlyph(template: AgentTemplate) {
   }
 }
 
+export function AgentTestActionButton({
+  variant,
+  onTest,
+  disabled,
+}: {
+  variant: "preview" | "detail";
+  onTest: () => void | Promise<void>;
+  disabled: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={variant === "preview" ? "agents-link-btn" : "agents-agent-action-button primary"}
+      onClick={() => void onTest()}
+      disabled={disabled}
+    >
+      <Play size={16} />
+      Test this agent
+    </button>
+  );
+}
+
 export function AgentsHubPanel({
   onOpenMissionControl,
   onOpenSlackSettings,
@@ -2006,23 +2028,11 @@ export function AgentsHubPanel({
             <div className="agents-studio-test-grid">
               <div className="agents-studio-test-chat">
                 <div className="agents-studio-test-suggestions">
-                  <button
-                    type="button"
-                    className="agents-link-btn"
-                    onClick={() => void handleTestDraft()}
+                  <AgentTestActionButton
+                    variant="preview"
+                    onTest={() => handleTestDraft()}
                     disabled={saving || studioTestRunning}
-                  >
-                    <Play size={16} />
-                    Test this agent
-                  </button>
-                  <button type="button" className="agents-link-btn" disabled>
-                    <Wrench size={16} />
-                    Add advanced logic
-                  </button>
-                  <button type="button" className="agents-link-btn" disabled>
-                    <BotGlyph size={17} />
-                    Optimize this agent
-                  </button>
+                  />
                 </div>
                 <div className="agents-studio-test-transcript">
                   {studioTestTranscript.length > 0 ? (
@@ -2654,7 +2664,7 @@ export function AgentsHubPanel({
               ))}
             </div>
             <button className="agents-secondary-btn" onClick={handleAddSlackTarget}>
-          <MessageSquare size={16} />
+              <MessageSquare size={16} />
               Add Slack deployment
             </button>
             <div className="agents-list">
@@ -3492,35 +3502,24 @@ export function AgentsHubPanel({
           <section className="agents-agent-action-strip" aria-label="Agent actions">
             <h2>Actions</h2>
             <div className="agents-agent-action-buttons">
-              <button
-                className="agents-agent-action-button primary"
-                onClick={() =>
-                  void handleRunAgentInMainTask(
+              <AgentTestActionButton
+                variant="detail"
+                onTest={() =>
+                  handleRunAgentInMainTask(
                     selectedAgent,
                     runAgentPrompt,
                     `${selectedAgent.name} agent test`,
                   )
                 }
                 disabled={!canRunSelectedAgent || agentRunSubmitting}
-              >
-                <Play size={16} />
-                Test this agent
-              </button>
-              <button
-                className="agents-agent-action-button"
-                onClick={openSelectedAgentDraft}
-                disabled={!canEditSelectedAgent}
-              >
-                <Library size={16} />
-                Add advanced logic
-              </button>
+              />
               <button
                 className="agents-agent-action-button"
                 onClick={openSelectedAgentDraft}
                 disabled={!canEditSelectedAgent}
               >
                 <Wrench size={16} />
-                Optimize this agent
+                Edit agent
               </button>
             </div>
             {agentRunError ? <p className="agents-agent-action-error">{agentRunError}</p> : null}

@@ -20,6 +20,12 @@ import {
   type OnboardingResponseStyleId,
   type OnboardingTimeDrainId,
 } from "../../../shared/onboarding";
+import {
+  FINAL_TRY_HEADLINE,
+  FINAL_TRY_NEXT_STEP,
+  selectFinalTrySuggestion,
+  submitFinalTryPrompt,
+} from "./final-try-utils";
 
 interface OnboardingProps {
   onComplete: (dontShowAgain: boolean, firstPrompt?: string) => void | Promise<void>;
@@ -692,13 +698,16 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
   }, [onboarding]);
 
   const handleConfidencePromptSubmit = useCallback(() => {
-    const prompt = inputValue.trim();
-    if (!prompt) return;
-
+    const submitted = submitFinalTryPrompt(
+      inputValue,
+      (prompt) => {
+        firstPromptRef.current = prompt;
+      },
+      () => onboarding.completeOnboarding(),
+    );
+    if (!submitted) return;
     setVoiceError(null);
-    firstPromptRef.current = prompt;
     setInputValue("");
-    onboarding.completeOnboarding();
   }, [inputValue, onboarding]);
 
   // Handle input submission
@@ -1473,9 +1482,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
 
   const renderFinalTryPrompt = () => (
     <div className="onboarding-final-try">
-      <p className="onboarding-final-try-copy">
-        Try one prompt now and I&apos;ll respond instantly.
-      </p>
+      <p className="onboarding-final-try-copy">{FINAL_TRY_HEADLINE}</p>
 
       <div className="onboarding-final-try-suggestions">
         {FINAL_TRY_SUGGESTIONS.map((mission) => (
@@ -1483,8 +1490,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
             key={mission.title}
             className="onboarding-final-try-suggestion"
             onClick={() => {
-              setInputValue(mission.prompt);
-              setVoiceError(null);
+              selectFinalTrySuggestion(mission.prompt, setInputValue, () => setVoiceError(null));
             }}
           >
             {mission.title}
@@ -1495,7 +1501,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
       <div className="onboarding-final-try-input-row">
         <input
           className="onboarding-input onboarding-final-try-input"
-          placeholder="Try me now..."
+          placeholder="Describe a task for your workspace…"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -1564,9 +1570,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         </button>
       </div>
 
-      <p className="onboarding-final-try-prompt">
-        Your prompt will run as a normal task after setup is saved.
-      </p>
+      <p className="onboarding-final-try-prompt">{FINAL_TRY_NEXT_STEP}</p>
     </div>
   );
 

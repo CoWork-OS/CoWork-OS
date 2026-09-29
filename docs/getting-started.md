@@ -17,9 +17,25 @@ Choose the macOS or Windows installer from the [latest release](https://github.c
 
 No Git checkout, compiler, or Node.js installation is needed for the desktop installer. For macOS first-launch security prompts, see the [README installation steps](../README.md#quick-start). If you want the terminal interface, use the [released CLI guide](cli.md). To clone, build, or contribute, use the [development guide](development.md).
 
-### Step 2: Choose How CoWork Runs AI
+### Step 2: Connect and test one model
 
-On first launch, choose the easiest working model route for your machine:
+Open **Settings > AI & Models > Model Access**, choose an account, API key, or local model route, then select a model and run **Test Connection**. Use the private starter workspace for this first task; you do not need to choose a project folder. See [Model Providers](providers.md) if you need help choosing a route.
+
+### Step 3: Choose the task permissions
+
+Start with **Ask for approval** so CoWork pauses for review when an action needs approval. This is separate from the work choice: **Ask** is labeled **Chat** and **Do** is labeled **Smart** in stable v0.5.54. Permissions govern allowed actions, while the work choice selects conversation-only help or task work.
+
+### Step 4: Create and inspect one result
+
+Choose **Do** (shown as **Smart** in the stable 0.5.54 release) and try:
+
+> Create a small spreadsheet with six columns and four example rows for a project tracker. Save it in this workspace.
+
+When the task finishes, open its output card, review the contents, and ask for one revision. Task duration depends on the model and work requested; CoWork shows progress in the task timeline. You can choose a folder containing your own files later.
+
+### Optional: Detailed provider setup
+
+If you need to configure a route manually, choose the path that fits your setup:
 
 1. **Sign in with ChatGPT** if CoWork supports the account route you want to use. Browser sign-in avoids copying an API key, but model eligibility, limits, and charges remain governed by OpenAI and your account plan.
 2. **Use local Ollama** if CoWork detects a model already running on your computer. On an Apple Silicon Mac, configure [MLX-LM](mlx-lm.md) immediately afterward in Settings for a local inference route. Model inference stays on that machine; connected tools and integrations can still send data to services you explicitly configure.
@@ -53,7 +69,7 @@ If you use the API-key path, open **Settings > AI & Models > Model Access** and 
 
 After you have at least two working model routes, you can optionally create a [Mixture of Agents](mixture-of-agents.md) preset in **Settings > AI & Models > AI Model > Mixture of Agents**. Choose one aggregator model and one or more advisor models, save the preset, then select **Mixture of Agents** as the active provider and the preset as the model for tasks that benefit from model diversity.
 
-For automatic team composition in Collaborative mode or `/multitask`, or for
+For automatic team composition with the Collaborative task option or `/multitask`, or for
 the optional Active JEV harness that makes bounded routing, strategy, and
 review decisions, configure [Jev Decision Support](jev.md) in **Settings > AI &
 Models > Jev**. Jev is a separate decision route: with OpenRouter, the Jev
@@ -120,60 +136,26 @@ Supermemory does not replace CoWork's local memory system. It adds an external p
 - If `npm run setup` fails on macOS with `Killed: 9`, macOS terminated the native build due to memory pressure. The setup script retries automatically (with exponential backoff); if it still fails, close other apps and run `npm run setup` again.
 - Account-based routes can have different eligibility, quotas, and billing rules from first-party apps. Check the provider's current terms and [Model Providers](providers.md) before relying on an account plan for third-party harness usage.
 
-### Step 4: Create Your First Task
+### Optional: Try another visible workflow
 
-1. **Start in the private starter workspace**
-   - CoWork creates a private starter workspace automatically, so you can run a safe first task without choosing a real folder.
-   - Click **Choose folder** when you want CoWork OS to work with your own files.
-   - That folder becomes your workspace (e.g., `~/Documents/test-workspace`).
+After reviewing your first output, try a document, presentation, web page, or browser task:
 
-2. **Initialize the Workspace Kit (Optional, Recommended)**
-   - Open **Settings** > **Memory Hub**
-   - Under **Workspace Kit**, click **Initialize**
-   - This creates a `.cowork/` directory in your workspace for durable context, prompt injection, and project scaffolding
-   - The root kit can include shared workspace files such as `AGENTS.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, `IDENTITY.md`, `RULES.md`, `SOUL.md`, `VIBES.md`, and `LORE.md`
-   - `BOOTSTRAP.md` is a one-time onboarding checklist; once you complete onboarding, removing it marks onboarding complete and CoWork OS tracks that state in `.cowork/workspace-state.json`
-   - `HEARTBEAT.md` is reserved for recurring heartbeat-only checks rather than general task context
-   - Project-specific context lives under `.cowork/projects/<projectId>/`, where `CONTEXT.md` captures project notes and `ACCESS.md` captures project access boundaries
-
-### Try The Everything Workbench
-
-After the app is configured, try tasks that produce or use visible work surfaces:
-
-- `create a small spreadsheet with 6 columns and 4 rows`
 - `create a sample Word document`
 - `create a two-slide presentation`
 - `create a simple HTML landing page`
 - `go to example.com and test the website as a normal user`
 - `open my local app and test the main flow at desktop, tablet, and mobile sizes`
 
-Generated documents, spreadsheets, presentations, and web pages appear as artifact cards and open in the right sidebar or fullscreen workbench. Live website testing opens the [Browser Workbench](browser-workbench.md), where the agent and user share the same Browser V2 in-app browser, with visible cursor movement, responsive viewport testing, accessibility snapshot refs, diagnostics, screenshots, annotation, and follow-up controls.
-
-- Changes to tracked kit files keep revision snapshots under `.cowork/**/.history/`
-- You can validate kit health, freshness, and secret/missing-file warnings locally with `npm run kit:lint`
-
-2. **Create a Task**
-   - Click "+ New Task"
-   - Title: "Organize my files"
-   - Description: "Please organize all files in this folder by file type (Images, Documents, etc.)"
-   - Click "Create Task"
-
-   Or run the same kind of local task from the terminal:
-
-   ```bash
-   cowork run "Please organize all files in this folder by file type, but ask before moving anything destructive."
-   ```
-
-3. **Watch it Work**
-   - The agent will create a plan
-   - Execute steps using tools exposed by the selected access profile
-   - Show real-time progress in the timeline
-   - Request approval before destructive changes
+Generated documents, spreadsheets, presentations, and web pages appear as artifact cards and open in the right sidebar or fullscreen workbench. Live website testing opens the [Browser Workbench](browser-workbench.md), where you can follow browser actions and review the resulting page.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-4.webp" alt="Task execution timeline" width="700">
-  <br><em>Task runs show live progress, intermediate work, approvals, and outputs in one view.</em>
+  <br><em>Task runs show progress, approvals, and outputs in one view.</em>
 </p>
+
+### Optional: Set up Workspace Kit
+
+Workspace Kit is not required for your first task. To add durable workspace context later, open **Settings > Memory Hub** and initialize the kit for a workspace. It creates `.cowork/` context files, including project-specific guidance under `.cowork/projects/`. Review and maintain those files like other project instructions. Use `npm run kit:lint` in a development checkout to check freshness and missing or sensitive files. See [Workspace Memory Flow](workspace-memory-flow.md).
 
 ## Orientation: Where The New Product Surfaces Live
 
@@ -183,7 +165,7 @@ Once the app opens, the most important places to know are:
 - **Everything Workbench**: generated documents, spreadsheets, decks, web pages, PDFs, and previews open from task output cards into resizable sidebar or fullscreen artifact workspaces. Use this as the default place for everyday generated knowledge work: review or edit the file, then ask the agent for changes without switching to a separate Word, Excel, PowerPoint, browser, or chat app. See [Everything Workbench](everything-workbench.md).
 - **Uploaded PDFs**: attach a PDF to a task or chat turn when you want CoWork to summarize it, answer questions from it, extract clauses, or transform it. The first prompt includes only a compact PDF excerpt plus page/extraction metadata and the workspace-relative path; CoWork reads the full PDF on demand with the document parser. PDF excerpts are treated as untrusted document data, and visual layout questions use the visual PDF reader instead.
 - **Long-document reviews**: ask for a read-only review of named `.docx`, `.pdf`, `.md`, or `.txt` files to use bounded extraction, full coverage accounting, and evidence reduction. Requests that edit the source remain on the normal task path. See [Long-Document Analysis](document-analysis.md).
-- **Message box shortcuts**: type `/` in the main message box to search app commands and skill-backed workflow shortcuts in one menu. Use `/side` to ask read-only questions about the selected running session from the right panel, `/schedule` for standalone scheduled tasks, `/schedule here` for scheduled follow-ups in the selected thread, `/clear` to clear the current task view without deleting history, `/plan <task>` for Plan mode, `/cost <task>` for estimates, `/multitask [N] <task>` for bounded parallel lane work, or shortcuts such as `/strategy`, `/batch-rename`, and `/gmail-summary-drive` from the bundled CoWork Shortcuts pack. Skill-backed selections insert the slash token first so you can add context before sending; Claude-for-Legal workflows can then show structured matter-context cards in the task view. See [Message Box Shortcuts](message-box-shortcuts.md), [Side Chat](side-chat.md), [Multitask Command](multitask.md), and [Claude-for-Legal Workflows](claude-for-legal.md).
+- **Message box shortcuts**: type `/` in the main message box to search app commands and skill-backed workflow shortcuts in one menu. Use `/side` to ask read-only questions about the selected running session from the right panel, `/schedule` for standalone scheduled tasks, `/schedule here` for scheduled follow-ups in the selected thread, `/clear` to clear the current task view without deleting history, `/plan <task>` for the Plan runtime override, `/cost <task>` for estimates, `/multitask [N] <task>` for bounded parallel lane work, or shortcuts such as `/strategy`, `/batch-rename`, and `/gmail-summary-drive` from the bundled CoWork Shortcuts pack. Skill-backed selections insert the slash token first so you can add context before sending; Claude-for-Legal workflows can then show structured matter-context cards in the task view. See [Message Box Shortcuts](message-box-shortcuts.md), [Side Chat](side-chat.md), [Multitask Command](multitask.md), and [Claude-for-Legal Workflows](claude-for-legal.md).
 - **Task menu**: open a task and use the three-dot menu beside the title for pin/rename/archive, copy working directory/task ID/deeplink/Markdown, fork session, view outputs, or turn the current task into a same-thread or new-task automation. See [Task Automations](task-automations.md).
 - **Automations**: open the main-sidebar Automation Studio to discover templates, build a versioned structured flow, test it without external writes, turn it on, and inspect step-level activity. See [Automation Studio](automation-studio.md).
 - **Agents Hub**: create and inspect reusable managed agents from **Agents**. The clicked-agent detail page is for configuration and actions, not a separate chat. **Test this agent**, **Preview**, and starter prompts start a normal managed-session task and open it in the main task window, where follow-ups, approvals, responses, and outputs work like any other task. See [Managed Agents](managed-agents.md).

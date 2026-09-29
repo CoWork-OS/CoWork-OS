@@ -1,27 +1,25 @@
-# Interaction modes
+# Ask and Do
 
-The desktop composer and device task composer offer **Smart** and **Chat**.
+Choose **Ask** to discuss or draft using the conversation and content you supplied. Ask does not take external actions. Choose **Do** when you want CoWork to work on a task; it selects an execution strategy and follows the active access profile and approval rules.
 
-- **Smart** is the default for new interactive sessions. It derives an execution strategy for each request. Explicit proposal-only requests remain non-mutating. Access profiles and approval rules continue to apply.
-- **Chat** answers and drafts using conversation content, images, and attachment previews already supplied to the model. It does not invoke external tools. Partial attachment previews are not represented as a full document read; switch to Smart when deeper inspection is necessary.
-- **Advanced…** exposes Execute, Plan, Analyze, Debug, and Verified. An override appears in the selector, for example **Smart · Plan**. Selecting plain Smart clears it.
+These are two ways to start work, not permission levels. **Ask for approval**, **Approve for me**, **Full access**, and **Custom** are access profiles that independently govern what a task may do.
 
-Changing the selector affects the next submitted message. It keeps the conversation and history. While a turn is running, actual mode or advanced-override changes wait for the next turn boundary; same-mode messages retain steering behavior. Later messages cannot skip a queued switch. Permission updates still take effect through the existing permission path.
+## Advanced runtime overrides
 
-Chat rejects action and skill shortcuts such as `/goal`; switch to Smart to use them. Local `/clear` remains available. Follow-up images are included in Chat model messages. Temporary automation overrides apply only to their turn and are not saved as session defaults, including when the turn fails.
+Open **Advanced…** when you need to pin a runtime behavior for the next message: **Execute**, **Plan**, **Analyze**, **Debug**, or **Verified**. A selected override appears as **Do · Plan**, for example. Selecting plain **Do** clears the override and lets CoWork choose an approach for the request.
 
-## Persistence and compatibility
+Autonomy, collaboration, model comparison, and parallel lanes are separate task controls. They do not replace Ask/Do. Use `/multitask [N] <task>` when you want bounded parallel lanes.
 
-`AgentConfig.interactionMode` stores the applied preference independently of `executionMode`, which describes the resolved runtime behavior. `TaskFollowUpInput.interactionMode` captures the choice for a specific message; it is validated by the same discriminated schema for local and remote callers. Queued selections are included in the existing V2 runtime snapshots, including queues created before the first conversation message.
+## Release labels
 
-The preference is applied and persisted when its turn begins. Each Smart turn clears previous inferred routing before deriving a new strategy. Chat and advanced overrides remain explicit. There is no database schema migration or historical-event rewrite.
+The current development UI calls the stored `chat` choice **Ask** and the stored `smart` choice **Do**. CoWork OS 0.5.54 labels those choices **Chat** and **Smart**, respectively. The release-specific [surface reference](release-surface-reference.md) lists labels and Mission Control navigation for the stable release and current development UI. These are UI-label changes only: stored and IPC `InteractionModeSelection` values remain `chat` and `smart`.
 
-Legacy clients may omit the field. Explicit legacy user modes are displayed as Chat or the corresponding advanced override. Ambiguous legacy configuration is not rewritten merely by opening or submitting an existing session. CLI and automation execution-mode values remain supported.
+## Behavior and compatibility
 
-Chat is rejected for external ACP runtimes that cannot enforce its no-tool contract. Use a native session for Chat.
+Changing Ask/Do affects the next submitted message and keeps the conversation and history. While a turn is running, a change waits for the next turn boundary; queued changes remain ordered and survive runtime snapshots. Do clears previous inferred routing before deriving a new strategy. Advanced overrides remain explicit, while access profiles and approval rules continue to apply.
 
-## Verification
+Ask supports conversation text, images, and attachment previews already supplied to the model. A partial preview is not represented as a full document read. Ask rejects action and skill shortcuts such as `/goal`; switch to Do to use them. Local `/clear` remains available. Ask is unavailable for external ACP runtimes that cannot enforce the no-external-action contract.
 
-Focused regression coverage includes local/remote validation, clearing stale planning, explicit proposal-only restrictions, advanced overrides, queued selection ordering and snapshot recovery, Chat PDF behavior, daemon permission-versus-mode timing, and the shared picker.
+Legacy clients and saved sessions retain the existing runtime values (`chat`, `execute`, `plan`, `analyze`, `debug`, and `verified`). Do not rename those values as part of a UI vocabulary change. Explicit legacy values continue to display as Ask or the corresponding advanced override; ambiguous legacy configuration is not rewritten merely by opening or submitting an existing session. CLI and automation execution-mode values remain supported.
 
-Manual desktop checks should exercise Chat → Smart → Chat in one session, a queued switch during execution, task navigation, and reopening the app. Smart tool requests must still encounter any applicable approvals; Chat must not execute the same request.
+Focused regression coverage exercises local and remote validation, strategy clearing, proposal-only behavior, advanced overrides, queued selection ordering and recovery, attachment handling, daemon permission timing, and the shared picker. Manual checks should cover Ask → Do → Ask in one session, a queued switch during execution, task navigation, and app restart. Applicable approvals must still appear for Do; Ask must not take external actions.

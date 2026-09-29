@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { Cable, Clock3, Link2, Pencil, Play, Plus, Save, Trash2, Workflow } from "lucide-react";
 import { validateCronExpression } from "../../electron/cron/schedule";
 
@@ -364,7 +364,13 @@ function createDefaultFormState(workspaceId = ""): RoutineFormState {
   };
 }
 
-export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: string) => void }) {
+export function RoutineSettingsPanel({
+  onOpenTask,
+  focusRoutineId,
+}: {
+  onOpenTask?: (taskId: string) => void;
+  focusRoutineId?: string;
+}) {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [runs, setRuns] = useState<RoutineRun[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -384,6 +390,7 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
   useEffect(() => {
     void loadAll();
   }, []);
+  const appliedFocusRoutineId = useRef<string | null>(null);
 
   const runsByRoutine = useMemo(() => {
     const grouped = new Map<string, RoutineRun[]>();
@@ -446,6 +453,14 @@ export function RoutineSettingsPanel({ onOpenTask }: { onOpenTask?: (taskId: str
     setShowForm(false);
     setForm(createDefaultFormState(workspaces[0]?.id || ""));
   }
+
+  useEffect(() => {
+    if (!focusRoutineId || loading || appliedFocusRoutineId.current === focusRoutineId) return;
+    appliedFocusRoutineId.current = focusRoutineId;
+    const routine = routines.find((entry) => entry.id === focusRoutineId);
+    if (routine) startEdit(routine);
+    else setError("This routine is no longer available in the current profile.");
+  }, [focusRoutineId, loading, routines]);
 
   function startCreate() {
     setEditingRoutineId(null);

@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plug, Zap, Package } from "lucide-react";
 import type { CapabilitySecurityReport, QuarantinedImportRecord } from "../../shared/types";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { MESSAGE_SHORTCUTS_UPDATED_EVENT } from "../utils/message-slash-options";
 import { PluginStore } from "./PluginStore";
+import type { AddToolsSelection } from "./AddToolsPanel";
 
 interface PluginPackData {
   name: string;
@@ -40,12 +41,14 @@ interface CustomizePanelProps {
   onNavigateToConnectors?: () => void;
   onNavigateToSkills?: () => void;
   onCreateTask?: (title: string, prompt: string) => void;
+  initialSelection?: AddToolsSelection;
 }
 
 export function CustomizePanel({
   onNavigateToConnectors,
   onNavigateToSkills,
   onCreateTask,
+  initialSelection,
 }: CustomizePanelProps) {
   const [packs, setPacks] = useState<PluginPackData[]>([]);
   const [selectedPack, setSelectedPack] = useState<string | null>(null);
@@ -59,6 +62,7 @@ export function CustomizePanel({
   const [quarantinedPacks, setQuarantinedPacks] = useState<QuarantinedImportRecord[]>([]);
   const [actioningRecordId, setActioningRecordId] = useState<string | null>(null);
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
+  const focusedSelection = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +92,24 @@ export function CustomizePanel({
       cancelled = true;
     };
   }, [loadKey]);
+
+  useEffect(() => {
+    if (!initialSelection || focusedSelection.current === initialSelection.id) return;
+    if (initialSelection.source === "Feature Pack registry") {
+      setShowStore(true);
+      focusedSelection.current = initialSelection.id;
+      return;
+    }
+    const targetId = initialSelection.targetId || initialSelection.id;
+    if (!packs.length) return;
+    const pack = packs.find(
+      (entry) => entry.name === targetId || entry.displayName === initialSelection.name,
+    );
+    if (pack) {
+      setSelectedPack(pack.name);
+      focusedSelection.current = initialSelection.id;
+    }
+  }, [initialSelection, packs]);
 
   // Check for pack updates in the background
   useEffect(() => {
@@ -651,6 +673,14 @@ export function CustomizePanel({
       {/* Plugin Store Modal */}
       {showStore && (
         <PluginStore
+          initialQuery={
+            initialSelection?.source === "Feature Pack registry" ? initialSelection.name : ""
+          }
+          initialPackId={
+            initialSelection?.source === "Feature Pack registry"
+              ? initialSelection.targetId
+              : undefined
+          }
           onClose={() => setShowStore(false)}
           onInstalled={() => setLoadKey((k) => k + 1)}
         />

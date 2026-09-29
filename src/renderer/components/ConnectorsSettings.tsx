@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search, X } from "lucide-react";
 import { ConnectorSetupModal, ConnectorProvider } from "./ConnectorSetupModal";
 import { ConnectorEnvModal, ConnectorEnvField } from "./ConnectorEnvModal";
@@ -12,6 +12,8 @@ import { DropboxSettings } from "./DropboxSettings";
 import { TeamsMeetingSettings } from "./TeamsMeetingSettings";
 import { SharePointSettings } from "./SharePointSettings";
 import { ConnectorBrandIcon } from "./ConnectorBrandIcon";
+import { NATIVE_INTEGRATIONS, type NativeIntegrationKey } from "./native-integration-catalog";
+import type { AddToolsSelection } from "./AddToolsPanel";
 
 // Types (matching preload types)
 type MCPConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
@@ -55,6 +57,10 @@ interface ConnectorDefinition {
   supportsOAuth: boolean;
   provider?: ConnectorProvider;
   envFields?: ConnectorEnvField[];
+}
+
+interface ConnectorsSettingsProps {
+  initialSelection?: AddToolsSelection;
 }
 
 const SHIPPED_CONNECTOR_IDS = new Set([
@@ -761,56 +767,21 @@ interface IntegrationDefinition {
   component: ReactNode;
 }
 
-const INTEGRATIONS: IntegrationDefinition[] = [
-  {
-    key: "notion",
-    name: "Notion",
-    description: "Search and create content on your Notion pages.",
-    component: <NotionSettings />,
-  },
-  {
-    key: "sharepoint",
-    name: "SharePoint",
-    description: "Get in-depth answers from your SharePoint content.",
-    component: <SharePointSettings />,
-  },
-  {
-    key: "onedrive",
-    name: "OneDrive",
-    description: "Get in-depth answers from your OneDrive content.",
-    component: <OneDriveSettings />,
-  },
-  {
-    key: "googleworkspace",
-    name: "Gmail",
-    description: "Connect Gmail for inbox search, thread reading, drafts, sending, and labels.",
-    component: <GoogleWorkspaceSettings />,
-  },
-  {
-    key: "agentmail",
-    name: "AgentMail",
-    description: "Native agent inboxes, pods, domains, scoped keys, and realtime email.",
-    component: <AgentMailSettings />,
-  },
-  {
-    key: "box",
-    name: "Box",
-    description: "Get in-depth answers from your Box content.",
-    component: <BoxSettings />,
-  },
-  {
-    key: "dropbox",
-    name: "Dropbox",
-    description: "Search and access your Dropbox content.",
-    component: <DropboxSettings />,
-  },
-  {
-    key: "teams-meetings",
-    name: "Teams meeting transcripts",
-    description: "Save transcripts of Teams meetings you organize as local notes.",
-    component: <TeamsMeetingSettings />,
-  },
-];
+const INTEGRATION_COMPONENTS: Record<NativeIntegrationKey, ReactNode> = {
+  notion: <NotionSettings />,
+  sharepoint: <SharePointSettings />,
+  onedrive: <OneDriveSettings />,
+  googleworkspace: <GoogleWorkspaceSettings />,
+  agentmail: <AgentMailSettings />,
+  box: <BoxSettings />,
+  dropbox: <DropboxSettings />,
+  "teams-meetings": <TeamsMeetingSettings />,
+};
+
+const INTEGRATIONS: IntegrationDefinition[] = NATIVE_INTEGRATIONS.map((integration) => ({
+  ...integration,
+  component: INTEGRATION_COMPONENTS[integration.key],
+}));
 
 const getStatusColor = (status: MCPConnectionStatus): string => {
   switch (status) {
@@ -939,7 +910,7 @@ function normalizeConnectorSearch(value: string): string {
   return value.trim().toLowerCase();
 }
 
-export function ConnectorsSettings() {
+export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps = {}) {
   const [settings, setSettings] = useState<MCPSettingsData | null>(null);
   const [serverStatuses, setServerStatuses] = useState<MCPServerStatus[]>([]);
   const [registryConnectorIds, setRegistryConnectorIds] = useState<Set<string> | null>(null);
@@ -976,6 +947,7 @@ export function ConnectorsSettings() {
   const [customCommand, setCustomCommand] = useState("");
   const [customArgs, setCustomArgs] = useState("");
   const [customSaving, setCustomSaving] = useState(false);
+  const handledSelection = useRef<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -1148,6 +1120,31 @@ export function ConnectorsSettings() {
   const showIntegrationResults = activeFilter !== "connected" && filteredIntegrations.length > 0;
   const showConnectorEmpty = filteredRows.length === 0 && !showIntegrationResults;
   const showMcpDivider = showIntegrationResults && filteredRows.length > 0;
+
+  useEffect(() => {
+    if (!initialSelection || handledSelection.current === initialSelection.id) return;
+    const targetId = initialSelection.targetId || initialSelection.id;
+    const integration = INTEGRATIONS.find((item) => item.key === targetId);
+    if (integration) {
+      setIntegrationModal(integration);
+      handledSelection.current = initialSelection.id;
+      return;
+    }
+    if (!settings) return;
+    const row = connectorRows.find(
+      ({ connector }) =>
+        connector.key === targetId ||
+        connector.registryId === targetId ||
+        connector.name === initialSelection.name,
+    );
+    if (row) {
+      setDetailConnector({ connector: row.connector, config: row.config, status: row.status });
+      handledSelection.current = initialSelection.id;
+    } else {
+      setSearchQuery(initialSelection.name);
+      handledSelection.current = initialSelection.id;
+    }
+  }, [connectorRows, initialSelection, settings]);
 
   return (
     <div className="settings-section connector-marketplace">

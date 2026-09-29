@@ -137,9 +137,11 @@ function buildPayload(draft: CouncilDraft): CreateCouncilConfigRequest {
 export function CouncilSettings({
   workspaceId,
   onOpenTask,
+  focusCouncilId,
 }: {
   workspaceId?: string;
   onOpenTask?: (taskId: string) => void;
+  focusCouncilId?: string;
 }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [channels, setChannels] = useState<GatewayChannel[]>([]);
@@ -226,7 +228,7 @@ export function CouncilSettings({
         const nextWorkspaceId = workspaceId || workspaceList[0]?.id || "";
         setSelectedWorkspaceId(nextWorkspaceId);
         setDraft(createDraft(nextWorkspaceId));
-        await loadCouncils(nextWorkspaceId);
+        await loadCouncils(nextWorkspaceId, focusCouncilId);
       } catch (loadError: Any) {
         if (!cancelled) {
           setError(loadError?.message || "Failed to load council settings.");
@@ -241,7 +243,7 @@ export function CouncilSettings({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, focusCouncilId]);
 
   const selectCouncil = async (councilId: string | null) => {
     setError(null);

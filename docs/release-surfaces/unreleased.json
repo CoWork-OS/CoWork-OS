@@ -1,0 +1,20 @@
+{
+  "version": "unreleased",
+  "status": "development",
+  "interactionChoices": [
+    { "label": "Ask", "runtimeValue": "chat" },
+    { "label": "Do", "runtimeValue": "smart" }
+  ],
+  "missionControl": [
+    {
+      "interface": "Standard",
+      "availability": "available",
+      "path": "Main sidebar > Mission Control"
+    },
+    {
+      "interface": "Calm",
+      "availability": "available",
+      "path": "More > Mission Control"
+    }
+  ]
+}

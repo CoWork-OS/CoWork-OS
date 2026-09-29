@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Zap, Plus, Trash2, ToggleLeft, ToggleRight, History, ChevronDown } from "lucide-react";
 
 interface TriggerCondition {
@@ -215,12 +215,17 @@ const EXAMPLE_TRIGGERS: ExampleTrigger[] = [
   },
 ];
 
-export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId }) => {
+export const EventTriggersPanel: React.FC<{
+  workspaceId?: string;
+  focusTriggerId?: string;
+}> = ({ workspaceId, focusTriggerId }) => {
   const [triggers, setTriggers] = useState<EventTrigger[]>([]);
+  const [triggersLoaded, setTriggersLoaded] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [history, setHistory] = useState<TriggerHistoryEntry[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServerOption[]>([]);
+  const appliedFocusTriggerId = useRef<string | null>(null);
 
   // Form state
   const [name, setName] = useState("");
@@ -239,6 +244,8 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
       setTriggers(result || []);
     } catch {
       // API not available yet
+    } finally {
+      setTriggersLoaded(true);
     }
   }, [workspaceId]);
 
@@ -379,6 +386,15 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
       setExpandedHistory(triggerId);
     }
   };
+
+  useEffect(() => {
+    if (!focusTriggerId || !triggersLoaded || appliedFocusTriggerId.current === focusTriggerId)
+      return;
+    appliedFocusTriggerId.current = focusTriggerId;
+    if (triggers.some((trigger) => trigger.id === focusTriggerId)) {
+      void loadHistory(focusTriggerId);
+    }
+  }, [focusTriggerId, loadHistory, triggers, triggersLoaded]);
 
   const fields = FIELDS_BY_SOURCE[source] || ["text"];
 
@@ -827,7 +843,10 @@ export const EventTriggersPanel: React.FC<{ workspaceId?: string }> = ({ workspa
         <div
           key={t.id}
           style={{
-            border: "1px solid var(--color-border)",
+            border:
+              focusTriggerId === t.id
+                ? "1px solid var(--color-accent, var(--color-primary))"
+                : "1px solid var(--color-border)",
             borderRadius: 8,
             marginBottom: 8,
             overflow: "hidden",

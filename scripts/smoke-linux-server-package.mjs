@@ -178,6 +178,11 @@ async function main() {
       ],
       { cwd: packageRoot },
     );
+    run(
+      process.execPath,
+      ["-e", "require('node-pty'); console.log('node-pty ok')"],
+      { cwd: packageRoot },
+    );
 
     const port = 20000 + Math.floor(Math.random() * 20000);
     const userDataDir = path.join(tempRoot, "data");

@@ -6,22 +6,83 @@ import ts from "typescript";
 const repoRoot = process.cwd();
 const rendererRoot = path.join(repoRoot, "src", "renderer");
 const preloadPath = path.join(repoRoot, "src", "electron", "preload.ts");
+const browserHostApplicationPath = path.join(
+  repoRoot,
+  "src",
+  "host",
+  "services",
+  "browser-host-application.ts",
+);
 const outputPath = path.join(repoRoot, "docs", "web-capability-matrix.md");
 const checkOnly = process.argv.includes("--check");
 const markdownTick = String.fromCharCode(96);
 
-const plannedMethods = new Set([
+const previewMethods = new Set([
   "getAppearanceSettings",
   "saveAppearanceSettings",
   "getLLMConfigStatus",
   "getLLMSettings",
-  "getTempWorkspace",
+  "getGuardrailSettings",
+  "getPermissionRuntimeInfo",
+  "getAdminPolicies",
+  "getUserProfile",
+  "listMemoryWriteApprovals",
+  "getMemoryWriteApproval",
+  "getMemoryWriteApprovalCount",
+  "approveMemoryWriteApproval",
+  "rejectMemoryWriteApproval",
+  "getMemoryLayerPreview",
+  "promoteMemoryObservation",
+  "getAwarenessConfig",
+  "saveAwarenessConfig",
+  "listAwarenessBeliefs",
+  "getAwarenessSummary",
+  "getAwarenessSnapshot",
+  "listAwarenessEvents",
+  "updateAwarenessBelief",
+  "deleteAwarenessBelief",
+  "getWorkspaceKitStatus",
+  "initWorkspaceKit",
+  "createWorkspaceKitProject",
+  "getMemorySettings",
+  "saveMemorySettings",
+  "findImportedMemories",
+  "importMemoryFromText",
+  "getMemoryDetails",
+  "setImportedMemoryPromptRecallIgnored",
+  "deleteImportedMemoryEntry",
+  "getMemoryObservationDetails",
+  "updateMemoryObservation",
+  "rebuildMemoryObservationMetadata",
+  "addUserFact",
+  "updateUserFact",
+  "deleteUserFact",
+  "getOpenCommitments",
+  "getUsageInsights",
+  "getUsageInsightsEarliest",
+  "getPersonalitySettings",
+  "getLLMRoutingStatus",
+  "getPermissionSettings",
+  "savePersonalitySettings",
+  "getPersonalityDefinitions",
+  "getPersonaDefinitions",
+  "getRelationshipStats",
+  "setActivePersonality",
+  "setActivePersona",
+  "onPersonalitySettingsChanged",
+  "onLLMRoutingEvent",
+  "onMailboxEvent",
+  "listNotifications",
+  "getUnreadNotificationCount",
+  "markNotificationRead",
+  "markAllNotificationsRead",
+  "deleteNotification",
+  "deleteAllNotifications",
   "listWorkspaces",
   "selectWorkspace",
   "touchWorkspace",
   "listSidebarTasks",
   "listTasks",
-  "listBotConversations",
   "getTask",
   "createTask",
   "sendMessage",
@@ -42,6 +103,16 @@ const plannedMethods = new Set([
   "putComposerDraftAttachment",
   "resolveComposerDraftAttachment",
   "releaseComposerDraftAttachment",
+]);
+
+const plannedMethods = new Set([
+  "getTempWorkspace",
+  "listBotConversations",
+  "getVoiceSettings",
+  "onVoiceEvent",
+  "infraGetStatus",
+  "infraGetSettings",
+  "onInfraStatusChange",
 ]);
 
 const nativeOnlyMethods = new Set([
@@ -391,7 +462,142 @@ function getPreloadSurface() {
   return { declared, exposed };
 }
 
+function getBrowserHostDefinitionSurface() {
+  if (!fs.existsSync(browserHostApplicationPath)) return new Map();
+  const applicationFile = parseSource(browserHostApplicationPath);
+  const imports = new Map();
+  const calledFactories = new Set();
+
+  function visitApplication(node) {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const modulePath = node.moduleSpecifier.text;
+      if (
+        modulePath.startsWith("./browser-") &&
+        node.importClause?.namedBindings &&
+        ts.isNamedImports(node.importClause.namedBindings)
+      ) {
+        for (const element of node.importClause.namedBindings.elements) {
+          const localName = element.name.text;
+          const importedName = element.propertyName?.text ?? localName;
+          if (importedName.startsWith("createBrowser") && importedName.endsWith("Definitions")) {
+            imports.set(
+              localName,
+              path.resolve(path.dirname(browserHostApplicationPath), `${modulePath}.ts`),
+            );
+          }
+        }
+      }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      imports.has(node.expression.text)
+    ) {
+      calledFactories.add(node.expression.text);
+    }
+    ts.forEachChild(node, visitApplication);
+  }
+  visitApplication(applicationFile);
+
+  const methodLocations = new Map();
+  const addMethod = (name, sourceFile, node) => {
+    if (!name) return;
+    const rows = methodLocations.get(name) ?? [];
+    rows.push(sourceLocation(sourceFile, node));
+    methodLocations.set(name, rows);
+  };
+
+  for (const factoryName of calledFactories) {
+    const filePath = imports.get(factoryName);
+    if (!filePath || !fs.existsSync(filePath)) continue;
+    const sourceFile = parseSource(filePath);
+    let factory = null;
+    function findFactory(node) {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === factoryName && node.body) {
+        factory = node;
+        return;
+      }
+      ts.forEachChild(node, findFactory);
+    }
+    findFactory(sourceFile);
+    if (!factory?.body) continue;
+
+    const localDefinitionObjects = new Set();
+    function collectFactoryMethods(node, isRoot = false) {
+      if (!isRoot && ts.isFunctionLike(node)) return;
+
+      if (ts.isVariableDeclaration(node)) {
+        const isDesktopDefinitionType =
+          node.type &&
+          ts.isTypeReferenceNode(node.type) &&
+          ts.isIdentifier(node.type.typeName) &&
+          node.type.typeName.text === "BrowserDesktopDefinitions";
+        if (isDesktopDefinitionType && ts.isIdentifier(node.name)) {
+          localDefinitionObjects.add(node.name.text);
+          const initializer = node.initializer && unwrapExpression(node.initializer);
+          if (initializer && ts.isObjectLiteralExpression(initializer)) {
+            for (const property of initializer.properties) {
+              const name = memberName(property.name);
+              if (name) addMethod(name, sourceFile, property);
+            }
+          }
+        }
+      }
+
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const left = unwrapExpression(node.left);
+        if (ts.isPropertyAccessExpression(left) && ts.isIdentifier(left.expression)) {
+          if (localDefinitionObjects.has(left.expression.text)) {
+            addMethod(left.name.text, sourceFile, node);
+          }
+        }
+      }
+
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "add" &&
+        node.arguments[0] &&
+        ts.isStringLiteralLike(unwrapExpression(node.arguments[0]))
+      ) {
+        addMethod(unwrapExpression(node.arguments[0]).text, sourceFile, node);
+      }
+
+      if (ts.isReturnStatement(node) && node.expression) {
+        const expression = unwrapExpression(node.expression);
+        if (ts.isObjectLiteralExpression(expression)) {
+          for (const property of expression.properties) {
+            if (!ts.isPropertyAssignment(property)) continue;
+            const value = unwrapExpression(property.initializer);
+            if (!value || !ts.isObjectLiteralExpression(value)) continue;
+            const hasHandler = value.properties.some(
+              (candidate) => memberName(candidate.name) === "handler",
+            );
+            if (hasHandler) addMethod(memberName(property.name), sourceFile, property);
+          }
+        }
+      }
+
+      ts.forEachChild(node, (child) => collectFactoryMethods(child, false));
+    }
+    collectFactoryMethods(factory.body, true);
+  }
+
+  for (const [name, locations] of methodLocations) {
+    const deduplicated = locations.filter(
+      (location, index) =>
+        index ===
+        locations.findIndex(
+          (candidate) => candidate.file === location.file && candidate.line === location.line,
+        ),
+    );
+    methodLocations.set(name, deduplicated);
+  }
+  return methodLocations;
+}
+
 const preloadSurface = getPreloadSurface();
+const browserHostDefinitionSurface = getBrowserHostDefinitionSurface();
 
 function escapeCell(value) {
   return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
@@ -413,9 +619,21 @@ function formatLocations(fileMap) {
     .join("; ");
 }
 
+function formatBrowserHandlerLocations(locations = []) {
+  const files = new Map();
+  for (const location of locations) {
+    const lines = files.get(location.file) ?? new Set();
+    lines.add(location.line);
+    files.set(location.file, lines);
+  }
+  return formatLocations(files);
+}
+
 function apiStatus(name) {
   if (nativeOnlyMethods.has(name)) return "Native-only today";
+  if (previewMethods.has(name)) return "Preview";
   if (plannedMethods.has(name)) return "Planned for browser work";
+  if (browserHostDefinitionSurface.has(name)) return "Host handler source; UI unverified";
   return "Unreviewed";
 }
 
@@ -447,6 +665,11 @@ function renderMarkdown() {
   const exposedNames = new Set(preloadSurface.exposed.keys());
   const directNames = new Set(directRows.map((row) => row.name));
   const unreviewedDirect = directRows.filter((row) => apiStatus(row.name) === "Unreviewed");
+  const statusCounts = new Map();
+  for (const row of directRows) {
+    const status = apiStatus(row.name);
+    statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
+  }
   const declaredUnused = Array.from(declaredNames)
     .filter((name) => !directNames.has(name))
     .sort(stableCompare);
@@ -467,24 +690,33 @@ function renderMarkdown() {
     "",
     "<!-- Generated by node scripts/qa/inventory-host-api.mjs. Do not edit generated sections by hand. -->",
     "",
-    "This is a source inventory and implementation map, not proof of a complete browser workflow. Classifications remain partial; only the opt-in browser preview, selected roadmap slices, and clearly native UI calls are classified. Remaining bridge methods stay unreviewed.",
+    "This is a source inventory and implementation map, not proof of a complete browser workflow. Preview marks a bounded set of flows with focused or UI-smoke evidence. Host handler source means a browser RPC definition is registered by the browser host composition; runtime availability may depend on host configuration, and the renderer flow remains unverified. Remaining bridge methods stay unreviewed.",
     "",
     "## Current status",
     "",
     "| Status | Capability | Evidence and limits |",
     "| --- | --- | --- |",
-    "| Preview | Pairing, authenticated workspace/task summaries, keyed task admission, cancellation receipts, text follow-up receipts, committed timeline replay with older-page navigation, scoped approval/input decisions, workspace file transfer, task artifact download handles, host terminal attachment, and read-only Git status/diff. | `src/renderer-web`, `src/host/web/WebApplication.ts`, and `src/host/services/browser-*.ts`. The disposable Node host smoke passes from source and an installed npm tarball; no real-model task or packaged desktop/Linux workflow is proven. |",
+    "| Preview | Pairing, authenticated workspace/task summaries, keyed task admission, cancellation receipts, text follow-up receipts, committed timeline replay with older-page navigation, scoped approval/input decisions, workspace file transfer, task artifact download handles, host terminal attachment, and Git status/diff/stage/unstage/staged-only commit with durable replay receipts. | `src/renderer-web`, `src/host/web/WebApplication.ts`, and `src/host/services/browser-*.ts`. Focused service tests and the disposable browser host smoke cover Git writes. A packaged macOS smoke verifies app assets, authenticated pairing, and the shared CoWork UI. Linux x64 packaging and daemon health passed smoke; pairing and the full browser workflow against that packaged artifact, plus real-model execution, remain unverified. |",
     "| Compatibility | The standalone legacy Web Access client retains REST task/event operations and its token-based login. | `src/renderer/components/WebAccessClient.tsx`. Its initial token is read from the URL query; this legacy surface is separate from the new browser session. |",
     "| Preview | The browser entry mounts the shared desktop App, sidebar, home, composer, and task view through a capability-limited bridge. | `src/renderer-web/browser-entry.tsx` installs the browser bridge before importing App. Desktop-only navigation and controls are gated; visual reuse does not imply capability parity or real-model browser acceptance. |",
+    "| Preview | Host-backed notifications: list, unread count, mark one/all read, delete one/all, and live updates. | Browser notifications use the host profile service, filter records through workspace read permissions, and render the control only when read/manage methods are advertised. The browser UI smoke verifies read and clear actions. |",
     "| Preview | Rich task and follow-up input, scoped attachment capture, skill status and catalog discovery, installed Feature Pack details, and workspace text/image/PDF previews. | Focused source tests cover input validation, durable attachment storage, replay privacy, and catalog DTOs. Provider execution and refresh during a real running task still require acceptance. |",
+    "| Preview | Workspace video previews for MP4, MOV, and WebM files through authenticated byte-range streaming. | Short-lived, session-bound handles are served by the host with permission and file-identity checks on each request. Focused host, route, and renderer bridge tests cover range reads, expiry/revocation, and denied access. Live playback and packaged-host acceptance remain open. |",
     "| Preview | Installed Feature Pack and skill toggles through shared host services. | Focused service, registry, bridge, and UI tests pass. A disposable Node host smoke verifies mutation replay and state restoration; browser clicks verified pack state across a host restart and skill state after reopening. Installation and import remain desktop-only. |",
     "| Preview | Task Queue concurrency and timeout settings. | Closed host-admin methods use the authoritative queue manager, persist before runtime publication, and confirm readback. Focused tests cover refused/failed writes and runtime slot application; the disposable host smoke verifies save/replay/readback and restoration. Browser clicks verified a changed limit across a host restart, then restored the original value. |",
-    "| In progress | Queued follow-up recovery across host restarts. | Source validation is ongoing; real-model crash recovery must pass before release claims. |",
-    "| Planned | Video media ranges and Git writes. | These workflows still need browser adapters and real acceptance. |",
+    "| Preview | Workspace memory settings and deterministic text imports, imported-memory recall flags and deletion, profile fact add/pin/delete, and observation metadata edits. | Focused host tests enforce current read/write/delete access, stored-record ownership, bounds, and service errors. Disposable host acceptance verifies import persistence, settings readback, observation edits, recall flags, and deletion denial followed by authorized deletion. Browser clicks verify facts, retention save/restore, import completion and persistence, and a delayed old-workspace reply being ignored. External memory setup, autonomy, Chronicle deletion and file imports remain engineering work. Real-task recall and streaming-load acceptance remain open. |",
+    "| Preview | Host awareness settings and workspace beliefs. | Browser clicks save/restore Private Mode, confirm a belief produced through existing task feedback, and forget it with authorized deletion. Host acceptance verifies config readback, partial field edits, scoped events/snapshot, belief update and deletion denial. Eight focused tests cover bounds, stored ownership and persistence failure before live publication. Device collectors, real-task prompt use, restart and load acceptance remain open. |",
+    "| Preview | Workspace Kit status, initialization and project folders through shared desktop templates and scheduling helpers. | Browser clicks Initialize and Create project, verifies project files on disk, and opens USER.md in the existing file viewer. Host smoke repeats initialization and verifies exactly three default scheduled jobs. Focused tests cover read-only status, retained user notes, scoped writes, symlink/history escapes, 2 MiB reads, explicit policy denies, and refused scheduling. Only fixed built-in policy templates can be seeded by the owner setup API; arbitrary file tools remain protected. Scheduled execution, fault recovery after partial initialization, and broader performance remain open. |",
+    "| Preview | Observation promotion into curated workspace knowledge and current Wake-Up Layers preview. | Browser acceptance imports an observation, rebuilds metadata, searches/selects it, clicks Promote, confirms the status, and verifies the workspace `.cowork/MEMORY.md` file. Host acceptance verifies promoted content and layer DTOs. Node initializes the existing curated-memory service before queue recovery. Filesystem guards enforce current workspace policy; focused tests cover ownership, denied writes, rejected promotion, and failed preview reads. Real-task injection after promotion, review-required promotion, and preview performance under active streaming remain open. |",
+    "| Preview | Pending Memory write review: bounded workspace list/count, redacted detail, approve and reject. | Browser clicks apply a disposable archive write and reject another, verify persisted outcomes, and refresh the pending list. Host smoke verifies list/count/detail and duplicate-operation replay. Focused tests cover stored-workspace authorization, delete permission for removals, current network policy for external writes, replay using effective workspace policy, and legacy-summary redaction. Reads fail visibly. Real-task generated approvals, external-provider execution and crash/restart recovery remain unverified. |",
+    "| Preview | Scheduled task configuration through browser create, update, and delete actions with live list refresh. | The disposable browser UI smoke creates a disabled job, renames and removes it through the host, and verifies each change appears in the shared Settings screen. It does not execute a scheduled model task or validate crash recovery. |",
+    "| In progress | Queued follow-up recovery across host restarts. | Focused tests cover terminal-task receipt discovery and snapshot-ahead-of-receipt recovery, including attachment restoration; fresh real-model crash/restart acceptance remains open. |",
+    "| Planned | Media artifact previews. | Workspace video file previews are implemented; media embedded in generated task artifacts still needs a browser adapter and real acceptance. |",
     "| Native-only today | Native window controls, folder dialog, Finder reveal, desktop update checks, tray callback, and system-settings launch. | These methods express Electron/OS UI behavior and are gated in the browser. The bridge reads host platform from the authenticated host identity, not the browser client. |",
-    "| Unreviewed | Every other direct bridge member and every declared member with no direct renderer access. | The direct inventory and unreferenced declaration appendix below expose the remaining names; no capability parity is inferred. |",
+    "| Host handler source; UI unverified | Direct renderer methods with a registered browser RPC handler but no explicit preview-flow acceptance evidence. | Handler presence does not prove the method is available in every host configuration or that a user-facing flow works. |",
+    "| Unreviewed | Direct bridge members with no classified browser-host handler source, and declared members with no direct renderer access. | The direct inventory and unreferenced declaration appendix below expose the remaining names; no capability parity is inferred. |",
     "",
-    "Planning basis: the CoWork web implementation plan (W0-W6). The installed npm Node-host smoke covers a bounded preview; each release surface still needs its own artifact and real-workflow acceptance before release claims.",
+    "Planning basis: the CoWork browser implementation plan (W0-W9). The installed npm Node-host smoke covers a bounded preview; each release surface still needs its own artifact and real-workflow acceptance before release claims.",
     "",
     "## Renderer entry and startup seams",
     "",
@@ -511,6 +743,9 @@ function renderMarkdown() {
     `| ElectronAPI members declared in preload type | ${preloadSurface.declared.size} |`,
     `| Methods/properties exposed by contextBridge | ${preloadSurface.exposed.size} |`,
     `| Distinct direct window.electronAPI member names | ${directRows.length} |`,
+    `| Direct renderer members with preview evidence | ${statusCounts.get("Preview") ?? 0} |`,
+    `| Direct renderer members with a browser handler source; UI unverified | ${statusCounts.get("Host handler source; UI unverified") ?? 0} |`,
+    `| Direct renderer members still unreviewed | ${statusCounts.get("Unreviewed") ?? 0} |`,
     `| Direct member expressions | ${syntacticCounts.directMembers} |`,
     `| Direct member expressions used as calls | ${syntacticCounts.directCalls} |`,
     `| Direct bridge root expressions (including method receivers) | ${bridgeRootReferences.length} |`,
@@ -522,17 +757,17 @@ function renderMarkdown() {
     `| Declared names not found in exposed object | ${declaredNotExposed.length} |`,
     `| Exposed names not found in interface | ${exposedNotDeclared.length} |`,
     "",
-    "The scan counts syntactic `window.electronAPI.member` and literal bracket-member expressions in renderer source while excluding tests. Calls are the subset whose member expression is the call target. Alias declarations are reported separately and are not included in direct member totals. The simple alias resolver is name-based within each file, so same-name shadowing can over-report an alias declaration. Dynamic reflection, values returned by helpers, destructured-variable use counts, and arbitrary aliases are outside this pass.",
+    "The scan counts syntactic `window.electronAPI.member` and literal bracket-member expressions in renderer source while excluding tests. Calls are the subset whose member expression is the call target. Alias declarations are reported separately and are not included in direct member totals. The browser-handler source pass follows `createBrowser*Definitions` factories imported and invoked by `browser-host-application.ts`, then recognizes typed definition-object keys, assignments, literal `add(...)` registrations, and returned handler objects. It is syntactic evidence only; conditional factory branches, runtime capabilities, and successful UI flows still need separate verification. The simple alias resolver is name-based within each file, so same-name shadowing can over-report an alias declaration. Dynamic reflection, values returned by helpers, destructured-variable use counts, and arbitrary aliases are outside this pass.",
     "",
     "## Direct renderer bridge members",
     "",
-    "| Member | Status | Accesses | Calls | Effect callback | Other function/component | Module scope | Source locations |",
-    "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    "| Member | Status | Browser handler source | Accesses | Calls | Effect callback | Other function/component | Module scope | Source locations |",
+    "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
   ];
 
   for (const row of directRows) {
     lines.push(
-      `| ${inline(escapeCell(row.name))} | ${apiStatus(row.name)} | ${row.accesses} | ${row.calls} | ${row.scopes["effect callback"]} | ${row.scopes["function/component"]} | ${row.scopes["module scope"]} | ${escapeCell(formatLocations(row.files))} |`,
+      `| ${inline(escapeCell(row.name))} | ${apiStatus(row.name)} | ${escapeCell(formatBrowserHandlerLocations(browserHostDefinitionSurface.get(row.name)))} | ${row.accesses} | ${row.calls} | ${row.scopes["effect callback"]} | ${row.scopes["function/component"]} | ${row.scopes["module scope"]} | ${escapeCell(formatLocations(row.files))} |`,
     );
   }
 

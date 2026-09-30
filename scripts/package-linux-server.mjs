@@ -281,7 +281,9 @@ async function main() {
         cwd: packageRoot,
       },
     );
-    run("npm", ["rebuild", "--ignore-scripts=false", "better-sqlite3"], { cwd: packageRoot });
+    run("npm", ["rebuild", "--ignore-scripts=false", "better-sqlite3", "node-pty"], {
+      cwd: packageRoot,
+    });
 
     await fsp.mkdir(RELEASE_DIR, { recursive: true });
     const tarballPath = path.join(RELEASE_DIR, `${packageName}.tar.gz`);

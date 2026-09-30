@@ -109,6 +109,8 @@
     "build:react": "vite build",
     "build:web": "vite build --config vite.web.config.mts",
     "qa:web:smoke": "npm run build:web && npm run build:daemon && node scripts/qa/smoke-browser-preview.mjs",
+    "qa:web:ui-smoke": "npm run build:web && npm run build:daemon && cross-env COWORK_WEB_UI_SMOKE=1 node scripts/qa/smoke-browser-preview.mjs",
+    "qa:web:desktop-smoke": "node scripts/qa/smoke-packaged-desktop-browser.mjs",
     "build:electron": "node scripts/clean-build-output.mjs electron && tsc -p tsconfig.electron.json",
     "build:daemon": "node scripts/clean-build-output.mjs daemon && tsc -p tsconfig.daemon.json",
     "build:cli": "node scripts/clean-build-output.mjs cli && tsc -p tsconfig.cli.json",

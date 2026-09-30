@@ -800,6 +800,21 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_browser_task_cancel_receipts_task
         ON browser_task_cancel_receipts(task_id, created_at);
 
+      -- Git write intents survive lost replies and host restarts. Operation keys are
+      -- installation/profile/audience scoped hashes; plaintext client keys are not stored.
+      CREATE TABLE IF NOT EXISTS browser_git_mutation_receipts (
+        scoped_key TEXT PRIMARY KEY CHECK (length(scoped_key) = 64),
+        fingerprint TEXT NOT NULL CHECK (length(fingerprint) = 64),
+        intent_json TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending', 'completed')),
+        result_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_browser_git_mutation_receipts_created
+        ON browser_git_mutation_receipts(created_at);
+
       CREATE TABLE IF NOT EXISTS task_session_metadata (
         session_id TEXT PRIMARY KEY,
         name TEXT,

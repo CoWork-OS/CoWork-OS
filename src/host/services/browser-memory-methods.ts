@@ -1,0 +1,689 @@
+import path from "node:path";
+import { statSync, existsSync } from "node:fs";
+import {
+  computeWorkspaceKitStatus,
+  readWorkspaceKitState,
+  ensureBootstrapLifecycleState,
+} from "../../electron/context/kit-status";
+import {
+  createKitProject,
+  templatesForInit,
+  ensureDir,
+  writeTemplate,
+  ensureDefaultKitCronJobs,
+} from "../../electron/context/kit-operations";
+import {
+  canonicalizeAccessPath,
+  isAccessPathWithin,
+} from "../../electron/security/access-profile-paths";
+import { z } from "zod";
+import { CuratedMemoryService } from "../../electron/memory/CuratedMemoryService";
+import { MemorySynthesizer } from "../../electron/memory/MemorySynthesizer";
+import { evaluateWorkspaceFilesystemAccess } from "../../electron/security/access-profile-paths";
+import { MemoryWriteGate } from "../../electron/memory/MemoryWriteGate";
+import { MemoryService } from "../../electron/memory/MemoryService";
+import { DurableContextService } from "../../electron/memory/DurableContextService";
+import { MemoryObservationService } from "../../electron/memory/MemoryObservationService";
+import { UserProfileService } from "../../electron/memory/UserProfileService";
+import { RelationshipMemoryService } from "../../electron/memory/RelationshipMemoryService";
+import { MemoryFeaturesManager } from "../../electron/settings/memory-features-manager";
+import { ChronicleObservationRepository } from "../../electron/chronicle/ChronicleObservationRepository";
+import type { MemoryFeaturesSettings, Workspace } from "../../shared/types";
+import type { BrowserDesktopDefinition, BrowserDesktopDefinitions } from "./browser-desktop-rpc";
+import { WebApplicationError } from "../web/WebApplication";
+
+const id = z.string().trim().min(1).max(200);
+const scope = z.object({ workspaceId: id });
+const page = scope.extend({ limit: z.number().int().min(1).max(200).optional() }).strict();
+const ids = z.array(id).max(100);
+const confidence = z.number().finite().min(0).max(1);
+const category = z.enum([
+  "identity",
+  "preference",
+  "bio",
+  "work",
+  "goal",
+  "operating",
+  "voice",
+  "accountability",
+  "constraint",
+  "other",
+]);
+const settingsPatch = z
+  .object({
+    enabled: z.boolean().optional(),
+    autoCapture: z.boolean().optional(),
+    compressionEnabled: z.boolean().optional(),
+    retentionDays: z.number().int().min(1).max(3650).optional(),
+    maxStorageMb: z.number().int().min(10).max(5000).optional(),
+    privacyMode: z.enum(["normal", "strict", "disabled"]).optional(),
+    excludedPatterns: z.array(z.string().max(500)).max(100).optional(),
+  })
+  .strict();
+const fact = z
+  .object({
+    category,
+    value: z.string().trim().min(1).max(240),
+    confidence: confidence.optional(),
+    pinned: z.boolean().optional(),
+  })
+  .strict();
+const featureBooleanKeys = [
+  "contextPackInjectionEnabled",
+  "heartbeatMaintenanceEnabled",
+  "checkpointCaptureEnabled",
+  "verbatimRecallEnabled",
+  "wakeUpLayersEnabled",
+  "temporalKnowledgeEnabled",
+  "promptStackV2Enabled",
+  "layeredMemoryEnabled",
+  "transcriptStoreEnabled",
+  "durableContextEnabled",
+  "backgroundConsolidationEnabled",
+  "queryOrchestratorEnabled",
+  "sessionLineageEnabled",
+  "curatedMemoryEnabled",
+  "sessionRecallEnabled",
+  "topicMemoryEnabled",
+  "defaultArchiveInjectionEnabled",
+  "autoPromoteToCuratedMemoryEnabled",
+  "structuredObservationsEnabled",
+  "progressiveRecallToolsEnabled",
+  "memoryInspectorEnabled",
+] as const;
+const featureSettings = z
+  .object({
+    ...Object.fromEntries(featureBooleanKeys.map((key) => [key, z.boolean().optional()])),
+    durableContextMode: z.enum(["off", "experimental", "on"]).optional(),
+    durableContextThreshold: z.number().min(0.25).max(0.95).optional(),
+    durableContextFreshTailCount: z.number().int().min(1).max(1000).optional(),
+    durableContextLargePayloadThreshold: z.number().int().min(1).max(1_000_000).optional(),
+    durableContextSummaryModel: z.string().max(200).optional(),
+    memoryWriteApprovalMode: z
+      .enum(["off", "curated_only", "external_only", "background_only", "all"])
+      .optional(),
+  })
+  .strict();
+const observationScope = scope.extend({ memoryId: id }).strict();
+const observationStrings = z.array(z.string().trim().min(1).max(240)).max(12);
+const observationPatch = z
+  .object({
+    title: z.string().trim().min(1).max(160).optional(),
+    subtitle: z.string().trim().max(200).optional(),
+    narrative: z.string().trim().min(1).max(2000).optional(),
+    facts: observationStrings.optional(),
+    concepts: observationStrings.optional(),
+    filesRead: observationStrings.optional(),
+    filesModified: observationStrings.optional(),
+    tools: observationStrings.optional(),
+    sourceEventIds: observationStrings.optional(),
+    privacyState: z.enum(["normal", "private", "redacted", "suppressed"]).optional(),
+  })
+  .strict();
+
+export function createBrowserMemoryDefinitions(options: {
+  resolveWorkspace: (workspaceId: string) => Promise<Workspace | null>;
+  getRecentTask?: (
+    workspaceId: string,
+  ) => Promise<{ prompt?: string; assignedAgentRoleId?: string } | null>;
+}): BrowserDesktopDefinitions {
+  const requireWorkspace = async (
+    workspaceId: string,
+    permission: "read" | "write" | "delete" = "read",
+  ) => {
+    const workspace = await options.resolveWorkspace(workspaceId);
+    if (!workspace?.permissions.read || !workspace.permissions[permission]) {
+      throw new WebApplicationError("FORBIDDEN", "Workspace memory access is unavailable.", 403);
+    }
+    return workspace;
+  };
+  const action = <S extends z.ZodType>(
+    schema: S,
+    handler: (value: z.infer<S>) => unknown,
+    mutation = false,
+  ): BrowserDesktopDefinition => ({
+    capability: "memory.manage",
+    mutation,
+    minArgs: 1,
+    maxArgs: 1,
+    validate: (args) => [schema.parse(args[0])],
+    handler: ([value]) => handler(value as z.infer<S>),
+  });
+  const workspaceAction = <S extends z.ZodType<{ workspaceId: string }>>(
+    schema: S,
+    permission: "read" | "write" | "delete",
+    handler: (value: z.infer<S>, workspace: Workspace) => unknown,
+  ): BrowserDesktopDefinition =>
+    action(
+      schema,
+      async (value) => {
+        const workspace = await requireWorkspace(value.workspaceId, permission);
+        return handler(value, workspace);
+      },
+      permission !== "read",
+    );
+  const workspaceIdAction = (
+    permission: "read" | "write" | "delete",
+    handler: (workspaceId: string) => unknown,
+  ) =>
+    action(
+      id,
+      async (workspaceId) => {
+        await requireWorkspace(workspaceId, permission);
+        return handler(workspaceId);
+      },
+      permission !== "read",
+    );
+  const noArgs = (handler: () => unknown, mutation = false): BrowserDesktopDefinition => ({
+    capability: "memory.manage",
+    mutation,
+    minArgs: 0,
+    maxArgs: 0,
+    handler,
+  });
+
+  const kitGuard =
+    (workspace: Workspace, trustedTemplateSeed = false) =>
+    (candidatePath: string, operation: "read" | "write") => {
+      if (!workspace.path || !path.isAbsolute(workspace.path))
+        throw new WebApplicationError(
+          "HOST_UNAVAILABLE",
+          "Workspace kit path is unavailable.",
+          503,
+        );
+      const evaluation = evaluateWorkspaceFilesystemAccess(workspace, candidatePath, operation);
+      const relative = path
+        .relative(canonicalizeAccessPath(workspace.path), canonicalizeAccessPath(candidatePath))
+        .replaceAll("\\", "/");
+      const policyTemplate =
+        /^\.cowork\/policy(?:$|\/(?:README\.md|tools\.monty)(?:$)|\/\.history(?:$|\/(?:README\.md|tools\.monty)(?:$|\/)))/.test(
+          relative,
+        );
+      const ownerSeedAllowed =
+        trustedTemplateSeed &&
+        operation === "write" &&
+        evaluation.reason === "protected_path" &&
+        policyTemplate &&
+        evaluateWorkspaceFilesystemAccess(
+          {
+            ...workspace,
+            permissions: {
+              ...workspace.permissions,
+              read: workspace.permissions.write,
+              accessFilesystemRules: workspace.permissions.accessFilesystemRules?.map((rule) => ({
+                ...rule,
+                access: rule.access === "read" ? "deny" : rule.access === "write" ? "read" : "deny",
+              })),
+            },
+          },
+          candidatePath,
+          "read",
+        ).decision === "allow";
+      if (
+        !isAccessPathWithin(
+          canonicalizeAccessPath(workspace.path),
+          canonicalizeAccessPath(candidatePath),
+        ) ||
+        (evaluation.decision !== "allow" && !ownerSeedAllowed)
+      ) {
+        throw new WebApplicationError(
+          "FORBIDDEN",
+          "Workspace kit file access is unavailable.",
+          403,
+        );
+      }
+      try {
+        const stat = statSync(candidatePath);
+        if (stat.isFile() && stat.size > 2 * 1024 * 1024) {
+          throw new WebApplicationError(
+            "INVALID_REQUEST",
+            "Workspace kit file exceeds the 2 MiB limit.",
+            413,
+          );
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    };
+
+  const requirePending = async (pendingId: string, workspaceId?: string, mutate = false) => {
+    const pending = await MemoryWriteGate.findPending(pendingId);
+    if (!pending || (workspaceId && pending.workspaceId !== workspaceId)) {
+      throw new WebApplicationError("NOT_FOUND", "Memory write approval is unavailable.", 404);
+    }
+    const workspace = await requireWorkspace(pending.workspaceId, mutate ? "write" : "read");
+    return { pending, workspace };
+  };
+
+  return {
+    listMemoryWriteApprovals: workspaceAction(page, "read", (value) =>
+      MemoryWriteGate.listPendingForDisplay(value.workspaceId, value.limit ?? 100),
+    ),
+    getMemoryWriteApproval: action(id, async (pendingId) => {
+      await requirePending(pendingId);
+      return (await MemoryWriteGate.findPendingForDisplay(pendingId)) ?? null;
+    }),
+    getMemoryWriteApprovalCount: workspaceIdAction("read", async (workspaceId) => ({
+      pending: await MemoryWriteGate.pendingCount(workspaceId),
+    })),
+    approveMemoryWriteApproval: action(
+      scope.extend({ id }).strict(),
+      async (value) => {
+        const { pending, workspace } = await requirePending(value.id, value.workspaceId, true);
+        if (pending.action === "remove" || pending.payload.action === "remove") {
+          await requireWorkspace(pending.workspaceId, "delete");
+        }
+        if (
+          pending.target === "external" &&
+          (workspace.permissions.network !== true ||
+            workspace.permissions.accessProfileUnavailable === true ||
+            workspace.permissions.accessNetworkMode === "disabled" ||
+            workspace.permissions.accessNetworkMode === "on-request")
+        ) {
+          throw new WebApplicationError(
+            "FORBIDDEN",
+            "Workspace automatic network access is unavailable.",
+            403,
+          );
+        }
+        return MemoryWriteGate.applyPending(value.id, {
+          workspaceId: pending.workspaceId,
+          reviewedBy: "user",
+          effectiveWorkspace: workspace,
+        });
+      },
+      true,
+    ),
+    rejectMemoryWriteApproval: action(
+      scope.extend({ id, reason: z.string().trim().max(2000).optional() }).strict(),
+      async (value) => {
+        const { pending } = await requirePending(value.id, value.workspaceId, true);
+        return MemoryWriteGate.rejectForDisplay(value.id, {
+          workspaceId: pending.workspaceId,
+          reviewedBy: "user",
+          resolution: value.reason,
+        });
+      },
+      true,
+    ),
+    getWorkspaceKitStatus: workspaceIdAction("read", async (workspaceId) => {
+      const workspace = await requireWorkspace(workspaceId);
+      return computeWorkspaceKitStatus(workspace.path, workspaceId, {
+        readOnly: true,
+        pathGuard: kitGuard(workspace),
+      });
+    }),
+    initWorkspaceKit: workspaceAction(
+      scope
+        .extend({
+          mode: z.enum(["missing", "overwrite"]).optional(),
+          templatePreset: z.enum(["default", "venture_operator"]).optional(),
+        })
+        .strict(),
+      "write",
+      async (value, workspace) => {
+        const guard = kitGuard(workspace, true);
+        guard(path.join(workspace.path, ".cowork", "workspace-state.json"), "read");
+        const state = await readWorkspaceKitState(workspace.path);
+        for (const dir of [
+          "memory",
+          "memory/hourly",
+          "memory/weekly",
+          "projects",
+          "agents",
+          "uploads",
+          "transforms",
+          "router",
+          "policy",
+          "feedback",
+        ]) {
+          await ensureDir(workspace.path, path.join(".cowork", dir), guard);
+        }
+        const mode = value.mode ?? "missing";
+        for (const template of templatesForInit(new Date(), value.templatePreset)) {
+          guard(path.join(workspace.path, template.relPath), "read");
+          if (
+            template.relPath === path.join(".cowork", "BOOTSTRAP.md") &&
+            mode === "missing" &&
+            state.onboardingCompletedAt &&
+            !existsSync(path.join(workspace.path, template.relPath))
+          )
+            continue;
+          await writeTemplate(workspace.path, template.relPath, template.content, mode, guard);
+        }
+        await ensureBootstrapLifecycleState(workspace.path, state, guard);
+        await MemoryService.syncWorkspaceMarkdown(
+          workspace.id,
+          path.join(workspace.path, ".cowork"),
+          true,
+          (candidatePath) => {
+            try {
+              guard(candidatePath, "read");
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        );
+        await ensureDefaultKitCronJobs(workspace.id, mode, true);
+        return computeWorkspaceKitStatus(workspace.path, workspace.id, {
+          readOnly: true,
+          pathGuard: guard,
+        });
+      },
+    ),
+    createWorkspaceKitProject: workspaceAction(
+      scope
+        .extend({
+          projectId: z
+            .string()
+            .trim()
+            .regex(/^[a-zA-Z0-9._-]{1,80}$/)
+            .refine((value) => !value.includes("..") && value !== "."),
+        })
+        .strict(),
+      "write",
+      async (value, workspace) => {
+        return createKitProject(workspace.path, value.projectId, kitGuard(workspace));
+      },
+    ),
+    getMemoryLayerPreview: workspaceIdAction("read", async (workspaceId) => {
+      const workspace = await requireWorkspace(workspaceId);
+      const task = await options.getRecentTask?.(workspaceId);
+      const prompt = task?.prompt?.trim() || "Current workspace memory preview";
+      return MemorySynthesizer.buildLayerPreview(workspaceId, workspace.path, prompt, {
+        tokenBudget: 1800,
+        includeWorkspaceKit: true,
+        agentRoleId: task?.assignedAgentRoleId || null,
+        filesystemReadGuard: (candidatePath) =>
+          evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "read").decision === "allow",
+        boxBrainHits: await MemorySynthesizer.prefetchBoxBrainHits(workspaceId, prompt),
+      });
+    }),
+    promoteMemoryObservation: workspaceAction(
+      observationScope
+        .extend({
+          target: z.enum(["user", "workspace"]).optional(),
+          kind: z
+            .enum([
+              "identity",
+              "preference",
+              "constraint",
+              "workflow_rule",
+              "project_fact",
+              "active_commitment",
+            ])
+            .optional(),
+        })
+        .strict(),
+      "write",
+      async (value, workspace) => {
+        const detail = (await MemoryObservationService.details([value.memoryId], workspace.id))[0];
+        if (!detail || detail.workspaceId !== workspace.id) {
+          throw new WebApplicationError("NOT_FOUND", "Memory observation is unavailable.", 404);
+        }
+        const result = await CuratedMemoryService.curate({
+          workspaceId: detail.workspaceId,
+          taskId: detail.taskId,
+          action: "add",
+          target: value.target ?? "workspace",
+          kind: value.kind ?? "project_fact",
+          content: detail.title || detail.narrative,
+          reason: "Promoted from Memory Hub Inspector",
+          filesystemReadGuard: (candidatePath) =>
+            evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "read").decision ===
+            "allow",
+          filesystemWriteGuard: (candidatePath) =>
+            evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "write").decision ===
+            "allow",
+        });
+        if (!result.success) {
+          throw new WebApplicationError(
+            "CONFLICT",
+            result.error || "Memory promotion could not be applied.",
+            409,
+          );
+        }
+        return result;
+      },
+    ),
+    getMemorySettings: workspaceIdAction("read", (workspaceId) =>
+      MemoryService.getSettings(workspaceId),
+    ),
+    getMemoryStats: workspaceIdAction("read", (workspaceId) => MemoryService.getStats(workspaceId)),
+    getImportedMemoryStats: workspaceIdAction("read", (workspaceId) =>
+      MemoryService.getImportedStats(workspaceId),
+    ),
+    saveMemorySettings: workspaceAction(
+      scope.extend({ settings: settingsPatch }).strict(),
+      "write",
+      async (value) => {
+        await MemoryService.updateSettings(value.workspaceId, value.settings);
+        return { success: true };
+      },
+    ),
+    getRecentMemories: workspaceAction(page, "read", (value) =>
+      MemoryService.getRecent(value.workspaceId, value.limit ?? 20),
+    ),
+    searchMemories: workspaceAction(
+      page.extend({ query: z.string().trim().min(1).max(4000) }).strict(),
+      "read",
+      (value) => MemoryService.searchAsync(value.workspaceId, value.query, value.limit ?? 30),
+    ),
+    getMemoryDetails: action(ids, async (memoryIds) => {
+      const details = await MemoryService.getFullDetails(memoryIds);
+      for (const workspaceId of new Set(details.map((memory) => memory.workspaceId)))
+        await requireWorkspace(workspaceId);
+      return details;
+    }),
+    getMemoryTimeline: action(
+      z.object({ memoryId: id, windowSize: z.number().int().min(1).max(50).optional() }).strict(),
+      async (value) => {
+        const [memory] = await MemoryService.getFullDetails([value.memoryId]);
+        if (!memory) return [];
+        await requireWorkspace(memory.workspaceId);
+        return MemoryService.getTimelineContext(value.memoryId, value.windowSize);
+      },
+    ),
+    findImportedMemories: workspaceAction(
+      page.extend({ offset: z.number().int().min(0).max(1_000_000).optional() }).strict(),
+      "read",
+      (value) =>
+        MemoryService.findImported(value.workspaceId, value.limit ?? 50, value.offset ?? 0),
+    ),
+    deleteImportedMemories: workspaceIdAction("delete", async (workspaceId) => ({
+      success: true,
+      deleted: await MemoryService.deleteImported(workspaceId),
+    })),
+    deleteImportedMemoryEntry: workspaceAction(observationScope, "delete", async (value) => ({
+      success: await MemoryService.deleteImportedEntry(value.workspaceId, value.memoryId),
+    })),
+    setImportedMemoryPromptRecallIgnored: workspaceAction(
+      observationScope.extend({ ignored: z.boolean() }).strict(),
+      "write",
+      async (value) => {
+        const memory = await MemoryService.setImportedPromptRecallIgnored(
+          value.workspaceId,
+          value.memoryId,
+          value.ignored,
+        );
+        return { success: Boolean(memory), memory };
+      },
+    ),
+    clearMemory: workspaceIdAction("delete", async (workspaceId) => {
+      await MemoryService.clearWorkspace(workspaceId);
+      await DurableContextService.clearWorkspace(workspaceId);
+      return { success: true };
+    }),
+    importMemoryFromText: workspaceAction(
+      scope
+        .extend({
+          provider: z.string().trim().min(1).max(80),
+          pastedText: z.string().trim().min(1).max(1_000_000),
+          forcePrivate: z.boolean().optional(),
+        })
+        .strict(),
+      "write",
+      (value) => MemoryService.importFromText(value),
+    ),
+    listChronicleObservations: workspaceAction(page, "read", async (value, workspace) => {
+      const observations = await ChronicleObservationRepository.list(
+        workspace.path,
+        value.limit ?? 50,
+      );
+      return observations.map(
+        ({
+          id,
+          appName,
+          windowTitle,
+          localTextSnippet,
+          capturedAt,
+          destinationHints,
+          memoryId,
+        }) => ({
+          id,
+          appName,
+          windowTitle,
+          localTextSnippet,
+          capturedAt,
+          destinationHints,
+          memoryId,
+        }),
+      );
+    }),
+    addUserFact: action(
+      fact.extend({ source: z.literal("manual").optional() }).strict(),
+      (value) => UserProfileService.addFact({ ...value, source: "manual" }),
+      true,
+    ),
+    updateUserFact: action(
+      fact.partial().extend({ id }).strict(),
+      (value) => UserProfileService.updateFact(value),
+      true,
+    ),
+    deleteUserFact: action(
+      id,
+      (factId) => ({ success: UserProfileService.deleteFact(factId) }),
+      true,
+    ),
+    listRelationshipMemory: {
+      ...action(
+        z
+          .object({
+            layer: z
+              .enum(["identity", "preferences", "context", "history", "commitments"])
+              .optional(),
+            includeDone: z.boolean().optional(),
+            limit: z.number().int().min(1).max(200).optional(),
+          })
+          .strict()
+          .optional(),
+        (value) => RelationshipMemoryService.listItems(value ?? { limit: 80 }),
+      ),
+      minArgs: 0,
+    },
+    updateRelationshipMemory: action(
+      z
+        .object({
+          id,
+          text: z.string().trim().min(1).max(4000).optional(),
+          confidence: confidence.optional(),
+          status: z.enum(["open", "done"]).optional(),
+          dueAt: z.number().int().min(0).nullable().optional(),
+        })
+        .strict(),
+      ({ id, ...patch }) => RelationshipMemoryService.updateItem(id, patch),
+      true,
+    ),
+    deleteRelationshipMemory: action(
+      id,
+      (itemId) => ({ success: RelationshipMemoryService.deleteItem(itemId) }),
+      true,
+    ),
+    cleanupRecurringRelationshipHistory: noArgs(
+      () => ({ success: true, ...RelationshipMemoryService.cleanupRecurringTaskHistory() }),
+      true,
+    ),
+    getDueSoonCommitments: {
+      ...action(z.number().finite().min(1).max(8760).optional(), (windowHours) => {
+        const items = RelationshipMemoryService.listDueSoonCommitments(windowHours ?? 72);
+        return {
+          items,
+          reminderText: items.length
+            ? `You have ${items.length} commitment(s) due soon.`
+            : "No commitments due soon.",
+        };
+      }),
+      minArgs: 0,
+    },
+    getMemoryFeaturesSettings: noArgs(() => MemoryFeaturesManager.loadSettings()),
+    saveMemoryFeaturesSettings: action(
+      featureSettings,
+      (value) => {
+        MemoryFeaturesManager.saveSettings({
+          ...MemoryFeaturesManager.loadSettings(),
+          ...value,
+        } as MemoryFeaturesSettings);
+        return { success: true };
+      },
+      true,
+    ),
+    searchMemoryObservations: workspaceAction(
+      page
+        .extend({
+          query: z.string().max(4000).optional(),
+          offset: z.number().int().min(0).max(1_000_000).optional(),
+          observationTypes: observationStrings.optional(),
+          origins: observationStrings.optional(),
+          privacyStates: z
+            .array(z.enum(["normal", "private", "redacted", "suppressed"]))
+            .max(4)
+            .optional(),
+          dateStart: z.number().int().min(0).optional(),
+          dateEnd: z.number().int().min(0).optional(),
+        })
+        .strict(),
+      "read",
+      (value) => MemoryObservationService.search(value),
+    ),
+    getMemoryObservationDetails: workspaceAction(scope.extend({ ids }).strict(), "read", (value) =>
+      MemoryObservationService.details(value.ids, value.workspaceId),
+    ),
+    getMemoryObservationTimeline: workspaceAction(
+      scope
+        .extend({
+          memoryId: id.optional(),
+          query: z.string().max(4000).optional(),
+          windowSize: z.number().int().min(1).max(50).optional(),
+        })
+        .strict(),
+      "read",
+      (value) => MemoryObservationService.timeline(value),
+    ),
+    updateMemoryObservation: workspaceAction(
+      observationScope.extend({ patch: observationPatch }).strict(),
+      "write",
+      (value) => MemoryObservationService.update(value.workspaceId, value.memoryId, value.patch),
+    ),
+    redactMemoryObservation: workspaceAction(
+      observationScope
+        .extend({ replacement: z.string().trim().min(1).max(500).optional() })
+        .strict(),
+      "write",
+      (value) =>
+        MemoryObservationService.redact(value.workspaceId, value.memoryId, value.replacement),
+    ),
+    deleteMemoryObservation: workspaceAction(observationScope, "delete", async (value) => ({
+      success: await MemoryObservationService.delete(value.workspaceId, value.memoryId),
+    })),
+    getMemoryObservationBackfillStatus: noArgs(() => MemoryObservationService.getBackfillStatus()),
+    rebuildMemoryObservationMetadata: {
+      ...action(
+        z.object({ force: z.boolean().optional() }).strict().optional(),
+        (value) => MemoryObservationService.startBackfill(value?.force === true),
+        true,
+      ),
+      minArgs: 0,
+    },
+  };
+}

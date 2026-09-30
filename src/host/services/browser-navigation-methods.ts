@@ -5,6 +5,7 @@ import {
   type PluginPackToggleService,
 } from "../../electron/extensions/plugin-pack-toggle-service";
 import {
+  AgentTeamRepository,
   AgentRoleRepository,
   AutomationProfileRepository,
 } from "../../electron/agents/agent-repository-facades";
@@ -14,7 +15,12 @@ import { EverydayAgentService } from "../../electron/everyday-agent/everyday-age
 import { CronService, getCronService } from "../../electron/cron";
 import type { CronJob, CronJobCreate, CronJobPatch, CronSchedule } from "../../electron/cron/types";
 import { CHANNEL_TYPES, type ChannelType } from "../../electron/gateway/channels/types";
-import { SkillRepository, WorkspaceRepository } from "../../electron/database/repository-facades";
+import {
+  BotNotificationPreferenceRepository,
+  SkillRepository,
+  TaskRepository,
+  WorkspaceRepository,
+} from "../../electron/database/repository-facades";
 import { TaskStore } from "../../electron/database/repositories";
 import { MCPSettingsManager } from "../../electron/mcp/settings";
 import { getCustomSkillLoader } from "../../electron/agent/custom-skill-loader";
@@ -41,6 +47,7 @@ import {
   resolveEffectiveAccessProfile,
 } from "../../electron/security/access-profile-resolver";
 import { HooksSettingsManager } from "../../electron/hooks/settings";
+import { listIntegrationMentionOptions } from "../../electron/integrations/integration-mention-options";
 import type {
   EventTrigger,
   EventTriggerRegistry,
@@ -72,11 +79,16 @@ import type {
   ManagedSessionCreateInput,
   ManagedSessionInputContent,
   ManagedSessionUserMessageRequest,
+  BotConversationReopenRequest,
+  ChannelData,
+  Task,
   Workspace,
 } from "../../shared/types";
+import { isTempWorkspaceId } from "../../shared/types";
 import { EVERYDAY_AGENT_CAPABILITY_BUNDLES } from "../../shared/types";
 import type { ChannelGateway } from "../../electron/gateway";
 import type { BrowserDesktopDefinitions, BrowserDesktopDefinition } from "./browser-desktop-rpc";
+import { toBrowserTask } from "./browser-desktop-read-methods";
 import { WebApplicationError } from "../web/WebApplication";
 import { WorkContextService } from "../../electron/workspaces/workspaces-repository-facades";
 
@@ -222,6 +234,55 @@ function textArg(value: unknown, max = 100_000, allowEmpty = false): string {
     return invalidRequest();
   }
   return value;
+}
+
+interface BrowserForkTaskSessionRequest {
+  taskId: string;
+  prompt?: string;
+  branchLabel?: string;
+  fromEventId?: string;
+  sideChat?: boolean;
+  initialMessage?: string;
+}
+
+function parseForkTaskSessionRequest(value: unknown): BrowserForkTaskSessionRequest {
+  const input = requireRecord(value, [
+    "taskId",
+    "prompt",
+    "branchLabel",
+    "fromEventId",
+    "sideChat",
+    "initialMessage",
+  ]);
+  return {
+    taskId: stringArg(input.taskId, 160),
+    ...(input.prompt === undefined ? {} : { prompt: textArg(input.prompt, 500_000, true) }),
+    ...(input.branchLabel === undefined ? {} : { branchLabel: textArg(input.branchLabel, 200) }),
+    ...(input.fromEventId === undefined ? {} : { fromEventId: stringArg(input.fromEventId, 200) }),
+    ...(input.sideChat === undefined ? {} : { sideChat: booleanArg(input.sideChat) }),
+    ...(input.initialMessage === undefined
+      ? {}
+      : { initialMessage: textArg(input.initialMessage, 500_000, true) }),
+  };
+}
+
+function publicForkTask(task: Task): RecordLike {
+  return {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    workspaceId: task.workspaceId,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    prompt: "",
+    ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
+    ...(task.agentType ? { agentType: task.agentType } : {}),
+    ...(task.depth !== undefined ? { depth: task.depth } : {}),
+    ...(task.assignedAgentRoleId ? { assignedAgentRoleId: task.assignedAgentRoleId } : {}),
+    ...(task.pinned !== undefined ? { pinned: task.pinned } : {}),
+    ...(task.sessionId ? { sessionId: task.sessionId } : {}),
+    ...(task.source ? { source: task.source } : {}),
+  };
 }
 
 function integerArg(value: unknown, min: number, max: number): number {
@@ -1334,6 +1395,8 @@ const CRON_JOB_FIELDS = [
   "name",
   "description",
   "enabled",
+  "accessProfileId",
+  "shellAccess",
   "allowUserInput",
   "deleteAfterRun",
   "schedule",
@@ -1358,6 +1421,11 @@ function validateCronJobFields(value: unknown, partial: boolean): RecordLike {
   if (!partial || input.enabled !== undefined) {
     if (typeof input.enabled !== "boolean") return invalidRequest();
   }
+  if (input.accessProfileId !== undefined) stringArg(input.accessProfileId, 160);
+  // Browser clients may preserve a legacy job's disabled shell override, but
+  // cannot create or grant that deprecated privilege through this API.
+  if (input.shellAccess === true) return invalidRequest();
+  optionalBoolean(input.shellAccess);
   optionalBoolean(input.allowUserInput);
   optionalBoolean(input.deleteAfterRun);
   if (!partial || input.schedule !== undefined) validateCronSchedule(input.schedule);
@@ -1614,6 +1682,51 @@ function definition(
 
 function simpleIdValidator(args: unknown[]): unknown[] {
   return [stringArg(args[0])];
+}
+
+function parseBotNotificationPolicyUpdate(value: unknown): {
+  agentRoleId: string;
+  onFinish?: boolean;
+  onInputRequired?: boolean;
+} {
+  const request = requireRecord(value, ["agentRoleId", "onFinish", "onInputRequired"]);
+  if (
+    (request.onFinish !== undefined && typeof request.onFinish !== "boolean") ||
+    (request.onInputRequired !== undefined && typeof request.onInputRequired !== "boolean")
+  ) {
+    return invalidRequest();
+  }
+  return {
+    agentRoleId: stringArg(request.agentRoleId),
+    ...(request.onFinish === undefined ? {} : { onFinish: request.onFinish }),
+    ...(request.onInputRequired === undefined ? {} : { onInputRequired: request.onInputRequired }),
+  };
+}
+
+function parseBotConversationReopenRequest(value: unknown): BotConversationReopenRequest {
+  const request = requireRecord(value, [
+    "workspaceId",
+    "taskId",
+    "agentRoleId",
+    "repairMembership",
+  ]);
+  if (
+    (request.taskId !== undefined && typeof request.taskId !== "string") ||
+    (request.agentRoleId !== undefined && typeof request.agentRoleId !== "string") ||
+    (request.repairMembership !== undefined && typeof request.repairMembership !== "boolean")
+  ) {
+    return invalidRequest();
+  }
+  const taskId = request.taskId === undefined ? undefined : stringArg(request.taskId);
+  const agentRoleId =
+    request.agentRoleId === undefined ? undefined : stringArg(request.agentRoleId);
+  if (!taskId && !agentRoleId) return invalidRequest();
+  return {
+    workspaceId: stringArg(request.workspaceId),
+    ...(taskId ? { taskId } : {}),
+    ...(agentRoleId ? { agentRoleId } : {}),
+    ...(request.repairMembership === true ? { repairMembership: true } : {}),
+  };
 }
 
 function workflowCapabilitiesWithRuntimeState(
@@ -2293,9 +2406,12 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
 } {
   const { db, agentDaemon } = options;
   const workspaceRepository = new WorkspaceRepository(db);
+  const taskRepository = new TaskRepository(db);
   const skillRepository = new SkillRepository(db);
   const agentRoleRepository = new AgentRoleRepository(db);
+  const agentTeamRepository = new AgentTeamRepository(db);
   const automationProfileRepository = new AutomationProfileRepository(db);
+  const botNotificationPreferenceRepository = new BotNotificationPreferenceRepository(db);
   const managed =
     options.managedSessionService ||
     new ManagedSessionService(db, agentDaemon, {
@@ -2308,6 +2424,39 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
   const imageProfiles = options.imageGenProfileService || new ImageGenProfileService();
   const taskStore = new TaskStore(db);
   const definitions: BrowserDesktopDefinitions = {};
+  definitions.forkTaskSession = {
+    capability: "tasks.create",
+    mutation: true,
+    minArgs: 1,
+    maxArgs: 1,
+    validate: ([request]) => [parseForkTaskSessionRequest(request)],
+    handler: async ([rawRequest]) => {
+      const request = rawRequest as BrowserForkTaskSessionRequest;
+      const sourceTask = await taskRepository.findById(request.taskId);
+      if (!sourceTask) {
+        throw new WebApplicationError("FORBIDDEN", "Task access is unavailable.", 403);
+      }
+      const workspace = options.resolveWorkspace
+        ? await options.resolveWorkspace(sourceTask.workspaceId)
+        : await workspaceRepository.findById(sourceTask.workspaceId);
+      if (
+        !workspace?.permissions.read ||
+        !workspace.permissions.write ||
+        workspace.isTemp ||
+        isTempWorkspaceId(workspace.id)
+      ) {
+        throw new WebApplicationError("FORBIDDEN", "Workspace access is unavailable.", 403);
+      }
+
+      const forkedTask = await agentDaemon.forkTaskSession(request);
+      try {
+        new WorkContextService(db).attachForkedTask(forkedTask, sourceTask.id);
+      } catch (error) {
+        console.warn("Failed to register browser-forked task WorkContext:", error);
+      }
+      return publicForkTask(forkedTask);
+    },
+  };
   const packToggleService =
     options.pluginPackToggleService || getPluginPackToggleService(PluginRegistry.getInstance());
   const discoverySources: BrowserDiscoverySources = {
@@ -3158,6 +3307,25 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
       status: channel.status,
     }));
   });
+  definitions.listIntegrationMentionOptions = definition(
+    "tasks.read",
+    async () => {
+      const channels = options.channelGateway ? await options.channelGateway.getChannels() : [];
+      return listIntegrationMentionOptions(
+        channels.map(
+          (channel) =>
+            ({
+              id: channel.id,
+              type: channel.type,
+              name: channel.name,
+              enabled: channel.enabled,
+              status: channel.status,
+            }) as ChannelData,
+        ),
+      );
+    },
+    { maxArgs: 0 },
+  );
   definitions.getGatewayChats = definition(
     automation,
     async ([rawChannelId]) => {
@@ -3439,6 +3607,112 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
       },
     },
   );
+  definitions.getAgentRole = definition(
+    agents,
+    async ([roleId]) => (await agentRoleRepository.findById(String(roleId))) ?? undefined,
+    { minArgs: 1, maxArgs: 1, validate: simpleIdValidator },
+  );
+  definitions.getBotNotificationPolicy = definition(
+    agents,
+    async ([rawRoleId]) => {
+      const roleId = String(rawRoleId);
+      if (!(await agentRoleRepository.findById(roleId))) {
+        throw new WebApplicationError("FORBIDDEN", "Agent role is unavailable.", 403);
+      }
+      return botNotificationPreferenceRepository.findByAgentRoleId(roleId);
+    },
+    { minArgs: 1, maxArgs: 1, validate: simpleIdValidator },
+  );
+  definitions.updateBotNotificationPolicy = definition(
+    agents,
+    async ([request]) => {
+      const update = request as {
+        agentRoleId: string;
+        onFinish?: boolean;
+        onInputRequired?: boolean;
+      };
+      if (!(await agentRoleRepository.findById(update.agentRoleId))) {
+        throw new WebApplicationError("FORBIDDEN", "Agent role is unavailable.", 403);
+      }
+      return botNotificationPreferenceRepository.upsert(update.agentRoleId, {
+        ...(update.onFinish === undefined ? {} : { onFinish: update.onFinish }),
+        ...(update.onInputRequired === undefined
+          ? {}
+          : { onInputRequired: update.onInputRequired }),
+      });
+    },
+    {
+      mutation: true,
+      minArgs: 1,
+      maxArgs: 1,
+      validate: ([request]) => [parseBotNotificationPolicyUpdate(request)],
+    },
+  );
+  definitions.listTeams = definition(
+    agents,
+    async ([rawWorkspaceId, includeInactive]) => {
+      const workspace = await readableWorkspace(String(rawWorkspaceId));
+      if (!workspace) {
+        throw new WebApplicationError("FORBIDDEN", "Workspace is unavailable.", 403);
+      }
+      const teams = await agentTeamRepository.listByWorkspace(
+        workspace.id,
+        includeInactive === true,
+      );
+      return teams.map((team) => ({
+        ...team,
+        ...(team.defaultWorkspaceId && team.defaultWorkspaceId !== workspace.id
+          ? { defaultWorkspaceId: undefined }
+          : {}),
+      }));
+    },
+    {
+      minArgs: 1,
+      maxArgs: 2,
+      validate: (args) => {
+        if (args.length < 1 || args.length > 2) return invalidRequest();
+        if (args[1] !== undefined && typeof args[1] !== "boolean") return invalidRequest();
+        return [stringArg(args[0]), args[1] ?? false];
+      },
+    },
+  );
+  if (agentDaemon.reopenBotConversation) {
+    definitions.reopenBotConversation = definition(
+      "tasks.create",
+      async ([request]) => {
+        const reopenRequest = request as BotConversationReopenRequest;
+        const workspace = options.resolveWorkspace
+          ? await options.resolveWorkspace(reopenRequest.workspaceId)
+          : await workspaceRepository.findById(reopenRequest.workspaceId);
+        const scopedWorkspace = workspace ? safeWorkspace(workspace) : null;
+        if (
+          !scopedWorkspace?.permissions.read ||
+          !scopedWorkspace.permissions.write ||
+          scopedWorkspace.isTemp ||
+          isTempWorkspaceId(scopedWorkspace.id)
+        ) {
+          throw new WebApplicationError("FORBIDDEN", "Workspace access is unavailable.", 403);
+        }
+        if (reopenRequest.taskId) {
+          const sourceTask = await taskRepository.findById(reopenRequest.taskId);
+          if (!sourceTask || sourceTask.workspaceId !== scopedWorkspace.id) {
+            throw new WebApplicationError("FORBIDDEN", "Bot conversation is unavailable.", 403);
+          }
+        }
+        if (reopenRequest.repairMembership) {
+          await permission(scopedWorkspace.id, "canManageMemberships");
+        }
+        const reopened = await agentDaemon.reopenBotConversation!(reopenRequest);
+        return toBrowserTask(reopened);
+      },
+      {
+        mutation: true,
+        minArgs: 1,
+        maxArgs: 1,
+        validate: ([request]) => [parseBotConversationReopenRequest(request)],
+      },
+    );
+  }
   definitions.listAutomationProfiles = definition(agents, () =>
     automationProfileRepository.listAll(),
   );
@@ -3886,6 +4160,9 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
     },
     { minArgs: 1, maxArgs: 1, validate: simpleIdValidator },
   );
+  // The desktop renderer uses this name for workflow run detail refreshes.
+  // Keep the shorter legacy method as an alias for callers that already use it.
+  definitions.listRoutineWorkflowRunSteps = definitions.listRoutineWorkflowSteps;
   definitions.listRoutineWorkflowEvents = definition(
     automation,
     async ([routineId, limit]) => {
@@ -3912,7 +4189,7 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
       ],
     },
   );
-  definitions.respondRoutineWorkflowApproval = definition(
+  definitions.respondToRoutineWorkflowApproval = definition(
     automation,
     async ([request]) => {
       const input = requireRecord(request, ["runId", "stepId", "approved"]);

@@ -8,6 +8,7 @@ import type { Workspace } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
 import {
   WEB_API_VERSION,
+  WEB_WORKSPACE_FILE_MEDIA_PATH_PREFIX,
   WEB_WORKSPACE_FILE_DOWNLOAD_PATH,
   WEB_WORKSPACE_FILE_UPLOAD_PATH,
 } from "../../shared/host-api/contracts";
@@ -35,6 +36,16 @@ const UPLOAD_TEMP_NAME_PATTERN =
   /^\.cowork-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
 const STALE_UPLOAD_TEMP_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_STALE_UPLOAD_TEMP_SCAN = 1_000;
+const DEFAULT_MEDIA_HANDLE_TTL_MS = 5 * 60_000;
+const MAX_MEDIA_HANDLE_TTL_MS = 15 * 60_000;
+const DEFAULT_MAX_ACTIVE_MEDIA_HANDLES = 256;
+const MAX_ACTIVE_MEDIA_HANDLES = 2_048;
+const MEDIA_HANDLE_RE = /^[A-Za-z0-9_-]{43}$/;
+const VIDEO_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+};
 
 export interface BrowserWorkspaceFileTarget {
   workspaceId: string;
@@ -54,6 +65,14 @@ export interface BrowserWorkspaceFileListing {
   relativePath: string;
   entries: BrowserWorkspaceFileEntry[];
   truncated: boolean;
+}
+
+export interface BrowserWorkspaceMediaHandle {
+  handle: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  expiresAt: number;
 }
 
 export interface BrowserWorkspaceFilesOptions {
@@ -91,6 +110,8 @@ export interface BrowserWorkspaceFilesOptions {
   maxWorkspaceActiveUploadBytes?: number;
   /** Maximum bytes staged by concurrent browser uploads across this service. */
   maxActiveUploadBytes?: number;
+  mediaHandleTtlMs?: number;
+  maxActiveMediaHandles?: number;
 }
 
 export interface BrowserTaskMediaFileSnapshot {
@@ -111,6 +132,7 @@ export interface BrowserTaskMediaFileSnapshot {
 export class BrowserWorkspaceFiles {
   private activeUploadBytes = 0;
   private readonly activeUploadBytesByWorkspace = new Map<string, number>();
+  private readonly mediaHandles = new Map<string, MediaHandleRecord>();
 
   constructor(private readonly options: BrowserWorkspaceFilesOptions) {}
 
@@ -264,6 +286,183 @@ export class BrowserWorkspaceFiles {
       return { bytes, sizeBytes: bytes.length, identity: identityOf(after) };
     } finally {
       await handle.close().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Issue a short-lived, session-bound URL for inline video playback. The
+   * caller receives metadata only; byte ranges are streamed from a fresh,
+   * permission-checked file handle by handleMediaRequest.
+   */
+  async createMediaHandle(
+    context: WebRequestContext,
+    rawTarget: unknown,
+  ): Promise<BrowserWorkspaceMediaHandle> {
+    await this.assertCapability(context);
+    const target = parseTarget(rawTarget, this.maxPathChars);
+    if (!target.relativePath) throw invalidTarget();
+    const workspace = await this.resolveWorkspace(target.workspaceId, context);
+    const location = await this.resolveAuthorizedPath(workspace, target.relativePath, "file");
+    const mimeType = videoMimeForPath(target.relativePath);
+    if (!mimeType)
+      throw new WebApplicationError(
+        "UNSUPPORTED_CAPABILITY",
+        "Video preview is unavailable for this file type.",
+        415,
+      );
+
+    const handle = await openVerifiedFile(
+      location,
+      workspace,
+      (candidate) => this.hasReadAccess(workspace, candidate),
+      (filePath, flags) => this.openReadHandle(filePath, flags),
+    );
+    try {
+      const stats = await handle.stat();
+      if (!stats.isFile() || !Number.isSafeInteger(stats.size) || stats.size <= 0) {
+        throw unavailable();
+      }
+      const signature = await readFilePrefix(handle, stats.size);
+      const after = await handle.stat();
+      const currentPath = await fs
+        .realpath(path.resolve(location.rootPath, location.relativePath))
+        .catch(() => null);
+      if (
+        !hasSameIdentity(identityOf(stats), identityOf(after)) ||
+        currentPath !== location.absolutePath ||
+        !isValidVideoSignature(mimeType, signature)
+      ) {
+        throw unavailable();
+      }
+
+      this.pruneExpiredMediaHandles();
+      if (this.mediaHandles.size >= this.maxActiveMediaHandles) {
+        throw new WebApplicationError("RATE_LIMITED", "Too many active video previews.", 429, true);
+      }
+      const rawHandle = crypto.randomBytes(32).toString("base64url");
+      const expiresAt = Date.now() + this.mediaHandleTtlMs;
+      this.mediaHandles.set(hashMediaHandle(rawHandle), {
+        workspaceId: target.workspaceId,
+        relativePath: target.relativePath,
+        identity: identityOf(after),
+        mimeType,
+        audience: context.audience,
+        sessionId: context.sessionId as string,
+        installationId: context.identity.installationId,
+        profileId: context.identity.profileId,
+        generation: context.identity.generation,
+        expiresAt,
+      });
+      return {
+        handle: rawHandle,
+        fileName: path.posix.basename(target.relativePath),
+        mimeType,
+        size: after.size,
+        expiresAt,
+      };
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  }
+
+  /** Serve authenticated, repeatable GET/HEAD byte ranges for one video handle. */
+  async handleMediaRequest(
+    context: WebRequestContext,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<boolean> {
+    const url = parseRequestUrl(req.url);
+    if (!url.pathname.startsWith(WEB_WORKSPACE_FILE_MEDIA_PATH_PREFIX)) return false;
+
+    let handle: fs.FileHandle | undefined;
+    try {
+      if (url.search) throw invalidTarget();
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        throw new WebApplicationError("INVALID_REQUEST", "Method not allowed.", 405);
+      }
+      const rawHandle = url.pathname.slice(WEB_WORKSPACE_FILE_MEDIA_PATH_PREFIX.length);
+      if (!MEDIA_HANDLE_RE.test(rawHandle)) throw invalidTarget();
+      await this.assertCapability(context);
+      const key = hashMediaHandle(rawHandle);
+      const record = this.mediaHandles.get(key);
+      if (!record || record.expiresAt <= Date.now()) {
+        this.mediaHandles.delete(key);
+        throw unavailable();
+      }
+      if (
+        record.audience !== context.audience ||
+        record.sessionId !== context.sessionId ||
+        record.installationId !== context.identity.installationId ||
+        record.profileId !== context.identity.profileId ||
+        record.generation !== context.identity.generation
+      ) {
+        throw unavailable();
+      }
+
+      const workspace = await this.resolveWorkspace(record.workspaceId, context);
+      const location = await this.resolveAuthorizedPath(workspace, record.relativePath, "file");
+      if (!location.fileIdentity || !hasSameIdentity(record.identity, location.fileIdentity)) {
+        throw unavailable();
+      }
+      handle = await openVerifiedFile(
+        location,
+        workspace,
+        (candidate) => this.hasReadAccess(workspace, candidate),
+        (filePath, flags) => this.openReadHandle(filePath, flags),
+      );
+      const stats = await handle.stat();
+      const signature = await readFilePrefix(handle, stats.size);
+      const latestPath = await fs
+        .realpath(path.resolve(location.rootPath, location.relativePath))
+        .catch(() => null);
+      if (
+        !hasSameIdentity(record.identity, identityOf(stats)) ||
+        latestPath !== location.absolutePath ||
+        !isValidVideoSignature(record.mimeType, signature)
+      ) {
+        throw unavailable();
+      }
+
+      const rangeHeader = getSingleHeader(req.headers.range);
+      const range =
+        req.headers.range !== undefined && rangeHeader === undefined
+          ? { kind: "invalid" as const }
+          : parseMediaRange(rangeHeader, stats.size);
+      const baseHeaders: Record<string, string | number> = {
+        "Content-Type": record.mimeType,
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Accept-Ranges": "bytes",
+      };
+      if (range.kind === "invalid") {
+        res.writeHead(416, { ...baseHeaders, "Content-Range": `bytes */${stats.size}` });
+        res.end();
+        return true;
+      }
+      if (range.kind === "partial") {
+        baseHeaders["Content-Range"] = `bytes ${range.start}-${range.end}/${stats.size}`;
+      }
+      baseHeaders["Content-Length"] = range.length;
+      res.writeHead(range.kind === "partial" ? 206 : 200, baseHeaders);
+      if (req.method === "HEAD" || range.length === 0) {
+        res.end();
+      } else {
+        await pipeline(
+          handle.createReadStream({ start: range.start, end: range.end, autoClose: false }),
+          res,
+        );
+      }
+      return true;
+    } catch (error) {
+      const webError = error instanceof WebApplicationError ? error : unavailable();
+      if (!res.headersSent && !res.writableEnded) {
+        closeIncompleteRequestAfterError(req, res);
+        writeError(res, webError);
+      } else if (!res.writableEnded) res.destroy();
+      return true;
+    } finally {
+      await handle?.close().catch(() => undefined);
     }
   }
 
@@ -579,6 +778,41 @@ export class BrowserWorkspaceFiles {
     );
   }
 
+  private get mediaHandleTtlMs(): number {
+    return boundedInteger(
+      this.options.mediaHandleTtlMs,
+      DEFAULT_MEDIA_HANDLE_TTL_MS,
+      1_000,
+      MAX_MEDIA_HANDLE_TTL_MS,
+    );
+  }
+
+  private get maxActiveMediaHandles(): number {
+    return boundedInteger(
+      this.options.maxActiveMediaHandles,
+      DEFAULT_MAX_ACTIVE_MEDIA_HANDLES,
+      1,
+      MAX_ACTIVE_MEDIA_HANDLES,
+    );
+  }
+
+  revokeSession(sessionId: string): void {
+    for (const [key, record] of this.mediaHandles) {
+      if (record.sessionId === sessionId) this.mediaHandles.delete(key);
+    }
+  }
+
+  dispose(): void {
+    this.mediaHandles.clear();
+  }
+
+  private pruneExpiredMediaHandles(): void {
+    const now = Date.now();
+    for (const [key, record] of this.mediaHandles) {
+      if (record.expiresAt <= now) this.mediaHandles.delete(key);
+    }
+  }
+
   private async assertCapability(context: WebRequestContext): Promise<void> {
     const capabilities = await this.options.getCapabilities(context);
     if (capabilities["files.read"]?.available !== true) {
@@ -889,6 +1123,15 @@ export function createBrowserWorkspaceFileMethods(
       validateParams: (value) => parseTarget(value),
       handler: (context, params) => files.list(context, params),
     },
+    "workspace.file.media.create": {
+      capability: "files.read",
+      validateParams: (value) => {
+        const target = parseTarget(value);
+        if (!target.relativePath) throw invalidTarget();
+        return target;
+      },
+      handler: (context, params) => files.createMediaHandle(context, params),
+    },
   };
 }
 
@@ -923,6 +1166,24 @@ interface FileIdentity {
   ino: number;
   size: number;
   mtimeMs: number;
+}
+
+type ParsedMediaRange =
+  | { kind: "full"; start: 0; end: number; length: number }
+  | { kind: "partial"; start: number; end: number; length: number }
+  | { kind: "invalid" };
+
+interface MediaHandleRecord {
+  workspaceId: string;
+  relativePath: string;
+  identity: FileIdentity;
+  mimeType: string;
+  audience: string;
+  sessionId: string;
+  installationId: string;
+  profileId: string;
+  generation: string;
+  expiresAt: number;
 }
 
 function parseTarget(
@@ -1159,6 +1420,68 @@ function hasSameIdentity(expected: FileIdentity | undefined, actual: FileIdentit
     expected.size === actual.size &&
     expected.mtimeMs === actual.mtimeMs
   );
+}
+
+function hashMediaHandle(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function videoMimeForPath(relativePath: string): string | undefined {
+  return VIDEO_MIME_BY_EXTENSION[path.posix.extname(relativePath).toLowerCase()];
+}
+
+async function readFilePrefix(handle: fs.FileHandle, size: number): Promise<Buffer> {
+  const prefix = Buffer.alloc(Math.min(16, size));
+  let offset = 0;
+  while (offset < prefix.length) {
+    const { bytesRead } = await handle.read(prefix, offset, prefix.length - offset, offset);
+    if (bytesRead <= 0) break;
+    offset += bytesRead;
+  }
+  return prefix.subarray(0, offset);
+}
+
+function isValidVideoSignature(mimeType: string, prefix: Buffer): boolean {
+  if (mimeType === "video/webm") {
+    return (
+      prefix.length >= 4 && prefix.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
+    );
+  }
+  return (
+    (mimeType === "video/mp4" || mimeType === "video/quicktime") &&
+    prefix.length >= 8 &&
+    prefix.subarray(4, 8).toString("ascii") === "ftyp"
+  );
+}
+
+function parseMediaRange(value: string | undefined, size: number): ParsedMediaRange {
+  if (!Number.isSafeInteger(size) || size < 0) return { kind: "invalid" };
+  if (value === undefined) {
+    return { kind: "full", start: 0, end: Math.max(0, size - 1), length: size };
+  }
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim());
+  if (!match || (!match[1] && !match[2]) || size === 0) return { kind: "invalid" };
+
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return { kind: "invalid" };
+    const start = Math.max(0, size - suffixLength);
+    return { kind: "partial", start, end: size - 1, length: size - start };
+  }
+
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(requestedEnd) ||
+    start < 0 ||
+    requestedEnd < start ||
+    start >= size
+  ) {
+    return { kind: "invalid" };
+  }
+  const end = Math.min(requestedEnd, size - 1);
+  return { kind: "partial", start, end, length: end - start + 1 };
 }
 
 async function readJsonRequest(

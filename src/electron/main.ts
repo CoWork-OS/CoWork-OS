@@ -286,6 +286,7 @@ import {
   getDesktopIconPath,
 } from "./branding";
 import { primeMacSafeStorageContext } from "./utils/mac-safe-storage-bootstrap";
+import { getSafeStorage } from "./utils/safe-storage";
 import {
   keepDirectRunAliveWithoutWindows,
   stripInjectedSystemCaOption,
@@ -320,6 +321,7 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
         taskCommands: agentDaemon,
         agentDaemon,
         channelGateway,
+        notificationService: getNotificationService() ?? undefined,
         getRoutineService: () => routineService,
         getEventTriggerService: () => eventTriggerService,
         getHeartbeatService: () => heartbeatService,
@@ -1795,15 +1797,19 @@ if (isMacSafeStorageMigrationWorker) {
         throw error;
       }
       dbManager.beginRun("desktop");
+      logStartupLane("blocking_startup", { event: "database_manager_ready" });
       // Database worker (async SQLite plan, DB2); starts after schema setup. Awaited so
       // each domain's backend is chosen once for the run (DB7): a worker that fails to
       // start leaves the whole run on the host backend.
+      logStartupLane("blocking_startup", { event: "database_worker_start" });
       await startDatabaseWorker({ dbPath: dbManager.getDatabasePath(), runtime: "desktop" });
+      logStartupLane("blocking_startup", { event: "database_worker_ready" });
       // Reporting reader (DB4); report-style reads only, so it may become ready later.
       const reportingReader = startReportingReader({
         dbPath: dbManager.getDatabasePath(),
         runtime: "desktop",
       });
+      logStartupLane("blocking_startup", { event: "reporting_reader_start_requested" });
       hostPerfMonitor = startHostPerfMonitor({
         runtime: "desktop",
         isSummaryEnabled: () =>
@@ -1823,11 +1829,14 @@ if (isMacSafeStorageMigrationWorker) {
         ),
       );
       usageInsightsProjector.warm();
+      logStartupLane("blocking_startup", { event: "usage_insights_warm_requested" });
       // DB4: maintenance chunks run in the database worker when this run uses it.
       const runDatabaseMaintenance = async () =>
         dbManager.runPostStartupMaintenance({ client: await getDatabaseClient() });
       if (startupQuietMode) {
+        logStartupLane("blocking_startup", { event: "database_maintenance_start" });
         await runDatabaseMaintenance();
+        logStartupLane("blocking_startup", { event: "database_maintenance_complete" });
       } else {
         deferStartupTask("database-maintenance", runDatabaseMaintenance);
       }
@@ -1843,7 +1852,9 @@ if (isMacSafeStorageMigrationWorker) {
           logger.warn("Failed to prune temp workspaces:", error);
         }
       };
+      logStartupLane("blocking_startup", { event: "temp_workspace_prune_start" });
       await runTempWorkspacePrune();
+      logStartupLane("blocking_startup", { event: "temp_workspace_prune_complete" });
       tempWorkspacePruneTimer = setInterval(
         // The prune reports its own failures.
         () => void runTempWorkspacePrune(),
@@ -1868,6 +1879,7 @@ if (isMacSafeStorageMigrationWorker) {
       // This MUST be done before provider factories so they can migrate legacy settings
       new SecureSettingsRepository(dbManager.getDatabase());
       logger.info("SecureSettingsRepository initialized");
+      logStartupLane("blocking_startup", { event: "secure_settings_ready" });
       if (process.platform === "darwin") {
         await migrateLegacyMacSafeStorageSettings({
           platform: process.platform,
@@ -1880,7 +1892,7 @@ if (isMacSafeStorageMigrationWorker) {
         await migrateLegacyMacSafeStorageChannels({
           platform: process.platform,
           database: dbManager.getDatabase(),
-          safeStorage,
+          safeStorage: getSafeStorage(),
           executable: process.execPath,
           appPath: app.getAppPath(),
           logger,

@@ -52,6 +52,70 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
     expect(capped.length).toBeLessThanOrEqual(120);
   });
 
+  it("retains only exactly named available MCP tools when built-ins exceed the soft cap", () => {
+    const executor = createExecutor("chat");
+    const requestedName = "mcp_qa_echo";
+    executor.task.title = `Use ${requestedName} exactly once`;
+    executor.task.prompt = executor.task.title;
+    executor.lastUserMessage = executor.task.prompt;
+    executor.getEffectiveExecutionMode = () => "execute";
+    executor.getToolCountCaps = () => ({ baseCap: 80, softCap: 120 });
+
+    const runtime = {
+      readOnly: false,
+      concurrencyClass: "serial_only",
+      interruptBehavior: "block",
+      approvalKind: "external_service",
+      sideEffectLevel: "low",
+      deferLoad: false,
+      alwaysExpose: false,
+      resultKind: "integration",
+      supportsContextMutation: false,
+      capabilityTags: ["integration", "mcp"],
+      exposure: "explicit_only",
+    };
+    const requestedTool = { name: requestedName, description: "Echo QA text", runtime };
+    const tools = [
+      ...Array.from({ length: 121 }, (_, index) => ({ name: `builtin_${index}` })),
+      requestedTool,
+      { name: "mcp_qa_echo_extra", description: "Similar name", runtime },
+      { name: "mcp_qa_admin_reset", description: "Unrequested tool", runtime },
+    ];
+
+    const exposed = (executor as Any).applyIntentFilter(tools) as Any[];
+
+    expect(exposed).toContain(requestedTool);
+    expect(exposed.find((tool) => tool.name === requestedName)?.runtime).toBe(runtime);
+    expect(exposed.some((tool) => tool.name === "mcp_qa_echo_extra")).toBe(false);
+    expect(exposed.some((tool) => tool.name === "mcp_qa_admin_reset")).toBe(false);
+  });
+
+  it("retains an exact MCP named only in a later follow-up through relevance ranking", () => {
+    const executor = createExecutor("chat");
+    executor.task.title = "A neutral task";
+    executor.task.prompt = "Continue the conversation";
+    executor.lastUserMessage = "Call mcp_qa_echo exactly once.";
+    executor.getEffectiveExecutionMode = () => "execute";
+    executor.getToolCountCaps = () => ({ baseCap: 80, softCap: 120 });
+    executor.buildToolSelectionContextWords = () => new Set<string>();
+
+    const candidates = Array.from({ length: 220 }, (_, index) => `mcp_candidate_${index}`);
+    const targetName = candidates.reduce((current, candidate) =>
+      (executor as Any).stableToolHash(candidate) > (executor as Any).stableToolHash(current)
+        ? candidate
+        : current,
+    );
+    const tools = [
+      ...Array.from({ length: 85 }, (_, index) => ({ name: `builtin_${index}` })),
+      ...candidates.map((name) => ({ name })),
+    ];
+    executor.lastUserMessage = `Call ${targetName} exactly once.`;
+
+    const exposed = (executor as Any).applyIntentFilter(tools) as Any[];
+
+    expect(exposed.map((tool) => tool.name)).toContain(targetName);
+  });
+
   it("uses stable hash tie-breaking instead of registry order for equal-score MCP tools", () => {
     const executorA = createExecutor("execution");
     const executorB = createExecutor("execution");

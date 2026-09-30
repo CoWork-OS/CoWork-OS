@@ -3,12 +3,17 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseManager } from "../../../electron/database/schema";
-import { WorkspaceStore } from "../../../electron/database/repositories";
+import { TaskStore, WorkspaceStore } from "../../../electron/database/repositories";
 import { WorkspaceRepository } from "../../../electron/database/repository-facades";
+import {
+  AgentRoleRepository,
+  AgentTeamRepository,
+} from "../../../electron/agents/agent-repository-facades";
 import type { EverydayActionReceipt, Workspace } from "../../../shared/types";
 import type { ChannelGateway } from "../../../electron/gateway";
 import type { ManagedSessionService } from "../../../electron/managed/ManagedSessionService";
 import type { EverydayAgentService } from "../../../electron/everyday-agent/everyday-agent-repository-facades";
+import type { CronService } from "../../../electron/cron/service";
 import type { RoutineService } from "../../../electron/routines/service";
 import type { PluginPackToggleService } from "../../../electron/extensions/plugin-pack-toggle-service";
 import { BrowserDesktopRpcService } from "../browser-desktop-rpc";
@@ -83,15 +88,17 @@ describe("browser navigation desktop methods", () => {
       ChannelGateway,
       "getChannels" | "getChannel" | "getDistinctChatIds" | "sendMessage"
     >,
+    agentDaemon: object = {},
+    cronService: CronService | null = null,
   ) {
     return createBrowserNavigationDefinitions({
       db,
-      agentDaemon: {} as never,
+      agentDaemon: agentDaemon as never,
       channelGateway,
       managedSessionService: managed,
       everydayAgentService: everyday,
       getRoutineService: () => routineService,
-      getCronService: () => null,
+      getCronService: () => cronService,
       resolveWorkspace: resolveWorkspace || (async (id) => workspaceRepository.findById(id)),
       discovery,
       pluginPackToggleService,
@@ -121,9 +128,161 @@ describe("browser navigation desktop methods", () => {
     expect(defs.getMCPStatus).toBeDefined();
     expect(defs.fetchMCPRegistry).toBeDefined();
     expect(defs.searchMCPRegistry).toBeDefined();
+    expect(defs.listRoutineWorkflowRunSteps).toBe(defs.listRoutineWorkflowSteps);
     expect(defs.listRoutineWorkflowEventSamples).toBeUndefined();
     expect(defs.getAllHeartbeatStatus).toBeUndefined();
     expect(Object.keys(defs).some((name) => name.toLowerCase().includes("ipc"))).toBe(false);
+  });
+
+  it("forks only writable readable tasks and returns a prompt-free task summary", async () => {
+    const sourceTask = new TaskStore(db).create({
+      title: "Source task",
+      prompt: "private source prompt",
+      status: "completed",
+      workspaceId: workspace.id,
+    });
+    const forkedTask = new TaskStore(db).create({
+      title: "Source task (side-chat)",
+      prompt: "private fork prompt",
+      status: "pending",
+      workspaceId: workspace.id,
+    });
+    const forkTaskSession = vi.fn().mockResolvedValue(forkedTask);
+    const defs = definitions(undefined, undefined, undefined, undefined, { forkTaskSession });
+    const forkDefinition = defs.forkTaskSession;
+    expect(forkDefinition).toMatchObject({ capability: "tasks.create", mutation: true });
+
+    const request = {
+      taskId: sourceTask.id,
+      branchLabel: "side-chat",
+      sideChat: true,
+      initialMessage: "private initial message",
+    };
+    const returned = await invoke(defs, "forkTaskSession", [request]);
+    expect(forkTaskSession).toHaveBeenCalledWith(request);
+    expect(returned).toMatchObject({
+      id: forkedTask.id,
+      title: forkedTask.title,
+      workspaceId: workspace.id,
+      prompt: "",
+    });
+    expect(JSON.stringify(returned)).not.toContain("private fork prompt");
+    expect(JSON.stringify(returned)).not.toContain(workspace.path);
+    expect(() => forkDefinition.validate!([{ ...request, extra: true }])).toThrow();
+
+    const readOnly = definitions(
+      async (id) => {
+        const found = await workspaceRepository.findById(id);
+        return found ? { ...found, permissions: { ...found.permissions, write: false } } : null;
+      },
+      undefined,
+      undefined,
+      undefined,
+      { forkTaskSession },
+    );
+    await expect(
+      readOnly.forkTaskSession.handler(readOnly.forkTaskSession.validate!([request])),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(forkTaskSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports browser bot details, notification policy, and workspace-scoped team reads", async () => {
+    const role = await new AgentRoleRepository(db).create({
+      name: "browser-reviewer",
+      displayName: "Browser Reviewer",
+      description: "Reviews approved work.",
+      systemPrompt: "Review the current task.",
+      capabilities: ["review"],
+    });
+    const team = await new AgentTeamRepository(db).create({
+      workspaceId: workspace.id,
+      name: "Review team",
+      leadAgentRoleId: role.id,
+    });
+    const defs = definitions();
+
+    expect(defs.getAgentRole).toMatchObject({ capability: "agents.manage", minArgs: 1 });
+    await expect(invoke(defs, "getAgentRole", [role.id])).resolves.toMatchObject({
+      id: role.id,
+      displayName: role.displayName,
+      systemPrompt: role.systemPrompt,
+    });
+    await expect(invoke(defs, "getBotNotificationPolicy", [role.id])).resolves.toMatchObject({
+      agentRoleId: role.id,
+      onFinish: true,
+      onInputRequired: true,
+    });
+    expect(defs.updateBotNotificationPolicy).toMatchObject({
+      capability: "agents.manage",
+      mutation: true,
+    });
+    await expect(
+      invoke(defs, "updateBotNotificationPolicy", [
+        { agentRoleId: role.id, onFinish: false, onInputRequired: true },
+      ]),
+    ).resolves.toMatchObject({
+      agentRoleId: role.id,
+      onFinish: false,
+      onInputRequired: true,
+    });
+    await expect(invoke(defs, "listTeams", [workspace.id])).resolves.toMatchObject([
+      { id: team.id, workspaceId: workspace.id, name: team.name },
+    ]);
+
+    expect(() =>
+      defs.updateBotNotificationPolicy.validate?.([{ agentRoleId: role.id, onFinish: 1 }]),
+    ).toThrow();
+    expect(() => defs.listTeams.validate?.([workspace.id, "true"])).toThrow();
+    const unreadable = definitions(async () => ({
+      ...workspace,
+      permissions: { ...workspace.permissions, read: false },
+    }));
+    await expect(invoke(unreadable, "listTeams", [workspace.id])).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("reopens bot conversations only inside a writable browser workspace", async () => {
+    const sourceTask = new TaskStore(db).create({
+      title: "Earlier bot session",
+      prompt: "private source prompt",
+      status: "completed",
+      workspaceId: workspace.id,
+    });
+    const reopenedTask = new TaskStore(db).create({
+      title: "Earlier bot session",
+      prompt: "private reopened prompt",
+      status: "pending",
+      workspaceId: workspace.id,
+    });
+    const reopenBotConversation = vi.fn().mockResolvedValue(reopenedTask);
+    const defs = definitions(undefined, undefined, undefined, undefined, {
+      reopenBotConversation,
+    });
+    const reopen = defs.reopenBotConversation;
+    expect(reopen).toMatchObject({ capability: "tasks.create", mutation: true });
+    const request = { workspaceId: workspace.id, taskId: sourceTask.id };
+    await expect(invoke(defs, "reopenBotConversation", [request])).resolves.toMatchObject({
+      id: reopenedTask.id,
+      workspaceId: workspace.id,
+      prompt: "private reopened prompt",
+    });
+    expect(reopenBotConversation).toHaveBeenCalledWith(request);
+
+    const readOnly = definitions(
+      async (id) => {
+        const found = await workspaceRepository.findById(id);
+        return found ? { ...found, permissions: { ...found.permissions, write: false } } : null;
+      },
+      undefined,
+      undefined,
+      undefined,
+      { reopenBotConversation },
+    );
+    await expect(invoke(readOnly, "reopenBotConversation", [request])).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(reopenBotConversation).toHaveBeenCalledTimes(1);
   });
 
   it("authorizes desired-state pack toggles as agents.manage mutations and returns bounded results", async () => {
@@ -210,6 +369,31 @@ describe("browser navigation desktop methods", () => {
     expect(gateway.getDistinctChatIds).toHaveBeenCalledWith("enabled-channel", 200);
     await expect(invoke(defs, "getGatewayChats", ["missing-channel"])).resolves.toEqual([]);
     expect(gateway.getDistinctChatIds).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts scheduled-task access profiles while rejecting browser shell-access escalation", () => {
+    const cronService = {} as CronService;
+    const defs = definitions(undefined, undefined, undefined, undefined, undefined, cronService);
+    const job = {
+      name: "Disposable report",
+      enabled: false,
+      accessProfileId: "ask_for_approval",
+      workspaceId: workspace.id,
+      taskPrompt: "Summarize local changes.",
+      schedule: { kind: "every", everyMs: 60 * 60 * 1000, anchorMs: Date.now() },
+      delivery: { enabled: false },
+    };
+
+    expect(defs.addCronJob?.validate?.([job])).toEqual([job]);
+    expect(() =>
+      defs.addCronJob?.validate?.([{ ...job, accessProfileId: "../full-access" }]),
+    ).toThrow();
+    expect(() => defs.addCronJob?.validate?.([{ ...job, shellAccess: true }])).toThrow();
+    expect(() => defs.updateCronJob?.validate?.(["cron-job-1", { shellAccess: true }])).toThrow();
+    expect(defs.updateCronJob?.validate?.(["cron-job-1", { shellAccess: false }])).toEqual([
+      "cron-job-1",
+      { shellAccess: false },
+    ]);
   });
 
   it("sends only the fixed scheduled-task test message through an enabled host channel", async () => {

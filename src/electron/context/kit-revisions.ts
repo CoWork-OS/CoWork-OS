@@ -59,6 +59,7 @@ export function writeKitFileWithSnapshot(
   fs.mkdirSync(dir, { recursive: true });
 
   const snapshotRoot = getKitSnapshotRoot(absPath);
+  pathGuard?.(snapshotRoot, "write");
   fs.mkdirSync(snapshotRoot, { recursive: true });
 
   if (existing !== null) {

@@ -157,7 +157,8 @@ async function main() {
   const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "true" };
   delete env.ELECTRON_RUN_AS_NODE;
 
-  const electron = spawn(electronPath, [mainPath, ...args], {
+  // Launch the package so app.getAppPath() resolves shipped assets from its root.
+  const electron = spawn(electronPath, [packageDir, ...args], {
     cwd: packageDir,
     stdio: "inherit",
     env,

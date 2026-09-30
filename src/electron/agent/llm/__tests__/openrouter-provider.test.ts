@@ -104,6 +104,32 @@ describe("OpenRouterProvider attribution headers", () => {
     });
   });
 
+  it("reports bounded upstream test errors with HTTP status and redacted credentials", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: {
+            message: "Provider returned error",
+            metadata: { raw: `max_tokens is too small; private-test-key ${"x".repeat(1000)}` },
+          },
+        }),
+      }),
+    );
+    const provider = new OpenRouterProvider({
+      type: "openrouter",
+      model: "model-a",
+      openrouterApiKey: "private-test-key",
+    });
+    const result = await provider.testConnection();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("HTTP 400: Provider returned error — max_tokens is too small");
+    expect(result.error).not.toContain("private-test-key");
+    expect(result.error!.length).toBeLessThan(560);
+  });
+
   it("uses the shared OpenRouter default model when no model is configured", () => {
     const provider = new OpenRouterProvider({
       type: "openrouter",

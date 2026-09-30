@@ -4,7 +4,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseManager } from "../../../electron/database/schema";
 import { SkillStore, TaskStore, WorkspaceStore } from "../../../electron/database/repositories";
-import { WorkspaceRepository } from "../../../electron/database/repository-facades";
+import { AgentRoleStore } from "../../../electron/agents/AgentRoleRepository";
+import { AgentTeamStore } from "../../../electron/agents/AgentTeamRepository";
+import { AgentTeamRunStore } from "../../../electron/agents/AgentTeamRunRepository";
+import { TaskRepository, WorkspaceRepository } from "../../../electron/database/repository-facades";
 import type { CustomSkill, Workspace } from "../../../shared/types";
 import { createBrowserCoreDefinitions } from "../browser-core-methods";
 
@@ -40,10 +43,16 @@ describe("browser core desktop methods", () => {
     vi.restoreAllMocks();
   });
 
-  function definitions(options: { write?: boolean; skillLoader?: object } = {}) {
+  function definitions(
+    options: {
+      write?: boolean;
+      skillLoader?: object;
+      daemon?: Parameters<typeof createBrowserCoreDefinitions>[0]["agentDaemon"];
+    } = {},
+  ) {
     return createBrowserCoreDefinitions({
       db,
-      agentDaemon: {},
+      agentDaemon: options.daemon ?? {},
       skillLoader: options.skillLoader as never,
       resolveWorkspace: async (workspaceId) => {
         const found = await workspaceRepository.findById(workspaceId);
@@ -85,6 +94,137 @@ describe("browser core desktop methods", () => {
       readOnly.renameTask.handler(readOnly.renameTask.validate!([task.id, "blocked"])),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(() => defs.renameTask.validate!([task.id, "\n"])).toThrow();
+  });
+
+  it("exposes task actions only through workspace-scoped daemon adapters", async () => {
+    const task = new TaskStore(db).create({
+      title: "Scoped task",
+      prompt: "private prompt",
+      status: "paused",
+      workspaceId: workspace.id,
+    });
+    const destination = new WorkspaceStore(db).create(
+      "Destination",
+      path.join(tempDir, "destination"),
+      {
+        read: true,
+        write: true,
+        delete: false,
+        network: false,
+        shell: false,
+      },
+    );
+    const taskRepository = new TaskRepository(db);
+    const daemon = {
+      updateTaskWorkspace: vi.fn(async (taskId: string, workspaceId: string) => {
+        await taskRepository.update(taskId, { workspaceId });
+        return (await taskRepository.findById(taskId))!;
+      }),
+      resumeTask: vi.fn(async () => true),
+      handleStepFeedback: vi.fn(async () => undefined),
+      logEvent: vi.fn(),
+    };
+    const defs = definitions({ daemon });
+
+    const updated = (await defs.updateTaskWorkspace.handler(
+      defs.updateTaskWorkspace.validate!([task.id, destination.id]),
+    )) as Record<string, unknown>;
+    expect(updated).toMatchObject({ id: task.id, workspaceId: destination.id });
+    expect(updated).not.toHaveProperty("worktreePath");
+    expect(daemon.updateTaskWorkspace).toHaveBeenCalledWith(task.id, destination.id);
+    await expect(defs.resumeTask.handler(defs.resumeTask.validate!([task.id]))).resolves.toBe(true);
+    await defs.sendStepFeedback.handler(
+      defs.sendStepFeedback.validate!([task.id, "step-1", "retry", "Try again"]),
+    );
+    await defs.submitMessageFeedback.handler(
+      defs.submitMessageFeedback.validate!([
+        {
+          taskId: task.id,
+          messageId: "message-1",
+          decision: "rejected",
+          reason: "Needs a correction",
+          note: "Use current figures",
+        },
+      ]),
+    );
+    expect(daemon.handleStepFeedback).toHaveBeenCalledWith(task.id, "step-1", "retry", "Try again");
+    expect(daemon.logEvent).toHaveBeenCalledWith(task.id, "user_feedback", {
+      decision: "rejected",
+      reason: "Needs a correction: Use current figures",
+      messageId: "message-1",
+    });
+    expect(() => defs.sendStepFeedback.validate!([task.id, "step-1", "delete"])).toThrow();
+    expect(() =>
+      defs.submitMessageFeedback.validate!([{ taskId: task.id, decision: "accepted", path: "/" }]),
+    ).toThrow();
+
+    const inaccessible = createBrowserCoreDefinitions({
+      db,
+      agentDaemon: daemon,
+      resolveWorkspace: async (workspaceId) =>
+        workspaceId === destination.id ? null : await workspaceRepository.findById(workspaceId),
+    });
+    await expect(
+      inaccessible.updateTaskWorkspace.handler(
+        inaccessible.updateTaskWorkspace.validate!([task.id, destination.id]),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(daemon.updateTaskWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("wraps up tasks and team runs only within writable workspaces", async () => {
+    const task = new TaskStore(db).create({
+      title: "Running task",
+      prompt: "private prompt",
+      status: "running",
+      workspaceId: workspace.id,
+    });
+    const role = new AgentRoleStore(db).create({
+      name: "Browser test role",
+      displayName: "Browser test role",
+      capabilities: ["code"],
+    } as never);
+    const team = new AgentTeamStore(db).create({
+      workspaceId: workspace.id,
+      name: "Browser test team",
+      leadAgentRoleId: role.id,
+    });
+    const run = new AgentTeamRunStore(db).create({
+      teamId: team.id,
+      rootTaskId: task.id,
+      status: "running",
+      collaborativeMode: true,
+    });
+    const runSummary = {
+      ...run,
+      collaborativeMode: true,
+    };
+    const wrapUpRun = vi.fn(async () => undefined);
+    const daemonMethods = {
+      wrapUpTask: vi.fn(async () => undefined),
+      ensureCollaborativeRunForParentTask: vi.fn(() => runSummary),
+      getTeamOrchestrator: vi.fn(() => ({ wrapUpRun })),
+    };
+    const defs = definitions({ daemon: daemonMethods as never });
+
+    await defs.wrapUpTask.handler(defs.wrapUpTask.validate!([task.id]));
+    await expect(
+      defs.findTeamRunByRootTask.handler(defs.findTeamRunByRootTask.validate!([task.id])),
+    ).resolves.toMatchObject({ id: run.id, rootTaskId: task.id });
+    await defs.wrapUpTeamRun.handler(defs.wrapUpTeamRun.validate!([run.id]));
+    expect(daemonMethods.wrapUpTask).toHaveBeenCalledWith(task.id);
+    expect(daemonMethods.ensureCollaborativeRunForParentTask).toHaveBeenCalledWith(task.id);
+    expect(wrapUpRun).toHaveBeenCalledWith(run.id);
+
+    const readOnly = definitions({ write: false, daemon: daemonMethods as never });
+    await expect(
+      readOnly.wrapUpTask.handler(readOnly.wrapUpTask.validate!([task.id])),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      readOnly.wrapUpTeamRun.handler(readOnly.wrapUpTeamRun.validate!([run.id])),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(daemonMethods.wrapUpTask).toHaveBeenCalledTimes(1);
+    expect(wrapUpRun).toHaveBeenCalledTimes(1);
   });
 
   it("archives the shared session through the retention service after checking every workspace", async () => {

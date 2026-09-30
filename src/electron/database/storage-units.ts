@@ -30,6 +30,7 @@ import {
   TaskSessionMetadataStore,
   TaskAdmissionStore,
   BrowserTaskCancelReceiptStore,
+  BrowserGitMutationReceiptStore,
   TaskEventRepository,
   TaskStore,
   WorkspacePermissionRuleStore,
@@ -47,6 +48,21 @@ import { WorkSessionProtocolRepository } from "./WorkSessionProtocolRepository";
  * a method is a write when it, or a method it calls, writes or opens a transaction.
  */
 export const STORAGE_UNITS = {
+  browserGitMutationReceipt_reserve: storeUnit(
+    (db: Database.Database) => new BrowserGitMutationReceiptStore(db),
+    "reserve",
+    { readonly: false },
+  ),
+  browserGitMutationReceipt_complete: storeUnit(
+    (db: Database.Database) => new BrowserGitMutationReceiptStore(db),
+    "complete",
+    { readonly: false },
+  ),
+  browserGitMutationReceipt_get: storeUnit(
+    (db: Database.Database) => new BrowserGitMutationReceiptStore(db),
+    "get",
+    { readonly: true },
+  ),
   browserTaskCancelReceipt_reserve: storeUnit(
     (db: Database.Database) => new BrowserTaskCancelReceiptStore(db),
     "reserve",

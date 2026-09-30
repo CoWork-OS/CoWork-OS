@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
 import { PRUNE_TASK_EVENTS_BATCH_SQL } from "./maintenance-sql";
@@ -52,6 +53,11 @@ import {
   CreateChannelSpecializationRequest,
   UpdateChannelSpecializationRequest,
 } from "../../shared/types";
+import type {
+  BrowserGitMutationIntent,
+  BrowserGitMutationReceipt,
+  BrowserGitMutationResult,
+} from "../../shared/host-api/git";
 import { isActiveTaskStatus, normalizeTaskLifecycleState } from "../../shared/task-status";
 import { isTimelineEventType, normalizeTaskEventToTimelineV2 } from "../../shared/timeline-v2";
 import {
@@ -1232,6 +1238,7 @@ export class TaskStore {
       includeArchivedSessions?: boolean;
       excludeBotConversations?: boolean;
       excludeSources?: Array<NonNullable<Task["source"]>>;
+      workspaceId?: string;
       cursor?: {
         id?: string;
         pinned?: boolean;
@@ -1261,6 +1268,7 @@ export class TaskStore {
       ? TaskStore.buildSidebarCursorPredicate(options.cursor)
       : { sql: "", args: [] };
     const whereClauses = [
+      ...(options?.workspaceId ? ["workspace_id = ?"] : []),
       ...(options?.excludeBotConversations
         ? [
             "COALESCE(json_extract(CASE WHEN json_valid(agent_config) = 1 THEN agent_config END, '$.botConversation'), 0) <> 1",
@@ -1383,7 +1391,13 @@ export class TaskStore {
       ${orderBy}
       LIMIT ? OFFSET ?
     `);
-    const rows = stmt.all(...excludedSources, ...cursor.args, limit, offset) as Any[];
+    const rows = stmt.all(
+      ...(options?.workspaceId ? [options.workspaceId] : []),
+      ...excludedSources,
+      ...cursor.args,
+      limit,
+      offset,
+    ) as Any[];
     return rows.map((row) => this.mapRowToSidebarTask(row));
   }
 
@@ -2543,6 +2557,97 @@ export class BrowserTaskCancelReceiptStore {
   private validateKey(value: string): void {
     if (typeof value !== "string" || !/^[a-f0-9]{64}$/i.test(value)) {
       throw new Error("Browser cancellation key must be a SHA-256 digest");
+    }
+  }
+}
+
+/** Durable operation-key receipts for selected-file browser Git mutations. */
+export class BrowserGitMutationReceiptStore {
+  constructor(private readonly db: Database.Database) {}
+
+  reserve(
+    scopedKey: string,
+    fingerprint: string,
+    intent: BrowserGitMutationIntent,
+  ): { created: boolean; receipt: BrowserGitMutationReceipt } {
+    this.validateDigest(scopedKey, "scope key");
+    this.validateDigest(fingerprint, "fingerprint");
+    if (!intent || JSON.stringify(intent).length > 16_384) {
+      throw new Error("Invalid browser Git mutation intent");
+    }
+    if (!intent.workspaceId || intent.workspaceId.length > 128) {
+      throw new Error("Invalid browser Git workspace");
+    }
+    if (!/^[a-f0-9]{64}$/i.test(intent.expectedRevision)) {
+      throw new Error("Invalid browser Git revision");
+    }
+    if (intent.expectedHead !== null && !/^[a-f0-9]{40,64}$/i.test(intent.expectedHead)) {
+      throw new Error("Invalid browser Git HEAD");
+    }
+    if (intent.expectedTree && !/^[a-f0-9]{40,64}$/i.test(intent.expectedTree)) {
+      throw new Error("Invalid browser Git tree");
+    }
+    const now = Date.now();
+    const inserted = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO browser_git_mutation_receipts
+         (scoped_key, fingerprint, intent_json, state, created_at, updated_at)
+         VALUES (?, ?, ?, 'pending', ?, ?)`,
+      )
+      .run(scopedKey, fingerprint.toLowerCase(), JSON.stringify(intent), now, now);
+    const receipt = this.get(scopedKey);
+    if (!receipt) throw new Error("Browser Git mutation receipt was not reserved");
+    return { created: inserted.changes === 1, receipt };
+  }
+
+  complete(scopedKey: string, result: BrowserGitMutationResult): void {
+    this.validateDigest(scopedKey, "scope key");
+    if (!result || JSON.stringify(result).length > 4_096) {
+      throw new Error("Invalid browser Git mutation result");
+    }
+    const receipt = this.get(scopedKey);
+    if (!receipt) throw new Error("Browser Git mutation receipt is missing");
+    if (receipt.state === "completed") return;
+    if (
+      receipt.intent.workspaceId !== result.workspaceId ||
+      receipt.intent.action !== result.action
+    ) {
+      throw new Error("Browser Git mutation result scope mismatch");
+    }
+    const updated = this.db
+      .prepare(
+        `UPDATE browser_git_mutation_receipts
+         SET state = 'completed', result_json = ?, updated_at = ?
+         WHERE scoped_key = ? AND state = 'pending'`,
+      )
+      .run(JSON.stringify(result), Date.now(), scopedKey);
+    if (updated.changes !== 1 && this.get(scopedKey)?.state !== "completed") {
+      throw new Error("Browser Git mutation receipt was not completed");
+    }
+  }
+
+  get(scopedKey: string): BrowserGitMutationReceipt | null {
+    this.validateDigest(scopedKey, "scope key");
+    const row = this.db
+      .prepare(
+        `SELECT fingerprint, intent_json, state, result_json
+         FROM browser_git_mutation_receipts WHERE scoped_key = ?`,
+      )
+      .get(scopedKey) as Any;
+    if (!row) return null;
+    return {
+      fingerprint: String(row.fingerprint),
+      intent: JSON.parse(String(row.intent_json)) as BrowserGitMutationIntent,
+      state: row.state as "pending" | "completed",
+      ...(row.result_json
+        ? { result: JSON.parse(String(row.result_json)) as BrowserGitMutationResult }
+        : {}),
+    };
+  }
+
+  private validateDigest(value: string, label: string): void {
+    if (typeof value !== "string" || !/^[a-f0-9]{64}$/i.test(value)) {
+      throw new Error(`Browser Git ${label} must be a SHA-256 digest`);
     }
   }
 }
@@ -5122,6 +5227,7 @@ export class LLMModelStore {
 
 const channelRepoLogger = createLogger("ChannelRepository");
 const CHANNEL_CONFIG_ENCRYPTED_PREFIX = "enc:";
+const CHANNEL_CONFIG_PROFILE_PREFIX = "enc:repo:v1:";
 const CHANNEL_CONFIG_DECRYPT_WARNING_INTERVAL_MS = 60_000;
 let lastChannelConfigDecryptUnavailableLogAt = Number.NEGATIVE_INFINITY;
 
@@ -5132,7 +5238,8 @@ interface ChannelConfigReadResult {
 }
 
 /**
- * Encrypt a channel config JSON string using OS keychain via safeStorage.
+ * Encrypt a channel config using OS keychain or the initialized profile's
+ * protected settings codec on hosts without an OS keychain.
  * Refuses to persist secrets when secure storage is unavailable.
  */
 function encryptChannelConfig(json: string): string {
@@ -5140,6 +5247,10 @@ function encryptChannelConfig(json: string): string {
     const safeStorage = getSafeStorage();
     if (safeStorage?.isEncryptionAvailable()) {
       return CHANNEL_CONFIG_ENCRYPTED_PREFIX + safeStorage.encryptString(json).toString("base64");
+    }
+    if (SecureSettingsRepository.isInitialized()) {
+      const record = SecureSettingsRepository.getInstance().encryptRecord({ channelConfig: json });
+      return CHANNEL_CONFIG_PROFILE_PREFIX + Buffer.from(JSON.stringify(record)).toString("base64");
     }
     throw new Error(
       "Secure storage is unavailable. Refusing to store channel credentials in plaintext.",
@@ -5164,6 +5275,17 @@ function decryptChannelConfig(value: string): ChannelConfigReadResult {
     };
   }
   try {
+    if (value.startsWith(CHANNEL_CONFIG_PROFILE_PREFIX)) {
+      const record = JSON.parse(
+        Buffer.from(value.slice(CHANNEL_CONFIG_PROFILE_PREFIX.length), "base64").toString("utf8"),
+      );
+      const decoded = SecureSettingsRepository.getInstance().decryptRecord<{
+        channelConfig: string;
+      }>(record);
+      if (typeof decoded.channelConfig !== "string")
+        throw new Error("Invalid channel configuration payload");
+      return { json: decoded.channelConfig, encrypted: true };
+    }
     const safeStorage = getSafeStorage();
     if (safeStorage?.isEncryptionAvailable()) {
       lastChannelConfigDecryptUnavailableLogAt = Number.NEGATIVE_INFINITY;
@@ -5201,7 +5323,7 @@ function decryptChannelConfig(value: string): ChannelConfigReadResult {
 
 /**
  * How `ChannelStore` turns a channel's config into the stored `channels.config` value and
- * back. The default encrypts with OS secure storage. The storage domain's transaction
+ * back. The default encrypts on the host. The storage domain's transaction
  * units, which may run in the database worker where secure storage is unavailable, use
  * `SEALED_CHANNEL_CONFIG_CODEC`: the host-side `ChannelRepository` facade encrypts before
  * the unit runs and decrypts after, and the stored value crosses the worker boundary sealed.

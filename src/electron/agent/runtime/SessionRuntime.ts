@@ -1889,9 +1889,9 @@ export class SessionRuntime {
       const policyFiltered = filterToolsByPolicy(tools, this.deps.getToolPolicyContext());
       const modeFiltered = this.deps.applyWebSearchModeFilter(policyFiltered.tools);
       const agentPolicyFiltered = this.deps.applyAgentPolicyToolFilter(modeFiltered);
-      finalTools = this.deps.applyAdaptiveToolAvailabilityFilter(
-        this.deps.applyStepScopedToolPolicy(this.deps.applyIntentFilter(agentPolicyFiltered)),
-      );
+      const intentFiltered = this.deps.applyIntentFilter(agentPolicyFiltered);
+      const stepScopedTools = this.deps.applyStepScopedToolPolicy(intentFiltered);
+      finalTools = this.deps.applyAdaptiveToolAvailabilityFilter(stepScopedTools);
       const renderedTools =
         typeof (toolRegistry as Any).renderToolsForContext === "function"
           ? (toolRegistry as Any).renderToolsForContext(finalTools as LLMTool[], renderContext)
@@ -1913,9 +1913,9 @@ export class SessionRuntime {
     const policyFiltered = filterToolsByPolicy(filtered, this.deps.getToolPolicyContext());
     const modeFiltered = this.deps.applyWebSearchModeFilter(policyFiltered.tools);
     const agentPolicyFiltered = this.deps.applyAgentPolicyToolFilter(modeFiltered);
-    finalTools = this.deps.applyAdaptiveToolAvailabilityFilter(
-      this.deps.applyStepScopedToolPolicy(this.deps.applyIntentFilter(agentPolicyFiltered)),
-    );
+    const intentFiltered = this.deps.applyIntentFilter(agentPolicyFiltered);
+    const stepScopedTools = this.deps.applyStepScopedToolPolicy(intentFiltered);
+    finalTools = this.deps.applyAdaptiveToolAvailabilityFilter(stepScopedTools);
     const renderedTools =
       typeof (toolRegistry as Any).renderToolsForContext === "function"
         ? (toolRegistry as Any).renderToolsForContext(finalTools as LLMTool[], renderContext)
@@ -4124,6 +4124,24 @@ export class SessionRuntime {
     }
   }
 
+  private isPendingFollowUpProviderDispatch(
+    messageId: string,
+    payload: Record<string, unknown>,
+  ): boolean {
+    if (payload.deliveryMode !== "follow_up") return false;
+    const providerDispatchStatus = payload.providerDispatchStatus;
+    if (providerDispatchStatus === "pending" || providerDispatchStatus === "started") return true;
+    if (providerDispatchStatus !== undefined) return false;
+
+    // The transcript snapshot is persisted immediately before the receipt is
+    // advanced from started to accepted. A restart between those writes must
+    // continue dispatch from the saved transcript, not acknowledge it as done.
+    return (
+      (payload.deliveryStatus ?? payload.status) === "started" &&
+      this.isFollowUpMessageConsumed(messageId)
+    );
+  }
+
   /**
    * Reconcile queue-only agent receipts with the last runtime snapshot.
    *
@@ -4170,10 +4188,7 @@ export class SessionRuntime {
     const deliveredMessageIds = new Set<string>();
     for (const [messageId, payload] of latestReceipts) {
       const status = payload.deliveryStatus ?? payload.status;
-      const providerDispatchPending =
-        payload.deliveryMode === "follow_up" &&
-        (payload.providerDispatchStatus === "pending" ||
-          payload.providerDispatchStatus === "started");
+      const providerDispatchPending = this.isPendingFollowUpProviderDispatch(messageId, payload);
       if (status === "delivered" || (status === "accepted" && !providerDispatchPending)) {
         deliveredMessageIds.add(messageId);
         this.markFollowUpMessageConsumed(messageId);
@@ -4193,10 +4208,9 @@ export class SessionRuntime {
       }
       let followUp = originalFollowUp;
       const receipt = messageId ? latestReceipts.get(messageId) : undefined;
-      const providerDispatchPending =
-        receipt?.deliveryMode === "follow_up" &&
-        (receipt.providerDispatchStatus === "pending" ||
-          receipt.providerDispatchStatus === "started");
+      const providerDispatchPending = receipt
+        ? this.isPendingFollowUpProviderDispatch(messageId, receipt)
+        : false;
       if (receipt?.deliveryMode === "follow_up") {
         followUp = {
           ...followUp,
@@ -4261,10 +4275,7 @@ export class SessionRuntime {
 
       let recoveredImages: ImageAttachment[] | undefined;
       const alreadyConsumed = this.isFollowUpMessageConsumed(messageId);
-      const providerDispatchPending =
-        payload.deliveryMode === "follow_up" &&
-        (payload.providerDispatchStatus === "pending" ||
-          payload.providerDispatchStatus === "started");
+      const providerDispatchPending = this.isPendingFollowUpProviderDispatch(messageId, payload);
       const hasLegacyAttachmentMetadata =
         Array.isArray(payload.images) && payload.images.length > 0;
       const hasQueuedAttachmentRefs = Object.prototype.hasOwnProperty.call(

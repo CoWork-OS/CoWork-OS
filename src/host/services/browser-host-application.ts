@@ -1,7 +1,11 @@
+import { createBrowserProviderSignIn } from "./browser-provider-sign-in";
+import { createBrowserAwarenessDefinitions } from "./browser-awareness-methods";
+import { getAwarenessService } from "../../electron/awareness/AwarenessService";
 import type Database from "better-sqlite3";
 import {
   ApprovalRepository,
   ArtifactRepository,
+  BrowserGitMutationReceiptRepository,
   BrowserTaskCancelReceiptRepository,
   InputRequestRepository,
   TaskEventReplayRepository,
@@ -18,7 +22,11 @@ import {
   type WebSessionBootstrap,
 } from "../../shared/host-api/contracts";
 import { isTempWorkspaceId } from "../../shared/types";
-import { WebApplication, type WebDeploymentPolicy } from "../web/WebApplication";
+import {
+  WebApplication,
+  WebApplicationError,
+  type WebDeploymentPolicy,
+} from "../web/WebApplication";
 import { createBrowserReadMethods, createDatabaseBrowserReadSources } from "./browser-read-methods";
 import { createBrowserDesktopReadMethods } from "./browser-desktop-read-methods";
 import { BrowserWorkspaceFiles, createBrowserWorkspaceFileMethods } from "./browser-files";
@@ -50,15 +58,21 @@ import type { ChannelGateway } from "../../electron/gateway";
 import type { RoutineService } from "../../electron/routines/service";
 import type { EventTriggerService } from "../../electron/triggers/EventTriggerService";
 import type { HeartbeatService } from "../../electron/agents/HeartbeatService";
+import type { NotificationService } from "../../electron/notifications/service";
 import { BrowserDesktopRpcService } from "./browser-desktop-rpc";
 import { createBrowserCoreDefinitions } from "./browser-core-methods";
 import { createBrowserSettingsDefinitions } from "./browser-settings-methods";
+import { createBrowserMCPDefinitions } from "./browser-mcp-methods";
+import { createBrowserIntegrationDefinitions } from "./browser-integration-methods";
 import { createBrowserMailboxDefinitions } from "./browser-mailbox-methods";
 import { createBrowserNavigationDefinitions } from "./browser-navigation-methods";
 import { createBrowserPlanningDefinitions } from "./browser-planning-methods";
 import { createBrowserQueueDefinitions } from "./browser-queue-methods";
 import { createBrowserDeviceDefinitions } from "./browser-device-methods";
 import { getFirstRunReadiness } from "../../shared/first-run-readiness";
+import { createBrowserNotificationDefinitions } from "./browser-notification-methods";
+import { createBrowserReportDefinitions } from "./browser-report-methods";
+import { createBrowserMemoryDefinitions } from "./browser-memory-methods";
 
 export interface BrowserHostApplicationOptions {
   db: Database.Database;
@@ -70,6 +84,7 @@ export interface BrowserHostApplicationOptions {
   getRoutineService?: () => RoutineService | null;
   getEventTriggerService?: () => EventTriggerService | null;
   getHeartbeatService?: () => HeartbeatService | null;
+  notificationService?: NotificationService;
   taskCommands?: Pick<BrowserTaskCommands, "createTaskIdempotent" | "startAdmittedTask"> &
     BrowserApprovalCommands &
     Pick<AgentDaemon, "sendMessage" | "getDurableTaskFollowUpReceipt" | "cancelTask">;
@@ -85,6 +100,7 @@ const READ_CAPABILITIES = new Set([
   "files.read",
   "artifacts.read",
   "git.read",
+  "git.write",
   "terminal.attach",
 ]);
 
@@ -121,6 +137,7 @@ export function createBrowserHostApplication(
   const cancellationReceipts = options.taskCommands
     ? new BrowserTaskCancelReceiptRepository(options.db)
     : null;
+  const gitMutationReceipts = new BrowserGitMutationReceiptRepository(options.db);
   const approvalRepository = options.taskCommands ? new ApprovalRepository(options.db) : null;
   const inputRequestRepository = options.taskCommands
     ? new InputRequestRepository(options.db)
@@ -136,7 +153,14 @@ export function createBrowserHostApplication(
     });
     return applyAccessProfileToWorkspace(workspace, profile);
   };
-  const mailbox = createBrowserMailboxDefinitions(options.db);
+  const mailbox = createBrowserMailboxDefinitions(options.db, options.channelGateway);
+  const notifications = options.notificationService
+    ? createBrowserNotificationDefinitions({
+        service: options.notificationService,
+        resolveWorkspace: resolveBrowserWorkspace,
+        getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+      })
+    : {};
   const devices = createBrowserDeviceDefinitions({
     db: options.db,
     identity: options.identity,
@@ -154,20 +178,51 @@ export function createBrowserHostApplication(
         resolveWorkspace: resolveBrowserWorkspace,
       })
     : null;
+  const providerSignIn = createBrowserProviderSignIn();
   const desktop = new BrowserDesktopRpcService({
+    ...providerSignIn.definitions,
     ...createBrowserCoreDefinitions({
       db: options.db,
       agentDaemon: options.agentDaemon ?? {},
       resolveWorkspace: resolveBrowserWorkspace,
     }),
-    ...createBrowserSettingsDefinitions(),
+    ...createBrowserAwarenessDefinitions({
+      service: getAwarenessService(),
+      resolveWorkspace: resolveBrowserWorkspace,
+    }),
+    ...createBrowserMemoryDefinitions({
+      resolveWorkspace: resolveBrowserWorkspace,
+      getRecentTask: async (workspaceId) =>
+        (await taskRepository.findByWorkspace(workspaceId, 1))[0] ?? null,
+    }),
+    ...createBrowserReportDefinitions({
+      db: options.db,
+      resolveWorkspace: resolveBrowserWorkspace,
+    }),
     ...createBrowserQueueDefinitions(options.agentDaemon),
+    ...notifications,
     ...mailbox.definitions,
     ...devices.definitions,
     ...navigation?.definitions,
     ...createBrowserPlanningDefinitions({
       db: options.db,
       agentDaemon: options.agentDaemon,
+      resolveWorkspace: resolveBrowserWorkspace,
+    }),
+    ...createBrowserSettingsDefinitions({
+      refreshAccessProfiles: () => options.agentDaemon?.refreshActiveExecutorsForAccessProfiles(),
+    }),
+    ...createBrowserIntegrationDefinitions({
+      channelGateway: options.channelGateway,
+      authorizeWorkspaceRead: async (workspaceId) => {
+        const workspace = await resolveBrowserWorkspace(workspaceId);
+        if (!workspace?.permissions.read) {
+          throw new WebApplicationError("FORBIDDEN", "Workspace is unavailable.", 403, false);
+        }
+      },
+    }),
+    ...createBrowserMCPDefinitions({
+      profileId: options.identity.profileId,
       resolveWorkspace: resolveBrowserWorkspace,
     }),
   });
@@ -335,6 +390,7 @@ export function createBrowserHostApplication(
       ...createBrowserGitMethods({
         resolveWorkspace: resolveBrowserWorkspace,
         getCapabilities,
+        receipts: gitMutationReceipts,
       }),
       ...taskEventMethods,
       ...taskMethods,
@@ -348,17 +404,23 @@ export function createBrowserHostApplication(
       workspaceFiles.handleDownloadRequest(context, req, res),
     handleWorkspaceFileUpload: (context, req, res) =>
       workspaceFiles.handleUploadRequest(context, req, res),
+    handleWorkspaceFileMedia: (context, req, res) =>
+      workspaceFiles.handleMediaRequest(context, req, res),
     handleArtifactDownload: (context, req, res) =>
       browserArtifacts.handleDownloadRequest(context, req, res),
     onSessionRevoked: (sessionId) => {
+      workspaceFiles.revokeSession(sessionId);
       browserArtifacts.revokeSession(sessionId);
       terminal.revokeSession(sessionId);
       desktop.revokeSession(sessionId);
+      providerSignIn.revokeSession(sessionId);
     },
     onClose: () => {
+      workspaceFiles.dispose();
       browserArtifacts.dispose();
       terminal.dispose();
       desktop.dispose();
+      providerSignIn.dispose();
       mailbox.dispose();
       navigation?.dispose?.();
       devices.dispose();

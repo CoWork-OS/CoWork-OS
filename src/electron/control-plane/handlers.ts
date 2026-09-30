@@ -602,9 +602,9 @@ async function resolveLocalWorkspaceIdForRemoteTask(
   const normalizedRemote = normalizePathForMatch(remotePath);
   if (!normalizedRemote) return fallbackWorkspaceId;
 
-  const localWorkspaces = (await workspaceRepo
-    .findAll())
-    .filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
+  const localWorkspaces = (await workspaceRepo.findAll()).filter(
+    (w) => !w.isTemp && !isTempWorkspaceId(w.id),
+  );
   const match = localWorkspaces.find((w) => pathsMatch(w.path, remotePath));
   return match?.id ?? fallbackWorkspaceId;
 }
@@ -660,12 +660,12 @@ async function getLocalConfigSnapshot(): Promise<Any> {
   const taskRepo = new TaskRepository(db);
   const channelRepo = new ChannelRepository(db);
 
-  const allWorkspaces = (await workspaceRepo
-    .findAll())
-    .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
-  const allLocalTasks = (await taskRepo
-    .findAll(250, 0))
-    .filter((task) => !task.targetNodeId || isLocalManagedDeviceIdentifier(task.targetNodeId));
+  const allWorkspaces = (await workspaceRepo.findAll()).filter(
+    (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+  );
+  const allLocalTasks = (await taskRepo.findAll(250, 0)).filter(
+    (task) => !task.targetNodeId || isLocalManagedDeviceIdentifier(task.targetNodeId),
+  );
   const byStatus = allLocalTasks.reduce(
     (acc: Record<string, number>, task) => {
       const key = task.status || "unknown";
@@ -710,9 +710,9 @@ async function getLocalStorageSummary(db: Any): Promise<{
 }> {
   const workspaceRepo = new WorkspaceRepository(db);
   const artifactRepo = new ArtifactRepository(db);
-  const workspaces = (await workspaceRepo
-    .findAll())
-    .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+  const workspaces = (await workspaceRepo.findAll()).filter(
+    (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+  );
   const workspaceRoots = workspaces.map((workspace) => ({
     id: workspace.id,
     name: workspace.name,
@@ -1422,9 +1422,9 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.CONFIG_GET:
       return getLocalConfigSnapshot();
     case Methods.WORKSPACE_LIST: {
-      const workspaces = (await workspaceRepo
-        .findAll())
-        .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+      const workspaces = (await workspaceRepo.findAll()).filter(
+        (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+      );
       return { workspaces };
     }
     case Methods.TASK_LIST: {
@@ -3172,13 +3172,13 @@ export function registerTaskAndWorkspaceMethods(
     requireScope(client, "read");
     const p = sanitizeManagedSessionListParams(params);
     return {
-      environments: (await managedSessions
-        .listEnvironments({
+      environments: (
+        await managedSessions.listEnvironments({
           limit: p.limit,
           offset: p.offset,
           status: p.status,
-        }))
-        .map(redactManagedEnvironmentForRead),
+        })
+      ).map(redactManagedEnvironmentForRead),
     };
   });
 
@@ -3823,9 +3823,9 @@ export function registerTaskAndWorkspaceMethods(
     requireScope(client, "read");
     const isAdmin = isAdminClient(client);
 
-    const allWorkspaces = (await workspaceRepo
-      .findAll())
-      .filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
+    const allWorkspaces = (await workspaceRepo.findAll()).filter(
+      (w) => !w.isTemp && !isTempWorkspaceId(w.id),
+    );
     const workspacesForClient = isAdmin ? allWorkspaces : allWorkspaces.map(redactWorkspaceForRead);
 
     const taskStatusRows = (await controlPlaneStatements(db).all(

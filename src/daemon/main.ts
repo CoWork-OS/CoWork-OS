@@ -48,6 +48,7 @@ import {
   formatChatTranscriptForPrompt,
   prefetchTranscriptUsers,
 } from "../electron/gateway/chat-transcript";
+import { CuratedMemoryService } from "../electron/memory/CuratedMemoryService";
 import { MemoryService } from "../electron/memory/MemoryService";
 import { CrossSignalService } from "../electron/agents/CrossSignalService";
 import { FeedbackService } from "../electron/agents/FeedbackService";
@@ -66,6 +67,7 @@ import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
 import { createWebHostIdentity } from "../host/web/host-identity";
 import { createBrowserHostApplication } from "../host/services/browser-host-application";
 import { isBrowserWebEnabled, webDeploymentFromEnv } from "../host/services/browser-web-config";
+import { NotificationService } from "../electron/notifications/service";
 
 interface StartedControlPlane {
   server: ControlPlaneServer;
@@ -340,6 +342,7 @@ async function main(): Promise<void> {
   // immediately resume queued tasks, and their early timeline events capture to memory.
   try {
     MemoryService.initialize(dbManager);
+    CuratedMemoryService.initialize(dbManager);
     console.log("[Daemon] Memory Service initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Memory Service:", error);
@@ -694,6 +697,7 @@ async function main(): Promise<void> {
       );
     } else {
       try {
+        const notificationService = new NotificationService();
         const identity = await createWebHostIdentity({
           userDataDir,
           profileId: getActiveProfileId(),
@@ -708,6 +712,7 @@ async function main(): Promise<void> {
           taskCommands: agentDaemon,
           agentDaemon,
           channelGateway,
+          notificationService,
         });
         await startedControlPlane.server.setWebApplication(browserApp);
         startedControlPlane.server.registerMethod("web.pair", async (client) => {

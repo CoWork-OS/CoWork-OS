@@ -1,4 +1,13 @@
 import {
+  createKitProject,
+  getLocalDateStamp,
+  withKitFrontmatter,
+  templatesForInit,
+  writeTemplate,
+  ensureDir,
+  ensureDefaultKitCronJobs,
+} from "../context/kit-operations";
+import {
   AgentRoleRepository,
   AgentTeamItemRepository,
   AgentTeamMemberRepository,
@@ -31,7 +40,11 @@ import {
   type IpcMainInvokeEvent,
 } from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
-import { RELEASE_BRIEF_PROMPT, checkReleaseBriefRuntime, seedReleaseBriefWorkspace } from "../first-task/service";
+import {
+  RELEASE_BRIEF_PROMPT,
+  checkReleaseBriefRuntime,
+  seedReleaseBriefWorkspace,
+} from "../first-task/service";
 import { probeFirstTaskModel } from "../first-task/model-preflight";
 import { applyRevisionContract } from "../first-task/revision-contract";
 import { ensureFirstTaskTables } from "../first-task/attempt-schema";
@@ -319,7 +332,6 @@ import { buildSavedLLMSettings } from "./llm-settings-save";
 import { buildTaskExportJson } from "../reports/task-export";
 import { listIntegrationMentionOptions } from "../integrations/integration-mention-options";
 import { ProfileManager } from "../profiles/ProfileManager";
-import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import {
@@ -497,7 +509,6 @@ import { CuratedMemoryService } from "../memory/CuratedMemoryService";
 import { SupermemoryService } from "../memory/SupermemoryService";
 import { MemoryWriteGate } from "../memory/MemoryWriteGate";
 import { UserProfileService } from "../memory/UserProfileService";
-import { WORKSPACE_KIT_CONTRACTS } from "../context/kit-contracts";
 import {
   computeWorkspaceKitStatus,
   readWorkspaceKitState,
@@ -515,8 +526,6 @@ import { VoiceSettingsManager } from "../voice/voice-settings-manager";
 import { getVoiceService } from "../voice/VoiceService";
 import { AgentPerformanceReviewService } from "../reports/AgentPerformanceReviewService";
 import { EvalService } from "../eval/eval-repository-facades";
-import { getCronService } from "../cron";
-import type { CronJobCreate } from "../cron/types";
 import { getXMentionBridgeService, getXMentionTriggerStatus } from "../x-mentions";
 import { getCouncilService } from "../council";
 import {
@@ -1741,9 +1750,9 @@ export async function setupIpcHandlers(
       return cached.root;
     }
 
-    const match = (await workspaceRepo
-      .findAll())
-      .find((workspace) => path.resolve(workspace.path) === requested);
+    const match = (await workspaceRepo.findAll()).find(
+      (workspace) => path.resolve(workspace.path) === requested,
+    );
     if (!match) {
       registeredWorkspaceRootCache.delete(requested);
       return null;
@@ -2192,9 +2201,9 @@ export async function setupIpcHandlers(
     let workspace: Workspace;
 
     if (!createNew) {
-      const existingTemp = (await workspaceRepo
-        .findAll())
-        .find((workspace) => isTempWorkspaceInScope(workspace.id, "ui"));
+      const existingTemp = (await workspaceRepo.findAll()).find((workspace) =>
+        isTempWorkspaceInScope(workspace.id, "ui"),
+      );
       if (existingTemp) {
         workspace = await ensureTempWorkspace(existingTemp.id, existingTemp.path, existingTemp);
       } else {
@@ -3034,11 +3043,9 @@ export async function setupIpcHandlers(
           : "";
       const workspace = requestedWorkspaceId
         ? await workspaceRepo.findById(requestedWorkspaceId)
-        : (await workspaceRepo
-            .findAll())
-            .find(
-              (item) => path.resolve(normalizePotentialPath(item.path)) === requestedWorkspacePath,
-            );
+        : (await workspaceRepo.findAll()).find(
+            (item) => path.resolve(normalizePotentialPath(item.path)) === requestedWorkspacePath,
+          );
       if (!workspace) {
         throw new Error("A registered workspace is required for spreadsheet edits");
       }
@@ -4668,10 +4675,18 @@ export async function setupIpcHandlers(
   const firstTaskRepo = new FirstTaskRepository(db);
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_GET, async () => {
     const row = await firstTaskRepo.getSetup();
-    return row ? { schemaVersion: row.schema_version, choice: row.choice, updatedAt: row.updated_at, modelReadyAt: row.model_ready_at } : null;
+    return row
+      ? {
+          schemaVersion: row.schema_version,
+          choice: row.choice,
+          updatedAt: row.updated_at,
+          modelReadyAt: row.model_ready_at,
+        }
+      : null;
   });
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_SET, async (_event, choice: string) => {
-    if (!["ready", "skipped", "browsing_without_ai", "connecting"].includes(choice)) throw new Error("Invalid first-task setup choice");
+    if (!["ready", "skipped", "browsing_without_ai", "connecting"].includes(choice))
+      throw new Error("Invalid first-task setup choice");
     await firstTaskRepo.setSetupChoice(choice as "ready", Date.now());
   });
   void firstTaskRepo
@@ -4693,7 +4708,8 @@ export async function setupIpcHandlers(
   const requireRealWorkTask = async (taskId: string) => {
     if (!/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
     const task = await taskRepo.findById(taskId);
-    if (!task || task.source === "sample" || task.parentTaskId || task.evalCaseId) throw new Error("Real-work task not found");
+    if (!task || task.source === "sample" || task.parentTaskId || task.evalCaseId)
+      throw new Error("Real-work task not found");
     return task;
   };
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_GET, async (_event, taskId: string) => {
@@ -4702,7 +4718,8 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_INSPECT, async (_event, taskId: string) => {
     const task = await requireRealWorkTask(taskId);
-    if (task.status !== "completed") throw new Error("Finish the task before inspecting its result");
+    if (task.status !== "completed")
+      throw new Error("Finish the task before inspecting its result");
     return firstTaskRepo.recordRealWorkInspection(taskId, Date.now());
   });
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_USEFUL, async (_event, taskId: string) => {
@@ -4724,26 +4741,42 @@ export async function setupIpcHandlers(
     const task = await taskRepo.findById(record.task_id);
     const workspace = await workspaceRepo.findById(record.workspace_id);
     if (!task || !workspace) return null;
-    return { attemptId: record.attempt_id, missionId: record.mission_id, task, workspace,
+    return {
+      attemptId: record.attempt_id,
+      missionId: record.mission_id,
+      task,
+      workspace,
       check: record.check_json ? JSON.parse(record.check_json) : null,
-      checkedAt: record.checked_at ?? null, inspectedAt: record.inspected_at ?? null,
+      checkedAt: record.checked_at ?? null,
+      inspectedAt: record.inspected_at ?? null,
       revisionRequestedAt: record.revision_requested_at ?? null,
-      revisionBaseHashes: record.revision_base_hashes_json ? JSON.parse(record.revision_base_hashes_json) as Record<string, string> : null,
-      revisionInspectedAt: record.revision_inspected_at ?? null };
+      revisionBaseHashes: record.revision_base_hashes_json
+        ? (JSON.parse(record.revision_base_hashes_json) as Record<string, string>)
+        : null,
+      revisionInspectedAt: record.revision_inspected_at ?? null,
+    };
   };
 
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_GET, async (_event, attemptId?: string, taskId?: string) => {
-    if (attemptId && !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
-    if (taskId && !/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
-    const attempt = await readFirstTaskAttempt(attemptId, taskId);
-    if (!attempt?.check?.passed) return attempt;
-    const current = attempt.task.status === "completed"
-      ? await verifyReleaseBrief(attempt.workspace.path).catch(() => null)
-      : null;
-    if (current?.passed && JSON.stringify(current.artifactHashes) === JSON.stringify(attempt.check.artifactHashes)) return attempt;
-    await firstTaskRepo.clearCheck(attempt.attemptId);
-    return readFirstTaskAttempt(attempt.attemptId);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.FIRST_TASK_GET,
+    async (_event, attemptId?: string, taskId?: string) => {
+      if (attemptId && !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+      if (taskId && !/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
+      const attempt = await readFirstTaskAttempt(attemptId, taskId);
+      if (!attempt?.check?.passed) return attempt;
+      const current =
+        attempt.task.status === "completed"
+          ? await verifyReleaseBrief(attempt.workspace.path).catch(() => null)
+          : null;
+      if (
+        current?.passed &&
+        JSON.stringify(current.artifactHashes) === JSON.stringify(attempt.check.artifactHashes)
+      )
+        return attempt;
+      await firstTaskRepo.clearCheck(attempt.attemptId);
+      return readFirstTaskAttempt(attempt.attemptId);
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_PREFLIGHT, async () => {
     checkRateLimit(IPC_CHANNELS.FIRST_TASK_PREFLIGHT);
@@ -4758,10 +4791,16 @@ export async function setupIpcHandlers(
         detail: error instanceof Error ? error.message : "The sample workspace is unavailable",
       }));
     if (workspace.status === "fail") {
-      return { endpoint: "unknown" as const, model: "unknown" as const,
-        toolCalls: "unknown" as const, workspace: workspace.status,
-        workspaceDetail: workspace.detail, token: null,
-        providerType: selection.providerType, modelId: selection.modelId };
+      return {
+        endpoint: "unknown" as const,
+        model: "unknown" as const,
+        toolCalls: "unknown" as const,
+        workspace: workspace.status,
+        workspaceDetail: workspace.detail,
+        token: null,
+        providerType: selection.providerType,
+        modelId: selection.modelId,
+      };
     }
     const result = await (async () => {
       try {
@@ -4771,7 +4810,12 @@ export async function setupIpcHandlers(
         });
         return await probeFirstTaskModel(provider, selection.modelId);
       } catch {
-        return { endpoint: "fail" as const, model: "unknown" as const, toolCalls: "unknown" as const, reason: "endpoint" as const };
+        return {
+          endpoint: "fail" as const,
+          model: "unknown" as const,
+          toolCalls: "unknown" as const,
+          reason: "endpoint" as const,
+        };
       }
     })();
     const token = result.toolCalls === "pass" ? randomUUID() : null;
@@ -4779,66 +4823,88 @@ export async function setupIpcHandlers(
       firstTaskPreflights.set(token, { routeKey, createdAt: Date.now() });
       await firstTaskRepo.markModelReady(Date.now());
     }
-    return { ...result, workspace: workspace.status, token,
-      providerType: selection.providerType, modelId: selection.modelId };
+    return {
+      ...result,
+      workspace: workspace.status,
+      token,
+      providerType: selection.providerType,
+      modelId: selection.modelId,
+    };
   });
 
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_START, async (_event, attemptId: string, preflightToken?: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)) {
-      throw new Error("Invalid attempt ID");
-    }
-    const existing = await readFirstTaskAttempt(attemptId);
-    if (existing) return existing;
-    const inFlight = firstTaskStarts.get(attemptId);
-    if (inFlight) return inFlight;
-    const preflight = preflightToken ? firstTaskPreflights.get(preflightToken) : undefined;
-    const { selection, routeKey } = selectedFirstTaskRoute();
-    if (!preflight || preflight.routeKey !== routeKey || Date.now() - preflight.createdAt > 10 * 60_000) {
-      throw new Error("Check the selected model route before starting the sample task.");
-    }
-    firstTaskPreflights.delete(preflightToken!);
-    const launch = (async () => {
-      await checkReleaseBriefRuntime(tempWorkspaceRoot);
-      const workspace = await getOrCreateTempWorkspace({ createNew: true });
-      await seedReleaseBriefWorkspace(workspace.path);
-      // The sample task and its attempt row are created in one unit.
-      const task = await firstTaskRepo.createSampleAttempt({
-        attemptId,
-        missionId: "release-brief-v1",
-        workspaceId: workspace.id,
-        now: Date.now(),
-        task: {
-          title: "Turn a messy release folder into a launch brief",
-          prompt: RELEASE_BRIEF_PROMPT,
-          status: "pending",
-          workspaceId: workspace.id,
-          source: "sample",
-          agentConfig: {
-            accessProfileId: RELEASE_BRIEF_ACCESS_PROFILE_ID,
-            providerType: selection.providerType,
-            modelKey: selection.modelKey,
-            allowedTools: ["list_directory", "read_file", "write_file", "edit_file"],
-            executionMode: "execute",
-          },
-        } as never,
-      });
-      try {
-        await agentDaemon.startTask(task);
-      } catch (error) {
-        agentDaemon.failTask(task.id, error instanceof Error ? error.message : String(error));
+  ipcMain.handle(
+    IPC_CHANNELS.FIRST_TASK_START,
+    async (_event, attemptId: string, preflightToken?: string) => {
+      if (
+        typeof attemptId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)
+      ) {
+        throw new Error("Invalid attempt ID");
       }
-      return readFirstTaskAttempt(attemptId);
-    })();
-    firstTaskStarts.set(attemptId, launch);
-    try { return await launch; } finally { firstTaskStarts.delete(attemptId); }
-  });
+      const existing = await readFirstTaskAttempt(attemptId);
+      if (existing) return existing;
+      const inFlight = firstTaskStarts.get(attemptId);
+      if (inFlight) return inFlight;
+      const preflight = preflightToken ? firstTaskPreflights.get(preflightToken) : undefined;
+      const { selection, routeKey } = selectedFirstTaskRoute();
+      if (
+        !preflight ||
+        preflight.routeKey !== routeKey ||
+        Date.now() - preflight.createdAt > 10 * 60_000
+      ) {
+        throw new Error("Check the selected model route before starting the sample task.");
+      }
+      firstTaskPreflights.delete(preflightToken!);
+      const launch = (async () => {
+        await checkReleaseBriefRuntime(tempWorkspaceRoot);
+        const workspace = await getOrCreateTempWorkspace({ createNew: true });
+        await seedReleaseBriefWorkspace(workspace.path);
+        // The sample task and its attempt row are created in one unit.
+        const task = await firstTaskRepo.createSampleAttempt({
+          attemptId,
+          missionId: "release-brief-v1",
+          workspaceId: workspace.id,
+          now: Date.now(),
+          task: {
+            title: "Turn a messy release folder into a launch brief",
+            prompt: RELEASE_BRIEF_PROMPT,
+            status: "pending",
+            workspaceId: workspace.id,
+            source: "sample",
+            agentConfig: {
+              accessProfileId: RELEASE_BRIEF_ACCESS_PROFILE_ID,
+              providerType: selection.providerType,
+              modelKey: selection.modelKey,
+              allowedTools: ["list_directory", "read_file", "write_file", "edit_file"],
+              executionMode: "execute",
+            },
+          } as never,
+        });
+        try {
+          await agentDaemon.startTask(task);
+        } catch (error) {
+          agentDaemon.failTask(task.id, error instanceof Error ? error.message : String(error));
+        }
+        return readFirstTaskAttempt(attemptId);
+      })();
+      firstTaskStarts.set(attemptId, launch);
+      try {
+        return await launch;
+      } finally {
+        firstTaskStarts.delete(attemptId);
+      }
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_VERIFY, async (_event, attemptId: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId))
+      throw new Error("Invalid attempt ID");
     const attempt = await readFirstTaskAttempt(attemptId);
     if (!attempt) throw new Error("Sample attempt not found");
-    if (attempt.task.status === "cancelled") throw new Error("Cancelled attempts cannot pass checks");
-    if (attempt.task.status !== "completed") throw new Error("Wait for the task to finish before checking outputs");
+    if (attempt.task.status === "cancelled")
+      throw new Error("Cancelled attempts cannot pass checks");
+    if (attempt.task.status !== "completed")
+      throw new Error("Wait for the task to finish before checking outputs");
     const verified = await verifyReleaseBrief(attempt.workspace.path);
     const check = attempt.revisionRequestedAt
       ? applyRevisionContract(verified, attempt.revisionBaseHashes)
@@ -4848,17 +4914,24 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_INSPECT, async (_event, attemptId: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId))
+      throw new Error("Invalid attempt ID");
     const attempt = await readFirstTaskAttempt(attemptId);
     if (!attempt || !attempt.check?.passed) throw new Error("No checked sample output to inspect");
     if (attempt.task.status !== "completed") throw new Error("Sample task is not complete");
     const current = await verifyReleaseBrief(attempt.workspace.path);
-    if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)) {
+    if (
+      !current.passed ||
+      JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)
+    ) {
       await firstTaskRepo.clearCheck(attemptId);
       throw new Error("Sample output changed since the last check. Run checks again.");
     }
     if (attempt.revisionRequestedAt) {
-      if (current.artifactHashes["release-brief.html"] === attempt.revisionBaseHashes?.["release-brief.html"]) {
+      if (
+        current.artifactHashes["release-brief.html"] ===
+        attempt.revisionBaseHashes?.["release-brief.html"]
+      ) {
         throw new Error("The release brief has not changed since the revision request.");
       }
       await firstTaskRepo.markInspected(attemptId, true, Date.now());
@@ -4869,13 +4942,22 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REQUEST_REVISION, async (_event, attemptId: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId))
+      throw new Error("Invalid attempt ID");
     const attempt = await readFirstTaskAttempt(attemptId);
-    if (!attempt || attempt.task.status !== "completed" || !attempt.check?.passed || !attempt.inspectedAt) {
+    if (
+      !attempt ||
+      attempt.task.status !== "completed" ||
+      !attempt.check?.passed ||
+      !attempt.inspectedAt
+    ) {
       throw new Error("Open a checked sample result before requesting a revision.");
     }
     const current = await verifyReleaseBrief(attempt.workspace.path);
-    if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)) {
+    if (
+      !current.passed ||
+      JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)
+    ) {
       throw new Error("Sample output changed. Run checks again before revising.");
     }
     await firstTaskRepo.requestRevision(
@@ -4887,11 +4969,16 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.FIRST_TASK_CANCEL_REVISION, async (_event, attemptId: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
+    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId))
+      throw new Error("Invalid attempt ID");
     const attempt = await readFirstTaskAttempt(attemptId);
     if (!attempt?.revisionRequestedAt || attempt.task.status !== "completed") return false;
     const current = await verifyReleaseBrief(attempt.workspace.path);
-    if (!current.passed || JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.revisionBaseHashes)) return false;
+    if (
+      !current.passed ||
+      JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.revisionBaseHashes)
+    )
+      return false;
     await firstTaskRepo.cancelRevision(attemptId, JSON.stringify(current), Date.now());
     return true;
   });
@@ -6437,9 +6524,9 @@ export async function setupIpcHandlers(
     const prepared = await managedSessionService.buildManagedAgentRoutineDefinition(request);
     const routine = await routineService.create(toManagedRoutinePayload(prepared, request.agentId));
     await managedSessionService.syncManagedAgentRoutineRefs(request.agentId);
-    const created = (await managedSessionService
-      .listManagedAgentRoutines(request.agentId))
-      .find((entry) => entry.id === routine.id);
+    const created = (await managedSessionService.listManagedAgentRoutines(request.agentId)).find(
+      (entry) => entry.id === routine.id,
+    );
     if (!created) throw new Error("Failed to create managed agent routine");
     const workspaceId = (await managedSessionService.getEnvironment(prepared.environmentId))?.config
       .workspaceId;
@@ -6466,9 +6553,9 @@ export async function setupIpcHandlers(
       toManagedRoutinePayload(prepared, request.agentId),
     );
     await managedSessionService.syncManagedAgentRoutineRefs(request.agentId);
-    const updated = (await managedSessionService
-      .listManagedAgentRoutines(request.agentId))
-      .find((entry) => entry.id === request.routineId);
+    const updated = (await managedSessionService.listManagedAgentRoutines(request.agentId)).find(
+      (entry) => entry.id === request.routineId,
+    );
     if (!updated) throw new Error("Failed to update managed agent routine");
     return updated;
   });
@@ -10647,11 +10734,13 @@ export async function setupIpcHandlers(
           if (!allMode) {
             return ProactiveSuggestionsService.getTopForBriefing(currentWorkspaceId, limit);
           }
-          return (await ProactiveSuggestionsService.getTopForBriefingForWorkspaces(
-            currentWorkspaceId,
-            briefingWorkspaceIds,
-            limit,
-          ))
+          return (
+            await ProactiveSuggestionsService.getTopForBriefingForWorkspaces(
+              currentWorkspaceId,
+              briefingWorkspaceIds,
+              limit,
+            )
+          )
             .map((suggestion) => ({
               ...suggestion,
               workspaceId: suggestion.workspaceId || currentWorkspaceId,
@@ -13045,47 +13134,6 @@ function broadcastPersonalitySettingsChanged(settings: Any): void {
 function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: AgentDaemon): void {
   const kitDirName = ".cowork";
 
-  const getLocalDateStamp = (now: Date): string => {
-    const yyyy = String(now.getFullYear());
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
-  const buildKitFrontmatter = (fileName: string, updated: string): string => {
-    const contract = WORKSPACE_KIT_CONTRACTS[fileName];
-    if (!contract) return "";
-
-    return [
-      "---",
-      `file: ${fileName}`,
-      `updated: ${updated}`,
-      `scope: ${contract.scope.join(", ")}`,
-      `mutability: ${contract.mutability}`,
-      "---",
-      "",
-    ].join("\n");
-  };
-
-  const withKitFrontmatter = (relPath: string, content: string, updated: string): string => {
-    if (!relPath.toLowerCase().endsWith(".md")) {
-      return content.endsWith("\n") ? content : `${content}\n`;
-    }
-
-    const fileName = path.basename(relPath);
-    const contract = WORKSPACE_KIT_CONTRACTS[fileName];
-    if (contract?.parser === "design-system") {
-      return content.endsWith("\n") ? content : `${content}\n`;
-    }
-    const frontmatter = buildKitFrontmatter(fileName, updated);
-    const normalized = content.trimEnd() + "\n";
-    if (!frontmatter) {
-      return normalized;
-    }
-
-    return `${frontmatter}${normalized}`;
-  };
-
   const getWorkspacePath = async (workspaceId: string): Promise<string> => {
     const ws = await workspaceRepo.findById(workspaceId);
     if (!ws) throw new Error("Workspace not found");
@@ -13099,701 +13147,6 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
     // before the pure status read so the returned onboarding timestamps are always accurate.
     await ensureBootstrapLifecycleState(workspacePath);
     return computeWorkspaceKitStatus(workspacePath, workspaceId);
-  };
-
-  const templatesForInit = (
-    now: Date,
-    preset: "default" | "venture_operator" = "default",
-  ): Array<{ relPath: string; content: string }> => {
-    const stamp = getLocalDateStamp(now);
-    const isVenturePreset = preset === "venture_operator";
-    const templates = [
-      {
-        relPath: path.join(kitDirName, "AGENTS.md"),
-        content:
-          `# Workspace Rules\n\n` +
-          `## Coordination\n` +
-          `- Keep durable context in .cowork/MEMORY.md\n` +
-          `- For project work, log in .cowork/projects/<project>/CONTEXT.md\n` +
-          `- Prefer small, well-scoped changes and leave clear notes\n\n` +
-          `## Quality Bar\n` +
-          `- Be explicit about assumptions and constraints\n` +
-          `- Avoid duplicate work: check existing files and recent tasks first\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "USER.md"),
-        content:
-          `# User Profile\n\n` +
-          `- Name:\n` +
-          `- Preferences:\n` +
-          `- Timezone:\n` +
-          `- Communication style:\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "COMPANY.md"),
-        content: isVenturePreset
-          ? `# Company Operating Profile\n\n` +
-            `## Mission\n` +
-            `- What are we trying to achieve?\n\n` +
-            `## Business Model\n` +
-            `- ICP:\n` +
-            `- Offer:\n` +
-            `- Pricing:\n` +
-            `- Growth loop:\n\n` +
-            `## Guardrails\n` +
-            `- Never do without founder approval:\n` +
-            `- Allowed to do autonomously:\n` +
-            `- Budget / risk thresholds:\n\n` +
-            `## Current Quarter\n` +
-            `- Primary company goal:\n` +
-            `- Main constraints:\n`
-          : `# Company Operating Profile\n\n` +
-            `## Mission\n` +
-            `- \n\n` +
-            `## Operating Guardrails\n` +
-            `- \n\n` +
-            `## Current Focus\n` +
-            `- \n`,
-      },
-      {
-        relPath: path.join(kitDirName, "OPERATIONS.md"),
-        content: isVenturePreset
-          ? `# Operating System\n\n` +
-            `## Work Loops\n` +
-            `- Product discovery:\n` +
-            `- Build / ship:\n` +
-            `- Customer support:\n` +
-            `- Growth / distribution:\n` +
-            `- Finance / admin:\n\n` +
-            `## Escalation Rules\n` +
-            `- When to wake the founder:\n` +
-            `- When to create a blocker issue:\n` +
-            `- When to pause outbound actions:\n\n` +
-            `## Definitions Of Done\n` +
-            `- Shipping:\n` +
-            `- Customer reply:\n` +
-            `- Experiment review:\n`
-          : `# Operating System\n\n` +
-            `## Recurring Loops\n` +
-            `- \n\n` +
-            `## Escalations\n` +
-            `- \n`,
-      },
-      {
-        relPath: path.join(kitDirName, "KPIS.md"),
-        content: isVenturePreset
-          ? `# KPIs\n\n` +
-            `## North Star\n` +
-            `- Metric:\n` +
-            `- Current:\n` +
-            `- Target:\n\n` +
-            `## Weekly Dashboard\n` +
-            `- Revenue:\n` +
-            `- New customers:\n` +
-            `- Churn / refunds:\n` +
-            `- Activation / conversion:\n` +
-            `- Support backlog:\n` +
-            `- Ship velocity:\n\n` +
-            `## Notes\n` +
-            `- \n`
-          : `# KPIs\n\n` + `## Core Metrics\n` + `- \n\n` + `## Notes\n` + `- \n`,
-      },
-      {
-        relPath: path.join(kitDirName, "DESIGN.md"),
-        content: buildDefaultDesignSystemMarkdown(),
-      },
-      {
-        relPath: path.join(kitDirName, "SOUL.md"),
-        content:
-          `# SOUL.md\n\n` +
-          `## Role\n` +
-          `You are the workspace operator and thought partner. You do not just answer; you help turn intent into shipped work.\n\n` +
-          `## Private Voice\n` +
-          `- Direct, candid, and concise.\n` +
-          `- Skip preamble and choose a recommendation when the tradeoff is clear.\n` +
-          `- Match the user's pace. Do not perform enthusiasm.\n\n` +
-          `## Public Voice\n` +
-          `- Treat public-facing output as a separate job from private chat.\n` +
-          `- Keep it sharp, audience-safe, and specific to the product/customer/context.\n` +
-          `- Do not leak private shorthand, internal jokes, or workspace-only assumptions.\n\n` +
-          `## Pushback Contract\n` +
-          `- Push back when the request is vague, wasteful, risky, misprioritized, or likely to produce weak output.\n` +
-          `- Earn disagreement with evidence: concrete reasoning, examples, data, code, logs, or a better alternative.\n` +
-          `- Do not be contrarian for sport. If the user's direction is sound, execute it cleanly.\n\n` +
-          `## Accountability Loop\n` +
-          `- Notice repeated asks, ignored outputs, stale priorities, and open loops.\n` +
-          `- If good work is not being used, say what is stuck and propose the next concrete action.\n` +
-          `- If your output is not useful enough to act on, improve it instead of producing more of the same.\n\n` +
-          `## Autonomy Defaults\n` +
-          `- Act on low-stakes implementation details without asking.\n` +
-          `- State assumptions when they matter, then keep moving.\n` +
-          `- Treat .cowork/RULES.md and .cowork/OPERATIONS.md as authoritative for approvals, permissions, and escalation boundaries.\n\n` +
-          `## Quality Bar\n` +
-          `- Working software beats documentation polish.\n` +
-          `- Concrete next steps beat abstract strategy.\n` +
-          `- If there are options, pick the best one and explain why briefly.\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "IDENTITY.md"),
-        content:
-          `# Assistant Identity\n\n` +
-          `- Role:\n` +
-          `- Operating assumptions:\n` +
-          `- Boundaries:\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "RULES.md"),
-        content:
-          `# Operational Rules\n\n` +
-          `- [ ] Requires approval for irreversible actions, external spend, and production-impacting changes\n` +
-          `- [ ] Confirm ambiguous destructive actions before proceeding\n` +
-          `- [ ] Record durable decisions in .cowork/MEMORY.md or project CONTEXT.md\n` +
-          `- [ ] Surface blockers, assumptions, and risks explicitly\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "TOOLS.md"),
-        content:
-          `# Local Setup Notes\n\n` +
-          `## Environment\n` +
-          `- Node version:\n` +
-          `- Package manager:\n` +
-          `- Common commands:\n\n` +
-          `## Secrets\n` +
-          `- Store secrets in env vars; do not commit them\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "VIBES.md"),
-        content:
-          `# Vibes\n\n` +
-          `Current energy and mode for this workspace. Updated by the agent based on cues.\n\n` +
-          `## Current\n` +
-          `<!-- cowork:auto:vibes:start -->\n` +
-          `- Mode: default\n` +
-          `- Energy: balanced\n` +
-          `- Notes: Ready to work\n` +
-          `<!-- cowork:auto:vibes:end -->\n\n` +
-          `## User Preferences\n` +
-          `- \n`,
-      },
-      {
-        relPath: path.join(kitDirName, "LORE.md"),
-        content:
-          `# Shared Lore\n\n` +
-          `This file is workspace-local and can be auto-updated by the system.\n` +
-          `It captures shared history between the human and the assistant.\n\n` +
-          `## Milestones\n` +
-          `<!-- cowork:auto:lore:start -->\n` +
-          `- (none)\n` +
-          `<!-- cowork:auto:lore:end -->\n\n` +
-          `## Notes\n` +
-          `- \n`,
-      },
-      {
-        relPath: path.join(kitDirName, "BOOTSTRAP.md"),
-        content:
-          `# First-Run Guide\n\n` +
-          `1. Fill in \`.cowork/USER.md\` (who you are, preferences).\n` +
-          `2. Fill in \`.cowork/IDENTITY.md\` and \`.cowork/SOUL.md\` (how the assistant should act).\n` +
-          `3. Add durable rules/constraints to \`.cowork/MEMORY.md\`.\n` +
-          `4. Fill in \`.cowork/COMPANY.md\`, \`.cowork/OPERATIONS.md\`, and \`.cowork/KPIS.md\`.\n` +
-          `5. Add recurring checks to \`.cowork/HEARTBEAT.md\`.\n` +
-          `6. If using Discord supervisor mode, define review and escalation policy in \`.cowork/SUPERVISOR.md\`.\n` +
-          `7. Review \`.cowork/VIBES.md\` and \`.cowork/LORE.md\` over time.\n\n` +
-          (isVenturePreset
-            ? `Suggested next step for venture mode: activate a founder-office or operator twin and link each active project to a workspace.\n\n`
-            : ``) +
-          `When onboarding is complete, you can delete this file.\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "transforms", "README.md"),
-        content:
-          `# Monty Transforms\n\n` +
-          `Drop \`.monty\` scripts in this folder to create deterministic, reusable transforms.\n\n` +
-          `Tools:\n` +
-          `- monty_list_transforms: list available transforms\n` +
-          `- monty_run_transform: run a transform with an input object\n` +
-          `- monty_transform_file: apply a transform to a file and write output without returning full file contents to the LLM\n\n` +
-          `Conventions:\n` +
-          `- Your input object is available as \`input\` (a dict)\n` +
-          `- The value of the last expression is returned\n\n` +
-          `Example:\n` +
-          `\`\`\`\n` +
-          `# name: Uppercase\n` +
-          `# description: Convert input['text'] to uppercase\n` +
-          `input['text'].upper()\n` +
-          `\`\`\`\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "transforms", "uppercase.monty"),
-        content:
-          `# name: Uppercase\n` +
-          `# description: Convert input['text'] to uppercase\n\n` +
-          `text = input.get('text') or ''\n` +
-          `text.upper()\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "router", "README.md"),
-        content:
-          `# Gateway Router Rules (Optional)\n\n` +
-          `You can add a workspace-local message triage script at:\n` +
-          `- \`.cowork/router/rules.monty\`\n\n` +
-          `This runs before a message is forwarded to the agent (regular messages only, not slash commands).\n` +
-          `It can be used to:\n` +
-          `- ignore low-signal messages ("ok", "thanks")\n` +
-          `- auto-reply with deterministic responses\n` +
-          `- rewrite/normalize messages before creating a task\n` +
-          `- switch workspace for a session\n\n` +
-          `Return a dict as the last expression:\n` +
-          `- {"action": "pass"}\n` +
-          `- {"action": "ignore"}\n` +
-          `- {"action": "reply", "text": "..."}\n` +
-          `- {"action": "rewrite", "text": "..."}\n` +
-          `- {"action": "set_workspace", "workspaceId": "...", "text": "optional rewrite"}\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "router", "rules.monty"),
-        content:
-          `# Workspace-local gateway router rules\n` +
-          `# Input is available as \`input\`.\n` +
-          `# Return a dict as the last expression.\n\n` +
-          `# Default: do nothing\n` +
-          `{"action": "pass"}\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "policy", "README.md"),
-        content:
-          `# Tool Policy Hook (Optional)\n\n` +
-          `You can add a workspace-local tool policy script at:\n` +
-          `- \`.cowork/policy/tools.monty\`\n\n` +
-          `This runs before each tool call.\n\n` +
-          `Input is available as \`input\` and includes:\n` +
-          `- input['tool'] (tool name)\n` +
-          `- input['params'] (tool input object)\n` +
-          `- input['workspace'] (id/name/path/permissions)\n` +
-          `- input['gatewayContext'] ("private" | "group" | "public" | null)\n\n` +
-          `Return a dict as the last expression:\n` +
-          `- {"decision": "pass"}\n` +
-          `- {"decision": "deny", "reason": "..."}\n` +
-          `- {"decision": "require_approval", "reason": "..."}\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "policy", "tools.monty"),
-        content:
-          `# Workspace-local tool policy hook\n` + `# Default: allow.\n` + `{"decision": "pass"}\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "MEMORY.md"),
-        content:
-          `# Long-Term Memory\n\n` +
-          `## Principles\n` +
-          `- (add durable rules and lessons here)\n\n` +
-          `## Preferences\n` +
-          `- (add preferred defaults and conventions here)\n\n` +
-          `## Auto Learnings\n` +
-          `<!-- cowork:auto:memory:start -->\n` +
-          `- (none)\n` +
-          `<!-- cowork:auto:memory:end -->\n\n` +
-          `## Known Constraints\n` +
-          `- (add constraints and guardrails here)\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "HEARTBEAT.md"),
-        content:
-          `# Recurring Checks\n\n` +
-          `Use this file as the proactive maintenance contract for heartbeat runs.\n` +
-          `If a check turns up nothing actionable, the assistant stays silent.\n\n` +
-          `## Daily\n` +
-          (isVenturePreset
-            ? `- Review open loops, priority issues, and due customer commitments\n` +
-              `- Check KPI deltas and write notable changes into .cowork/KPIS.md\n` +
-              `- Summarize key decisions into .cowork/MEMORY.md\n\n`
-            : `- Review open loops and next actions\n` +
-              `- Summarize key decisions into .cowork/MEMORY.md\n\n`) +
-          `## Weekly\n` +
-          (isVenturePreset
-            ? `- Review team performance and update autonomy levels if needed\n` +
-              `- Review experiment outcomes, blocked deals, and operator handoffs\n`
-            : `- Review team performance and update autonomy levels if needed\n`),
-      },
-      {
-        relPath: path.join(kitDirName, "SUPERVISOR.md"),
-        content:
-          `# Supervisor Protocol\n\n` +
-          `Use this file when Discord supervisor mode is enabled. It defines what the worker may propose, what the supervisor must verify, and when a human must be escalated.\n\n` +
-          `## Review Thresholds\n` +
-          `- Freshness window:\n` +
-          `- Required evidence:\n` +
-          `- Duplicate / repetition checks:\n\n` +
-          `## Escalation Rules\n` +
-          `- Escalate when external judgment is required\n` +
-          `- Escalate when freshness, safety, or policy checks fail\n` +
-          `- Escalate when the worker output cannot be verified from evidence\n\n` +
-          `## Channel Quality Checks\n` +
-          `- Output channels:\n` +
-          `- Required disclaimers:\n` +
-          `- Forbidden output patterns:\n\n` +
-          `## Role Boundaries\n` +
-          `- Worker: provide status, evidence, and reviewable proposals only\n` +
-          `- Supervisor: ACK or escalate; do not produce the primary work product\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "PRIORITIES.md"),
-        content:
-          `# Priorities\n\n` +
-          (isVenturePreset
-            ? `## Company\n` +
-              `1. \n` +
-              `2. \n` +
-              `3. \n\n` +
-              `## Department / Operator\n` +
-              `1. \n` +
-              `2. \n` +
-              `3. \n\n`
-            : `## Current\n` + `1. \n` + `2. \n` + `3. \n\n`) +
-          `## Notes\n` +
-          `- \n\n` +
-          `## History\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "CROSS_SIGNALS.md"),
-        content:
-          `# Cross-Agent Signals\n\n` +
-          `This file is workspace-local and can be auto-updated by agents.\n` +
-          `Use it to track entities/topics that show up across multiple agents, contradictions, and amplified opportunities.\n\n` +
-          `## Signals (Last 24h)\n` +
-          `<!-- cowork:auto:signals:start -->\n` +
-          `- (none)\n` +
-          `<!-- cowork:auto:signals:end -->\n\n` +
-          `## Conflicts / Contradictions\n` +
-          `- \n\n` +
-          `## Notes\n` +
-          `- \n`,
-      },
-      {
-        relPath: path.join(kitDirName, "MISTAKES.md"),
-        content:
-          `# Mistakes / Preferences\n\n` +
-          `This file is workspace-local and can be auto-updated by the system.\n` +
-          `Use it to capture rejection reasons and durable preference patterns.\n\n` +
-          `## Patterns\n` +
-          `<!-- cowork:auto:mistakes:start -->\n` +
-          `- (none)\n` +
-          `<!-- cowork:auto:mistakes:end -->\n\n` +
-          `## Notes\n` +
-          `- \n`,
-      },
-      {
-        relPath: path.join(kitDirName, "projects", "README.md"),
-        content:
-          `# Project Contexts\n\n` +
-          `Each project folder can contain:\n` +
-          `- ACCESS.md: access rules (## Allow / ## Deny with agent role ids; deny wins)\n` +
-          `- CONTEXT.md: durable working context and decisions\n` +
-          `- research/: supporting documents\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "agents", "README.md"),
-        content:
-          `# Agent Notes\n\n` +
-          `Optional workspace-local notes about agent roles, working agreements, and conventions.\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "memory", "hourly", "README.md"),
-        content:
-          `# Hourly Logs\n\n` +
-          `This folder is intended for auto-generated hourly digests to reduce context loss.\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "memory", "weekly", "README.md"),
-        content:
-          `# Weekly Syntheses\n\n` +
-          `This folder is intended for auto-generated weekly syntheses and compounding learnings.\n`,
-      },
-      {
-        relPath: path.join(kitDirName, "memory", `${stamp}.md`),
-        content:
-          `# Daily Log (${stamp})\n\n` +
-          `<!-- cowork:auto:daily:start -->\n` +
-          `## Open Loops\n\n` +
-          `## Next Actions\n\n` +
-          `## Decisions\n\n` +
-          `## Summary\n\n` +
-          `<!-- cowork:auto:daily:end -->\n\n` +
-          `## Notes\n` +
-          `- \n`,
-      },
-    ];
-
-    return templates.map((template) => ({
-      ...template,
-      content: withKitFrontmatter(template.relPath, template.content, stamp),
-    }));
-  };
-
-  const writeTemplate = async (
-    workspacePath: string,
-    relPath: string,
-    content: string,
-    mode: "missing" | "overwrite",
-  ) => {
-    const absPath = path.join(workspacePath, relPath);
-    const dir = path.dirname(absPath);
-    await fs.mkdir(dir, { recursive: true });
-
-    if (mode === "missing") {
-      try {
-        await fs.stat(absPath);
-        return;
-      } catch {
-        // continue
-      }
-    }
-
-    if (absPath.toLowerCase().endsWith(".md")) {
-      writeKitFileWithSnapshot(absPath, content, "system", `kit_init:${mode}`);
-      return;
-    }
-
-    await fs.writeFile(absPath, content, "utf8");
-  };
-
-  const ensureDir = async (workspacePath: string, relPath: string) => {
-    const absPath = path.join(workspacePath, relPath);
-    await fs.mkdir(absPath, { recursive: true });
-  };
-
-  const ensureDefaultKitCronJobs = async (
-    workspaceId: string,
-    kitMode: "missing" | "overwrite",
-  ): Promise<void> => {
-    if (!workspaceId || isTempWorkspaceId(workspaceId)) return;
-
-    const cron = getCronService();
-    if (!cron) return;
-
-    const markers = {
-      hourly: "cowork:kit:memory:hourly:v1",
-      daily: "cowork:kit:memory:daily:v1",
-      weekly: "cowork:kit:memory:weekly:v1",
-    } as const;
-
-    const buildHourlyPrompt = () =>
-      [
-        "You are the scheduled hourly memory digest for this workspace.",
-        "",
-        "Goal: preserve continuity by writing a structured hourly summary to `.cowork/memory/hourly/{{date}}.md`.",
-        "",
-        "Steps:",
-        "1) Call tool `task_events` with:",
-        '   - period: "custom"',
-        '   - from: "{{prev_run}}"',
-        '   - to: "{{now}}"',
-        "   - limit: 500",
-        `   - workspace_id: "${workspaceId}"`,
-        "   - include_payload: true",
-        "2) Ignore events where the taskTitle is one of:",
-        '   - "Kit: Hourly Memory Digest"',
-        '   - "Kit: Daily Context Sync"',
-        '   - "Kit: Weekly Synthesis"',
-        "3) Produce a concise structured summary ONLY from the tool output (do not hallucinate).",
-        "4) Ensure `.cowork/memory/hourly/{{date}}.md` exists. If missing, create it with:",
-        "   - `# Hourly Log ({{date}})`",
-        "   - a blank line",
-        "   - `<!-- cowork:auto:hourly:start -->`",
-        "   - `<!-- cowork:auto:hourly:end -->`",
-        "5) Insert a new entry immediately before `<!-- cowork:auto:hourly:end -->` (do not modify anything outside the markers).",
-        "",
-        "Entry format (must match):",
-        "### <local timestamp YYYY-MM-DD HH:MM> ({{prev_run}} -> {{now}})",
-        "Topics:",
-        "- ...",
-        "Decisions:",
-        "- ...",
-        "Action Items:",
-        "- ...",
-        "Risks/Blockers:",
-        "- ...",
-        "Signals:",
-        "- ...",
-        "Feedback:",
-        "- ...",
-        "Stats: <events> events | <user> user msgs | <assistant> assistant msgs | <toolCalls> tool calls (<toolErrors> errors) | files: +<created> ~<modified> -<deleted>",
-        "",
-        "Return 1-3 sentences confirming the write (do not paste the entire entry).",
-      ].join("\n");
-
-    const buildDailyPrompt = () =>
-      [
-        "You are the scheduled daily context sync for this workspace.",
-        "",
-        "Goal: consolidate today's work into `.cowork/memory/{{date}}.md` without destroying manual notes.",
-        "",
-        "Steps:",
-        "1) Call tool `task_events` with:",
-        '   - period: "today"',
-        "   - limit: 500",
-        `   - workspace_id: "${workspaceId}"`,
-        "   - include_payload: true",
-        "2) Ignore events where the taskTitle is one of:",
-        '   - "Kit: Hourly Memory Digest"',
-        '   - "Kit: Daily Context Sync"',
-        '   - "Kit: Weekly Synthesis"',
-        "3) Summarize ONLY from the tool output (do not hallucinate). Focus on: open loops, next actions, decisions, and a short narrative summary.",
-        "4) Update `.cowork/memory/{{date}}.md` by upserting an auto section delimited by these markers:",
-        "   - `<!-- cowork:auto:daily:start -->`",
-        "   - `<!-- cowork:auto:daily:end -->`",
-        "   If the file or markers are missing, create/append them; do not remove or rewrite other content.",
-        "",
-        "Auto section body format (must match):",
-        "## Open Loops",
-        "- ...",
-        "",
-        "## Next Actions",
-        "- ...",
-        "",
-        "## Decisions",
-        "- ...",
-        "",
-        "## Summary",
-        "- ...",
-        "",
-        "Return 1-3 sentences confirming the update (do not paste the entire section).",
-      ].join("\n");
-
-    const buildWeeklyPrompt = () =>
-      [
-        "You are the scheduled weekly synthesis for this workspace.",
-        "",
-        "Goal: distill compounding learnings and next-week focus, then update `.cowork/MEMORY.md` (auto section) and write a weekly report file.",
-        "",
-        "Steps:",
-        "1) Call tool `task_events` with:",
-        '   - period: "last_7_days"',
-        "   - limit: 500",
-        `   - workspace_id: "${workspaceId}"`,
-        "   - include_payload: true",
-        "2) Read `.cowork/MISTAKES.md` to ground preference patterns in actual recorded feedback.",
-        "3) Write a weekly report to `.cowork/memory/weekly/{{date}}.md` with:",
-        "   - Wins (what shipped / moved forward)",
-        "   - Misses (what stalled / why)",
-        "   - Patterns (approval/rejection themes)",
-        "   - Process updates (what to do differently)",
-        "   - Next week focus (top 3)",
-        "4) Update `.cowork/MEMORY.md` by upserting an auto section delimited by:",
-        "   - `<!-- cowork:auto:memory:start -->`",
-        "   - `<!-- cowork:auto:memory:end -->`",
-        "   Keep it to 5-15 bullets, only durable learnings and preferences (no daily noise).",
-        "",
-        "Constraints:",
-        "- Do not hallucinate; ground everything in tool output and `.cowork/MISTAKES.md`.",
-        '- Ignore events from tasks titled "Kit: Hourly Memory Digest" / "Kit: Daily Context Sync" / "Kit: Weekly Synthesis".',
-        "",
-        "Return 1-3 sentences confirming the write (do not paste the full report).",
-      ].join("\n");
-
-    try {
-      const existing = await cron.list({ includeDisabled: true });
-      const existingInWorkspace = existing.filter((j) => j.workspaceId === workspaceId);
-
-      const desired: Array<{ marker: string; job: CronJobCreate }> = [
-        {
-          marker: markers.hourly,
-          job: {
-            name: "Kit: Hourly Memory Digest",
-            description: `Automated hourly memory digest. [${markers.hourly}]`,
-            enabled: true,
-            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
-            schedule: { kind: "cron", expr: "0 * * * *" },
-            workspaceId,
-            taskPrompt: buildHourlyPrompt(),
-            taskTitle: "Kit: Hourly Memory Digest",
-            maxHistoryEntries: 25,
-          },
-        },
-        {
-          marker: markers.daily,
-          job: {
-            name: "Kit: Daily Context Sync",
-            description: `Automated daily context sync. [${markers.daily}]`,
-            enabled: true,
-            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
-            schedule: { kind: "cron", expr: "0 21 * * *" },
-            workspaceId,
-            taskPrompt: buildDailyPrompt(),
-            taskTitle: "Kit: Daily Context Sync",
-            maxHistoryEntries: 25,
-          },
-        },
-        {
-          marker: markers.weekly,
-          job: {
-            name: "Kit: Weekly Synthesis",
-            description: `Automated weekly synthesis. [${markers.weekly}]`,
-            enabled: true,
-            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
-            schedule: { kind: "cron", expr: "0 18 * * 0" },
-            workspaceId,
-            taskPrompt: buildWeeklyPrompt(),
-            taskTitle: "Kit: Weekly Synthesis",
-            maxHistoryEntries: 25,
-          },
-        },
-      ];
-
-      const findJob = (name: string, marker: string) =>
-        existingInWorkspace.find(
-          (j) => typeof j.description === "string" && j.description.includes(marker),
-        ) ?? existingInWorkspace.find((j) => j.name === name);
-
-      for (const spec of desired) {
-        const existingJob = findJob(spec.job.name, spec.marker);
-        if (!existingJob) {
-          const res = await cron.add(spec.job);
-          if (!res.ok) {
-            logger.warn("[Kit] Failed to add scheduled job:", spec.job.name, res.error);
-          }
-          continue;
-        }
-
-        // Update kit-managed job prompts/description. Preserve schedule/enabled in "missing" mode.
-        const patch: Any = {
-          name: spec.job.name,
-          description: spec.job.description,
-          taskPrompt: spec.job.taskPrompt,
-          taskTitle: spec.job.taskTitle,
-          maxHistoryEntries: spec.job.maxHistoryEntries,
-          accessProfileId: spec.job.accessProfileId,
-        };
-
-        if (kitMode === "overwrite") {
-          patch.enabled = spec.job.enabled;
-          patch.schedule = spec.job.schedule;
-        }
-
-        const needsUpdate = (() => {
-          if (existingJob.name !== patch.name) return true;
-          if ((existingJob.description || "") !== (patch.description || "")) return true;
-          if (existingJob.taskPrompt !== patch.taskPrompt) return true;
-          if ((existingJob.taskTitle || "") !== (patch.taskTitle || "")) return true;
-          if ((existingJob.maxHistoryEntries || 0) !== (patch.maxHistoryEntries || 0)) return true;
-          if (kitMode === "overwrite") {
-            if (existingJob.enabled !== patch.enabled) return true;
-            if (JSON.stringify(existingJob.schedule) !== JSON.stringify(patch.schedule))
-              return true;
-          }
-          return false;
-        })();
-
-        if (!needsUpdate) continue;
-
-        const res = await cron.update(existingJob.id, patch);
-        if (!res.ok) {
-          logger.warn("[Kit] Failed to update scheduled job:", spec.job.name, res.error);
-        }
-      }
-    } catch (error) {
-      logger.warn("[Kit] Failed to ensure default scheduled jobs:", error);
-    }
   };
 
   ipcMain.handle(IPC_CHANNELS.KIT_GET_STATUS, async (_event, workspaceId: string) => {
@@ -13905,34 +13258,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
         throw new Error("Invalid project id");
       }
 
-      const projectRootRel = path.join(kitDirName, "projects", rawId);
-      await ensureDir(workspacePath, projectRootRel);
-      await ensureDir(workspacePath, path.join(projectRootRel, "research"));
-
-      const projectStamp = getLocalDateStamp(new Date());
-
-      await writeTemplate(
-        workspacePath,
-        path.join(projectRootRel, "ACCESS.md"),
-        withKitFrontmatter(
-          path.join(projectRootRel, "ACCESS.md"),
-          `# Access\n\n## Allow\n- all\n\n## Deny\n- \n`,
-          projectStamp,
-        ),
-        "missing",
-      );
-      await writeTemplate(
-        workspacePath,
-        path.join(projectRootRel, "CONTEXT.md"),
-        withKitFrontmatter(
-          path.join(projectRootRel, "CONTEXT.md"),
-          `# Context\n\nLast updated by:\n\n## Goals\n\n## Constraints\n\n## Decisions\n\n## Notes\n`,
-          projectStamp,
-        ),
-        "missing",
-      );
-
-      return { success: true, projectId: rawId };
+      return createKitProject(workspacePath, rawId);
     },
   );
 

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type Database from "better-sqlite3";
+import { AgentTeamRunRepository } from "../../electron/agents/agent-repository-facades";
+import type { AgentDaemon } from "../../electron/agent/daemon";
 import {
   SkillRepository,
   TaskRepository,
@@ -20,12 +22,24 @@ import {
   type CustomSkillLoader,
 } from "../../electron/agent/custom-skill-loader";
 import { getActiveProfileId, getUserDataDir } from "../../electron/utils/user-data-dir";
-import type { CustomSkill, Skill, Task, Workspace } from "../../shared/types";
+import type { CustomSkill, Skill, StepFeedbackAction, Task, Workspace } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
 import type { BrowserDesktopDefinitions } from "./browser-desktop-rpc";
+import { toBrowserTask } from "./browser-desktop-read-methods";
 import { WebApplicationError } from "../web/WebApplication";
 
-type AgentDaemonDependency = object;
+type AgentDaemonDependency = Partial<
+  Pick<
+    AgentDaemon,
+    | "updateTaskWorkspace"
+    | "resumeTask"
+    | "handleStepFeedback"
+    | "logEvent"
+    | "wrapUpTask"
+    | "ensureCollaborativeRunForParentTask"
+    | "getTeamOrchestrator"
+  >
+>;
 
 export interface BrowserCoreDefinitionsOptions {
   db: Database.Database;
@@ -52,12 +66,14 @@ const WORKSPACE_PERMISSIONS: Workspace["permissions"] = {
  */
 export function createBrowserCoreDefinitions({
   db,
+  agentDaemon,
   resolveWorkspace,
   skillLoader,
 }: BrowserCoreDefinitionsOptions): BrowserDesktopDefinitions {
   // The desktop task admission surface is assembled next to these DB-backed methods and shares
   // this options shape. This factory intentionally does not call daemon operations itself.
   const tasks = new TaskRepository(db);
+  const teamRuns = new AgentTeamRunRepository(db);
   const workspaces = new WorkspaceRepository(db);
   const skills = new SkillRepository(db);
   const sessions = new SessionRetentionService(
@@ -71,7 +87,7 @@ export function createBrowserCoreDefinitions({
     resolveWorkspace ??
     (async (workspaceId: string) => (await workspaces.findById(workspaceId)) ?? null);
 
-  return {
+  const definitions: BrowserDesktopDefinitions = {
     listProfiles: {
       capability: "workspaces.read",
       maxArgs: 0,
@@ -206,6 +222,196 @@ export function createBrowserCoreDefinitions({
       },
     },
   };
+
+  if (agentDaemon.updateTaskWorkspace) {
+    definitions.updateTaskWorkspace = {
+      capability: "tasks.create",
+      mutation: true,
+      minArgs: 2,
+      maxArgs: 2,
+      validate: ([taskId, workspaceId]) => [parseId(taskId), parseId(workspaceId)],
+      handler: async ([taskId, workspaceId]) => {
+        const task = await requireWritableTask(tasks, getEffectiveWorkspace, String(taskId));
+        const destination = await requireWorkspaceAccess(
+          getEffectiveWorkspace,
+          String(workspaceId),
+          true,
+        );
+        if (task.workspaceId === destination.id) return toBrowserTask(task);
+        const updated = await agentDaemon.updateTaskWorkspace!(task.id, destination.id);
+        return toBrowserTask(updated);
+      },
+    };
+  }
+
+  if (agentDaemon.resumeTask) {
+    definitions.resumeTask = {
+      capability: "tasks.create",
+      mutation: true,
+      minArgs: 1,
+      maxArgs: 1,
+      validate: ([taskId]) => [parseId(taskId)],
+      handler: async ([taskId]) => {
+        const task = await requireWritableTask(tasks, getEffectiveWorkspace, String(taskId));
+        return agentDaemon.resumeTask!(task.id);
+      },
+    };
+  }
+
+  if (agentDaemon.ensureCollaborativeRunForParentTask) {
+    definitions.findTeamRunByRootTask = {
+      capability: "tasks.create",
+      mutation: true,
+      minArgs: 1,
+      maxArgs: 1,
+      validate: ([taskId]) => [parseId(taskId)],
+      handler: async ([taskId]) => {
+        const task = await requireWritableTask(tasks, getEffectiveWorkspace, String(taskId));
+        const run = agentDaemon.ensureCollaborativeRunForParentTask!(task.id);
+        return run ? { ...run } : null;
+      },
+    };
+  }
+
+  if (agentDaemon.wrapUpTask) {
+    definitions.wrapUpTask = {
+      capability: "tasks.create",
+      mutation: true,
+      minArgs: 1,
+      maxArgs: 1,
+      validate: ([taskId]) => [parseId(taskId)],
+      handler: async ([taskId]) => {
+        const task = await requireWritableTask(tasks, getEffectiveWorkspace, String(taskId));
+        await agentDaemon.wrapUpTask!(task.id);
+        return { success: true };
+      },
+    };
+  }
+
+  if (agentDaemon.getTeamOrchestrator) {
+    definitions.wrapUpTeamRun = {
+      capability: "tasks.create",
+      mutation: true,
+      minArgs: 1,
+      maxArgs: 1,
+      validate: ([runId]) => [parseId(runId)],
+      handler: async ([runId]) => {
+        const run = await teamRuns.findById(String(runId));
+        if (!run) throw notFound();
+        await requireWritableTask(tasks, getEffectiveWorkspace, run.rootTaskId);
+        const orchestrator = agentDaemon.getTeamOrchestrator!();
+        if (!orchestrator) {
+          throw new WebApplicationError(
+            "UNSUPPORTED_CAPABILITY",
+            "Team run controls are unavailable in this browser session.",
+            501,
+          );
+        }
+        await orchestrator.wrapUpRun(run.id);
+        return { success: true };
+      },
+    };
+  }
+
+  if (agentDaemon.handleStepFeedback) {
+    definitions.sendStepFeedback = {
+      capability: "tasks.create",
+      mutation: true,
+      minArgs: 3,
+      maxArgs: 4,
+      validate: parseStepFeedbackArgs,
+      handler: async ([taskId, stepId, action, message]) => {
+        const task = await requireWritableTask(tasks, getEffectiveWorkspace, String(taskId));
+        await agentDaemon.handleStepFeedback!(
+          task.id,
+          String(stepId),
+          action as StepFeedbackAction,
+          message as string | undefined,
+        );
+        return null;
+      },
+    };
+  }
+
+  if (agentDaemon.logEvent) {
+    definitions.submitMessageFeedback = {
+      capability: "tasks.create",
+      mutation: true,
+      minArgs: 1,
+      maxArgs: 1,
+      validate: ([value]) => [parseMessageFeedback(value)],
+      handler: async ([value]) => {
+        const feedback = value as MessageFeedbackRequest;
+        const task = await requireWritableTask(tasks, getEffectiveWorkspace, feedback.taskId);
+        const reason = [feedback.reason, feedback.note].filter(Boolean).join(": ") || undefined;
+        agentDaemon.logEvent!(task.id, "user_feedback", {
+          decision: feedback.decision,
+          ...(reason ? { reason } : {}),
+          ...(feedback.messageId ? { messageId: feedback.messageId } : {}),
+        });
+        return null;
+      },
+    };
+  }
+
+  return definitions;
+}
+
+interface MessageFeedbackRequest {
+  taskId: string;
+  messageId?: string;
+  decision: "accepted" | "rejected";
+  reason?: string;
+  note?: string;
+}
+
+function parseMessageFeedback(value: unknown): MessageFeedbackRequest {
+  const record = requireRecord(value);
+  if (
+    Object.keys(record).some(
+      (key) => !["taskId", "messageId", "decision", "reason", "note"].includes(key),
+    ) ||
+    (record.decision !== "accepted" && record.decision !== "rejected")
+  ) {
+    throw invalidRequest();
+  }
+  const optionalText = (input: unknown, maxLength: number): string | undefined => {
+    if (input === undefined) return undefined;
+    if (typeof input !== "string" || input.length > maxLength) throw invalidRequest();
+    return input;
+  };
+  return {
+    taskId: parseId(record.taskId),
+    decision: record.decision,
+    ...(record.messageId !== undefined
+      ? { messageId: parseBoundedText(record.messageId, 200) }
+      : {}),
+    ...(record.reason !== undefined ? { reason: optionalText(record.reason, 2_000) } : {}),
+    ...(record.note !== undefined ? { note: optionalText(record.note, 4_000) } : {}),
+  };
+}
+
+function parseStepFeedbackArgs(args: unknown[]): unknown[] {
+  const [taskId, stepId, action, message] = args;
+  if (
+    args.length < 3 ||
+    args.length > 4 ||
+    typeof stepId !== "string" ||
+    !stepId.trim() ||
+    stepId.length > 100 ||
+    !["retry", "skip", "stop", "drift"].includes(String(action)) ||
+    (message !== undefined && (typeof message !== "string" || message.length > 64_000))
+  ) {
+    throw invalidRequest();
+  }
+  return [parseId(taskId), stepId, action as StepFeedbackAction, message];
+}
+
+function parseBoundedText(value: unknown, maxLength: number): string {
+  if (typeof value !== "string" || !value.trim() || value.length > maxLength) {
+    throw invalidRequest();
+  }
+  return value.trim();
 }
 
 interface CreateWorkspaceRequest {

@@ -32,6 +32,7 @@ import type {
   TaskSessionMetadataStore,
   TaskAdmissionStore,
   BrowserTaskCancelReceiptStore,
+  BrowserGitMutationReceiptStore,
   TaskEventRepository as TaskEventRepositoryStore,
   TaskStore,
   WorkspacePermissionRuleStore,
@@ -121,6 +122,16 @@ export const BrowserTaskCancelReceiptRepository = repositoryFacade<
   BrowserTaskCancelReceiptStore,
   (typeof BROWSER_TASK_CANCEL_RECEIPT_METHODS)[number]
 >("browserTaskCancelReceipt_", BROWSER_TASK_CANCEL_RECEIPT_METHODS);
+
+const BROWSER_GIT_MUTATION_RECEIPT_METHODS = ["reserve", "complete", "get"] as const;
+export type BrowserGitMutationReceiptRepository = AsyncStore<
+  BrowserGitMutationReceiptStore,
+  (typeof BROWSER_GIT_MUTATION_RECEIPT_METHODS)[number]
+>;
+export const BrowserGitMutationReceiptRepository = repositoryFacade<
+  BrowserGitMutationReceiptStore,
+  (typeof BROWSER_GIT_MUTATION_RECEIPT_METHODS)[number]
+>("browserGitMutationReceipt_", BROWSER_GIT_MUTATION_RECEIPT_METHODS);
 
 const TASK_EVENT_REPLAY_METHODS = [
   "getCommittedMutationCursor",

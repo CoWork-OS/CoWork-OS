@@ -5,7 +5,11 @@ import type { WorkspaceKitStatus } from "../../shared/types";
 import { WORKSPACE_HEALTH_FILES, WORKSPACE_KIT_CONTRACTS } from "./kit-contracts";
 import { lintKitDoc, isKitDocStale } from "./kit-linter";
 import { parseKitDocument } from "./kit-parser";
-import { getKitRevisionCount } from "./kit-revisions";
+import {
+  getKitRevisionCount,
+  getKitSnapshotRoot,
+  type KitRevisionPathGuard,
+} from "./kit-revisions";
 
 export const KIT_DIR_NAME = ".cowork";
 const WORKSPACE_STATE_FILE_NAME = "workspace-state.json";
@@ -60,10 +64,13 @@ async function writeWorkspaceKitState(
 export async function ensureBootstrapLifecycleState(
   workspacePath: string,
   state?: KitWorkspaceState,
+  pathGuard?: KitRevisionPathGuard,
 ): Promise<{
   state: KitWorkspaceState;
   bootstrapPresent: boolean;
 }> {
+  pathGuard?.(resolveWorkspaceStatePath(workspacePath), "read");
+  pathGuard?.(path.join(workspacePath, KIT_DIR_NAME, "BOOTSTRAP.md"), "read");
   const current = state || (await readWorkspaceKitState(workspacePath));
   const bootstrapPath = path.join(workspacePath, KIT_DIR_NAME, "BOOTSTRAP.md");
   const bootstrapPresent = fs.existsSync(bootstrapPath);
@@ -82,6 +89,7 @@ export async function ensureBootstrapLifecycleState(
   }
 
   if (dirty) {
+    pathGuard?.(resolveWorkspaceStatePath(workspacePath), "write");
     await writeWorkspaceKitState(workspacePath, next);
   }
 
@@ -91,9 +99,18 @@ export async function ensureBootstrapLifecycleState(
 export async function computeWorkspaceKitStatus(
   workspacePath: string,
   workspaceId = workspacePath,
+  options: { readOnly?: boolean; pathGuard?: KitRevisionPathGuard } = {},
 ): Promise<WorkspaceKitStatus> {
   const kitRoot = path.join(workspacePath, KIT_DIR_NAME);
-  const lifecycle = await ensureBootstrapLifecycleState(workspacePath);
+  options.pathGuard?.(kitRoot, "read");
+  options.pathGuard?.(resolveWorkspaceStatePath(workspacePath), "read");
+  options.pathGuard?.(path.join(kitRoot, "BOOTSTRAP.md"), "read");
+  const lifecycle = options.readOnly
+    ? {
+        state: await readWorkspaceKitState(workspacePath),
+        bootstrapPresent: fs.existsSync(path.join(kitRoot, "BOOTSTRAP.md")),
+      }
+    : await ensureBootstrapLifecycleState(workspacePath, undefined, options.pathGuard);
   const trackedHealthPaths = new Set(
     WORKSPACE_HEALTH_FILES.map((fileName) => path.join(KIT_DIR_NAME, fileName)),
   );
@@ -109,6 +126,8 @@ export async function computeWorkspaceKitStatus(
     const relPath = path.join(KIT_DIR_NAME, fileName);
     const absPath = path.join(workspacePath, relPath);
 
+    options.pathGuard?.(absPath, "read");
+    options.pathGuard?.(path.join(getKitSnapshotRoot(absPath), "revisions.jsonl"), "read");
     try {
       const stat = await fsp.stat(absPath);
       const parsed = parseKitDocument(absPath, contract, relPath.replace(/\\/g, "/"));
@@ -140,6 +159,7 @@ export async function computeWorkspaceKitStatus(
 
   for (const relPath of TRACKED_KIT_DIRECTORIES) {
     const absPath = path.join(workspacePath, relPath);
+    options.pathGuard?.(absPath, "read");
     try {
       const stat = await fsp.stat(absPath);
       files.push({

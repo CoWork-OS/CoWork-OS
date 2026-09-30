@@ -301,6 +301,93 @@ describe("browser approval and input methods", () => {
     expect(dependency.commands.respondToApproval).toHaveBeenCalledTimes(1);
   });
 
+  it("serializes decisions from two browser tabs and rejects an opposing stale vote", async () => {
+    const dependency = sources();
+    let saved = approval();
+    vi.mocked(dependency.getApproval).mockImplementation(async (id) =>
+      id === approvalId ? saved : null,
+    );
+    vi.mocked(dependency.commands.respondToApproval).mockImplementation(async (_id, approved) => {
+      saved = approval({ status: approved ? "approved" : "denied" });
+      return "handled";
+    });
+    const methods = createBrowserApprovalMethods(dependency);
+    const respond = methods["approval.respond"];
+    const approve = respond.validateParams!({
+      approvalId,
+      workspaceId: workspace.id,
+      taskId: task.id,
+      expectedVersion: requestedAt,
+      approved: true,
+    });
+    const deny = respond.validateParams!({
+      approvalId,
+      workspaceId: workspace.id,
+      taskId: task.id,
+      expectedVersion: requestedAt,
+      approved: false,
+    });
+
+    // Browser tabs share the authenticated host session but each can have its
+    // own in-flight operation receipt while the decision is being submitted.
+    const sameVote = await Promise.all([
+      respond.handler({ ...context, operationKey: "tab-one-approve" }, approve),
+      respond.handler({ ...context, operationKey: "tab-two-approve" }, approve),
+    ]);
+    expect(sameVote.map((result) => result.status).sort()).toEqual(["duplicate", "handled"]);
+    expect(dependency.commands.respondToApproval).toHaveBeenCalledTimes(1);
+
+    saved = approval();
+    const opposingVotes = await Promise.allSettled([
+      respond.handler({ ...context, operationKey: "tab-one-deny" }, deny),
+      respond.handler({ ...context, operationKey: "tab-two-approve-again" }, approve),
+    ]);
+    expect(opposingVotes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(opposingVotes.filter((result) => result.status === "rejected")).toMatchObject([
+      { reason: { code: "CONFLICT" } },
+    ]);
+    expect(dependency.commands.respondToApproval).toHaveBeenCalledTimes(2);
+  });
+
+  it("serializes input responses from two browser tabs and rejects a competing answer", async () => {
+    const dependency = sources();
+    let saved = inputRequest();
+    vi.mocked(dependency.getInputRequest).mockImplementation(async (id) =>
+      id === requestId ? saved : null,
+    );
+    vi.mocked(dependency.commands.respondToInputRequest).mockImplementation(async (response) => {
+      saved = inputRequest({ status: response.status, answers: response.answers });
+      return { status: "handled", requestId };
+    });
+    const methods = createBrowserApprovalMethods(dependency);
+    const respond = methods["input_request.respond"];
+    const submitted = respond.validateParams!({
+      requestId,
+      workspaceId: workspace.id,
+      taskId: task.id,
+      expectedVersion: requestedAt,
+      status: "submitted",
+      answers: { output_format: { optionLabel: "PDF" } },
+    });
+    const dismissed = respond.validateParams!({
+      requestId,
+      workspaceId: workspace.id,
+      taskId: task.id,
+      expectedVersion: requestedAt,
+      status: "dismissed",
+    });
+
+    const competingResponses = await Promise.allSettled([
+      respond.handler({ ...context, operationKey: "tab-one-submit" }, submitted),
+      respond.handler({ ...context, operationKey: "tab-two-dismiss" }, dismissed),
+    ]);
+    expect(competingResponses.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(competingResponses.filter((result) => result.status === "rejected")).toMatchObject([
+      { reason: { code: "CONFLICT" } },
+    ]);
+    expect(dependency.commands.respondToInputRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("returns a retryable unknown outcome when the durable row remains pending", async () => {
     const dependency = sources();
     vi.mocked(dependency.commands.respondToApproval).mockResolvedValue("handled");

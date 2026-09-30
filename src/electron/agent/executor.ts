@@ -1,4 +1,5 @@
 import { resolveInteractionMode } from "./strategy/interaction-mode";
+import { QUALITY_PASS_SYSTEM_PROMPT, isQualityRewriteSafe } from "./quality-pass-output";
 import {
   AgentConfig,
   Task,
@@ -12104,13 +12105,8 @@ ${transcript}
       if (!candidate) continue;
       const matchIndex = typeof match.index === "number" ? match.index : -1;
       const contextWindow =
-        matchIndex >= 0
-          ? desc.slice(
-              Math.max(0, matchIndex - 28),
-              Math.min(desc.length, matchIndex + match[0].length + 28),
-            )
-          : desc;
-      if (!/\b(tool|call|invoke|run|execute|using|via|from|output|result)\b/.test(contextWindow)) {
+        matchIndex >= 0 ? desc.slice(Math.max(0, matchIndex - 28), matchIndex) : desc;
+      if (!/\b(?:call|invoke|run|execute|use|using|via)\b/.test(contextWindow)) {
         continue;
       }
       addRequiredToolIfKnown(candidate);
@@ -17149,6 +17145,7 @@ ${transcript}
   private static readonly BASE_MAX_TOOLS_OFFERED = 80;
   private static readonly SOFT_MAX_TOOLS_OFFERED = 120;
   private static readonly LOW_SIGNAL_EXPLORATION_BUFFER = 20;
+  private static readonly MAX_EXPLICIT_MCP_TOOLS = 8;
 
   private getToolCountCaps(): { baseCap: number; softCap: number } {
     const defaultBase = this.provider?.type === "ollama" ? 40 : TaskExecutor.BASE_MAX_TOOLS_OFFERED;
@@ -17212,6 +17209,55 @@ ${transcript}
         .split(/[^a-z0-9]+/)
         .filter((w) => w.length > 2),
     );
+  }
+
+  private getExplicitlyReferencedMcpTools(tools: Any[]): Any[] {
+    const currentStep =
+      this.currentStepId && this.plan?.steps
+        ? this.plan.steps.find((step) => step.id === this.currentStepId)
+        : undefined;
+    const referenceText = [
+      this.task?.title,
+      this.task?.prompt,
+      this.task?.rawPrompt,
+      this.task?.userPrompt,
+      this.lastUserMessage,
+      currentStep?.description,
+    ]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join("\n")
+      .toLowerCase();
+    if (!referenceText) return [];
+
+    const retainedNames = new Set<string>();
+    const explicitlyReferenced: Any[] = [];
+    for (const tool of tools) {
+      const name = String(tool?.name || "").toLowerCase();
+      if (!name.startsWith("mcp_") || retainedNames.has(name)) continue;
+
+      let start = referenceText.indexOf(name);
+      let found = false;
+      while (start >= 0) {
+        const previous = referenceText[start - 1] || "";
+        const nextIndex = start + name.length;
+        const next = referenceText[nextIndex] || "";
+        const nextNext = referenceText[nextIndex + 1] || "";
+        const hasExactLeftBoundary = !/[a-z0-9_.-]/i.test(previous);
+        const hasExactRightBoundary =
+          !/[a-z0-9_-]/i.test(next) && !(next === "." && /[a-z0-9_-]/i.test(nextNext));
+        if (hasExactLeftBoundary && hasExactRightBoundary) {
+          found = true;
+          break;
+        }
+        start = referenceText.indexOf(name, start + 1);
+      }
+      if (!found) continue;
+
+      retainedNames.add(name);
+      explicitlyReferenced.push(tool);
+      if (explicitlyReferenced.length >= TaskExecutor.MAX_EXPLICIT_MCP_TOOLS) break;
+    }
+    return explicitlyReferenced;
   }
 
   private stableToolHash(name: string): number {
@@ -17746,6 +17792,21 @@ ${transcript}
       stepText,
     );
     const normalizedStepText = stepText.toLowerCase();
+    const explicitMcpReferenceText = [
+      this.task.title || "",
+      step.description || "",
+      this.getExecutionTaskPrompt(),
+      this.lastUserMessage || "",
+    ]
+      .join("\n")
+      .toLowerCase();
+    for (const tool of tools) {
+      const name = String(tool.name || "");
+      if (!name.toLowerCase().startsWith("mcp_")) continue;
+      const escapedName = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const explicitNameMention = new RegExp(`(?:^|[^a-z0-9_])${escapedName}(?:$|[^a-z0-9_])`);
+      if (explicitNameMention.test(explicitMcpReferenceText)) allowlist.add(name);
+    }
     const mcpReferenced =
       /\bmcp[_\s-]|connector|slack|salesforce|jira|linear|notion|github|postgres|mysql|hubspot|maps?|nearby|walking?|places?|location\b/.test(
         normalizedStepText,
@@ -17864,9 +17925,12 @@ ${transcript}
 
     const builtIn = tools.filter((t) => !t.name.startsWith("mcp_"));
     const mcpTools = tools.filter((t) => t.name.startsWith("mcp_"));
+    const explicitlyReferencedMcp = this.getExplicitlyReferencedMcpTools(mcpTools);
 
-    // If built-in tools alone exceed soft cap, preserve built-ins.
-    if (builtIn.length >= softCap) return builtIn;
+    // Built-ins stay available above the soft cap. Also retain a small bounded
+    // set of MCP tools the user named exactly, even when those built-ins leave
+    // no room for the normal relevance-ranked MCP budget.
+    if (builtIn.length >= softCap) return [...builtIn, ...explicitlyReferencedMcp];
 
     let mcpBudget = Math.max(0, baseCap - builtIn.length);
 
@@ -17943,7 +18007,15 @@ ${transcript}
       }
       scored = rotated;
     }
-    const keptMcp = scored.slice(0, Math.max(0, mcpBudget)).map((s) => s.tool);
+    const explicitMcpNames = new Set(explicitlyReferencedMcp.map((tool) => String(tool.name)));
+    const remainingMcpBudget = Math.max(0, mcpBudget - explicitlyReferencedMcp.length);
+    const keptMcp = [
+      ...explicitlyReferencedMcp,
+      ...scored
+        .filter((entry) => !explicitMcpNames.has(String(entry.tool.name)))
+        .slice(0, remainingMcpBudget)
+        .map((entry) => entry.tool),
+    ];
     const cappedCount = builtIn.length + keptMcp.length;
 
     // Avoid high-volume no-op logs when nothing is trimmed and MCP tools are not in play.
@@ -37154,7 +37226,7 @@ Return ONLY a JSON object:
               {
                 model: this.modelId,
                 maxTokens: 1600,
-                system: this.systemPrompt || "",
+                system: QUALITY_PASS_SYSTEM_PROMPT,
                 messages: [
                   {
                     role: "user",
@@ -37188,7 +37260,7 @@ Return ONLY a JSON object:
         }
 
         const text = this.extractTextFromLLMContent(response.content).trim();
-        if (!text) return { text: draft, accepted: false };
+        if (!isQualityRewriteSafe(text, draft)) return { text: draft, accepted: false };
         if (response.stopReason !== "end_turn") {
           return { text: draft, accepted: false };
         }
@@ -37222,7 +37294,7 @@ Return ONLY a JSON object:
             {
               model: this.modelId,
               maxTokens: 900,
-              system: this.systemPrompt || "",
+              system: QUALITY_PASS_SYSTEM_PROMPT,
               messages: [
                 {
                   role: "user",
@@ -37290,7 +37362,7 @@ Return ONLY a JSON object:
             {
               model: this.modelId,
               maxTokens: 1800,
-              system: this.systemPrompt || "",
+              system: QUALITY_PASS_SYSTEM_PROMPT,
               messages: [
                 {
                   role: "user",
@@ -37331,7 +37403,7 @@ Return ONLY a JSON object:
       }
 
       const text = this.extractTextFromLLMContent(refineResp.content).trim();
-      if (!text) return { text: draft, accepted: false };
+      if (!isQualityRewriteSafe(text, draft)) return { text: draft, accepted: false };
       if (
         refineResp.stopReason !== "end_turn" ||
         (refineResp.content || []).some((c: Any) => c && c.type === "tool_use")

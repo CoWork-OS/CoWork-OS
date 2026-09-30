@@ -143,6 +143,53 @@ describe("MemoryWriteGate", () => {
     delete process.env.COWORK_APPROVAL_PROMPTS;
   });
 
+  it("redacts legacy approval summaries and nested display values without changing the stored write", async () => {
+    const record = repoMock.create({
+      ...baseRequest,
+      target: "archive",
+      summary: "Legacy token=fake-secret-value",
+      payload: { content: "Bearer fake-secret-value", nested: { apiKey: "fake-key-value" } },
+      reason: "password=fake-password-value",
+    });
+    const display = await MemoryWriteGate.findPendingForDisplay(record.id);
+    expect(display?.summary).toBe("Legacy token=[redacted]");
+    expect(display?.payload).toEqual({
+      content: "Bearer [redacted]",
+      nested: { apiKey: "[redacted]" },
+    });
+    expect(display?.reason).toBe("password=[redacted]");
+    expect((await MemoryWriteGate.findPending(record.id))?.summary).toContain("fake-secret-value");
+  });
+
+  it("uses the effective workspace policy for approved archive mirroring and blocks external replay", async () => {
+    const archive = repoMock.create({
+      ...baseRequest,
+      target: "archive",
+      payload: { type: "insight", content: "Disposable archive policy fact" },
+    });
+    const effectiveWorkspace = {
+      id: "ws-1",
+      path: "/tmp/qa",
+      permissions: { read: true, write: true, network: false },
+    } as Any;
+    await MemoryWriteGate.applyPending(archive.id, { workspaceId: "ws-1", effectiveWorkspace });
+    expect(serviceMocks.capture).toHaveBeenCalledWith(
+      "ws-1",
+      "task-1",
+      "insight",
+      "Disposable archive policy fact",
+      false,
+      expect.objectContaining({ allowExternalMirror: false }),
+    );
+    const external = repoMock.create({ ...baseRequest, target: "external", action: "remember" });
+    const result = await MemoryWriteGate.applyPending(external.id, {
+      workspaceId: "ws-1",
+      effectiveWorkspace,
+    });
+    expect(result.status).toBe("failed");
+    expect(serviceMocks.remember).not.toHaveBeenCalled();
+  });
+
   it("allows writes when approval mode is off", async () => {
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,

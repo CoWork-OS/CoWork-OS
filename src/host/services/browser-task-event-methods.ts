@@ -260,6 +260,32 @@ function sanitizeEventPayload(event: TaskEvent): unknown {
   }
 
   const sanitized = sanitizeValue(payload, undefined, 0, { nodes: MAX_EVENT_NODES });
+  const isUsage =
+    event.type === "llm_usage" ||
+    (event.type.startsWith("timeline_") &&
+      (event.legacyType === "llm_usage" ||
+        (isRecord(payload) && payload.legacyType === "llm_usage")));
+  if (isUsage && isRecord(payload) && isRecord(sanitized)) {
+    // Token counts are measurements, not authentication tokens. Preserve only
+    // finite nonnegative counters at the known usage locations; other token
+    // fields still pass through credential redaction.
+    const counters = [
+      "inputTokens",
+      "outputTokens",
+      "totalTokens",
+      "cachedTokens",
+      "cacheWriteTokens",
+    ];
+    for (const location of [undefined, "delta", "totals"] as const) {
+      const original = location ? payload[location] : payload;
+      const target = location ? sanitized[location] : sanitized;
+      if (!isRecord(original) || !isRecord(target)) continue;
+      for (const key of counters) {
+        const value = original[key];
+        if (typeof value === "number" && Number.isFinite(value) && value >= 0) target[key] = value;
+      }
+    }
+  }
   return isRecord(sanitized) ? sanitized : {};
 }
 

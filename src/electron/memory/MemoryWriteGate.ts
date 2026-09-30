@@ -123,7 +123,7 @@ export class MemoryWriteGate {
 
   static async applyPending(
     id: string,
-    opts: { workspaceId?: string; reviewedBy?: string } = {},
+    opts: { workspaceId?: string; reviewedBy?: string; effectiveWorkspace?: Workspace } = {},
   ): Promise<MemoryWriteApprovalItem> {
     this.ensureInitialized();
     const pending = await this.pendingRepo.findById(id);
@@ -132,6 +132,9 @@ export class MemoryWriteGate {
     }
     if (opts.workspaceId && pending.workspaceId !== opts.workspaceId) {
       throw new Error("Pending memory write does not belong to this workspace.");
+    }
+    if (opts.effectiveWorkspace && opts.effectiveWorkspace.id !== pending.workspaceId) {
+      throw new Error("Effective memory workspace does not match the pending write.");
     }
     if (pending.status !== "pending") {
       throw new Error(`Pending memory write is already ${pending.status}.`);
@@ -147,7 +150,7 @@ export class MemoryWriteGate {
     }
 
     try {
-      await this.replay(claimed);
+      await this.replay(claimed, opts.effectiveWorkspace);
       const applied = await this.pendingRepo.updateStatusIfCurrent(id, "applying", "applied", {
         reviewedBy: opts.reviewedBy,
         resolution: "Applied approved memory write.",
@@ -287,23 +290,29 @@ export class MemoryWriteGate {
     return request.target === "external" && this.containsSensitiveDisplayContent(request.payload);
   }
 
-  private static async replay(pending: PendingMemoryWrite): Promise<void> {
+  private static async replay(
+    pending: PendingMemoryWrite,
+    effectiveWorkspace?: Workspace,
+  ): Promise<void> {
     if (pending.target === "archive") {
-      await this.replayArchive(pending);
+      await this.replayArchive(pending, effectiveWorkspace);
       return;
     }
     if (pending.target === "curated") {
-      await this.replayCurated(pending);
+      await this.replayCurated(pending, effectiveWorkspace);
       return;
     }
     if (pending.target === "external") {
-      await this.replayExternal(pending);
+      await this.replayExternal(pending, effectiveWorkspace);
       return;
     }
     throw new Error(`Unsupported memory write target: ${pending.target}`);
   }
 
-  private static async replayArchive(pending: PendingMemoryWrite): Promise<void> {
+  private static async replayArchive(
+    pending: PendingMemoryWrite,
+    effectiveWorkspace?: Workspace,
+  ): Promise<void> {
     const { MemoryService } = await import("./MemoryService");
     const payload = pending.payload;
     const type = this.asMemoryType(payload.type);
@@ -312,7 +321,7 @@ export class MemoryWriteGate {
       throw new Error("Pending archive memory payload is missing type or content.");
     }
     const options = this.asPlainObject(payload.options);
-    const workspace = await this.getStoredWorkspace(pending.workspaceId);
+    const workspace = effectiveWorkspace ?? (await this.getStoredWorkspace(pending.workspaceId));
     const memory = await MemoryService.capture(
       pending.workspaceId,
       pending.taskId,
@@ -330,11 +339,14 @@ export class MemoryWriteGate {
     }
   }
 
-  private static async replayCurated(pending: PendingMemoryWrite): Promise<void> {
+  private static async replayCurated(
+    pending: PendingMemoryWrite,
+    effectiveWorkspace?: Workspace,
+  ): Promise<void> {
     const { CuratedMemoryService } = await import("./CuratedMemoryService");
     const payload = pending.payload;
     const filesystemGuards = this.getCuratedFilesystemGuards(
-      await this.getStoredWorkspace(pending.workspaceId),
+      effectiveWorkspace ?? (await this.getStoredWorkspace(pending.workspaceId)),
     );
     const action = this.asString(payload.action);
     const target = this.asCuratedTarget(payload.target);
@@ -392,10 +404,14 @@ export class MemoryWriteGate {
     }
   }
 
-  private static async replayExternal(pending: PendingMemoryWrite): Promise<void> {
+  private static async replayExternal(
+    pending: PendingMemoryWrite,
+    effectiveWorkspace?: Workspace,
+  ): Promise<void> {
     const { SupermemoryService } = await import("./SupermemoryService");
     const payload = pending.payload;
-    const storedWorkspace = await this.getStoredWorkspace(pending.workspaceId);
+    const storedWorkspace =
+      effectiveWorkspace ?? (await this.getStoredWorkspace(pending.workspaceId));
     if (!this.isExternalMemoryReplayAllowed(storedWorkspace)) {
       throw new Error(
         "Approved external memory write was blocked because the workspace no longer permits automatic network access.",
@@ -523,7 +539,7 @@ export class MemoryWriteGate {
       target: item.target,
       action: item.action,
       origin: item.origin,
-      summary: item.summary,
+      summary: this.redactText(item.summary) || "",
       payload: this.redactValue(item.payload) as Record<string, unknown>,
       oldValue: this.redactText(item.oldValue),
       proposedValue: this.redactText(item.proposedValue),

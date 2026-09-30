@@ -8,6 +8,7 @@ import {
   WEB_API_PATH,
   WEB_API_VERSION,
   WEB_APP_PATH,
+  WEB_WORKSPACE_FILE_MEDIA_PATH_PREFIX,
   WEB_WORKSPACE_FILE_DOWNLOAD_PATH,
   WEB_WORKSPACE_FILE_UPLOAD_PATH,
   WEB_ARTIFACT_DOWNLOAD_PATH,
@@ -86,6 +87,12 @@ export interface WebApplicationOptions {
   ) => Promise<boolean>;
   /** Fixed raw upload route, invoked only after browser session and CSRF checks. */
   handleWorkspaceFileUpload?: (
+    context: WebRequestContext,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ) => Promise<boolean>;
+  /** Authenticated read-only media streaming; supports repeatable byte-range requests. */
+  handleWorkspaceFileMedia?: (
     context: WebRequestContext,
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -590,6 +597,42 @@ export class WebApplication {
           "Workspace file transfer is unavailable.",
           404,
         );
+      await handler(this.requestContext(audience, session), req, res);
+      return true;
+    }
+
+    if (url.pathname.startsWith(WEB_WORKSPACE_FILE_MEDIA_PATH_PREFIX)) {
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        writeError(res, new WebApplicationError("INVALID_REQUEST", "Method not allowed.", 405));
+        return true;
+      }
+      // Video elements may omit Origin on same-origin GET/HEAD. The high-entropy
+      // media handle is session-bound; reject declared cross-origin requests.
+      this.requireOriginIfPresent(req, security);
+      const fetchSite = singleHeader(req.headers["sec-fetch-site"]);
+      if (fetchSite && fetchSite !== "same-origin") {
+        throw new WebApplicationError("FORBIDDEN", "Cross-origin request rejected.", 403);
+      }
+      const mount = this.mounts.get(audience);
+      if (!mount) {
+        throw new WebApplicationError(
+          "UNSUPPORTED_CAPABILITY",
+          "Browser listener is unavailable.",
+          404,
+        );
+      }
+      const { session, error } = this.authenticateRequest(audience, req, mount.cookieName);
+      if (error || !session) {
+        throw error || new WebApplicationError("UNAUTHENTICATED", "Authentication required.", 401);
+      }
+      const handler = this.options.handleWorkspaceFileMedia;
+      if (!handler) {
+        throw new WebApplicationError(
+          "UNSUPPORTED_CAPABILITY",
+          "Workspace media preview is unavailable.",
+          404,
+        );
+      }
       await handler(this.requestContext(audience, session), req, res);
       return true;
     }
@@ -1237,10 +1280,11 @@ export class WebApplication {
       }
       const contentType = contentTypeFor(canonicalFile);
       const isIndex = path.basename(canonicalFile) === "index.html";
+      const isManifest = path.basename(canonicalFile) === "web-manifest.json";
       res.writeHead(200, {
         "Content-Type": contentType,
         "Content-Length": stat.size,
-        "Cache-Control": isIndex ? "no-store" : "public, max-age=31536000, immutable",
+        "Cache-Control": isIndex || isManifest ? "no-store" : "public, max-age=31536000, immutable",
       });
       if (headOnly) {
         res.end();

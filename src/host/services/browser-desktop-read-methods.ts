@@ -80,7 +80,7 @@ function toBrowserWorkspace(workspace: Workspace): Workspace {
   };
 }
 
-function toBrowserTask(task: Task): Task {
+export function toBrowserTask(task: Task): Task {
   if (typeof task.prompt !== "string" || task.prompt.length > 256 * 1024) {
     throw new WebApplicationError(
       "INVALID_REQUEST",

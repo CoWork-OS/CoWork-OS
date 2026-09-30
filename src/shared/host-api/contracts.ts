@@ -8,6 +8,8 @@ export const WEB_APP_PATH = "/app/" as const;
 export const WEB_API_PATH = "/api/web/v1" as const;
 export const WEB_WORKSPACE_FILE_DOWNLOAD_PATH = `${WEB_API_PATH}/workspace-files/download` as const;
 export const WEB_WORKSPACE_FILE_UPLOAD_PATH = `${WEB_API_PATH}/workspace-files/upload` as const;
+export const WEB_WORKSPACE_FILE_MEDIA_PATH_PREFIX =
+  `${WEB_API_PATH}/workspace-files/media/` as const;
 export const WEB_ARTIFACT_DOWNLOAD_PATH = `${WEB_API_PATH}/artifacts/download` as const;
 
 export const HOST_CAPABILITIES = [
@@ -26,6 +28,8 @@ export const HOST_CAPABILITIES = [
   "terminal.attach",
   "git.read",
   "git.write",
+  "notifications.read",
+  "notifications.manage",
   "providers.read",
   "providers.configure",
   "connectors.configure",
@@ -83,6 +87,7 @@ export interface WebSessionBootstrap {
 export const WEB_ERROR_CODES = [
   "UNAUTHENTICATED",
   "FORBIDDEN",
+  "NOT_FOUND",
   "UNSUPPORTED_CAPABILITY",
   "HOST_UNAVAILABLE",
   "STALE_HOST",

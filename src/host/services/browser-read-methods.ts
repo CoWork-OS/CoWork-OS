@@ -29,11 +29,10 @@ export function createDatabaseBrowserReadSources(
     listTasks: async ({ limit, offset, workspaceId }) => {
       if (workspaceId) {
         if (!(await readable(workspaceId))) return [];
-        return (await tasks.findByWorkspace(
+        return (await tasks.findSidebarSummaries(limit + 1, offset, {
           workspaceId,
-          limit + 1,
-          offset,
-        )) as unknown as RecordLike[];
+          includeArchivedSessions: false,
+        })) as unknown as RecordLike[];
       }
       // Filter before applying the browser's offset, preserving the repository's stable order.
       const ids = new Set((await workspaces.findAll()).map((row) => row.id));

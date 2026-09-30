@@ -8,6 +8,7 @@ import {
   HOST_CAPABILITIES,
   WEB_API_PATH,
   WEB_ARTIFACT_DOWNLOAD_PATH,
+  WEB_WORKSPACE_FILE_MEDIA_PATH_PREFIX,
   WEB_WORKSPACE_FILE_DOWNLOAD_PATH,
   WEB_WORKSPACE_FILE_UPLOAD_PATH,
   type HostCapabilities,
@@ -46,12 +47,17 @@ async function createHost(
     methods?: WebApplicationOptions["methods"];
     handleWorkspaceFileDownload?: WebApplicationOptions["handleWorkspaceFileDownload"];
     handleWorkspaceFileUpload?: WebApplicationOptions["handleWorkspaceFileUpload"];
+    handleWorkspaceFileMedia?: WebApplicationOptions["handleWorkspaceFileMedia"];
     handleArtifactDownload?: WebApplicationOptions["handleArtifactDownload"];
     onSessionRevoked?: WebApplicationOptions["onSessionRevoked"];
   } = {},
 ): Promise<TestHost> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-web-app-"));
   await fs.writeFile(path.join(directory, "index.html"), "<main>browser shell</main>");
+  await fs.writeFile(
+    path.join(directory, "web-manifest.json"),
+    JSON.stringify({ buildId: "build-one" }),
+  );
   await fs.mkdir(path.join(directory, "assets"));
   await fs.writeFile(path.join(directory, "assets", "app.js"), "globalThis.ready = true;");
 
@@ -86,6 +92,7 @@ async function createHost(
     },
     handleWorkspaceFileDownload: options.handleWorkspaceFileDownload,
     handleWorkspaceFileUpload: options.handleWorkspaceFileUpload,
+    handleWorkspaceFileMedia: options.handleWorkspaceFileMedia,
     handleArtifactDownload: options.handleArtifactDownload,
     onSessionRevoked: options.onSessionRevoked,
     pairingTtlMs: options.pairingTtlMs,
@@ -393,6 +400,62 @@ describe("WebApplication host core", () => {
     expect(download).toHaveBeenCalledTimes(1);
   });
 
+  it("authenticates same-origin video range requests without requiring Origin or CSRF", async () => {
+    const stream = vi.fn(async (_context, req: http.IncomingMessage, res: http.ServerResponse) => {
+      expect(req.headers.range).toBe("bytes=0-3");
+      res.writeHead(206, {
+        "Content-Range": "bytes 0-3/8",
+        "Content-Length": "4",
+        "Accept-Ranges": "bytes",
+      });
+      res.end("vide");
+      return true;
+    });
+    const host = await createHost({ handleWorkspaceFileMedia: stream });
+    const mediaPath = `${WEB_WORKSPACE_FILE_MEDIA_PATH_PREFIX}${"a".repeat(43)}`;
+    const noSession = await request(host, {
+      path: mediaPath,
+      headers: { Range: "bytes=0-3", "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(noSession.status).toBe(401);
+
+    const session = await pair(host);
+    const crossOrigin = await request(host, {
+      path: mediaPath,
+      headers: {
+        Origin: "http://hostile.invalid",
+        Cookie: session.cookie,
+        Range: "bytes=0-3",
+      },
+    });
+    expect(crossOrigin.status).toBe(403);
+    const crossSite = await request(host, {
+      path: mediaPath,
+      headers: {
+        Cookie: session.cookie,
+        Range: "bytes=0-3",
+        "Sec-Fetch-Site": "cross-site",
+      },
+    });
+    expect(crossSite.status).toBe(403);
+
+    const accepted = await request(host, {
+      path: mediaPath,
+      headers: {
+        Cookie: session.cookie,
+        Range: "bytes=0-3",
+        "Sec-Fetch-Site": "same-origin",
+      },
+    });
+    expect(accepted.status).toBe(206);
+    expect(accepted.body).toBe("vide");
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(stream.mock.calls[0]?.[0]).toMatchObject({
+      audience: "test-browser",
+      sessionId: expect.any(String),
+    });
+  });
+
   it("guards artifact streams and revokes their session handles on logout", async () => {
     const download = vi.fn(async (_context, _req, res: http.ServerResponse) => {
       res.writeHead(200, { "Content-Type": "application/octet-stream" });
@@ -450,11 +513,14 @@ describe("WebApplication host core", () => {
   it("serves the injected app with same-origin CSP and exposes only public bootstrap", async () => {
     const host = await createHost();
     const shell = await request(host, { path: "/app/" });
+    const manifest = await request(host, { path: "/app/web-manifest.json" });
     const asset = await request(host, { path: "/app/assets/app.js" });
     const bootstrap = await request(host, { path: `${WEB_API_PATH}/bootstrap` });
 
     expect(shell.status).toBe(200);
     expect(shell.body).toContain("browser shell");
+    expect(manifest.status).toBe(200);
+    expect(manifest.headers["cache-control"]).toBe("no-store");
     expect(shell.headers["content-security-policy"]).toContain(
       `connect-src 'self' ws://127.0.0.1:${host.port}`,
     );

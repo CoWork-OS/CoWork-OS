@@ -6,6 +6,33 @@ const mailbox = vi.hoisted(() => ({
     id: "thread",
     attachments: [{ name: "report.txt", localPath: "/private/report.txt" }],
   })),
+  getReplyTargets: vi.fn(async () => [
+    {
+      handleId: "handle-1",
+      channelType: "slack",
+      channelId: "channel-1",
+      chatId: "chat-1",
+      label: "Alex",
+    },
+  ]),
+  previewMissionControlHandoff: vi.fn(async () => ({ threadId: "thread" })),
+  listMissionControlHandoffs: vi.fn(async () => []),
+  updateCommitmentDetails: vi.fn(),
+  updateCommitmentState: vi.fn(),
+  generateDraft: vi.fn(),
+  reclassifyAccount: vi.fn(),
+  retryMailboxAction: vi.fn(),
+  extractMailboxAttachmentText: vi.fn(),
+  createMailboxRule: vi.fn(),
+  deleteMailboxRule: vi.fn(),
+  createMailboxSchedule: vi.fn(),
+  deleteMailboxSchedule: vi.fn(),
+  createMailboxForward: vi.fn(),
+  deleteMailboxForward: vi.fn(),
+  runMailboxForward: vi.fn(),
+  previewMailboxLabelSimilar: vi.fn(),
+  createMailboxSavedView: vi.fn(),
+  createMissionControlHandoff: vi.fn(),
   upsertMailboxSnippet: vi.fn(async (value: unknown) => value),
   applyAction: vi.fn(),
 }));
@@ -51,5 +78,64 @@ describe("browser mailbox adapter", () => {
     ).toThrow();
     expect(() => method.validateParams!({ args: [{ type: "archive" }] })).toThrow();
     expect(mailbox.applyAction).not.toHaveBeenCalled();
+  });
+
+  it("exposes the inbox actions that the shared renderer invokes", () => {
+    const definitions = createBrowserMailboxDefinitions({} as Database.Database, {
+      sendMessage: vi.fn(),
+    }).definitions;
+    for (const name of [
+      "previewMailboxMissionControlHandoff",
+      "listMailboxMissionControlHandoffs",
+      "createMailboxMissionControlHandoff",
+      "updateMailboxCommitmentDetails",
+      "updateMailboxCommitmentState",
+      "generateMailboxDraft",
+      "reclassifyMailboxAccount",
+      "retryMailboxAction",
+      "extractMailboxAttachmentText",
+      "replyViaChannel",
+      "createMailboxRule",
+      "deleteMailboxRule",
+      "createMailboxSchedule",
+      "deleteMailboxSchedule",
+      "createMailboxForward",
+      "deleteMailboxForward",
+      "runMailboxForward",
+      "previewMailboxSavedViewSimilar",
+      "createMailboxSavedView",
+    ]) {
+      expect(definitions[name], `${name} is missing`).toBeDefined();
+    }
+  });
+
+  it("sends a cross-channel reply only to the current matching reply target", async () => {
+    const sendMessage = vi.fn(async () => "message-1");
+    const service = new BrowserDesktopRpcService(
+      createBrowserMailboxDefinitions({} as Database.Database, { sendMessage }).definitions,
+    );
+    const method = service.methods()["desktop.replyViaChannel"];
+    const params = method.validateParams!({
+      args: [
+        {
+          threadId: "thread",
+          handleId: "handle-1",
+          channelType: "slack",
+          message: "Following up",
+          parseMode: "text",
+        },
+      ],
+    });
+    await method.handler(context, params);
+    expect(sendMessage).toHaveBeenCalledWith("slack", "chat-1", "Following up", {
+      channelDbId: "channel-1",
+      parseMode: "text",
+    });
+
+    mailbox.getReplyTargets.mockResolvedValueOnce([]);
+    await expect(
+      method.handler({ ...context, operationKey: "reply-stale-target" }, params),
+    ).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN" });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 });

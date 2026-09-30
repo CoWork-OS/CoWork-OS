@@ -84,6 +84,61 @@ function sources(overrides: Partial<BrowserTaskEventSources> = {}): BrowserTaskE
 }
 
 describe("browser task event methods", () => {
+  it.each(["llm_usage", "timeline_step_updated"])(
+    "preserves %s counters while redacting credential tokens on snapshot and replay",
+    async (type) => {
+      const usage = event(type, {
+        ...(type.startsWith("timeline_") ? { legacyType: "llm_usage" } : {}),
+        apiKey: "private-key",
+        totals: {
+          inputTokens: 126523,
+          outputTokens: 203,
+          totalTokens: 126726,
+          cost: 0,
+          accessToken: "private-token",
+        },
+        delta: { inputTokens: 28780, cachedTokens: 100, refreshToken: "private-refresh" },
+      });
+      const dependency = sources();
+      const snapshot = await dependency.findScopedTimelineSnapshot({
+        taskId: task.id,
+        workspaceId: workspace.id,
+        limit: 10,
+      });
+      if (snapshot.outcome !== "available") throw new Error("Unavailable fixture");
+      snapshot.page.events = [usage];
+      vi.mocked(dependency.findScopedTimelineSnapshot).mockResolvedValue(snapshot);
+      vi.mocked(dependency.findScopedMutationPage).mockResolvedValue({
+        outcome: "available",
+        page: {
+          outcome: "page",
+          taskId: task.id,
+          changes: [{ operation: "upsert", cursor: 8, event: usage }],
+          nextCursor: { taskId: task.id, position: 8 },
+          hasMore: false,
+        },
+      });
+      const methods = createBrowserTaskEventMethods(dependency);
+      const result = (await methods["task.events.snapshot"].handler(context, {
+        taskId: task.id,
+        workspaceId: workspace.id,
+        limit: 10,
+      })) as { events: TaskEvent[] };
+      const replay = (await methods["task.events.page"].handler(context, {
+        taskId: task.id,
+        workspaceId: workspace.id,
+        afterCursor: { taskId: task.id, position: 7 },
+      })) as { changes: Array<{ event: TaskEvent }> };
+      for (const projected of [result.events[0], replay.changes[0].event]) {
+        expect(projected.payload).toMatchObject({
+          totals: { inputTokens: 126523, outputTokens: 203, totalTokens: 126726 },
+          delta: { cachedTokens: 100 },
+        });
+        expect(JSON.stringify(projected)).not.toMatch(/private-key|private-token|private-refresh/);
+      }
+    },
+  );
+
   it("returns a bounded newest snapshot with safe event DTOs and a replay cursor", async () => {
     const unsafeEvents = [
       event("approval_requested", {

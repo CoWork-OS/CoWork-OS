@@ -1,0 +1,334 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CuratedMemoryService } from "../../../electron/memory/CuratedMemoryService";
+import { MemorySynthesizer } from "../../../electron/memory/MemorySynthesizer";
+import { MemoryWriteGate } from "../../../electron/memory/MemoryWriteGate";
+import { MemoryService } from "../../../electron/memory/MemoryService";
+import { MemoryObservationService } from "../../../electron/memory/MemoryObservationService";
+import { UserProfileService } from "../../../electron/memory/UserProfileService";
+import { ChronicleObservationRepository } from "../../../electron/chronicle/ChronicleObservationRepository";
+import type { Workspace } from "../../../shared/types";
+import { createBrowserMemoryDefinitions } from "../browser-memory-methods";
+
+const workspace = {
+  id: "workspace-one",
+  path: "/work/one",
+  permissions: { read: true, write: true, delete: true },
+} as Workspace;
+function setup(resolved: Workspace | null = workspace) {
+  const resolveWorkspace = vi.fn(async () => resolved);
+  const definitions = createBrowserMemoryDefinitions({ resolveWorkspace });
+  const call = async (name: string, args: unknown[] = []) => {
+    const method = definitions[name];
+    return method.handler(method.validate?.(args) ?? args, {} as never);
+  };
+  return { call, resolveWorkspace, definitions };
+}
+afterEach(() => vi.restoreAllMocks());
+
+describe("browser memory services", () => {
+  it("checks current workspace permission before reads, imports, edits and deletes", async () => {
+    const get = vi.spyOn(MemoryService, "getSettings");
+    const save = vi.spyOn(MemoryService, "updateSettings");
+    const remove = vi.spyOn(MemoryService, "deleteImportedEntry");
+    const imported = vi.spyOn(MemoryService, "importFromText");
+    const { call } = setup({
+      ...workspace,
+      permissions: { ...workspace.permissions, read: false },
+    });
+    for (const [name, args] of [
+      ["getMemorySettings", [workspace.id]],
+      ["saveMemorySettings", [{ workspaceId: workspace.id, settings: { enabled: false } }]],
+      ["deleteImportedMemoryEntry", [{ workspaceId: workspace.id, memoryId: "memory-one" }]],
+      [
+        "importMemoryFromText",
+        [{ workspaceId: workspace.id, provider: "QA", pastedText: "Disposable test memory." }],
+      ],
+    ] as Array<[string, unknown[]]>) {
+      await expect(call(name, args)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    }
+    expect(get).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(imported).not.toHaveBeenCalled();
+  });
+
+  it("requires delete authority independently from workspace write authority", async () => {
+    vi.spyOn(MemoryService, "updateSettings").mockResolvedValue(undefined);
+    const remove = vi.spyOn(MemoryService, "deleteImported");
+    const { call } = setup({
+      ...workspace,
+      permissions: { ...workspace.permissions, delete: false },
+    });
+    await expect(
+      call("saveMemorySettings", [{ workspaceId: workspace.id, settings: { retentionDays: 30 } }]),
+    ).resolves.toEqual({ success: true });
+    await expect(call("deleteImportedMemories", [workspace.id])).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("authorizes details and timeline by the stored memory workspace", async () => {
+    vi.spyOn(MemoryService, "getFullDetails").mockResolvedValue([
+      { id: "memory-one", workspaceId: "private-workspace" },
+    ] as never);
+    const timeline = vi.spyOn(MemoryService, "getTimelineContext");
+    const { call, resolveWorkspace } = setup(null);
+    await expect(call("getMemoryDetails", [["memory-one"]])).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(call("getMemoryTimeline", [{ memoryId: "memory-one" }])).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(resolveWorkspace).toHaveBeenCalledWith("private-workspace");
+    expect(timeline).not.toHaveBeenCalled();
+  });
+
+  it("rejects unbounded pages and settings identifiers before touching services", async () => {
+    const imported = vi.spyOn(MemoryService, "findImported");
+    const settings = vi.spyOn(MemoryService, "updateSettings");
+    const { call } = setup();
+    await expect(
+      call("findImportedMemories", [{ workspaceId: workspace.id, limit: 201 }]),
+    ).rejects.toThrow();
+    await expect(
+      call("saveMemorySettings", [
+        { workspaceId: workspace.id, settings: { workspaceId: "other-workspace" } },
+      ]),
+    ).rejects.toThrow();
+    expect(imported).not.toHaveBeenCalled();
+    expect(settings).not.toHaveBeenCalled();
+  });
+
+  it("passes paginated reads and does not turn service failures into empty results", async () => {
+    const imported = vi.spyOn(MemoryService, "findImported").mockResolvedValue([]);
+    vi.spyOn(MemoryService, "getStats").mockRejectedValue(new Error("Memory storage unavailable"));
+    const { call } = setup();
+    await call("findImportedMemories", [{ workspaceId: workspace.id, limit: 20, offset: 40 }]);
+    expect(imported).toHaveBeenCalledWith(workspace.id, 20, 40);
+    await expect(call("getMemoryStats", [workspace.id])).rejects.toThrow(
+      "Memory storage unavailable",
+    );
+  });
+
+  it("restricts observation edits to the requested authorized workspace", async () => {
+    const update = vi.spyOn(MemoryObservationService, "update").mockResolvedValue(null as never);
+    const { call, definitions } = setup();
+    await call("updateMemoryObservation", [
+      { workspaceId: workspace.id, memoryId: "memory-one", patch: { privacyState: "suppressed" } },
+    ]);
+    expect(update).toHaveBeenCalledWith(workspace.id, "memory-one", { privacyState: "suppressed" });
+    expect(definitions.updateMemoryObservation.mutation).toBe(true);
+  });
+
+  it("returns a Chronicle display DTO without local asset or file paths", async () => {
+    vi.spyOn(ChronicleObservationRepository, "list").mockResolvedValue([
+      {
+        id: "observation",
+        appName: "QA",
+        capturedAt: 1,
+        windowTitle: "Disposable",
+        imagePath: "/private/image.png",
+        workspaceId: workspace.id,
+      },
+    ] as never);
+    const { call } = setup();
+    const result = await call("listChronicleObservations", [{ workspaceId: workspace.id }]);
+    expect(JSON.stringify(result)).not.toContain("/private");
+    expect(result).toEqual([expect.objectContaining({ id: "observation", appName: "QA" })]);
+  });
+
+  it("allows manual profile edits and rejects forged task/source attribution", async () => {
+    const add = vi
+      .spyOn(UserProfileService, "addFact")
+      .mockReturnValue({ id: "fact-one" } as never);
+    const { call } = setup();
+    await call("addUserFact", [
+      { category: "preference", value: "Disposable QA preference", source: "manual" },
+    ]);
+    expect(add).toHaveBeenCalledWith({
+      category: "preference",
+      value: "Disposable QA preference",
+      source: "manual",
+    });
+    await expect(
+      call("addUserFact", [
+        { category: "preference", value: "QA", source: "conversation", taskId: "other-task" },
+      ]),
+    ).rejects.toThrow();
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+  it("authorizes approval records using their stored workspace and returns only display DTOs", async () => {
+    const pending = {
+      id: "pending-one",
+      workspaceId: workspace.id,
+      target: "archive",
+      action: "capture",
+      payload: {},
+    } as never;
+    vi.spyOn(MemoryWriteGate, "findPending").mockResolvedValue(pending);
+    const display = vi
+      .spyOn(MemoryWriteGate, "findPendingForDisplay")
+      .mockResolvedValue({ id: "pending-one", payload: { apiKey: "[redacted]" } } as never);
+    const apply = vi
+      .spyOn(MemoryWriteGate, "applyPending")
+      .mockResolvedValue({ status: "applied" } as never);
+    const reject = vi
+      .spyOn(MemoryWriteGate, "rejectForDisplay")
+      .mockResolvedValue({ status: "rejected" } as never);
+    const { call } = setup();
+    await expect(call("getMemoryWriteApproval", ["pending-one"])).resolves.toMatchObject({
+      payload: { apiKey: "[redacted]" },
+    });
+    expect(display).toHaveBeenCalledWith("pending-one");
+    await expect(
+      call("approveMemoryWriteApproval", [{ id: "pending-one", workspaceId: "wrong-workspace" }]),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(apply).not.toHaveBeenCalled();
+    await call("approveMemoryWriteApproval", [{ id: "pending-one", workspaceId: workspace.id }]);
+    expect(apply).toHaveBeenCalledWith("pending-one", {
+      workspaceId: workspace.id,
+      reviewedBy: "user",
+      effectiveWorkspace: workspace,
+    });
+    await call("rejectMemoryWriteApproval", [
+      { id: "pending-one", workspaceId: workspace.id, reason: "Disposable rejection" },
+    ]);
+    expect(reject).toHaveBeenCalledWith("pending-one", {
+      workspaceId: workspace.id,
+      reviewedBy: "user",
+      resolution: "Disposable rejection",
+    });
+    const denied = setup({ ...workspace, permissions: { ...workspace.permissions, write: false } });
+    await expect(
+      denied.call("approveMemoryWriteApproval", [{ id: "pending-one", workspaceId: workspace.id }]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires delete authority for removal approvals and automatic network access for external writes", async () => {
+    const find = vi.spyOn(MemoryWriteGate, "findPending");
+    const apply = vi.spyOn(MemoryWriteGate, "applyPending");
+    const { call } = setup({
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        delete: false,
+        network: true,
+        accessNetworkMode: "on-request",
+      },
+    });
+    find.mockResolvedValue({
+      workspaceId: workspace.id,
+      target: "curated",
+      action: "curate",
+      payload: { action: "remove" },
+    } as never);
+    await expect(
+      call("approveMemoryWriteApproval", [{ id: "remove-one", workspaceId: workspace.id }]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    find.mockResolvedValue({
+      workspaceId: workspace.id,
+      target: "external",
+      action: "remember",
+      payload: {},
+    } as never);
+    await expect(
+      call("approveMemoryWriteApproval", [{ id: "external-one", workspaceId: workspace.id }]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("keeps approval lists bounded and propagates read failures", async () => {
+    const list = vi
+      .spyOn(MemoryWriteGate, "listPendingForDisplay")
+      .mockRejectedValue(new Error("Unavailable approval storage"));
+    const { call } = setup();
+    await expect(
+      call("listMemoryWriteApprovals", [{ workspaceId: workspace.id, limit: 201 }]),
+    ).rejects.toThrow();
+    expect(list).not.toHaveBeenCalled();
+    await expect(
+      call("listMemoryWriteApprovals", [{ workspaceId: workspace.id, limit: 50 }]),
+    ).rejects.toThrow("Unavailable approval storage");
+    expect(list).toHaveBeenCalledWith(workspace.id, 50);
+  });
+  it("promotes only an observation in the authorized workspace with filesystem policy guards", async () => {
+    const details = vi
+      .spyOn(MemoryObservationService, "details")
+      .mockResolvedValue([
+        { workspaceId: workspace.id, taskId: "task-one", title: "Disposable promoted fact" },
+      ] as never);
+    const curate = vi.spyOn(CuratedMemoryService, "curate").mockResolvedValue({ success: true });
+    const { call } = setup();
+    await call("promoteMemoryObservation", [
+      { workspaceId: workspace.id, memoryId: "observation-one" },
+    ]);
+    expect(curate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: workspace.id,
+        taskId: "task-one",
+        content: "Disposable promoted fact",
+        target: "workspace",
+        action: "add",
+        filesystemReadGuard: expect.any(Function),
+        filesystemWriteGuard: expect.any(Function),
+      }),
+    );
+    details.mockResolvedValue([
+      { workspaceId: "another-workspace", title: "Private other workspace" },
+    ] as never);
+    await expect(
+      call("promoteMemoryObservation", [
+        { workspaceId: workspace.id, memoryId: "other-observation" },
+      ]),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(curate).toHaveBeenCalledTimes(1);
+    details.mockResolvedValue([{ workspaceId: workspace.id, title: "Disposable fact" }] as never);
+    curate.mockResolvedValue({ success: false, error: "File policy denied" });
+    await expect(
+      call("promoteMemoryObservation", [
+        { workspaceId: workspace.id, memoryId: "observation-one" },
+      ]),
+    ).rejects.toMatchObject({ code: "CONFLICT", message: "File policy denied" });
+    const readonly = setup({
+      ...workspace,
+      permissions: { ...workspace.permissions, write: false },
+    });
+    await expect(
+      readonly.call("promoteMemoryObservation", [
+        { workspaceId: workspace.id, memoryId: "observation-one" },
+      ]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("builds a guarded layer preview from the authorized recent task and propagates failures", async () => {
+    const prefetch = vi.spyOn(MemorySynthesizer, "prefetchBoxBrainHits").mockResolvedValue([]);
+    const preview = vi
+      .spyOn(MemorySynthesizer, "buildLayerPreview")
+      .mockResolvedValue({ workspaceId: workspace.id, layers: [] } as never);
+    const definitions = createBrowserMemoryDefinitions({
+      resolveWorkspace: async () => workspace,
+      getRecentTask: async () => ({
+        prompt: "Disposable recent task",
+        assignedAgentRoleId: "role-one",
+      }),
+    });
+    await definitions.getMemoryLayerPreview.handler([workspace.id], {} as never);
+    expect(prefetch).toHaveBeenCalledWith(workspace.id, "Disposable recent task");
+    expect(preview).toHaveBeenCalledWith(
+      workspace.id,
+      workspace.path,
+      "Disposable recent task",
+      expect.objectContaining({
+        tokenBudget: 1800,
+        agentRoleId: "role-one",
+        boxBrainHits: [],
+        filesystemReadGuard: expect.any(Function),
+      }),
+    );
+    preview.mockRejectedValue(new Error("Layer storage unavailable"));
+    await expect(
+      definitions.getMemoryLayerPreview.handler([workspace.id], {} as never),
+    ).rejects.toThrow("Layer storage unavailable");
+  });
+});

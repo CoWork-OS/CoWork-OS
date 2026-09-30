@@ -6753,6 +6753,8 @@ export interface ElectronAPI {
   // Google Workspace Settings
   getGoogleWorkspaceSettings: () => Promise<{
     enabled: boolean;
+    /** Browser hosts return only this presence flag and never expose OAuth tokens. */
+    credentialsConfigured?: boolean;
     clientId?: string;
     clientSecret?: string;
     builtinOAuthClientAvailable?: boolean;
@@ -7785,7 +7787,7 @@ export interface ElectronAPI {
     memoryId: string;
     target?: "user" | "workspace";
     kind?: string;
-  }) => Promise<{ success: boolean; error?: string }>;
+  }) => Promise<{ success: boolean; error?: string; staged?: boolean; pendingId?: string }>;
   rebuildMemoryObservationMetadata: (data?: {
     force?: boolean;
   }) => Promise<MemoryObservationBackfillStatus>;

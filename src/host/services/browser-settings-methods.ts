@@ -1,3 +1,4 @@
+import { createHmac, randomBytes } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { z } from "zod";
@@ -7,20 +8,112 @@ import { testJevProvider } from "../../electron/agent/jev";
 import { buildSavedLLMSettings } from "../../electron/ipc/llm-settings-save";
 import {
   JevTestProviderRequestSchema,
+  GuardrailSettingsSchema,
+  PermissionSettingsSchema,
   LLMSettingsSchema,
   PersonalityConfigV2Schema,
 } from "../../electron/utils/validation";
 import { MCPSettingsManager } from "../../electron/mcp/settings";
 import { PermissionSettingsManager } from "../../electron/security/permission-settings-manager";
+import { approvalPromptsDisabled } from "../../electron/agent/approval-policy";
+import { GuardrailManager } from "../../electron/guardrails/guardrail-manager";
+import { BuiltinToolsSettingsManager } from "../../electron/agent/tools/builtin-settings";
+import { loadPolicies } from "../../electron/admin/policies";
 import { PersonalityManager } from "../../electron/settings/personality-manager";
+import { GoogleWorkspaceSettingsManager } from "../../electron/settings/google-workspace-manager";
+import { RelationshipMemoryService } from "../../electron/memory/RelationshipMemoryService";
+import { UserProfileService } from "../../electron/memory/UserProfileService";
 import { isBlockedInternalHost, normalizeHostname } from "../../electron/security/address-classes";
 import { LLM_PROVIDER_TYPES, type LLMSettingsData } from "../../shared/types";
 import type { BrowserDesktopDefinitions } from "./browser-desktop-rpc";
 import { WebApplicationError } from "../web/WebApplication";
 
 const LLMProviderTypeSchema = z.enum(LLM_PROVIDER_TYPES);
+const ProviderSettingsRevisionSchema = z.string().min(32).max(128);
+const LLMSettingsPathSchema = z
+  .array(z.string().min(1).max(200))
+  .min(1)
+  .max(16)
+  .refine((path) =>
+    path.every((segment) => !["__proto__", "prototype", "constructor"].includes(segment)),
+  );
+const LLMSettingsPatchSchema = z
+  .object({
+    set: z
+      .array(
+        z
+          .object({
+            path: LLMSettingsPathSchema,
+            value: z.unknown().refine((value) => value !== undefined),
+          })
+          .strict(),
+      )
+      .max(2048),
+    remove: z.array(LLMSettingsPathSchema).max(2048),
+    replaceSecrets: z
+      .array(
+        z
+          .object({ path: LLMSettingsPathSchema, value: z.string().trim().min(1).max(16_384) })
+          .strict(),
+      )
+      .max(512),
+  })
+  .strict();
 const NonEmptyString = z.string().trim().min(1).max(500);
 const OptionalString = z.string().max(4000).optional();
+const ToolPriority = z.enum(["high", "normal", "low"]);
+const ToolCategory = z
+  .object({
+    enabled: z.boolean(),
+    priority: ToolPriority,
+    description: z.string().max(2000).optional(),
+  })
+  .strict();
+const ToolName = z.string().regex(/^[A-Za-z0-9_.:-]{1,200}$/);
+const BuiltinToolsSchema = z
+  .object({
+    version: z.string().min(1).max(20),
+    categories: z
+      .object(
+        Object.fromEntries(
+          [
+            "code",
+            "webfetch",
+            "browser",
+            "search",
+            "system",
+            "file",
+            "skill",
+            "shell",
+            "image",
+            "chronicle",
+            "computer_use",
+          ].map((name) => [name, ToolCategory]),
+        ),
+      )
+      .strict(),
+    toolOverrides: z.record(
+      ToolName,
+      z.object({ enabled: z.boolean(), priority: ToolPriority.optional() }).strict(),
+    ),
+    toolTimeouts: z.record(ToolName, z.number().int().min(1000).max(3_600_000)),
+    toolAutoApprove: z.record(ToolName, z.boolean()),
+    runCommandApprovalMode: z.enum(["per_command", "single_bundle"]),
+    codexRuntimeMode: z.enum(["native", "acpx"]),
+    computerUseAutomation: z
+      .object({
+        browserAutomationMode: z.enum(["background", "visible", "ask"]),
+        nativeComputerUseMode: z.enum(["background_first", "ask_visible", "visible"]),
+      })
+      .strict(),
+  })
+  .strict()
+  .refine((value) =>
+    [value.toolOverrides, value.toolTimeouts, value.toolAutoApprove].every(
+      (map) => Object.keys(map).length <= 500,
+    ),
+  );
+const providerSettingsRevisionKey = randomBytes(32);
 const PersonalitySettingsSchema = z.object({
   activePersonality: z
     .enum(["professional", "friendly", "concise", "creative", "technical", "casual", "custom"])
@@ -271,6 +364,54 @@ function parsePositional<T extends z.ZodTypeAny>(
   });
 }
 
+function stableSettingsSnapshot(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableSettingsSnapshot);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, stableSettingsSnapshot(entry)]),
+  );
+}
+
+function getProviderSettingsRevision(settings: unknown): string {
+  // Discovery updates derived catalog data, not the editable provider configuration.
+  // Preserve conflicts for credentials/model choices while allowing refresh → save.
+  const configuration = isRecord(settings)
+    ? Object.fromEntries(
+        Object.entries(settings)
+          .filter(([key]) => !/^cached[A-Z].*Models$/.test(key))
+          .map(([key, value]) => [
+            key,
+            key === "customProviders" && isRecord(value)
+              ? Object.fromEntries(
+                  Object.entries(value).map(([provider, config]) => [
+                    provider,
+                    isRecord(config)
+                      ? Object.fromEntries(
+                          Object.entries(config).filter(([field]) => field !== "cachedModels"),
+                        )
+                      : config,
+                  ]),
+                )
+              : value,
+          ]),
+      )
+    : settings;
+  return createHmac("sha256", providerSettingsRevisionKey)
+    .update(JSON.stringify(stableSettingsSnapshot(configuration)) ?? "null")
+    .digest("base64url");
+}
+
+function assertProviderSettingsRevision(expected: string, current: unknown): void {
+  if (expected === getProviderSettingsRevision(current)) return;
+  throw new WebApplicationError(
+    "CONFLICT",
+    "Provider settings changed after this page loaded. Reload AI & Models to review the latest values, then reapply your changes.",
+    409,
+  );
+}
+
 function define(
   handler: (args: unknown[]) => unknown | Promise<unknown>,
   options: {
@@ -327,6 +468,116 @@ function secretAwareMerge(incoming: unknown, existing: unknown): unknown {
     result[key] = secretAwareMerge(value, oldRecord[key]);
   }
   return result;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSecretConfiguredMarker(key: string): boolean {
+  return key.endsWith("Configured") && SECRET_KEY.test(key.slice(0, -"Configured".length));
+}
+
+function rejectProtectedSettingsValue(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) rejectProtectedSettingsValue(entry);
+    return;
+  }
+  if (!isRecord(value)) return;
+  for (const [key, entry] of Object.entries(value)) {
+    if (
+      HOST_ONLY_OAUTH_KEYS.has(key) ||
+      isSecretConfiguredMarker(key) ||
+      (key !== "clearApiKey" && SECRET_KEY.test(key))
+    ) {
+      return invalid("Provider credentials must use the protected replacement field.");
+    }
+    rejectProtectedSettingsValue(entry);
+  }
+}
+
+function validateSettingsPatchPath(
+  path: string[],
+  kind: "field" | "remove" | "secret",
+  value?: unknown,
+): void {
+  if (path.some((segment) => HOST_ONLY_OAUTH_KEYS.has(segment))) {
+    return invalid("Host-managed OAuth credentials cannot be changed from the browser.");
+  }
+  const field = path[path.length - 1] ?? "";
+  if (isSecretConfiguredMarker(field)) {
+    return invalid("Credential presence flags are read-only.");
+  }
+  if (kind === "secret") {
+    if (field === "clearApiKey" || !SECRET_KEY.test(field)) {
+      return invalid("The protected replacement path is not a provider credential field.");
+    }
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return invalid("A provider credential replacement must not be blank.");
+    }
+    return;
+  }
+  if (kind === "field" && field === "clearApiKey") {
+    if (typeof value !== "boolean") return invalid("The credential clear action must be boolean.");
+    return;
+  }
+  if (SECRET_KEY.test(field)) {
+    return invalid("Provider credentials must use the protected replacement field.");
+  }
+  if (kind === "field") rejectProtectedSettingsValue(value);
+}
+
+function applySettingsPath(
+  target: Record<string, unknown>,
+  path: string[],
+  operation: "set" | "remove",
+  value?: unknown,
+): void {
+  let parent = target;
+  for (const segment of path.slice(0, -1)) {
+    const next = parent[segment];
+    if (next === undefined) {
+      if (operation === "remove") return;
+      parent[segment] = {};
+    } else if (!isRecord(next)) {
+      return invalid("Provider settings field path is invalid.");
+    }
+    parent = parent[segment] as Record<string, unknown>;
+  }
+  const field = path[path.length - 1];
+  if (operation === "remove") delete parent[field];
+  else parent[field] = value;
+}
+
+function applyProviderSettingsPatch(
+  current: LLMSettingsData,
+  patch: z.infer<typeof LLMSettingsPatchSchema>,
+): LLMSettingsData {
+  const next = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
+  const touchedPaths = new Set<string>();
+  const recordPath = (path: string[]) => {
+    const key = JSON.stringify(path);
+    if (touchedPaths.has(key)) return invalid("Provider settings patch repeats a field path.");
+    touchedPaths.add(key);
+  };
+
+  for (const change of patch.set) {
+    validateSettingsPatchPath(change.path, "field", change.value);
+    recordPath(change.path);
+    applySettingsPath(next, change.path, "set", change.value);
+  }
+  for (const path of patch.remove) {
+    validateSettingsPatchPath(path, "remove");
+    recordPath(path);
+    applySettingsPath(next, path, "remove");
+  }
+  for (const change of patch.replaceSecrets) {
+    validateSettingsPatchPath(change.path, "secret", change.value);
+    recordPath(change.path);
+    applySettingsPath(next, change.path, "set", change.value.trim());
+  }
+
+  return next as unknown as LLMSettingsData;
 }
 
 function gatherKnownSecrets(value: unknown, found = new Set<string>()): Set<string> {
@@ -503,15 +754,146 @@ function modelArgs(keySchema = OptionalString, urlSchema = OptionalString) {
   return (args: unknown[]) => parsePositional([keySchema, urlSchema], args, 2);
 }
 
-export function createBrowserSettingsDefinitions(): BrowserDesktopDefinitions {
+export function createBrowserSettingsDefinitions(
+  options: {
+    refreshAccessProfiles?: () => void;
+  } = {},
+): BrowserDesktopDefinitions {
   const definitions: BrowserDesktopDefinitions = {
+    getBuiltinToolsSettings: define(() => BuiltinToolsSettingsManager.loadSettings(), {
+      capability: "agents.manage",
+      minArgs: 0,
+      maxArgs: 0,
+    }),
+    getBuiltinToolsCategories: define(() => BuiltinToolsSettingsManager.getToolsByCategory(), {
+      capability: "agents.manage",
+      minArgs: 0,
+      maxArgs: 0,
+    }),
+    saveBuiltinToolsSettings: define(
+      (args) => {
+        BuiltinToolsSettingsManager.saveSettings(args[0] as never);
+        BuiltinToolsSettingsManager.clearCache();
+        return { success: true };
+      },
+      {
+        capability: "agents.manage",
+        mutation: true,
+        minArgs: 1,
+        maxArgs: 1,
+        validate: (args) => parseArgs(BuiltinToolsSchema, args),
+      },
+    ),
+    getGuardrailSettings: define(() => GuardrailManager.loadSettings(), {
+      capability: "agents.manage",
+      minArgs: 0,
+      maxArgs: 0,
+    }),
+    getGuardrailDefaults: define(() => GuardrailManager.getDefaults(), {
+      capability: "agents.manage",
+      minArgs: 0,
+      maxArgs: 0,
+    }),
+    saveGuardrailSettings: define(
+      (args) => {
+        GuardrailManager.saveSettings(args[0] as never);
+        GuardrailManager.clearCache();
+        return { success: true };
+      },
+      {
+        capability: "agents.manage",
+        mutation: true,
+        minArgs: 1,
+        maxArgs: 1,
+        validate: (args) => parseArgs(GuardrailSettingsSchema.strict(), args),
+      },
+    ),
+    savePermissionSettings: define(
+      (args) => {
+        PermissionSettingsManager.saveSettings(args[0] as never);
+        PermissionSettingsManager.clearCache();
+        options.refreshAccessProfiles?.();
+        return { success: true };
+      },
+      {
+        capability: "agents.manage",
+        mutation: true,
+        minArgs: 1,
+        maxArgs: 1,
+        validate: (args) => parseArgs(PermissionSettingsSchema.strict(), args),
+      },
+    ),
+    getPermissionRuntimeInfo: define(
+      () => ({ approvalPromptsEnabled: !approvalPromptsDisabled() }),
+      { capability: "agents.manage", minArgs: 0, maxArgs: 0 },
+    ),
+    getAdminPolicies: define(() => redactSecrets(loadPolicies()), {
+      capability: "agents.manage",
+      minArgs: 0,
+      maxArgs: 0,
+    }),
+    getUserProfile: define(() => UserProfileService.getProfile(), {
+      capability: "agents.manage",
+      minArgs: 0,
+      maxArgs: 0,
+    }),
+    getOpenCommitments: define(
+      (args) =>
+        RelationshipMemoryService.listOpenCommitments((args[0] as number | undefined) ?? 25),
+      {
+        capability: "agents.manage",
+        minArgs: 0,
+        maxArgs: 1,
+        validate: (args) => parseArgs(z.number().int().min(1).max(200).optional(), args, true),
+      },
+    ),
+    // A compact signal lets browser subscribers refresh name/personality context
+    // without repeatedly transferring a potentially large custom prompt.
+    getPersonalitySettingsChangeSignal: define(
+      () => {
+        const settings = PersonalityManager.loadSettings();
+        return {
+          agentName: settings.agentName,
+          activePersonality: settings.activePersonality,
+          activePersona: settings.activePersona,
+          responseStyle: settings.responseStyle,
+          relationshipUserName: settings.relationship?.userName,
+        };
+      },
+      {
+        capability: "agents.manage",
+        minArgs: 0,
+        maxArgs: 0,
+      },
+    ),
+    getGoogleWorkspaceSettings: define(
+      () => {
+        const settings = GoogleWorkspaceSettingsManager.loadSettings();
+        return {
+          enabled: settings.enabled === true,
+          credentialsConfigured: Boolean(settings.accessToken || settings.refreshToken),
+          scopes: Array.isArray(settings.scopes) ? settings.scopes.slice(0, 100) : null,
+        };
+      },
+      {
+        capability: "providers.read",
+        minArgs: 0,
+        maxArgs: 0,
+      },
+    ),
     getLLMConfigStatus: define(() => redactSecrets(LLMProviderFactory.getConfigStatus()), {
       capability: "providers.read",
       minArgs: 0,
       maxArgs: 0,
     }),
     getLLMSettings: define(
-      () => redactSecrets(redactSettingsUrlQueries(LLMProviderFactory.loadSettings())),
+      () => {
+        const settings = LLMProviderFactory.loadSettings();
+        return {
+          settings: redactSecrets(redactSettingsUrlQueries(settings)),
+          revision: getProviderSettingsRevision(settings),
+        };
+      },
       {
         capability: "providers.read",
         minArgs: 0,
@@ -536,27 +918,38 @@ export function createBrowserSettingsDefinitions(): BrowserDesktopDefinitions {
     ),
     saveLLMSettings: define(
       async (args) => {
-        const incoming = LLMSettingsSchema.parse(args[0]) as LLMSettingsData;
-        await validateSettingsUrls(incoming as unknown as Record<string, unknown>);
+        const patch = LLMSettingsPatchSchema.parse(args[0]);
         const existing = LLMProviderFactory.loadSettings();
-        const restoredUrls = restoreSettingsUrlQueryCredentials(incoming, existing);
-        const mergedInput = secretAwareMerge(restoredUrls, existing) as LLMSettingsData;
-        const merged = buildSavedLLMSettings(mergedInput, existing as unknown as LLMSettingsData);
+        assertProviderSettingsRevision(args[1] as string, existing);
+        const browserVisibleCandidate = applyProviderSettingsPatch(
+          redactSettingsUrlQueries(existing),
+          patch,
+        );
+        await validateSettingsUrls(browserVisibleCandidate as unknown as Record<string, unknown>);
+        const patched = applyProviderSettingsPatch(existing as LLMSettingsData, patch);
+        const restoredUrls = restoreSettingsUrlQueryCredentials(patched, existing);
+        const validated = LLMSettingsSchema.parse(restoredUrls) as LLMSettingsData;
+        const merged = buildSavedLLMSettings(validated, existing as unknown as LLMSettingsData);
         LLMProviderFactory.saveSettings(merged as never);
-        return { success: true };
+        return {
+          success: true,
+          revision: getProviderSettingsRevision(LLMProviderFactory.loadSettings()),
+        };
       },
       {
         capability: "providers.configure",
         mutation: true,
-        minArgs: 1,
-        maxArgs: 1,
-        validate: (args) => parseArgs(LLMSettingsSchema, args),
+        minArgs: 2,
+        maxArgs: 2,
+        validate: (args) =>
+          parsePositional([LLMSettingsPatchSchema, ProviderSettingsRevisionSchema], args),
       },
     ),
     resetLLMProviderCredentials: define(
       (args) => {
         const providerType = args[0] as (typeof LLM_PROVIDER_TYPES)[number];
         const settings = LLMProviderFactory.loadSettings();
+        assertProviderSettingsRevision(args[1] as string, settings);
         const next = { ...settings };
         switch (providerType) {
           case "anthropic":
@@ -646,14 +1039,18 @@ export function createBrowserSettingsDefinitions(): BrowserDesktopDefinitions {
         }
         LLMProviderFactory.saveSettings(next);
         LLMProviderFactory.clearCache();
-        return { success: true };
+        return {
+          success: true,
+          revision: getProviderSettingsRevision(LLMProviderFactory.loadSettings()),
+        };
       },
       {
         capability: "providers.configure",
         mutation: true,
-        minArgs: 1,
-        maxArgs: 1,
-        validate: (args) => parseArgs(LLMProviderTypeSchema, args),
+        minArgs: 2,
+        maxArgs: 2,
+        validate: (args) =>
+          parsePositional([LLMProviderTypeSchema, ProviderSettingsRevisionSchema], args),
       },
     ),
     setLLMModel: define(
@@ -666,6 +1063,7 @@ export function createBrowserSettingsDefinitions(): BrowserDesktopDefinitions {
               reasoningEffort?: string;
             };
         const settings = LLMProviderFactory.loadSettings();
+        assertProviderSettingsRevision(args[1] as string, settings);
         const modelKey =
           typeof selection === "string" ? selection.trim() : selection.modelKey.trim();
         const providerType =
@@ -681,14 +1079,18 @@ export function createBrowserSettingsDefinitions(): BrowserDesktopDefinitions {
           );
         }
         LLMProviderFactory.saveSettings(updated);
-        return { success: true };
+        return {
+          success: true,
+          revision: getProviderSettingsRevision(LLMProviderFactory.loadSettings()),
+        };
       },
       {
         capability: "providers.configure",
         mutation: true,
-        minArgs: 1,
-        maxArgs: 1,
-        validate: (args) => parseArgs(ModelSelectionSchema, args),
+        minArgs: 2,
+        maxArgs: 2,
+        validate: (args) =>
+          parsePositional([ModelSelectionSchema, ProviderSettingsRevisionSchema], args),
       },
     ),
     getAnthropicModels: define(
@@ -1235,19 +1637,7 @@ export function createBrowserSettingsDefinitions(): BrowserDesktopDefinitions {
     getPermissionSettings: define(
       () => {
         const settings = PermissionSettingsManager.loadSettings();
-        return {
-          defaultAccessProfileId: settings.defaultAccessProfileId,
-          accessProfiles: (settings.accessProfiles || []).map((profile) => ({
-            id: profile.id,
-            label: profile.label,
-            description: profile.description,
-            sandbox: profile.sandbox,
-            approval: profile.approval,
-            reviewer: profile.reviewer,
-            network: profile.network,
-            extends: profile.extends,
-          })),
-        };
+        return redactSecrets(settings);
       },
       { capability: "agents.manage", minArgs: 0, maxArgs: 0 },
     ),

@@ -818,8 +818,9 @@ describe("BrowserWorkspaceFiles", () => {
   it("registers only metadata listing in generic RPC and uses a fixed download route", async () => {
     const files = createService();
     const methods = createBrowserWorkspaceFileMethods(files);
-    expect(Object.keys(methods)).toEqual(["workspace.files.list"]);
+    expect(Object.keys(methods)).toEqual(["workspace.files.list", "workspace.file.media.create"]);
     expect(methods["workspace.files.list"].capability).toBe("files.read");
+    expect(methods["workspace.file.media.create"].capability).toBe("files.read");
 
     const server = await startDownloadServer(files);
     try {
@@ -835,6 +836,84 @@ describe("BrowserWorkspaceFiles", () => {
       expect(response.headers.get("content-disposition")).toBeNull();
     } finally {
       await closeServer(server.server);
+    }
+  });
+
+  it("streams repeatable, bounded video byte ranges through a session-bound handle", async () => {
+    const video = Buffer.concat([
+      Buffer.from([0, 0, 0, 24]),
+      Buffer.from("ftypisom"),
+      Buffer.alloc(12, 7),
+    ]);
+    await fs.writeFile(path.join(workspaceRoot, "demo.mp4"), video);
+    const files = createService();
+    const media = await files.createMediaHandle(context, {
+      workspaceId: workspace.id,
+      relativePath: "demo.mp4",
+    });
+    expect(media).toMatchObject({
+      fileName: "demo.mp4",
+      mimeType: "video/mp4",
+      size: video.length,
+    });
+
+    const server = await startDownloadServer(files);
+    const mediaUrl = `${server.url}/api/web/v1/workspace-files/media/${media.handle}`;
+    try {
+      const firstRange = await fetch(mediaUrl, { headers: { Range: "bytes=0-7" } });
+      expect(firstRange.status).toBe(206);
+      expect(firstRange.headers.get("content-range")).toBe(`bytes 0-7/${video.length}`);
+      expect(firstRange.headers.get("content-type")).toBe("video/mp4");
+      expect(Buffer.from(await firstRange.arrayBuffer())).toEqual(video.subarray(0, 8));
+
+      const suffixRange = await fetch(mediaUrl, { headers: { Range: "bytes=-4" } });
+      expect(suffixRange.status).toBe(206);
+      expect(suffixRange.headers.get("content-range")).toBe(
+        `bytes ${video.length - 4}-${video.length - 1}/${video.length}`,
+      );
+      expect(Buffer.from(await suffixRange.arrayBuffer())).toEqual(video.subarray(-4));
+
+      const head = await fetch(mediaUrl, { method: "HEAD" });
+      expect(head.status).toBe(200);
+      expect(head.headers.get("content-length")).toBe(String(video.length));
+      expect(await head.text()).toBe("");
+
+      const invalidRange = await fetch(mediaUrl, { headers: { Range: "bytes=999-1000" } });
+      expect(invalidRange.status).toBe(416);
+      expect(invalidRange.headers.get("content-range")).toBe(`bytes */${video.length}`);
+    } finally {
+      await closeServer(server.server);
+      files.dispose();
+    }
+  });
+
+  it("rechecks permissions and file identity before every video range", async () => {
+    const videoPath = path.join(workspaceRoot, "restricted.mp4");
+    const video = Buffer.concat([
+      Buffer.from([0, 0, 0, 24]),
+      Buffer.from("ftypisom"),
+      Buffer.alloc(12),
+    ]);
+    await fs.writeFile(videoPath, video);
+    const files = createService();
+    const media = await files.createMediaHandle(context, {
+      workspaceId: workspace.id,
+      relativePath: "restricted.mp4",
+    });
+    const server = await startDownloadServer(files);
+    const mediaUrl = `${server.url}/api/web/v1/workspace-files/media/${media.handle}`;
+    try {
+      workspace.permissions.accessFilesystemRules = [{ path: "restricted.mp4", access: "deny" }];
+      const denied = await fetch(mediaUrl, { headers: { Range: "bytes=0-3" } });
+      expect(denied.status).toBe(404);
+
+      workspace.permissions.accessFilesystemRules = [];
+      await fs.writeFile(videoPath, Buffer.concat([video, Buffer.from("changed")]));
+      const replaced = await fetch(mediaUrl, { headers: { Range: "bytes=0-3" } });
+      expect(replaced.status).toBe(404);
+    } finally {
+      await closeServer(server.server);
+      files.dispose();
     }
   });
 
@@ -889,6 +968,9 @@ async function startDownloadServer(files: BrowserWorkspaceFiles): Promise<{
       .handleUploadRequest(context, req, res)
       .then((uploadHandled) =>
         uploadHandled ? true : files.handleDownloadRequest(context, req, res),
+      )
+      .then((downloadHandled) =>
+        downloadHandled ? true : files.handleMediaRequest(context, req, res),
       )
       .then((handled) => {
         if (!handled && !res.writableEnded) {

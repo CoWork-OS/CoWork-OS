@@ -2087,6 +2087,12 @@ export class AgentDaemon extends EventEmitter {
     // and response handlers can safely resolve the persisted request.
     await this.reconcileDurableWaitsOnStartup();
 
+    // A follow-up can be journaled before an idle executor changes a terminal
+    // task back to executing. If the host exits in that short admission window,
+    // recover the durable queued/started receipt instead of leaving it attached
+    // to a task that startup would otherwise treat as finished.
+    this.recoverUnstartedUserFollowUpsOnStartup();
+
     // Recover stale retry tasks that were incorrectly persisted as executing.
     // These should re-enter the queue on startup so retries can continue.
     const staleTransientRetryTasks = this.taskRepo
@@ -3003,6 +3009,47 @@ export class AgentDaemon extends EventEmitter {
     if (/^heartbeat:/i.test(title)) return false;
     if (/^routine prep:/i.test(title)) return false;
     return true;
+  }
+
+  private recoverUnstartedUserFollowUpsOnStartup(): void {
+    const candidates = this.taskRepo.findByStatus([
+      "paused",
+      "blocked",
+      "completed",
+      "failed",
+      "cancelled",
+    ]);
+    let recoveredCount = 0;
+    for (const task of candidates) {
+      if (!this.shouldResumeTaskOnStartup(task)) continue;
+
+      const latestReceipts = new Map<string, Record<string, unknown>>();
+      for (const event of readDurableTaskEvents(this, task.id, "user_message")) {
+        const payload = event.payload as Record<string, unknown> | undefined;
+        const messageId = typeof payload?.messageId === "string" ? payload.messageId.trim() : "";
+        if (messageId && payload?.deliveryMode === "follow_up") {
+          latestReceipts.set(messageId, payload);
+        }
+      }
+      const hasUnstartedFollowUp = Array.from(latestReceipts.values()).some((payload) => {
+        const status = payload.deliveryStatus ?? payload.status;
+        return status === "queued" || status === "started";
+      });
+      if (!hasUnstartedFollowUp) continue;
+
+      this.taskRepo.update(task.id, {
+        status: "interrupted",
+        error: "A queued follow-up was interrupted by application restart; resuming it now.",
+      });
+      this.logEvent(task.id, "task_interrupted", {
+        message: "A queued follow-up was interrupted by application restart. The task will resume.",
+        reason: "user_follow_up_recovered_after_restart",
+      });
+      recoveredCount += 1;
+    }
+    if (recoveredCount > 0) {
+      log.info(`[AgentDaemon] Recovering ${recoveredCount} task(s) with queued follow-ups`);
+    }
   }
 
   private skipStartupResume(task: Task): void {
@@ -16773,10 +16820,45 @@ export class AgentDaemon extends EventEmitter {
             : followUp.deliveryMode === "follow_up" && followUpMessageId
               ? this.getQueuedUserFollowUpDeliveryStatus(taskId, followUpMessageId)
               : undefined;
-        const providerDispatchPending =
+        let providerDispatchPending =
           followUp.deliveryMode === "follow_up" &&
           followUpMessageId.length > 0 &&
           this.isQueuedUserFollowUpProviderDispatchRecoverable(taskId, followUpMessageId);
+        if (
+          followUp.deliveryMode === "follow_up" &&
+          followUpMessageId &&
+          queuedDeliveryStatus === "started" &&
+          !providerDispatchPending &&
+          runtime?.isFollowUpMessageConsumed?.(followUpMessageId)
+        ) {
+          // The transcript snapshot commits before the started receipt advances
+          // to accepted. A crash in that boundary leaves the message consumed
+          // but no provider dispatch marker. Promote the receipt to accepted /
+          // pending so recovery dispatches the existing transcript exactly once
+          // through the normal follow-up recovery path.
+          try {
+            if (!(await this.markQueuedUserFollowUpAccepted(taskId, followUpMessageId))) {
+              throw new Error(`Follow-up ${followUpMessageId} could not recover its receipt.`);
+            }
+            providerDispatchPending = this.isQueuedUserFollowUpProviderDispatchRecoverable(
+              taskId,
+              followUpMessageId,
+            );
+            if (!providerDispatchPending) {
+              throw new Error(
+                `Follow-up ${followUpMessageId} was not marked for provider recovery.`,
+              );
+            }
+          } catch (error) {
+            runtime?.requeueFollowUpAtTurnBoundary?.(followUp);
+            this.logEvent(taskId, "error", {
+              message: "Queued follow-up acceptance recovery failed",
+              error: String(error),
+              messageId: followUpMessageId,
+            });
+            break;
+          }
+        }
         if (
           queuedDeliveryStatus === "delivered" ||
           (followUp.deliveryMode === "follow_up" &&

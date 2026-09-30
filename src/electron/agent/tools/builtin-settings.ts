@@ -333,7 +333,9 @@ export class BuiltinToolsSettingsManager {
         const settings = JSON.parse(data) as BuiltinToolsSettings;
         const merged = this.mergeWithDefaults(settings);
 
-        repository.save("builtintools", merged);
+        if (!repository.save("builtintools", merged)) {
+          throw new Error("Built-in tool settings migration could not be saved.");
+        }
         log.info("Settings migrated to encrypted database");
 
         // Migration successful - delete backup and original
@@ -391,7 +393,9 @@ export class BuiltinToolsSettingsManager {
       }
 
       const repository = SecureSettingsRepository.getInstance();
-      repository.save("builtintools", settings);
+      if (!repository.save("builtintools", settings)) {
+        throw new Error("Built-in tool settings could not be saved.");
+      }
       this.cachedSettings = settings;
       log.info("Settings saved to encrypted database");
     } catch (error) {

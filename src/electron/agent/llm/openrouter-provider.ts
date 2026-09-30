@@ -228,7 +228,7 @@ export class OpenRouterProvider implements LLMProvider {
 
       if (!response.ok) {
         const errorData = (await response.json().catch(() => ({}))) as {
-          error?: { message?: string };
+          error?: { message?: string; metadata?: { raw?: string } };
         };
         const providerError = errorData.error?.message;
         return {
@@ -236,7 +236,15 @@ export class OpenRouterProvider implements LLMProvider {
           error:
             providerError && /missing authentication header/i.test(providerError)
               ? OPENROUTER_AUTH_ERROR_MESSAGE
-              : providerError || `HTTP ${response.status}: ${response.statusText}`,
+              : `HTTP ${response.status}: ${providerError || response.statusText}${
+                  typeof errorData.error?.metadata?.raw === "string" && errorData.error.metadata.raw
+                    ? ` — ${errorData.error.metadata.raw
+                        .split(this.apiKey)
+                        .join("[redacted]")
+                        .replace(/\s+/g, " ")
+                        .slice(0, 500)}`
+                    : ""
+                }`,
         };
       }
 

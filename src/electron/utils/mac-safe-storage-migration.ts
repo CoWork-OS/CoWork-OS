@@ -277,7 +277,7 @@ export async function migrateLegacyMacSafeStorageSettings(options: {
 export async function migrateLegacyMacSafeStorageChannels(options: {
   platform: NodeJS.Platform;
   database: ChannelMigrationDatabase;
-  safeStorage: SafeStorageLike;
+  safeStorage: SafeStorageLike | null;
   executable: string;
   appPath: string;
   logger: MigrationLogger;
@@ -285,7 +285,14 @@ export async function migrateLegacyMacSafeStorageChannels(options: {
   spawnProcess?: SpawnProcess;
   env?: NodeJS.ProcessEnv;
 }): Promise<number> {
-  if (options.platform !== "darwin" || !options.safeStorage.isEncryptionAvailable()) return 0;
+  if (
+    options.platform !== "darwin" ||
+    !options.safeStorage ||
+    !options.safeStorage.isEncryptionAvailable()
+  ) {
+    return 0;
+  }
+  const safeStorage = options.safeStorage;
 
   const rows = (
     options.database.prepare("SELECT id, config FROM channels WHERE config LIKE 'enc:%'") as {
@@ -296,7 +303,7 @@ export async function migrateLegacyMacSafeStorageChannels(options: {
 
   const canDecryptWithCurrentIdentity = (config: string): boolean => {
     try {
-      options.safeStorage.decryptString(Buffer.from(config.slice("enc:".length), "base64"));
+      safeStorage.decryptString(Buffer.from(config.slice("enc:".length), "base64"));
       return true;
     } catch {
       return false;
@@ -348,7 +355,7 @@ export async function migrateLegacyMacSafeStorageChannels(options: {
       if (!config || typeof config !== "object" || Array.isArray(config)) continue;
 
       try {
-        const currentCiphertext = options.safeStorage
+        const currentCiphertext = safeStorage
           .encryptString(JSON.stringify(config))
           .toString("base64");
         const result = update.run(`enc:${currentCiphertext}`, Date.now(), row.id, row.config);

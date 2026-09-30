@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import { MailboxService, getMailboxServiceInstance } from "../../electron/mailbox/MailboxService";
+import type { ChannelGateway } from "../../electron/gateway";
 import type { BrowserDesktopDefinitions } from "./browser-desktop-rpc";
 
 const id = z.string().trim().min(1).max(200);
@@ -63,8 +64,115 @@ const threadQuery = z
   .strict()
   .optional();
 
+const cronSchedule = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("at"), atMs: z.number().int().positive() }).strict(),
+  z
+    .object({
+      kind: z.literal("every"),
+      everyMs: z.number().int().positive(),
+      anchorMs: z.number().int().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("cron"),
+      expr: z.string().trim().min(1).max(200),
+      tz: z.string().max(100).optional(),
+    })
+    .strict(),
+]);
+const mailboxConditionOperator = z.enum([
+  "equals",
+  "not_equals",
+  "contains",
+  "not_contains",
+  "matches",
+  "starts_with",
+  "ends_with",
+  "gt",
+  "lt",
+]);
+const commitmentState = z.enum(["suggested", "accepted", "done", "dismissed"]);
+const mailboxDraftOptions = z
+  .object({
+    tone: z.enum(["concise", "warm", "direct", "executive"]).optional(),
+    includeAvailability: z.boolean().optional(),
+    allowNoreplySender: z.boolean().optional(),
+  })
+  .strict();
+const mailboxRuleRecipe = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    description: z.string().max(4000).optional(),
+    workspaceId: id.optional(),
+    threadId: id.optional(),
+    source: z.literal("mailbox_event").optional(),
+    conditions: z
+      .array(
+        z
+          .object({
+            field: z.string().trim().min(1).max(100),
+            operator: mailboxConditionOperator,
+            value: z.string().max(4000),
+          })
+          .strict(),
+      )
+      .max(50),
+    conditionLogic: z.enum(["all", "any"]).optional(),
+    actionType: z.enum(["create_task", "wake_agent"]),
+    actionTitle: z.string().max(500).optional(),
+    actionPrompt: z.string().max(100_000),
+    agentRoleId: id.optional(),
+    cooldownMs: z.number().int().min(0).max(31_536_000_000).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+const mailboxScheduleRecipe = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    description: z.string().max(4000).optional(),
+    workspaceId: id.optional(),
+    threadId: id.optional(),
+    kind: z.enum(["rule", "schedule", "reminder", "forward"]).optional(),
+    schedule: cronSchedule,
+    taskTitle: z.string().trim().min(1).max(500),
+    taskPrompt: z.string().max(100_000),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+const mailboxForwardRecipe = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    description: z.string().max(4000).optional(),
+    workspaceId: id.optional(),
+    threadId: id.optional(),
+    providerThreadId: z.string().max(1000).optional(),
+    schedule: cronSchedule,
+    targetEmail: z.string().trim().email().max(320),
+    allowedSenders: z.array(z.string().trim().email().max(320)).max(100),
+    allowedDomains: z.array(z.string().trim().min(1).max(253)).max(100),
+    excludedSenders: z.array(z.string().trim().email().max(320)).max(100).optional(),
+    excludedDomains: z.array(z.string().trim().min(1).max(253)).max(100).optional(),
+    subjectKeywords: z.array(z.string().max(500)).max(100).optional(),
+    attachmentKeywords: z.array(z.string().max(500)).max(100).optional(),
+    attachmentExtensions: z.array(z.string().max(32)).max(50).optional(),
+    dryRun: z.boolean().optional(),
+    maxMessagesPerRun: z.number().int().min(1).max(1000).optional(),
+    backfillDays: z.number().int().min(0).max(3650).optional(),
+    lookbackMinutes: z.number().int().min(0).max(525_600).optional(),
+    gmailQuery: z.string().max(4000).optional(),
+    forwardedLabelName: z.string().max(200).optional(),
+    rejectedLabelName: z.string().max(200).optional(),
+    candidateLabelName: z.string().max(200).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
 /** Mailbox records stay in the active host profile; browser input cannot name host files. */
-export function createBrowserMailboxDefinitions(db: Database.Database): {
+export function createBrowserMailboxDefinitions(
+  db: Database.Database,
+  channelGateway?: Pick<ChannelGateway, "sendMessage">,
+): {
   definitions: BrowserDesktopDefinitions;
   dispose: () => void;
 } {
@@ -241,6 +349,189 @@ export function createBrowserMailboxDefinitions(db: Database.Database): {
     ([request]) => mailbox.applyAction(request),
     true,
   );
+  add("previewMailboxMissionControlHandoff", oneId, ([threadId]) =>
+    mailbox.previewMissionControlHandoff(threadId),
+  );
+  add("listMailboxMissionControlHandoffs", oneId, ([threadId]) =>
+    mailbox.listMissionControlHandoffs(threadId),
+  );
+  add(
+    "createMailboxMissionControlHandoff",
+    z.tuple([
+      z
+        .object({
+          threadId: id,
+          companyId: id,
+          operatorRoleId: id,
+          issueTitle: z.string().trim().min(1).max(500),
+          issueSummary: z.string().max(20_000).optional(),
+        })
+        .strict(),
+    ]),
+    ([request]) => mailbox.createMissionControlHandoff(request),
+    true,
+  );
+  add(
+    "updateMailboxCommitmentDetails",
+    z.tuple([
+      id,
+      z
+        .object({
+          title: z.string().max(1000).optional(),
+          dueAt: z.number().int().positive().nullable().optional(),
+          ownerEmail: z.string().max(320).nullable().optional(),
+          state: commitmentState.optional(),
+          sourceExcerpt: z.string().max(20_000).nullable().optional(),
+        })
+        .strict(),
+    ]),
+    ([commitmentId, patch]) => mailbox.updateCommitmentDetails(commitmentId, patch),
+    true,
+  );
+  add(
+    "updateMailboxCommitmentState",
+    z.tuple([id, commitmentState]),
+    ([commitmentId, state]) => mailbox.updateCommitmentState(commitmentId, state),
+    true,
+  );
+  add(
+    "generateMailboxDraft",
+    z
+      .array(z.unknown())
+      .min(1)
+      .max(2)
+      .transform((args): [string, z.infer<typeof mailboxDraftOptions> | undefined] => [
+        id.parse(args[0]),
+        mailboxDraftOptions.optional().parse(args[1]),
+      ]),
+    ([threadId, options]) => mailbox.generateDraft(threadId, options),
+    true,
+  );
+  add(
+    "reclassifyMailboxAccount",
+    z.tuple([
+      z
+        .object({
+          accountId: id.optional(),
+          threadId: id.optional(),
+          scope: z.enum(["thread", "account", "backfill"]).optional(),
+          limit: z.number().int().min(1).max(500).optional(),
+        })
+        .strict()
+        .refine((request) => Boolean(request.accountId), "An account is required"),
+    ]),
+    ([request]) => mailbox.reclassifyAccount(request),
+    true,
+  );
+  add("retryMailboxAction", oneId, ([actionId]) => mailbox.retryMailboxAction(actionId), true);
+  add(
+    "extractMailboxAttachmentText",
+    oneId,
+    ([attachmentId]) => mailbox.extractMailboxAttachmentText(attachmentId),
+    true,
+  );
+  add(
+    "createMailboxRule",
+    z.tuple([mailboxRuleRecipe]),
+    ([recipe]) => mailbox.createMailboxRule(recipe),
+    true,
+  );
+  add(
+    "deleteMailboxRule",
+    oneId,
+    ([automationId]) => mailbox.deleteMailboxRule(automationId),
+    true,
+  );
+  add(
+    "createMailboxSchedule",
+    z.tuple([mailboxScheduleRecipe]),
+    ([recipe]) => mailbox.createMailboxSchedule(recipe),
+    true,
+  );
+  add(
+    "deleteMailboxSchedule",
+    oneId,
+    ([automationId]) => mailbox.deleteMailboxSchedule(automationId),
+    true,
+  );
+  add(
+    "createMailboxForward",
+    z.tuple([mailboxForwardRecipe]),
+    ([recipe]) => mailbox.createMailboxForward(recipe),
+    true,
+  );
+  add(
+    "deleteMailboxForward",
+    oneId,
+    ([automationId]) => mailbox.deleteMailboxForward(automationId),
+    true,
+  );
+  add(
+    "runMailboxForward",
+    oneId,
+    ([automationId]) => mailbox.runMailboxForward(automationId),
+    true,
+  );
+  add(
+    "previewMailboxSavedViewSimilar",
+    z.tuple([
+      z
+        .object({
+          seedThreadId: id,
+          name: z.string().max(200),
+          instructions: z.string().max(4000),
+        })
+        .strict(),
+    ]),
+    ([request]) => mailbox.previewMailboxLabelSimilar(request),
+    true,
+  );
+  add(
+    "createMailboxSavedView",
+    z.tuple([
+      z
+        .object({
+          name: z.string().trim().min(1).max(200),
+          instructions: z.string().trim().min(1).max(4000),
+          seedThreadId: id.optional(),
+          threadIds: z.array(id).max(500),
+          showInInbox: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    ([request]) => mailbox.createMailboxSavedView(request),
+    true,
+  );
+  if (channelGateway) {
+    add(
+      "replyViaChannel",
+      z.tuple([
+        z
+          .object({
+            threadId: id,
+            handleId: id,
+            channelType: z.enum(["slack", "teams", "whatsapp", "signal", "imessage"]),
+            message: z.string().trim().min(1).max(100_000),
+            parseMode: z.enum(["text", "markdown"]).optional(),
+          })
+          .strict(),
+      ]),
+      async ([request]) => {
+        const target = (await mailbox.getReplyTargets(request.threadId)).find(
+          (candidate) => candidate.handleId === request.handleId,
+        );
+        if (!target || target.channelType !== request.channelType) {
+          throw new Error("The selected reply target is no longer available.");
+        }
+        await channelGateway.sendMessage(target.channelType, target.chatId, request.message, {
+          channelDbId: target.channelId,
+          parseMode: request.parseMode ?? "text",
+        });
+        return { ok: true, target };
+      },
+      true,
+    );
+  }
   return {
     definitions,
     dispose: () => {

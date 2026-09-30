@@ -1,5 +1,4 @@
 import { randomUUID } from "crypto";
-import { protocol } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { Readable } from "stream";
@@ -24,6 +23,10 @@ type MediaTokenRecord = {
 };
 
 const mediaTokenStore = new Map<string, MediaTokenRecord>();
+
+function getElectronProtocol(): typeof import("electron").protocol {
+  return require("electron").protocol as typeof import("electron").protocol;
+}
 
 function purgeExpiredTokens(now = Date.now()): void {
   for (const [token, record] of mediaTokenStore.entries()) {
@@ -95,7 +98,7 @@ function parseRangeHeader(
 }
 
 export function registerMediaScheme(): void {
-  protocol.registerSchemesAsPrivileged([
+  getElectronProtocol().registerSchemesAsPrivileged([
     {
       scheme: MEDIA_SCHEME,
       privileges: {
@@ -163,7 +166,7 @@ function createTokenizedMediaUrl(params: {
 }
 
 export function registerMediaProtocol(): void {
-  protocol.handle(MEDIA_SCHEME, async (request) => {
+  getElectronProtocol().handle(MEDIA_SCHEME, async (request) => {
     purgeExpiredTokens();
 
     let token = "";

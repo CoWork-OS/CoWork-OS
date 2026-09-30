@@ -183,6 +183,40 @@ describe("TaskExecutor queued follow-up acceptance", () => {
     });
   });
 
+  it("marks an ordinary recovered follow-up accepted only after the transcript snapshot", async () => {
+    const harness = createAcceptanceHarness([true, true]);
+    const { executor, runtime, message, callOrder, snapshots } = harness;
+    const followUp = { ...message, deliveryMode: "follow_up" };
+    executor.task = { id: "task-1" };
+    runtime.state.queues.pendingFollowUps[0] = followUp;
+    executor.daemon = {
+      markQueuedUserFollowUpAccepted: vi.fn(async () => {
+        callOrder.push("receipt-accepted");
+        expect(runtime.state.queues.pendingFollowUps).toEqual([followUp]);
+        expect(runtime.state.queues.consumedFollowUpMessageIds).toContain(message.messageId);
+        expect(snapshots[0]).toMatchObject({
+          pending: [followUp],
+          consumed: [message.messageId],
+        });
+        return true;
+      }),
+    };
+
+    await (TaskExecutor.prototype as Any).acceptQueuedFollowUpAfterSnapshot.call(
+      executor,
+      followUp,
+      runtime.state.transcript.conversationHistory,
+    );
+
+    expect(executor.daemon.markQueuedUserFollowUpAccepted).toHaveBeenCalledWith(
+      "task-1",
+      message.messageId,
+    );
+    expect(callOrder.indexOf("snapshot")).toBeLessThan(callOrder.indexOf("receipt-accepted"));
+    expect(callOrder.indexOf("receipt-accepted")).toBeLessThan(callOrder.indexOf("remove-pending"));
+    expect(runtime.state.queues.pendingFollowUps).toEqual([]);
+  });
+
   it("retries an accepted receipt under the mutex without replaying the provider turn", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     const onAccepted = vi.fn(async () => undefined);

@@ -5312,6 +5312,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveWebAccessSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_SAVE_SETTINGS, settings),
   getWebAccessStatus: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_GET_STATUS),
+  createWebAccessPairingCode: () => ipcRenderer.invoke(IPC_CHANNELS.WEBACCESS_CREATE_PAIRING_CODE),
 
   // Playwright QA APIs
   qaGetRuns: () => ipcRenderer.invoke(IPC_CHANNELS.QA_GET_RUNS),
@@ -6752,6 +6753,8 @@ export interface ElectronAPI {
   // Google Workspace Settings
   getGoogleWorkspaceSettings: () => Promise<{
     enabled: boolean;
+    /** Browser hosts return only this presence flag and never expose OAuth tokens. */
+    credentialsConfigured?: boolean;
     clientId?: string;
     clientSecret?: string;
     builtinOAuthClientAvailable?: boolean;
@@ -7784,7 +7787,7 @@ export interface ElectronAPI {
     memoryId: string;
     target?: "user" | "workspace";
     kind?: string;
-  }) => Promise<{ success: boolean; error?: string }>;
+  }) => Promise<{ success: boolean; error?: string; staged?: boolean; pendingId?: string }>;
   rebuildMemoryObservationMetadata: (data?: {
     force?: boolean;
   }) => Promise<MemoryObservationBackfillStatus>;

@@ -29,6 +29,10 @@ export interface CalmTopBarProps {
     activeWorkspaceId?: string;
     onSelect: (workspace: Workspace) => void;
     onNewFolder: () => void;
+    /** Explains why the native folder picker is unavailable in this host. */
+    onNewFolderDisabledReason?: string;
+    /** Browser workspaces must not disclose the server's filesystem paths. */
+    showWorkspacePaths?: boolean;
     /** Called when the menu opens, to refresh the recent folders list. */
     onOpen?: () => void;
   };
@@ -45,12 +49,18 @@ export interface CalmTopBarProps {
 
 export type CalmFolderMenuProps = CalmTopBarProps["scope"];
 
+export function getFolderActionAvailability(scope: CalmFolderMenuProps) {
+  const reason = scope.onNewFolderDisabledReason?.trim() || null;
+  return { available: reason === null, reason };
+}
+
 /** Folder picker (recent folders + "Work in another folder…"). */
 export function CalmFolderMenu({ scope }: { scope: CalmFolderMenuProps }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismissable(ref, open, close);
+  const newFolderAvailability = getFolderActionAvailability(scope);
 
   return (
     <div className="calm-menu" ref={ref}>
@@ -91,7 +101,9 @@ export function CalmFolderMenu({ scope }: { scope: CalmFolderMenuProps }) {
                     >
                       <span className="calm-popover-item-copy">
                         <span className="calm-popover-item-title">{workspace.name}</span>
-                        <span className="calm-popover-item-desc">{workspace.path}</span>
+                        {scope.showWorkspacePaths !== false && (
+                          <span className="calm-popover-item-desc">{workspace.path}</span>
+                        )}
                       </span>
                       {active && <Check size={15} aria-hidden="true" />}
                     </button>
@@ -104,13 +116,25 @@ export function CalmFolderMenu({ scope }: { scope: CalmFolderMenuProps }) {
           <button
             type="button"
             className="calm-popover-item calm-popover-footer-item"
+            disabled={!newFolderAvailability.available}
+            title={newFolderAvailability.reason || undefined}
+            aria-describedby={
+              newFolderAvailability.reason ? "calm-folder-picker-unavailable" : undefined
+            }
             onClick={() => {
               close();
               scope.onNewFolder();
             }}
           >
             <FolderPlus size={15} aria-hidden="true" />
-            <span className="calm-popover-item-title">Work in another folder…</span>
+            <span className="calm-popover-item-copy">
+              <span className="calm-popover-item-title">Work in another folder…</span>
+              {newFolderAvailability.reason && (
+                <span id="calm-folder-picker-unavailable" className="calm-popover-item-desc">
+                  {newFolderAvailability.reason}
+                </span>
+              )}
+            </span>
           </button>
         </div>
       )}

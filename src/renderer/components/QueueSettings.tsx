@@ -9,6 +9,9 @@ export function QueueSettings() {
   const [settings, setSettings] = useState<QueueSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -17,12 +20,13 @@ export function QueueSettings() {
   const loadSettings = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const loaded = await window.electronAPI.getQueueSettings();
       setSettings(loaded);
     } catch (error) {
       console.error("Failed to load queue settings:", error);
-      // Fall back to defaults if loading fails
-      setSettings(DEFAULT_QUEUE_SETTINGS);
+      setSettings(null);
+      setLoadError(error instanceof Error ? error.message : "Queue settings could not be loaded.");
     } finally {
       setLoading(false);
     }
@@ -32,20 +36,44 @@ export function QueueSettings() {
     if (!settings) return;
     try {
       setSaving(true);
-      await window.electronAPI.saveQueueSettings(settings);
+      setSaveError(null);
+      setSaved(false);
+      const result = await window.electronAPI.saveQueueSettings(settings);
+      if (!result?.success) throw new Error("The host did not confirm the queue settings save.");
+      const confirmed = await window.electronAPI.getQueueSettings();
+      if (
+        confirmed.maxConcurrentTasks !== settings.maxConcurrentTasks ||
+        confirmed.taskTimeoutMinutes !== settings.taskTimeoutMinutes
+      ) {
+        throw new Error("The saved queue settings did not match the values you entered.");
+      }
+      setSettings(confirmed);
+      setSaved(true);
     } catch (error) {
       console.error("Failed to save queue settings:", error);
+      setSaveError(error instanceof Error ? error.message : "Queue settings could not be saved.");
     } finally {
       setSaving(false);
     }
   };
 
   const handleReset = () => {
-    setSettings(DEFAULT_QUEUE_SETTINGS);
+    setSettings({ ...DEFAULT_QUEUE_SETTINGS });
+    setSaveError(null);
+    setSaved(false);
   };
 
-  if (loading || !settings) {
+  if (loading) {
     return <div className="settings-loading">Loading queue settings...</div>;
+  }
+
+  if (!settings) {
+    return (
+      <QueueSettingsLoadFailure
+        message={loadError || "Queue settings could not be loaded."}
+        onRetry={() => void loadSettings()}
+      />
+    );
   }
 
   const timeoutHours = Math.max(1, Math.round(settings.taskTimeoutMinutes / 60));
@@ -69,9 +97,12 @@ export function QueueSettings() {
               min={1}
               max={20}
               value={settings.maxConcurrentTasks}
-              onChange={(e) =>
-                setSettings({ ...settings, maxConcurrentTasks: parseInt(e.target.value) })
-              }
+              disabled={saving}
+              onChange={(e) => {
+                setSaved(false);
+                setSaveError(null);
+                setSettings({ ...settings, maxConcurrentTasks: parseInt(e.target.value) });
+              }}
             />
             <span className="slider-value">{settings.maxConcurrentTasks}</span>
           </div>
@@ -99,15 +130,18 @@ export function QueueSettings() {
               min={1}
               max={24}
               value={timeoutHours}
-              onChange={(e) =>
+              disabled={saving}
+              onChange={(e) => {
+                setSaved(false);
+                setSaveError(null);
                 setSettings({
                   ...settings,
                   taskTimeoutMinutes: Math.min(
                     MAX_QUEUE_TASK_TIMEOUT_MINUTES,
                     parseInt(e.target.value) * 60,
                   ),
-                })
-              }
+                });
+              }}
             />
             <span className="slider-value">
               {timeoutHours} {timeoutHours === 1 ? "hour" : "hours"}
@@ -161,6 +195,46 @@ export function QueueSettings() {
           {saving ? "Saving..." : "Save Settings"}
         </button>
       </div>
+      {(saveError || saved) && <QueueSettingsSaveFeedback error={saveError} saved={saved} />}
     </>
   );
+}
+
+export function QueueSettingsLoadFailure({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="settings-section" role="alert">
+      <p className="settings-error">Could not load queue settings: {message}</p>
+      <button className="button-secondary" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
+export function QueueSettingsSaveFeedback({
+  error,
+  saved,
+}: {
+  error: string | null;
+  saved: boolean;
+}) {
+  if (error)
+    return (
+      <p role="alert" className="settings-error">
+        {error}
+      </p>
+    );
+  if (saved)
+    return (
+      <p role="status" className="settings-description">
+        Queue settings saved.
+      </p>
+    );
+  return null;
 }

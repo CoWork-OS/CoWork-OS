@@ -27,6 +27,7 @@ export interface WebAccessRoute {
 
 export interface WebAccessStatus {
   running: boolean;
+  browserApplication: boolean;
   url?: string;
   port?: number;
   connectedClients: number;

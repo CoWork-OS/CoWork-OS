@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Check, ChevronDown, Copy, UserPlus, Users } from "lucide-react";
 import type { SessionHumanRole, SessionShareSnapshot, Task } from "../../shared/types";
 import { hasSharedSessionActivity } from "../utils/session-sidebar-visibility";
+import { hasHostMethod } from "../host/browser-capabilities";
 
 interface SessionMembersCardProps {
   task?: Task;
@@ -38,7 +39,7 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
   useEffect(() => {
     let cancelled = false;
     if (task?.id && loadedTaskId !== task.id) setLoadedTaskId(undefined);
-    if (!task?.id || !window.electronAPI?.getSessionMembers) {
+    if (!task?.id || !hasHostMethod("getSessionMembers")) {
       setSnapshot(undefined);
       return;
     }
@@ -66,7 +67,7 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
     setExpanded(false);
   }, [task?.id]);
 
-  if (!task) return null;
+  if (!task || !hasHostMethod("getSessionMembers")) return null;
   if (loadedTaskId !== task.id) return null;
 
   const sharedSessionActive = snapshot ? hasSharedSessionActivity(snapshot) : false;

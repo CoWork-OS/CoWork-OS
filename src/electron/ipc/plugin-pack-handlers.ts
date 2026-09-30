@@ -5,6 +5,7 @@ import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { MCPSettingsManager } from "../mcp/settings";
 import { getCustomSkillLoader } from "../agent/custom-skill-loader";
 import { isPackAllowed, isPackRequired, loadPoliciesStrict } from "../admin/policies";
+import { getPluginPackToggleService } from "../extensions/plugin-pack-toggle-service";
 
 /**
  * Serializable pack data sent to the renderer
@@ -160,6 +161,7 @@ function resolveConnectorIcon(server: { id: string; name: string }): string {
  */
 export function setupPluginPackHandlers(): void {
   const registry = PluginRegistry.getInstance();
+  const packToggleService = getPluginPackToggleService(registry);
   const ensureRegistryInitialized = async (): Promise<void> => {
     await registry.initialize();
   };
@@ -200,7 +202,7 @@ export function setupPluginPackHandlers(): void {
           color: r.color,
         })),
         state: blocked ? "disabled" : p.state,
-        enabled: blocked ? false : p.state !== "disabled",
+        enabled: !blocked && (p.state === "registered" || p.state === "active"),
         policyBlocked: blocked,
         policyRequired: required,
         securityReport: p.securityReport,
@@ -247,7 +249,7 @@ export function setupPluginPackHandlers(): void {
         color: r.color,
       })),
       state: blocked ? "disabled" : plugin.state,
-      enabled: blocked ? false : plugin.state !== "disabled",
+      enabled: !blocked && (plugin.state === "registered" || plugin.state === "active"),
       policyBlocked: blocked,
       policyRequired: required,
       securityReport: plugin.securityReport,
@@ -256,101 +258,14 @@ export function setupPluginPackHandlers(): void {
 
   // Toggle a plugin pack on/off
   ipcMain.handle(IPC_CHANNELS.PLUGIN_PACK_TOGGLE, async (_, name: string, enabled: boolean) => {
-    await ensureRegistryInitialized();
-    if (!name || typeof name !== "string") {
-      throw new Error("Pack name is required");
-    }
-    const policies = loadPoliciesStrict();
-    if (!policies) {
-      throw new Error("Admin policies failed to load; refusing to change plugin pack state");
-    }
-    // Policy enforcement
-    if (!isPackAllowed(name, policies)) {
-      throw new Error(`Pack "${name}" is blocked by admin policy`);
-    }
-    if (!enabled && isPackRequired(name, policies)) {
-      throw new Error(`Pack "${name}" is required by admin policy and cannot be disabled`);
-    }
-    const plugin = registry.getPlugin(name);
-    if (!plugin) {
-      throw new Error(`Pack "${name}" not found`);
-    }
-
-    const currentlyEnabled = plugin.state !== "disabled";
-    const previousPersistedState = registry.getPackEnabled(name);
-    const previousRuntimeState = plugin.state;
-    registry.setPackEnabled(name, enabled);
-
-    // Apply declarative registration state immediately.
-    // This keeps runtime skills/connectors aligned with persisted pack state.
-    try {
-      if (currentlyEnabled !== enabled) {
-        if (enabled) {
-          await registry.reloadPlugin(name);
-        } else {
-          await registry.disablePlugin(name);
-        }
-      }
-    } catch (error) {
-      try {
-        registry.restorePackEnabled(name, previousPersistedState);
-        const restored = registry.getPlugin(name);
-        if (restored) {
-          restored.state = previousRuntimeState;
-        }
-      } catch (rollbackError) {
-        console.warn("[PluginPacks] Failed to roll back pack toggle state:", rollbackError);
-      }
-      throw error;
-    }
-
-    const updated = registry.getPlugin(name);
-    if (updated) {
-      updated.state = enabled ? "registered" : "disabled";
-    }
-    return { success: true, name, enabled };
+    return packToggleService.setPackEnabled(name, enabled);
   });
 
   // Toggle a specific skill within a pack
   ipcMain.handle(
     IPC_CHANNELS.PLUGIN_PACK_TOGGLE_SKILL,
-    async (_, packName: string, skillId: string, enabled: boolean) => {
-      await ensureRegistryInitialized();
-      if (!packName || !skillId) {
-        throw new Error("Pack name and skill ID are required");
-      }
-      const policies = loadPoliciesStrict();
-      if (!policies) {
-        throw new Error("Admin policies failed to load; refusing to change plugin skill state");
-      }
-      const plugin = registry.getPlugin(packName);
-      if (!plugin || plugin.manifest.type !== "pack") {
-        throw new Error(`Pack "${packName}" not found`);
-      }
-      if (!isPackAllowed(packName, policies)) {
-        throw new Error(`Pack "${packName}" is blocked by admin policy`);
-      }
-      if (!enabled && isPackRequired(packName, policies)) {
-        throw new Error(`Pack "${packName}" is required by admin policy and cannot be disabled`);
-      }
-      const skill = [
-        ...(plugin.manifest.skills || []),
-        ...(plugin.manifest.skillDirectories || []),
-      ].find((s) => s.id === skillId);
-      if (!skill) {
-        throw new Error(`Skill "${skillId}" not found in pack "${packName}"`);
-      }
-      const previousSkillState = skill.enabled;
-      skill.enabled = enabled;
-      // Persist skill states alongside pack states
-      try {
-        registry.setSkillEnabled(packName, skillId, enabled);
-      } catch (error) {
-        skill.enabled = previousSkillState;
-        throw error;
-      }
-      return { success: true, packName, skillId, enabled };
-    },
+    async (_, packName: string, skillId: string, enabled: boolean) =>
+      packToggleService.setSkillEnabled(packName, skillId, enabled),
   );
 
   // Get active context (connected MCP servers + enabled skills)

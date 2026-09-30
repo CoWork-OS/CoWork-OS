@@ -5,6 +5,17 @@ import remarkGfm from "remark-gfm";
 import { ThemeIcon } from "./ThemeIcon";
 import { AlertTriangleIcon, CheckIcon, ClockIcon, InfoIcon, XIcon } from "./LineIcons";
 import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
+import { hasHostMethods } from "../host/browser-capabilities";
+
+const NOTIFICATION_PANEL_METHODS = [
+  "listNotifications",
+  "getUnreadNotificationCount",
+  "markNotificationRead",
+  "markAllNotificationsRead",
+  "deleteNotification",
+  "deleteAllNotifications",
+  "onNotificationEvent",
+] as const;
 
 // Define types inline for the renderer
 interface AppNotification {
@@ -454,6 +465,7 @@ function formatNotificationTitle(title: string): {
 }
 
 export function NotificationPanel({ onNotificationClick }: NotificationPanelProps) {
+  const canUseNotifications = hasHostMethods(...NOTIFICATION_PANEL_METHODS);
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -463,6 +475,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
 
   // Load notifications on mount
   useEffect(() => {
+    if (!canUseNotifications) return;
     const loadNotifications = async () => {
       try {
         const list = await window.electronAPI.listNotifications();
@@ -474,10 +487,11 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
       }
     };
     loadNotifications();
-  }, []);
+  }, [canUseNotifications]);
 
   // Subscribe to notification events
   useEffect(() => {
+    if (!canUseNotifications) return;
     const unsubscribe = window.electronAPI.onNotificationEvent((event: NotificationEvent) => {
       if (event.type === "added" && event.notification) {
         setNotifications((prev) => [event.notification!, ...prev]);
@@ -501,7 +515,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
       }
     });
     return unsubscribe;
-  }, []);
+  }, [canUseNotifications]);
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -517,6 +531,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
   }, [isOpen]);
 
   const handleMarkAllRead = async () => {
+    if (!canUseNotifications) return;
     try {
       await window.electronAPI.markAllNotificationsRead();
     } catch (error) {
@@ -525,6 +540,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
   };
 
   const handleDeleteAll = async () => {
+    if (!canUseNotifications) return;
     try {
       await window.electronAPI.deleteAllNotifications();
     } catch (error) {
@@ -533,6 +549,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
   };
 
   const handleNotificationClick = async (notification: AppNotification) => {
+    if (!canUseNotifications) return;
     if (!notification.read) {
       try {
         await window.electronAPI.markNotificationRead(notification.id);
@@ -550,6 +567,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    if (!canUseNotifications) return;
     try {
       await window.electronAPI.deleteNotification(id);
     } catch (error) {
@@ -564,7 +582,13 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
         onClick={() => setIsOpen(!isOpen)}
         onMouseEnter={() => setIsHoveringButton(true)}
         onMouseLeave={() => setIsHoveringButton(false)}
-        title="Notifications — click to view past notifications and open tasks"
+        disabled={!canUseNotifications}
+        aria-label={canUseNotifications ? "Notifications" : "Notifications unavailable"}
+        title={
+          canUseNotifications
+            ? "Notifications — click to view past notifications and open tasks"
+            : "Notifications are not available in this browser session yet."
+        }
       >
         <BellIcon color={isHoveringButton ? "#3b82f6" : unreadCount > 0 ? "#3b82f6" : "#6b7280"} />
         {unreadCount > 0 && (
@@ -572,7 +596,7 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
         )}
       </button>
 
-      {isOpen && (
+      {isOpen && canUseNotifications && (
         <div style={styles.panel}>
           <div style={styles.header}>
             <h3 style={styles.headerTitle}>Notifications</h3>

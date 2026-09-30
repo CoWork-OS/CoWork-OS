@@ -3114,13 +3114,13 @@ export class MCPRegistryManager {
 
   /**
    * Register the handler that asks the user to confirm a remote registry
-   * entry's spawn command. Set once during startup.
+   * entry's spawn plan on install or update. Set once during startup.
    *
-   * Installing a remote entry runs whatever `defaultCommand`/`defaultArgs` the
-   * registry response supplied, in the main process's environment. That is a
-   * code-execution decision, so it needs a human — including (especially) when
-   * the install is triggered by the agent's `integration_setup` tool, which is
-   * reachable through prompt injection.
+   * Installing or updating a remote entry can save whatever
+   * `defaultCommand`/`defaultArgs` the registry response supplied for a later
+   * process launch, in the main process's environment. That is a code-execution
+   * decision, so it needs a human — including (especially) when triggered by
+   * an agent tool that is reachable through prompt injection.
    */
   static setInstallConfirmationHandler(handler: McpInstallConfirmationHandler | null): void {
     this.installConfirmationHandler = handler;
@@ -3128,21 +3128,28 @@ export class MCPRegistryManager {
 
   private static installConfirmationHandler: McpInstallConfirmationHandler | null = null;
 
-  private static async confirmRemoteEntryInstall(
+  private static async confirmRemoteEntryLaunchPlan(
     entry: MCPRegistryEntry,
     command: string | undefined,
     args: string[],
+    confirmationHandler?: McpInstallConfirmationHandler,
   ): Promise<void> {
-    if (!isRemoteRegistryEntry(entry)) return;
+    // Native callers keep the original bundled-entry trust path. A browser
+    // caller supplies a one-use, session-scoped approval and must review the
+    // exact launch plan even when the entry came from the bundled catalog.
+    if (!isRemoteRegistryEntry(entry) && !confirmationHandler) return;
     // Remote entries with no local command still get confirmed if they carry a
     // stdio command; url-only remote entries are covered by validateManualEntry.
     if (entry.transport === "stdio" && !command) return;
 
-    const handler = this.installConfirmationHandler;
+    // A caller handling a reviewed, one-off launch-plan change can supply its own
+    // confirmation decision. Keep the process-wide desktop dialog as the
+    // fallback for existing native callers; never replace it temporarily.
+    const handler = confirmationHandler ?? this.installConfirmationHandler;
     if (!handler) {
       // Fail closed: no way to ask the user means no install.
       throw new Error(
-        `Refusing to install "${entry.name}" from the remote registry: no confirmation handler is available to review its launch command.`,
+        `Refusing to use "${entry.name}" from the remote registry: no confirmation handler is available to review its launch command.`,
       );
     }
 
@@ -3158,14 +3165,18 @@ export class MCPRegistryManager {
     });
 
     if (!approved) {
-      throw new Error(`Installation of "${entry.name}" was declined.`);
+      throw new Error(`Launch plan for "${entry.name}" was declined.`);
     }
   }
 
   /**
    * Install a server from the registry
    */
-  static async installServer(entryId: string, extraArgs?: string[]): Promise<MCPServerConfig> {
+  static async installServer(
+    entryId: string,
+    extraArgs?: string[],
+    confirmationHandler?: McpInstallConfirmationHandler,
+  ): Promise<MCPServerConfig> {
     const entry = await this.getServer(entryId);
     if (!entry) {
       throw new Error(`Server ${entryId} not found in registry`);
@@ -3194,10 +3205,12 @@ export class MCPRegistryManager {
 
     // Ask the user before running a launch command that came from the remote
     // registry, showing the exact command and args.
-    await this.confirmRemoteEntryInstall(entry, entry.defaultCommand || entry.installCommand, [
-      ...(entry.defaultArgs || []),
-      ...(extraArgs || []),
-    ]);
+    await this.confirmRemoteEntryLaunchPlan(
+      entry,
+      entry.defaultCommand || entry.installCommand,
+      [...(entry.defaultArgs || []), ...(extraArgs || [])],
+      confirmationHandler,
+    );
 
     // Verify the npm package exists before installing
     if (entry.packageName && entry.installMethod === "npm") {
@@ -3316,7 +3329,10 @@ export class MCPRegistryManager {
    * Update an installed server to the latest version.
    * For npm packages, fetches the current version from the npm registry.
    */
-  static async updateServer(serverId: string): Promise<MCPServerConfig> {
+  static async updateServer(
+    serverId: string,
+    confirmationHandler?: McpInstallConfirmationHandler,
+  ): Promise<MCPServerConfig> {
     const settings = MCPSettingsManager.loadSettings();
     const installed = settings.servers.find((s) => s.id === serverId);
 
@@ -3345,6 +3361,16 @@ export class MCPRegistryManager {
         version = verification.version;
       }
     }
+
+    // An update can replace the command/arguments that the next connection
+    // launches. Route remote registry plans through the same native fallback
+    // or a one-call browser approval before changing the saved configuration.
+    await this.confirmRemoteEntryLaunchPlan(
+      entry,
+      entry.defaultCommand || entry.installCommand,
+      [...(entry.defaultArgs || [])],
+      confirmationHandler,
+    );
 
     const updatedConfig: Partial<MCPServerConfig> =
       entry.transport === "stdio"

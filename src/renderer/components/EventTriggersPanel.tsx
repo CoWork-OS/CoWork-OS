@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Zap, Plus, Trash2, ToggleLeft, ToggleRight, History, ChevronDown } from "lucide-react";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
 
 interface TriggerCondition {
   field: string;
@@ -256,7 +257,8 @@ export const EventTriggersPanel: React.FC<{
   useEffect(() => {
     const loadMcpServers = async () => {
       try {
-        const statuses = await (window as Any).electronAPI.getMCPStatus?.();
+        const statuses =
+          await invokeMcpApi<Array<{ id: string; name: string; status: string }>>("getMCPStatus");
         if (Array.isArray(statuses)) {
           setMcpServers(
             statuses.map((status) => ({

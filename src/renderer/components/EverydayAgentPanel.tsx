@@ -1071,6 +1071,13 @@ export function EverydayAgentPanel({
                 })
               }
               disabled={Boolean(busy) || !result?.profile.enabled}
+              title={
+                busy
+                  ? "Wait for the current change to finish."
+                  : !result?.profile.enabled
+                    ? "Enable Everyday Agent before pausing it."
+                    : undefined
+              }
             >
               <PauseCircle size={16} />
               Pause all
@@ -1558,6 +1565,15 @@ export function EverydayAgentPanel({
                   })
                 }
                 disabled={Boolean(busy) || !result?.profile.enabled || adminBlocked}
+                title={
+                  adminBlocked
+                    ? "Everyday Agent is blocked by host policy."
+                    : busy
+                      ? "Wait for the current change to finish."
+                      : !result?.profile.enabled
+                        ? "Enable Everyday Agent before pausing it."
+                        : undefined
+                }
               >
                 <PauseCircle size={16} />
                 Pause all

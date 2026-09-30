@@ -34,6 +34,183 @@ describe("TaskExecutor image attachment routing", () => {
     }
   });
 
+  it("restores original visual input as an attributed historical provider turn", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "cowork-executor-original-media-"));
+    try {
+      const store = new QueuedAttachmentStore(path.join(root, "store"));
+      const persisted = store.persist("task-1", "__task_initial_media__", [
+        { data: "aGVsbG8=", mimeType: "image/png", filename: "chart.png", sizeBytes: 5 },
+      ]);
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.provider = { type: "openai" };
+      executor.emitEvent = vi.fn();
+      executor.ensureProviderFailoverSelectionsContext = vi.fn();
+      executor.conversationHistory = [
+        { role: "user", content: "Original task prompt" },
+        { role: "assistant", content: "Prior answer" },
+        { role: "user", content: "Current follow-up" },
+      ];
+      executor.updateConversationHistory = vi.fn((history: Any[]) => {
+        executor.conversationHistory = history;
+      });
+      const priorConversation = executor.conversationHistory.slice();
+
+      await executor.restoreInitialMediaContext("Original task prompt", persisted.images);
+
+      expect(executor.conversationHistory.slice(0, 3)).toEqual(priorConversation);
+      expect(executor.conversationHistory).toHaveLength(4);
+      expect(executor.conversationHistory[3]).toEqual({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Original task request and visual attachments (provided at task creation):\nOriginal task prompt",
+          },
+          {
+            type: "image",
+            data: "aGVsbG8=",
+            mimeType: "image/png",
+            originalSizeBytes: 5,
+          },
+        ],
+      });
+
+      // A snapshot replaces image bytes with a text marker; recreate only the
+      // attributed restoration turn without changing the surrounding history.
+      executor.conversationHistory[3] = {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Original task request and visual attachments (provided at task creation):\nOriginal task prompt",
+          },
+          { type: "text", text: "[Image was attached: image/png, 0KB]" },
+        ],
+      };
+      await executor.restoreInitialMediaContext("Original task prompt", persisted.images);
+
+      expect(executor.conversationHistory).toHaveLength(4);
+      expect(executor.conversationHistory.slice(0, 3)).toEqual(priorConversation);
+      expect(executor.conversationHistory[3].content).toEqual([
+        {
+          type: "text",
+          text: "Original task request and visual attachments (provided at task creation):\nOriginal task prompt",
+        },
+        {
+          type: "image",
+          data: "aGVsbG8=",
+          mimeType: "image/png",
+          originalSizeBytes: 5,
+        },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rehydrates media on an accepted follow-up turn without adding another user turn", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "cowork-executor-follow-up-media-"));
+    try {
+      const store = new QueuedAttachmentStore(path.join(root, "store"));
+      const persisted = store.persist("task-1", "accepted-follow-up", [
+        { data: "aGVsbG8=", mimeType: "image/png", filename: "chart.png", sizeBytes: 5 },
+      ]);
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.provider = { type: "openai" };
+      executor.task = { id: "task-1" };
+      executor.emitEvent = vi.fn();
+      executor.conversationHistory = [
+        { role: "user", content: "Earlier request" },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: 'QUOTED ASSISTANT MESSAGE (the user explicitly quoted this earlier assistant reply and is responding to it):\n"""\nEarlier chart context\n"""\n\nUSER UPDATE: Compare these charts',
+            },
+            { type: "text", text: "[Image was attached: image/png, 0KB]" },
+          ],
+        },
+      ];
+      executor.updateConversationHistory = vi.fn((history: Any[]) => {
+        executor.conversationHistory = history;
+      });
+      executor.saveConversationSnapshot = vi.fn(() => true);
+
+      await (TaskExecutor.prototype as Any).restorePersistedFollowUpMediaContext.call(
+        executor,
+        "Compare these charts",
+        persisted.images,
+        { eventId: "assistant-7", message: "Earlier chart context" },
+      );
+
+      expect(executor.conversationHistory).toHaveLength(2);
+      expect(executor.conversationHistory[0]).toEqual({ role: "user", content: "Earlier request" });
+      expect(executor.conversationHistory[1].content).toEqual([
+        {
+          type: "text",
+          text: 'QUOTED ASSISTANT MESSAGE (the user explicitly quoted this earlier assistant reply and is responding to it):\n"""\nEarlier chart context\n"""\n\nCompare these charts',
+        },
+        {
+          type: "image",
+          data: "aGVsbG8=",
+          mimeType: "image/png",
+          originalSizeBytes: 5,
+        },
+      ]);
+      expect(executor.saveConversationSnapshot).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not replace a historical message that only starts with the media attribution", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "cowork-executor-original-media-prefix-"));
+    try {
+      const store = new QueuedAttachmentStore(path.join(root, "store"));
+      const persisted = store.persist("task-1", "__task_initial_media__", [
+        { data: "aGVsbG8=", mimeType: "image/png", filename: "chart.png", sizeBytes: 5 },
+      ]);
+      const unrelatedHistoricalMessage =
+        "Original task request and visual attachments (provided at task creation):\n" +
+        "Original task prompt\nA continuation supplied later by the user";
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.provider = { type: "openai" };
+      executor.emitEvent = vi.fn();
+      executor.ensureProviderFailoverSelectionsContext = vi.fn();
+      executor.conversationHistory = [
+        { role: "user", content: unrelatedHistoricalMessage },
+        { role: "assistant", content: "Prior answer" },
+      ];
+      executor.updateConversationHistory = vi.fn((history: Any[]) => {
+        executor.conversationHistory = history;
+      });
+
+      await executor.restoreInitialMediaContext("Original task prompt", persisted.images);
+
+      expect(executor.conversationHistory[0]).toEqual({
+        role: "user",
+        content: unrelatedHistoricalMessage,
+      });
+      expect(executor.conversationHistory[1]).toEqual({
+        role: "assistant",
+        content: "Prior answer",
+      });
+      expect(executor.conversationHistory[2]).toMatchObject({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Original task request and visual attachments (provided at task creation):\nOriginal task prompt",
+          },
+          { type: "image", mimeType: "image/png" },
+        ],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("emits a user-facing switch-model message when the active provider cannot accept images", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.provider = { type: "gemini" };

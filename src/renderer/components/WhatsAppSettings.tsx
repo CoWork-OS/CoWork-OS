@@ -90,11 +90,30 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
       loadChannel();
     };
 
-    window.electronAPI?.onWhatsAppQRCode?.(handleQrCode);
-    window.electronAPI?.onWhatsAppConnected?.(handleWhatsAppConnected);
+    const eventApi = window.electronAPI as unknown as {
+      onWhatsAppQRCode?: (callback: (event: unknown, qr: string) => void) => unknown;
+      onWhatsAppConnected?: (callback: () => void) => unknown;
+      onWhatsAppStatus?: (callback: (event: unknown, data: { status: string }) => void) => unknown;
+    };
+    const unsubscribeQrCode = eventApi.onWhatsAppQRCode?.(handleQrCode);
+    const unsubscribeConnected = eventApi.onWhatsAppConnected?.(handleWhatsAppConnected);
+    const unsubscribeStatus = eventApi.onWhatsAppStatus?.((_event, data) => {
+      if (data?.status === "connected") {
+        handleWhatsAppConnected();
+      } else if (data?.status === "error" || data?.status === "disconnected") {
+        setQrLoading(false);
+        setTestResult({
+          success: false,
+          error: "WhatsApp connection needs attention. Check the channel status on the host.",
+        });
+        void loadChannel();
+      }
+    });
 
     return () => {
-      // Cleanup listeners if needed
+      for (const unsubscribe of [unsubscribeQrCode, unsubscribeConnected, unsubscribeStatus]) {
+        if (typeof unsubscribe === "function") unsubscribe();
+      }
     };
   }, [loadChannel]);
 

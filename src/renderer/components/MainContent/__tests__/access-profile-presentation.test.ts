@@ -19,6 +19,10 @@ describe("getAccessProfilePresentation", () => {
     });
   });
 
+  it("does not report the prompt limitation while runtime support is still unknown", () => {
+    expect(getAccessProfilePresentation(BUILTIN_ACCESS_PROFILES[0], null).notice).toBeNull();
+  });
+
   it("does not imply approval is needed for full access", () => {
     const profile = BUILTIN_ACCESS_PROFILES[2];
     expect(getAccessProfilePresentation(profile, false).label).toBe("Full access");

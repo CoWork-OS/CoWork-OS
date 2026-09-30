@@ -1,5 +1,4 @@
 import { randomUUID } from "crypto";
-import { protocol } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { Readable } from "stream";
@@ -24,6 +23,10 @@ type MediaTokenRecord = {
 };
 
 const mediaTokenStore = new Map<string, MediaTokenRecord>();
+
+function getElectronProtocol(): typeof import("electron").protocol {
+  return require("electron").protocol as typeof import("electron").protocol;
+}
 
 function purgeExpiredTokens(now = Date.now()): void {
   for (const [token, record] of mediaTokenStore.entries()) {
@@ -95,7 +98,7 @@ function parseRangeHeader(
 }
 
 export function registerMediaScheme(): void {
-  protocol.registerSchemesAsPrivileged([
+  getElectronProtocol().registerSchemesAsPrivileged([
     {
       scheme: MEDIA_SCHEME,
       privileges: {
@@ -163,7 +166,7 @@ function createTokenizedMediaUrl(params: {
 }
 
 export function registerMediaProtocol(): void {
-  protocol.handle(MEDIA_SCHEME, async (request) => {
+  getElectronProtocol().handle(MEDIA_SCHEME, async (request) => {
     purgeExpiredTokens();
 
     let token = "";
@@ -217,7 +220,7 @@ export function registerMediaProtocol(): void {
     const rangeHeader = request.headers.get("range");
     if (!rangeHeader) {
       const stream = fs.createReadStream(resolvedPath);
-      return new Response(Readable.toWeb(stream) as BodyInit, {
+      return new Response(Readable.toWeb(stream) as RequestInit["body"], {
         status: 200,
         headers: {
           ...baseHeaders,
@@ -239,7 +242,7 @@ export function registerMediaProtocol(): void {
 
     const contentLength = range.end - range.start + 1;
     const stream = fs.createReadStream(resolvedPath, { start: range.start, end: range.end });
-    return new Response(Readable.toWeb(stream) as BodyInit, {
+    return new Response(Readable.toWeb(stream) as RequestInit["body"], {
       status: 206,
       headers: {
         ...baseHeaders,

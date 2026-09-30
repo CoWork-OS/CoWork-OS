@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import type { AddToolsSelection } from "./AddToolsPanel";
 import {
   CapabilitySecurityReport,
@@ -108,6 +109,16 @@ interface SkillHubBrowserProps {
   initialSelection?: AddToolsSelection;
 }
 
+type BrowserSkillInstallProgress = {
+  status: "starting" | "downloading" | "checking" | "installing" | "completed" | "failed";
+  progress: number;
+  message: string;
+};
+
+type BrowserSkillInstallApi = {
+  getSkillInstallProgress?: () => Promise<BrowserSkillInstallProgress | null>;
+};
+
 export function SkillHubBrowser({
   onSkillInstalled,
   onClose,
@@ -123,6 +134,7 @@ export function SkillHubBrowser({
   const [installedSkills, setInstalledSkills] = useState<Set<string>>(new Set());
   const [skillStatus, setSkillStatus] = useState<SkillStatusReport | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [installProgress, setInstallProgress] = useState<BrowserSkillInstallProgress | null>(null);
   const [externalSource, setExternalSource] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [quarantinedSkills, setQuarantinedSkills] = useState<QuarantinedImportRecord[]>([]);
@@ -133,6 +145,30 @@ export function SkillHubBrowser({
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const focusedSelection = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!installing || !hasHostMethod("getSkillInstallProgress")) {
+      setInstallProgress(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const progress = await (
+          window.electronAPI as unknown as BrowserSkillInstallApi
+        ).getSkillInstallProgress?.();
+        if (!cancelled && progress) setInstallProgress(progress);
+      } catch {
+        // The install call reports the final outcome; progress polling is optional.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 750);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [installing]);
 
   useEffect(() => {
     loadSkillStatus();
@@ -388,6 +424,10 @@ export function SkillHubBrowser({
   };
 
   const handleExternalInstall = async () => {
+    if (!hasHostMethods("installSkillFromClawHub", "installSkillFromGit", "installSkillFromUrl")) {
+      setError("Import skills in the desktop app.");
+      return;
+    }
     const source = externalSource.trim();
     if (!source) {
       setError("Paste a Git repository, ClawHub URL, or raw skill URL first");
@@ -538,7 +578,23 @@ export function SkillHubBrowser({
                     e.stopPropagation();
                     onInstall(skill.id);
                   }}
-                  disabled={installing === skill.id}
+                  disabled={
+                    installing === skill.id ||
+                    !hasHostMethod(
+                      skill.source === "clawhub"
+                        ? "installSkillFromClawHub"
+                        : "installSkillFromRegistry",
+                    )
+                  }
+                  title={
+                    !hasHostMethod(
+                      skill.source === "clawhub"
+                        ? "installSkillFromClawHub"
+                        : "installSkillFromRegistry",
+                    )
+                      ? "Install skills in the desktop app"
+                      : undefined
+                  }
                 >
                   {installing === skill.id ? "Installing..." : "Install"}
                 </button>
@@ -576,13 +632,24 @@ export function SkillHubBrowser({
           placeholder="https://clawhub.ai/owner/skill or https://github.com/org/skill-repo"
           className="settings-input"
           value={externalSource}
+          disabled={
+            !hasHostMethods("installSkillFromClawHub", "installSkillFromGit", "installSkillFromUrl")
+          }
           onChange={(e) => setExternalSource(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleExternalInstall()}
         />
         <button
           className="button-primary button-small"
           onClick={handleExternalInstall}
-          disabled={installing === "__external__"}
+          disabled={
+            installing === "__external__" ||
+            !hasHostMethods("installSkillFromClawHub", "installSkillFromGit", "installSkillFromUrl")
+          }
+          title={
+            !hasHostMethods("installSkillFromClawHub", "installSkillFromGit", "installSkillFromUrl")
+              ? "Import skills in the desktop app"
+              : undefined
+          }
         >
           {installing === "__external__" ? "Installing..." : "Import"}
         </button>
@@ -702,7 +769,16 @@ export function SkillHubBrowser({
         <div className="settings-section-header">
           <h3>Installed Skills</h3>
           <div className="settings-section-actions">
-            <button className="button-secondary button-small" onClick={handleOpenFolder}>
+            <button
+              className="button-secondary button-small"
+              onClick={handleOpenFolder}
+              disabled={!hasHostMethod("openCustomSkillsFolder")}
+              title={
+                !hasHostMethod("openCustomSkillsFolder")
+                  ? "Open the skills folder in the desktop app"
+                  : undefined
+              }
+            >
               Open Folder
             </button>
           </div>
@@ -740,14 +816,28 @@ export function SkillHubBrowser({
                     <button
                       className="button-secondary button-small"
                       onClick={() => handleRetryQuarantined(record.id)}
-                      disabled={installing === record.id}
+                      disabled={
+                        installing === record.id || !hasHostMethod("retryQuarantinedImport")
+                      }
+                      title={
+                        !hasHostMethod("retryQuarantinedImport")
+                          ? "Retry skill scans in the desktop app"
+                          : undefined
+                      }
                     >
                       {installing === record.id ? "Scanning..." : "Retry Scan"}
                     </button>
                     <button
                       className="button-danger button-small"
                       onClick={() => handleRemoveQuarantined(record.id)}
-                      disabled={installing === record.id}
+                      disabled={
+                        installing === record.id || !hasHostMethod("removeQuarantinedImport")
+                      }
+                      title={
+                        !hasHostMethod("removeQuarantinedImport")
+                          ? "Remove quarantined imports in the desktop app"
+                          : undefined
+                      }
                     >
                       Remove
                     </button>
@@ -798,7 +888,12 @@ export function SkillHubBrowser({
                   <button
                     className="button-danger button-small"
                     onClick={() => handleUninstall(skill.id)}
-                    disabled={installing === skill.id}
+                    disabled={installing === skill.id || !hasHostMethod("uninstallSkill")}
+                    title={
+                      !hasHostMethod("uninstallSkill")
+                        ? "Remove skills in the desktop app"
+                        : undefined
+                    }
                   >
                     {installing === skill.id ? "Uninstalling..." : "Uninstall"}
                   </button>
@@ -927,12 +1022,29 @@ export function SkillHubBrowser({
         </div>
       </div>
 
+      {!hasHostMethods("installSkillFromRegistry", "uninstallSkill") && (
+        <p className="settings-description" role="status">
+          Browse skills and check their status here. Install, import, remove, or rescan skills in
+          the desktop app.
+        </p>
+      )}
+
       {error && (
         <div className="settings-alert settings-alert-error">
           <span>{error}</span>
           <button className="button-secondary button-small" onClick={() => setError(null)}>
             Dismiss
           </button>
+        </div>
+      )}
+
+      {installing && installProgress && (
+        <div className="settings-card" role="status" aria-live="polite">
+          <div className="settings-section-header">
+            <strong>{installProgress.message}</strong>
+            <span>{installProgress.progress}%</span>
+          </div>
+          <progress max={100} value={Math.max(0, Math.min(100, installProgress.progress))} />
         </div>
       )}
 

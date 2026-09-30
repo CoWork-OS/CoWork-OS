@@ -1,0 +1,57 @@
+.managed-accounts-panel {
+  margin: 0 0 20px;
+  padding: 20px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  background: var(--color-surface, rgba(255, 255, 255, 0.02));
+}
+
+.managed-accounts-panel .settings-field {
+  max-width: 720px;
+}
+
+.managed-accounts-panel .settings-hint {
+  margin: 4px 0 10px;
+}
+
+.managed-accounts-secret-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(180px, 1.2fr) auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.managed-accounts-clear-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.managed-accounts-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+}
+
+.managed-accounts-meta {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .managed-accounts-secret-row {
+    grid-template-columns: 1fr;
+  }
+
+  .managed-accounts-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

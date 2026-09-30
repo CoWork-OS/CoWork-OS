@@ -313,12 +313,15 @@ export class OpenAIOAuth {
    * Start the OAuth flow using pi-ai SDK
    * Opens browser for authentication and waits for callback
    */
-  async authenticate(): Promise<OpenAIOAuthTokens> {
+  async authenticate(browser?: {
+    onAuth: (info: OAuthAuthInfo) => void;
+    onManualCodeInput: () => Promise<string>;
+  }): Promise<OpenAIOAuthTokens> {
     logger.info("Starting authentication flow with pi-ai SDK...");
     const { loginOpenAICodex } = await loadPiAiOAuthModule();
-    const useSystemBrowser = await canBindOpenAICodexCallbackPort();
+    const useSystemBrowser = browser ? false : await canBindOpenAICodexCallbackPort();
     let manualRedirectPromise: Promise<string> | null = null;
-    if (!useSystemBrowser) {
+    if (!browser && !useSystemBrowser) {
       logger.warn(
         "localhost:1455 is already in use. Using system browser with manual redirect paste so macOS passkeys still work.",
       );
@@ -328,6 +331,10 @@ export class OpenAIOAuth {
     try {
       credentials = await loginOpenAICodex({
         onAuth: (info: OAuthAuthInfo) => {
+          if (browser) {
+            browser.onAuth(info);
+            return;
+          }
           logger.info("Opening browser for authentication...");
           if (!useSystemBrowser && !manualRedirectPromise) {
             manualRedirectPromise = promptForOpenAICodexRedirectUrl();
@@ -346,12 +353,14 @@ export class OpenAIOAuth {
         ...(!useSystemBrowser
           ? {
               onManualCodeInput: () => {
+                if (browser) return browser.onManualCodeInput();
                 manualRedirectPromise ||= promptForOpenAICodexRedirectUrl();
                 return manualRedirectPromise;
               },
             }
           : {}),
         onPrompt: async (prompt: OAuthPrompt) => {
+          if (browser) return browser.onManualCodeInput();
           logger.info("Prompt:", prompt.message);
           if (useSystemBrowser) return "";
           manualRedirectPromise ||= promptForOpenAICodexRedirectUrl();

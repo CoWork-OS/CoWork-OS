@@ -1,3 +1,14 @@
+import type {
+  BrowserProviderAuthApi,
+  BrowserProviderSignIn,
+} from "../../shared/host-api/provider-sign-in";
+import { hasHostMethods } from "../host/browser-capabilities";
+import {
+  AUTOMATION_SUBTAB_METHOD_REQUIREMENTS,
+  AutomationSubtabNavigation,
+  getInitialAutomationSubtab,
+  type AutomationSettingsSubTab,
+} from "./AutomationSubtabNavigation";
 import {
   useState,
   useEffect,
@@ -19,7 +30,6 @@ import {
   Sparkles,
   Sun,
   User,
-  Users,
   Mic,
   Layers,
   Search,
@@ -31,11 +41,9 @@ import {
   MoreHorizontal,
   Shield,
   Brain,
-  ListOrdered,
   GitBranch,
   Wrench,
   Store,
-  Clock,
   LayoutGrid,
   Zap,
   Monitor,
@@ -55,8 +63,6 @@ import {
   Cloud,
   Star,
   Globe,
-  Box,
-  Link,
   Hexagon,
   ChevronDown,
   Building2,
@@ -301,6 +307,42 @@ type SettingsTab =
   | "subconscious"
   | "access"
   | "webaccess";
+
+// A missing browser service should produce an explanation, never an endless loading panel.
+const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
+  appearance: [],
+  personality: ["getPersonalityConfigV2", "getRelationshipStats", "savePersonalityConfigV2"],
+  everydayAgent: ["everydayAgentGetProfile"],
+  aimodels: ["getLLMSettings", "saveLLMSettings"],
+  jev: ["testJevProvider"],
+  automations: AUTOMATION_SUBTAB_METHOD_REQUIREMENTS.routines,
+  skills: [
+    "listSkills",
+    "getSkill",
+    "getSkillStatus",
+    "listQuarantinedImports",
+    "searchSkillRegistry",
+    "searchClawHubSkills",
+  ],
+  suggestions: ["listSuggestions", "dismissSuggestion"],
+  mcp: ["getMCPSettings", "saveMCPSettings"],
+  memory: ["getMemorySettings", "getMemoryFeaturesSettings", "getRecentMemories"],
+  tools: ["getBuiltinToolsSettings", "saveBuiltinToolsSettings"],
+  integrations: ["getConnectorSettings"],
+  customize: ["listPluginPacks"],
+  addtools: [
+    "listPluginPacks",
+    "getMCPSettings",
+    "getSkillStatus",
+    "getMCPStatus",
+    "searchPackRegistry",
+    "searchSkillRegistry",
+    "searchClawHubSkills",
+    "fetchMCPRegistry",
+  ],
+  access: ["getControlPlaneSettings", "getWebAccessStatus"],
+  insights: ["getUsageInsights", "getUsageInsightsEarliest"],
+};
 
 // Secondary channels shown inside "More Channels" tab
 type SecondaryChannel =
@@ -1382,26 +1424,31 @@ export function Settings({
   const [addToolsSelection, setAddToolsSelection] = useState<AddToolsSelection | null>(null);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
-    initialTab === "skillhub" ? "store" : "custom",
+    initialTab === "skillhub" || !hasHostMethods("listCustomSkills", "getCustomSkillSettings")
+      ? "store"
+      : "custom",
   );
   const [activeAIModelsSubTab, setActiveAIModelsSubTab] = useState<
     "llm" | "image" | "video" | "search"
   >(initialTab === "search" ? "search" : initialTab === "image" ? "image" : "llm");
-  const [activeAutomationsSubTab, setActiveAutomationsSubTab] = useState<
-    "routines" | "queue" | "subconscious" | "scheduled" | "hooks" | "triggers" | "council"
-  >(
-    ["routines", "queue", "subconscious", "scheduled", "hooks", "triggers", "council"].includes(
-      initialTab as string,
-    )
-      ? (initialTab as
-          | "routines"
-          | "queue"
-          | "subconscious"
-          | "scheduled"
-          | "hooks"
-          | "triggers"
-          | "council")
-      : "routines",
+  const requestedAutomationSubTab = [
+    "routines",
+    "queue",
+    "subconscious",
+    "scheduled",
+    "hooks",
+    "triggers",
+    "council",
+  ].includes(initialTab as string)
+    ? (initialTab as AutomationSettingsSubTab)
+    : "routines";
+  const [activeAutomationsSubTab, setActiveAutomationsSubTab] = useState<AutomationSettingsSubTab>(
+    () =>
+      getInitialAutomationSubtab(
+        requestedAutomationSubTab,
+        window.coworkBrowserHost === true,
+        hasHostMethods,
+      ),
   );
   const [activeIntegrationsSubTab, setActiveIntegrationsSubTab] = useState<
     "git" | "connectors" | "identity" | "infrastructure"
@@ -1579,6 +1626,79 @@ export function Settings({
   const [openaiTextVerbosity, setOpenaiTextVerbosity] = useState<LLMTextVerbosity>("medium");
   const [openaiOAuthConnected, setOpenaiOAuthConnected] = useState(false);
   const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
+  const [browserSignIn, setBrowserSignIn] = useState<BrowserProviderSignIn | null>(null);
+  const [browserCallbackUrl, setBrowserCallbackUrl] = useState("");
+  const browserAuthAvailable =
+    window.coworkBrowserHost === true &&
+    hasHostMethods(
+      "beginOpenAIBrowserSignIn",
+      "getOpenAIBrowserSignIn",
+      "submitOpenAIBrowserSignIn",
+      "cancelOpenAIBrowserSignIn",
+    );
+  const browserAuth = window.electronAPI as unknown as BrowserProviderAuthApi;
+  useEffect(() => {
+    if (!browserAuthAvailable) return;
+    let disposed = false;
+    const flowId = sessionStorage.getItem("cowork-openai-sign-in");
+    if (flowId)
+      void browserAuth
+        .getOpenAIBrowserSignIn(flowId)
+        .then((flow) => {
+          if (!disposed) setBrowserSignIn(flow);
+        })
+        .catch(() => sessionStorage.removeItem("cowork-openai-sign-in"));
+    return () => {
+      disposed = true;
+    };
+  }, [browserAuthAvailable]);
+  useEffect(() => {
+    if (!browserAuthAvailable || browserSignIn?.state !== "pending") return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const next = await browserAuth.getOpenAIBrowserSignIn(browserSignIn.flowId);
+        if (disposed) return;
+        setBrowserSignIn(next);
+        if (next.state === "completed") {
+          sessionStorage.removeItem("cowork-openai-sign-in");
+          await window.electronAPI.getLLMSettings();
+          if (disposed) return;
+          setOpenaiOAuthConnected(true);
+          setOpenaiAuthMethod("oauth");
+          setOpenaiApiKey("");
+          if (!openaiModel || openaiModel === "gpt-4o-mini")
+            setOpenaiModel(next.recommendedModel || "gpt-6-astra");
+          onSettingsChanged?.();
+          void loadOpenAIModels();
+        } else if (next.state !== "pending") {
+          sessionStorage.removeItem("cowork-openai-sign-in");
+          if (next.error) setTestResult({ success: false, error: next.error });
+        } else timer = setTimeout(poll, 1250);
+      } catch (error) {
+        if (!disposed) {
+          setTestResult({
+            success: false,
+            error: error instanceof Error ? error.message : "Account sign-in could not be checked.",
+          });
+          if (Date.now() >= browserSignIn.expiresAt) {
+            sessionStorage.removeItem("cowork-openai-sign-in");
+            setBrowserSignIn({
+              ...browserSignIn,
+              state: "failed",
+              error: "Sign-in expired. Start again.",
+            });
+          } else timer = setTimeout(poll, 2500);
+        }
+      }
+    };
+    void poll();
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [browserAuthAvailable, browserSignIn?.flowId, browserSignIn?.state]);
 
   type ImageGenProvider = "openai" | "openai-codex" | "azure" | "openrouter" | "gemini";
   type ImageProviderTab = ImageGenProvider | "auto";
@@ -1747,6 +1867,14 @@ export function Settings({
   const [detectingHardware, setDetectingHardware] = useState(false);
   const [startingServer, setStartingServer] = useState(false);
   const [stoppingServer, setStoppingServer] = useState(false);
+  const canManageLocalAiRuntime = hasHostMethods(
+    "checkHf",
+    "detectHardware",
+    "startLocalAIServer",
+    "stopLocalAIServer",
+    "getLocalAIServerStatus",
+    "getLocalAIServerLog",
+  );
   const [serverLog, setServerLog] = useState<{
     lines: string[];
     state: "idle" | "downloading" | "loading" | "ready" | "error";
@@ -1779,6 +1907,7 @@ export function Settings({
   // Poll the shared local-AI server status when either local provider is active
   useEffect(() => {
     if (settings.providerType !== "hf-agents" && settings.providerType !== "mlx") return;
+    if (!canManageLocalAiRuntime) return;
     window.electronAPI.checkHf?.().then((result: Any) => {
       if (result) setHfStatus(result);
     });
@@ -1790,7 +1919,7 @@ export function Settings({
     poll();
     const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
-  }, [settings.providerType]);
+  }, [canManageLocalAiRuntime, settings.providerType]);
 
   const resolveCustomProviderId = (providerType: LLMProviderType) =>
     providerType === "kimi-coding" ? "kimi-code" : providerType;
@@ -2729,7 +2858,12 @@ export function Settings({
           if (!loadedSettings.openai.model) {
             setOpenaiModel(recommendChatGPTModelForPlan(loadedSettings.openai.chatgptPlanType));
           }
-          if (loadedSettings.openai.accessToken || loadedSettings.openai.refreshToken) {
+          if (
+            loadedSettings.openai.accessToken ||
+            loadedSettings.openai.refreshToken ||
+            (loadedSettings.openai as Any).accessTokenConfigured ||
+            (loadedSettings.openai as Any).refreshTokenConfigured
+          ) {
             // Tokens available - fully connected
             setOpenaiOAuthConnected(true);
           } else {
@@ -2823,7 +2957,13 @@ export function Settings({
       if (loadedSettings.xai?.model) {
         setXaiModel(loadedSettings.xai.model);
       }
-      setXaiOAuthConnected(!!(loadedSettings.xai?.accessToken && loadedSettings.xai?.refreshToken));
+      setXaiOAuthConnected(
+        Boolean(
+          (loadedSettings.xai?.accessToken && loadedSettings.xai?.refreshToken) ||
+          (loadedSettings.xai as Any)?.accessTokenConfigured ||
+          (loadedSettings.xai as Any)?.refreshTokenConfigured,
+        ),
+      );
 
       // Set DeepSeek form state
       if (loadedSettings.deepseek?.apiKey) {
@@ -3424,6 +3564,12 @@ export function Settings({
     try {
       setOpenaiOAuthLoading(true);
       setTestResult(null);
+      if (browserAuthAvailable) {
+        const flow = await browserAuth.beginOpenAIBrowserSignIn();
+        sessionStorage.setItem("cowork-openai-sign-in", flow.flowId);
+        setBrowserSignIn(flow);
+        return;
+      }
       const result = await window.electronAPI.openaiOAuthStart();
       if (result.success) {
         setOpenaiOAuthConnected(true);
@@ -6167,7 +6313,12 @@ export function Settings({
                     <button
                       className="button-small button-secondary"
                       onClick={handleOpenAIOAuthLogout}
-                      disabled={openaiOAuthLoading}
+                      disabled={openaiOAuthLoading || !hasHostMethods("openaiOAuthLogout")}
+                      title={
+                        !hasHostMethods("openaiOAuthLogout")
+                          ? "OAuth account changes are available in the desktop app."
+                          : undefined
+                      }
                     >
                       {openaiOAuthLoading ? "Disconnecting..." : "Disconnect Account"}
                     </button>
@@ -6185,7 +6336,16 @@ export function Settings({
                     <button
                       className="button-primary oauth-login-btn"
                       onClick={handleOpenAIOAuthLogin}
-                      disabled={openaiOAuthLoading}
+                      disabled={
+                        openaiOAuthLoading ||
+                        browserSignIn?.state === "pending" ||
+                        (!browserAuthAvailable && !hasHostMethods("openaiOAuthStart"))
+                      }
+                      title={
+                        !browserAuthAvailable && !hasHostMethods("openaiOAuthStart")
+                          ? "OAuth sign-in is available in the desktop app."
+                          : undefined
+                      }
                     >
                       {openaiOAuthLoading ? (
                         <>
@@ -6220,6 +6380,86 @@ export function Settings({
                         </>
                       )}
                     </button>
+                    {browserSignIn?.state === "pending" && (
+                      <div className="settings-section" role="status">
+                        <p>
+                          Complete ChatGPT sign-in, then return here. This request expires after
+                          fifteen minutes.
+                        </p>
+                        {browserSignIn.authorizationUrl && (
+                          <a
+                            href={browserSignIn.authorizationUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Continue ChatGPT sign-in
+                          </a>
+                        )}
+                        <p className="settings-hint">
+                          If your browser finishes on a localhost callback page but this screen
+                          stays pending, paste that page’s complete address below.
+                        </p>
+                        <input
+                          className="settings-input"
+                          aria-label="ChatGPT callback URL"
+                          value={browserCallbackUrl}
+                          onChange={(event) => setBrowserCallbackUrl(event.target.value)}
+                          placeholder="http://localhost:1455/auth/callback?..."
+                          autoComplete="off"
+                        />
+                        <button
+                          className="settings-button"
+                          disabled={!browserCallbackUrl.trim()}
+                          onClick={() => {
+                            void browserAuth
+                              .submitOpenAIBrowserSignIn(browserSignIn.flowId, browserCallbackUrl)
+                              .then(() => setBrowserCallbackUrl(""))
+                              .catch((error) =>
+                                setTestResult({
+                                  success: false,
+                                  error:
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Callback could not be submitted.",
+                                }),
+                              );
+                          }}
+                        >
+                          Finish sign-in
+                        </button>
+                        <button
+                          className="settings-button"
+                          onClick={() => {
+                            void browserAuth
+                              .cancelOpenAIBrowserSignIn(browserSignIn.flowId)
+                              .then(() => {
+                                sessionStorage.removeItem("cowork-openai-sign-in");
+                                setBrowserSignIn(null);
+                                setBrowserCallbackUrl("");
+                              })
+                              .catch((error) =>
+                                setTestResult({
+                                  success: false,
+                                  error:
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Sign-in could not be cancelled.",
+                                }),
+                              );
+                          }}
+                        >
+                          Cancel sign-in
+                        </button>
+                      </div>
+                    )}
+                    {window.coworkBrowserHost === true &&
+                    !browserAuthAvailable &&
+                    !hasHostMethods("openaiOAuthStart") ? (
+                      <p className="settings-hint" role="status">
+                        OAuth sign-in is available in the desktop app. You can configure an API key
+                        here instead.
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -6666,7 +6906,12 @@ export function Settings({
                     <button
                       className="button-small button-secondary"
                       onClick={handleXAIOAuthLogout}
-                      disabled={xaiOAuthLoading}
+                      disabled={xaiOAuthLoading || !hasHostMethods("xaiOAuthLogout")}
+                      title={
+                        !hasHostMethods("xaiOAuthLogout")
+                          ? "OAuth account changes are available in the desktop app."
+                          : undefined
+                      }
                     >
                       {xaiOAuthLoading ? "Disconnecting..." : "Disconnect Account"}
                     </button>
@@ -6680,10 +6925,21 @@ export function Settings({
                     <button
                       className="button-primary oauth-login-btn"
                       onClick={handleXAIOAuthLogin}
-                      disabled={xaiOAuthLoading}
+                      disabled={xaiOAuthLoading || !hasHostMethods("xaiOAuthStart")}
+                      title={
+                        !hasHostMethods("xaiOAuthStart")
+                          ? "OAuth sign-in is available in the desktop app."
+                          : undefined
+                      }
                     >
                       {xaiOAuthLoading ? "Connecting..." : "Sign in with Grok"}
                     </button>
+                    {window.coworkBrowserHost === true && !hasHostMethods("xaiOAuthStart") ? (
+                      <p className="settings-hint" role="status">
+                        OAuth sign-in is available in the desktop app. You can configure an API key
+                        here instead.
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -7446,7 +7702,12 @@ export function Settings({
             {/* Installation status */}
             <div className="settings-section">
               <h3>Local AI Status</h3>
-              {hfStatus === null ? (
+              {!canManageLocalAiRuntime ? (
+                <p className="settings-description" role="status">
+                  Runtime status is unavailable in this browser session. Check local model status in
+                  the desktop app.
+                </p>
+              ) : hfStatus === null ? (
                 <p className="settings-description">Checking hf-agents installation...</p>
               ) : hfStatus.installed ? (
                 <p
@@ -7510,11 +7771,13 @@ export function Settings({
                   }}
                 />
                 <span className="settings-description" style={{ margin: 0 }}>
-                  {hfServerStatus?.serverRunning
-                    ? `Server running on :8080${hfServerStatus.models?.length ? ` · ${hfServerStatus.models[0]}` : ""}`
-                    : hfServerStatus?.processAlive
-                      ? "Starting… (model may be downloading)"
-                      : "Server not running"}
+                  {!canManageLocalAiRuntime
+                    ? "Local server status is unavailable in this browser session."
+                    : hfServerStatus?.serverRunning
+                      ? `Server running on :8080${hfServerStatus.models?.length ? ` · ${hfServerStatus.models[0]}` : ""}`
+                      : hfServerStatus?.processAlive
+                        ? "Starting… (model may be downloading)"
+                        : "Server not running"}
                 </span>
               </div>
               {/* Live server log panel — shown while starting or after error */}
@@ -7597,10 +7860,16 @@ export function Settings({
                 Run <code>hf agents fit</code> to detect your hardware and get model
                 recommendations. The best model will be selected automatically.
               </p>
+              {window.coworkBrowserHost === true && !canManageLocalAiRuntime && (
+                <p className="settings-description" role="status">
+                  Local model runtime controls are unavailable in this browser session. Use the
+                  desktop app to detect hardware or start and stop a local model server.
+                </p>
+              )}
               <button
                 className="button-small button-secondary"
                 onClick={handleHfDetectHardware}
-                disabled={detectingHardware || !hfStatus?.installed}
+                disabled={!canManageLocalAiRuntime || detectingHardware || !hfStatus?.installed}
               >
                 {detectingHardware ? "Detecting..." : "Detect Hardware"}
               </button>
@@ -7941,18 +8210,31 @@ export function Settings({
                 Start the llama.cpp server with your selected model. The server exposes an
                 OpenAI-compatible API at <code>http://localhost:8080/v1</code>.
               </p>
+              {window.coworkBrowserHost === true && !canManageLocalAiRuntime && (
+                <p className="settings-description" role="status">
+                  Server controls are unavailable in this browser session. Use the desktop app to
+                  start or stop the local model server.
+                </p>
+              )}
               <div style={{ display: "flex", gap: "8px" }}>
                 <button
                   className="button-small button-primary"
                   onClick={handleHfStartServer}
-                  disabled={startingServer || !hfStatus?.installed || hfServerStatus?.serverRunning}
+                  disabled={
+                    !canManageLocalAiRuntime ||
+                    startingServer ||
+                    !hfStatus?.installed ||
+                    hfServerStatus?.serverRunning
+                  }
                 >
                   {startingServer ? "Starting..." : "Start Server"}
                 </button>
                 <button
                   className="button-small button-secondary"
                   onClick={handleHfStopServer}
-                  disabled={stoppingServer || !hfServerStatus?.processAlive}
+                  disabled={
+                    !canManageLocalAiRuntime || stoppingServer || !hfServerStatus?.processAlive
+                  }
                 >
                   {stoppingServer ? "Stopping..." : "Stop Server"}
                 </button>
@@ -7965,7 +8247,12 @@ export function Settings({
           <>
             <div className="settings-section">
               <h3>MLX-LM Status</h3>
-              {hfStatus === null ? (
+              {!canManageLocalAiRuntime ? (
+                <p className="settings-description" role="status">
+                  Runtime status is unavailable in this browser session. Check MLX-LM status in the
+                  desktop app.
+                </p>
+              ) : hfStatus === null ? (
                 <p className="settings-description">Checking MLX-LM installation...</p>
               ) : !hfStatus.isAppleSilicon ? (
                 <p
@@ -8053,6 +8340,12 @@ export function Settings({
                 API at <code>http://localhost:8080/v1</code>. This server is shared with HuggingFace
                 Local AI, so stop one runtime before starting the other.
               </p>
+              {window.coworkBrowserHost === true && !canManageLocalAiRuntime && (
+                <p className="settings-description" role="status">
+                  Server controls are unavailable in this browser session. Use the desktop app to
+                  start or stop the local model server.
+                </p>
+              )}
               <div
                 style={{
                   marginBottom: "10px",
@@ -8075,11 +8368,13 @@ export function Settings({
                   }}
                 />
                 <span className="settings-description" style={{ margin: 0 }}>
-                  {hfServerStatus?.serverRunning
-                    ? `Server running${hfServerStatus.models?.length ? ` · ${hfServerStatus.models[0]}` : ""}`
-                    : hfServerStatus?.processAlive
-                      ? "Starting… (model may be downloading)"
-                      : "Server not running"}
+                  {!canManageLocalAiRuntime
+                    ? "Local server status is unavailable in this browser session."
+                    : hfServerStatus?.serverRunning
+                      ? `Server running${hfServerStatus.models?.length ? ` · ${hfServerStatus.models[0]}` : ""}`
+                      : hfServerStatus?.processAlive
+                        ? "Starting… (model may be downloading)"
+                        : "Server not running"}
                 </span>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
@@ -8087,7 +8382,12 @@ export function Settings({
                   type="button"
                   className="button-small button-primary"
                   onClick={handleMlxStartServer}
-                  disabled={startingServer || !mlxRuntimeReady || hfServerStatus?.serverRunning}
+                  disabled={
+                    !canManageLocalAiRuntime ||
+                    startingServer ||
+                    !mlxRuntimeReady ||
+                    hfServerStatus?.serverRunning
+                  }
                 >
                   {startingServer ? "Starting..." : "Start MLX Server"}
                 </button>
@@ -8095,7 +8395,9 @@ export function Settings({
                   type="button"
                   className="button-small button-secondary"
                   onClick={handleMlxStopServer}
-                  disabled={stoppingServer || !hfServerStatus?.processAlive}
+                  disabled={
+                    !canManageLocalAiRuntime || stoppingServer || !hfServerStatus?.processAlive
+                  }
                 >
                   {stoppingServer ? "Stopping..." : "Stop Server"}
                 </button>
@@ -8690,6 +8992,15 @@ export function Settings({
                   },
                 ]);
               }}
+              title={
+                currentFailoverProviders.length >= 5
+                  ? "You can configure up to five backup providers."
+                  : configuredFallbackProviderOptions.some(
+                        (provider) => provider.type !== currentProviderType,
+                      )
+                    ? undefined
+                    : "Configure another provider before adding a backup."
+              }
               disabled={
                 configuredFallbackProviderOptions.filter(
                   (provider) => provider.type !== currentProviderType,
@@ -8786,7 +9097,17 @@ export function Settings({
         <div className="settings-content-card">
           <div className="settings-content">
             <Suspense fallback={<div className="settings-loading">Loading settings...</div>}>
-              {activeTab === "appearance" ? (
+              {window.coworkBrowserHost === true &&
+              (!BROWSER_SETTINGS_METHODS[activeTab] ||
+                !hasHostMethods(...BROWSER_SETTINGS_METHODS[activeTab]!)) ? (
+                <section className="settings-section" role="status">
+                  <h2>This setting is unavailable on this browser host</h2>
+                  <p className="settings-description">
+                    The host does not expose this settings service yet. Configure it in the desktop
+                    app. Your saved host settings remain in effect.
+                  </p>
+                </section>
+              ) : activeTab === "appearance" ? (
                 <AppearanceSettings
                   themeMode={themeMode}
                   visualTheme={visualTheme}
@@ -8984,9 +9305,36 @@ export function Settings({
                   </div>
                   <div className="more-channels-content">
                     {activeAIModelsSubTab === "llm" && renderLLMPanel()}
-                    {activeAIModelsSubTab === "image" && renderImagePanel()}
-                    {activeAIModelsSubTab === "video" && renderVideoPanel()}
-                    {activeAIModelsSubTab === "search" && <SearchSettings />}
+                    {activeAIModelsSubTab === "image" &&
+                      (window.coworkBrowserHost &&
+                      !hasHostMethods("getImageSettings", "saveImageSettings") ? (
+                        <p role="status">
+                          Image provider configuration is unavailable on this browser host.
+                          Configure it in the desktop app.
+                        </p>
+                      ) : (
+                        renderImagePanel()
+                      ))}
+                    {activeAIModelsSubTab === "video" &&
+                      (window.coworkBrowserHost &&
+                      !hasHostMethods("getVideoSettings", "saveVideoSettings") ? (
+                        <p role="status">
+                          Video provider configuration is unavailable on this browser host.
+                          Configure it in the desktop app.
+                        </p>
+                      ) : (
+                        renderVideoPanel()
+                      ))}
+                    {activeAIModelsSubTab === "search" &&
+                      (window.coworkBrowserHost &&
+                      !hasHostMethods("getSearchSettings", "saveSearchSettings") ? (
+                        <p role="status">
+                          Search provider configuration is unavailable on this browser host.
+                          Configure it in the desktop app.
+                        </p>
+                      ) : (
+                        <SearchSettings />
+                      ))}
                   </div>
                 </div>
               ) : activeTab === "updates" ? (
@@ -9000,42 +9348,12 @@ export function Settings({
                       automation engines that routines compile into
                     </p>
                   </div>
-                  <div className="more-channels-tabs">
-                    {(
-                      [
-                        "routines",
-                        "queue",
-                        "council",
-                        "subconscious",
-                        "scheduled",
-                        "hooks",
-                        "triggers",
-                      ] as const
-                    ).map((key) => (
-                      <button
-                        key={key}
-                        className={`more-channels-tab ${activeAutomationsSubTab === key ? "active" : ""}`}
-                        onClick={() => setActiveAutomationsSubTab(key)}
-                      >
-                        {key === "routines" && <Box {...S} />}
-                        {key === "queue" && <ListOrdered {...S} />}
-                        {key === "council" && <Users {...S} />}
-                        {key === "subconscious" && <Sparkles {...S} />}
-                        {key === "scheduled" && <Clock {...S} />}
-                        {key === "hooks" && <Link {...S} />}
-                        {key === "triggers" && <Zap {...S} />}
-                        <span>
-                          {key === "routines" && "Routines"}
-                          {key === "queue" && "Task Queue"}
-                          {key === "council" && "R&D Council"}
-                          {key === "subconscious" && "Workflow Intelligence"}
-                          {key === "scheduled" && "Scheduled Tasks"}
-                          {key === "hooks" && "Webhooks"}
-                          {key === "triggers" && "Event Triggers"}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  <AutomationSubtabNavigation
+                    activeTab={activeAutomationsSubTab}
+                    isBrowserHost={window.coworkBrowserHost === true}
+                    hasMethods={hasHostMethods}
+                    onSelect={setActiveAutomationsSubTab}
+                  />
                   <div className="more-channels-content">
                     {activeAutomationsSubTab === "routines" && (
                       <RoutineSettingsPanel
@@ -9108,6 +9426,12 @@ export function Settings({
                     <button
                       className={`more-channels-tab ${activeSkillsSubTab === "custom" ? "active" : ""}`}
                       onClick={() => setActiveSkillsSubTab("custom")}
+                      disabled={!hasHostMethods("listCustomSkills", "getCustomSkillSettings")}
+                      title={
+                        !hasHostMethods("listCustomSkills", "getCustomSkillSettings")
+                          ? "Manage custom skill files in the desktop app"
+                          : undefined
+                      }
                     >
                       <Wrench {...S} />
                       <span>Custom Skills</span>
@@ -9121,7 +9445,15 @@ export function Settings({
                     </button>
                   </div>
                   <div className="more-channels-content">
-                    {activeSkillsSubTab === "custom" && <SkillsSettings />}
+                    {activeSkillsSubTab === "custom" &&
+                      (hasHostMethods("listCustomSkills", "getCustomSkillSettings") ? (
+                        <SkillsSettings />
+                      ) : (
+                        <p className="settings-description">
+                          Manage custom skill files in the desktop app. Browse installed skills and
+                          catalogs in Skill Store.
+                        </p>
+                      ))}
                     {activeSkillsSubTab === "store" && (
                       <SkillHubBrowser
                         initialSelection={
@@ -9179,7 +9511,25 @@ export function Settings({
                     {activeIntegrationsSubTab === "identity" && (
                       <ContactIdentitySettings workspaceId={workspaceId} />
                     )}
-                    {activeIntegrationsSubTab === "infrastructure" && <InfraSettings />}
+                    {activeIntegrationsSubTab === "infrastructure" &&
+                      (window.coworkBrowserHost === true &&
+                      !hasHostMethods(
+                        "infraGetStatus",
+                        "infraGetSettings",
+                        "infraSetup",
+                        "infraReset",
+                        "infraSaveSettings",
+                      ) ? (
+                        <section className="settings-section" role="status">
+                          <h2>Infrastructure settings are unavailable on this browser host</h2>
+                          <p className="settings-description">
+                            This host does not expose the infrastructure service yet. Configure it
+                            in the desktop app; its saved host settings remain in effect.
+                          </p>
+                        </section>
+                      ) : (
+                        <InfraSettings />
+                      ))}
                   </div>
                 </div>
               ) : activeTab === "mcp" ? (

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { InstallSecurityOutcome } from "../../shared/types";
 import { isGitPluginUrl } from "../utils/plugin-store-install";
+import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 
 interface PackRegistryEntry {
   id: string;
@@ -66,6 +67,10 @@ export function PluginStore({
   const [scaffoldCategory, setScaffoldCategory] = useState("Custom");
   const [scaffoldIcon, setScaffoldIcon] = useState("📦");
   const focusedPackId = useRef<string | null>(null);
+  const canInstallFromGit = hasHostMethod("installPluginPackFromGit");
+  const canInstallFromUrl = hasHostMethod("installPluginPackFromUrl");
+  const canImportFromUrl = hasHostMethods("installPluginPackFromGit", "installPluginPackFromUrl");
+  const canScaffoldPack = hasHostMethod("scaffoldPluginPack");
 
   // Load categories on mount
   useEffect(() => {
@@ -124,6 +129,23 @@ export function PluginStore({
   }, [initialPackId, results]);
 
   const handleInstall = async (entry: PackRegistryEntry) => {
+    const installMethod = entry.gitUrl
+      ? "installPluginPackFromGit"
+      : entry.downloadUrl
+        ? "installPluginPackFromUrl"
+        : null;
+    if (!installMethod || !hasHostMethod(installMethod)) {
+      setInstallResult({
+        id: entry.id,
+        success: false,
+        message:
+          window.coworkBrowserHost === true
+            ? "Pack installation is unavailable on this browser host. Install packs in the desktop app."
+            : "No supported installer is available for this pack.",
+      });
+      return;
+    }
+
     setInstalling(entry.id);
     setInstallResult(null);
 
@@ -167,6 +189,14 @@ export function PluginStore({
 
   const handleUrlInstall = async () => {
     if (!installUrl.trim()) return;
+    if (!canImportFromUrl) {
+      setInstallResult({
+        id: "url",
+        success: false,
+        message: "Importing packs from a URL is available in the desktop app.",
+      });
+      return;
+    }
     setInstalling("url");
     setInstallResult(null);
 
@@ -211,6 +241,14 @@ export function PluginStore({
 
   const handleScaffold = async () => {
     if (!scaffoldName.trim() || !scaffoldDisplayName.trim()) return;
+    if (!canScaffoldPack) {
+      setInstallResult({
+        id: "scaffold",
+        success: false,
+        message: "Creating packs is available in the desktop app.",
+      });
+      return;
+    }
     setInstalling("scaffold");
     setInstallResult(null);
 
@@ -267,6 +305,8 @@ export function PluginStore({
                 setShowScaffold(true);
                 setShowInstallUrl(false);
               }}
+              disabled={!canScaffoldPack}
+              title={!canScaffoldPack ? "Create packs in the desktop app" : undefined}
             >
               + Create Pack
             </button>
@@ -276,6 +316,8 @@ export function PluginStore({
                 setShowInstallUrl(true);
                 setShowScaffold(false);
               }}
+              disabled={!canImportFromUrl}
+              title={!canImportFromUrl ? "Import packs in the desktop app" : undefined}
             >
               Install from URL
             </button>
@@ -284,6 +326,14 @@ export function PluginStore({
             </button>
           </div>
         </div>
+
+        {window.coworkBrowserHost === true &&
+          (!canInstallFromGit || !canInstallFromUrl || !canScaffoldPack) && (
+            <p className="ps-hint" role="status">
+              Browse the pack catalog here. Installing, importing, or creating packs is available in
+              the desktop app.
+            </p>
+          )}
 
         {/* Install from URL panel */}
         {showInstallUrl && (
@@ -298,13 +348,15 @@ export function PluginStore({
                 className="ps-input"
                 placeholder="github:owner/repo or https://..."
                 value={installUrl}
+                disabled={!canImportFromUrl}
                 onChange={(e) => setInstallUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleUrlInstall()}
               />
               <button
                 className="ps-btn ps-btn--primary"
                 onClick={handleUrlInstall}
-                disabled={!installUrl.trim() || installing === "url"}
+                disabled={!canImportFromUrl || !installUrl.trim() || installing === "url"}
+                title={!canImportFromUrl ? "Import packs in the desktop app" : undefined}
               >
                 {installing === "url" ? "Installing..." : "Install"}
               </button>
@@ -384,8 +436,12 @@ export function PluginStore({
                   className="ps-btn ps-btn--primary"
                   onClick={handleScaffold}
                   disabled={
-                    !scaffoldName.trim() || !scaffoldDisplayName.trim() || installing === "scaffold"
+                    !canScaffoldPack ||
+                    !scaffoldName.trim() ||
+                    !scaffoldDisplayName.trim() ||
+                    installing === "scaffold"
                   }
+                  title={!canScaffoldPack ? "Create packs in the desktop app" : undefined}
                 >
                   {installing === "scaffold" ? "Creating..." : "Create"}
                 </button>
@@ -454,39 +510,53 @@ export function PluginStore({
           )}
 
           <div className="ps-grid">
-            {results.map((entry) => (
-              <div key={entry.id} className="ps-card" data-pack-id={entry.id}>
-                <div className="ps-card-header">
-                  <span className="ps-card-icon">{entry.icon || "📦"}</span>
-                  <div className="ps-card-meta">
-                    <span className="ps-card-name">{entry.displayName}</span>
-                    <span className="ps-card-author">by {normalizeAuthor(entry.author)}</span>
+            {results.map((entry) => {
+              const canInstallEntry = entry.gitUrl
+                ? canInstallFromGit
+                : entry.downloadUrl
+                  ? canInstallFromUrl
+                  : false;
+              return (
+                <div key={entry.id} className="ps-card" data-pack-id={entry.id}>
+                  <div className="ps-card-header">
+                    <span className="ps-card-icon">{entry.icon || "📦"}</span>
+                    <div className="ps-card-meta">
+                      <span className="ps-card-name">{entry.displayName}</span>
+                      <span className="ps-card-author">by {normalizeAuthor(entry.author)}</span>
+                    </div>
                   </div>
+                  <p className="ps-card-desc">{entry.description}</p>
+                  <div className="ps-card-footer">
+                    <div className="ps-card-stats">
+                      {entry.skillCount != null && <span>{entry.skillCount} skills</span>}
+                      {entry.agentCount != null && <span>{entry.agentCount} agents</span>}
+                      {entry.category && <span className="ps-card-category">{entry.category}</span>}
+                    </div>
+                    <button
+                      className="ps-btn ps-btn--primary ps-btn--sm"
+                      onClick={() => handleInstall(entry)}
+                      disabled={!canInstallEntry || installing === entry.id}
+                      title={
+                        !canInstallEntry
+                          ? window.coworkBrowserHost === true
+                            ? "Install this pack in the desktop app"
+                            : "No supported installer is available for this pack"
+                          : undefined
+                      }
+                    >
+                      {installing === entry.id ? "Installing..." : "Install"}
+                    </button>
+                  </div>
+                  {installResult?.id === entry.id && (
+                    <div
+                      className={`ps-result ${installResult.success ? "ps-result--success" : "ps-result--error"}`}
+                    >
+                      {installResult.message}
+                    </div>
+                  )}
                 </div>
-                <p className="ps-card-desc">{entry.description}</p>
-                <div className="ps-card-footer">
-                  <div className="ps-card-stats">
-                    {entry.skillCount != null && <span>{entry.skillCount} skills</span>}
-                    {entry.agentCount != null && <span>{entry.agentCount} agents</span>}
-                    {entry.category && <span className="ps-card-category">{entry.category}</span>}
-                  </div>
-                  <button
-                    className="ps-btn ps-btn--primary ps-btn--sm"
-                    onClick={() => handleInstall(entry)}
-                    disabled={installing === entry.id}
-                  >
-                    {installing === entry.id ? "Installing..." : "Install"}
-                  </button>
-                </div>
-                {installResult?.id === entry.id && (
-                  <div
-                    className={`ps-result ${installResult.success ? "ps-result--success" : "ps-result--error"}`}
-                  >
-                    {installResult.message}
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Pagination */}

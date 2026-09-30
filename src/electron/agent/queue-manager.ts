@@ -372,34 +372,35 @@ export class TaskQueueManager {
    * Update settings
    */
   saveSettings(newSettings: Partial<QueueSettings>): void {
-    // Validate maxConcurrentTasks
+    const candidate = { ...this.settings, ...newSettings };
+
+    // Validate maxConcurrentTasks without mutating caller input or live settings.
     if (newSettings.maxConcurrentTasks !== undefined) {
-      newSettings.maxConcurrentTasks = Math.max(1, Math.min(20, newSettings.maxConcurrentTasks));
+      candidate.maxConcurrentTasks = Math.max(1, Math.min(20, newSettings.maxConcurrentTasks));
     }
 
     // Validate taskTimeoutMinutes (5 min to 24 hours)
     if (newSettings.taskTimeoutMinutes !== undefined) {
-      newSettings.taskTimeoutMinutes = Math.max(
+      candidate.taskTimeoutMinutes = Math.max(
         MIN_QUEUE_TASK_TIMEOUT_MINUTES,
         Math.min(MAX_QUEUE_TASK_TIMEOUT_MINUTES, newSettings.taskTimeoutMinutes),
       );
     }
 
-    this.settings = { ...this.settings, ...newSettings };
-
-    try {
-      if (SecureSettingsRepository.isInitialized()) {
-        const repository = SecureSettingsRepository.getInstance();
-        repository.save("queue", this.settings);
-        console.log("[TaskQueueManager] Settings saved to encrypted database");
-      } else {
-        console.warn(
-          "[TaskQueueManager] SecureSettingsRepository not initialized, settings not persisted",
-        );
-      }
-    } catch (error) {
-      console.error("[TaskQueueManager] Failed to save settings:", error);
+    if (!SecureSettingsRepository.isInitialized()) {
+      throw new Error("Queue settings cannot be saved before secure settings are initialized.");
     }
+
+    const repository = SecureSettingsRepository.getInstance();
+    if (!repository.save("queue", candidate)) {
+      throw new Error(
+        "Queue settings were not persisted because secure storage refused the write.",
+      );
+    }
+
+    // Publish the new limits only after encrypted storage confirms the write.
+    this.settings = candidate;
+    console.log("[TaskQueueManager] Settings saved to encrypted database");
 
     // Process queue in case we increased concurrency
     void this.processQueue().catch((error: unknown) =>

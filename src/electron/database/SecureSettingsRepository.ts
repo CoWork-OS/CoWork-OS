@@ -473,6 +473,23 @@ export class SecureSettingsRepository {
     return { encryptedData, checksum: this.computeChecksum(encryptedData) };
   }
 
+  /** Decode a sealed host record without accepting legacy plaintext. */
+  decryptRecord<T extends object>(record: SecureSettingsRecord): T {
+    if (
+      !record ||
+      typeof record.encryptedData !== "string" ||
+      typeof record.checksum !== "string" ||
+      !(record.encryptedData.startsWith("os:") || record.encryptedData.startsWith("app2:")) ||
+      record.checksum !== this.computeChecksum(record.encryptedData)
+    )
+      throw new Error("Invalid encrypted settings record");
+    const value: unknown = JSON.parse(this.decrypt(record.encryptedData));
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Invalid encrypted settings payload");
+    }
+    return value as T;
+  }
+
   /** Load a category together with the revision it was read at. */
   readRecord<T extends object>(
     category: SettingsCategory,

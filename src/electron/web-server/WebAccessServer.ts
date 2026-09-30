@@ -11,6 +11,8 @@ import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import { WebAccessConfig, WebAccessStatus, DEFAULT_WEB_ACCESS_CONFIG } from "./types";
+import { WebApplication, type WebApplicationMount } from "../../host/web/WebApplication";
+import type { Duplex } from "stream";
 
 interface WebAccessServerDeps {
   /** Handle an IPC-equivalent invoke from the web client */
@@ -19,6 +21,8 @@ interface WebAccessServerDeps {
   getRendererPath: () => string;
   /** Forward real-time events to connected WebSocket clients */
   onDaemonEvent?: (callback: (event: Any) => void) => void;
+  /** Optional, explicit browser app host. Omission keeps the new browser API disabled. */
+  webApplication?: WebApplication;
   log?: (...args: unknown[]) => void;
 }
 
@@ -28,6 +32,7 @@ export class WebAccessServer {
   private config: WebAccessConfig;
   private deps: WebAccessServerDeps;
   private startedAt?: number;
+  private webApplicationMount: WebApplicationMount | null = null;
 
   constructor(config: Partial<WebAccessConfig>, deps: WebAccessServerDeps) {
     this.config = this.normalizeConfig(config);
@@ -39,24 +44,51 @@ export class WebAccessServer {
   async start(): Promise<void> {
     if (this.server) return;
 
+    this.mountWebApplication();
+
     this.server = http.createServer((req, res) => this.handleRequest(req, res));
 
     // WebSocket upgrade
-    this.server.on("upgrade", (req, socket, head) => {
-      this.handleWebSocketUpgrade(req, socket, head);
+    this.server.on("upgrade", (req, socket: Duplex, head) => {
+      const mount = this.webApplicationMount;
+      if (!mount) {
+        this.handleWebSocketUpgrade(req, socket, head);
+        return;
+      }
+      void mount
+        .handleUpgrade(req, socket, head)
+        .then((handled) => {
+          if (!handled && !socket.destroyed) this.handleWebSocketUpgrade(req, socket, head);
+        })
+        .catch((error) => {
+          this.log("[WebAccess] Browser WebSocket upgrade failed:", error);
+          socket.destroy();
+        });
     });
 
     return new Promise((resolve, reject) => {
-      this.server!.listen(this.config.port, this.config.host, () => {
+      const server = this.server!;
+      server.once("error", (error) => {
+        this.server = null;
+        const mount = this.webApplicationMount;
+        this.webApplicationMount = null;
+        if (mount) void mount.close();
+        reject(error);
+      });
+      server.listen(this.config.port, this.config.host, () => {
+        const address = server.address();
+        if (address && typeof address !== "string") this.config.port = address.port;
         this.startedAt = Date.now();
         this.log(`[WebAccess] Server started at http://${this.config.host}:${this.config.port}`);
         resolve();
       });
-      this.server!.on("error", reject);
     });
   }
 
   async stop(): Promise<void> {
+    const mount = this.webApplicationMount;
+    this.webApplicationMount = null;
+    if (mount) await mount.close();
     if (!this.server) return;
 
     // Close all WebSocket connections
@@ -82,6 +114,7 @@ export class WebAccessServer {
   getStatus(): WebAccessStatus {
     return {
       running: !!this.server,
+      browserApplication: !!this.server && !!this.webApplicationMount,
       url: this.server ? `http://${this.config.host}:${this.config.port}` : undefined,
       port: this.config.port,
       connectedClients: this.wsClients.size,
@@ -91,6 +124,14 @@ export class WebAccessServer {
 
   getConfig(): WebAccessConfig {
     return { ...this.config };
+  }
+
+  /** Enable or disable the browser app host after listener startup. */
+  async setWebApplication(webApplication?: WebApplication): Promise<void> {
+    if (this.webApplicationMount) await this.webApplicationMount.close();
+    this.webApplicationMount = null;
+    this.deps.webApplication = webApplication;
+    if (this.server) this.mountWebApplication();
   }
 
   /**
@@ -133,6 +174,9 @@ export class WebAccessServer {
   // ── HTTP handler ────────────────────────────────────────────────
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (this.webApplicationMount && (await this.webApplicationMount.handleRequest(req, res)))
+      return;
+
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
     const requestOrigin = typeof req.headers.origin === "string" ? req.headers.origin.trim() : "";
     const corsOrigin = this.resolveCorsOrigin(requestOrigin);
@@ -176,6 +220,19 @@ export class WebAccessServer {
 
     // Serve static renderer files
     this.serveStatic(url.pathname, res);
+  }
+
+  private mountWebApplication(): void {
+    const webApplication = this.deps.webApplication;
+    if (!webApplication?.enabled) return;
+    this.webApplicationMount = webApplication.mount({
+      audience: "web-access",
+      listenerHost: this.config.host,
+      getListenerPort: () => {
+        const address = this.server?.address();
+        return address && typeof address !== "string" ? address.port : undefined;
+      },
+    });
   }
 
   private authenticate(req: http.IncomingMessage): boolean {

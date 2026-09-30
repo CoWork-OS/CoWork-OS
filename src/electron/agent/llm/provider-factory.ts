@@ -2189,7 +2189,9 @@ export class LLMProviderFactory {
 
       // Save entire settings object to encrypted database
       // No need for per-field encryption - the entire object is encrypted
-      repository.save("llm", normalizedSettings);
+      if (!repository.save("llm", normalizedSettings)) {
+        throw new Error("Provider settings storage refused the write.");
+      }
       this.cachedSettings = normalizedSettings;
 
       logger.debug("Settings saved to encrypted database");

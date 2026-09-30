@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { TaskLabelData, AgentRoleData } from "../../electron/preload";
+import { TaskStatusBadge } from "../host-shared/TaskStatusBadge";
 
 interface Task {
   id: string;
@@ -138,7 +139,7 @@ export function TaskBoardCard({
 
       <div className="card-footer">
         <span className="card-time">{formatTimeAgo(task.createdAt)}</span>
-        <span className={`card-status status-${task.status}`}>{task.status}</span>
+        <TaskStatusBadge className="card-status" status={task.status} />
       </div>
 
       {showActions && (

@@ -1,0 +1,79 @@
+.web-task-cancellation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 20px;
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #3f3438;
+  border-radius: 10px;
+  background: #1d191c;
+}
+
+.web-task-cancellation-copy h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.web-task-cancellation-copy p {
+  margin: 5px 0 0;
+  color: #b8aeb1;
+  font-size: 0.8rem;
+}
+
+.web-task-cancellation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.web-task-cancel-button,
+.web-task-cancel-restart {
+  width: auto;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+}
+
+.web-task-cancel-button {
+  background: #713f46;
+}
+
+.web-task-cancel-button:not(:disabled):hover {
+  background: #89505a;
+}
+
+.web-task-cancel-restart {
+  border: 1px solid #5b6570;
+  background: transparent;
+}
+
+.web-task-cancel-restart:not(:disabled):hover {
+  background: #28333f;
+}
+
+.web-task-cancel-notice,
+.web-task-cancel-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.web-task-cancel-notice {
+  color: #b7c9d8;
+}
+
+.web-task-cancel-error {
+  color: #ffb3aa;
+}
+
+@media (max-width: 640px) {
+  .web-task-cancellation {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .web-task-cancellation-actions {
+    justify-content: flex-start;
+  }
+}

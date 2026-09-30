@@ -419,6 +419,25 @@ describe("TaskExecutor plan parsing", () => {
     expect(Array.from(contract.requiredTools)).toContain("write_file");
   });
 
+  it("requires imperative MCP tool calls but ignores report-only references", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.toolRegistry.getTools = vi.fn().mockReturnValue([{ name: "mcp_qa_echo" }]);
+
+    const reportOnly =
+      "Once the response is received from the `mcp_qa_echo` call, summarize and present the returned text in a brief plain sentence.";
+    const reportContract = (executor as Any).extractRequiredToolsFromStepDescription(
+      reportOnly,
+    ) as Set<string>;
+    expect(reportContract.has("mcp_qa_echo")).toBe(false);
+
+    const imperativeCall =
+      'Call `mcp_qa_echo` once with text "browser-tool-connected" and capture the returned text.';
+    const callContract = (executor as Any).extractRequiredToolsFromStepDescription(
+      imperativeCall,
+    ) as Set<string>;
+    expect(callContract.has("mcp_qa_echo")).toBe(true);
+  });
+
   it("keeps non-trivial file requests on the normal planning path", async () => {
     const response = {
       usage: { inputTokens: 1, outputTokens: 2 },
@@ -544,6 +563,58 @@ describe("TaskExecutor plan parsing", () => {
       "search_files",
       "request_user_input",
     ]);
+  });
+
+  it("retains only explicitly named MCP tools that are currently available", () => {
+    const executor = createPlanExecutor({ content: [] });
+    const prompt = "Call mcp_qa_echo with the text 'fixture ping'.";
+    executor.task.title = "Call mcp_qa_echo";
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+    executor.lastUserMessage = prompt;
+    executor.currentStepId = "1";
+    executor.plan = {
+      description: "Call mcp_qa_echo with the provided text.",
+      steps: [{ id: "1", description: "Call mcp_qa_echo with fixture ping.", status: "pending" }],
+    };
+    executor.hasTaskToolAllowlistConfigured = vi.fn().mockReturnValue(false);
+    executor.resolveStepExecutionContract = vi.fn().mockReturnValue({
+      requiredTools: new Set(),
+      requiresMutation: false,
+    });
+    executor.getToolPolicyContext = vi.fn().mockReturnValue({
+      executionMode: "execute",
+      taskDomain: "general",
+      taskIntent: "execution",
+    });
+    executor.toolUsageCounts = new Map();
+
+    const availableTools = [
+      { name: "read_file" },
+      { name: "mcp_qa_echo" },
+      { name: "mcp_qa_admin_reset" },
+    ];
+    const stepScopedTools = executor.applyStepScopedToolPolicy(availableTools);
+    expect(stepScopedTools.map((tool: Any) => tool.name)).toEqual(["read_file", "mcp_qa_echo"]);
+    expect(
+      executor.applyAdaptiveToolAvailabilityFilter(stepScopedTools).map((tool: Any) => tool.name),
+    ).toEqual(["read_file", "mcp_qa_echo"]);
+
+    executor.task.prompt = "Use the configured MCP server to inspect the result.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.task.title = "Inspect the result through MCP";
+    executor.lastUserMessage = executor.task.prompt;
+    executor.plan.steps[0].description = "Use the configured MCP server.";
+    expect(
+      executor
+        .applyStepScopedToolPolicy(availableTools)
+        .map((tool: Any) => tool.name)
+        .filter((name: string) => name.startsWith("mcp_")),
+    ).toEqual([]);
+
+    expect(
+      executor.applyStepScopedToolPolicy([{ name: "read_file" }]).map((tool: Any) => tool.name),
+    ).toEqual(["read_file"]);
   });
 
   it("keeps file mutations on the explicitly requested single-use tool", () => {

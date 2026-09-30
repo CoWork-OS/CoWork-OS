@@ -17,6 +17,8 @@ const REQUIRED_FILES = [
   "bin/coworkd-node.js",
   "bin/coworkctl.js",
   "dist/daemon/daemon/main.js",
+  "dist/web/index.html",
+  "dist/web/web-manifest.json",
   "deploy/systemd/cowork-os-node.service",
   "deploy/systemd/cowork-os.env.example",
   "docs/vps-linux.md",
@@ -152,6 +154,19 @@ async function main() {
     for (const relativePath of REQUIRED_FILES) {
       await fs.access(path.join(packageRoot, relativePath));
     }
+    const webAssets = await fs.readdir(path.join(packageRoot, "dist/web/assets"));
+    if (!webAssets.some((name) => name.endsWith(".js"))) {
+      throw new Error("Packaged browser application has no JavaScript asset");
+    }
+    const webManifest = JSON.parse(
+      await fs.readFile(path.join(packageRoot, "dist/web/web-manifest.json"), "utf8"),
+    );
+    const packageManifest = JSON.parse(
+      await fs.readFile(path.join(packageRoot, "package.json"), "utf8"),
+    );
+    if (webManifest.apiVersion !== 1 || webManifest.appVersion !== packageManifest.version) {
+      throw new Error("Packaged browser application version does not match the server package");
+    }
     await validateNumbatRuntime(packageRoot);
 
     run(process.execPath, ["bin/coworkd-node.js", "--help"], { cwd: packageRoot });
@@ -161,6 +176,11 @@ async function main() {
         "-e",
         "const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.close(); console.log('better-sqlite3 ok')",
       ],
+      { cwd: packageRoot },
+    );
+    run(
+      process.execPath,
+      ["-e", "require('node-pty'); console.log('node-pty ok')"],
       { cwd: packageRoot },
     );
 

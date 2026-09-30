@@ -32,9 +32,17 @@ import {
 import { pruneTaskEventsWithWorker, readStorageStats } from "../database/async/maintenance";
 import { performance } from "perf_hooks";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
+import {
+  TaskAdmissionConflictError,
+  TaskAdmissionInputError,
+  TaskAdmissionReceiptUnavailableError,
+  TaskAdmissionService,
+} from "../control-plane/task-admission-service";
 import type Database from "better-sqlite3";
 import {
   TaskStore,
+  type TaskAdmissionInput,
+  type TaskAdmissionMediaMetadata,
   TaskEventRepository,
   WorkspaceStore,
   MemoryType,
@@ -244,7 +252,12 @@ import {
   createVerificationRuntime,
   type VerificationRuntimeResult,
 } from "./runtime/VerificationRuntime";
-import { QueuedAttachmentStore, type QueuedAttachmentRef } from "./runtime/queued-attachment-store";
+import {
+  INITIAL_TASK_ATTACHMENT_MESSAGE_ID,
+  QueuedAttachmentStore,
+  type QueuedAttachmentBytes,
+  type QueuedAttachmentRef,
+} from "./runtime/queued-attachment-store";
 import type { AgentTeamOrchestrator } from "../agents/AgentTeamOrchestrator";
 import { AgentTeamItemStore } from "../agents/AgentTeamItemRepository";
 import { AgentTeamRunStore } from "../agents/AgentTeamRunRepository";
@@ -384,8 +397,14 @@ export function shouldRestartInterruptedTask(input: {
   hasSnapshot: boolean;
   hasPlan: boolean;
   hasRecoveredBotHandoff: boolean;
+  hasQueuedUserFollowUp?: boolean;
 }): boolean {
-  return !input.hasSnapshot && !input.hasPlan && !input.hasRecoveredBotHandoff;
+  return (
+    !input.hasSnapshot &&
+    !input.hasPlan &&
+    !input.hasRecoveredBotHandoff &&
+    !input.hasQueuedUserFollowUp
+  );
 }
 
 const RESUME_STATE_EVENT_TYPES = [
@@ -579,6 +598,14 @@ type DaemonFollowUpOptions = Pick<
   startAfterAccepted?: boolean;
   /** Full queue item retained until the executor's acceptance snapshot commits. */
   queuedFollowUp?: TaskFollowUpInput;
+  /** Browser-captured bytes; persisted before executor admission. */
+  capturedAttachments?: QueuedAttachmentBytes[];
+  /** Private browser idempotency identity persisted with the durable user-message receipt. */
+  requestFingerprint?: string;
+  /** Set only by orphan recovery when the accepted user turn is already in the transcript. */
+  transcriptAlreadyContainsMessage?: boolean;
+  /** Durable attachment refs associated with this accepted message. */
+  queuedAttachmentRefs?: QueuedAttachmentRef[];
 };
 
 interface PendingApprovalEntry {
@@ -668,6 +695,7 @@ export class AgentDaemon extends EventEmitter {
   ]);
 
   private taskRepo: TaskStore;
+  private taskAdmissionService: TaskAdmissionService;
   /** Synchronous graph reads on the hot path (DB6); writes go through the engine's facade. */
   private orchestrationGraphStore: OrchestrationGraphStore;
   private eventRepo: TaskEventRepository;
@@ -730,6 +758,13 @@ export class AgentDaemon extends EventEmitter {
   private sessionAutoApproveAll = false;
   /** Transient storage for images attached to task creation (not persisted to DB). */
   private pendingTaskImages: Map<string, ImageAttachment[]> = new Map();
+  /** Initial browser media is retained only until its first user-message event commits. */
+  private pendingInitialTaskMediaReceipts = new Map<
+    string,
+    { messageId: string; refs: QueuedAttachmentRef[] }
+  >();
+  private initialTaskMediaStarted = new Set<string>();
+  private emittedPrecommittedTaskCreatedIds = new Set<string>();
   /** Durable copies for queue-only message receipts; initialized lazily for lightweight test hosts. */
   private queuedAttachmentStore?: QueuedAttachmentStore;
   /**
@@ -785,6 +820,7 @@ export class AgentDaemon extends EventEmitter {
         this.options.recurringApprovalService || new RecurringApprovalService(db),
     };
     this.taskRepo = new TaskStore(db);
+    this.taskAdmissionService = new TaskAdmissionService(db);
     this.orchestrationGraphStore = new OrchestrationGraphStore(db);
     this.eventRepo = new TaskEventRepository(db);
     this.workspaceRepo = new WorkspaceStore(db);
@@ -2051,6 +2087,12 @@ export class AgentDaemon extends EventEmitter {
     // and response handlers can safely resolve the persisted request.
     await this.reconcileDurableWaitsOnStartup();
 
+    // A follow-up can be journaled before an idle executor changes a terminal
+    // task back to executing. If the host exits in that short admission window,
+    // recover the durable queued/started receipt instead of leaving it attached
+    // to a task that startup would otherwise treat as finished.
+    this.recoverUnstartedUserFollowUpsOnStartup();
+
     // Recover stale retry tasks that were incorrectly persisted as executing.
     // These should re-enter the queue on startup so retries can continue.
     const staleTransientRetryTasks = this.taskRepo
@@ -2071,7 +2113,9 @@ export class AgentDaemon extends EventEmitter {
     }
 
     // Find queued tasks from database for queue recovery
-    const queuedTasks = this.taskRepo.findByStatus("queued");
+    const queuedTasks = this.taskRepo
+      .findByStatus("queued")
+      .filter((task) => this.prepareInitialTaskMediaForQueuedTask(task));
 
     // Find tasks that were gracefully interrupted (app shutdown while running).
     // These have a conversation snapshot saved and can be resumed.
@@ -2155,6 +2199,10 @@ export class AgentDaemon extends EventEmitter {
         }
       }
     }
+
+    // Admission commits the queued task and receipt before building the additive
+    // work-session projections. Repair those projections before queue recovery.
+    this.ensureQueuedTaskSessionProjections(queuedTasks);
 
     // Initialize queue with queued tasks
     await this.queueManager.initialize(queuedTasks, []);
@@ -2428,12 +2476,15 @@ export class AgentDaemon extends EventEmitter {
    * The task will either start immediately or be queued based on concurrency limits
    */
   async startTask(task: Task, images?: ImageAttachment[]): Promise<void> {
+    this.pendingTaskImages ??= new Map();
     if (this.shutdownRequested) {
       throw new Error("Agent daemon is shutting down; task was not admitted.");
     }
     // Store images transiently until the task starts executing
     if (images && images.length > 0) {
       this.pendingTaskImages.set(task.id, images);
+    } else if (task.status === "queued" && !this.prepareInitialTaskMediaForQueuedTask(task)) {
+      return;
     }
     await this.queueManager.enqueue(task);
 
@@ -2454,6 +2505,98 @@ export class AgentDaemon extends EventEmitter {
         message,
       });
     }
+  }
+
+  /** Rehydrate the task's original browser media whenever a fresh executor needs it. */
+  private prepareInitialTaskMediaForQueuedTask(task: Task): boolean {
+    this.pendingTaskImages ??= new Map();
+    this.pendingInitialTaskMediaReceipts ??= new Map();
+    this.initialTaskMediaStarted ??= new Set();
+    if (this.initialTaskMediaStarted.has(task.id)) return true;
+    if (this.pendingTaskImages.has(task.id)) return true;
+    const initialEvent = this.findInitialTaskMediaEvent(task.id);
+    if (!initialEvent) return true;
+    const payload =
+      initialEvent.payload &&
+      typeof initialEvent.payload === "object" &&
+      !Array.isArray(initialEvent.payload)
+        ? (initialEvent.payload as Record<string, unknown>)
+        : {};
+    const messageId =
+      typeof payload.browserInitialAttachmentMessageId === "string"
+        ? payload.browserInitialAttachmentMessageId
+        : "";
+    const refs = payload.queuedAttachmentRefs;
+    if (!messageId || !Array.isArray(refs) || refs.length === 0) return false;
+    if (this.pendingInitialTaskMediaReceipts.has(task.id)) return true;
+    try {
+      const images = this.getQueuedAttachmentStore().hydrate(task.id, messageId, refs);
+      if (images.length === 0) throw new Error("empty media receipt");
+      this.pendingTaskImages.set(task.id, images);
+      this.pendingInitialTaskMediaReceipts.set(task.id, {
+        messageId,
+        refs: refs as QueuedAttachmentRef[],
+      });
+      return true;
+    } catch {
+      const errorMessage =
+        "The task's attached media is unavailable. Reattach the files before retrying.";
+      this.taskRepo.update(task.id, {
+        status: "blocked",
+        terminalStatus: "needs_user_action",
+        awaitingUserInputReasonCode: "queued_attachment_unavailable",
+        error: errorMessage,
+      });
+      this.logEvent(task.id, "task_status", {
+        status: "blocked",
+        terminalStatus: "needs_user_action",
+        awaitingUserInputReasonCode: "queued_attachment_unavailable",
+        message: errorMessage,
+      });
+      return false;
+    }
+  }
+
+  private findInitialTaskMediaEvent(taskId: string): TaskEvent | undefined {
+    if (typeof this.eventRepo?.findByTaskIdAndTypes !== "function") return undefined;
+    return this.eventRepo
+      .findByTaskIdAndTypes(taskId, ["task_created"])
+      .slice()
+      .reverse()
+      .find((event) => {
+        const payload =
+          event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+            ? (event.payload as Record<string, unknown>)
+            : {};
+        return (
+          payload.browserInitialAttachmentMessageId === INITIAL_TASK_ATTACHMENT_MESSAGE_ID &&
+          Array.isArray(payload.queuedAttachmentRefs)
+        );
+      });
+  }
+
+  private reprepareInitialTaskMediaForNewExecutor(task: Task): boolean {
+    this.pendingTaskImages ??= new Map();
+    if (this.pendingTaskImages.has(task.id)) return true;
+    this.initialTaskMediaStarted?.delete(task.id);
+    this.pendingInitialTaskMediaReceipts?.delete(task.id);
+    return this.prepareInitialTaskMediaForQueuedTask(task);
+  }
+
+  private emitPrecommittedTaskCreated(taskId: string): boolean {
+    const event = this.findInitialTaskMediaEvent(taskId);
+    if (!event) return false;
+    this.emittedPrecommittedTaskCreatedIds ??= new Set();
+    if (this.emittedPrecommittedTaskCreatedIds.has(taskId)) return true;
+    this.emittedPrecommittedTaskCreatedIds.add(taskId);
+    const payload =
+      event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+        ? (event.payload as Record<string, unknown>)
+        : {};
+    // Keep the canonical private attachment refs in storage; native listeners
+    // receive the same task-created shape as ordinary task creation.
+    this.emitTaskEvent({ ...event, payload: { task: payload.task } });
+    return true;
   }
 
   /**
@@ -2775,6 +2918,9 @@ export class AgentDaemon extends EventEmitter {
           if (initialImages && initialImages.length > 0) {
             executor.setInitialImages(initialImages);
             this.pendingTaskImages.delete(executionTask.id);
+            if (this.pendingInitialTaskMediaReceipts?.has(executionTask.id)) {
+              this.initialTaskMediaStarted?.add(executionTask.id);
+            }
           }
           console.log(`[AgentDaemon] TaskExecutor created successfully`);
         }
@@ -2794,7 +2940,9 @@ export class AgentDaemon extends EventEmitter {
 
       // Update task status
       this.taskRepo.update(effectiveTask.id, { status: "planning", error: undefined });
-      this.logEvent(effectiveTask.id, "task_created", { task: executionTask });
+      if (!this.emitPrecommittedTaskCreated(effectiveTask.id)) {
+        this.logEvent(effectiveTask.id, "task_created", { task: executionTask });
+      }
       console.log(`[AgentDaemon] Task status updated to 'planning', starting execution...`);
 
       const guardrails = GuardrailManager.loadSettings();
@@ -2863,6 +3011,47 @@ export class AgentDaemon extends EventEmitter {
     return true;
   }
 
+  private recoverUnstartedUserFollowUpsOnStartup(): void {
+    const candidates = this.taskRepo.findByStatus([
+      "paused",
+      "blocked",
+      "completed",
+      "failed",
+      "cancelled",
+    ]);
+    let recoveredCount = 0;
+    for (const task of candidates) {
+      if (!this.shouldResumeTaskOnStartup(task)) continue;
+
+      const latestReceipts = new Map<string, Record<string, unknown>>();
+      for (const event of readDurableTaskEvents(this, task.id, "user_message")) {
+        const payload = event.payload as Record<string, unknown> | undefined;
+        const messageId = typeof payload?.messageId === "string" ? payload.messageId.trim() : "";
+        if (messageId && payload?.deliveryMode === "follow_up") {
+          latestReceipts.set(messageId, payload);
+        }
+      }
+      const hasUnstartedFollowUp = Array.from(latestReceipts.values()).some((payload) => {
+        const status = payload.deliveryStatus ?? payload.status;
+        return status === "queued" || status === "started";
+      });
+      if (!hasUnstartedFollowUp) continue;
+
+      this.taskRepo.update(task.id, {
+        status: "interrupted",
+        error: "A queued follow-up was interrupted by application restart; resuming it now.",
+      });
+      this.logEvent(task.id, "task_interrupted", {
+        message: "A queued follow-up was interrupted by application restart. The task will resume.",
+        reason: "user_follow_up_recovered_after_restart",
+      });
+      recoveredCount += 1;
+    }
+    if (recoveredCount > 0) {
+      log.info(`[AgentDaemon] Recovering ${recoveredCount} task(s) with queued follow-ups`);
+    }
+  }
+
   private skipStartupResume(task: Task): void {
     const current = this.taskRepo.findById(task.id);
     if (!current) return;
@@ -2928,6 +3117,21 @@ export class AgentDaemon extends EventEmitter {
       )
       .pop();
     const hasPlan = planEvent && planEvent.payload?.plan;
+    const hasQueuedUserFollowUp = events.some((event) => {
+      if (!this.isLegacyEventType(event, "user_message")) return false;
+      const payload = event.payload as Record<string, unknown> | undefined;
+      const messageId = typeof payload?.messageId === "string" ? payload.messageId.trim() : "";
+      const status = payload?.deliveryStatus ?? payload?.status;
+      return (
+        messageId.length > 0 &&
+        payload?.deliveryMode === "follow_up" &&
+        (status === "queued" ||
+          status === "started" ||
+          (status === "accepted" &&
+            (payload?.providerDispatchStatus === "pending" ||
+              payload?.providerDispatchStatus === "started")))
+      );
+    });
 
     // A delivered teammate handoff is meaningful durable state even when the
     // receiver has not persisted a conversation snapshot or execution plan
@@ -2938,6 +3142,7 @@ export class AgentDaemon extends EventEmitter {
         hasSnapshot,
         hasPlan: Boolean(hasPlan),
         hasRecoveredBotHandoff: Boolean(recoveredBotHandoff),
+        hasQueuedUserFollowUp,
       })
     ) {
       if (this.shutdownRequested) return;
@@ -2988,9 +3193,23 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    // Restore any initial browser media as well as transcript state: an early
+    // crash can occur after the initial user-message event but before the
+    // first model read of those bytes.
+    if (!this.reprepareInitialTaskMediaForNewExecutor({ ...currentTask, status: "queued" })) return;
+
     // Create new executor and restore conversation state
     const executor = new TaskExecutor(effectiveTask, effectiveWorkspace, this);
     executor.rebuildConversationFromEvents(events);
+    const initialImages = this.pendingTaskImages.get(task.id);
+    if (initialImages?.length) {
+      await executor.restoreInitialMediaContext(
+        effectiveTask.rawPrompt || effectiveTask.userPrompt || effectiveTask.prompt,
+        initialImages,
+      );
+      this.pendingTaskImages.delete(task.id);
+      this.initialTaskMediaStarted?.add(task.id);
+    }
 
     // A structured input/approval response can arrive after the original
     // executor disappeared. Queue it before starting the resumed executor so
@@ -3892,6 +4111,177 @@ export class AgentDaemon extends EventEmitter {
     return task;
   }
 
+  /**
+   * Atomically admit a queued task and its operation receipt, then wake it when
+   * requested. `requestIdentity` is the canonical validated client payload; it
+   * stays stable when routing, memory context, or defaults change between retries.
+   */
+  async createTaskIdempotent(params: {
+    operationKey: string;
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    agentConfig?: AgentConfig;
+    budgetTokens?: number;
+    budgetCost?: number;
+    source?: Task["source"];
+    taskOverrides?: Partial<Task>;
+    boardColumn?: Task["boardColumn"];
+    requestIdentity?: unknown;
+    capturedAttachments?: QueuedAttachmentBytes[];
+    autoStart?: boolean;
+  }): Promise<{ task: Task; replayed: boolean }> {
+    const requestIdentity = params.requestIdentity ?? {
+      title: params.title,
+      prompt: params.prompt,
+      workspaceId: params.workspaceId,
+      agentConfig: params.agentConfig,
+      budgetTokens: params.budgetTokens,
+      budgetCost: params.budgetCost,
+      source: params.source,
+      taskOverrides: sanitizeTaskOverrides(params.taskOverrides),
+      boardColumn: params.boardColumn,
+    };
+    const finishAdmission = async (
+      admitted: { task: Task; replayed: boolean },
+      derived?: ReturnType<AgentDaemon["deriveTaskStrategy"]>,
+    ) => {
+      this.ensureTaskSessionProjections(admitted.task);
+      if (!admitted.replayed && derived) this.logTaskIntentRouted(admitted.task.id, derived);
+      if (params.autoStart !== false) await this.wakeAdmittedTask(admitted.task.id);
+      return admitted;
+    };
+
+    try {
+      const replay = await this.taskAdmissionService.findReplayByRequestIdentity(
+        params.operationKey,
+        requestIdentity,
+      );
+      if (replay) return await finishAdmission(replay);
+    } catch (error) {
+      if (
+        error instanceof TaskAdmissionInputError ||
+        error instanceof TaskAdmissionConflictError ||
+        error instanceof TaskAdmissionReceiptUnavailableError
+      ) {
+        throw error;
+      }
+      // The storage worker may be temporarily unavailable. Preparation and the
+      // service's same-key transaction/reconciliation path can still recover it.
+    }
+
+    let prepared: ReturnType<AgentDaemon["prepareTaskCreation"]>;
+    try {
+      prepared = this.prepareTaskCreation(params);
+    } catch (preparationError) {
+      // A concurrent attempt may have committed while preparation was running;
+      // retry the receipt lookup before surfacing mutable-context failures.
+      try {
+        const replay = await this.taskAdmissionService.findReplayByRequestIdentity(
+          params.operationKey,
+          requestIdentity,
+        );
+        if (replay) return await finishAdmission(replay);
+      } catch (error) {
+        if (
+          error instanceof TaskAdmissionInputError ||
+          error instanceof TaskAdmissionConflictError ||
+          error instanceof TaskAdmissionReceiptUnavailableError
+        ) {
+          throw error;
+        }
+      }
+      throw preparationError;
+    }
+
+    let stagedMedia: TaskAdmissionMediaMetadata | undefined;
+    if (params.capturedAttachments?.length) {
+      const candidateTaskId = crypto.randomUUID();
+      const persisted = this.getQueuedAttachmentStore().persistBytes(
+        candidateTaskId,
+        INITIAL_TASK_ATTACHMENT_MESSAGE_ID,
+        params.capturedAttachments,
+      );
+      if (persisted.refs.length === 0) {
+        throw new Error("Captured task media could not be persisted.");
+      }
+      stagedMedia = {
+        taskId: candidateTaskId,
+        messageId: INITIAL_TASK_ATTACHMENT_MESSAGE_ID,
+        queuedAttachmentRefs: persisted.refs,
+      };
+    }
+
+    let admitted: { task: Task; replayed: boolean };
+    try {
+      admitted =
+        stagedMedia === undefined
+          ? await this.taskAdmissionService.admit(
+              params.operationKey,
+              prepared.input,
+              requestIdentity,
+            )
+          : await this.taskAdmissionService.admit(
+              params.operationKey,
+              prepared.input,
+              requestIdentity,
+              stagedMedia,
+            );
+    } catch (error) {
+      // These are definitive reconciled outcomes: no new task can own this
+      // candidate's files. Keep staged bytes only when the admission result is
+      // uncertain, since the database worker may have committed before a lost reply.
+      if (
+        stagedMedia &&
+        (error instanceof TaskAdmissionInputError ||
+          error instanceof TaskAdmissionConflictError ||
+          error instanceof TaskAdmissionReceiptUnavailableError)
+      ) {
+        this.getQueuedAttachmentStore().release(
+          stagedMedia.taskId,
+          stagedMedia.messageId,
+          stagedMedia.queuedAttachmentRefs,
+        );
+      }
+      throw error;
+    }
+    // The losing side of a concurrent same-key admission knows its staged media
+    // was not included in the committed task. Do not release when the outcome is
+    // uncertain: the task id may already be durable after a lost worker reply.
+    if (stagedMedia && admitted.task.id !== stagedMedia.taskId) {
+      this.getQueuedAttachmentStore().release(
+        stagedMedia.taskId,
+        stagedMedia.messageId,
+        stagedMedia.queuedAttachmentRefs,
+      );
+    }
+    return finishAdmission(admitted, prepared.derived);
+  }
+
+  /** Wake a durable admission after caller-side metadata has been committed. */
+  async startAdmittedTask(operationKey: string, taskId: string): Promise<void> {
+    const receipt = await this.taskAdmissionService.getByOperationKey(operationKey);
+    if (!receipt.found || receipt.taskId !== taskId) {
+      throw new Error("Task admission receipt does not match the requested task");
+    }
+    await this.wakeAdmittedTask(taskId);
+  }
+
+  private async wakeAdmittedTask(taskId: string): Promise<void> {
+    if (this.shutdownRequested) {
+      throw new Error("Agent daemon is shutting down; admitted task remains queued.");
+    }
+    const task = this.taskRepo.findById(taskId);
+    if (!task || task.status !== "queued") {
+      return;
+    }
+    if (!this.prepareInitialTaskMediaForQueuedTask(task)) return;
+    if (this.queueManager.isQueued(taskId) || this.queueManager.isRunning(taskId)) return;
+    // The receipt is durable before this call. If waking fails, a same-key retry
+    // or startup recovery can start this same queued task.
+    await this.startTask(task);
+  }
+
   private createTaskRecord(params: {
     title: string;
     prompt: string;
@@ -3901,6 +4291,36 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
+  }) {
+    const { input, derived } = this.prepareTaskCreation(params);
+    const task = this.taskRepo.create({ ...input, status: "pending" });
+    const rootLineageUpdates: Partial<Task> = {
+      sessionId: input.sessionId || task.id,
+      resumeStrategy: input.resumeStrategy,
+      ...(input.branchFromTaskId
+        ? {
+            branchFromTaskId: input.branchFromTaskId,
+            branchFromEventId: input.branchFromEventId,
+            branchLabel: input.branchLabel,
+          }
+        : {}),
+    };
+    this.taskRepo.update(task.id, rootLineageUpdates);
+    Object.assign(task, rootLineageUpdates);
+    this.ensureTaskSessionProjections(task);
+    return { task, derived };
+  }
+
+  private prepareTaskCreation(params: {
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    agentConfig?: AgentConfig;
+    budgetTokens?: number;
+    budgetCost?: number;
+    source?: Task["source"];
+    taskOverrides?: Partial<Task>;
+    boardColumn?: Task["boardColumn"];
   }) {
     const botTeamAgentConfig = this.attachDefaultBotTeam(
       params.workspaceId,
@@ -3926,11 +4346,18 @@ export class AgentDaemon extends EventEmitter {
         })
       : undefined;
     const safeTaskOverrides = sanitizeTaskOverrides(params.taskOverrides);
-    const task = this.taskRepo.create({
+    const memoryFeatures = MemoryFeaturesManager.loadSettings();
+    const resumeStrategy =
+      safeTaskOverrides?.resumeStrategy ||
+      (memoryFeatures.transcriptStoreEnabled ? "checkpoint" : "snapshot");
+    const sessionId =
+      typeof safeTaskOverrides?.sessionId === "string" && safeTaskOverrides.sessionId.trim()
+        ? safeTaskOverrides.sessionId.trim()
+        : undefined;
+    const input: TaskAdmissionInput = {
       title: params.title,
       prompt: derived.prompt,
       rawPrompt: params.prompt,
-      status: "pending",
       workspaceId: params.workspaceId,
       agentConfig: derived.agentConfig,
       budgetTokens: params.budgetTokens,
@@ -3939,27 +4366,14 @@ export class AgentDaemon extends EventEmitter {
       budgetProfile: cronBudgetProfile,
       ...(params.source ? { source: params.source } : {}),
       ...safeTaskOverrides,
-    });
-    const memoryFeatures = MemoryFeaturesManager.loadSettings();
-    const rootLineageUpdates: Partial<Task> = {
-      sessionId:
-        typeof safeTaskOverrides?.sessionId === "string" &&
-        safeTaskOverrides.sessionId.trim().length > 0
-          ? safeTaskOverrides.sessionId.trim()
-          : task.id,
-      resumeStrategy:
-        safeTaskOverrides?.resumeStrategy ||
-        (memoryFeatures.transcriptStoreEnabled ? "checkpoint" : "snapshot"),
-      ...(safeTaskOverrides?.branchFromTaskId
-        ? {
-            branchFromTaskId: safeTaskOverrides.branchFromTaskId,
-            branchFromEventId: safeTaskOverrides.branchFromEventId,
-            branchLabel: safeTaskOverrides.branchLabel,
-          }
-        : {}),
+      ...(params.boardColumn ? { boardColumn: params.boardColumn } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      resumeStrategy,
     };
-    this.taskRepo.update(task.id, rootLineageUpdates);
-    Object.assign(task, rootLineageUpdates);
+    return { input, derived };
+  }
+
+  private ensureTaskSessionProjections(task: Task): void {
     try {
       this.workSessionProtocolService.ensureForTask(task);
       this.workSessionContractService.ensureForTask(task);
@@ -3969,7 +4383,12 @@ export class AgentDaemon extends EventEmitter {
       // record from being created.
       log.warn(`[work-session-protocol] Failed to initialize task ${task.id}:`, error);
     }
-    return { task, derived };
+  }
+
+  private ensureQueuedTaskSessionProjections(queuedTasks: Task[]): void {
+    for (const task of queuedTasks) {
+      this.ensureTaskSessionProjections(task);
+    }
   }
 
   /**
@@ -6156,6 +6575,9 @@ export class AgentDaemon extends EventEmitter {
 
     // Clear executor and free queue slot
     this.activeTasks.delete(taskId);
+    this.pendingTaskImages?.delete(taskId);
+    this.pendingInitialTaskMediaReceipts?.delete(taskId);
+    this.initialTaskMediaStarted?.delete(taskId);
     this.finishQueueSlot(taskId);
 
     const runRetry = async (): Promise<void> => {
@@ -8134,7 +8556,6 @@ export class AgentDaemon extends EventEmitter {
         : payload === undefined
           ? {}
           : ({ value: payload } as Record<string, unknown>);
-
     const securityLifecycleEvent =
       type === "task_created"
         ? "SessionStart"
@@ -9642,6 +10063,9 @@ export class AgentDaemon extends EventEmitter {
     recordHostOperation("timeline.persist", performance.now() - persistStartedAt);
 
     this.emitTaskEvent(storedEvent);
+    if (effectiveType === "task_completed" || effectiveType === "task_cancelled") {
+      this.clearInitialTaskMediaRuntimeState(event.taskId);
+    }
 
     const teamThoughtEventTypes = new Set([
       "assistant_message",
@@ -14118,6 +14542,8 @@ export class AgentDaemon extends EventEmitter {
     taskId: string,
     messageId: string,
     message: string,
+    requestFingerprint?: string,
+    trustedQueuedRecovery = false,
   ): AgentMessageSendResult | null {
     const event = readDurableTaskEvents(this, taskId, "user_message")
       .slice()
@@ -14129,9 +14555,16 @@ export class AgentDaemon extends EventEmitter {
     if (!event) return null;
     const payload = (event.payload as Record<string, unknown> | undefined) || {};
     const priorMessage = typeof payload.message === "string" ? payload.message : "";
-    if (priorMessage && priorMessage !== message) {
+    if (priorMessage && priorMessage !== message && !trustedQueuedRecovery) {
       throw new Error(
         `Message ID ${messageId} was already used for different content; retry with a new message_id.`,
+      );
+    }
+    const priorFingerprint =
+      typeof payload.requestFingerprint === "string" ? payload.requestFingerprint : undefined;
+    if (requestFingerprint !== undefined && priorFingerprint !== requestFingerprint) {
+      throw new Error(
+        `Message ID ${messageId} was already used for a different request; retry with a new message_id.`,
       );
     }
     const rawStatus = payload.deliveryStatus ?? payload.status;
@@ -14180,6 +14613,44 @@ export class AgentDaemon extends EventEmitter {
       throw new Error(`Task ${taskId} not found`);
     }
     const task = this.withLegacyTeamWorkItemLane(storedTask);
+    if (
+      options?.requestFingerprint !== undefined &&
+      (typeof options.requestFingerprint !== "string" ||
+        !/^[0-9a-f]{64}$/i.test(options.requestFingerprint))
+    ) {
+      throw new Error("Follow-up request fingerprint is invalid.");
+    }
+    if (
+      options?.capturedAttachments?.length &&
+      (!options.messageId || !options.requestFingerprint)
+    ) {
+      throw new Error("Media follow-ups require a stable message id and request fingerprint.");
+    }
+    // An accepted message id is an idempotency boundary. Reconcile it before
+    // checking a potentially stale turn token so a retry after a lost reply
+    // cannot be mistaken for a new request on a newer task turn.
+    if (
+      options?.deliveryMode !== "message" &&
+      options?.messageId &&
+      options.messageSource !== "agent"
+    ) {
+      const existing = this.getExistingUserFollowUpResult(
+        taskId,
+        options.messageId,
+        message,
+        options.requestFingerprint,
+        Boolean(options.queuedFollowUp?.messageId === options.messageId),
+      );
+      if (existing) {
+        const recoveringQueuedFollowUp =
+          options.queuedFollowUp?.messageId === options.messageId &&
+          options.queuedFollowUp.deliveryMode === "follow_up" &&
+          (existing.deliveryStatus === "queued" ||
+            existing.deliveryStatus === "started" ||
+            this.isQueuedUserFollowUpProviderDispatchRecoverable(taskId, options.messageId));
+        if (!recoveringQueuedFollowUp) return existing;
+      }
+    }
     // Bot conversations are created dormant and their first user turn enters
     // through sendMessage rather than startTaskImmediate. Attach the
     // workspace-scoped persistent team here as well so the initial executor
@@ -14203,10 +14674,6 @@ export class AgentDaemon extends EventEmitter {
     // composer receives the acceptance callback. A stable message_id is the
     // idempotency boundary for ordinary follow-ups too; never create a second
     // transcript event or provider turn for the same identity.
-    if (options?.messageId && options.messageSource !== "agent") {
-      const existing = this.getExistingUserFollowUpResult(taskId, options.messageId, message);
-      if (existing) return existing;
-    }
     let cached = this.activeTasks.get(taskId);
     if (this.isSideChatTask(task) && !cached?.executor.isRunning) {
       this.refreshSideChatParentSnapshot(task);
@@ -14323,6 +14790,23 @@ export class AgentDaemon extends EventEmitter {
       throw new Error(errorMessage);
     }
 
+    if (effectiveOptions?.capturedAttachments?.length) {
+      const messageId = effectiveOptions.messageId;
+      if (!messageId) throw new Error("Media follow-up message id is missing.");
+      const persisted = this.getQueuedAttachmentStore().persistBytes(
+        taskId,
+        messageId,
+        effectiveOptions.capturedAttachments,
+      );
+      if (persisted.refs.length === 0) throw new Error("Media follow-up could not be persisted.");
+      images = persisted.images;
+      effectiveOptions = {
+        ...effectiveOptions,
+        capturedAttachments: undefined,
+        queuedAttachmentRefs: persisted.refs,
+      };
+    }
+
     this.taskRepo.touch(taskId);
     const annotationContext = await this.buildAnnotationFollowUpContext(taskId, message);
     const effectiveMessage = annotationContext.message;
@@ -14341,12 +14825,26 @@ export class AgentDaemon extends EventEmitter {
     if (!cached) {
       // Task executor not in memory - need to recreate it
       // Create new executor
+      if (!this.reprepareInitialTaskMediaForNewExecutor(effectiveTask)) {
+        throw new Error(
+          "The task's attached media is unavailable. Reattach the files before retrying.",
+        );
+      }
       executor = new TaskExecutor(effectiveTask, effectiveWorkspace, this);
 
       // Rebuild conversation history from saved events
       const events = this.getTaskEventsForResume(taskId, effectiveWorkspace.path);
       if (events.length > 0) {
         executor.rebuildConversationFromEvents(events);
+      }
+      const initialImages = this.pendingTaskImages.get(taskId);
+      if (initialImages?.length) {
+        await executor.restoreInitialMediaContext(
+          effectiveTask.rawPrompt || effectiveTask.userPrompt || effectiveTask.prompt,
+          initialImages,
+        );
+        this.pendingTaskImages.delete(taskId);
+        this.initialTaskMediaStarted?.add(taskId);
       }
 
       this.activeTasks.set(taskId, {
@@ -14366,40 +14864,30 @@ export class AgentDaemon extends EventEmitter {
     // If the executor is busy (mutex locked), queue the message for the running
     // loop to pick up and return immediately so the IPC doesn't block.
     if (executor.isRunning) {
-      if (effectiveOptions?.queuedFollowUp?.deliveryMode === "message") {
-        // Another turn may start while the orphan drain performs preflight.
-        // Keep its existing receipt/full queue item instead of creating a
-        // second ordinary follow-up and a second user-message event.
+      if (
+        effectiveOptions?.queuedFollowUp?.messageId &&
+        (effectiveOptions.queuedFollowUp.deliveryMode === "message" ||
+          effectiveOptions.queuedFollowUp.deliveryMode === "follow_up")
+      ) {
+        // Another turn may start while a recovered receipt is being admitted.
+        // Keep its exact queue item instead of creating a second event.
         executor.runtime.requeueFollowUpAtTurnBoundary(effectiveOptions.queuedFollowUp);
         return {
           queued: true,
           messageId: effectiveOptions.queuedFollowUp.messageId,
-          deliveryMode: "message",
+          deliveryMode: effectiveOptions.queuedFollowUp.deliveryMode,
           deliveryStatus: "queued",
         };
       }
       const acceptedAt = Date.now();
-      const integrationMentions = effectiveTask.agentConfig?.integrationMentions;
-      executor.queueFollowUp(
-        effectiveMessage,
-        images,
-        quotedAssistantMessage,
-        integrationMentions,
-        effectiveOptions?.agentConfigOverride,
-        effectiveOptions?.interactionMode ?? effectiveTask.agentConfig?.interactionMode,
-        effectiveOptions?.messageSource,
-        effectiveOptions?.messageId,
-        effectiveOptions?.senderTaskId,
-        effectiveOptions?.senderLabel,
-        effectiveOptions?.deliveryMode,
-        ...(effectiveOptions?.inReplyToMessageId || effectiveOptions?.inReplyToTaskId
-          ? [effectiveOptions.inReplyToMessageId, effectiveOptions.inReplyToTaskId]
-          : []),
-      );
+      const integrationMentions =
+        effectiveOptions?.integrationMentions ?? effectiveTask.agentConfig?.integrationMentions;
+      const deliveryMode = effectiveOptions?.deliveryMode || "follow_up";
+      const durableQueueReceipt = Boolean(effectiveOptions?.messageId);
       this.logEvent(taskId, "agent_follow_up_scheduled", {
         message,
         ...(effectiveOptions?.messageId ? { messageId: effectiveOptions.messageId } : {}),
-        deliveryMode: effectiveOptions?.deliveryMode || "follow_up",
+        deliveryMode,
         deliveryStatus: "queued",
         acceptedAt,
         queuedAt: acceptedAt,
@@ -14414,6 +14902,16 @@ export class AgentDaemon extends EventEmitter {
         ...(effectiveOptions?.inReplyToTaskId
           ? { inReplyToTaskId: effectiveOptions.inReplyToTaskId }
           : {}),
+        ...(effectiveOptions?.queuedAttachmentRefs?.length
+          ? { queuedAttachmentRefs: effectiveOptions.queuedAttachmentRefs }
+          : {}),
+        ...(effectiveOptions?.requestFingerprint
+          ? { requestFingerprint: effectiveOptions.requestFingerprint }
+          : {}),
+        ...(effectiveOptions?.interactionMode
+          ? { interactionMode: effectiveOptions.interactionMode }
+          : {}),
+        ...(integrationMentions && integrationMentions.length > 0 ? { integrationMentions } : {}),
       });
       // Emit user_message event immediately so the UI shows the message right away.
       // The executor's sendMessageLegacy won't re-emit because the message is
@@ -14424,8 +14922,8 @@ export class AgentDaemon extends EventEmitter {
           ? { messageSource: effectiveOptions.messageSource }
           : {}),
         ...(effectiveOptions?.messageId ? { messageId: effectiveOptions.messageId } : {}),
-        ...(effectiveOptions?.deliveryMode ? { deliveryMode: effectiveOptions.deliveryMode } : {}),
-        ...(effectiveOptions?.deliveryMode === "message" ? { deliveryStatus: "queued" } : {}),
+        deliveryMode,
+        ...(durableQueueReceipt ? { deliveryStatus: "queued" } : {}),
         acceptedAt,
         queuedAt: acceptedAt,
         ...(effectiveOptions?.senderTaskId ? { senderTaskId: effectiveOptions.senderTaskId } : {}),
@@ -14442,10 +14940,40 @@ export class AgentDaemon extends EventEmitter {
           : {}),
         ...(integrationMentions && integrationMentions.length > 0 ? { integrationMentions } : {}),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+        ...(effectiveOptions?.queuedAttachmentRefs?.length
+          ? { queuedAttachmentRefs: effectiveOptions.queuedAttachmentRefs }
+          : {}),
+        ...(effectiveOptions?.requestFingerprint
+          ? { requestFingerprint: effectiveOptions.requestFingerprint }
+          : {}),
+        ...(effectiveOptions?.interactionMode
+          ? { interactionMode: effectiveOptions.interactionMode }
+          : {}),
       });
+      // The active executor may drain its queue as soon as an item is added.
+      // Commit the receipt before making the follow-up visible to that loop.
+      await this.timelineRowsCommitted(taskId);
+      executor.queueFollowUp(
+        effectiveMessage,
+        images,
+        quotedAssistantMessage,
+        integrationMentions,
+        effectiveOptions?.agentConfigOverride,
+        effectiveOptions?.interactionMode ?? effectiveTask.agentConfig?.interactionMode,
+        effectiveOptions?.messageSource,
+        effectiveOptions?.messageId,
+        effectiveOptions?.senderTaskId,
+        effectiveOptions?.senderLabel,
+        deliveryMode,
+        effectiveOptions?.inReplyToMessageId,
+        effectiveOptions?.inReplyToTaskId,
+      );
+      // queueFollowUp snapshots the pending item; include that row in the return
+      // boundary so the accepted queue item survives an immediate restart.
+      await this.timelineRowsCommitted(taskId);
       return {
         queued: true,
-        deliveryMode: effectiveOptions?.deliveryMode || "follow_up",
+        deliveryMode,
         deliveryStatus: "queued",
         acceptedAt,
         queuedAt: acceptedAt,
@@ -14453,23 +14981,63 @@ export class AgentDaemon extends EventEmitter {
       };
     }
 
+    // Direct human follow-ups use the same durable receipt lifecycle as turns
+    // recovered from the busy queue. Persist their receipt before the executor
+    // can reach a provider, so a crash between admission and dispatch can
+    // reconstruct the user turn from the journal.
+    const directUserFollowUpId =
+      effectiveOptions?.deliveryMode === "follow_up" &&
+      effectiveOptions.messageSource !== "agent" &&
+      typeof effectiveOptions.messageId === "string"
+        ? effectiveOptions.messageId.trim()
+        : "";
     // Send the message (executor is idle, acquire mutex normally)
-    if (effectiveMessage !== message) {
-      executor.suppressNextUserMessageEvent();
+    if (effectiveMessage !== message || directUserFollowUpId) {
+      if (!directUserFollowUpId) executor.suppressNextUserMessageEvent();
+      const startedAt = Date.now();
       this.logEvent(taskId, "user_message", {
         message,
-        annotationContextInjected: true,
+        ...(effectiveMessage !== message ? { annotationContextInjected: true } : {}),
+        ...(directUserFollowUpId
+          ? {
+              deliveryMode: "follow_up",
+              deliveryStatus: "started",
+              status: "started",
+              startedAt,
+            }
+          : {}),
         ...(effectiveOptions?.messageSource
           ? { messageSource: effectiveOptions.messageSource }
           : {}),
         ...(effectiveOptions?.messageId ? { messageId: effectiveOptions.messageId } : {}),
         ...(effectiveOptions?.senderTaskId ? { senderTaskId: effectiveOptions.senderTaskId } : {}),
         ...(effectiveOptions?.senderLabel ? { senderLabel: effectiveOptions.senderLabel } : {}),
+        ...(effectiveOptions?.inReplyToMessageId
+          ? { inReplyToMessageId: effectiveOptions.inReplyToMessageId }
+          : {}),
+        ...(effectiveOptions?.inReplyToTaskId
+          ? { inReplyToTaskId: effectiveOptions.inReplyToTaskId }
+          : {}),
         ...(userMessageAttachmentMetadata.length > 0
           ? { images: userMessageAttachmentMetadata }
           : {}),
+        ...(effectiveOptions?.integrationMentions?.length
+          ? { integrationMentions: effectiveOptions.integrationMentions }
+          : {}),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+        ...(effectiveOptions?.queuedAttachmentRefs?.length
+          ? { queuedAttachmentRefs: effectiveOptions.queuedAttachmentRefs }
+          : {}),
+        ...(effectiveOptions?.requestFingerprint
+          ? { requestFingerprint: effectiveOptions.requestFingerprint }
+          : {}),
+        ...(effectiveOptions?.interactionMode
+          ? { interactionMode: effectiveOptions.interactionMode }
+          : {}),
       });
+      if (directUserFollowUpId) {
+        await this.timelineRowsCommitted(taskId);
+      }
     }
     if (effectiveOptions?.agentConfigOverride) {
       this.setTransientTaskAgentConfig(taskId, effectiveOptions.agentConfigOverride);
@@ -14509,6 +15077,47 @@ export class AgentDaemon extends EventEmitter {
           agentMessageAcceptanceCompleted = true;
         }
       : undefined;
+    const queuedUserFollowUpId =
+      effectiveOptions?.queuedFollowUp?.deliveryMode === "follow_up" &&
+      typeof effectiveOptions.queuedFollowUp.messageId === "string"
+        ? effectiveOptions.queuedFollowUp.messageId.trim()
+        : "";
+    const trackedUserFollowUpId = queuedUserFollowUpId || directUserFollowUpId;
+    const onQueuedUserFollowUpAccepted = trackedUserFollowUpId
+      ? async () => {
+          if (!(await this.markQueuedUserFollowUpAccepted(taskId, trackedUserFollowUpId))) {
+            throw new Error(`Follow-up ${trackedUserFollowUpId} could not be durably accepted.`);
+          }
+        }
+      : undefined;
+    const onQueuedUserFollowUpProviderDispatchStarted = trackedUserFollowUpId
+      ? async () => {
+          if (
+            !(await this.markQueuedUserFollowUpProviderDispatchStarted(
+              taskId,
+              trackedUserFollowUpId,
+            ))
+          ) {
+            throw new Error(
+              `Follow-up ${trackedUserFollowUpId} provider dispatch could not be recorded.`,
+            );
+          }
+        }
+      : undefined;
+    const onQueuedUserFollowUpProviderDispatchCompleted = trackedUserFollowUpId
+      ? async () => {
+          if (
+            !(await this.markQueuedUserFollowUpProviderDispatchCompleted(
+              taskId,
+              trackedUserFollowUpId,
+            ))
+          ) {
+            throw new Error(
+              `Follow-up ${trackedUserFollowUpId} provider dispatch completion could not be recorded.`,
+            );
+          }
+        }
+      : undefined;
     // A delivered receipt is the idempotency boundary. Return before invoking
     // the executor when a stale queue copy is retried after restart.
     if (queuedAgentMessageId && candidateReceiptStatus === "delivered") {
@@ -14538,7 +15147,8 @@ export class AgentDaemon extends EventEmitter {
         })
       : undefined;
     const onExecutionAccepted = returnOnAccepted
-      ? () => {
+      ? async () => {
+          await this.timelineRowsCommitted(taskId);
           if (executionAcceptedAt !== undefined) return;
           executionAcceptedAt = Date.now();
           resolveExecutionAccepted?.(executionAcceptedAt);
@@ -14546,6 +15156,11 @@ export class AgentDaemon extends EventEmitter {
       : undefined;
     const executeFollowUp = async (): Promise<void> => {
       try {
+        if (trackedUserFollowUpId) {
+          if (!(await this.markQueuedUserFollowUpStarted(taskId, trackedUserFollowUpId))) {
+            throw new Error(`Follow-up ${trackedUserFollowUpId} has no active receipt.`);
+          }
+        }
         await executor.sendMessage(effectiveMessage, images, quotedAssistantMessage, {
           agentConfigOverride: effectiveOptions?.agentConfigOverride,
           interactionMode:
@@ -14556,12 +15171,28 @@ export class AgentDaemon extends EventEmitter {
           senderLabel: effectiveOptions?.senderLabel,
           inReplyToMessageId: effectiveOptions?.inReplyToMessageId,
           inReplyToTaskId: effectiveOptions?.inReplyToTaskId,
-          onAccepted: onAgentMessageAccepted,
+          onAccepted: onAgentMessageAccepted ?? onQueuedUserFollowUpAccepted,
+          onProviderDispatchStarted: onQueuedUserFollowUpProviderDispatchStarted,
+          onProviderDispatchCompleted: onQueuedUserFollowUpProviderDispatchCompleted,
           onExecutionAccepted,
+          transcriptAlreadyContainsMessage:
+            effectiveOptions?.transcriptAlreadyContainsMessage === true,
           suppressUserMessageEvent:
             effectiveOptions?.suppressUserMessageEvent === true ||
+            directUserFollowUpId !== "" ||
             queuedAgentMessageId !== undefined,
           queuedFollowUp: effectiveOptions?.queuedFollowUp,
+          attachmentReceipt:
+            effectiveOptions?.queuedAttachmentRefs?.length || effectiveOptions?.requestFingerprint
+              ? {
+                  ...(effectiveOptions.queuedAttachmentRefs?.length
+                    ? { queuedAttachmentRefs: effectiveOptions.queuedAttachmentRefs }
+                    : {}),
+                  ...(effectiveOptions.requestFingerprint
+                    ? { requestFingerprint: effectiveOptions.requestFingerprint }
+                    : {}),
+                }
+              : undefined,
         });
         if (onAgentMessageAccepted && !agentMessageAcceptanceCompleted) {
           throw new Error(
@@ -15053,6 +15684,56 @@ export class AgentDaemon extends EventEmitter {
     return readDurableTaskEvents(this, taskId, type, 200);
   }
 
+  /**
+   * Find one durable human follow-up receipt by its exact message identity.
+   * Unlike the bounded task-event convenience method above, this scans the
+   * durable user-message stream so old operation keys remain reconcilable.
+   * The result intentionally contains receipt metadata only, never message text.
+   */
+  getDurableTaskFollowUpReceipt(taskId: string, messageId: string): AgentMessageSendResult | null {
+    const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
+    if (!normalizedTaskId || !normalizedMessageId) return null;
+
+    const event = readDurableTaskEvents(this, normalizedTaskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === normalizedMessageId && payload.deliveryMode !== "message";
+      });
+    if (!event) return null;
+
+    const payload = (event.payload as Record<string, unknown> | undefined) || {};
+    const rawStatus = payload.deliveryStatus ?? payload.status;
+    const deliveryStatus: AgentMessageDeliveryStatus =
+      rawStatus === "queued" ||
+      rawStatus === "started" ||
+      rawStatus === "delivered" ||
+      rawStatus === "failed" ||
+      rawStatus === "quarantined" ||
+      rawStatus === "accepted"
+        ? rawStatus
+        : "accepted";
+    return {
+      queued: deliveryStatus === "queued" || deliveryStatus === "started",
+      duplicate: true,
+      messageId: normalizedMessageId,
+      deliveryMode: "follow_up",
+      deliveryStatus,
+      ...(typeof payload.acceptedAt === "number"
+        ? { acceptedAt: payload.acceptedAt }
+        : { acceptedAt: event.timestamp }),
+      ...(typeof payload.queuedAt === "number" ? { queuedAt: payload.queuedAt } : {}),
+      ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
+      ...(typeof payload.deliveredAt === "number" ? { deliveredAt: payload.deliveredAt } : {}),
+      ...(typeof payload.failedAt === "number" ? { failedAt: payload.failedAt } : {}),
+      ...(typeof payload.quarantinedAt === "number"
+        ? { quarantinedAt: payload.quarantinedAt }
+        : {}),
+    };
+  }
+
   private getQueuedAgentMessageDeliveryStatus(
     taskId: string,
     messageId: string,
@@ -15075,6 +15756,60 @@ export class AgentDaemon extends EventEmitter {
     if (payload?.deliveryStatus === "failed" || payload?.status === "failed") return "failed";
     if (payload?.deliveryStatus === "started" || payload?.status === "started") return "started";
     return "queued";
+  }
+
+  private getQueuedUserFollowUpDeliveryStatus(
+    taskId: string,
+    messageId: string,
+  ): "queued" | "started" | "accepted" | undefined {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "follow_up";
+      });
+    if (!event) return undefined;
+    const payload = event.payload as Record<string, unknown> | undefined;
+    if (payload?.deliveryStatus === "accepted" || payload?.status === "accepted") {
+      return "accepted";
+    }
+    if (payload?.deliveryStatus === "started" || payload?.status === "started") return "started";
+    if (payload?.deliveryStatus === "failed" || payload?.status === "failed") return undefined;
+    return "queued";
+  }
+
+  isQueuedUserFollowUpProviderDispatchRecoverable(taskId: string, messageId: string): boolean {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "follow_up";
+      });
+    const payload = event?.payload as Record<string, unknown> | undefined;
+    return (
+      (payload?.deliveryStatus ?? payload?.status) === "accepted" &&
+      (payload?.providerDispatchStatus === "pending" ||
+        payload?.providerDispatchStatus === "started")
+    );
+  }
+
+  private getDurableTaskFollowUpRequestFingerprint(
+    taskId: string,
+    messageId: string,
+  ): string | undefined {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "follow_up";
+      });
+    const fingerprint = (event?.payload as Record<string, unknown> | undefined)?.requestFingerprint;
+    return typeof fingerprint === "string" && /^[0-9a-f]{64}$/i.test(fingerprint)
+      ? fingerprint
+      : undefined;
   }
 
   /**
@@ -15153,6 +15888,144 @@ export class AgentDaemon extends EventEmitter {
       // Durable state is authoritative if the renderer is unavailable.
     }
     this.updateAgentMessageSenderProjection(taskId, messageId, payload, "started", startedAt);
+    return true;
+  }
+
+  /** Mark a busy human follow-up when the executor begins incorporating it. */
+  async markQueuedUserFollowUpStarted(taskId: string, messageId: string): Promise<boolean> {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "follow_up";
+      });
+    if (!event) return false;
+    const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
+    const existingStatus = existingPayload.deliveryStatus ?? existingPayload.status;
+    if (existingStatus === "accepted" || existingStatus === "delivered") return false;
+    if (existingStatus === "started") return true;
+    if (existingStatus !== "queued") return false;
+    const payload: Record<string, unknown> = {
+      ...existingPayload,
+      status: "started",
+      deliveryStatus: "started",
+      startedAt:
+        typeof existingPayload.startedAt === "number" ? existingPayload.startedAt : Date.now(),
+    };
+    this.eventRepo.updatePayloadById(event.id, payload);
+    try {
+      this.emitTaskEvent({ ...event, payload });
+    } catch {
+      // Durable state remains authoritative if the renderer is unavailable.
+    }
+    await this.timelineRowsCommitted(taskId);
+    return true;
+  }
+
+  /** Mark a busy human follow-up after its transcript snapshot commits. */
+  async markQueuedUserFollowUpAccepted(taskId: string, messageId: string): Promise<boolean> {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "follow_up";
+      });
+    if (!event) return false;
+    const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
+    const existingStatus = existingPayload.deliveryStatus ?? existingPayload.status;
+    if (existingStatus === "accepted" || existingStatus === "delivered") return true;
+    if (existingStatus !== "queued" && existingStatus !== "started") return false;
+    const acceptedAt =
+      typeof existingPayload.acceptedAt === "number" ? existingPayload.acceptedAt : Date.now();
+    const payload: Record<string, unknown> = {
+      ...existingPayload,
+      status: "accepted",
+      deliveryStatus: "accepted",
+      providerDispatchStatus: "pending",
+      acceptedAt,
+    };
+    this.eventRepo.updatePayloadById(event.id, payload);
+    try {
+      this.emitTaskEvent({ ...event, payload });
+    } catch {
+      // The durable receipt must not depend on renderer availability.
+    }
+    await this.timelineRowsCommitted(taskId);
+    return true;
+  }
+
+  /**
+   * Record that the provider request is about to start. Pending and started
+   * receipts remain recoverable: after a crash an external request may or may
+   * not have completed, so recovery is intentionally at-least-once.
+   */
+  async markQueuedUserFollowUpProviderDispatchStarted(
+    taskId: string,
+    messageId: string,
+  ): Promise<boolean> {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "follow_up";
+      });
+    if (!event) return false;
+    const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
+    if ((existingPayload.deliveryStatus ?? existingPayload.status) !== "accepted") return false;
+    if (existingPayload.providerDispatchStatus === "started") return true;
+    if (existingPayload.providerDispatchStatus !== "pending") return false;
+    const payload: Record<string, unknown> = {
+      ...existingPayload,
+      providerDispatchStatus: "started",
+      providerDispatchStartedAt: Date.now(),
+    };
+    this.eventRepo.updatePayloadById(event.id, payload);
+    try {
+      this.emitTaskEvent({ ...event, payload });
+    } catch {
+      // Durable state is authoritative if the renderer is unavailable.
+    }
+    await this.timelineRowsCommitted(taskId);
+    return true;
+  }
+
+  /** Mark dispatch complete only after the assistant response is durably stored. */
+  async markQueuedUserFollowUpProviderDispatchCompleted(
+    taskId: string,
+    messageId: string,
+  ): Promise<boolean> {
+    const event = readDurableTaskEvents(this, taskId, "user_message")
+      .slice()
+      .reverse()
+      .find((candidate) => {
+        const payload = candidate.payload as Record<string, unknown> | undefined;
+        return payload?.messageId === messageId && payload.deliveryMode === "follow_up";
+      });
+    if (!event) return false;
+    const existingPayload = (event.payload as Record<string, unknown> | undefined) || {};
+    if (
+      (existingPayload.deliveryStatus ?? existingPayload.status) !== "accepted" ||
+      (existingPayload.providerDispatchStatus !== "started" &&
+        existingPayload.providerDispatchStatus !== "completed")
+    ) {
+      return false;
+    }
+    if (existingPayload.providerDispatchStatus === "completed") return true;
+    const payload: Record<string, unknown> = {
+      ...existingPayload,
+      providerDispatchStatus: "completed",
+      providerDispatchCompletedAt: Date.now(),
+    };
+    this.eventRepo.updatePayloadById(event.id, payload);
+    try {
+      this.emitTaskEvent({ ...event, payload });
+    } catch {
+      // Durable state is authoritative if the renderer is unavailable.
+    }
+    await this.timelineRowsCommitted(taskId);
     return true;
   }
 
@@ -15796,6 +16669,12 @@ export class AgentDaemon extends EventEmitter {
     }
   }
 
+  private clearInitialTaskMediaRuntimeState(taskId: string): void {
+    this.pendingTaskImages?.delete(taskId);
+    this.pendingInitialTaskMediaReceipts?.delete(taskId);
+    this.initialTaskMediaStarted?.delete(taskId);
+  }
+
   /**
    * Capture schema-valid durable refs before a task row and its events are
    * deleted. The caller must release the captured refs only after deletion
@@ -15807,24 +16686,40 @@ export class AgentDaemon extends EventEmitter {
   }> {
     const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
     if (!normalizedTaskId) return [];
-    let events: TaskEvent[];
+    let events: TaskEvent[] = [];
     try {
       events = readDurableTaskEvents(this, normalizedTaskId, "user_message");
+      if (typeof this.eventRepo?.findByTaskIdAndTypes === "function") {
+        events.push(...this.eventRepo.findByTaskIdAndTypes(normalizedTaskId, ["task_created"]));
+      }
     } catch {
-      return [];
+      // A missing task-created lookup must not discard user-message refs that
+      // were already read successfully through the compatibility repository.
     }
     const captured: Array<{ messageId: string; refs: QueuedAttachmentRef[] }> = [];
+    const seen = new Set<string>();
     for (const event of events) {
       const payload = event.payload as Record<string, unknown> | undefined;
-      const messageId = typeof payload?.messageId === "string" ? payload.messageId.trim() : "";
+      const messageId =
+        typeof payload?.messageId === "string"
+          ? payload.messageId.trim()
+          : typeof payload?.browserInitialAttachmentMessageId === "string"
+            ? payload.browserInitialAttachmentMessageId.trim()
+            : typeof payload?.initialAttachmentMessageId === "string"
+              ? payload.initialAttachmentMessageId.trim()
+              : "";
       if (!messageId || !Array.isArray(payload?.queuedAttachmentRefs)) continue;
+      if (seen.has(messageId)) continue;
       try {
         const refs = this.getQueuedAttachmentStore().validateRefs(
           normalizedTaskId,
           messageId,
           payload.queuedAttachmentRefs,
         );
-        if (refs.length > 0) captured.push({ messageId, refs });
+        if (refs.length > 0) {
+          captured.push({ messageId, refs });
+          seen.add(messageId);
+        }
       } catch {
         // Invalid receipt metadata cannot authorize filesystem deletion. It
         // remains retained for the conservative orphan sweep.
@@ -15914,11 +16809,62 @@ export class AgentDaemon extends EventEmitter {
           break;
         }
         const runtime = executor.runtime as Any;
-        const queuedAgentMessageStatus =
-          followUp.deliveryMode === "message" && followUp.messageId
-            ? this.getQueuedAgentMessageDeliveryStatus(taskId, followUp.messageId)
-            : undefined;
-        if (queuedAgentMessageStatus === "delivered") {
+        const followUpMessageId =
+          (followUp.deliveryMode === "message" || followUp.deliveryMode === "follow_up") &&
+          typeof followUp.messageId === "string"
+            ? followUp.messageId.trim()
+            : "";
+        const queuedDeliveryStatus =
+          followUp.deliveryMode === "message" && followUpMessageId
+            ? this.getQueuedAgentMessageDeliveryStatus(taskId, followUpMessageId)
+            : followUp.deliveryMode === "follow_up" && followUpMessageId
+              ? this.getQueuedUserFollowUpDeliveryStatus(taskId, followUpMessageId)
+              : undefined;
+        let providerDispatchPending =
+          followUp.deliveryMode === "follow_up" &&
+          followUpMessageId.length > 0 &&
+          this.isQueuedUserFollowUpProviderDispatchRecoverable(taskId, followUpMessageId);
+        if (
+          followUp.deliveryMode === "follow_up" &&
+          followUpMessageId &&
+          queuedDeliveryStatus === "started" &&
+          !providerDispatchPending &&
+          runtime?.isFollowUpMessageConsumed?.(followUpMessageId)
+        ) {
+          // The transcript snapshot commits before the started receipt advances
+          // to accepted. A crash in that boundary leaves the message consumed
+          // but no provider dispatch marker. Promote the receipt to accepted /
+          // pending so recovery dispatches the existing transcript exactly once
+          // through the normal follow-up recovery path.
+          try {
+            if (!(await this.markQueuedUserFollowUpAccepted(taskId, followUpMessageId))) {
+              throw new Error(`Follow-up ${followUpMessageId} could not recover its receipt.`);
+            }
+            providerDispatchPending = this.isQueuedUserFollowUpProviderDispatchRecoverable(
+              taskId,
+              followUpMessageId,
+            );
+            if (!providerDispatchPending) {
+              throw new Error(
+                `Follow-up ${followUpMessageId} was not marked for provider recovery.`,
+              );
+            }
+          } catch (error) {
+            runtime?.requeueFollowUpAtTurnBoundary?.(followUp);
+            this.logEvent(taskId, "error", {
+              message: "Queued follow-up acceptance recovery failed",
+              error: String(error),
+              messageId: followUpMessageId,
+            });
+            break;
+          }
+        }
+        if (
+          queuedDeliveryStatus === "delivered" ||
+          (followUp.deliveryMode === "follow_up" &&
+            queuedDeliveryStatus === "accepted" &&
+            !providerDispatchPending)
+        ) {
           // A crash can leave an older runtime snapshot containing an item
           // whose receipt was already accepted. The receipt wins, so discard
           // the stale queue copy without dispatching it again.
@@ -15933,21 +16879,22 @@ export class AgentDaemon extends EventEmitter {
           followUp = executor.takeNextFollowUpAtTurnBoundary();
           continue;
         }
-        const followUpMessageId =
-          followUp.deliveryMode === "message" && typeof followUp.messageId === "string"
-            ? followUp.messageId.trim()
-            : "";
         if (
           followUpMessageId &&
           runtime &&
           typeof runtime.isFollowUpMessageConsumed === "function" &&
-          runtime.isFollowUpMessageConsumed(followUpMessageId)
+          runtime.isFollowUpMessageConsumed(followUpMessageId) &&
+          !providerDispatchPending
         ) {
           // The transcript/consumed marker is durable, but receipt persistence
           // may have failed. Retry only that receipt and never call the
           // executor with the already-incorporated message again.
           try {
-            if (!this.markQueuedAgentMessageDelivered(taskId, followUpMessageId)) {
+            const acknowledged =
+              followUp.deliveryMode === "message"
+                ? this.markQueuedAgentMessageDelivered(taskId, followUpMessageId)
+                : await this.markQueuedUserFollowUpAccepted(taskId, followUpMessageId);
+            if (!acknowledged) {
               throw new Error(`Queued follow-up ${followUpMessageId} has no durable receipt.`);
             }
           } catch (error) {
@@ -15967,8 +16914,12 @@ export class AgentDaemon extends EventEmitter {
           followUp = executor.takeNextFollowUpAtTurnBoundary();
           continue;
         }
+        if (providerDispatchPending) {
+          runtime?.removeFollowUpAtTurnBoundary?.(followUpMessageId);
+          runtime?.saveSnapshot?.();
+        }
         try {
-          if (followUpMessageId) {
+          if (followUp.deliveryMode === "message" && followUpMessageId) {
             const started = this.markQueuedAgentMessageStarted(taskId, followUpMessageId);
             const durableStatus = this.getQueuedAgentMessageDeliveryStatus(
               taskId,
@@ -15981,6 +16932,20 @@ export class AgentDaemon extends EventEmitter {
               }
               followUp = executor.takeNextFollowUpAtTurnBoundary();
               continue;
+            }
+          } else if (followUp.deliveryMode === "follow_up" && followUpMessageId) {
+            const started = providerDispatchPending
+              ? false
+              : await this.markQueuedUserFollowUpStarted(taskId, followUpMessageId);
+            if (!started && !providerDispatchPending) {
+              const status = this.getQueuedUserFollowUpDeliveryStatus(taskId, followUpMessageId);
+              if (status === "accepted") {
+                runtime?.removeFollowUpAtTurnBoundary?.(followUpMessageId);
+                runtime?.saveSnapshot?.();
+                followUp = executor.takeNextFollowUpAtTurnBoundary();
+                continue;
+              }
+              throw new Error(`Queued follow-up ${followUpMessageId} has no active receipt.`);
             }
           }
           this.logEvent(taskId, "agent_follow_up_started", {
@@ -16018,8 +16983,11 @@ export class AgentDaemon extends EventEmitter {
               senderLabel: followUp.senderLabel,
               inReplyToMessageId: followUp.inReplyToMessageId,
               inReplyToTaskId: followUp.inReplyToTaskId,
-              suppressUserMessageEvent:
-                followUp.deliveryMode === "message" && followUp.messageId !== undefined,
+              requestFingerprint: followUpMessageId
+                ? this.getDurableTaskFollowUpRequestFingerprint(taskId, followUpMessageId)
+                : undefined,
+              suppressUserMessageEvent: followUpMessageId.length > 0,
+              transcriptAlreadyContainsMessage: providerDispatchPending,
               queuedFollowUp: followUp,
             },
           );
@@ -16030,11 +16998,15 @@ export class AgentDaemon extends EventEmitter {
           const deliveryStatus =
             currentFollowUp.deliveryMode === "message" && currentFollowUp.messageId
               ? this.getQueuedAgentMessageDeliveryStatus(taskId, currentFollowUp.messageId)
-              : undefined;
+              : currentFollowUp.deliveryMode === "follow_up" && currentFollowUp.messageId
+                ? this.getQueuedUserFollowUpDeliveryStatus(taskId, currentFollowUp.messageId)
+                : undefined;
           if (
-            currentFollowUp.deliveryMode === "message" &&
+            (currentFollowUp.deliveryMode === "message" ||
+              currentFollowUp.deliveryMode === "follow_up") &&
             currentFollowUp.messageId &&
             deliveryStatus !== "delivered" &&
+            deliveryStatus !== "accepted" &&
             runtime &&
             typeof runtime.requeueFollowUpAtTurnBoundary === "function"
           ) {
@@ -16049,7 +17021,13 @@ export class AgentDaemon extends EventEmitter {
             message: "Queued follow-up failed",
             error: String(error),
           });
-          if (currentFollowUp.deliveryMode === "message" && currentFollowUp.messageId) break;
+          if (
+            (currentFollowUp.deliveryMode === "message" ||
+              currentFollowUp.deliveryMode === "follow_up") &&
+            currentFollowUp.messageId
+          ) {
+            break;
+          }
         }
         followUp = executor.takeNextFollowUpAtTurnBoundary();
       }

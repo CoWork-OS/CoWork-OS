@@ -602,9 +602,9 @@ async function resolveLocalWorkspaceIdForRemoteTask(
   const normalizedRemote = normalizePathForMatch(remotePath);
   if (!normalizedRemote) return fallbackWorkspaceId;
 
-  const localWorkspaces = (await workspaceRepo
-    .findAll())
-    .filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
+  const localWorkspaces = (await workspaceRepo.findAll()).filter(
+    (w) => !w.isTemp && !isTempWorkspaceId(w.id),
+  );
   const match = localWorkspaces.find((w) => pathsMatch(w.path, remotePath));
   return match?.id ?? fallbackWorkspaceId;
 }
@@ -660,12 +660,12 @@ async function getLocalConfigSnapshot(): Promise<Any> {
   const taskRepo = new TaskRepository(db);
   const channelRepo = new ChannelRepository(db);
 
-  const allWorkspaces = (await workspaceRepo
-    .findAll())
-    .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
-  const allLocalTasks = (await taskRepo
-    .findAll(250, 0))
-    .filter((task) => !task.targetNodeId || isLocalManagedDeviceIdentifier(task.targetNodeId));
+  const allWorkspaces = (await workspaceRepo.findAll()).filter(
+    (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+  );
+  const allLocalTasks = (await taskRepo.findAll(250, 0)).filter(
+    (task) => !task.targetNodeId || isLocalManagedDeviceIdentifier(task.targetNodeId),
+  );
   const byStatus = allLocalTasks.reduce(
     (acc: Record<string, number>, task) => {
       const key = task.status || "unknown";
@@ -710,9 +710,9 @@ async function getLocalStorageSummary(db: Any): Promise<{
 }> {
   const workspaceRepo = new WorkspaceRepository(db);
   const artifactRepo = new ArtifactRepository(db);
-  const workspaces = (await workspaceRepo
-    .findAll())
-    .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+  const workspaces = (await workspaceRepo.findAll()).filter(
+    (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+  );
   const workspaceRoots = workspaces.map((workspace) => ({
     id: workspace.id,
     name: workspace.name,
@@ -1422,9 +1422,9 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     case Methods.CONFIG_GET:
       return getLocalConfigSnapshot();
     case Methods.WORKSPACE_LIST: {
-      const workspaces = (await workspaceRepo
-        .findAll())
-        .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+      const workspaces = (await workspaceRepo.findAll()).filter(
+        (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+      );
       return { workspaces };
     }
     case Methods.TASK_LIST: {
@@ -1654,6 +1654,7 @@ function sanitizeTaskCreateParams(params: unknown): {
   title: string;
   prompt: string;
   workspaceId: string;
+  operationKey?: string;
   assignedAgentRoleId?: string;
   agentConfig?: AgentConfig;
   budgetTokens?: number;
@@ -1661,6 +1662,14 @@ function sanitizeTaskCreateParams(params: unknown): {
   shellAccess?: boolean;
 } {
   const p = (params ?? {}) as any;
+  const hasOperationKey = Object.prototype.hasOwnProperty.call(p, "operationKey");
+  const operationKey = typeof p.operationKey === "string" ? p.operationKey.trim() : "";
+  if (hasOperationKey && (!operationKey || operationKey.length > 200)) {
+    throw {
+      code: ErrorCodes.INVALID_PARAMS,
+      message: "operationKey must contain 1..200 characters",
+    };
+  }
   const title = typeof p.title === "string" ? p.title.trim() : "";
   const prompt = typeof p.prompt === "string" ? p.prompt.trim() : "";
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
@@ -1729,6 +1738,7 @@ function sanitizeTaskCreateParams(params: unknown): {
     title,
     prompt,
     workspaceId,
+    ...(hasOperationKey ? { operationKey } : {}),
     ...(assignedAgentRoleId ? { assignedAgentRoleId } : {}),
     ...(agentConfig ? { agentConfig } : {}),
     ...(budgetTokens !== undefined ? { budgetTokens } : {}),
@@ -2888,7 +2898,7 @@ function registerCanvasMethods(server: ControlPlaneServer): void {
   console.log("[ControlPlane] Registered 10 canvas methods");
 }
 
-function registerTaskAndWorkspaceMethods(
+export function registerTaskAndWorkspaceMethods(
   server: ControlPlaneServer,
   deps: ControlPlaneMethodDeps,
 ): void {
@@ -3162,13 +3172,13 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "read");
     const p = sanitizeManagedSessionListParams(params);
     return {
-      environments: (await managedSessions
-        .listEnvironments({
+      environments: (
+        await managedSessions.listEnvironments({
           limit: p.limit,
           offset: p.offset,
           status: p.status,
-        }))
-        .map(redactManagedEnvironmentForRead),
+        })
+      ).map(redactManagedEnvironmentForRead),
     };
   });
 
@@ -3330,6 +3340,55 @@ function registerTaskAndWorkspaceMethods(
           ...(normalizedAgentConfig.autonomousMode ? { allowUserInput: false } : {}),
         }
       : undefined;
+
+    if (validated.operationKey) {
+      const admitted = await agentDaemon.createTaskIdempotent({
+        operationKey: validated.operationKey,
+        title: validated.title,
+        prompt: validated.prompt,
+        workspaceId: validated.workspaceId,
+        agentConfig: taskAgentConfig,
+        budgetTokens: validated.budgetTokens,
+        budgetCost: validated.budgetCost,
+        source: "api",
+        taskOverrides: validated.assignedAgentRoleId
+          ? { assignedAgentRoleId: validated.assignedAgentRoleId }
+          : undefined,
+        boardColumn: validated.assignedAgentRoleId ? "todo" : undefined,
+        requestIdentity: {
+          title: validated.title,
+          prompt: validated.prompt,
+          workspaceId: validated.workspaceId,
+          assignedAgentRoleId: validated.assignedAgentRoleId,
+          agentConfig: validated.agentConfig,
+          budgetTokens: validated.budgetTokens,
+          budgetCost: validated.budgetCost,
+          shellAccess: validated.shellAccess,
+        },
+        autoStart: false,
+      });
+
+      if (!isTempWorkspaceId(validated.workspaceId) && !workspace?.isTemp) {
+        try {
+          await workspaceRepo.updateLastUsedAt(validated.workspaceId);
+        } catch (error) {
+          console.warn("[ControlPlane] Failed to update workspace last used time:", error);
+        }
+      }
+
+      try {
+        await agentDaemon.startAdmittedTask(validated.operationKey, admitted.task.id);
+      } catch (error: any) {
+        // Keep the durable queued receipt intact. A same-key retry or startup
+        // recovery can wake this admission without manufacturing another task.
+        throw {
+          code: ErrorCodes.METHOD_FAILED,
+          message: error?.message || "Failed to start admitted task. Check LLM provider settings.",
+        };
+      }
+
+      return { taskId: admitted.task.id, task: admitted.task, replayed: admitted.replayed };
+    }
 
     const task = await taskRepo.create({
       title: validated.title,
@@ -3764,9 +3823,9 @@ function registerTaskAndWorkspaceMethods(
     requireScope(client, "read");
     const isAdmin = isAdminClient(client);
 
-    const allWorkspaces = (await workspaceRepo
-      .findAll())
-      .filter((w) => !w.isTemp && !isTempWorkspaceId(w.id));
+    const allWorkspaces = (await workspaceRepo.findAll()).filter(
+      (w) => !w.isTemp && !isTempWorkspaceId(w.id),
+    );
     const workspacesForClient = isAdmin ? allWorkspaces : allWorkspaces.map(redactWorkspaceForRead);
 
     const taskStatusRows = (await controlPlaneStatements(db).all(

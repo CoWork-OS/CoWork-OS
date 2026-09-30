@@ -474,13 +474,25 @@ export function AppearanceSettings({
       <div className="appearance-section">
         <h4>Developer logging</h4>
         <p className="settings-description">
-          When enabled, <code>npm run dev</code> writes redacted text and structured JSONL logs to{" "}
-          <code>logs/</code> with automatic cleanup.
+          {window.coworkBrowserHost === true ? (
+            "Configure host development logging in the desktop app. Browser appearance preferences do not change host logging."
+          ) : (
+            <>
+              When enabled, <code>npm run dev</code> writes redacted text and structured JSONL logs
+              to <code>logs/</code> with automatic cleanup.
+            </>
+          )}
         </p>
         <label className="settings-checkbox">
           <input
             type="checkbox"
             checked={devRunLoggingEnabled}
+            disabled={window.coworkBrowserHost === true}
+            title={
+              window.coworkBrowserHost === true
+                ? "Configure host development logging in the desktop app."
+                : undefined
+            }
             onChange={(event) => onDevRunLoggingEnabledChange(event.target.checked)}
           />
           <span>Capture `npm run dev` logs locally (default: off)</span>

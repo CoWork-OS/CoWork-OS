@@ -1,4 +1,5 @@
 import { resolveInteractionMode } from "./strategy/interaction-mode";
+import { QUALITY_PASS_SYSTEM_PROMPT, isQualityRewriteSafe } from "./quality-pass-output";
 import {
   AgentConfig,
   Task,
@@ -322,10 +323,26 @@ type TaskExecutorFollowUpOptions = Pick<
   onAccepted?: () => void | Promise<void>;
   /** Called once the follow-up is admitted and the task has started processing it. */
   onExecutionAccepted?: () => void | Promise<void>;
+  /** Recoverable dispatch marker written immediately before a provider request. */
+  onProviderDispatchStarted?: () => void | Promise<void>;
+  /** Called only after the assistant response is durably captured. */
+  onProviderDispatchCompleted?: () => void | Promise<void>;
+  /** Recovery replay whose user turn is already present in the restored transcript. */
+  transcriptAlreadyContainsMessage?: boolean;
   /** Queue recovery already emitted the receipt; avoid a duplicate event. */
   suppressUserMessageEvent?: boolean;
   /** Full queue item retained until the acceptance snapshot commits. */
   queuedFollowUp?: TaskFollowUpInput;
+  /** Internal durable media/idempotency metadata; contains no attachment bytes. */
+  attachmentReceipt?: {
+    queuedAttachmentRefs?: Array<{
+      key: string;
+      mimeType: string;
+      filename?: string;
+      sizeBytes: number;
+    }>;
+    requestFingerprint?: string;
+  };
 };
 import {
   evaluateDomainCompletion,
@@ -3651,6 +3668,7 @@ export class TaskExecutor {
         ...this.buildIntegrationMentionEventPayload(),
         ...this.buildUserMessageAttachmentEventPayload(_images),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+        ...this.buildAttachmentReceiptEventPayload(options?.attachmentReceipt),
       });
     }
     await options?.onExecutionAccepted?.();
@@ -5627,6 +5645,7 @@ export class TaskExecutor {
     message: string,
     systemPrompt: string,
     images?: ImageAttachment[],
+    transcriptAlreadyContainsMessage = false,
   ): Promise<LLMMessage[]> {
     const baseHistory = this.conversationHistory.slice().reduce<LLMMessage[]>((acc, msg) => {
       if (!Array.isArray(msg.content)) {
@@ -5652,7 +5671,9 @@ export class TaskExecutor {
         : [{ type: "text", text: message }],
     };
 
-    const fullMessages: LLMMessage[] = [...baseHistory, currentMessage];
+    const fullMessages: LLMMessage[] = transcriptAlreadyContainsMessage
+      ? baseHistory
+      : [...baseHistory, currentMessage];
     const totalTokens = estimateTotalTokens(fullMessages, systemPrompt);
     const shouldSummarize =
       baseHistory.length >= EXPLICIT_CHAT_SUMMARY_TRIGGER_MESSAGE_COUNT ||
@@ -8120,6 +8141,121 @@ ${transcript}
   }
 
   /**
+   * Recreate the original visual input as a distinct historical user turn after
+   * restoring a fresh executor. Runtime snapshots keep image markers rather than
+   * image bytes, so rebuild this turn from the durable attachment store before a
+   * later follow-up is sent. Keep it separate from the current follow-up's images.
+   */
+  async restoreInitialMediaContext(prompt: string, images: ImageAttachment[]): Promise<void> {
+    this.setInitialImages(images);
+    const originalPrompt = String(prompt || "").trim();
+    if (!originalPrompt || images.length === 0) return;
+
+    const attribution = "Original task request and visual attachments (provided at task creation):";
+    const attributedPrompt = `${attribution}\n${originalPrompt}`;
+    const snapshotImageMarkers = images.map(
+      (image) =>
+        `[Image was attached: ${image.mimeType || "unknown"}, ${((image.sizeBytes || 0) / 1024).toFixed(0)}KB]`,
+    );
+    const expectedSnapshotText =
+      snapshotImageMarkers.length > 0
+        ? `${attributedPrompt}\n${snapshotImageMarkers.join("\n")}`
+        : attributedPrompt;
+    const existingIndex = this.conversationHistory.findIndex((message) => {
+      if (message.role !== "user") return false;
+      const text =
+        typeof message.content === "string"
+          ? message.content
+          : Array.isArray(message.content)
+            ? message.content
+                .filter(
+                  (block): block is Extract<LLMContent, { type: "text" }> => block.type === "text",
+                )
+                .map((block) => block.text)
+                .join("\n")
+            : "";
+      return text === attributedPrompt || text === expectedSnapshotText;
+    });
+    if (
+      existingIndex >= 0 &&
+      Array.isArray(this.conversationHistory[existingIndex].content) &&
+      this.conversationHistory[existingIndex].content.some(
+        (block) => block.type === "image" && isLLMImageContent(block as LLMContent),
+      )
+    ) {
+      return;
+    }
+
+    const content = await this.buildUserContent(attributedPrompt, images);
+    const restoredMessage: LLMMessage = { role: "user", content };
+    const history = this.conversationHistory.slice();
+    if (existingIndex >= 0) history[existingIndex] = restoredMessage;
+    else history.push(restoredMessage);
+    this.updateConversationHistory(history);
+  }
+
+  private async restorePersistedFollowUpMediaContext(
+    message: string,
+    images: ImageAttachment[],
+    quotedAssistantMessage?: QuotedAssistantMessage,
+  ): Promise<void> {
+    if (images.length === 0) return;
+    const candidates = [
+      this.buildQuotedAssistantContextMessage(message, quotedAssistantMessage),
+      this.buildQuotedAssistantContextMessage(`USER UPDATE: ${message}`, quotedAssistantMessage),
+    ];
+    const imageMarkers = images.map(
+      (image) =>
+        `[Image was attached: ${image.mimeType || "unknown"}, ${((image.sizeBytes || 0) / 1024).toFixed(0)}KB]`,
+    );
+    const snapshotCandidates = candidates.flatMap((candidate) => [
+      candidate,
+      `${candidate}\n${imageMarkers.join("\n")}`,
+    ]);
+    const history = this.conversationHistory.slice();
+    let existingIndex = -1;
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const item = history[index];
+      if (item.role !== "user") continue;
+      const text =
+        typeof item.content === "string"
+          ? item.content
+          : Array.isArray(item.content)
+            ? item.content
+                .filter(
+                  (block): block is Extract<LLMContent, { type: "text" }> => block.type === "text",
+                )
+                .map((block) => block.text)
+                .join("\n")
+            : "";
+      if (snapshotCandidates.includes(text)) {
+        existingIndex = index;
+        break;
+      }
+    }
+
+    const restoredContent = await this.buildUserContent(candidates[0], images);
+    if (existingIndex >= 0) {
+      const existingContent = history[existingIndex].content;
+      if (
+        Array.isArray(existingContent) &&
+        existingContent.some(
+          (block) => block.type === "image" && isLLMImageContent(block as LLMContent),
+        )
+      ) {
+        return;
+      }
+      history[existingIndex] = { role: "user", content: restoredContent };
+    } else {
+      // A bounded fallback preserves the actual visual input if an older
+      // transcript stored contextual text that cannot be matched exactly.
+      history.push({ role: "user", content: restoredContent });
+    }
+    this.updateConversationHistory(history);
+    this.saveConversationSnapshot();
+  }
+
+  /**
    * Detect high-confidence skill matches for the given query and return explicit
    * planning hints so even weaker models route to the correct skill via Skill.
    * Returns empty string when no skill scores above the threshold.
@@ -8515,6 +8651,8 @@ ${transcript}
     previousStatus?: Task["status"],
     images?: ImageAttachment[],
     onIncorporated?: () => Promise<void>,
+    onProviderDispatchCompleted?: () => Promise<void>,
+    transcriptAlreadyContainsMessage = false,
   ): Promise<void> {
     const personalityIdOverride = this.task.agentConfig?.personalityId;
     const contextMode = detectContextMode(
@@ -8568,7 +8706,12 @@ ${transcript}
     });
 
     const messages: LLMMessage[] = isExplicitChatMode
-      ? await this.buildExplicitChatMessages(message, systemPrompt, images)
+      ? await this.buildExplicitChatMessages(
+          message,
+          systemPrompt,
+          images,
+          transcriptAlreadyContainsMessage,
+        )
       : (() => {
           // Strip tool_use / tool_result blocks from history so we can send to
           // the LLM without a toolConfig (Bedrock rejects the call otherwise).
@@ -8588,14 +8731,18 @@ ${transcript}
             }
             return acc;
           }, []);
-          return [...recent, { role: "user", content: [{ type: "text", text: message }] }];
+          return transcriptAlreadyContainsMessage
+            ? recent
+            : [...recent, { role: "user", content: [{ type: "text", text: message }] }];
         })();
 
     if (onIncorporated) {
-      this.appendConversationHistory({
-        role: "user",
-        content: await this.buildUserContent(message, images),
-      });
+      if (!transcriptAlreadyContainsMessage) {
+        this.appendConversationHistory({
+          role: "user",
+          content: await this.buildUserContent(message, images),
+        });
+      }
       // Keep persistence errors outside the chat fallback handler: a failed
       // incorporation must remain retryable without making a provider call.
       await onIncorporated();
@@ -8656,7 +8803,7 @@ ${transcript}
       if (isExplicitChatMode) {
         this.completeExplicitChatCompaction(historyMessages);
       }
-      this.saveConversationSnapshot();
+      if (this.saveConversationSnapshot()) await onProviderDispatchCompleted?.();
       this.emitEvent("follow_up_completed", {
         message: "Follow-up message processed (chat mode)",
         followUpMessage: message,
@@ -8677,7 +8824,7 @@ ${transcript}
       if (isExplicitChatMode) {
         this.failExplicitChatCompaction(error);
       }
-      this.saveConversationSnapshot();
+      if (this.saveConversationSnapshot()) await onProviderDispatchCompleted?.();
       this.emitEvent("follow_up_completed", {
         message: "Follow-up fallback processed (chat mode)",
       });
@@ -11958,13 +12105,8 @@ ${transcript}
       if (!candidate) continue;
       const matchIndex = typeof match.index === "number" ? match.index : -1;
       const contextWindow =
-        matchIndex >= 0
-          ? desc.slice(
-              Math.max(0, matchIndex - 28),
-              Math.min(desc.length, matchIndex + match[0].length + 28),
-            )
-          : desc;
-      if (!/\b(tool|call|invoke|run|execute|using|via|from|output|result)\b/.test(contextWindow)) {
+        matchIndex >= 0 ? desc.slice(Math.max(0, matchIndex - 28), matchIndex) : desc;
+      if (!/\b(?:call|invoke|run|execute|use|using|via)\b/.test(contextWindow)) {
         continue;
       }
       addRequiredToolIfKnown(candidate);
@@ -17003,6 +17145,7 @@ ${transcript}
   private static readonly BASE_MAX_TOOLS_OFFERED = 80;
   private static readonly SOFT_MAX_TOOLS_OFFERED = 120;
   private static readonly LOW_SIGNAL_EXPLORATION_BUFFER = 20;
+  private static readonly MAX_EXPLICIT_MCP_TOOLS = 8;
 
   private getToolCountCaps(): { baseCap: number; softCap: number } {
     const defaultBase = this.provider?.type === "ollama" ? 40 : TaskExecutor.BASE_MAX_TOOLS_OFFERED;
@@ -17066,6 +17209,55 @@ ${transcript}
         .split(/[^a-z0-9]+/)
         .filter((w) => w.length > 2),
     );
+  }
+
+  private getExplicitlyReferencedMcpTools(tools: Any[]): Any[] {
+    const currentStep =
+      this.currentStepId && this.plan?.steps
+        ? this.plan.steps.find((step) => step.id === this.currentStepId)
+        : undefined;
+    const referenceText = [
+      this.task?.title,
+      this.task?.prompt,
+      this.task?.rawPrompt,
+      this.task?.userPrompt,
+      this.lastUserMessage,
+      currentStep?.description,
+    ]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join("\n")
+      .toLowerCase();
+    if (!referenceText) return [];
+
+    const retainedNames = new Set<string>();
+    const explicitlyReferenced: Any[] = [];
+    for (const tool of tools) {
+      const name = String(tool?.name || "").toLowerCase();
+      if (!name.startsWith("mcp_") || retainedNames.has(name)) continue;
+
+      let start = referenceText.indexOf(name);
+      let found = false;
+      while (start >= 0) {
+        const previous = referenceText[start - 1] || "";
+        const nextIndex = start + name.length;
+        const next = referenceText[nextIndex] || "";
+        const nextNext = referenceText[nextIndex + 1] || "";
+        const hasExactLeftBoundary = !/[a-z0-9_.-]/i.test(previous);
+        const hasExactRightBoundary =
+          !/[a-z0-9_-]/i.test(next) && !(next === "." && /[a-z0-9_-]/i.test(nextNext));
+        if (hasExactLeftBoundary && hasExactRightBoundary) {
+          found = true;
+          break;
+        }
+        start = referenceText.indexOf(name, start + 1);
+      }
+      if (!found) continue;
+
+      retainedNames.add(name);
+      explicitlyReferenced.push(tool);
+      if (explicitlyReferenced.length >= TaskExecutor.MAX_EXPLICIT_MCP_TOOLS) break;
+    }
+    return explicitlyReferenced;
   }
 
   private stableToolHash(name: string): number {
@@ -17600,6 +17792,21 @@ ${transcript}
       stepText,
     );
     const normalizedStepText = stepText.toLowerCase();
+    const explicitMcpReferenceText = [
+      this.task.title || "",
+      step.description || "",
+      this.getExecutionTaskPrompt(),
+      this.lastUserMessage || "",
+    ]
+      .join("\n")
+      .toLowerCase();
+    for (const tool of tools) {
+      const name = String(tool.name || "");
+      if (!name.toLowerCase().startsWith("mcp_")) continue;
+      const escapedName = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const explicitNameMention = new RegExp(`(?:^|[^a-z0-9_])${escapedName}(?:$|[^a-z0-9_])`);
+      if (explicitNameMention.test(explicitMcpReferenceText)) allowlist.add(name);
+    }
     const mcpReferenced =
       /\bmcp[_\s-]|connector|slack|salesforce|jira|linear|notion|github|postgres|mysql|hubspot|maps?|nearby|walking?|places?|location\b/.test(
         normalizedStepText,
@@ -17718,9 +17925,12 @@ ${transcript}
 
     const builtIn = tools.filter((t) => !t.name.startsWith("mcp_"));
     const mcpTools = tools.filter((t) => t.name.startsWith("mcp_"));
+    const explicitlyReferencedMcp = this.getExplicitlyReferencedMcpTools(mcpTools);
 
-    // If built-in tools alone exceed soft cap, preserve built-ins.
-    if (builtIn.length >= softCap) return builtIn;
+    // Built-ins stay available above the soft cap. Also retain a small bounded
+    // set of MCP tools the user named exactly, even when those built-ins leave
+    // no room for the normal relevance-ranked MCP budget.
+    if (builtIn.length >= softCap) return [...builtIn, ...explicitlyReferencedMcp];
 
     let mcpBudget = Math.max(0, baseCap - builtIn.length);
 
@@ -17797,7 +18007,15 @@ ${transcript}
       }
       scored = rotated;
     }
-    const keptMcp = scored.slice(0, Math.max(0, mcpBudget)).map((s) => s.tool);
+    const explicitMcpNames = new Set(explicitlyReferencedMcp.map((tool) => String(tool.name)));
+    const remainingMcpBudget = Math.max(0, mcpBudget - explicitlyReferencedMcp.length);
+    const keptMcp = [
+      ...explicitlyReferencedMcp,
+      ...scored
+        .filter((entry) => !explicitMcpNames.has(String(entry.tool.name)))
+        .slice(0, remainingMcpBudget)
+        .map((entry) => entry.tool),
+    ];
     const cappedCount = builtIn.length + keptMcp.length;
 
     // Avoid high-volume no-op logs when nothing is trimmed and MCP tools are not in play.
@@ -30731,6 +30949,8 @@ Return ONLY a JSON object:
         bootstrapMutationSucceeded = bootstrap.succeeded;
       }
 
+      const pendingProviderDispatchMessageIds = new Set<string>();
+      const startedProviderDispatchMessageIds = new Set<string>();
       const stepKernelPolicy: TurnKernelPolicy = {
         shouldStopBeforeIteration: (state: TurnKernelIterationState) => {
           if (this.cancelled || this.taskCompleted) {
@@ -30834,13 +31054,32 @@ Return ONLY a JSON object:
               typeof pendingMsg.messageId === "string" ? pendingMsg.messageId.trim() : "";
             const isQueuedAgentMessage =
               pendingMsg.deliveryMode === "message" && pendingMessageId.length > 0;
+            const isQueuedHumanFollowUp =
+              pendingMsg.deliveryMode === "follow_up" && pendingMessageId.length > 0;
+            const hasDurableFollowUpReceipt = isQueuedAgentMessage || isQueuedHumanFollowUp;
             const runtime = this.getSessionRuntime();
-            if (isQueuedAgentMessage && runtime.isFollowUpMessageConsumed(pendingMessageId)) {
+            const providerDispatchPending =
+              isQueuedHumanFollowUp &&
+              this.daemon.isQueuedUserFollowUpProviderDispatchRecoverable?.(
+                this.task.id,
+                pendingMessageId,
+              ) === true;
+            if (
+              hasDurableFollowUpReceipt &&
+              runtime.isFollowUpMessageConsumed(pendingMessageId) &&
+              !providerDispatchPending
+            ) {
               // A receipt update may have failed after the incorporated
               // transcript was snapshotted. Retry only the acknowledgement;
               // never inject the provider prompt a second time.
               try {
-                if (!this.daemon.markQueuedAgentMessageDelivered(this.task.id, pendingMessageId)) {
+                const acknowledged = isQueuedAgentMessage
+                  ? this.daemon.markQueuedAgentMessageDelivered(this.task.id, pendingMessageId)
+                  : await this.daemon.markQueuedUserFollowUpAccepted(
+                      this.task.id,
+                      pendingMessageId,
+                    );
+                if (!acknowledged) {
                   throw new Error(`Queued follow-up ${pendingMessageId} has no durable receipt.`);
                 }
               } catch (error) {
@@ -30849,10 +31088,20 @@ Return ONLY a JSON object:
               }
               runtime.removeFollowUpAtTurnBoundary(pendingMessageId);
               runtime.saveSnapshot();
+              if (isQueuedHumanFollowUp) {
+                pendingProviderDispatchMessageIds.add(pendingMessageId);
+              }
               pendingMsg = this.drainPendingFollowUp();
               continue;
             }
             try {
+              if (
+                isQueuedHumanFollowUp &&
+                !providerDispatchPending &&
+                !(await this.daemon.markQueuedUserFollowUpStarted(this.task.id, pendingMessageId))
+              ) {
+                throw new Error(`Queued follow-up ${pendingMessageId} has no active receipt.`);
+              }
               this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
               const isPendingBotHandoff = pendingMsg.messageSource === "agent";
               if (isPendingBotHandoff && !resetForPendingBotHandoff) {
@@ -30885,11 +31134,17 @@ Return ONLY a JSON object:
                 messages.pop();
                 throw error;
               }
-              if (isQueuedAgentMessage) {
+              if (hasDurableFollowUpReceipt) {
                 await this.acceptQueuedFollowUpAfterSnapshot(pendingMsg, messages);
+                if (isQueuedHumanFollowUp) {
+                  pendingProviderDispatchMessageIds.add(pendingMessageId);
+                }
               }
             } catch (error) {
-              if (isQueuedAgentMessage && !runtime.isFollowUpMessageConsumed(pendingMessageId)) {
+              if (
+                hasDurableFollowUpReceipt &&
+                !runtime.isFollowUpMessageConsumed(pendingMessageId)
+              ) {
                 runtime.requeueFollowUpAtTurnBoundary(pendingMsg);
               }
               throw error;
@@ -30974,6 +31229,20 @@ Return ONLY a JSON object:
         requestResponse: async (state: TurnKernelIterationState) => {
           iterationCount = state.iterationCount;
           try {
+            for (const messageId of pendingProviderDispatchMessageIds) {
+              if (startedProviderDispatchMessageIds.has(messageId)) continue;
+              if (
+                !(await this.daemon.markQueuedUserFollowUpProviderDispatchStarted(
+                  this.task.id,
+                  messageId,
+                ))
+              ) {
+                throw new Error(
+                  `Queued follow-up ${messageId} provider dispatch was not recorded.`,
+                );
+              }
+              startedProviderDispatchMessageIds.add(messageId);
+            }
             return await this.requestLLMResponseWithAdaptiveBudget({
               messages,
               retryLabel: `Step execution (iteration ${iterationCount})`,
@@ -35776,8 +36045,16 @@ Return ONLY a JSON object:
 
       this.recordAssistantOutput(messages, step);
 
-      // Save conversation history for follow-up messages
+      // Persist the assistant response before declaring queued provider dispatches
+      // complete. A crash before this boundary remains recoverable and may replay
+      // an uncertain external request at least once.
       this.updateConversationHistory(messages);
+      const stepSnapshotSaved = this.saveConversationSnapshot();
+      if (stepSnapshotSaved) {
+        await this.markQueuedUserFollowUpProviderDispatchesCompleted(
+          pendingProviderDispatchMessageIds,
+        );
+      }
 
       if (awaitingUserInput) {
         this.stepStopReasons.add("awaiting_user_input");
@@ -36949,7 +37226,7 @@ Return ONLY a JSON object:
               {
                 model: this.modelId,
                 maxTokens: 1600,
-                system: this.systemPrompt || "",
+                system: QUALITY_PASS_SYSTEM_PROMPT,
                 messages: [
                   {
                     role: "user",
@@ -36983,7 +37260,7 @@ Return ONLY a JSON object:
         }
 
         const text = this.extractTextFromLLMContent(response.content).trim();
-        if (!text) return { text: draft, accepted: false };
+        if (!isQualityRewriteSafe(text, draft)) return { text: draft, accepted: false };
         if (response.stopReason !== "end_turn") {
           return { text: draft, accepted: false };
         }
@@ -37017,7 +37294,7 @@ Return ONLY a JSON object:
             {
               model: this.modelId,
               maxTokens: 900,
-              system: this.systemPrompt || "",
+              system: QUALITY_PASS_SYSTEM_PROMPT,
               messages: [
                 {
                   role: "user",
@@ -37085,7 +37362,7 @@ Return ONLY a JSON object:
             {
               model: this.modelId,
               maxTokens: 1800,
-              system: this.systemPrompt || "",
+              system: QUALITY_PASS_SYSTEM_PROMPT,
               messages: [
                 {
                   role: "user",
@@ -37126,7 +37403,7 @@ Return ONLY a JSON object:
       }
 
       const text = this.extractTextFromLLMContent(refineResp.content).trim();
-      if (!text) return { text: draft, accepted: false };
+      if (!isQualityRewriteSafe(text, draft)) return { text: draft, accepted: false };
       if (
         refineResp.stopReason !== "end_turn" ||
         (refineResp.content || []).some((c: Any) => c && c.type === "tool_use")
@@ -37571,6 +37848,17 @@ Return ONLY a JSON object:
     return attachments.length > 0 ? { images: attachments } : {};
   }
 
+  private buildAttachmentReceiptEventPayload(
+    receipt?: TaskExecutorFollowUpOptions["attachmentReceipt"],
+  ): Record<string, unknown> {
+    return {
+      ...(receipt?.queuedAttachmentRefs?.length
+        ? { queuedAttachmentRefs: receipt.queuedAttachmentRefs }
+        : {}),
+      ...(receipt?.requestFingerprint ? { requestFingerprint: receipt.requestFingerprint } : {}),
+    };
+  }
+
   private isVerificationTaskRoute(): boolean {
     return (
       this.task.agentConfig?.verificationAgent === true ||
@@ -37910,7 +38198,12 @@ Return ONLY a JSON object:
       if (this.shutdownRequested) return;
       if (options?.onAccepted && options.messageId) {
         const runtime = this.getSessionRuntime();
-        if (runtime.isFollowUpMessageConsumed(options.messageId)) {
+        const providerDispatchPending =
+          this.daemon.isQueuedUserFollowUpProviderDispatchRecoverable?.(
+            this.task.id,
+            options.messageId,
+          ) === true;
+        if (runtime.isFollowUpMessageConsumed(options.messageId) && !providerDispatchPending) {
           await options.onAccepted();
           runtime.removeFollowUpAtTurnBoundary(options.messageId);
           runtime.saveSnapshot();
@@ -37994,8 +38287,12 @@ Return ONLY a JSON object:
         messageContext: options,
         onAccepted: options.onAccepted,
         onExecutionAccepted: options.onExecutionAccepted,
+        onProviderDispatchStarted: options.onProviderDispatchStarted,
+        onProviderDispatchCompleted: options.onProviderDispatchCompleted,
         suppressUserMessageEvent: options.suppressUserMessageEvent,
+        transcriptAlreadyContainsMessage: options.transcriptAlreadyContainsMessage,
         queuedFollowUp: options.queuedFollowUp,
+        attachmentReceipt: options.attachmentReceipt,
       });
       return;
     }
@@ -38004,8 +38301,12 @@ Return ONLY a JSON object:
       messageContext: options,
       onAccepted: options?.onAccepted,
       onExecutionAccepted: options?.onExecutionAccepted,
+      onProviderDispatchStarted: options?.onProviderDispatchStarted,
+      onProviderDispatchCompleted: options?.onProviderDispatchCompleted,
       suppressUserMessageEvent: options?.suppressUserMessageEvent,
+      transcriptAlreadyContainsMessage: options?.transcriptAlreadyContainsMessage,
       queuedFollowUp: options?.queuedFollowUp,
+      attachmentReceipt: options?.attachmentReceipt,
     });
   }
 
@@ -38019,12 +38320,21 @@ Return ONLY a JSON object:
     messages?: LLMMessage[],
   ): Promise<void> {
     const messageId = typeof followUp.messageId === "string" ? followUp.messageId.trim() : "";
-    if (followUp.deliveryMode !== "message" || !messageId) return;
+    if (
+      !messageId ||
+      (followUp.deliveryMode !== "message" && followUp.deliveryMode !== "follow_up")
+    ) {
+      return;
+    }
 
     await this.persistFollowUpAcceptance(
       messageId,
-      () => {
-        if (!this.daemon.markQueuedAgentMessageDelivered(this.task.id, messageId)) {
+      async () => {
+        const accepted =
+          followUp.deliveryMode === "message"
+            ? this.daemon.markQueuedAgentMessageDelivered(this.task.id, messageId)
+            : await this.daemon.markQueuedUserFollowUpAccepted(this.task.id, messageId);
+        if (!accepted) {
           throw new Error(`Queued follow-up ${messageId} has no durable receipt.`);
         }
       },
@@ -38065,6 +38375,32 @@ Return ONLY a JSON object:
     this.saveConversationSnapshot();
   }
 
+  private async markQueuedUserFollowUpProviderDispatchesCompleted(
+    messageIds: Iterable<string>,
+  ): Promise<void> {
+    for (const messageId of messageIds) {
+      try {
+        if (
+          !(await this.daemon.markQueuedUserFollowUpProviderDispatchCompleted(
+            this.task.id,
+            messageId,
+          ))
+        ) {
+          logger.debug(
+            `${this.logTag} Provider dispatch completion was not recorded for ${messageId}; receipt remains recoverable.`,
+          );
+        }
+      } catch (error) {
+        // The assistant response snapshot is already durable. Leave the started
+        // receipt recoverable so a restart can reconcile an uncertain write.
+        logger.warn(
+          `${this.logTag} Could not complete provider dispatch receipt ${messageId}:`,
+          error,
+        );
+      }
+    }
+  }
+
   private rollbackLastFollowUpIncorporation(messages?: LLMMessage[]): void {
     const runtime = this.getSessionRuntime();
     const history = runtime.state.transcript.conversationHistory;
@@ -38100,8 +38436,12 @@ Return ONLY a JSON object:
       >;
       onAccepted?: () => void | Promise<void>;
       onExecutionAccepted?: () => void | Promise<void>;
+      onProviderDispatchStarted?: () => void | Promise<void>;
+      onProviderDispatchCompleted?: () => void | Promise<void>;
       suppressUserMessageEvent?: boolean;
+      transcriptAlreadyContainsMessage?: boolean;
       queuedFollowUp?: TaskFollowUpInput;
+      attachmentReceipt?: TaskExecutorFollowUpOptions["attachmentReceipt"];
     },
   ): Promise<void> {
     let executionMessage = message;
@@ -38113,7 +38453,14 @@ Return ONLY a JSON object:
         ? opts.messageContext.messageId.trim()
         : "";
     const acceptFollowUp = async (): Promise<void> => {
-      if (recoveredFromTurnLimit || !opts?.onAccepted || followUpAcceptanceAttempted) return;
+      if (
+        recoveredFromTurnLimit ||
+        opts?.transcriptAlreadyContainsMessage ||
+        !opts?.onAccepted ||
+        followUpAcceptanceAttempted
+      ) {
+        return;
+      }
       followUpAcceptanceAttempted = true;
       if (!followUpMessageId) {
         throw new Error("Queued follow-up is missing its durable message id.");
@@ -38129,6 +38476,24 @@ Return ONLY a JSON object:
       if (executionAcceptanceAttempted || !opts?.onExecutionAccepted) return;
       executionAcceptanceAttempted = true;
       await opts.onExecutionAccepted();
+    };
+    let providerDispatchStarted = false;
+    const notifyProviderDispatchStarted = async (): Promise<void> => {
+      if (providerDispatchStarted || !opts?.onProviderDispatchStarted) return;
+      providerDispatchStarted = true;
+      await opts.onProviderDispatchStarted();
+    };
+    let providerDispatchCompletionAttempted = false;
+    const notifyProviderDispatchCompleted = async (): Promise<void> => {
+      if (providerDispatchCompletionAttempted || !opts?.onProviderDispatchCompleted) return;
+      providerDispatchCompletionAttempted = true;
+      try {
+        await opts.onProviderDispatchCompleted();
+      } catch (error) {
+        // The assistant snapshot is authoritative. If the marker write fails,
+        // recovery stays at-least-once rather than losing the accepted turn.
+        logger.warn(`${this.logTag} Could not persist provider dispatch completion marker:`, error);
+      }
     };
     if (!recoveredFromTurnLimit) {
       this.followUpRecoveryAttemptsInCurrentMessage = 0;
@@ -38183,10 +38548,19 @@ Return ONLY a JSON object:
     const goalFollowUp = this.handleGoalSlashFollowUp(message);
     if (goalFollowUp.handled) {
       if (opts?.onAccepted || opts?.onExecutionAccepted) {
-        this.appendConversationHistory({
-          role: "user",
-          content: await this.buildUserContent(message, images),
-        });
+        if (opts?.transcriptAlreadyContainsMessage) {
+          await this.restorePersistedFollowUpMediaContext(
+            message,
+            images || [],
+            quotedAssistantMessage,
+          );
+        }
+        if (!opts?.transcriptAlreadyContainsMessage) {
+          this.appendConversationHistory({
+            role: "user",
+            content: await this.buildUserContent(message, images),
+          });
+        }
         await notifyExecutionAccepted();
         await acceptFollowUp();
       }
@@ -38281,14 +38655,24 @@ Return ONLY a JSON object:
           ...this.buildIntegrationMentionEventPayload(),
           ...this.buildUserMessageAttachmentEventPayload(images),
           ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+          ...this.buildAttachmentReceiptEventPayload(opts?.attachmentReceipt),
         });
       }
       if (!recoveredFromTurnLimit) {
-        const content = await this.buildUserContent(followUpConversationMessage, images);
-        this.appendConversationHistory({
-          role: "user",
-          content,
-        });
+        if (opts?.transcriptAlreadyContainsMessage) {
+          await this.restorePersistedFollowUpMediaContext(
+            executionMessage,
+            images || [],
+            quotedAssistantMessage,
+          );
+        }
+        if (!opts?.transcriptAlreadyContainsMessage) {
+          const content = await this.buildUserContent(followUpConversationMessage, images);
+          this.appendConversationHistory({
+            role: "user",
+            content,
+          });
+        }
         await notifyExecutionAccepted();
         await acceptFollowUp();
       }
@@ -38300,7 +38684,8 @@ Return ONLY a JSON object:
       executionMessage = `Continue the task using the collected details for ${pendingSkillParameterCollection.skillName}.`;
     }
 
-    if (this.preflightShellExecutionCheck()) {
+    const requiresShellPreflight = this.preflightShellExecutionCheck();
+    if (requiresShellPreflight) {
       if (!handledPendingSkillReply && !suppressUserMessageEvent && !recoveredFromTurnLimit) {
         this.emitEvent("user_message", {
           message,
@@ -38308,14 +38693,24 @@ Return ONLY a JSON object:
           ...this.buildIntegrationMentionEventPayload(),
           ...this.buildUserMessageAttachmentEventPayload(images),
           ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+          ...this.buildAttachmentReceiptEventPayload(opts?.attachmentReceipt),
         });
       }
       if (!recoveredFromTurnLimit && !handledPendingSkillReply) {
-        const content = await this.buildUserContent(followUpConversationMessage, images);
-        this.appendConversationHistory({
-          role: "user",
-          content,
-        });
+        if (opts?.transcriptAlreadyContainsMessage) {
+          await this.restorePersistedFollowUpMediaContext(
+            executionMessage,
+            images || [],
+            quotedAssistantMessage,
+          );
+        }
+        if (!opts?.transcriptAlreadyContainsMessage) {
+          const content = await this.buildUserContent(followUpConversationMessage, images);
+          this.appendConversationHistory({
+            role: "user",
+            content,
+          });
+        }
         await notifyExecutionAccepted();
         await acceptFollowUp();
       }
@@ -38358,6 +38753,7 @@ Return ONLY a JSON object:
         ...this.buildIntegrationMentionEventPayload(),
         ...this.buildUserMessageAttachmentEventPayload(images),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+        ...this.buildAttachmentReceiptEventPayload(opts?.attachmentReceipt),
       });
     }
     await notifyExecutionAccepted();
@@ -38369,11 +38765,21 @@ Return ONLY a JSON object:
       (!shouldResumeAfterFollowup &&
         (this.isExplicitChatExecutionMode() || knownContextInformationalFollowUp))
     ) {
+      if (opts?.transcriptAlreadyContainsMessage) {
+        await this.restorePersistedFollowUpMediaContext(
+          executionMessage,
+          images || [],
+          quotedAssistantMessage,
+        );
+      }
+      await notifyProviderDispatchStarted();
       await this.respondInChatMode(
         followUpConversationMessage,
         previousStatus,
         images,
         opts?.onAccepted ? acceptFollowUp : undefined,
+        notifyProviderDispatchCompleted,
+        opts?.transcriptAlreadyContainsMessage === true,
       );
       return;
     }
@@ -38530,8 +38936,16 @@ Return ONLY a JSON object:
         `- Use \`${this.taskPinnedRoot}/...\` for file operations in this follow-up.`;
     }
 
+    if (opts?.transcriptAlreadyContainsMessage) {
+      await this.restorePersistedFollowUpMediaContext(
+        messageWithContext,
+        images || [],
+        quotedAssistantMessage,
+      );
+    }
+
     // Add user message to conversation history (including any image attachments)
-    if (!recoveredFromTurnLimit) {
+    if (!recoveredFromTurnLimit && !opts?.transcriptAlreadyContainsMessage) {
       const content = await this.buildUserContent(
         this.buildQuotedAssistantContextMessage(messageWithContext, quotedAssistantMessage),
         images,
@@ -38615,6 +39029,8 @@ Return ONLY a JSON object:
         `${this.logTag} ▶ Follow-up message processing started | maxIter=${maxIterations}`,
       );
 
+      const pendingProviderDispatchMessageIds = new Set<string>();
+      const startedProviderDispatchMessageIds = new Set<string>();
       const followUpKernelPolicy: TurnKernelPolicy = {
         shouldStopBeforeIteration: (_state: TurnKernelIterationState) => {
           if (this.cancelled) {
@@ -38650,12 +39066,31 @@ Return ONLY a JSON object:
               typeof pendingMsg.messageId === "string" ? pendingMsg.messageId.trim() : "";
             const isQueuedAgentMessage =
               pendingMsg.deliveryMode === "message" && pendingMessageId.length > 0;
+            const isQueuedHumanFollowUp =
+              pendingMsg.deliveryMode === "follow_up" && pendingMessageId.length > 0;
+            const hasDurableFollowUpReceipt = isQueuedAgentMessage || isQueuedHumanFollowUp;
             const runtime = this.getSessionRuntime();
-            if (isQueuedAgentMessage && runtime.isFollowUpMessageConsumed(pendingMessageId)) {
+            const providerDispatchPending =
+              isQueuedHumanFollowUp &&
+              this.daemon.isQueuedUserFollowUpProviderDispatchRecoverable?.(
+                this.task.id,
+                pendingMessageId,
+              ) === true;
+            if (
+              hasDurableFollowUpReceipt &&
+              runtime.isFollowUpMessageConsumed(pendingMessageId) &&
+              !providerDispatchPending
+            ) {
               // Receipt update failed after durable incorporation. Retry only
               // the receipt and suppress a second provider prompt.
               try {
-                if (!this.daemon.markQueuedAgentMessageDelivered(this.task.id, pendingMessageId)) {
+                const acknowledged = isQueuedAgentMessage
+                  ? this.daemon.markQueuedAgentMessageDelivered(this.task.id, pendingMessageId)
+                  : await this.daemon.markQueuedUserFollowUpAccepted(
+                      this.task.id,
+                      pendingMessageId,
+                    );
+                if (!acknowledged) {
                   throw new Error(`Queued follow-up ${pendingMessageId} has no durable receipt.`);
                 }
               } catch (error) {
@@ -38664,10 +39099,20 @@ Return ONLY a JSON object:
               }
               runtime.removeFollowUpAtTurnBoundary(pendingMessageId);
               runtime.saveSnapshot();
+              if (isQueuedHumanFollowUp) {
+                pendingProviderDispatchMessageIds.add(pendingMessageId);
+              }
               pendingMsg = this.drainPendingFollowUp();
               continue;
             }
             try {
+              if (
+                isQueuedHumanFollowUp &&
+                !providerDispatchPending &&
+                !(await this.daemon.markQueuedUserFollowUpStarted(this.task.id, pendingMessageId))
+              ) {
+                throw new Error(`Queued follow-up ${pendingMessageId} has no active receipt.`);
+              }
               this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
               const isPendingBotHandoff = pendingMsg.messageSource === "agent";
               if (isPendingBotHandoff && !resetForPendingBotHandoff) {
@@ -38695,11 +39140,17 @@ Return ONLY a JSON object:
               );
               // messages === this.conversationHistory here, so push persists automatically
               messages.push({ role: "user" as const, content });
-              if (isQueuedAgentMessage) {
+              if (hasDurableFollowUpReceipt) {
                 await this.acceptQueuedFollowUpAfterSnapshot(pendingMsg, messages);
+                if (isQueuedHumanFollowUp) {
+                  pendingProviderDispatchMessageIds.add(pendingMessageId);
+                }
               }
             } catch (error) {
-              if (isQueuedAgentMessage && !runtime.isFollowUpMessageConsumed(pendingMessageId)) {
+              if (
+                hasDurableFollowUpReceipt &&
+                !runtime.isFollowUpMessageConsumed(pendingMessageId)
+              ) {
                 runtime.requeueFollowUpAtTurnBoundary(pendingMsg);
               }
               throw error;
@@ -38750,6 +39201,21 @@ Return ONLY a JSON object:
         requestResponse: async (state: TurnKernelIterationState) => {
           iterationCount = state.iterationCount;
           try {
+            for (const messageId of pendingProviderDispatchMessageIds) {
+              if (startedProviderDispatchMessageIds.has(messageId)) continue;
+              if (
+                !(await this.daemon.markQueuedUserFollowUpProviderDispatchStarted(
+                  this.task.id,
+                  messageId,
+                ))
+              ) {
+                throw new Error(
+                  `Queued follow-up ${messageId} provider dispatch was not recorded.`,
+                );
+              }
+              startedProviderDispatchMessageIds.add(messageId);
+            }
+            await notifyProviderDispatchStarted();
             return await this.requestLLMResponseWithAdaptiveBudget({
               messages,
               retryLabel: `Message processing (iteration ${iterationCount})`,
@@ -40674,7 +41140,13 @@ Return ONLY a JSON object:
       // Save updated conversation history
       this.updateConversationHistory(messages);
       // Save conversation snapshot for future follow-ups and persistence
-      this.saveConversationSnapshot();
+      const responseSnapshotSaved = this.saveConversationSnapshot();
+      if (responseSnapshotSaved) {
+        await notifyProviderDispatchCompleted();
+        await this.markQueuedUserFollowUpProviderDispatchesCompleted(
+          pendingProviderDispatchMessageIds,
+        );
+      }
       // Emit internal follow_up_completed event for gateway (to send artifacts, etc.)
       this.emitEvent("follow_up_completed", {
         message: "Follow-up message processed",
@@ -40779,7 +41251,10 @@ Return ONLY a JSON object:
             followUpScopeStartedAt,
             onAccepted: opts?.onAccepted,
             onExecutionAccepted: opts?.onExecutionAccepted,
+            onProviderDispatchStarted: opts?.onProviderDispatchStarted,
+            onProviderDispatchCompleted: opts?.onProviderDispatchCompleted,
             suppressUserMessageEvent: opts?.suppressUserMessageEvent,
+            transcriptAlreadyContainsMessage: opts?.transcriptAlreadyContainsMessage,
             messageContext: opts?.messageContext,
             queuedFollowUp: opts?.queuedFollowUp,
           });

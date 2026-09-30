@@ -1,3 +1,4 @@
+import { hasHostMethod } from "../../host/browser-capabilities";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type {
   AgentRoleData,
@@ -450,8 +451,12 @@ export function useMissionControlData(
     try {
       setPlannerLoading(true);
       const [config, runs] = await Promise.all([
-        window.electronAPI.getPlannerConfig(companyId),
-        window.electronAPI.listPlannerRuns(companyId, 6),
+        hasHostMethod("getPlannerConfig")
+          ? window.electronAPI.getPlannerConfig(companyId)
+          : Promise.resolve(null),
+        hasHostMethod("listPlannerRuns")
+          ? window.electronAPI.listPlannerRuns(companyId, 6)
+          : Promise.resolve([]),
       ]);
       setPlannerConfig(config);
       setPlannerRuns(runs);
@@ -491,6 +496,10 @@ export function useMissionControlData(
   }, []);
 
   const loadCommandCenterSummary = useCallback(async (companyId: string) => {
+    if (!hasHostMethod("getCommandCenterSummary")) {
+      setCommandCenterSummary(null);
+      return;
+    }
     try {
       const summary = await window.electronAPI.getCommandCenterSummary(companyId);
       setCommandCenterSummary(summary);
@@ -570,26 +579,36 @@ export function useMissionControlData(
       const workspaceScope =
         workspaceId && workspaceId !== ALL_WORKSPACES_ID ? { workspaceId } : undefined;
       const [failures, clusters, evals, experiments, learnings] = await Promise.all([
-        window.electronAPI.listCoreFailureRecords({
-          ...workspaceScope,
-          limit: 20,
-        }),
-        window.electronAPI.listCoreFailureClusters({
-          ...workspaceScope,
-          limit: 20,
-        }),
-        window.electronAPI.listCoreEvalCases({
-          ...workspaceScope,
-          limit: 20,
-        }),
-        window.electronAPI.listCoreExperiments({
-          ...workspaceScope,
-          limit: 20,
-        }),
-        window.electronAPI.listCoreLearnings({
-          ...workspaceScope,
-          limit: 25,
-        }),
+        hasHostMethod("listCoreFailureRecords")
+          ? window.electronAPI.listCoreFailureRecords({
+              ...workspaceScope,
+              limit: 20,
+            })
+          : Promise.resolve([]),
+        hasHostMethod("listCoreFailureClusters")
+          ? window.electronAPI.listCoreFailureClusters({
+              ...workspaceScope,
+              limit: 20,
+            })
+          : Promise.resolve([]),
+        hasHostMethod("listCoreEvalCases")
+          ? window.electronAPI.listCoreEvalCases({
+              ...workspaceScope,
+              limit: 20,
+            })
+          : Promise.resolve([]),
+        hasHostMethod("listCoreExperiments")
+          ? window.electronAPI.listCoreExperiments({
+              ...workspaceScope,
+              limit: 20,
+            })
+          : Promise.resolve([]),
+        hasHostMethod("listCoreLearnings")
+          ? window.electronAPI.listCoreLearnings({
+              ...workspaceScope,
+              limit: 25,
+            })
+          : Promise.resolve([]),
       ]);
       setCoreFailureRecords(failures);
       setCoreFailureClusters(clusters);
@@ -630,7 +649,9 @@ export function useMissionControlData(
     async (workspaceId: string, workspaceList: Workspace[]) => {
       const [loadedAgents, statuses, loadedTasks] = await Promise.all([
         window.electronAPI.getAgentRoles(true),
-        window.electronAPI.getAllHeartbeatStatus(),
+        hasHostMethod("getAllHeartbeatStatus")
+          ? window.electronAPI.getAllHeartbeatStatus()
+          : Promise.resolve([]),
         window.electronAPI.listTasks().catch(() => []),
       ]);
       const normalizedAgents = loadedAgents.map(normalizeMissionControlAgent);
@@ -1151,7 +1172,9 @@ export function useMissionControlData(
         }
         setEditingAgent(null);
         setIsCreatingAgent(false);
-        const statuses = await window.electronAPI.getAllHeartbeatStatus();
+        const statuses = hasHostMethod("getAllHeartbeatStatus")
+          ? await window.electronAPI.getAllHeartbeatStatus()
+          : [];
         setHeartbeatStatuses(statuses);
       } catch (err: Any) {
         setAgentError(err.message || "Failed to save agent");
@@ -1361,7 +1384,7 @@ export function useMissionControlData(
         staleIssueDays: number;
       }>,
     ) => {
-      if (!selectedCompanyId) return;
+      if (!selectedCompanyId || !hasHostMethod("updatePlannerConfig")) return;
       try {
         setPlannerSaving(true);
         const next = await window.electronAPI.updatePlannerConfig({
@@ -1379,7 +1402,7 @@ export function useMissionControlData(
   );
 
   const handleRunPlanner = useCallback(async () => {
-    if (!selectedCompanyId) return;
+    if (!selectedCompanyId || !hasHostMethod("runPlanner")) return;
     try {
       setPlannerRunning(true);
       const run = await window.electronAPI.runPlanner(selectedCompanyId);

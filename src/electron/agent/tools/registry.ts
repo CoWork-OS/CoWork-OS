@@ -3333,22 +3333,25 @@ export class ToolRegistry {
         (settings.servers || []).map((server) => [server.id, server.name]),
       );
 
-      return mcpTools.map((tool: { name: string; description?: string; inputSchema: Any }) => {
-        const serverId =
-          typeof (mcpManager as Any).getServerIdForTool === "function"
-            ? (mcpManager as Any).getServerIdForTool(tool.name)
-            : null;
-        const serverName = serverId ? serverNamesById.get(serverId) : null;
-        const baseDescription = tool.description || `MCP tool: ${tool.name}`;
+      const definitions = mcpTools.map(
+        (tool: { name: string; description?: string; inputSchema: Any }) => {
+          const serverId =
+            typeof (mcpManager as Any).getServerIdForTool === "function"
+              ? (mcpManager as Any).getServerIdForTool(tool.name)
+              : null;
+          const serverName = serverId ? serverNamesById.get(serverId) : null;
+          const baseDescription = tool.description || `MCP tool: ${tool.name}`;
 
-        return {
-          name: `${prefix}${tool.name}`,
-          description: serverName
-            ? `${baseDescription} Provided by MCP server "${serverName}".`
-            : baseDescription,
-          input_schema: tool.inputSchema,
-        };
-      });
+          return {
+            name: `${prefix}${tool.name}`,
+            description: serverName
+              ? `${baseDescription} Provided by MCP server "${serverName}".`
+              : baseDescription,
+            input_schema: tool.inputSchema,
+          };
+        },
+      );
+      return definitions;
     } catch {
       // MCP not initialized yet, return empty array
       return [];

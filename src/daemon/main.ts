@@ -29,7 +29,7 @@ import {
   shouldTrustControlPlaneProxyFromEnv,
   shouldUseManagedDeploymentModeFromEnv,
 } from "../electron/utils/runtime-mode";
-import { getUserDataDir } from "../electron/utils/user-data-dir";
+import { getActiveProfileId, getUserDataDir } from "../electron/utils/user-data-dir";
 import { ChannelGateway } from "../electron/gateway";
 import { ControlPlaneServer } from "../electron/control-plane/server";
 import { ControlPlaneSettingsManager } from "../electron/control-plane/settings";
@@ -48,6 +48,7 @@ import {
   formatChatTranscriptForPrompt,
   prefetchTranscriptUsers,
 } from "../electron/gateway/chat-transcript";
+import { CuratedMemoryService } from "../electron/memory/CuratedMemoryService";
 import { MemoryService } from "../electron/memory/MemoryService";
 import { CrossSignalService } from "../electron/agents/CrossSignalService";
 import { FeedbackService } from "../electron/agents/FeedbackService";
@@ -63,10 +64,23 @@ import { runShutdownSteps, type ShutdownStep } from "../electron/utils/graceful-
 import { startHostPerfMonitor } from "../electron/utils/host-perf-monitor";
 import { startDatabaseWorker, stopDatabaseWorker } from "../electron/database/async/runtime";
 import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
+import { createWebHostIdentity } from "../host/web/host-identity";
+import { createBrowserHostApplication } from "../host/services/browser-host-application";
+import { isBrowserWebEnabled, webDeploymentFromEnv } from "../host/services/browser-web-config";
+import { NotificationService } from "../electron/notifications/service";
 
 interface StartedControlPlane {
   server: ControlPlaneServer;
   detachAgentBridge: (() => void) | null;
+}
+
+async function readNodeAppVersion(): Promise<string> {
+  const manifestPath = path.resolve(__dirname, "../../../package.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as { version?: unknown };
+  if (typeof manifest.version !== "string" || !manifest.version.trim()) {
+    throw new Error(`Invalid CoWork package version in ${manifestPath}`);
+  }
+  return manifest.version;
 }
 
 async function maybeBootstrapWorkspace(agentDaemon: AgentDaemon): Promise<void> {
@@ -238,6 +252,7 @@ async function main(): Promise<void> {
   const IMPORT_ENV_SETTINGS_MODE = getEnvSettingsImportModeFromArgsOrEnv();
 
   const userDataDir = getUserDataDir();
+  const appVersion = await readNodeAppVersion();
   await fs.mkdir(userDataDir, { recursive: true });
 
   console.log("[Daemon] Starting CoWork OS (Node-only)");
@@ -258,7 +273,7 @@ async function main(): Promise<void> {
   let pulseService: PulseService | null = null;
   try {
     pulseService = new PulseService(dbManager.getDatabase(), {
-      version: process.env.npm_package_version || "0.0.0",
+      version: appVersion,
       runtime: "daemon",
     });
     pulseService.start();
@@ -327,6 +342,7 @@ async function main(): Promise<void> {
   // immediately resume queued tasks, and their early timeline events capture to memory.
   try {
     MemoryService.initialize(dbManager);
+    CuratedMemoryService.initialize(dbManager);
     console.log("[Daemon] Memory Service initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Memory Service:", error);
@@ -672,6 +688,44 @@ async function main(): Promise<void> {
     }
   } else if (cp.skipped) {
     console.log("[Daemon] Control Plane disabled (skipping auto-start)");
+  }
+
+  if (isBrowserWebEnabled()) {
+    if (!startedControlPlane?.server?.isRunning) {
+      console.warn(
+        "[Daemon] Browser app requested, but no local Control Plane listener is running.",
+      );
+    } else {
+      try {
+        const notificationService = new NotificationService();
+        const identity = await createWebHostIdentity({
+          userDataDir,
+          profileId: getActiveProfileId(),
+          runtime: "node",
+          appVersion,
+        });
+        const browserApp = createBrowserHostApplication({
+          db: dbManager.getDatabase(),
+          webDirectory: path.resolve(__dirname, "../../web"),
+          deployment: webDeploymentFromEnv(),
+          identity,
+          taskCommands: agentDaemon,
+          agentDaemon,
+          channelGateway,
+          notificationService,
+        });
+        await startedControlPlane.server.setWebApplication(browserApp);
+        startedControlPlane.server.registerMethod("web.pair", async (client) => {
+          if (!client.hasScope("admin")) throw new Error("Admin scope is required.");
+          return browserApp.createPairingCode("control-plane");
+        });
+        console.log(
+          "[Daemon] Browser app enabled. Use an admin Control Plane client to call web.pair.",
+        );
+      } catch (error) {
+        console.error("[Daemon] Browser app failed to start:", error);
+      }
+    }
   }
 
   let shutdownPromise: Promise<void> | undefined;

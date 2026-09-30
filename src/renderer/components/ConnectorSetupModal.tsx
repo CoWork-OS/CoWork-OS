@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import {
   GOOGLE_SCOPE_CONTACTS_READONLY,
   GOOGLE_SCOPE_MEET_READONLY,
@@ -133,18 +134,18 @@ export function ConnectorSetupModal({
 
   const reconnectServer = async () => {
     try {
-      await window.electronAPI.disconnectMCPServer(serverId);
+      await invokeMcpApi("disconnectMCPServer", serverId);
     } catch {
       // ignore
     }
-    await window.electronAPI.connectMCPServer(serverId);
+    await invokeMcpApi("connectMCPServer", serverId);
   };
 
   const saveEnv = async (env: Record<string, string | undefined>) => {
     setSaving(true);
     try {
       const merged = sanitizeEnv(env);
-      await window.electronAPI.updateMCPServer(serverId, { env: merged });
+      await invokeMcpApi("updateMCPServer", serverId, { env: merged });
       await reconnectServer();
       onSaved();
       onClose();

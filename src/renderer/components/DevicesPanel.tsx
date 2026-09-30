@@ -58,6 +58,7 @@ import { isActiveSessionStatus, isAwaitingSessionStatus } from "./Sidebar";
 import { getPlatformVisualIcon } from "./DeviceIcons";
 import { RemoteFilePicker } from "./RemoteFilePicker";
 import { RemoteDeviceControlVisual } from "./RemoteDeviceControlVisual";
+import { hasHostMethod } from "../host/browser-capabilities";
 
 export interface DeviceTaskOptions {
   interactionMode?: InteractionModeSelection;
@@ -610,6 +611,9 @@ export function DevicesPanel({
     () => (selectedDeviceId ? deviceMap.get(selectedDeviceId) || null : null),
     [deviceMap, selectedDeviceId],
   );
+  const remoteDispatchUnavailable = Boolean(
+    activeDevice && activeDevice.role !== "local" && !hasHostMethod("deviceAssignTask"),
+  );
 
   const activeSummary = useMemo(
     () => (activeDevice ? summaries[activeDevice.id] || null : null),
@@ -737,6 +741,7 @@ export function DevicesPanel({
 
   const handleRunTask = useCallback(async () => {
     if (!activeDevice || !taskPrompt.trim() || submittingTask) return;
+    if (activeDevice.role !== "local" && !hasHostMethod("deviceAssignTask")) return;
     setSubmittingTask(true);
     const options = buildTaskOptions();
     const prompt = buildPromptWithAttachments(taskPrompt.trim());
@@ -1331,13 +1336,24 @@ export function DevicesPanel({
             type="button"
             className="dp-input-action-btn"
             onClick={() => void handleRunTask()}
-            disabled={!activeDevice || submittingTask || !taskPrompt.trim()}
+            disabled={
+              !activeDevice || submittingTask || !taskPrompt.trim() || remoteDispatchUnavailable
+            }
             aria-label="Send task"
-            title="Send task"
+            title={
+              remoteDispatchUnavailable
+                ? "Remote task dispatch is not available in this browser session."
+                : "Send task"
+            }
           >
             <Send size={20} />
           </button>
         </div>
+        {remoteDispatchUnavailable && (
+          <div role="status" className="dp-browser-capability-note">
+            Remote task dispatch is not available in this browser session.
+          </div>
+        )}
       </div>
 
       {showRemoteFilePicker && activeDevice?.taskNodeId && remoteFilePickerContext && (

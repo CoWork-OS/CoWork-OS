@@ -733,14 +733,19 @@ describe("bot transcript surface", () => {
 });
 
 describe("task header browser action", () => {
-  it("wires the task menu Open browser action to the sidebar Browser Workbench", () => {
+  it("explains the unavailable browser action and gates workbench entry points by capability", () => {
     const mainContentSource = readFileSync(mainContentPath, "utf8");
     const appSource = readFileSync(appPath, "utf8");
 
     expect(mainContentSource).toContain("<span>Open browser</span>");
+    expect(mainContentSource).toContain('getHostCapabilityReason("browser.interactive")');
+    expect(mainContentSource).toContain("main-header-task-menu-note");
     expect(mainContentSource).toContain("onOpenBrowserWorkbenchSidebar()");
     expect(appSource).toContain("openEmptyBrowserWorkbenchSidebar");
     expect(appSource).toContain('sessionId: "default"');
+    expect(appSource).toContain('hasHostCapability("browser.interactive")');
+    expect(appSource).toContain("if (!canUseInteractiveBrowser) return;");
+    expect(appSource).toContain("canUseInteractiveBrowser && task && workspace?.path");
     expect(appSource).toContain("onOpenBrowserWorkbenchSidebar=");
   });
 });

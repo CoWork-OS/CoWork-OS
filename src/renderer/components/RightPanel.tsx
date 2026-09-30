@@ -1,3 +1,4 @@
+import { hasHostMethod } from "../host/browser-capabilities";
 import {
   memo,
   useState,
@@ -1933,6 +1934,7 @@ function RightPanelComponent({
     let cancelled = false;
 
     async function loadContext() {
+      if (!hasHostMethod("getActiveContext")) return;
       try {
         const data = await window.electronAPI.getActiveContext();
         if (!cancelled) {
@@ -2337,11 +2339,7 @@ function RightPanelComponent({
   useEffect(() => {
     let cancelled = false;
     setTaskCostEstimate(null);
-    if (
-      !taskIdForCost ||
-      typeof window === "undefined" ||
-      !window.electronAPI?.getTaskCostEstimate
-    ) {
+    if (!taskIdForCost || typeof window === "undefined" || !hasHostMethod("getTaskCostEstimate")) {
       return;
     }
     void (async () => {

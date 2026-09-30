@@ -197,15 +197,15 @@ export class AwarenessService {
 
   saveConfig(config: AwarenessConfig): AwarenessConfig {
     this.ensureLoaded();
-    this.state.config = {
-      ...DEFAULT_AWARENESS_CONFIG,
-      ...config,
-      sources: {
-        ...DEFAULT_AWARENESS_CONFIG.sources,
-        ...config.sources,
+    const next = {
+      ...this.state,
+      config: {
+        ...this.state.config,
+        ...config,
+        sources: { ...this.state.config.sources, ...config.sources },
       },
     };
-    this.save();
+    this.commitReviewedState(next);
     return this.getConfig();
   }
 
@@ -222,7 +222,8 @@ export class AwarenessService {
     patch: Partial<Pick<AwarenessBelief, "confidence" | "promotionStatus" | "value">>,
   ): AwarenessBelief | null {
     this.ensureLoaded();
-    const belief = this.state.beliefs.find((entry) => entry.id === id);
+    const next = JSON.parse(JSON.stringify(this.state)) as PersistedAwarenessState;
+    const belief = next.beliefs.find((entry) => entry.id === id);
     if (!belief) return null;
     if (typeof patch.value === "string" && patch.value.trim())
       belief.value = truncate(patch.value, 220);
@@ -240,16 +241,19 @@ export class AwarenessService {
       }
     }
     belief.updatedAt = Date.now();
-    this.save();
+    this.commitReviewedState(next);
     return { ...belief, evidenceRefs: [...belief.evidenceRefs] };
   }
 
   deleteBelief(id: string): boolean {
     this.ensureLoaded();
     const before = this.state.beliefs.length;
-    this.state.beliefs = this.state.beliefs.filter((belief) => belief.id !== id);
-    const deleted = this.state.beliefs.length !== before;
-    if (deleted) this.save();
+    const next = {
+      ...this.state,
+      beliefs: this.state.beliefs.filter((belief) => belief.id !== id),
+    };
+    const deleted = next.beliefs.length !== before;
+    if (deleted) this.commitReviewedState(next);
     return deleted;
   }
 
@@ -508,6 +512,14 @@ export class AwarenessService {
     } catch {
       this.state = defaultPersistedState();
     }
+  }
+
+  private commitReviewedState(next: PersistedAwarenessState): void {
+    if (!SecureSettingsRepository.isInitialized())
+      throw new Error("Awareness storage is unavailable.");
+    if (!SecureSettingsRepository.getInstance().save(STORAGE_KEY, next))
+      throw new Error("Awareness storage refused the write.");
+    this.state = next;
   }
 
   private save(): void {

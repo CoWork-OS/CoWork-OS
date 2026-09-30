@@ -1,3 +1,4 @@
+import { hasHostCapability, hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import {
   useState,
   useRef,
@@ -144,6 +145,8 @@ interface SidebarProps {
   isBuildActive?: boolean;
   onOpenLibrary?: () => void;
   isLibraryActive?: boolean;
+  onOpenGitChanges?: () => void;
+  isGitChangesActive?: boolean;
   onOpenPlugins?: () => void;
 
   onTasksChanged: () => void;
@@ -919,6 +922,8 @@ function SidebarComponent({
   isBuildActive = false,
   onOpenLibrary,
   isLibraryActive = false,
+  onOpenGitChanges,
+  isGitChangesActive = false,
   onOpenPlugins,
   isLoadingMoreTasks = false,
 
@@ -931,6 +936,15 @@ function SidebarComponent({
   onBotUpdated,
   onBotDeleted,
 }: SidebarProps) {
+  const isBrowserHost = typeof window !== "undefined" && window.coworkBrowserHost === true;
+  const [browserNotice, setBrowserNotice] = useState<string | null>(null);
+  const [newWorkspaceName, setNewWorkspaceName] = useState<string | null>(null);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const browserAction = (methods: string[], action: (() => void) | undefined, label: string) =>
+    hasHostMethods(...methods) && action
+      ? action
+      : () =>
+          setBrowserNotice(`${label} requires a host service that is unavailable in this session.`);
   const isCalm = useIsCalmTheme();
   const calmAgentContext = useAgentContext();
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -1061,7 +1075,11 @@ function SidebarComponent({
 
   const handleAddWorkspace = useCallback(async () => {
     const api = window.electronAPI;
-    if (!api?.selectFolder || !api?.listWorkspaces || !api?.createWorkspace) return;
+    if (!api?.listWorkspaces || !api?.createWorkspace) return;
+    if (isBrowserHost) {
+      setNewWorkspaceName("");
+      return;
+    }
 
     try {
       const folderPath = await api.selectFolder();
@@ -2355,6 +2373,7 @@ function SidebarComponent({
               className="sidebar-workspace-menu-option"
               role="menuitem"
               data-menu-option="rename"
+              disabled={!hasHostMethod("renameTask")}
               onMouseDown={(e) => {
                 if (e.button === 0) {
                   e.preventDefault();
@@ -2377,6 +2396,7 @@ function SidebarComponent({
               className="sidebar-workspace-menu-option"
               role="menuitem"
               data-menu-option="pin"
+              disabled={!hasHostMethod("toggleTaskPin")}
               onMouseDown={(e) => {
                 if (e.button === 0) {
                   e.preventDefault();
@@ -2400,6 +2420,7 @@ function SidebarComponent({
               className="sidebar-workspace-menu-option sidebar-workspace-menu-option-danger"
               role="menuitem"
               data-menu-option="archive"
+              disabled={!hasHostMethod("archiveTask")}
               onMouseDown={(e) => {
                 if (e.button === 0) {
                   e.preventDefault();
@@ -2569,12 +2590,9 @@ function SidebarComponent({
                   <span className="cli-task-time" aria-hidden="true">
                     {formatRelativeShort(task.updatedAt || task.createdAt)}
                   </span>
-                  {sessionActions}
                 </span>
               )}
-              {isAwaitingSession && sessionActions && (
-                <span className="cli-task-action-wrap">{sessionActions}</span>
-              )}
+              {sessionActions && <span className="cli-task-action-wrap">{sessionActions}</span>}
             </div>
           )}
         </div>
@@ -2630,6 +2648,7 @@ function SidebarComponent({
           className="sidebar-workspace-menu-option"
           role="menuitem"
           data-menu-option="pin"
+          disabled={!hasHostMethod("toggleTaskPin")}
           onClick={() => handleToggleWorkspacePin(workspaceId)}
         >
           {isPinned ? <PinOff size={16} /> : <Pin size={16} />}
@@ -2663,6 +2682,8 @@ function SidebarComponent({
           className="sidebar-workspace-menu-option"
           role="menuitem"
           data-menu-option="reveal"
+          disabled={isBrowserHost}
+          title={isBrowserHost ? "Open host folders from the desktop app" : undefined}
           onClick={() => void handleRevealWorkspace(candidate)}
         >
           <FolderOpen size={16} />
@@ -2685,6 +2706,7 @@ function SidebarComponent({
           className="sidebar-workspace-menu-option"
           role="menuitem"
           data-menu-option="archive"
+          disabled={!hasHostMethod("archiveTask")}
           onClick={() => void handleArchiveWorkspace(workspaceId)}
         >
           <Archive size={16} />
@@ -2746,6 +2768,7 @@ function SidebarComponent({
                     className="sidebar-workspace-menu-option"
                     role="menuitem"
                     data-menu-option="add-folder"
+                    disabled={!hasHostMethod("createWorkspace")}
                     onClick={() => {
                       setWorkspaceSectionMenuOpen(false);
                       void handleAddWorkspace();
@@ -2913,6 +2936,92 @@ function SidebarComponent({
 
   return (
     <div className={`sidebar cli-sidebar${isCalm ? " calm-sidebar" : ""}`}>
+      {browserNotice && (
+        <div className="sidebar-browser-host-notice" role="status">
+          <span>{browserNotice}</span>
+          <button type="button" aria-label="Dismiss notice" onClick={() => setBrowserNotice(null)}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
+      {newWorkspaceName !== null && (
+        <div
+          className="modal-overlay"
+          onClick={() => !creatingWorkspace && setNewWorkspaceName(null)}
+        >
+          <form
+            className="modal-content"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Create project"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!newWorkspaceName.trim() || creatingWorkspace) return;
+              setCreatingWorkspace(true);
+              try {
+                const added = await window.electronAPI.createWorkspace({
+                  name: newWorkspaceName.trim(),
+                  path: "",
+                  permissions: {
+                    read: true,
+                    write: true,
+                    delete: true,
+                    network: true,
+                    shell: false,
+                  },
+                });
+                setSidebarWorkspaces((current) => [
+                  added,
+                  ...current.filter((item) => item.id !== added.id),
+                ]);
+                updateWorkspaceNavSettings((current) => ({
+                  ...current,
+                  visibleWorkspaceIds: [...new Set([...current.visibleWorkspaceIds, added.id])],
+                  expandedWorkspaceIds: [...new Set([...current.expandedWorkspaceIds, added.id])],
+                }));
+                window.dispatchEvent(
+                  new CustomEvent("cowork-browser-workspace-selected", { detail: added }),
+                );
+                setWorkspaceActionError(null);
+                setNewWorkspaceName(null);
+              } catch (error) {
+                setWorkspaceActionError(
+                  error instanceof Error ? error.message : "Could not create project",
+                );
+              } finally {
+                setCreatingWorkspace(false);
+              }
+            }}
+          >
+            <h2>Create project</h2>
+            <p>Your host will create a folder for this project.</p>
+            <label>
+              Project name
+              <input
+                autoFocus
+                required
+                maxLength={100}
+                value={newWorkspaceName}
+                onChange={(event) => setNewWorkspaceName(event.target.value)}
+              />
+            </label>
+            {workspaceActionError && <p role="alert">{workspaceActionError}</p>}
+            <div className="modal-actions">
+              <button
+                type="button"
+                disabled={creatingWorkspace}
+                onClick={() => setNewWorkspaceName(null)}
+              >
+                Cancel
+              </button>
+              <button type="submit" disabled={creatingWorkspace || !newWorkspaceName.trim()}>
+                {creatingWorkspace ? "Creating…" : "Create project"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       {isCalm && (
         <CalmSidebarNav
           segment={calmSegment}
@@ -2927,17 +3036,31 @@ function SidebarComponent({
             });
           }}
           isSearchActive={showSessionSearch}
-          onOpenLibrary={onOpenLibrary}
+          onOpenLibrary={browserAction(
+            ["listBrowserWorkspaceFiles", "listBrowserTaskArtifacts"],
+            onOpenLibrary,
+            "Library",
+          )}
           isLibraryActive={isLibraryActive}
-          onOpenPlugins={onOpenPlugins}
-          onOpenAutomations={onOpenAutomations}
+          onOpenGitChanges={isBrowserHost ? onOpenGitChanges : undefined}
+          isGitChangesActive={isGitChangesActive}
+          onOpenPlugins={browserAction(["listPluginPacks"], onOpenPlugins, "Tools")}
+          onOpenAutomations={browserAction(["listRoutines"], onOpenAutomations, "Automations")}
           isAutomationsActive={isAutomationsActive}
           more={{
             inboxLabel: "Inbox",
             inboxUnread: inboxUnreadCount,
-            onOpenInbox: onOpenInboxAgent,
+            onOpenInbox: browserAction(
+              ["getMailboxSyncStatus", "listMailboxThreads"],
+              onOpenInboxAgent,
+              "Inbox",
+            ),
             isInboxActive: isInboxAgentActive,
-            onOpenEveryday: onOpenEverydayAgent,
+            onOpenEveryday: browserAction(
+              ["everydayAgentGetProfile"],
+              onOpenEverydayAgent,
+              "Everyday Agent",
+            ),
             isEverydayActive: isEverydayAgentActive,
             onOpenDevices,
             isDevicesActive,
@@ -2971,10 +3094,38 @@ function SidebarComponent({
             </span>
           </button>
 
+          {isBrowserHost && hasHostCapability("git.read") && (
+            <button
+              type="button"
+              className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isGitChangesActive ? "active" : ""}`}
+              onClick={onOpenGitChanges}
+              aria-pressed={isGitChangesActive}
+              title="Git Changes"
+            >
+              <span className="cli-btn-text">
+                <span className="terminal-only">git_changes</span>
+                <span className="modern-only cli-new-task-modern-label">
+                  <span
+                    className="sidebar-home-btn-icon"
+                    aria-hidden="true"
+                    style={{ display: "flex" }}
+                  >
+                    <GitBranch size={16} strokeWidth={2} style={{ display: "block" }} />
+                  </span>
+                  <span>Git Changes</span>
+                </span>
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isAgentsActive ? "active" : ""}`}
-            onClick={onOpenAgents}
+            onClick={browserAction(
+              ["listManagedAgents", "listManagedSessions"],
+              onOpenAgents,
+              "Agents",
+            )}
             aria-pressed={isAgentsActive}
             title="Agents"
           >
@@ -2995,7 +3146,11 @@ function SidebarComponent({
 
           <button
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-devices-btn cli-devices-btn sidebar-nav-item ${isDevicesActive ? "active" : ""}`}
-            onClick={onOpenDevices}
+            onClick={browserAction(
+              ["listManagedDevices", "getDeviceSummary"],
+              onOpenDevices,
+              "Devices",
+            )}
             title="Devices"
           >
             <span className="terminal-only">
@@ -3021,7 +3176,11 @@ function SidebarComponent({
           <button
             type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isInboxAgentActive ? "active" : ""}`}
-            onClick={onOpenInboxAgent}
+            onClick={browserAction(
+              ["getMailboxSyncStatus", "listMailboxThreads"],
+              onOpenInboxAgent,
+              "Inbox",
+            )}
             aria-pressed={isInboxAgentActive}
             title={inboxNavLabel}
             aria-label={inboxNavLabel}
@@ -3044,7 +3203,7 @@ function SidebarComponent({
           <button
             type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isAutomationsActive ? "active" : ""}`}
-            onClick={onOpenAutomations}
+            onClick={browserAction(["listRoutines"], onOpenAutomations, "Automations")}
             aria-pressed={isAutomationsActive}
             title="Automations"
           >
@@ -3066,7 +3225,11 @@ function SidebarComponent({
           <button
             type="button"
             className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isEverydayAgentActive ? "active" : ""}`}
-            onClick={onOpenEverydayAgent}
+            onClick={browserAction(
+              ["everydayAgentGetProfile"],
+              onOpenEverydayAgent,
+              "Everyday Agent",
+            )}
             aria-pressed={isEverydayAgentActive}
             title="Everyday Agent"
           >
@@ -3112,7 +3275,11 @@ function SidebarComponent({
               <button
                 type="button"
                 className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isMissionControlActive ? "active" : ""}`}
-                onClick={onOpenMissionControl}
+                onClick={browserAction(
+                  ["getAgentRoles", "listMissionControlItems"],
+                  onOpenMissionControl,
+                  "Mission Control",
+                )}
                 aria-pressed={isMissionControlActive}
                 title="Mission Control"
               >
@@ -3317,7 +3484,11 @@ function SidebarComponent({
               onSelectTask={onSelectTask}
               onOpenBot={onOpenBot}
               onReopenBot={onReopenBot}
-              onOpenAgents={onOpenAgents}
+              onOpenAgents={browserAction(
+                ["listManagedAgents", "listManagedSessions"],
+                onOpenAgents,
+                "Agents",
+              )}
               onBotCreated={handleBotCreated}
               onBotUpdated={async (bot) => {
                 setAgentRoles((current) => {
@@ -3592,16 +3763,30 @@ function SidebarComponent({
       {isCalm && (
         <CalmSidebarProfile
           agentName={calmAgentContext.agentName}
-          onOpenSettings={onOpenSettings}
+          onOpenSettings={browserAction(
+            ["getLLMSettings", "getLLMConfigStatus"],
+            onOpenSettings,
+            "Settings",
+          )}
         />
       )}
       {/* Footer */}
       <div className="sidebar-footer cli-sidebar-footer" hidden={isCalm && !updateInfo?.available}>
-        <InfraWalletBadge onOpenSettings={onOpenSettings} />
+        <InfraWalletBadge
+          onOpenSettings={browserAction(
+            ["getLLMSettings", "getLLMConfigStatus"],
+            onOpenSettings,
+            "Settings",
+          )}
+        />
         <div className="cli-footer-actions">
           <button
             className="settings-btn cli-settings-btn"
-            onClick={onOpenSettings}
+            onClick={browserAction(
+              ["getLLMSettings", "getLLMConfigStatus"],
+              onOpenSettings,
+              "Settings",
+            )}
             title="Settings"
           >
             <span className="terminal-only">[cfg]</span>

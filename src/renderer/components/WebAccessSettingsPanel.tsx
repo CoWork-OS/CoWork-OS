@@ -11,6 +11,7 @@ interface WebAccessConfig {
 
 interface WebAccessStatus {
   running: boolean;
+  browserApplication: boolean;
   url?: string;
   port?: number;
   connectedClients: number;
@@ -27,6 +28,14 @@ export const WebAccessSettingsPanel: React.FC = () => {
   });
   const [status, setStatus] = useState<WebAccessStatus | null>(null);
   const [copied, setCopied] = useState(false);
+  const [pairing, setPairing] = useState<{ code: string; expiresAt: number } | null>(null);
+  const [pairingError, setPairingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pairing) return;
+    const timeout = setTimeout(() => setPairing(null), Math.max(0, pairing.expiresAt - Date.now()));
+    return () => clearTimeout(timeout);
+  }, [pairing]);
 
   useEffect(() => {
     loadSettings();
@@ -74,6 +83,20 @@ export const WebAccessSettingsPanel: React.FC = () => {
 
   const accessUrl = status?.url || `http://${config.host}:${config.port}`;
 
+  const createPairingCode = async () => {
+    setPairingError(null);
+    setPairing(null);
+    try {
+      const result = await (window as Any).electronAPI.createWebAccessPairingCode();
+      if (typeof result?.code !== "string" || !Number.isFinite(result.expiresAt)) {
+        throw new Error("The host did not return a pairing code.");
+      }
+      setPairing(result);
+    } catch (error) {
+      setPairingError(error instanceof Error ? error.message : "Could not create a pairing code.");
+    }
+  };
+
   return (
     <div className="settings-section">
       <h2 className="settings-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -81,8 +104,8 @@ export const WebAccessSettingsPanel: React.FC = () => {
         Web Access
       </h2>
       <p className="settings-description">
-        Access CoWork OS from any browser on your network. When enabled, the UI is served over HTTP
-        with token authentication.
+        Manage the local Web Access listener. Browser pairing requires the browser application to be
+        enabled on this host with <code>COWORK_WEB_ENABLED=1</code> at startup.
       </p>
 
       <div className="settings-group">
@@ -178,6 +201,28 @@ export const WebAccessSettingsPanel: React.FC = () => {
                   )}
                 </div>
               </div>
+            )}
+
+            {status?.browserApplication && (
+              <div className="settings-field">
+                <label>Browser application</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                  <code>{new URL("/app/", accessUrl).toString()}</code>
+                  <button type="button" onClick={() => void createPairingCode()}>
+                    Generate pairing code
+                  </button>
+                </div>
+                {pairing && (
+                  <p role="status">
+                    Pairing code: <code>{pairing.code}</code> · Expires at{" "}
+                    {new Date(pairing.expiresAt).toLocaleTimeString()}
+                  </p>
+                )}
+                {pairingError && <p role="alert">{pairingError}</p>}
+              </div>
+            )}
+            {status?.running && !status.browserApplication && (
+              <p role="status">The browser application is not active on this listener.</p>
             )}
           </>
         )}

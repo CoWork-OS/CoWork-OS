@@ -140,6 +140,34 @@ describe("SecureSettingsRepository", () => {
     (SecureSettingsRepositoryClass as Any).instance = null;
   });
 
+  describe("sealed host records", () => {
+    it("roundtrips profile encryption without accepting plaintext or corrupted ciphertext", () => {
+      mockIsEncryptionAvailable.mockReturnValue(false);
+      repository = new SecureSettingsRepositoryClass(mockDb);
+      const value = { channelConfig: JSON.stringify({ token: "disposable-secret" }) };
+      const record = repository.encryptRecord(value);
+      expect(record.encryptedData).toMatch(/^app2:/);
+      expect(record.encryptedData).not.toContain("disposable-secret");
+      expect(repository.decryptRecord(record)).toEqual(value);
+      expect(() =>
+        repository.decryptRecord({ ...record, encryptedData: record.encryptedData + "x" }),
+      ).toThrow();
+      expect(() =>
+        repository.decryptRecord({ encryptedData: JSON.stringify(value), checksum: "invalid" }),
+      ).toThrow();
+    });
+
+    it("preserves the OS storage boundary", () => {
+      repository = new SecureSettingsRepositoryClass(mockDb);
+      const record = repository.encryptRecord({ channelConfig: "{}" });
+      expect(record.encryptedData).toMatch(/^os:/);
+      expect(repository.decryptRecord(record)).toEqual({ channelConfig: "{}" });
+      mockIsEncryptionAvailable.mockReturnValue(false);
+      const unavailable = new SecureSettingsRepositoryClass(mockDb);
+      expect(() => unavailable.decryptRecord(record)).toThrow("OS encryption");
+    });
+  });
+
   describe("constructor and singleton", () => {
     it("should create instance and set as singleton", () => {
       repository = new SecureSettingsRepositoryClass(mockDb);

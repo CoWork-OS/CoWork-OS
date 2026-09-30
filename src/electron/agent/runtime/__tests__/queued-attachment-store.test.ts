@@ -93,6 +93,32 @@ describe("QueuedAttachmentStore", () => {
     ).toThrow(/declared size does not match/i);
   });
 
+  it("persists verified host-captured bytes without reopening a caller path", () => {
+    const store = createStore();
+    const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1]);
+    const original = Buffer.from(bytes);
+    const persistence = store.persistBytes("task-1", "__task_initial_media__", [
+      { bytes, mimeType: "image/png", filename: "chart.png", sizeBytes: bytes.length },
+    ]);
+
+    bytes.fill(0);
+    expect(readFileSync(persistence.images[0].filePath!)).toEqual(original);
+    expect(store.hydrate("task-1", "__task_initial_media__", persistence.refs)).toEqual([
+      expect.objectContaining({
+        mimeType: "image/png",
+        filename: "chart.png",
+        sizeBytes: original.length,
+        tempFile: false,
+      }),
+    ]);
+    expect(JSON.stringify(persistence.refs)).not.toContain(original.toString("base64"));
+    expect(() =>
+      store.persistBytes("task-1", "bad-size", [
+        { bytes: original, mimeType: "image/png", sizeBytes: original.length + 1 },
+      ]),
+    ).toThrow(/declared size does not match/i);
+  });
+
   it("rejects cross-task references, missing bytes, corrupt bytes, and symlink substitution", () => {
     const store = createStore();
     const persistence = store.persist("task-1", "message-1", [

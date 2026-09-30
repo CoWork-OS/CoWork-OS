@@ -23,6 +23,7 @@ function usage() {
       '  node bin/coworkctl.js --token $TOKEN call task.events \'{"taskId":"<id>","limit":200}\'',
       '  node bin/coworkctl.js --token $TOKEN call approval.respond \'{"approvalId":"...","approved":true}\'',
       "  node bin/coworkctl.js --token $TOKEN call config.get",
+      "  node bin/coworkctl.js --token $TOKEN call web.pair",
       "  node bin/coworkctl.js --token $TOKEN call channel.list",
       '  node bin/coworkctl.js --token $TOKEN call channel.create \'{"type":"telegram","name":"telegram","config":{"botToken":"..."},"securityConfig":{"mode":"pairing"}}\'',
       '  node bin/coworkctl.js --token $TOKEN call channel.test \'{"channelId":"..."}\'',

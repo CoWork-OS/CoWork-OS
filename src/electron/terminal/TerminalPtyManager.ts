@@ -7,6 +7,10 @@ import type { ShellSessionInfo } from "../../shared/types";
 type TerminalPtyOutputListener = (event: {
   stream: "stdout";
   output: string;
+  /** Absolute position in the PTY output stream, measured in UTF-16 code units. */
+  offset: number;
+  /** First offset after this output chunk, measured in UTF-16 code units. */
+  nextOffset: number;
   cwd: string;
   status: ShellSessionInfo["status"];
 }) => void;
@@ -16,6 +20,8 @@ type TerminalPtyRuntime = {
   process: pty.IPty | null;
   listeners: Map<string, TerminalPtyOutputListener>;
   buffer: string;
+  /** Absolute number of UTF-16 code units emitted for the lifetime of this tab. */
+  outputOffset: number;
   cols: number;
   rows: number;
   closeRequested: boolean;
@@ -149,7 +155,24 @@ function resolveOsc7Cwd(rawValue: string): string | null {
 function appendBuffer(buffer: string, output: string): string {
   const next = `${buffer}${output}`;
   if (next.length <= MAX_REPLAY_BUFFER_LENGTH) return next;
-  return next.slice(next.length - MAX_REPLAY_BUFFER_LENGTH);
+  let start = next.length - MAX_REPLAY_BUFFER_LENGTH;
+  if (
+    start > 0 &&
+    start < next.length &&
+    isHighSurrogate(next.charCodeAt(start - 1)) &&
+    isLowSurrogate(next.charCodeAt(start))
+  ) {
+    start += 1;
+  }
+  return next.slice(start);
+}
+
+function isHighSurrogate(value: number): boolean {
+  return value >= 0xd800 && value <= 0xdbff;
+}
+
+function isLowSurrogate(value: number): boolean {
+  return value >= 0xdc00 && value <= 0xdfff;
 }
 
 export class TerminalPtyManager {
@@ -207,6 +230,7 @@ export class TerminalPtyManager {
       process: null,
       listeners: new Map(),
       buffer: "",
+      outputOffset: 0,
       cols: params.cols || DEFAULT_COLS,
       rows: params.rows || DEFAULT_ROWS,
       closeRequested: false,
@@ -253,16 +277,29 @@ export class TerminalPtyManager {
     runtime.listeners.set(listenerKey, listener);
     if (!runtime.process) this.spawn(runtime);
     if (!listenerAlreadyAttached && runtime.buffer) {
-      queueMicrotask(() =>
+      const output = runtime.buffer;
+      const offset = runtime.outputOffset - runtime.buffer.length;
+      const nextOffset = runtime.outputOffset;
+      const cwd = runtime.info.cwd;
+      const status = runtime.info.status;
+      queueMicrotask(() => {
+        if (runtime.listeners.get(listenerKey) !== listener) return;
         listener({
           stream: "stdout",
-          output: runtime.buffer,
-          cwd: runtime.info.cwd,
-          status: runtime.info.status,
-        }),
-      );
+          output,
+          offset,
+          nextOffset,
+          cwd,
+          status,
+        });
+      });
     }
     return { ...runtime.info };
+  }
+
+  /** Remove one keyed output subscriber without stopping or changing the PTY. */
+  detachTerminalTabOutput(tabId: string, listenerKey: string): boolean {
+    return this.tabs.get(tabId)?.listeners.delete(listenerKey) ?? false;
   }
 
   writeToTab(tabId: string, input: string): ShellSessionInfo {
@@ -345,12 +382,16 @@ export class TerminalPtyManager {
     });
     this.updateInfo(runtime, { status: "active" });
     runtime.process.onData((output) => {
+      const offset = runtime.outputOffset;
+      runtime.outputOffset += output.length;
       runtime.buffer = appendBuffer(runtime.buffer, output);
       this.consumeCwd(runtime, output);
       for (const listener of runtime.listeners.values()) {
         listener({
           stream: "stdout",
           output,
+          offset,
+          nextOffset: runtime.outputOffset,
           cwd: runtime.info.cwd,
           status: runtime.info.status,
         });

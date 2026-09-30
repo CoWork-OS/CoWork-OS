@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { FileViewer } from "./FileViewer";
+import { useEffect, useMemo, useState, useRef } from "react";
 import "./memory-hub-settings.css";
 import type {
   AutonomyConfig,
@@ -25,6 +26,7 @@ import type {
 import { MemorySettings } from "./MemorySettings";
 import { ChronicleSettingsCard } from "./ChronicleSettings";
 import { createRendererLogger } from "../utils/logger";
+import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 
 const DEFAULT_FEATURES: MemoryFeaturesSettings = {
   contextPackInjectionEnabled: true,
@@ -81,8 +83,16 @@ export function MemoryHubSettings(props?: {
   const [features, setFeatures] = useState<MemoryFeaturesSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const activeWorkspace = useRef(selectedWorkspaceId);
+  activeWorkspace.current = selectedWorkspaceId;
+  const observationSearchGeneration = useRef(0);
+  const observationDetailGeneration = useRef(0);
+  const [kitPreviewPath, setKitPreviewPath] = useState<string | null>(null);
   const [kitStatus, setKitStatus] = useState<WorkspaceKitStatus | null>(null);
   const [kitLoading, setKitLoading] = useState(false);
   const [kitBusy, setKitBusy] = useState(false);
@@ -109,6 +119,7 @@ export function MemoryHubSettings(props?: {
     useState<MemoryObservationBackfillStatus | null>(null);
   const [pendingMemoryWrites, setPendingMemoryWrites] = useState<MemoryWriteApprovalItem[]>([]);
   const [memoryApprovalBusyId, setMemoryApprovalBusyId] = useState<string>("");
+  const [memoryApprovalsError, setMemoryApprovalsError] = useState<string | null>(null);
   const [memoryApprovalsLoading, setMemoryApprovalsLoading] = useState(false);
   const [awarenessConfig, setAwarenessConfig] = useState<AwarenessConfig | null>(null);
   const [awarenessBeliefs, setAwarenessBeliefs] = useState<AwarenessBelief[]>([]);
@@ -157,6 +168,26 @@ export function MemoryHubSettings(props?: {
   }, []);
 
   useEffect(() => {
+    observationSearchGeneration.current += 1;
+    observationDetailGeneration.current += 1;
+    setSelectedObservationId("");
+    setSelectedObservation(null);
+    setObservationResults([]);
+    setObservationTimeline([]);
+    setActionError(null);
+    setActionNotice(null);
+    setObservationBusy(false);
+    setLayerPreview(null);
+    setKitPreviewPath(null);
+    setKitStatus(null);
+    setAwarenessBeliefs([]);
+    setAwarenessSummary(null);
+    setKitBusy(false);
+    setKitLoading(false);
+    setPendingMemoryWrites([]);
+    setMemoryApprovalsError(null);
+    setMemoryApprovalBusyId("");
+    setMemoryApprovalsLoading(false);
     if (!selectedWorkspaceId) {
       setKitStatus(null);
       setLayerPreview(null);
@@ -184,6 +215,7 @@ export function MemoryHubSettings(props?: {
   const loadAll = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
 
       const [
         loadedFeatures,
@@ -193,14 +225,12 @@ export function MemoryHubSettings(props?: {
         loadedAutonomyConfig,
         loadedSupermemoryStatus,
       ] = await Promise.all([
-        window.electronAPI.getMemoryFeaturesSettings().catch(() => DEFAULT_FEATURES),
-        window.electronAPI.listWorkspaces().catch(() => [] as Workspace[]),
-        window.electronAPI.getTempWorkspace().catch(() => null as Workspace | null),
-        window.electronAPI.getAwarenessConfig().catch(() => null as AwarenessConfig | null),
-        window.electronAPI.getAutonomyConfig().catch(() => null as AutonomyConfig | null),
-        window.electronAPI
-          .getSupermemoryStatus()
-          .catch(() => null as SupermemoryConfigStatus | null),
+        window.electronAPI.getMemoryFeaturesSettings(),
+        window.electronAPI.listWorkspaces(),
+        hasHostMethod("getTempWorkspace") ? window.electronAPI.getTempWorkspace() : null,
+        hasHostMethod("getAwarenessConfig") ? window.electronAPI.getAwarenessConfig() : null,
+        hasHostMethod("getAutonomyConfig") ? window.electronAPI.getAutonomyConfig() : null,
+        hasHostMethod("getSupermemoryStatus") ? window.electronAPI.getSupermemoryStatus() : null,
       ]);
 
       const combined: Workspace[] = [
@@ -234,33 +264,51 @@ export function MemoryHubSettings(props?: {
         if (prev && combined.some((w) => w.id === prev)) return prev;
         return combined[0]?.id || "";
       });
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Failed to load memory settings.");
     } finally {
       setLoading(false);
     }
   };
 
   const refreshKit = async () => {
-    if (!selectedWorkspaceId) return;
+    if (
+      activeWorkspace.current !== selectedWorkspaceId ||
+      !selectedWorkspaceId ||
+      !hasHostMethod("getWorkspaceKitStatus")
+    )
+      return;
     try {
       setKitLoading(true);
       const status = await window.electronAPI.getWorkspaceKitStatus(selectedWorkspaceId);
+      if (activeWorkspace.current !== selectedWorkspaceId) return;
       setKitStatus(status);
     } catch (error) {
-      logger.error("Failed to load workspace kit status:", error);
-      setKitStatus(null);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to load workspace kit status.",
+        );
     } finally {
-      setKitLoading(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setKitLoading(false);
     }
   };
 
   const refreshLayerPreview = async () => {
-    if (!selectedWorkspaceId) return;
+    if (
+      activeWorkspace.current !== selectedWorkspaceId ||
+      !selectedWorkspaceId ||
+      !hasHostMethod("getMemoryLayerPreview")
+    )
+      return;
     try {
       const preview = await window.electronAPI.getMemoryLayerPreview(selectedWorkspaceId);
+      if (activeWorkspace.current !== selectedWorkspaceId) return;
       setLayerPreview(preview);
     } catch (error) {
-      logger.error("Failed to load memory layer preview:", error);
-      setLayerPreview(null);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to load memory layer preview.",
+        );
     }
   };
 
@@ -274,19 +322,28 @@ export function MemoryHubSettings(props?: {
   };
 
   const refreshMemoryApprovals = async () => {
-    if (!selectedWorkspaceId) return;
+    if (
+      !selectedWorkspaceId ||
+      activeWorkspace.current !== selectedWorkspaceId ||
+      !hasHostMethod("listMemoryWriteApprovals")
+    )
+      return;
     try {
       setMemoryApprovalsLoading(true);
+      setMemoryApprovalsError(null);
       const items = await window.electronAPI.listMemoryWriteApprovals({
         workspaceId: selectedWorkspaceId,
         limit: 50,
       });
+      if (activeWorkspace.current !== selectedWorkspaceId) return;
       setPendingMemoryWrites(items);
     } catch (error) {
-      logger.error("Failed to load pending memory writes:", error);
-      setPendingMemoryWrites([]);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setMemoryApprovalsError(
+          error instanceof Error ? error.message : "Failed to load pending memory writes.",
+        );
     } finally {
-      setMemoryApprovalsLoading(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setMemoryApprovalsLoading(false);
     }
   };
 
@@ -299,13 +356,15 @@ export function MemoryHubSettings(props?: {
         workspaceId: selectedWorkspaceId,
       });
       if (result.status === "failed") {
-        window.alert(result.resolution || "Approved memory write failed to apply.");
+        if (activeWorkspace.current === selectedWorkspaceId)
+          setActionError(result.resolution || "Approved memory write failed to apply.");
       }
       await Promise.all([refreshMemoryApprovals(), refreshLayerPreview(), refreshKit()]);
     } catch (error) {
-      logger.error("Failed to approve memory write:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(error instanceof Error ? error.message : "Failed to approve memory write.");
     } finally {
-      setMemoryApprovalBusyId("");
+      if (activeWorkspace.current === selectedWorkspaceId) setMemoryApprovalBusyId("");
     }
   };
 
@@ -325,14 +384,19 @@ export function MemoryHubSettings(props?: {
       });
       await refreshMemoryApprovals();
     } catch (error) {
-      logger.error("Failed to reject memory write:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(error instanceof Error ? error.message : "Failed to reject memory write.");
     } finally {
-      setMemoryApprovalBusyId("");
+      if (activeWorkspace.current === selectedWorkspaceId) setMemoryApprovalBusyId("");
     }
   };
 
   const searchObservations = async () => {
-    if (!selectedWorkspaceId) return;
+    if (!selectedWorkspaceId || activeWorkspace.current !== selectedWorkspaceId) return;
+    const generation = ++observationSearchGeneration.current;
+    const current = () =>
+      activeWorkspace.current === selectedWorkspaceId &&
+      generation === observationSearchGeneration.current;
     try {
       setObservationLoading(true);
       const results = await window.electronAPI.searchMemoryObservations({
@@ -341,8 +405,11 @@ export function MemoryHubSettings(props?: {
         limit: 30,
         privacyStates: observationPrivacy === "all" ? undefined : [observationPrivacy],
       });
+      if (!current()) return;
       setObservationResults(results);
-      const nextId = selectedObservationId || results[0]?.memoryId || "";
+      const nextId = results.some((result) => result.memoryId === selectedObservationId)
+        ? selectedObservationId
+        : results[0]?.memoryId || "";
       if (nextId) {
         await loadObservation(nextId);
       } else {
@@ -350,15 +417,22 @@ export function MemoryHubSettings(props?: {
         setObservationTimeline([]);
       }
     } catch (error) {
-      logger.error("Failed to search memory observations:", error);
-      setObservationResults([]);
+      if (current())
+        setActionError(
+          error instanceof Error ? error.message : "Failed to search memory observations.",
+        );
     } finally {
-      setObservationLoading(false);
+      if (current()) setObservationLoading(false);
     }
   };
 
   const loadObservation = async (memoryId: string) => {
-    if (!selectedWorkspaceId || !memoryId) return;
+    if (!selectedWorkspaceId || !memoryId || activeWorkspace.current !== selectedWorkspaceId)
+      return;
+    const generation = ++observationDetailGeneration.current;
+    const current = () =>
+      activeWorkspace.current === selectedWorkspaceId &&
+      generation === observationDetailGeneration.current;
     try {
       setSelectedObservationId(memoryId);
       const [details, timeline] = await Promise.all([
@@ -372,12 +446,16 @@ export function MemoryHubSettings(props?: {
           windowSize: 4,
         }),
       ]);
+      if (!current()) return;
       setSelectedObservation(details[0] || null);
       setObservationEditTitle(details[0]?.title || "");
       setObservationEditNarrative(details[0]?.narrative || "");
       setObservationTimeline(timeline);
     } catch (error) {
-      logger.error("Failed to load memory observation:", error);
+      if (current())
+        setActionError(
+          error instanceof Error ? error.message : "Failed to load memory observation.",
+        );
     }
   };
 
@@ -393,9 +471,12 @@ export function MemoryHubSettings(props?: {
       await loadObservation(selectedObservation.memoryId);
       await searchObservations();
     } catch (error) {
-      logger.error("Failed to update memory observation:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to update memory observation:",
+        );
     } finally {
-      setObservationBusy(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setObservationBusy(false);
     }
   };
 
@@ -414,9 +495,12 @@ export function MemoryHubSettings(props?: {
       await loadObservation(selectedObservation.memoryId);
       await searchObservations();
     } catch (error) {
-      logger.error("Failed to save memory observation metadata:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to save memory observation metadata:",
+        );
     } finally {
-      setObservationBusy(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setObservationBusy(false);
     }
   };
 
@@ -431,9 +515,12 @@ export function MemoryHubSettings(props?: {
       await loadObservation(selectedObservation.memoryId);
       await searchObservations();
     } catch (error) {
-      logger.error("Failed to redact memory observation:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to redact memory observation:",
+        );
     } finally {
-      setObservationBusy(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setObservationBusy(false);
     }
   };
 
@@ -449,14 +536,18 @@ export function MemoryHubSettings(props?: {
         workspaceId: selectedWorkspaceId,
         memoryId: selectedObservation.memoryId,
       });
+      if (activeWorkspace.current !== selectedWorkspaceId) return;
       setSelectedObservationId("");
       setSelectedObservation(null);
       setObservationTimeline([]);
       await searchObservations();
     } catch (error) {
-      logger.error("Failed to delete memory observation:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to delete memory observation:",
+        );
     } finally {
-      setObservationBusy(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setObservationBusy(false);
     }
   };
 
@@ -464,17 +555,30 @@ export function MemoryHubSettings(props?: {
     if (!selectedObservation) return;
     try {
       setObservationBusy(true);
-      await window.electronAPI.promoteMemoryObservation({
+      setActionNotice(null);
+      setActionError(null);
+      const result = await window.electronAPI.promoteMemoryObservation({
         workspaceId: selectedWorkspaceId,
         memoryId: selectedObservation.memoryId,
         target: "workspace",
         kind: "project_fact",
       });
-      await refreshLayerPreview();
+      if (!result.success)
+        throw new Error(result.error || "Memory promotion could not be applied.");
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionNotice(
+          result.staged
+            ? "Memory promotion is awaiting review in Pending Memory Writes."
+            : "Memory promoted to workspace knowledge.",
+        );
+      await Promise.all([refreshLayerPreview(), refreshMemoryApprovals()]);
     } catch (error) {
-      logger.error("Failed to promote memory observation:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to promote memory observation:",
+        );
     } finally {
-      setObservationBusy(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setObservationBusy(false);
     }
   };
 
@@ -485,32 +589,42 @@ export function MemoryHubSettings(props?: {
       setObservationBackfillStatus(status);
       await searchObservations();
     } catch (error) {
-      logger.error("Failed to rebuild memory observation metadata:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to rebuild memory observation metadata:",
+        );
     } finally {
-      setObservationBusy(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setObservationBusy(false);
     }
   };
 
   const refreshAwareness = async () => {
-    if (!selectedWorkspaceId) return;
+    if (
+      !selectedWorkspaceId ||
+      activeWorkspace.current !== selectedWorkspaceId ||
+      !hasHostMethods("listAwarenessBeliefs", "getAwarenessSummary")
+    )
+      return;
     try {
       const [beliefs, summary] = await Promise.all([
-        window.electronAPI
-          .listAwarenessBeliefs(selectedWorkspaceId)
-          .catch(() => [] as AwarenessBelief[]),
-        window.electronAPI
-          .getAwarenessSummary(selectedWorkspaceId)
-          .catch(() => null as AwarenessSummary | null),
+        window.electronAPI.listAwarenessBeliefs(selectedWorkspaceId),
+        window.electronAPI.getAwarenessSummary(selectedWorkspaceId),
       ]);
+      if (activeWorkspace.current !== selectedWorkspaceId) return;
       setAwarenessBeliefs(beliefs);
       setAwarenessSummary(summary);
     } catch (error) {
-      logger.error("Failed to load awareness state:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(error instanceof Error ? error.message : "Failed to load awareness state.");
     }
   };
 
   const refreshAutonomy = async () => {
-    if (!selectedWorkspaceId) return;
+    if (
+      !selectedWorkspaceId ||
+      !hasHostMethods("getAutonomyState", "listAutonomyDecisions", "listAutonomyActions")
+    )
+      return;
     try {
       const [worldModel, decisions, actions] = await Promise.all([
         window.electronAPI
@@ -531,6 +645,26 @@ export function MemoryHubSettings(props?: {
     }
   };
 
+  const openKitFile = async (relPath: string) => {
+    if (window.coworkBrowserHost) {
+      setKitPreviewPath(relPath);
+      return;
+    }
+    try {
+      if (
+        !(await window.electronAPI.openWorkspaceKitFile({
+          workspaceId: selectedWorkspaceId,
+          relPath,
+        }))
+      )
+        throw new Error("Workspace kit file could not be opened.");
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Workspace kit file could not be opened.",
+      );
+    }
+  };
+
   const initKit = async () => {
     if (!selectedWorkspaceId) return;
     try {
@@ -540,11 +674,14 @@ export function MemoryHubSettings(props?: {
         mode: "missing",
         templatePreset: kitPreset,
       });
-      setKitStatus(status);
+      if (activeWorkspace.current === selectedWorkspaceId) setKitStatus(status);
     } catch (error) {
-      logger.error("Failed to initialize workspace kit:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to initialize workspace kit:",
+        );
     } finally {
-      setKitBusy(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setKitBusy(false);
     }
   };
 
@@ -558,23 +695,27 @@ export function MemoryHubSettings(props?: {
         workspaceId: selectedWorkspaceId,
         projectId,
       });
-      setNewProjectId("");
+      if (activeWorkspace.current === selectedWorkspaceId) setNewProjectId("");
       await refreshKit();
     } catch (error) {
-      logger.error("Failed to create project folder:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(error instanceof Error ? error.message : "Failed to create project folder.");
     } finally {
-      setKitBusy(false);
+      if (activeWorkspace.current === selectedWorkspaceId) setKitBusy(false);
     }
   };
 
   const saveFeatures = async (updates: Partial<MemoryFeaturesSettings>) => {
     const next: MemoryFeaturesSettings = { ...(features || DEFAULT_FEATURES), ...updates };
-    setFeatures(next);
     try {
       setSaving(true);
+      setActionError(null);
       await window.electronAPI.saveMemoryFeaturesSettings(next);
+      setFeatures(await window.electronAPI.getMemoryFeaturesSettings());
     } catch (error) {
-      logger.error("Failed to save memory feature settings:", error);
+      setActionError(
+        error instanceof Error ? error.message : "Failed to save memory feature settings.",
+      );
     } finally {
       setSaving(false);
     }
@@ -592,13 +733,34 @@ export function MemoryHubSettings(props?: {
   };
 
   const saveAwarenessConfig = async (nextConfig: AwarenessConfig) => {
-    setAwarenessConfig(nextConfig);
     try {
       setAwarenessSaving(true);
-      const saved = await window.electronAPI.saveAwarenessConfig(nextConfig);
+      type SourcePolicy = AwarenessConfig["sources"][AwarenessSource];
+      let request: Omit<Partial<AwarenessConfig>, "sources"> & {
+        sources?: Partial<Record<AwarenessSource, Partial<SourcePolicy>>>;
+      } = nextConfig;
+      if (window.coworkBrowserHost && awarenessConfig) {
+        request = {};
+        if (nextConfig.privateModeEnabled !== awarenessConfig.privateModeEnabled)
+          request.privateModeEnabled = nextConfig.privateModeEnabled;
+        if (nextConfig.defaultTtlMinutes !== awarenessConfig.defaultTtlMinutes)
+          request.defaultTtlMinutes = nextConfig.defaultTtlMinutes;
+        const sourceChanges: Partial<Record<AwarenessSource, Partial<SourcePolicy>>> = {};
+        for (const source of Object.keys(nextConfig.sources) as AwarenessSource[]) {
+          const changed = Object.fromEntries(
+            Object.entries(nextConfig.sources[source]).filter(
+              ([key, value]) =>
+                value !== awarenessConfig.sources[source][key as keyof SourcePolicy],
+            ),
+          ) as Partial<SourcePolicy>;
+          if (Object.keys(changed).length) sourceChanges[source] = changed;
+        }
+        if (Object.keys(sourceChanges).length) request.sources = sourceChanges;
+      }
+      const saved = await window.electronAPI.saveAwarenessConfig(request);
       setAwarenessConfig(saved);
     } catch (error) {
-      logger.error("Failed to save awareness config:", error);
+      setActionError(error instanceof Error ? error.message : "Failed to save awareness config.");
     } finally {
       setAwarenessSaving(false);
     }
@@ -626,7 +788,10 @@ export function MemoryHubSettings(props?: {
       await window.electronAPI.updateAwarenessBelief(belief.id, patch);
       await refreshAwareness();
     } catch (error) {
-      logger.error("Failed to update awareness belief:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to update awareness belief.",
+        );
     }
   };
 
@@ -635,7 +800,10 @@ export function MemoryHubSettings(props?: {
       await window.electronAPI.deleteAwarenessBelief(beliefId);
       await refreshAwareness();
     } catch (error) {
-      logger.error("Failed to delete awareness belief:", error);
+      if (activeWorkspace.current === selectedWorkspaceId)
+        setActionError(
+          error instanceof Error ? error.message : "Failed to delete awareness belief.",
+        );
     }
   };
 
@@ -717,6 +885,16 @@ export function MemoryHubSettings(props?: {
     }
   };
 
+  if (loadError) {
+    return (
+      <div className="settings-section">
+        <p role="alert">{loadError}</p>
+        <button className="settings-button" onClick={() => void loadAll()}>
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (loading || !features) {
     return (
       <div className="settings-section">
@@ -727,10 +905,42 @@ export function MemoryHubSettings(props?: {
 
   return (
     <div className="settings-section">
+      {kitPreviewPath && (
+        <FileViewer
+          filePath={kitPreviewPath}
+          workspacePath={selectedWorkspace?.path}
+          onClose={() => setKitPreviewPath(null)}
+        />
+      )}
       <h2 className="settings-section-title">Memory</h2>
+      {actionNotice && <div role="status">{actionNotice}</div>}
+      {actionError && (
+        <div role="alert">
+          {actionError}
+          <button className="settings-button" onClick={() => setActionError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       <p className="settings-section-description">
         Control memory-related features globally and per workspace.
       </p>
+      {window.coworkBrowserHost && (
+        <p className="settings-form-hint">
+          Workspace memory, text imports, profile facts, and the observation inspector are connected
+          to the host.
+          {[
+            ["getSupermemoryStatus", "external memory setup"],
+            ["getWorkspaceKitStatus", "workspace kit management"],
+            ["getAwarenessConfig", "awareness"],
+            ["listMemoryWriteApprovals", "pending write review"],
+          ]
+            .filter(([method]) => !hasHostMethod(method))
+            .map(([, label]) => label)
+            .join(", ")}{" "}
+          remain in progress for browser access.
+        </p>
+      )}
 
       <div className="settings-subsection">
         <h3>Global Toggles</h3>
@@ -986,12 +1196,20 @@ export function MemoryHubSettings(props?: {
         </div>
       </div>
 
-      <div className="settings-subsection">
+      <div
+        className="settings-subsection"
+        hidden={
+          !hasHostMethods(
+            "getSupermemoryStatus",
+            "saveSupermemorySettings",
+            "testSupermemoryConnection",
+          )
+        }
+      >
         <h3>Supermemory</h3>
         <p className="settings-form-hint">
-          External memory provider integration inspired by Hermes: workspace-scoped profile fetches,
-          explicit search/remember/forget tools, and optional background mirroring of CoWork memory
-          captures.
+          External memory integration provides workspace-scoped profile fetches, explicit
+          search/remember/forget tools, and optional background mirroring of CoWork memory captures.
         </p>
 
         <div className="settings-card">
@@ -1460,7 +1678,12 @@ export function MemoryHubSettings(props?: {
                     <div className="memory-hub-chip-row">
                       <button
                         className="settings-button"
-                        disabled={observationBusy}
+                        disabled={observationBusy || !hasHostMethod("promoteMemoryObservation")}
+                        title={
+                          !hasHostMethod("promoteMemoryObservation")
+                            ? "Memory promotion is not connected to this browser host yet."
+                            : undefined
+                        }
                         onClick={() => void promoteObservation()}
                       >
                         Promote
@@ -1488,7 +1711,17 @@ export function MemoryHubSettings(props?: {
                       </button>
                       <button
                         className="settings-button danger"
-                        disabled={observationBusy}
+                        disabled={
+                          observationBusy ||
+                          (window.coworkBrowserHost === true &&
+                            !selectedWorkspace?.permissions.delete)
+                        }
+                        title={
+                          window.coworkBrowserHost === true &&
+                          !selectedWorkspace?.permissions.delete
+                            ? "This workspace does not permit memory deletion."
+                            : undefined
+                        }
                         onClick={() => void deleteObservation()}
                       >
                         Delete
@@ -1537,6 +1770,12 @@ export function MemoryHubSettings(props?: {
             Control which local signals CoWork can observe, promote into durable beliefs, inject
             into prompts, and use for heartbeats.
           </p>
+          {window.coworkBrowserHost && (
+            <p className="settings-form-hint">
+              These settings apply to your host. Device signals are collected only when its
+              collectors are running.
+            </p>
+          )}
 
           <div className="settings-form-group">
             <div className="memory-hub-toggle-row">
@@ -1550,6 +1789,7 @@ export function MemoryHubSettings(props?: {
               <label className="settings-toggle memory-hub-toggle">
                 <input
                   type="checkbox"
+                  aria-label="Private Mode"
                   checked={awarenessConfig.privateModeEnabled}
                   onChange={(e) =>
                     void saveAwarenessConfig({
@@ -2013,8 +2253,11 @@ export function MemoryHubSettings(props?: {
           <p className="settings-form-hint">No workspaces found.</p>
         ) : (
           <div className="settings-form-group">
-            <label className="settings-label">Workspace</label>
+            <label className="settings-label" htmlFor="memory-workspace">
+              Workspace
+            </label>
             <select
+              id="memory-workspace"
               value={selectedWorkspaceId}
               onChange={(e) => setSelectedWorkspaceId(e.target.value)}
               className="settings-select"
@@ -2030,7 +2273,7 @@ export function MemoryHubSettings(props?: {
                 Path: <code>{selectedWorkspace.path}</code>
               </p>
             )}
-            <div className="memory-hub-top-gap">
+            <div className="memory-hub-top-gap" hidden={!hasHostMethod("getWorkspaceKitStatus")}>
               <label className="settings-label">Kit Preset</label>
               <select
                 value={kitPreset}
@@ -2052,7 +2295,7 @@ export function MemoryHubSettings(props?: {
           </div>
         )}
 
-        {selectedWorkspaceId && (
+        {selectedWorkspaceId && hasHostMethod("getWorkspaceKitStatus") && (
           <div className="settings-form-group memory-hub-top-gap">
             <div
               style={{
@@ -2303,36 +2546,21 @@ export function MemoryHubSettings(props?: {
             <div style={{ marginTop: "10px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <button
                 className="settings-button"
-                onClick={() =>
-                  void window.electronAPI.openWorkspaceKitFile({
-                    workspaceId: selectedWorkspaceId,
-                    relPath: ".cowork/USER.md",
-                  })
-                }
+                onClick={() => void openKitFile(".cowork/USER.md")}
                 disabled={!selectedWorkspaceId || kitBusy}
               >
                 Open USER.md
               </button>
               <button
                 className="settings-button"
-                onClick={() =>
-                  void window.electronAPI.openWorkspaceKitFile({
-                    workspaceId: selectedWorkspaceId,
-                    relPath: ".cowork/MEMORY.md",
-                  })
-                }
+                onClick={() => void openKitFile(".cowork/MEMORY.md")}
                 disabled={!selectedWorkspaceId || kitBusy}
               >
                 Open MEMORY.md
               </button>
               <button
                 className="settings-button"
-                onClick={() =>
-                  void window.electronAPI.openWorkspaceKitFile({
-                    workspaceId: selectedWorkspaceId,
-                    relPath: ".cowork/DESIGN.md",
-                  })
-                }
+                onClick={() => void openKitFile(".cowork/DESIGN.md")}
                 disabled={!selectedWorkspaceId || kitBusy}
               >
                 Open DESIGN.md
@@ -2343,7 +2571,10 @@ export function MemoryHubSettings(props?: {
 
         {selectedWorkspaceId && (
           <>
-            <div className="settings-card memory-hub-top-gap">
+            <div
+              className="settings-card memory-hub-top-gap"
+              hidden={!hasHostMethod("listMemoryWriteApprovals")}
+            >
               <div className="memory-hub-row-center">
                 <div className="memory-hub-grow">
                   <div className="memory-hub-primary-label">Pending Memory Writes</div>
@@ -2356,7 +2587,7 @@ export function MemoryHubSettings(props?: {
                   <span
                     className={badgeClass(pendingMemoryWrites.length > 0 ? "warning" : "success")}
                   >
-                    {pendingMemoryWrites.length} pending
+                    {memoryApprovalsError ? "Unavailable" : `${pendingMemoryWrites.length} pending`}
                   </span>
                   <button
                     className="settings-button"
@@ -2369,13 +2600,31 @@ export function MemoryHubSettings(props?: {
               </div>
 
               <div className="memory-hub-top-gap">
-                {pendingMemoryWrites.length === 0 ? (
+                {memoryApprovalsError ? (
+                  <div role="alert">{memoryApprovalsError}</div>
+                ) : pendingMemoryWrites.length === 0 ? (
                   <div className="settings-empty">No pending memory writes.</div>
                 ) : (
                   <div className="memory-list" style={{ maxHeight: "360px" }}>
                     {pendingMemoryWrites.map((item) => {
                       const isExternal = item.target === "external";
                       const busy = memoryApprovalBusyId === item.id;
+                      const browser = window.coworkBrowserHost === true;
+                      const writable = !browser || selectedWorkspace?.permissions.write === true;
+                      const removal = item.action === "remove" || item.payload?.action === "remove";
+                      const network =
+                        !browser ||
+                        (selectedWorkspace?.permissions.network === true &&
+                          selectedWorkspace.permissions.accessProfileUnavailable !== true &&
+                          selectedWorkspace.permissions.accessNetworkMode !== "disabled" &&
+                          selectedWorkspace.permissions.accessNetworkMode !== "on-request");
+                      const approvalReason = !writable
+                        ? "This workspace does not allow memory edits."
+                        : browser && removal && selectedWorkspace?.permissions.delete !== true
+                          ? "This workspace does not allow memory deletion."
+                          : isExternal && !network
+                            ? "This workspace does not allow automatic network access."
+                            : undefined;
                       return (
                         <div key={item.id} className="memory-list-item">
                           <div className="memory-hub-row">
@@ -2419,14 +2668,20 @@ export function MemoryHubSettings(props?: {
                               <button
                                 className="settings-button primary"
                                 onClick={() => void approveMemoryWrite(item.id)}
-                                disabled={busy}
+                                disabled={busy || Boolean(approvalReason)}
+                                title={approvalReason}
                               >
                                 Approve
                               </button>
                               <button
                                 className="settings-button settings-button-danger"
                                 onClick={() => void rejectMemoryWrite(item.id)}
-                                disabled={busy}
+                                disabled={busy || !writable}
+                                title={
+                                  !writable
+                                    ? "This workspace does not allow memory edits."
+                                    : undefined
+                                }
                               >
                                 Reject
                               </button>
@@ -2440,9 +2695,19 @@ export function MemoryHubSettings(props?: {
               </div>
             </div>
 
-            <ChronicleSettingsCard />
+            {hasHostMethods("getChronicleSettings", "getChronicleStatus") ? (
+              <ChronicleSettingsCard />
+            ) : (
+              <p className="settings-form-hint">
+                Chronicle capture controls require the desktop host. Stored observations are
+                available below.
+              </p>
+            )}
             <MemorySettings
               workspaceId={selectedWorkspaceId}
+              canDelete={
+                window.coworkBrowserHost !== true || selectedWorkspace?.permissions.delete === true
+              }
               onSettingsChanged={props?.onSettingsChanged}
             />
           </>

@@ -1,4 +1,9 @@
 import {
+  BROWSER_HOST_UNSUPPORTED_ACTION_EVENT,
+  hasHostCapability,
+  hasHostMethod,
+} from "./host/browser-capabilities";
+import {
   memo,
   useState,
   useEffect,
@@ -48,6 +53,7 @@ import { GenericApprovalDialog } from "./components/GenericApprovalDialog";
 import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWarningDialog";
 import { LibraryPanel } from "./components/calm/LibraryPanel";
 import { BuildPanel } from "./components/calm/BuildPanel";
+import { GitChangesPanel } from "./components/GitChangesPanel";
 import { CalmAgentSetupHost } from "./components/calm/CalmAgentSetup";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
 import { NotificationPanel } from "./components/NotificationPanel";
@@ -685,6 +691,7 @@ type AppView =
   | "everydayAgent"
   | "missionControl"
   | "library"
+  | "git"
   | "build";
 type RemoteTaskView = {
   deviceId: string;
@@ -799,7 +806,7 @@ type SelectedTaskWorkspaceViewProps = {
       returnOnAccepted?: boolean;
     },
   ) => Promise<void | boolean>;
-  onOpenSideChat: (request: {
+  onOpenSideChat?: (request: {
     taskId: string;
     fromEventId?: string;
     initialMessage?: string;
@@ -965,6 +972,7 @@ const SelectedTaskWorkspaceView = memo(
     onCloseTerminalTabs,
     onModelChange,
   }: SelectedTaskWorkspaceViewProps) {
+    const canUseInteractiveBrowser = hasHostCapability("browser.interactive");
     const [spreadsheetArtifact, setSpreadsheetArtifact] = useState<{
       kind: ActiveArtifactKind;
       path: string;
@@ -976,6 +984,7 @@ const SelectedTaskWorkspaceView = memo(
       mode: "sidebar" | "fullscreen";
       requestId?: string;
     } | null>(null);
+    const visibleBrowserWorkbench = canUseInteractiveBrowser ? browserWorkbench : null;
     const [spawnedAgentSidebar, setSpawnedAgentSidebar] = useState<{
       taskId: string;
     } | null>(null);
@@ -997,6 +1006,9 @@ const SelectedTaskWorkspaceView = memo(
       setBrowserWorkbench(null);
       setSpawnedAgentSidebar(null);
     }, [sideChat?.task?.id]);
+    useEffect(() => {
+      if (!canUseInteractiveBrowser && browserWorkbench) setBrowserWorkbench(null);
+    }, [browserWorkbench, canUseInteractiveBrowser]);
     // Calm theme: artifacts take most of the width and the conversation narrows
     // to a column beside them, instead of opening the right panel as well.
     const prepareArtifactSidebar = useCallback(() => {
@@ -1086,6 +1098,7 @@ const SelectedTaskWorkspaceView = memo(
     }, []);
     const openBrowserWorkbenchSidebar = useCallback(
       (request: { sessionId?: string; url?: string; requestId?: string }) => {
+        if (!canUseInteractiveBrowser) return;
         setSpreadsheetArtifact(null);
         setSpawnedAgentSidebar(null);
         onRevealRightSidebar?.();
@@ -1105,7 +1118,7 @@ const SelectedTaskWorkspaceView = memo(
           requestId: request.requestId,
         });
       },
-      [onRevealRightSidebar],
+      [canUseInteractiveBrowser, onRevealRightSidebar],
     );
     const openWebLinkInBrowserSidebar = useCallback(
       (url: string) => {
@@ -1142,12 +1155,18 @@ const SelectedTaskWorkspaceView = memo(
     }, [selectedTaskId, workspace?.path]);
     useEffect(() => {
       if (!browserWorkbenchRequest || browserWorkbenchRequest.taskId !== selectedTaskId) return;
+      if (!canUseInteractiveBrowser) return;
       openBrowserWorkbenchSidebar({
         sessionId: browserWorkbenchRequest.sessionId || "default",
         url: browserWorkbenchRequest.url,
         requestId: browserWorkbenchRequest.requestId,
       });
-    }, [browserWorkbenchRequest, openBrowserWorkbenchSidebar, selectedTaskId]);
+    }, [
+      browserWorkbenchRequest,
+      canUseInteractiveBrowser,
+      openBrowserWorkbenchSidebar,
+      selectedTaskId,
+    ]);
     useEffect(() => {
       if (!spawnedAgentSidebar) return;
       if (childTasks.some((childTask) => childTask.id === spawnedAgentSidebar.taskId)) return;
@@ -1175,14 +1194,19 @@ const SelectedTaskWorkspaceView = memo(
       if (
         !(
           (spreadsheetArtifact && spreadsheetArtifact.mode === "sidebar") ||
-          (browserWorkbench && browserWorkbench.mode === "sidebar") ||
+          (visibleBrowserWorkbench && visibleBrowserWorkbench.mode === "sidebar") ||
           spawnedAgentSidebar
         )
       ) {
         return;
       }
       setSpreadsheetSidebarWidth((current) => clampSpreadsheetSidebarWidth(current));
-    }, [browserWorkbench, clampSpreadsheetSidebarWidth, spawnedAgentSidebar, spreadsheetArtifact]);
+    }, [
+      clampSpreadsheetSidebarWidth,
+      spawnedAgentSidebar,
+      spreadsheetArtifact,
+      visibleBrowserWorkbench,
+    ]);
     useEffect(() => {
       if (!isSpreadsheetResizing) return;
       const previousCursor = document.body.style.cursor;
@@ -1311,11 +1335,11 @@ const SelectedTaskWorkspaceView = memo(
     );
     const browserTurnContext = useMemo(
       () =>
-        browserWorkbench
+        visibleBrowserWorkbench
           ? buildSpreadsheetTurnContext({
               task,
               events: spreadsheetEvents,
-              filePath: browserWorkbench.url || "browser workbench",
+              filePath: visibleBrowserWorkbench.url || "browser workbench",
               isWorking: effectiveSpreadsheetTaskWorking,
               durationLabel: spreadsheetWorkDuration,
               turnStartedAt: activeSpreadsheetTurnStartedAt,
@@ -1323,7 +1347,7 @@ const SelectedTaskWorkspaceView = memo(
           : null,
       [
         activeSpreadsheetTurnStartedAt,
-        browserWorkbench,
+        visibleBrowserWorkbench,
         effectiveSpreadsheetTaskWorking,
         spreadsheetEvents,
         spreadsheetWorkDuration,
@@ -1391,14 +1415,14 @@ const SelectedTaskWorkspaceView = memo(
         : null
       : computedArtifactRefreshKey;
 
-    if (browserWorkbench?.mode === "fullscreen" && task) {
+    if (visibleBrowserWorkbench?.mode === "fullscreen" && task) {
       const selectedModelLabel =
         availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
       return (
         <BrowserWorkbenchView
           taskId={task.id}
-          sessionId={browserWorkbench.sessionId}
-          initialUrl={browserWorkbench.url}
+          sessionId={visibleBrowserWorkbench.sessionId}
+          initialUrl={visibleBrowserWorkbench.url}
           workspaceId={workspace?.id}
           workspacePath={workspace?.path}
           mode="fullscreen"
@@ -1520,7 +1544,7 @@ const SelectedTaskWorkspaceView = memo(
     }
 
     const hasSpreadsheetSidebar = Boolean(
-      (spreadsheetArtifact || browserWorkbench || spawnedAgentSidebar || sideChat) &&
+      (spreadsheetArtifact || visibleBrowserWorkbench || spawnedAgentSidebar || sideChat) &&
       workspace?.path &&
       !remoteTaskView,
     );
@@ -1588,7 +1612,7 @@ const SelectedTaskWorkspaceView = memo(
               pendingInputRequests={pendingInputRequests}
               onSubmitInputRequest={onSubmitInputRequest}
               onDismissInputRequest={onDismissInputRequest}
-              onOpenBrowserView={onOpenBrowserView}
+              onOpenBrowserView={canUseInteractiveBrowser ? onOpenBrowserView : undefined}
               onViewTaskOutputs={onViewTaskOutputs}
               onTasksChanged={onTasksChanged}
               selectedModel={selectedModel}
@@ -1618,12 +1642,14 @@ const SelectedTaskWorkspaceView = memo(
               onOpenPresentationArtifact={openPresentationArtifact}
               onOpenWebArtifact={openWebArtifact}
               onOpenBrowserWorkbenchSidebar={
-                task && workspace?.path && !remoteTaskView
+                canUseInteractiveBrowser && task && workspace?.path && !remoteTaskView
                   ? openEmptyBrowserWorkbenchSidebar
                   : undefined
               }
               onOpenWebLinkInSidebar={
-                task && workspace?.path && !remoteTaskView ? openWebLinkInBrowserSidebar : undefined
+                canUseInteractiveBrowser && task && workspace?.path && !remoteTaskView
+                  ? openWebLinkInBrowserSidebar
+                  : undefined
               }
               onOpenSideChat={onOpenSideChat}
               onOpenChildAgentSidebar={openSpawnedAgentSidebar}
@@ -1665,7 +1691,7 @@ const SelectedTaskWorkspaceView = memo(
                 </Suspense>
               </div>
             </>
-          ) : (spreadsheetArtifact || browserWorkbench || spawnedAgentSidebar) &&
+          ) : (spreadsheetArtifact || visibleBrowserWorkbench || spawnedAgentSidebar) &&
             workspace?.path &&
             !remoteTaskView ? (
             <>
@@ -1711,12 +1737,12 @@ const SelectedTaskWorkspaceView = memo(
                       onOpenPresentationArtifact={openPresentationArtifact}
                       onOpenWebArtifact={openWebArtifact}
                     />
-                  ) : browserWorkbench && task ? (
+                  ) : visibleBrowserWorkbench && task ? (
                     <BrowserWorkbenchView
-                      key={browserWorkbench.requestId || browserWorkbench.sessionId}
+                      key={visibleBrowserWorkbench.requestId || visibleBrowserWorkbench.sessionId}
                       taskId={task.id}
-                      sessionId={browserWorkbench.sessionId}
-                      initialUrl={browserWorkbench.url}
+                      sessionId={visibleBrowserWorkbench.sessionId}
+                      initialUrl={visibleBrowserWorkbench.url}
                       workspaceId={workspace.id}
                       workspacePath={workspace.path}
                       mode="sidebar"
@@ -2916,6 +2942,25 @@ export function App() {
   // Timestamp of when onboarding was completed
   const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<string | undefined>(undefined);
   const hasElectronAPI = typeof window !== "undefined" && !!window.electronAPI;
+  const isBrowserHost =
+    typeof window !== "undefined" &&
+    (window as Window & { coworkBrowserHost?: boolean }).coworkBrowserHost === true;
+  const [browserProviderReady, setBrowserProviderReady] = useState(
+    () => !isBrowserHost || window.coworkBrowserHostInfo?.providerReady === true,
+  );
+  useEffect(() => {
+    if (!isBrowserHost) return;
+    setBrowserProviderReady(window.coworkBrowserHostInfo?.providerReady === true);
+    const onLLMSettingsChanged = (
+      window.electronAPI as typeof window.electronAPI & {
+        onLLMSettingsChanged?: (listener: () => void) => (() => void) | void;
+      }
+    )?.onLLMSettingsChanged;
+    const unsubscribe = onLLMSettingsChanged?.(() => {
+      setBrowserProviderReady(window.coworkBrowserHostInfo?.providerReady === true);
+    });
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [isBrowserHost]);
   const [devLogCaptureEnabled, setDevLogCaptureEnabled] = useState(false);
   const rendererPerfLoggingEnabled = devRunLoggingEnabled || devLogCaptureEnabled;
   const startupMarksRef = useRef<Set<string>>(new Set());
@@ -3268,6 +3313,15 @@ export function App() {
   };
 
   const handleOpenBrowserView = (url?: string) => {
+    if (!hasHostCapability("browser.interactive")) {
+      addToast({
+        type: "info",
+        title: "Interactive browser unavailable",
+        message:
+          "This browser session does not provide an interactive browser yet. Use the CoWork desktop app for browser work.",
+      });
+      return;
+    }
     setBrowserUrl(url || "");
     setCurrentView("browser");
   };
@@ -3533,8 +3587,47 @@ export function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!isBrowserHost) return;
+    const selectProject = (event: Event) => {
+      const workspace = (event as CustomEvent<Workspace>).detail;
+      if (workspace?.id) {
+        setSelectedTaskId(null);
+        setCurrentWorkspace(workspace);
+        setCurrentView("main");
+      }
+    };
+    window.addEventListener("cowork-browser-workspace-selected", selectProject);
+    return () => window.removeEventListener("cowork-browser-workspace-selected", selectProject);
+  }, [isBrowserHost]);
+
+  useEffect(() => {
+    if (!isBrowserHost || !currentWorkspace?.id) return;
+    void window.electronAPI
+      .selectWorkspace(currentWorkspace.id)
+      .catch((error: unknown) => console.error("Could not select project:", error));
+  }, [isBrowserHost, currentWorkspace?.id]);
+
   // Auto-load temp workspace on mount if no workspace is selected
   useEffect(() => {
+    if (isBrowserHost) {
+      let cancelled = false;
+      void window.electronAPI
+        .listWorkspaces()
+        .then((workspaces) => {
+          if (cancelled || workspaces.length === 0) return;
+          const activeWorkspaceId = window.coworkBrowserHostInfo?.activeWorkspaceId;
+          setCurrentWorkspace(
+            workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0],
+          );
+        })
+        .catch((error: unknown) => {
+          console.error("Failed to load browser workspaces:", error);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     if (!window.electronAPI?.getTempWorkspace) return;
 
     const initWorkspace = async () => {
@@ -3548,7 +3641,7 @@ export function App() {
       }
     };
     initWorkspace();
-  }, []);
+  }, [isBrowserHost]);
 
   // Load tasks when workspace is set
   useEffect(() => {
@@ -3627,6 +3720,22 @@ export function App() {
 
     return id;
   };
+
+  useEffect(() => {
+    if (!isBrowserHost) return;
+    const onUnsupportedBrowserAction = () => {
+      addToast({
+        id: "browser-host-unsupported-action",
+        type: "info",
+        title: "Action unavailable in this browser",
+        message:
+          "This action is not connected to the browser session. Use CoWork OS on the host to complete it.",
+      });
+    };
+    window.addEventListener(BROWSER_HOST_UNSUPPORTED_ACTION_EVENT, onUnsupportedBrowserAction);
+    return () =>
+      window.removeEventListener(BROWSER_HOST_UNSUPPORTED_ACTION_EVENT, onUnsupportedBrowserAction);
+  }, [addToast, isBrowserHost]);
 
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -5783,6 +5892,7 @@ export function App() {
   // Build starts a new task, so picking a folder there only changes the
   // working folder and never moves the currently selected task.
   const handlePickBuildFolder = async () => {
+    if (isBrowserHost) return;
     try {
       const workspace = await pickFolderWorkspace();
       if (workspace) setCurrentWorkspace(workspace);
@@ -6168,7 +6278,18 @@ export function App() {
 
   const handleOpenSideChat = useCallback(
     async (request: { taskId: string; fromEventId?: string; initialMessage?: string }) => {
-      if (!window.electronAPI?.forkTaskSession) return;
+      if (!hasHostMethod("forkTaskSession")) return;
+      const cleanupStaleSideChat = (taskId: string) => {
+        const cleanup = hasHostMethod("deleteTask")
+          ? window.electronAPI.deleteTask
+          : hasHostMethod("archiveTask")
+            ? window.electronAPI.archiveTask
+            : undefined;
+        if (!cleanup) return;
+        void cleanup(taskId).catch((cleanupError) => {
+          console.error("Failed to clean up stale sidechat task:", cleanupError);
+        });
+      };
       const requestSeq = sideChatRequestSeqRef.current + 1;
       sideChatRequestSeqRef.current = requestSeq;
       const parentTaskId = request.taskId;
@@ -6215,18 +6336,14 @@ export function App() {
           ...(request.fromEventId ? { fromEventId: request.fromEventId } : {}),
         })) as Task;
         if (sideChatRequestSeqRef.current !== requestSeq) {
-          void window.electronAPI.deleteTask?.(forkedTask.id).catch((deleteError) => {
-            console.error("Failed to delete stale sidechat task:", deleteError);
-          });
+          cleanupStaleSideChat(forkedTask.id);
           return;
         }
         const forkedEvents = (await window.electronAPI
           .getTaskEvents(forkedTask.id)
           .catch(() => [])) as TaskEvent[];
         if (sideChatRequestSeqRef.current !== requestSeq) {
-          void window.electronAPI.deleteTask?.(forkedTask.id).catch((deleteError) => {
-            console.error("Failed to delete stale sidechat task:", deleteError);
-          });
+          cleanupStaleSideChat(forkedTask.id);
           return;
         }
         const cappedForkedEvents = capTaskEvents(forkedEvents);
@@ -6644,9 +6761,7 @@ export function App() {
     await handleCreateTask(title, prompt, { generateTitle: true });
   };
 
-  const handleCreateTaskFromIdea = async (prompt: string) => {
-    setCurrentView("main");
-    clearRemoteTaskView();
+  const handleCreateTaskFromIdea = async (prompt: string): Promise<boolean> => {
     let workspace = currentWorkspace;
     if (!workspace) {
       try {
@@ -6655,17 +6770,19 @@ export function App() {
       } catch (error) {
         console.error("Failed to get workspace for idea:", error);
         addToast({ type: "error", title: "Error", message: "Could not create session" });
-        return;
+        return false;
       }
     }
     const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
-    await handleCreateTask(
+    const admitted = await handleCreateTask(
       title,
       prompt,
       { generateTitle: true },
       undefined,
       workspace || undefined,
     );
+    if (admitted) clearRemoteTaskView();
+    return admitted;
   };
 
   const handleNewSession = async () => {
@@ -7526,7 +7643,7 @@ export function App() {
         </div>
         <div className="title-bar-spacer" />
         <div className="title-bar-actions">
-          {titleBarBrowserTaskId && (
+          {titleBarBrowserTaskId && !isBrowserHost && (
             <button
               type="button"
               className="title-bar-btn title-bar-browser-toggle"
@@ -7559,33 +7676,34 @@ export function App() {
               </svg>
             </button>
           )}
-          {showTitleBarTerminalToggle && (
-            <button
-              type="button"
-              className={`title-bar-btn title-bar-terminal-toggle ${terminalTabsOpen ? "active" : ""}`}
-              onClick={() => setTerminalTabsOpen((open) => !open)}
-              title={terminalTabsOpen ? "Close terminal" : "Open terminal"}
-              aria-label={terminalTabsOpen ? "Close terminal" : "Open terminal"}
-              aria-pressed={terminalTabsOpen}
-            >
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
+          {showTitleBarTerminalToggle &&
+            (!isBrowserHost || (Boolean(selectedTaskId) && hasHostMethod("createTerminalTab"))) && (
+              <button
+                type="button"
+                className={`title-bar-btn title-bar-terminal-toggle ${terminalTabsOpen ? "active" : ""}`}
+                onClick={() => setTerminalTabsOpen((open) => !open)}
+                title={terminalTabsOpen ? "Close terminal" : "Open terminal"}
+                aria-label={terminalTabsOpen ? "Close terminal" : "Open terminal"}
+                aria-pressed={terminalTabsOpen}
               >
-                <path d="m7 11 2 2-2 2" />
-                <path d="M11 15h4" />
-                <rect x="3" y="4" width="18" height="16" rx="2" ry="2" />
-              </svg>
-            </button>
-          )}
+                <svg
+                  aria-hidden="true"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#6b7280"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: "block", flexShrink: 0 }}
+                >
+                  <path d="m7 11 2 2-2 2" />
+                  <path d="M11 15h4" />
+                  <rect x="3" y="4" width="18" height="16" rx="2" ry="2" />
+                </svg>
+              </button>
+            )}
           <button
             type="button"
             className="title-bar-btn title-bar-theme-toggle"
@@ -7636,41 +7754,56 @@ export function App() {
               </svg>
             )}
           </button>
-          <NotificationPanel
-            onNotificationClick={(notification) => {
-              // Prioritize taskId to show the completed task result
-              if (notification.taskId) {
-                void openTaskById(notification.taskId);
-                return;
-              }
-              if (notification.suggestionId) {
-                void (async () => {
-                  try {
-                    if (notification.workspaceId) {
-                      const workspaces = await window.electronAPI.listWorkspaces();
-                      const targetWorkspace = workspaces.find(
-                        (workspace) => workspace.id === notification.workspaceId,
-                      );
-                      if (targetWorkspace) {
-                        setCurrentWorkspace(targetWorkspace);
+          {(!isBrowserHost ||
+            (hasHostCapability("notifications.read") &&
+              hasHostCapability("notifications.manage"))) && (
+            <NotificationPanel
+              onNotificationClick={(notification) => {
+                // Prioritize taskId to show the completed task result
+                if (notification.taskId) {
+                  void openTaskById(notification.taskId);
+                  return;
+                }
+                if (notification.suggestionId) {
+                  void (async () => {
+                    try {
+                      if (notification.workspaceId) {
+                        const workspaces = await window.electronAPI.listWorkspaces();
+                        const targetWorkspace = workspaces.find(
+                          (workspace) => workspace.id === notification.workspaceId,
+                        );
+                        if (targetWorkspace) {
+                          setCurrentWorkspace(targetWorkspace);
+                        }
                       }
+                    } catch {
+                      // best-effort
+                    } finally {
+                      setCurrentView("home");
+                      setHomeAutomationFocusTick((tick) => tick + 1);
                     }
-                  } catch {
-                    // best-effort
-                  } finally {
-                    setCurrentView("home");
-                    setHomeAutomationFocusTick((tick) => tick + 1);
-                  }
-                })();
-                return;
-              }
-              // Fall back to scheduled tasks settings if only cronJobId
-              if (notification.cronJobId) {
-                setSettingsTab("scheduled");
-                setCurrentView("settings");
-              }
-            }}
-          />
+                  })();
+                  return;
+                }
+                // Fall back to scheduled tasks settings if only cronJobId
+                if (notification.cronJobId) {
+                  setSettingsTab("scheduled");
+                  setCurrentView("settings");
+                }
+              }}
+            />
+          )}
+          {isBrowserHost && (
+            <button
+              type="button"
+              className="title-bar-btn title-bar-browser-signout"
+              onClick={() => window.dispatchEvent(new Event("cowork-browser-sign-out"))}
+              title="Sign out of this browser"
+              aria-label="Sign out of this browser"
+            >
+              Sign out
+            </button>
+          )}
           <button
             type="button"
             className={`title-bar-btn density-toggle ${uiDensity}`}
@@ -7714,42 +7847,44 @@ export function App() {
               </svg>
             )}
           </button>
-          {currentView === "main" && (
-            <button
-              type="button"
-              className="title-bar-btn title-bar-panel-toggle"
-              onClick={handleRightSidebarToggle}
-              title={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
-              aria-label={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
-            >
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
+          {currentView === "main" &&
+            (uiDensity === "full" || Boolean(selectedTaskId)) &&
+            hasHostMethod("readFileForViewer") && (
+              <button
+                type="button"
+                className="title-bar-btn title-bar-panel-toggle"
+                onClick={handleRightSidebarToggle}
+                title={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
+                aria-label={effectiveRightCollapsed ? "Show panel" : "Hide panel"}
               >
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <line x1="15" y1="3" x2="15" y2="21" />
-              </svg>
-              {effectiveRightCollapsed && unseenOutputCount > 0 && (
-                <span
-                  className="title-bar-output-badge"
-                  aria-label={`${unseenOutputCount} new outputs`}
+                <svg
+                  aria-hidden="true"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#6b7280"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: "block", flexShrink: 0 }}
                 >
-                  {unseenOutputCount > 9 ? "9+" : unseenOutputCount}
-                </span>
-              )}
-            </button>
-          )}
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <line x1="15" y1="3" x2="15" y2="21" />
+                </svg>
+                {effectiveRightCollapsed && unseenOutputCount > 0 && (
+                  <span
+                    className="title-bar-output-badge"
+                    aria-label={`${unseenOutputCount} new outputs`}
+                  >
+                    {unseenOutputCount > 9 ? "9+" : unseenOutputCount}
+                  </span>
+                )}
+              </button>
+            )}
         </div>
         {/* Windows custom window controls (minimize, maximize, close) */}
-        {isWindows && (
+        {isWindows && !isBrowserHost && (
           <div className="win-controls">
             <button
               type="button"
@@ -7795,8 +7930,26 @@ export function App() {
         currentView === "everydayAgent" ||
         currentView === "missionControl" ||
         currentView === "library" ||
+        currentView === "git" ||
         currentView === "build") && (
         <>
+          {isBrowserHost && !browserProviderReady && currentView !== "git" && (
+            <section className="browser-provider-notice" role="status">
+              <div>
+                <strong>No model provider is configured on this host.</strong>
+                <span>Connect a provider before starting tasks from this browser.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsTab("llm");
+                  setCurrentView("settings");
+                }}
+              >
+                Open AI &amp; Models
+              </button>
+            </section>
+          )}
           <div
             className={`app-layout ${leftSidebarCollapsed ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
           >
@@ -7820,9 +7973,11 @@ export function App() {
                 isEverydayAgentActive={currentView === "everydayAgent"}
                 isMissionControlActive={currentView === "missionControl"}
                 isDevicesActive={currentView === "devices"}
+                isGitChangesActive={currentView === "git"}
                 isBuildActive={currentView === "build"}
                 isLibraryActive={currentView === "library"}
                 onOpenHome={() => setCurrentView("main")}
+                onOpenGitChanges={() => setCurrentView("git")}
                 onOpenBuild={() => setCurrentView("build")}
                 onOpenLibrary={() => setCurrentView("library")}
                 onOpenPlugins={() => {
@@ -7902,6 +8057,8 @@ export function App() {
                     setCurrentView("main");
                   }}
                   onNewSession={handleNewSession}
+                  onViewAllTasks={handleClearTaskView}
+                  onViewAllFiles={() => setCurrentView("library")}
                   onOpenScheduledTasks={() => {
                     setSettingsTab("scheduled");
                     setCurrentView("settings");
@@ -8087,12 +8244,20 @@ export function App() {
                 />
               ) : currentView === "library" ? (
                 <LibraryPanel workspaceId={currentWorkspace?.id} />
+              ) : currentView === "git" ? (
+                <GitChangesPanel workspace={currentWorkspace} />
               ) : currentView === "build" ? (
                 <BuildPanel
                   onStart={handleCreateTaskFromIdea}
                   workspace={currentWorkspace}
                   onSelectWorkspace={setCurrentWorkspace}
                   onPickFolder={handlePickBuildFolder}
+                  folderPickerUnavailableReason={
+                    isBrowserHost
+                      ? "Browser sessions cannot select arbitrary computer folders. Workspace switching is limited to folders made available to this browser session; use the desktop app to choose another folder."
+                      : undefined
+                  }
+                  showWorkspacePaths={!isBrowserHost}
                   model={{
                     models: availableModels,
                     selectedModel,
@@ -8174,7 +8339,7 @@ export function App() {
                   onNewBotConversation={handleNewBotConversation}
                   onSelectTask={handleSelectTaskFromShell}
                   onSendMessage={handleSendMessage}
-                  onOpenSideChat={handleOpenSideChat}
+                  onOpenSideChat={hasHostMethod("forkTaskSession") ? handleOpenSideChat : undefined}
                   onSendSideChatMessage={handleSendSideChatMessage}
                   onCloseSideChat={handleCloseSideChat}
                   onOpenSideChatFullThread={handleOpenSideChatFullThread}

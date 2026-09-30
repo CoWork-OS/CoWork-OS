@@ -62,6 +62,21 @@ describe("TaskStore.findAll", () => {
     expect(all).toHaveBeenCalledWith(25, 0);
   });
 
+  it("filters sidebar summaries by workspace and excludes archived sessions", () => {
+    const { repository, prepare, all } = createRepository();
+
+    repository.findSidebarSummaries(25, 0, {
+      workspaceId: "workspace-1",
+      includeArchivedSessions: false,
+    });
+
+    const sql = prepare.mock.calls[0]?.[0] || "";
+    expect(sql).toContain("workspace_id = ?");
+    expect(sql).toContain("task_session_metadata");
+    expect(sql).toContain("archived_at IS NOT NULL");
+    expect(all).toHaveBeenCalledWith("workspace-1", 25, 0);
+  });
+
   it("can query bot conversations by workspace and assigned role", () => {
     const { repository, prepare, all } = createRepository();
 

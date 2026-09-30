@@ -189,7 +189,12 @@ import {
   setupControlPlaneHandlers,
   shutdownControlPlane,
   startControlPlaneFromSettings,
+  getControlPlaneServer,
 } from "./control-plane";
+import { createWebHostIdentity } from "../host/web/host-identity";
+import { createBrowserHostApplication } from "../host/services/browser-host-application";
+import { isBrowserWebEnabled, webDeploymentFromEnv } from "../host/services/browser-web-config";
+import type { WebApplication } from "../host/web/WebApplication";
 import { sanitizeTaskMessageParams } from "./control-plane/sanitize";
 import {
   getArgValue,
@@ -281,6 +286,7 @@ import {
   getDesktopIconPath,
 } from "./branding";
 import { primeMacSafeStorageContext } from "./utils/mac-safe-storage-bootstrap";
+import { getSafeStorage } from "./utils/safe-storage";
 import {
   keepDirectRunAliveWithoutWindows,
   stripInjectedSystemCaOption,
@@ -293,6 +299,49 @@ import {
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
+let browserWebApplication: WebApplication | null = null;
+let browserPairingControlPlane: ReturnType<typeof getControlPlaneServer> = null;
+let webAccessServerRef: WebAccessServer | null = null;
+
+async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): Promise<void> {
+  if (!isBrowserWebEnabled()) return;
+  try {
+    if (!browserWebApplication) {
+      const identity = await createWebHostIdentity({
+        userDataDir: getUserDataDir(),
+        profileId: getActiveProfileId(),
+        runtime: "electron",
+        appVersion: app.getVersion(),
+      });
+      browserWebApplication = createBrowserHostApplication({
+        db: dbManager.getDatabase(),
+        webDirectory: path.join(app.getAppPath(), "dist", "web"),
+        deployment: webDeploymentFromEnv(),
+        identity,
+        taskCommands: agentDaemon,
+        agentDaemon,
+        channelGateway,
+        notificationService: getNotificationService() ?? undefined,
+        getRoutineService: () => routineService,
+        getEventTriggerService: () => eventTriggerService,
+        getHeartbeatService: () => heartbeatService,
+      });
+    }
+
+    const controlPlane = getControlPlaneServer();
+    if (controlPlane?.isRunning && controlPlane !== browserPairingControlPlane) {
+      await controlPlane.setWebApplication(browserWebApplication);
+      controlPlane.registerMethod("web.pair", async (client) => {
+        if (!client.hasScope("admin")) throw new Error("Admin scope is required.");
+        return browserWebApplication!.createPairingCode("control-plane");
+      });
+      browserPairingControlPlane = controlPlane;
+    }
+    if (webAccessServer) await webAccessServer.setWebApplication(browserWebApplication);
+  } catch (error) {
+    console.error("[BrowserWeb] Failed to attach browser application:", error);
+  }
+}
 /** Whether the database worker settled every accepted operation at shutdown (DB6). */
 let databaseWorkerDrained = true;
 let agentDaemon: AgentDaemon;
@@ -486,13 +535,11 @@ async function ensureCoreAutomationProfiles(): Promise<void> {
     logger.info(`Added ${addedAgents.length} new default agent(s)`);
   }
 
-  const eligibleRoles = (await agentRoleRepo
-    .findAll(false))
-    .filter(
-      (role) =>
-        role.roleKind !== "persona_template" &&
-        (role.roleKind === "system" || role.roleKind === "custom"),
-    );
+  const eligibleRoles = (await agentRoleRepo.findAll(false)).filter(
+    (role) =>
+      role.roleKind !== "persona_template" &&
+      (role.roleKind === "system" || role.roleKind === "custom"),
+  );
   if (!eligibleRoles.length) {
     return;
   }
@@ -1750,15 +1797,19 @@ if (isMacSafeStorageMigrationWorker) {
         throw error;
       }
       dbManager.beginRun("desktop");
+      logStartupLane("blocking_startup", { event: "database_manager_ready" });
       // Database worker (async SQLite plan, DB2); starts after schema setup. Awaited so
       // each domain's backend is chosen once for the run (DB7): a worker that fails to
       // start leaves the whole run on the host backend.
+      logStartupLane("blocking_startup", { event: "database_worker_start" });
       await startDatabaseWorker({ dbPath: dbManager.getDatabasePath(), runtime: "desktop" });
+      logStartupLane("blocking_startup", { event: "database_worker_ready" });
       // Reporting reader (DB4); report-style reads only, so it may become ready later.
       const reportingReader = startReportingReader({
         dbPath: dbManager.getDatabasePath(),
         runtime: "desktop",
       });
+      logStartupLane("blocking_startup", { event: "reporting_reader_start_requested" });
       hostPerfMonitor = startHostPerfMonitor({
         runtime: "desktop",
         isSummaryEnabled: () =>
@@ -1778,11 +1829,14 @@ if (isMacSafeStorageMigrationWorker) {
         ),
       );
       usageInsightsProjector.warm();
+      logStartupLane("blocking_startup", { event: "usage_insights_warm_requested" });
       // DB4: maintenance chunks run in the database worker when this run uses it.
       const runDatabaseMaintenance = async () =>
         dbManager.runPostStartupMaintenance({ client: await getDatabaseClient() });
       if (startupQuietMode) {
+        logStartupLane("blocking_startup", { event: "database_maintenance_start" });
         await runDatabaseMaintenance();
+        logStartupLane("blocking_startup", { event: "database_maintenance_complete" });
       } else {
         deferStartupTask("database-maintenance", runDatabaseMaintenance);
       }
@@ -1798,7 +1852,9 @@ if (isMacSafeStorageMigrationWorker) {
           logger.warn("Failed to prune temp workspaces:", error);
         }
       };
+      logStartupLane("blocking_startup", { event: "temp_workspace_prune_start" });
       await runTempWorkspacePrune();
+      logStartupLane("blocking_startup", { event: "temp_workspace_prune_complete" });
       tempWorkspacePruneTimer = setInterval(
         // The prune reports its own failures.
         () => void runTempWorkspacePrune(),
@@ -1823,6 +1879,7 @@ if (isMacSafeStorageMigrationWorker) {
       // This MUST be done before provider factories so they can migrate legacy settings
       new SecureSettingsRepository(dbManager.getDatabase());
       logger.info("SecureSettingsRepository initialized");
+      logStartupLane("blocking_startup", { event: "secure_settings_ready" });
       if (process.platform === "darwin") {
         await migrateLegacyMacSafeStorageSettings({
           platform: process.platform,
@@ -1835,7 +1892,7 @@ if (isMacSafeStorageMigrationWorker) {
         await migrateLegacyMacSafeStorageChannels({
           platform: process.platform,
           database: dbManager.getDatabase(),
-          safeStorage,
+          safeStorage: getSafeStorage(),
           executable: process.execPath,
           appPath: app.getAppPath(),
           logger,
@@ -2967,14 +3024,14 @@ if (isMacSafeStorageMigrationWorker) {
           recordActivity: ({ workspaceId, agentRoleId, title, description, metadata }) => {
             void activityRepo
               .create({
-              workspaceId,
-              agentRoleId,
-              actorType: "system",
-              activityType: "info",
-              title,
-              description,
-              metadata,
-            })
+                workspaceId,
+                agentRoleId,
+                actorType: "system",
+                activityType: "info",
+                title,
+                description,
+                metadata,
+              })
               .catch((error: unknown) => logger.warn("Failed to record activity:", error));
           },
           listWorkspaceContexts: () =>
@@ -3091,13 +3148,13 @@ if (isMacSafeStorageMigrationWorker) {
           recordActivity: ({ workspaceId, title, description, metadata }) => {
             void activityRepo
               .create({
-              workspaceId,
-              actorType: "system",
-              activityType: "info",
-              title,
-              description,
-              metadata,
-            })
+                workspaceId,
+                actorType: "system",
+                activityType: "info",
+                title,
+                description,
+                metadata,
+              })
               .catch((error: unknown) => logger.warn("Failed to record activity:", error));
           },
           wakeHeartbeats: ({ text, mode }) => {
@@ -3361,6 +3418,8 @@ if (isMacSafeStorageMigrationWorker) {
         } else if (cp.skipped) {
           logger.info("Control Plane disabled (skipping auto-start)");
         }
+
+        await attachBrowserWebApplication();
 
         logger.info(`Startup complete in ${Date.now() - startupStartedAt} ms`);
         return;
@@ -3775,13 +3834,13 @@ if (isMacSafeStorageMigrationWorker) {
           recordActivity: ({ workspaceId, activityType, title, description, metadata }) => {
             void activityRepo
               .create({
-              workspaceId,
-              actorType: "system",
-              activityType,
-              title,
-              description,
-              metadata,
-            })
+                workspaceId,
+                actorType: "system",
+                activityType,
+                title,
+                description,
+                metadata,
+              })
               .catch((error: unknown) => logger.warn("Failed to record activity:", error));
           },
           emitTrigger: (event) => {
@@ -3898,8 +3957,9 @@ if (isMacSafeStorageMigrationWorker) {
               ? await dailyBriefingService.configuredWorkspaceIds()
               : [];
             const targetWorkspaceIds = new Set(
-              configuredWorkspaceIds
-                .filter((workspaceId) => typeof workspaceId === "string" && workspaceId.length > 0),
+              configuredWorkspaceIds.filter(
+                (workspaceId) => typeof workspaceId === "string" && workspaceId.length > 0,
+              ),
             );
             const jobs = await cronService.list({ includeDisabled: true });
             for (const job of jobs) {
@@ -4191,6 +4251,7 @@ if (isMacSafeStorageMigrationWorker) {
           },
           log: (...args: unknown[]) => console.log("[WebAccess]", ...args),
         });
+        webAccessServerRef = webAccessServer;
         const normalizedWebAccessSettings = webAccessServer.getConfig();
         if (
           JSON.stringify(initialWebAccessSettings) !== JSON.stringify(normalizedWebAccessSettings)
@@ -4206,7 +4267,14 @@ if (isMacSafeStorageMigrationWorker) {
         }
         setupWebAccessHandlers(webAccessServer, {
           saveSettings: saveWebAccessSettings,
+          createPairingCode: isBrowserWebEnabled()
+            ? () => {
+                if (!browserWebApplication) throw new Error("Browser application is unavailable.");
+                return browserWebApplication.createPairingCode("web-access");
+              }
+            : undefined,
         });
+        await attachBrowserWebApplication(webAccessServer);
 
         // Hook triggers into gateway message events
         channelGateway.onEvent((event) => {
@@ -4364,6 +4432,13 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         { name: "canvas", run: () => cleanupCanvasHandlers() },
+        {
+          name: "web access",
+          run: async () => {
+            await webAccessServerRef?.stop();
+            webAccessServerRef = null;
+          },
+        },
         { name: "control plane", run: () => shutdownControlPlane() },
         {
           name: "event triggers",

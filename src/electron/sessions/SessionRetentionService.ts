@@ -279,7 +279,7 @@ export class SessionRetentionService {
       const taskIds = this.taskRepo
         .findAll(-1, 0, { includeArchivedSessions: true })
         .map((task) => task.id);
-      const events = this.eventRepo.findByTaskIds(taskIds, ["user_message"]);
+      const events = this.eventRepo.findByTaskIds(taskIds, ["user_message", "task_created"]);
       const keys = new Set<string>();
       for (const event of events) {
         const payload = event.payload as Record<string, unknown> | undefined;

@@ -297,6 +297,13 @@ function hasToolAffinity(toolName: string, tools?: Iterable<string>): boolean {
   return false;
 }
 
+function hasExplicitToolNameReference(toolName: string, taskText: string): boolean {
+  const normalizedName = toolName.trim().toLowerCase();
+  if (!normalizedName) return false;
+  const escapedName = normalizedName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^a-z0-9_])${escapedName}(?:$|[^a-z0-9_])`).test(taskText);
+}
+
 function inferToolExposureMetadata(
   toolName: string,
   runtime?: RuntimeToolMetadata,
@@ -460,7 +467,9 @@ export function evaluateToolAvailability(
         ? { decision: "allow", metadata }
         : { decision: "defer", reason: "explicit_multi_agent_intent_required", metadata };
     case "integration":
-      return INTEGRATION_INTENT_PATTERN.test(taskText)
+      return INTEGRATION_INTENT_PATTERN.test(taskText) ||
+        (normalizedToolName.toLowerCase().startsWith("mcp_") &&
+          hasExplicitToolNameReference(normalizedToolName, taskText))
         ? { decision: "allow", metadata }
         : { decision: "defer", reason: "integration_intent_missing", metadata };
     case "browser":

@@ -4,6 +4,7 @@ const mockState = vi.hoisted(() => ({
   addServerMock: vi.fn(),
   execFileMock: vi.fn(),
   loadSettingsMock: vi.fn(),
+  updateServerMock: vi.fn(),
   mockInstalledServers: [] as Any[],
 }));
 
@@ -28,16 +29,17 @@ vi.mock("../settings", () => ({
   MCPSettingsManager: {
     loadSettings: mockState.loadSettingsMock,
     addServer: mockState.addServerMock,
-    updateServer: vi.fn(),
+    updateServer: mockState.updateServerMock,
     removeServer: vi.fn(),
   },
 }));
 
-import { MCPRegistryManager } from "../registry/MCPRegistryManager";
+import { MCPRegistryManager, REGISTRY_ENTRY_PROVENANCE } from "../registry/MCPRegistryManager";
 
 describe("MCPRegistryManager install defaults", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    MCPRegistryManager.setInstallConfirmationHandler(null);
     mockState.mockInstalledServers = [];
     mockState.execFileMock.mockImplementation(
       (_file: string, _args: string[], _options: Any, callback: Any) =>
@@ -146,6 +148,154 @@ describe("MCPRegistryManager install defaults", () => {
       PITCHBOOK_API_KEY: "",
       PITCHBOOK_BASE_URL: "",
     });
+  });
+
+  it("uses a one-call launch-plan approval for remote installs without replacing the desktop fallback", async () => {
+    const entry = {
+      id: "qa-remote-echo",
+      name: "QA Remote Echo",
+      description: "Disposable fixture",
+      version: "1.0.0",
+      author: "CoWork QA",
+      installMethod: "manual" as const,
+      transport: "stdio" as const,
+      defaultCommand: "node",
+      defaultArgs: ["--qa-echo"],
+      tools: [],
+      tags: ["qa"],
+      verified: true,
+    };
+    const lookup = vi.spyOn(MCPRegistryManager, "getServer").mockResolvedValue(entry);
+    const desktopConfirmation = vi.fn(async () => false);
+    const browserConfirmation = vi.fn(async () => true);
+    MCPRegistryManager.setInstallConfirmationHandler(desktopConfirmation);
+
+    await expect(
+      MCPRegistryManager.installServer(entry.id, [], browserConfirmation),
+    ).resolves.toMatchObject({
+      registryId: entry.id,
+      command: "node",
+      args: ["--qa-echo"],
+    });
+
+    expect(browserConfirmation).toHaveBeenCalledWith({
+      entryId: entry.id,
+      name: entry.name,
+      publisher: entry.author,
+      transport: entry.transport,
+      command: "node",
+      args: ["--qa-echo"],
+      envKeys: [],
+      url: undefined,
+    });
+    expect(desktopConfirmation).not.toHaveBeenCalled();
+    await expect(MCPRegistryManager.installServer(entry.id)).rejects.toThrow("was declined");
+    expect(desktopConfirmation).toHaveBeenCalledTimes(1);
+    lookup.mockRestore();
+  });
+
+  it("applies explicit browser approval to bundled entries while preserving native trust behavior", async () => {
+    const entry = {
+      id: "qa-bundled-echo",
+      name: "QA Bundled Echo",
+      description: "Disposable fixture",
+      version: "1.0.0",
+      author: "CoWork QA",
+      installMethod: "manual" as const,
+      transport: "stdio" as const,
+      defaultCommand: "node",
+      defaultArgs: ["--qa-echo"],
+      tools: [],
+      tags: ["qa"],
+      verified: true,
+      [REGISTRY_ENTRY_PROVENANCE]: "bundled" as const,
+    };
+    const lookup = vi.spyOn(MCPRegistryManager, "getServer").mockResolvedValue(entry);
+    const browserConfirmation = vi.fn(async () => true);
+    MCPRegistryManager.setInstallConfirmationHandler(null);
+
+    await expect(
+      MCPRegistryManager.installServer(entry.id, [], browserConfirmation),
+    ).resolves.toMatchObject({ registryId: entry.id });
+    expect(browserConfirmation).toHaveBeenCalledWith({
+      entryId: entry.id,
+      name: entry.name,
+      publisher: entry.author,
+      transport: entry.transport,
+      command: "node",
+      args: ["--qa-echo"],
+      envKeys: [],
+      url: undefined,
+    });
+    await expect(MCPRegistryManager.installServer(entry.id)).resolves.toMatchObject({
+      registryId: entry.id,
+    });
+    lookup.mockRestore();
+  });
+
+  it("checks remote registry updates against a per-call launch-plan approval before mutating settings", async () => {
+    const entry = {
+      id: "qa-remote-echo",
+      name: "QA Remote Echo",
+      description: "Disposable fixture",
+      version: "2.0.0",
+      author: "CoWork QA",
+      installMethod: "manual" as const,
+      transport: "stdio" as const,
+      defaultCommand: "node",
+      defaultArgs: ["--qa-echo-v2"],
+      tools: [],
+      tags: ["qa"],
+      verified: true,
+    };
+    const installed = {
+      id: "installed-qa-echo",
+      name: entry.name,
+      description: entry.description,
+      enabled: true,
+      transport: "stdio" as const,
+      command: "node",
+      args: ["--qa-echo-v1"],
+      registryId: entry.id,
+      version: "1.0.0",
+    };
+    mockState.mockInstalledServers = [installed];
+    const updated = { ...installed, args: entry.defaultArgs, version: entry.version };
+    mockState.updateServerMock.mockReturnValue(updated);
+    const registry = vi.spyOn(MCPRegistryManager, "fetchRegistry").mockResolvedValue({
+      version: "qa",
+      lastUpdated: "today",
+      servers: [entry],
+    });
+    const desktopConfirmation = vi.fn(async () => false);
+    const browserConfirmation = vi.fn(async () => true);
+    MCPRegistryManager.setInstallConfirmationHandler(desktopConfirmation);
+
+    await expect(
+      MCPRegistryManager.updateServer(installed.id, browserConfirmation),
+    ).resolves.toMatchObject({ args: ["--qa-echo-v2"], version: "2.0.0" });
+
+    expect(browserConfirmation).toHaveBeenCalledWith({
+      entryId: entry.id,
+      name: entry.name,
+      publisher: entry.author,
+      transport: entry.transport,
+      command: "node",
+      args: ["--qa-echo-v2"],
+      envKeys: [],
+      url: undefined,
+    });
+    expect(mockState.updateServerMock).toHaveBeenCalledWith(installed.id, {
+      version: "2.0.0",
+      command: "node",
+      args: ["--qa-echo-v2"],
+    });
+    expect(desktopConfirmation).not.toHaveBeenCalled();
+    mockState.updateServerMock.mockClear();
+    await expect(MCPRegistryManager.updateServer(installed.id)).rejects.toThrow("was declined");
+    expect(desktopConfirmation).toHaveBeenCalledTimes(1);
+    expect(mockState.updateServerMock).not.toHaveBeenCalled();
+    registry.mockRestore();
   });
 
   it("exposes only read-only tools for finance connector presets", async () => {

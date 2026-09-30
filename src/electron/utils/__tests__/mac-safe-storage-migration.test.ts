@@ -230,6 +230,21 @@ describe("macOS safeStorage legacy migration", () => {
     expect(spawnProcess).not.toHaveBeenCalled();
   });
 
+  it("does not touch channel storage when OS keychain access is disabled", async () => {
+    const prepare = vi.fn();
+    await expect(
+      migrateLegacyMacSafeStorageChannels({
+        platform: "darwin",
+        database: { prepare },
+        safeStorage: null,
+        executable: "electron",
+        appPath: ".",
+        logger: { info: vi.fn(), warn: vi.fn() },
+      }),
+    ).resolves.toBe(0);
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
   it("re-encrypts decryptable legacy channel configs under the current Keychain identity", async () => {
     const originalConfig = `enc:${Buffer.from("legacy-channel-ciphertext").toString("base64")}`;
     const rows = [{ id: "email-channel", config: originalConfig }];

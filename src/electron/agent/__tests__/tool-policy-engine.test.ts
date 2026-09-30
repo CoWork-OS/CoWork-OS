@@ -286,6 +286,22 @@ describe("evaluateToolAvailability session checklist", () => {
   });
 });
 
+describe("evaluateToolAvailability exact MCP references", () => {
+  const baseCtx = {
+    taskText: "Use mcp_qa_echo exactly once.",
+    taskDomain: "auto" as const,
+    taskIntent: "general" as const,
+    requiredTools: undefined as Iterable<string> | undefined,
+    recentlyUsedTools: undefined as Iterable<string> | undefined,
+  };
+
+  it("allows only the currently evaluated MCP tool when its exact name is requested", () => {
+    expect(evaluateToolAvailability("mcp_qa_echo", baseCtx).decision).toBe("allow");
+    expect(evaluateToolAvailability("mcp_qa_admin_reset", baseCtx).decision).toBe("defer");
+    expect(evaluateToolAvailability("mcp_qa_echo_extra", baseCtx).decision).toBe("defer");
+  });
+});
+
 describe("evaluateToolAvailability open_application", () => {
   const baseCtx = {
     taskText: "Open Calculator and show me the 159th Fibonacci number.",

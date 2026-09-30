@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
 
 export interface ConnectorEnvField {
   key: string;
@@ -48,18 +49,18 @@ export function ConnectorEnvModal({
 
   const reconnectServer = async () => {
     try {
-      await window.electronAPI.disconnectMCPServer(serverId);
+      await invokeMcpApi("disconnectMCPServer", serverId);
     } catch {
       // ignore
     }
-    await window.electronAPI.connectMCPServer(serverId);
+    await invokeMcpApi("connectMCPServer", serverId);
   };
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
-      await window.electronAPI.updateMCPServer(serverId, { env: mergeEnv() });
+      await invokeMcpApi("updateMCPServer", serverId, { env: mergeEnv() });
       await reconnectServer();
       onSaved();
       onClose();

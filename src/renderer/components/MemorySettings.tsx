@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { hasHostMethod } from "../host/browser-capabilities";
 import { ChatGPTImportWizard } from "./ChatGPTImportWizard";
 import { PromptMemoryImportWizard } from "./PromptMemoryImportWizard";
 
@@ -92,6 +93,7 @@ interface ChronicleObservationItem {
 
 interface MemorySettingsProps {
   workspaceId: string;
+  canDelete?: boolean;
   onSettingsChanged?: () => void;
 }
 
@@ -191,10 +193,24 @@ function ToggleRow({ title, description, checked, onChange, disabled }: ToggleRo
 
 const PAGE_SIZE = 20;
 
-export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySettingsProps) {
+export function MemorySettings({
+  workspaceId,
+  onSettingsChanged,
+  canDelete = true,
+}: MemorySettingsProps) {
   const [settings, setSettings] = useState<MemorySettingsData | null>(null);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const activeWorkspace = useRef(workspaceId);
+  activeWorkspace.current = workspaceId;
+  const loadGeneration = useRef(0);
+  const importedGeneration = useRef(0);
+  const reportError = (error: unknown) => {
+    if (activeWorkspace.current === workspaceId)
+      setActionError(error instanceof Error ? error.message : "The memory action failed.");
+  };
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState(false);
@@ -231,14 +247,32 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
   const [deletingChronicleId, setDeletingChronicleId] = useState<string | null>(null);
 
   useEffect(() => {
+    setSettings(null);
+    setActionError(null);
+    setSaving(false);
+    setLoadingImported(false);
+    setImportedMemories([]);
+    setShowImported(false);
+    setShowImportWizard(false);
+    setShowPromptImportWizard(false);
+    importedGeneration.current += 1;
     if (workspaceId) {
       loadData();
     }
+    return () => {
+      loadGeneration.current += 1;
+      importedGeneration.current += 1;
+    };
   }, [workspaceId]);
 
-  const loadData = async () => {
+  const loadData = async (background = false) => {
+    if (activeWorkspace.current !== workspaceId) return;
+    const generation = ++loadGeneration.current;
+    const current = () =>
+      generation === loadGeneration.current && activeWorkspace.current === workspaceId;
     try {
-      setLoading(true);
+      if (!background) setLoading(true);
+      setLoadError(null);
       const [
         loadedSettings,
         loadedStats,
@@ -258,6 +292,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         window.electronAPI.getRecentMemories({ workspaceId, limit: 20 }),
         window.electronAPI.listChronicleObservations({ workspaceId, limit: 50 }),
       ]);
+      if (!current()) return;
       setSettings(loadedSettings);
       setStats(loadedStats);
       setImportedStats(loadedImportedStats);
@@ -272,9 +307,13 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         Array.isArray(loadedChronicleObservations) ? loadedChronicleObservations : [],
       );
     } catch (error) {
-      console.error("Failed to load memory settings:", error);
+      if (current()) {
+        const message = error instanceof Error ? error.message : "Failed to load memory settings.";
+        if (background) setActionError(message);
+        else setLoadError(message);
+      }
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   };
 
@@ -301,7 +340,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         setMemorySearchResults(Array.isArray(details) ? details : []);
       } catch (error) {
         if (!cancelled) {
-          console.error("Failed to search memories:", error);
+          reportError(error);
           setMemorySearchResults([]);
         }
       } finally {
@@ -319,6 +358,10 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
 
   const loadImportedMemories = useCallback(
     async (offset = 0) => {
+      if (activeWorkspace.current !== workspaceId) return;
+      const generation = ++importedGeneration.current;
+      const current = () =>
+        generation === importedGeneration.current && activeWorkspace.current === workspaceId;
       try {
         setLoadingImported(true);
         const memories = await window.electronAPI.findImportedMemories({
@@ -326,6 +369,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
           limit: PAGE_SIZE,
           offset,
         });
+        if (!current()) return;
         if (offset === 0) {
           setImportedMemories(memories);
         } else {
@@ -334,9 +378,9 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         setImportedOffset(offset + memories.length);
         setImportedHasMore(memories.length === PAGE_SIZE);
       } catch (error) {
-        console.error("Failed to load imported memories:", error);
+        if (current()) reportError(error);
       } finally {
-        setLoadingImported(false);
+        if (current()) setLoadingImported(false);
       }
     },
     [workspaceId],
@@ -360,13 +404,14 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
     try {
       setDeletingImported(true);
       await window.electronAPI.deleteImportedMemories(workspaceId);
+      if (activeWorkspace.current !== workspaceId) return;
       setImportedMemories([]);
       setImportedOffset(0);
       setImportedHasMore(false);
       setShowImported(false);
       await loadData();
     } catch (error) {
-      console.error("Failed to delete imported memories:", error);
+      reportError(error);
     } finally {
       setDeletingImported(false);
     }
@@ -382,7 +427,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       await loadImportedMemories(0);
       await loadData();
     } catch (error) {
-      console.error("Failed to delete imported memory entry:", error);
+      reportError(error);
     } finally {
       setDeletingImportedEntryId(null);
     }
@@ -399,6 +444,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         memoryId,
         ignored: !currentlyIgnored,
       });
+      if (activeWorkspace.current !== workspaceId) return;
 
       if (result?.memory) {
         setImportedMemories((prev) =>
@@ -420,7 +466,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
 
       await loadData();
     } catch (error) {
-      console.error("Failed to update imported memory prompt-recall state:", error);
+      reportError(error);
     } finally {
       setUpdatingImportedEntryId(null);
     }
@@ -431,12 +477,14 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
     try {
       setSaving(true);
       await window.electronAPI.saveMemorySettings({ workspaceId, settings: updates });
-      setSettings({ ...settings, ...updates });
+      const saved = await window.electronAPI.getMemorySettings(workspaceId);
+      if (activeWorkspace.current !== workspaceId) return;
+      setSettings(saved);
       onSettingsChanged?.();
     } catch (error) {
-      console.error("Failed to save memory settings:", error);
+      reportError(error);
     } finally {
-      setSaving(false);
+      if (activeWorkspace.current === workspaceId) setSaving(false);
     }
   };
 
@@ -451,13 +499,14 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
     try {
       setClearing(true);
       await window.electronAPI.clearMemory(workspaceId);
+      if (activeWorkspace.current !== workspaceId) return;
       setImportedMemories([]);
       setImportedOffset(0);
       setImportedHasMore(false);
       setShowImported(false);
       await loadData();
     } catch (error) {
-      console.error("Failed to clear memory:", error);
+      reportError(error);
     } finally {
       setClearing(false);
     }
@@ -469,7 +518,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       await window.electronAPI.deleteChronicleObservation({ workspaceId, observationId });
       await loadData();
     } catch (error) {
-      console.error("Failed to delete Chronicle observation:", error);
+      reportError(error);
     } finally {
       setDeletingChronicleId(null);
     }
@@ -481,7 +530,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       await window.electronAPI.clearChronicleObservations({ workspaceId });
       await loadData();
     } catch (error) {
-      console.error("Failed to clear Chronicle observations:", error);
+      reportError(error);
     } finally {
       setClearingChronicle(false);
     }
@@ -505,7 +554,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       }));
       setNewFact("");
     } catch (error) {
-      console.error("Failed to add user fact:", error);
+      reportError(error);
     } finally {
       setSavingFact(false);
     }
@@ -523,7 +572,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         };
       });
     } catch (error) {
-      console.error("Failed to delete user fact:", error);
+      reportError(error);
     }
   };
 
@@ -543,7 +592,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         };
       });
     } catch (error) {
-      console.error("Failed to update user fact:", error);
+      reportError(error);
     }
   };
 
@@ -553,7 +602,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       setRelationshipItems((prev) => prev.filter((item) => item.id !== itemId));
       setDueSoonItems((prev) => prev.filter((item) => item.id !== itemId));
     } catch (error) {
-      console.error("Failed to delete relationship memory:", error);
+      reportError(error);
     }
   };
 
@@ -570,7 +619,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         setDueSoonItems((prev) => prev.filter((entry) => entry.id !== item.id));
       }
     } catch (error) {
-      console.error("Failed to update commitment status:", error);
+      reportError(error);
     }
   };
 
@@ -588,7 +637,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       setRelationshipItems((prev) => prev.map((entry) => (entry.id === item.id ? updated : entry)));
       setDueSoonItems((prev) => prev.map((entry) => (entry.id === item.id ? updated : entry)));
     } catch (error) {
-      console.error("Failed to edit relationship memory:", error);
+      reportError(error);
     }
   };
 
@@ -610,13 +659,22 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       );
       await loadData();
     } catch (error) {
-      console.error("Failed to cleanup recurring relationship history:", error);
+      reportError(error);
       setRecurringCleanupMessage("Failed to clean recurring history. Please try again.");
     } finally {
       setCleaningRecurringHistory(false);
     }
   };
 
+  if (loadError)
+    return (
+      <div className="settings-section">
+        <p role="alert">{loadError}</p>
+        <button className="settings-button" onClick={() => void loadData()}>
+          Retry
+        </button>
+      </div>
+    );
   if (loading || !settings) {
     return (
       <div className="settings-section">
@@ -634,7 +692,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
           setShowImportWizard(false);
           loadData();
         }}
-        onImportComplete={() => loadData()}
+        onImportComplete={() => void loadData(true)}
       />
     );
   }
@@ -646,6 +704,14 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
 
   return (
     <div className="settings-section">
+      {actionError && (
+        <div role="alert">
+          {actionError}
+          <button className="settings-button" onClick={() => setActionError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       <div
         style={{
           display: "flex",
@@ -815,7 +881,16 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
               <button
                 className="settings-button"
                 onClick={handleClearChronicleObservations}
-                disabled={clearingChronicle || chronicleObservations.length === 0}
+                disabled={
+                  clearingChronicle ||
+                  chronicleObservations.length === 0 ||
+                  !hasHostMethod("clearChronicleObservations")
+                }
+                title={
+                  !hasHostMethod("clearChronicleObservations")
+                    ? "Chronicle deletion is not connected to this browser host yet."
+                    : undefined
+                }
               >
                 {clearingChronicle ? "Clearing..." : "Clear Chronicle"}
               </button>
@@ -864,7 +939,15 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                   </div>
                   <button
                     className="memory-inline-btn danger"
-                    disabled={deletingChronicleId === observation.id}
+                    disabled={
+                      deletingChronicleId === observation.id ||
+                      !hasHostMethod("deleteChronicleObservation")
+                    }
+                    title={
+                      !hasHostMethod("deleteChronicleObservation")
+                        ? "Chronicle deletion is not connected to this browser host yet."
+                        : undefined
+                    }
                     onClick={() => void handleDeleteChronicleObservation(observation.id)}
                   >
                     {deletingChronicleId === observation.id ? "Deleting..." : "Delete"}
@@ -1318,7 +1401,12 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                             <button
                               className="memory-inline-btn danger"
                               onClick={() => handleDeleteImportedEntry(memory.id)}
-                              disabled={busy}
+                              disabled={busy || !canDelete}
+                              title={
+                                !canDelete
+                                  ? "This workspace does not permit memory deletion."
+                                  : undefined
+                              }
                               style={{ opacity: busy ? 0.6 : 1 }}
                             >
                               {deletingImportedEntryId === memory.id ? "Deleting..." : "Delete"}
@@ -1362,7 +1450,10 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                   <button
                     className="settings-button settings-button-danger"
                     onClick={handleDeleteImported}
-                    disabled={deletingImported}
+                    disabled={deletingImported || !canDelete}
+                    title={
+                      !canDelete ? "This workspace does not permit memory deletion." : undefined
+                    }
                     style={{
                       display: "block",
                       width: "100%",
@@ -1399,7 +1490,12 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
               <button
                 className="chatgpt-import-btn chatgpt-import-btn-primary"
                 onClick={() => setShowImportWizard(true)}
-                disabled={!settings.enabled}
+                disabled={!settings.enabled || !hasHostMethod("importChatGPT")}
+                title={
+                  !hasHostMethod("importChatGPT")
+                    ? "File-based conversation import is not connected to this browser host yet. Use text import above."
+                    : undefined
+                }
                 style={{ opacity: settings.enabled ? 1 : 0.5, whiteSpace: "nowrap" }}
               >
                 {importedStats && importedStats.count > 0 ? "Import More" : "Import"}
@@ -1514,7 +1610,8 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
                 <button
                   className="settings-button settings-button-danger"
                   onClick={handleClear}
-                  disabled={saving || clearing}
+                  disabled={saving || clearing || !canDelete}
+                  title={!canDelete ? "This workspace does not permit memory deletion." : undefined}
                   style={{ opacity: clearing ? 0.6 : 1 }}
                 >
                   {clearing ? "Clearing..." : "Clear All Memories"}
@@ -1534,7 +1631,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
             setShowPromptImportWizard(false);
             loadData();
           }}
-          onImportComplete={() => loadData()}
+          onImportComplete={() => void loadData(true)}
         />
       )}
     </div>

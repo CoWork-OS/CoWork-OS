@@ -49,6 +49,10 @@ type PickedFileEntry = {
 type BrowserFileBridgeOptions = {
   session: WebSessionBootstrap;
   listWorkspaces: () => Promise<Workspace[]>;
+  createMediaHandle: (
+    workspaceId: string,
+    relativePath: string,
+  ) => Promise<{ handle: string; mimeType: string; size: number }>;
   isActive: () => boolean;
 };
 
@@ -623,6 +627,34 @@ export function createBrowserFileBridge(options: BrowserFileBridgeOptions): Brow
         if (!relativePath) {
           return { success: false, error: "This file path is unavailable in the browser." };
         }
+        const fileName = relativePath.split("/").pop() || relativePath;
+        const extension = fileExtension(fileName);
+        const expectedVideoMime = SAFE_VIDEO_MIME_BY_EXTENSION[extension];
+        if (expectedVideoMime) {
+          const media = await options.createMediaHandle(workspace.id, relativePath);
+          ensureActive();
+          if (
+            !media ||
+            !/^[A-Za-z0-9_-]{43}$/.test(media.handle) ||
+            media.mimeType !== expectedVideoMime ||
+            !Number.isSafeInteger(media.size) ||
+            media.size <= 0
+          ) {
+            return { success: false, error: "Video preview is unavailable for this file." };
+          }
+          return {
+            success: true,
+            data: {
+              path: relativePath,
+              fileName,
+              fileType: "video",
+              content: null,
+              mimeType: media.mimeType,
+              size: media.size,
+              playbackUrl: webEndpoint(`workspace-files/media/${media.handle}`).toString(),
+            },
+          };
+        }
         const response = await download(workspace.id, relativePath);
         if (!response.ok) return { success: false, error: "This file is unavailable." };
 
@@ -637,8 +669,6 @@ export function createBrowserFileBridge(options: BrowserFileBridgeOptions): Brow
           return { success: false, error: "This file exceeds the browser preview limit." };
         }
 
-        const fileName = relativePath.split("/").pop() || relativePath;
-        const extension = fileExtension(fileName);
         const contentType = (response.headers.get("content-type") || "")
           .split(";", 1)[0]
           .trim()
@@ -747,6 +777,12 @@ const SAFE_IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".png": "image/png",
   ".webp": "image/webp",
+};
+
+const SAFE_VIDEO_MIME_BY_EXTENSION: Record<string, string> = {
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
 };
 
 const SAFE_TEXT_FILE_TYPES: Record<string, "code" | "csv" | "json" | "markdown" | "text"> = {

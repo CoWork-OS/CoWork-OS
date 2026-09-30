@@ -102,15 +102,23 @@ function installDocument(): void {
   vi.stubGlobal("document", fakeDocument);
 }
 
-function createBridge(workspaces: Workspace[] = [writableWorkspace]) {
+function createBridge(
+  workspaces: Workspace[] = [writableWorkspace],
+  createMediaHandle = vi.fn(async () => ({
+    handle: "a".repeat(43),
+    mimeType: "video/mp4",
+    size: 64,
+  })),
+) {
   active = true;
   listWorkspaces = vi.fn(async () => workspaces);
   const bridge = createBrowserFileBridge({
     session: { csrfToken: "csrf-secret" } as never,
     listWorkspaces,
+    createMediaHandle,
     isActive: () => active,
   });
-  return { ...bridge, api: bridge.methods as unknown as FileBridgeMethods };
+  return { ...bridge, api: bridge.methods as unknown as FileBridgeMethods, createMediaHandle };
 }
 
 function setPickedFiles(files: File[]): void {
@@ -600,6 +608,51 @@ describe("browser file bridge", () => {
       success: true,
       data: { fileType: "unsupported", content: null },
     });
+  });
+
+  it("returns an authenticated range-stream URL for supported video previews", async () => {
+    const createMediaHandle = vi.fn(async () => ({
+      handle: "b".repeat(43),
+      mimeType: "video/mp4",
+      size: 2_000_000_000,
+    }));
+    const { api } = createBridge([writableWorkspace], createMediaHandle);
+
+    await expect(
+      api.readFileForViewer("/work/project/media/demo.mp4", writableWorkspace.path),
+    ).resolves.toMatchObject({
+      success: true,
+      data: {
+        path: "media/demo.mp4",
+        fileName: "demo.mp4",
+        fileType: "video",
+        content: null,
+        mimeType: "video/mp4",
+        size: 2_000_000_000,
+        playbackUrl: "https://cowork.example/api/web/v1/workspace-files/media/" + "b".repeat(43),
+      },
+    });
+    expect(createMediaHandle).toHaveBeenCalledWith(writableWorkspace.id, "media/demo.mp4");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed video handles without exposing them to the browser", async () => {
+    const { api } = createBridge(
+      [writableWorkspace],
+      vi.fn(async () => ({
+        handle: "../private.mp4",
+        mimeType: "video/mp4",
+        size: 64,
+      })),
+    );
+
+    await expect(
+      api.readFileForViewer("media/demo.mp4", writableWorkspace.path),
+    ).resolves.toMatchObject({
+      success: false,
+      error: "Video preview is unavailable for this file.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("enforces picker count and aggregate byte limits before retaining selections", async () => {

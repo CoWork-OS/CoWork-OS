@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ElectronAPI } from "../../electron/preload";
+import type { CronEvent, CronJob, CronStatusSummary } from "../../electron/cron/types";
 import { WebTransportError, type BrowserHostTransport } from "../../renderer-web/transport";
 import type { WebSessionBootstrap } from "../../shared/host-api/contracts";
+import type { BrowserGitApi } from "../../shared/host-api/git";
+import type { MailboxEvent } from "../../shared/mailbox";
+import { BROWSER_HOST_UNSUPPORTED_ACTION_EVENT } from "./browser-capabilities";
 import { installBrowserHostBridge } from "./browser-host-bridge";
 
 const workspace = {
@@ -61,6 +66,7 @@ function stubBrowserWindow(previousApi?: unknown) {
     coworkBrowserHostInfo: undefined,
     sessionStorage: createMemoryStorage(),
     localStorage: createMemoryStorage(),
+    open: vi.fn(),
   };
   vi.stubGlobal("window", fakeWindow);
   vi.stubGlobal("navigator", { platform: "Win32" });
@@ -73,6 +79,553 @@ afterEach(() => {
 });
 
 describe("browser host bridge", () => {
+  it("polls scoped MCP status only while a shared screen subscribes", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    let statuses = [{ id: "qa", status: "connecting" }];
+    const request = vi.fn(async () => statuses);
+    const dispose = installBrowserHostBridge({ request } as unknown as BrowserHostTransport, {
+      ...session,
+      desktopMethods: { getMCPStatus: { mutation: false } },
+    });
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+    const listener = vi.fn();
+    const unsubscribe = api.onMCPStatusChange(listener);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledWith(
+      "desktop.getMCPStatus",
+      {
+        args: [{ workspaceId: workspace.id }],
+      },
+      undefined,
+    );
+    expect(listener).toHaveBeenLastCalledWith(statuses);
+    statuses = [{ id: "qa", status: "connected" }];
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(listener).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    const requests = request.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(request).toHaveBeenCalledTimes(requests);
+    dispose();
+  });
+
+  it("publishes only changed gateway revisions and stops on bridge disposal", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    let rows = [{ channelId: "qa", channelType: "discord", revision: "one" }];
+    const request = vi.fn(async () => rows);
+    const dispose = installBrowserHostBridge({ request } as unknown as BrowserHostTransport, {
+      ...session,
+      desktopMethods: { getGatewayChangeSignal: { mutation: false } },
+    });
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+    const listener = vi.fn();
+    api.onGatewayUsersUpdated(listener);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(listener).toHaveBeenCalledTimes(1);
+    rows = [{ ...rows[0], revision: "two" }];
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(listener).toHaveBeenLastCalledWith({ channelId: "qa", channelType: "discord" });
+    dispose();
+    const requests = request.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(request).toHaveBeenCalledTimes(requests);
+  });
+
+  it("connects Git Changes to read and replay-safe mutation RPCs", async () => {
+    const fakeWindow = stubBrowserWindow();
+    const request = vi.fn(async (method: string, _params?: unknown, _options?: unknown) => {
+      if (method === "git.status") {
+        return {
+          workspaceId: workspace.id,
+          isRepository: true,
+          branch: "main",
+          revision: "a".repeat(64),
+          clean: false,
+          changedFiles: 1,
+          stagedChanges: 0,
+          unstagedChanges: 1,
+          untrackedFiles: 0,
+          conflictedFiles: 0,
+          files: [],
+          filesTruncated: false,
+          truncated: false,
+        };
+      }
+      return { workspaceId: workspace.id, action: "stage", outcome: "applied" };
+    });
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      session,
+    );
+    const git = (fakeWindow as unknown as { coworkBrowserGit: BrowserGitApi }).coworkBrowserGit;
+
+    await expect(git.status(workspace.id)).resolves.toMatchObject({ branch: "main" });
+    await expect(
+      git.stage({
+        workspaceId: workspace.id,
+        expectedRevision: "a".repeat(64),
+        relativePaths: ["notes.txt"],
+      }),
+    ).resolves.toMatchObject({ action: "stage", outcome: "applied" });
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "git.status",
+      { workspaceId: workspace.id },
+      undefined,
+    );
+    expect(request.mock.calls[1]?.[0]).toBe("git.stage");
+    expect(request.mock.calls[1]?.[2]).toMatchObject({ mutation: true });
+    expect((request.mock.calls[1]?.[2] as { operationKey: string }).operationKey).toEqual(
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    );
+    dispose();
+    expect(
+      (fakeWindow as unknown as { coworkBrowserGit?: unknown }).coworkBrowserGit,
+    ).toBeUndefined();
+  });
+
+  it("publishes authenticated workflow capabilities to the shared renderer", () => {
+    const fakeWindow = stubBrowserWindow();
+    const capabilities = {
+      "browser.interactive": {
+        available: false as const,
+        reason: "Interactive browser streaming is unavailable on this host.",
+      },
+    };
+    const dispose = installBrowserHostBridge(
+      { request: vi.fn() } as unknown as BrowserHostTransport,
+      { ...session, capabilities } as WebSessionBootstrap,
+    );
+
+    expect(fakeWindow.coworkBrowserHostInfo).toMatchObject({ capabilities });
+    dispose();
+  });
+
+  it("leaves optional native local-model controls absent so browser UI can gate them", () => {
+    const fakeWindow = stubBrowserWindow();
+    const dispose = installBrowserHostBridge(
+      { request: vi.fn() } as unknown as BrowserHostTransport,
+      session,
+    );
+    const api = fakeWindow.electronAPI as unknown as Record<string, unknown>;
+
+    expect(api.startLocalAIServer).toBeUndefined();
+    expect(api.stopLocalAIServer).toBeUndefined();
+    expect(api.detectHardware).toBeUndefined();
+    expect(api.getVoiceSettings).toBeUndefined();
+    expect(api.infraGetStatus).toBeUndefined();
+    expect(api.infraGetSettings).toBeUndefined();
+    expect(api.onTrayOpenAbout).toBeUndefined();
+    expect(typeof api.createTask).toBe("function");
+    dispose();
+  });
+
+  it("announces an unsupported browser action before rejecting its host call", async () => {
+    const fakeWindow = stubBrowserWindow();
+    const dispatchEvent = vi.fn();
+    Object.assign(fakeWindow, { dispatchEvent });
+    const dispose = installBrowserHostBridge(
+      { request: vi.fn() } as unknown as BrowserHostTransport,
+      session,
+    );
+    const api = fakeWindow.electronAPI as unknown as Record<
+      string,
+      (...args: unknown[]) => unknown
+    >;
+
+    await expect(api.agentSecurityScan()).rejects.toMatchObject({
+      code: "UNSUPPORTED_CAPABILITY",
+    });
+    expect(dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: BROWSER_HOST_UNSUPPORTED_ACTION_EVENT,
+        detail: { method: "agentSecurityScan" },
+      }),
+    );
+    dispose();
+  });
+
+  it("announces an unsupported subscription instead of silently accepting it", () => {
+    const fakeWindow = stubBrowserWindow();
+    const dispatchEvent = vi.fn();
+    Object.assign(fakeWindow, { dispatchEvent });
+    const dispose = installBrowserHostBridge(
+      { request: vi.fn() } as unknown as BrowserHostTransport,
+      session,
+    );
+    const api = fakeWindow.electronAPI as unknown as Record<
+      string,
+      (...args: unknown[]) => unknown
+    >;
+
+    const unsubscribe = api.onTaskBoardEvent(vi.fn());
+
+    expect(typeof unsubscribe).toBe("function");
+    expect(dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: BROWSER_HOST_UNSUPPORTED_ACTION_EVENT,
+        detail: { method: "onTaskBoardEvent" },
+      }),
+    );
+    dispose();
+  });
+
+  it("polls host notification changes for shared renderer subscriptions", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    const methodNames = [
+      "listNotifications",
+      "getUnreadNotificationCount",
+      "markNotificationRead",
+      "markAllNotificationsRead",
+      "deleteNotification",
+      "deleteAllNotifications",
+    ];
+    const hostMethods = Object.fromEntries(
+      methodNames.map((name) => [
+        name,
+        { mutation: name.startsWith("mark") || name.startsWith("delete") },
+      ]),
+    );
+    const notification = {
+      id: "notification-one",
+      type: "task_completed",
+      title: "Task completed",
+      message: "The browser task finished.",
+      read: false,
+      createdAt: 1,
+    };
+    let notifications: (typeof notification)[] = [];
+    const transport = {
+      request: vi.fn(async (method: string) => {
+        if (method === "desktop.listNotifications") return notifications;
+        if (method === "desktop.getUnreadNotificationCount") {
+          return notifications.filter((item) => !item.read).length;
+        }
+        return null;
+      }),
+    } as unknown as BrowserHostTransport;
+    const dispose = installBrowserHostBridge(transport, {
+      ...session,
+      desktopMethods: hostMethods,
+    });
+    const api = fakeWindow.electronAPI as unknown as {
+      onNotificationEvent: (
+        listener: (event: { type: string; notification?: unknown }) => void,
+      ) => () => void;
+    };
+    const onEvent = vi.fn();
+    const unsubscribe = api.onNotificationEvent(onEvent);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onEvent).not.toHaveBeenCalled();
+    notifications = [notification];
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).toHaveBeenCalledWith({ type: "added", notification });
+    notifications = [{ ...notification, read: true }];
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "updated",
+      notification: { ...notification, read: true },
+    });
+    notifications = [];
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).toHaveBeenCalledWith({ type: "cleared" });
+    unsubscribe();
+    dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("polls queue status while subscribed and releases the timer when unsubscribed", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    const initialStatus: Awaited<ReturnType<ElectronAPI["getQueueStatus"]>> = {
+      runningCount: 1,
+      queuedCount: 0,
+      runningTaskIds: ["task-1"],
+      queuedTaskIds: [],
+      maxConcurrent: 4,
+    };
+    let currentStatus = initialStatus;
+    const request = vi.fn(async (method: string) => {
+      if (method === "desktop.getQueueStatus") return currentStatus;
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      {
+        ...session,
+        desktopMethods: { getQueueStatus: { mutation: false } },
+      } as WebSessionBootstrap,
+    );
+    const api = fakeWindow.electronAPI as unknown as {
+      onQueueUpdate: (listener: (status: typeof initialStatus) => void) => () => void;
+    };
+    const onUpdate = vi.fn();
+    const unsubscribe = api.onQueueUpdate(onUpdate);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onUpdate).toHaveBeenCalledWith(initialStatus);
+    currentStatus = { ...initialStatus, queuedCount: 1, queuedTaskIds: ["task-2"] };
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onUpdate).toHaveBeenLastCalledWith(currentStatus);
+    const callsAfterUpdate = request.mock.calls.length;
+
+    unsubscribe();
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(request).toHaveBeenCalledTimes(callsAfterUpdate);
+    expect(
+      (
+        fakeWindow.coworkBrowserHostInfo as unknown as {
+          desktopMethods: Record<string, unknown>;
+        }
+      ).desktopMethods.onQueueUpdate,
+    ).toEqual({ mutation: false });
+    dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("polls cron snapshots and emits bounded change events while Scheduled Tasks is mounted", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    let jobs: CronJob[] = [];
+    let observedAtMs = 1_000;
+    let schedulerEnabled = true;
+    const makeStatus = (): CronStatusSummary => ({
+      enabled: schedulerEnabled,
+      storePath: "/private/cron.json",
+      jobCount: jobs.length,
+      enabledJobCount: jobs.filter((job) => job.enabled).length,
+      runningJobCount: jobs.filter((job) => job.state.runningAtMs !== undefined).length,
+      maxConcurrentRuns: 1,
+      nextWakeAtMs: null,
+      scheduler: {
+        profileScope: "current_profile",
+        runnerKind: "daemon",
+        state: schedulerEnabled ? "running" : "disabled",
+        observedAtMs,
+        timeZone: "UTC",
+        runnerExclusivity: "unknown",
+      },
+    });
+    const request = vi.fn(async (method: string) => {
+      if (method === "desktop.getCronStatus") return makeStatus();
+      if (method === "desktop.listCronJobs") return jobs;
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      {
+        ...session,
+        desktopMethods: {
+          getCronStatus: { mutation: false },
+          listCronJobs: { mutation: false },
+        },
+      } as WebSessionBootstrap,
+    );
+    const api = fakeWindow.electronAPI as unknown as {
+      onCronEvent: (listener: (event: CronEvent) => void) => () => void;
+    };
+    const onEvent = vi.fn();
+    const unsubscribe = api.onCronEvent(onEvent);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onEvent).not.toHaveBeenCalled();
+    observedAtMs += 2_500;
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).not.toHaveBeenCalled();
+
+    const job = { id: "cron-job-1", name: "Daily check", enabled: false, state: {} } as CronJob;
+    jobs = [job];
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).toHaveBeenLastCalledWith({ jobId: job.id, action: "added" });
+
+    jobs = [{ ...job, name: "Updated check" }];
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).toHaveBeenLastCalledWith({ jobId: job.id, action: "updated" });
+
+    jobs = [];
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).toHaveBeenLastCalledWith({ jobId: job.id, action: "removed" });
+
+    schedulerEnabled = false;
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).toHaveBeenLastCalledWith({ jobId: "scheduler", action: "updated" });
+
+    unsubscribe();
+    const callsAfterUnsubscribe = request.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(request).toHaveBeenCalledTimes(callsAfterUnsubscribe);
+    expect(
+      (
+        fakeWindow.coworkBrowserHostInfo as unknown as {
+          desktopMethods: Record<string, unknown>;
+        }
+      ).desktopMethods.onCronEvent,
+    ).toEqual({ mutation: false });
+    dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("polls mailbox events for shared renderer subscriptions", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    const firstEvent: MailboxEvent = {
+      id: "mail-event-1",
+      fingerprint: "fingerprint-1",
+      type: "thread_summarized",
+      workspaceId: workspace.id,
+      timestamp: 1,
+      threadId: "thread-1",
+      evidenceRefs: [],
+      payload: {},
+    };
+    let events = [firstEvent];
+    const request = vi.fn(async (method: string) => {
+      if (method === "desktop.listMailboxEvents") return events;
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    const dispose = installBrowserHostBridge({ request } as unknown as BrowserHostTransport, {
+      ...session,
+      desktopMethods: { listMailboxEvents: { mutation: false } },
+    });
+    const api = fakeWindow.electronAPI as unknown as {
+      onMailboxEvent: (listener: (event: MailboxEvent) => void) => () => void;
+    };
+    const onEvent = vi.fn();
+    const unsubscribe = api.onMailboxEvent(onEvent);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onEvent).not.toHaveBeenCalled();
+    const nextEvent = { ...firstEvent, id: "mail-event-2", timestamp: 2 };
+    events = [nextEvent];
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onEvent).toHaveBeenCalledWith(nextEvent);
+
+    unsubscribe();
+    dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("polls a compact personality signal while subscribed", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    let signal = { agentName: "CoWork", activePersonality: "professional" };
+    const request = vi.fn(async (method: string) => {
+      if (method === "desktop.getPersonalitySettingsChangeSignal") return signal;
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    const dispose = installBrowserHostBridge({ request } as unknown as BrowserHostTransport, {
+      ...session,
+      desktopMethods: { getPersonalitySettingsChangeSignal: { mutation: false } },
+    });
+    const api = fakeWindow.electronAPI as unknown as {
+      onPersonalitySettingsChanged: (listener: (settings: unknown) => void) => () => void;
+    };
+    const onChanged = vi.fn();
+    const unsubscribe = api.onPersonalitySettingsChanged(onChanged);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onChanged).not.toHaveBeenCalled();
+    signal = { agentName: "Assistant", activePersonality: "friendly" };
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onChanged).toHaveBeenCalledWith(signal);
+
+    unsubscribe();
+    dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("polls host model-routing status for shared settings subscriptions", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    let status = { activeProvider: "openai", activeModel: "model-a" };
+    const request = vi.fn(async (method: string) => {
+      if (method === "desktop.getLLMRoutingStatus") return status;
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    const dispose = installBrowserHostBridge({ request } as unknown as BrowserHostTransport, {
+      ...session,
+      desktopMethods: { getLLMRoutingStatus: { mutation: false } },
+    });
+    const api = fakeWindow.electronAPI as unknown as {
+      onLLMRoutingEvent: (listener: (event: unknown) => void) => () => void;
+    };
+    const onChanged = vi.fn();
+    const unsubscribe = api.onLLMRoutingEvent(onChanged);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onChanged).not.toHaveBeenCalled();
+    status = { activeProvider: "anthropic", activeModel: "model-b" };
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(onChanged).toHaveBeenCalledWith(status);
+
+    unsubscribe();
+    dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("opens only safe external URL schemes in a new browser tab", () => {
+    const fakeWindow = stubBrowserWindow();
+    const dispose = installBrowserHostBridge(
+      { request: vi.fn() } as unknown as BrowserHostTransport,
+      session,
+    );
+    const api = fakeWindow.electronAPI as unknown as Record<
+      string,
+      (...args: unknown[]) => unknown
+    >;
+
+    api.openExternal("https://example.com/docs");
+    expect(fakeWindow.open).toHaveBeenCalledWith(
+      "https://example.com/docs",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(() => api.openExternal("javascript:alert(1)")).toThrow(
+      "Only http, https, and mailto URLs are allowed.",
+    );
+    const hostInfo = fakeWindow.coworkBrowserHostInfo as unknown as
+      | { desktopMethods?: Record<string, unknown> }
+      | undefined;
+    expect(hostInfo?.desktopMethods?.openExternal).toEqual({ mutation: false });
+    dispose();
+  });
+
+  it("keeps session auto-approval scoped to the authenticated browser page", async () => {
+    const fakeWindow = stubBrowserWindow();
+    const dispose = installBrowserHostBridge(
+      { request: vi.fn() } as unknown as BrowserHostTransport,
+      session,
+    );
+    const api = fakeWindow.electronAPI as unknown as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >;
+
+    expect(await api.getSessionAutoApprove()).toBe(false);
+    await api.setSessionAutoApprove(true);
+    expect(await api.getSessionAutoApprove()).toBe(true);
+    expect(
+      (
+        fakeWindow.coworkBrowserHostInfo as unknown as {
+          desktopMethods: Record<string, unknown>;
+        }
+      ).desktopMethods,
+    ).toMatchObject({
+      getSessionAutoApprove: { mutation: false },
+      setSessionAutoApprove: { mutation: false },
+    });
+    await expect(api.setSessionAutoApprove("true")).rejects.toThrow(
+      "Session auto-approval must be a boolean.",
+    );
+    dispose();
+  });
+
   it("keeps independent pack toggles usable while another target awaits its receipt", async () => {
     const fakeWindow = stubBrowserWindow();
     const pending: Array<() => void> = [];
@@ -117,10 +670,21 @@ describe("browser host bridge", () => {
     const initialSession = {
       ...session,
       providerReady: false,
-      desktopMethods: { saveLLMSettings: { mutation: true } },
+      desktopMethods: {
+        getLLMSettings: { mutation: false },
+        saveLLMSettings: { mutation: true },
+      },
     } as WebSessionBootstrap;
-    const request = vi.fn(async (method: string) => {
-      if (method === "desktop.saveLLMSettings") return { success: true };
+    const request = vi.fn(async (method: string, params?: unknown) => {
+      if (method === "desktop.getLLMSettings") {
+        return { settings: { providerType: "anthropic" }, revision: "revision-one" };
+      }
+      if (method === "desktop.saveLLMSettings") {
+        expect(params).toMatchObject({
+          args: [{ set: [], remove: [], replaceSecrets: [] }, "revision-one"],
+        });
+        return { success: true, revision: "revision-two" };
+      }
       if (method === "task.admission.get") return { found: false };
       if (method === "task.create") return { taskId: taskDetail.id, task: taskSummary };
       throw new Error(`Unexpected RPC method ${method}`);
@@ -137,12 +701,165 @@ describe("browser host bridge", () => {
       initialSession,
     );
     const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+    const providerReadinessChanged = vi.fn();
+    (
+      api as unknown as {
+        onLLMSettingsChanged: (listener: () => void) => () => void;
+      }
+    ).onLLMSettingsChanged(providerReadinessChanged);
     const input = { title: "Provider test", prompt: "Test", workspaceId: workspace.id };
     await expect(api.createTask(input)).rejects.toThrow("Settings → AI & Models");
     expect(request).not.toHaveBeenCalled();
     await api.saveLLMSettings({ providerType: "anthropic" } as never);
     expect(fakeWindow.coworkBrowserHostInfo).toMatchObject({ providerReady: true });
+    expect(providerReadinessChanged).toHaveBeenCalledOnce();
     await expect(api.createTask(input)).resolves.toMatchObject({ id: taskDetail.id });
+    dispose();
+  });
+
+  it("sends provider edits as field changes and protected secret replacements", async () => {
+    const fakeWindow = stubBrowserWindow();
+    vi.stubGlobal("document", { baseURI: "http://127.0.0.1:18989/app/" });
+    const initialSettings = {
+      providerType: "openai",
+      modelKey: "gpt-4o",
+      openai: { apiKeyConfigured: true },
+    };
+    const updatedSettings = {
+      providerType: "openai",
+      modelKey: "gpt-4.1",
+      openai: { apiKeyConfigured: true },
+    };
+    let snapshotReads = 0;
+    const initialSession = {
+      ...session,
+      desktopMethods: {
+        getLLMSettings: { mutation: false },
+        saveLLMSettings: { mutation: true },
+      },
+    } as WebSessionBootstrap;
+    const request = vi.fn(async (method: string, _params?: unknown) => {
+      if (method === "desktop.getLLMSettings") {
+        const firstRead = snapshotReads++ === 0;
+        return {
+          settings: firstRead ? initialSettings : updatedSettings,
+          revision: firstRead ? "revision-one" : "revision-two",
+        };
+      }
+      if (method === "desktop.saveLLMSettings") {
+        return { success: true, revision: "revision-two" };
+      }
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => initialSession })),
+    );
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      initialSession,
+    );
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+
+    await api.saveLLMSettings({
+      providerType: "openai",
+      modelKey: "gpt-4.1",
+      openai: { apiKey: "sk-new-provider-secret", apiKeyConfigured: true },
+    } as never);
+
+    const saveCall = request.mock.calls.find(([method]) => method === "desktop.saveLLMSettings");
+    expect(saveCall?.[1]).toMatchObject({
+      args: [
+        {
+          set: [{ path: ["modelKey"], value: "gpt-4.1" }],
+          remove: [],
+          replaceSecrets: [{ path: ["openai", "apiKey"], value: "sk-new-provider-secret" }],
+        },
+        "revision-one",
+      ],
+    });
+    const serializedFieldChanges = JSON.stringify(
+      (saveCall?.[1] as { args: [{ set: unknown[] }] }).args[0].set,
+    );
+    expect(serializedFieldChanges).not.toContain("sk-new-provider-secret");
+    dispose();
+  });
+
+  it("surfaces stale provider settings and requires an explicit reload before retry", async () => {
+    const fakeWindow = stubBrowserWindow();
+    vi.stubGlobal("document", { baseURI: "http://127.0.0.1:18989/app/" });
+    let settingsReads = 0;
+    let saveAttempts = 0;
+    const initialSession = {
+      ...session,
+      desktopMethods: {
+        getLLMSettings: { mutation: false },
+        saveLLMSettings: { mutation: true },
+      },
+    } as WebSessionBootstrap;
+    const request = vi.fn(async (method: string, _params?: unknown) => {
+      if (method === "desktop.getLLMSettings") {
+        settingsReads += 1;
+        return {
+          settings: {
+            providerType: "openai",
+            modelKey: settingsReads === 1 ? "gpt-4o" : "gpt-4.1",
+          },
+          revision: settingsReads === 1 ? "revision-one" : "revision-two",
+        };
+      }
+      if (method === "desktop.saveLLMSettings") {
+        saveAttempts += 1;
+        if (saveAttempts === 1) {
+          throw new WebTransportError({
+            code: "CONFLICT",
+            message: "Provider settings changed after this page loaded.",
+            retryable: false,
+          });
+        }
+        return { success: true, revision: "revision-three" };
+      }
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => initialSession })),
+    );
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      initialSession,
+    );
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+
+    await expect(api.getLLMSettings()).resolves.toEqual({
+      providerType: "openai",
+      modelKey: "gpt-4o",
+    });
+    await expect(api.saveLLMSettings({ providerType: "openai" } as never)).rejects.toThrow(
+      "Provider settings changed after this page loaded.",
+    );
+    await expect(api.saveLLMSettings({ providerType: "openai" } as never)).rejects.toThrow(
+      /reload AI & Models/i,
+    );
+    expect(saveAttempts).toBe(1);
+
+    await expect(api.getLLMSettings()).resolves.toEqual({
+      providerType: "openai",
+      modelKey: "gpt-4.1",
+    });
+    await expect(api.saveLLMSettings({ providerType: "openai" } as never)).resolves.toMatchObject({
+      success: true,
+    });
+    expect(saveAttempts).toBe(2);
+    const providerWrites = request.mock.calls.filter(
+      ([method]) => method === "desktop.saveLLMSettings",
+    );
+    expect(providerWrites[0]?.[1]).toMatchObject({
+      args: [{ set: [], remove: [], replaceSecrets: [] }, "revision-one"],
+    });
+    expect(providerWrites[1]?.[1]).toMatchObject({
+      args: [{ set: [], remove: [], replaceSecrets: [] }, "revision-two"],
+    });
     dispose();
   });
 
@@ -180,6 +897,69 @@ describe("browser host bridge", () => {
         .filter(([method]) => method === "task.followUp")
         .map((call) => (call[2] as { operationKey: string }).operationKey);
       expect(new Set(keys).size).toBe(2);
+      dispose();
+    },
+  );
+
+  it.each(["pending", "unavailable"] as const)(
+    "reconciles a changed draft against its previous %s receipt before any new submission",
+    async (state) => {
+      const fakeWindow = stubBrowserWindow();
+      let lookups = 0;
+      const request = vi.fn(async (method: string) => {
+        if (method === "desktop.task.get") return { task: taskDetail };
+        if (method === "task.followUp.receipt") {
+          lookups++;
+          if (lookups === 1) return { found: false, state: "unavailable" };
+          if (lookups === 2) throw new Error("Reply lost");
+          return {
+            found: true,
+            state,
+            ...(state === "pending" ? { deliveryStatus: "started" } : {}),
+          };
+        }
+        if (method === "task.followUp") throw new Error("Reply lost");
+        throw new Error(`Unexpected RPC method ${method}`);
+      });
+      const dispose = installBrowserHostBridge(
+        { request } as unknown as BrowserHostTransport,
+        session,
+      );
+      const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+      await expect(api.sendMessage(taskDetail.id, "Original")).rejects.toThrow("Reply lost");
+      await expect(api.sendMessage(taskDetail.id, "Changed draft")).rejects.toThrow(
+        state === "pending" ? "previous follow-up was accepted" : "previous follow-up failed",
+      );
+      expect(request.mock.calls.filter(([method]) => method === "task.followUp")).toHaveLength(1);
+      expect(
+        Array.from({ length: fakeWindow.localStorage.length }, (_, index) =>
+          fakeWindow.localStorage.key(index),
+        ).some((key) => key?.includes(":follow-up:")),
+      ).toBe(false);
+      dispose();
+    },
+  );
+
+  it.each(["queued", "started"] as const)(
+    "reconciles a %s follow-up receipt without submitting it again",
+    async (deliveryStatus) => {
+      const fakeWindow = stubBrowserWindow();
+      const request = vi.fn(async (method: string) => {
+        if (method === "desktop.task.get") return { task: taskDetail };
+        if (method === "task.followUp.receipt")
+          return { found: true, state: "pending", deliveryStatus, queuedAt: 10, startedAt: 20 };
+        throw new Error(`Unexpected RPC method ${method}`);
+      });
+      const dispose = installBrowserHostBridge(
+        { request } as unknown as BrowserHostTransport,
+        session,
+      );
+      const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+      await expect(api.sendMessage(taskDetail.id, "Existing follow-up")).resolves.toMatchObject({
+        queued: true,
+        deliveryStatus: "queued",
+      });
+      expect(request.mock.calls.some(([method]) => method === "task.followUp")).toBe(false);
       dispose();
     },
   );
@@ -347,6 +1127,95 @@ describe("browser host bridge", () => {
       timelineVerbosity: "verbose",
     });
     secondDispose();
+  });
+
+  it("loads older task timeline pages and exposes only the browser-safe event detail", async () => {
+    const fakeWindow = stubBrowserWindow();
+    const recentEvent = {
+      id: "recent-event",
+      taskId: taskDetail.id,
+      timestamp: 20,
+      type: "assistant_message",
+      payload: { message: "Recent answer", privateData: "[REDACTED]" },
+      schemaVersion: 2,
+    };
+    const olderEvent = {
+      id: "older-event",
+      taskId: taskDetail.id,
+      timestamp: 10,
+      type: "progress_update",
+      payload: { message: "Earlier progress" },
+      schemaVersion: 2,
+    };
+    const request = vi.fn(async (method: string) => {
+      if (method === "desktop.task.get") return { task: taskDetail };
+      if (method === "task.events.snapshot") {
+        return {
+          taskId: taskDetail.id,
+          workspaceId: workspace.id,
+          events: [recentEvent],
+          cursor: { taskId: taskDetail.id, position: 3 },
+          hasMoreHistory: true,
+          nextHistoryCursor: { order: 2, timestamp: 10, id: "older-event" },
+        };
+      }
+      if (method === "task.events.history") {
+        return {
+          events: [olderEvent],
+          hasMoreHistory: false,
+          nextHistoryCursor: null,
+        };
+      }
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      session,
+    );
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+
+    const recentPage = await api.getTaskTimelinePage({ taskId: taskDetail.id, limit: 1 });
+    expect(recentPage).toMatchObject({
+      taskId: taskDetail.id,
+      events: [recentEvent],
+      hasMoreHistory: true,
+      nextCursor: { order: 2, timestamp: 10, id: "older-event" },
+      summary: { eventCount: 1 },
+    });
+    const historyPage = await api.getTaskTimelinePage({
+      taskId: taskDetail.id,
+      cursor: recentPage.nextCursor,
+      limit: 1,
+    });
+    expect(historyPage).toMatchObject({
+      events: [olderEvent],
+      hasMoreHistory: false,
+      nextCursor: null,
+    });
+    expect(request).toHaveBeenCalledWith(
+      "task.events.history",
+      {
+        taskId: taskDetail.id,
+        workspaceId: workspace.id,
+        beforeCursor: { order: 2, timestamp: 10, id: "older-event" },
+        limit: 1,
+      },
+      undefined,
+    );
+    await expect(
+      api.getTaskEventDetail({ taskId: taskDetail.id, eventId: "recent-event" }),
+    ).resolves.toMatchObject({ event: recentEvent });
+    expect(
+      (
+        fakeWindow.coworkBrowserHostInfo as unknown as {
+          desktopMethods: Record<string, unknown>;
+        }
+      ).desktopMethods,
+    ).toMatchObject({
+      getTaskTimelinePage: { mutation: false },
+      getTaskEventDetail: { mutation: false },
+    });
+    dispose();
   });
 
   it("reuses a persisted task admission key after an uncertain reply", async () => {

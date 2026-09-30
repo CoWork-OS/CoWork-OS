@@ -15,6 +15,29 @@ function renderBrowserPanel(...methods: string[]) {
   return renderToStaticMarkup(React.createElement(AddToolsPanel, { onNavigate: () => {} }));
 }
 
+const BROWSER_MCP_METHODS = [
+  "getMCPSettings",
+  "saveMCPSettings",
+  "getMCPStatus",
+  "addMCPServer",
+  "updateMCPServer",
+  "removeMCPServer",
+  "connectMCPServer",
+  "disconnectMCPServer",
+  "getMCPServerStatus",
+  "getMCPServerTools",
+  "getMCPAllTools",
+  "testMCPServer",
+  "fetchMCPRegistry",
+  "searchMCPRegistry",
+  "previewMCPServerInstall",
+  "installMCPServer",
+  "uninstallMCPServer",
+  "checkMCPUpdates",
+  "previewMCPServerUpdate",
+  "updateMCPServerFromRegistry",
+];
+
 describe("Add Tools route availability", () => {
   const withMethods =
     (...available: string[]) =>
@@ -78,16 +101,25 @@ describe("Add Tools route availability", () => {
     }
   });
 
+  it("requires the complete scoped MCP lifecycle before enabling its browser route", () => {
+    expect(
+      getAddToolsRouteAvailability("mcp", true, withMethods(...BROWSER_MCP_METHODS)),
+    ).toMatchObject({ kind: "available", action: "Open setup" });
+    expect(
+      getAddToolsRouteAvailability("mcp", true, withMethods("getMCPSettings", "saveMCPSettings")),
+    ).toMatchObject({ kind: "unavailable", action: "Unavailable here" });
+  });
+
   it("renders browser destinations as disabled or read-only according to their available methods", () => {
     const markup = renderBrowserPanel(
       "listPluginPacks",
       "searchPackRegistry",
       "getConnectorSettings",
+      ...BROWSER_MCP_METHODS,
     );
 
     expect(markup).toContain("View installed packs and browse the catalog here");
     expect(markup).toContain("Installing or changing packs requires the desktop app.");
-    expect(markup).toContain("MCP catalog and status are readable here");
     expect(markup).toContain(
       "Connector setup and account changes are available in the desktop app.",
     );
@@ -99,6 +131,6 @@ describe("Add Tools route availability", () => {
     const mcpPath = paths.find(([markup]) => markup.includes("MCP servers"))?.[0];
     expect(packPath).toBeDefined();
     expect(packPath).not.toContain("disabled");
-    expect(mcpPath).toContain("disabled");
+    expect(mcpPath).not.toContain("disabled");
   });
 });

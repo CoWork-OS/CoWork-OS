@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
+import { MCPLaunchPlanReview } from "./MCPLaunchPlanReview";
 
 // Types (matching electron mcp types)
 type MCPInstallMethod = "npm" | "pip" | "binary" | "docker" | "manual";
@@ -29,6 +31,21 @@ interface MCPRegistryEntry {
   downloads?: number;
 }
 
+interface MCPInstallPreview {
+  approvalToken: string;
+  expiresAt: number;
+  plan: {
+    entryId: string;
+    name: string;
+    publisher?: string;
+    transport: MCPTransportType;
+    command?: string;
+    args: string[];
+    envKeys: string[];
+    url?: string;
+  };
+}
+
 interface MCPRegistryBrowserProps {
   onInstall?: (serverId: string) => void;
   installedServerIds?: string[];
@@ -52,6 +69,10 @@ export function MCPRegistryBrowser({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
+  const [pendingInstall, setPendingInstall] = useState<{
+    entry: MCPRegistryEntry;
+    preview: MCPInstallPreview;
+  } | null>(null);
   const [viewingDetails, setViewingDetails] = useState<MCPRegistryEntry | null>(null);
   const focusedServerId = useRef<string | null>(null);
 
@@ -66,7 +87,7 @@ export function MCPRegistryBrowser({
   const loadRegistry = async () => {
     try {
       setLoading(true);
-      const registry = await window.electronAPI.fetchMCPRegistry();
+      const registry = await invokeMcpApi<{ servers: MCPRegistryEntry[] }>("fetchMCPRegistry");
       setServers(registry.servers || []);
       // Extract unique categories from servers
       const uniqueCategories = new Set<string>();
@@ -83,7 +104,11 @@ export function MCPRegistryBrowser({
 
   const searchServers = async () => {
     try {
-      const results = await window.electronAPI.searchMCPRegistry(searchQuery, selectedTags);
+      const results = await invokeMcpApi<MCPRegistryEntry[]>(
+        "searchMCPRegistry",
+        searchQuery,
+        selectedTags,
+      );
       let filtered = results;
 
       // Apply category filter
@@ -115,13 +140,35 @@ export function MCPRegistryBrowser({
 
     try {
       setInstallingId(entry.id);
-      await window.electronAPI.installMCPServer(entry.id);
+      if (window.coworkBrowserHost === true) {
+        const preview = await invokeMcpApi<MCPInstallPreview>("previewMCPServerInstall", entry.id);
+        setPendingInstall({ entry, preview });
+        return;
+      }
+      await invokeMcpApi("installMCPServer", entry.id);
       onInstall?.(entry.id);
-      // Refresh the list
       await loadRegistry();
-    } catch (error: Any) {
-      console.error("Failed to install server:", error);
-      alert(`Failed to install ${entry.name}: ${error.message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "MCP installation failed.";
+      alert(`Failed to prepare ${entry.name}: ${message}`);
+    } finally {
+      setInstallingId(null);
+    }
+  };
+
+  const confirmInstall = async () => {
+    if (!pendingInstall || installDisabled) return;
+    const { entry, preview } = pendingInstall;
+    try {
+      setInstallingId(entry.id);
+      await invokeMcpApi("installMCPServer", entry.id, preview.approvalToken);
+      setPendingInstall(null);
+      onInstall?.(entry.id);
+      await loadRegistry();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "MCP installation failed.";
+      setPendingInstall(null);
+      alert(`Failed to install ${entry.name}: ${message}`);
     } finally {
       setInstallingId(null);
     }
@@ -426,6 +473,18 @@ export function MCPRegistryBrowser({
             </div>
           </div>
         </div>
+      )}
+
+      {pendingInstall && (
+        <MCPLaunchPlanReview
+          plan={pendingInstall.preview.plan}
+          expiresAt={pendingInstall.preview.expiresAt}
+          action="install"
+          busy={installingId === pendingInstall.entry.id}
+          disabled={installDisabled}
+          onApprove={confirmInstall}
+          onCancel={() => setPendingInstall(null)}
+        />
       )}
     </div>
   );

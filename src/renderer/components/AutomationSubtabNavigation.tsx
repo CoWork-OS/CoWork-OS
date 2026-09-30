@@ -47,6 +47,7 @@ export const AUTOMATION_SUBTAB_METHOD_REQUIREMENTS: Record<AutomationSettingsSub
     "getCronStatus",
     "listCronJobs",
     "listWorkspaces",
+    "onCronEvent",
     "getCronRunHistory",
     "updateCronJob",
     "removeCronJob",

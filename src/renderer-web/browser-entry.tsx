@@ -7,6 +7,9 @@ import "../renderer/react-refresh-ignored-exports";
 import "../renderer/styles/index.css";
 import "../renderer/components/right-panel.css";
 import "../renderer/styles/calm-theme.css";
+import "./browser-entry.css";
+
+declare const __WEB_BUILD_ID__: string;
 
 type BrowserApp = ComponentType;
 
@@ -56,7 +59,13 @@ function BrowserEntry() {
   });
   const [pairingCode, setPairingCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const activeBridgeRef = useRef<ActiveBridge | null>(null);
+
+  useEffect(() => {
+    document.documentElement.classList.add("browser-host");
+    return () => document.documentElement.classList.remove("browser-host");
+  }, []);
 
   const disposeActiveBridge = useCallback((expected?: ActiveBridge) => {
     const activeBridge = activeBridgeRef.current;
@@ -71,6 +80,7 @@ function BrowserEntry() {
   const openAppForSession = useCallback(
     async (session: WebSessionBootstrap, isActive: () => boolean) => {
       disposeActiveBridge();
+      setUpdateAvailable(false);
 
       const transport = new BrowserHostTransport(session);
       let appMounted = false;
@@ -229,6 +239,42 @@ function BrowserEntry() {
     };
   }, [disposeActiveBridge, refreshSession]);
 
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    let active = true;
+    const checkForUpdatedBuild = async () => {
+      try {
+        const response = await fetch(new URL("web-manifest.json", document.baseURI), {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const manifest: unknown = await response.json();
+        if (
+          active &&
+          isRecord(manifest) &&
+          typeof manifest.buildId === "string" &&
+          manifest.buildId !== __WEB_BUILD_ID__
+        ) {
+          setUpdateAvailable(true);
+        }
+      } catch {
+        // A temporary manifest read failure must not interrupt a connected task.
+      }
+    };
+    const checkWhenVisible = () => {
+      if (document.visibilityState === "visible") void checkForUpdatedBuild();
+    };
+    void checkForUpdatedBuild();
+    const timer = window.setInterval(checkForUpdatedBuild, 30_000);
+    document.addEventListener("visibilitychange", checkWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", checkWhenVisible);
+    };
+  }, [state.kind]);
+
   async function pair(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!pairingCode.trim() || submitting) return;
@@ -267,33 +313,29 @@ function BrowserEntry() {
 
   if (state.kind === "ready") {
     const App = state.App;
-    return <App />;
+    return (
+      <>
+        <App />
+        {updateAvailable && (
+          <div className="browser-host-update-banner" role="status">
+            <span>A newer CoWork interface is available.</span>
+            <button type="button" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          </div>
+        )}
+      </>
+    );
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
-        boxSizing: "border-box",
-        background: "var(--background, #10151d)",
-        color: "var(--foreground, #e8edf5)",
-      }}
-    >
-      <section
-        aria-live="polite"
-        style={{
-          width: "min(100%, 400px)",
-          padding: 32,
-          border: "1px solid var(--border, #394657)",
-          borderRadius: 16,
-          background: "var(--card, #171f2a)",
-          boxSizing: "border-box",
-        }}
-      >
-        <h1 style={{ marginTop: 0 }}>CoWork OS</h1>
+    <main className="browser-entry">
+      <section className="browser-entry-card" aria-live="polite">
+        <div className="browser-entry-brand">
+          <img src="./cowork-os-app-logo-dark.png" alt="" width="40" height="40" />
+          <span>CoWork OS</span>
+        </div>
+        <h1>{state.kind === "login" ? "Connect to your workspace" : "Your CoWork workspace"}</h1>
         {(state.kind === "loading" || state.kind === "connecting") && (
           <p role="status">
             {state.kind === "loading" ? state.message : "Opening a secure connection to your host…"}
@@ -301,12 +343,20 @@ function BrowserEntry() {
         )}
         {state.kind === "login" && (
           <>
-            <p>Enter the pairing code shown by your CoWork host.</p>
-            <form onSubmit={(event) => void pair(event)}>
+            <p className="browser-entry-description">
+              Enter the pairing code from your CoWork OS app to get started.
+            </p>
+            <form className="browser-entry-form" onSubmit={(event) => void pair(event)}>
               <label htmlFor="browser-pairing-code">Pairing code</label>
               <input
                 id="browser-pairing-code"
                 autoComplete="one-time-code"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="Paste your pairing code"
+                aria-describedby={state.error ? "browser-pairing-error" : undefined}
+                aria-invalid={Boolean(state.error)}
+                disabled={submitting}
                 value={pairingCode}
                 onChange={(event) => setPairingCode(event.target.value)}
                 required
@@ -315,7 +365,11 @@ function BrowserEntry() {
                 {submitting ? "Connecting…" : "Connect"}
               </button>
             </form>
-            {state.error && <p role="alert">{state.error}</p>}
+            {state.error && (
+              <p className="browser-entry-error" id="browser-pairing-error" role="alert">
+                {state.error}
+              </p>
+            )}
           </>
         )}
         {state.kind === "version_mismatch" && (

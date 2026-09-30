@@ -488,6 +488,11 @@ export function AppearanceSettings({
             type="checkbox"
             checked={devRunLoggingEnabled}
             disabled={window.coworkBrowserHost === true}
+            title={
+              window.coworkBrowserHost === true
+                ? "Configure host development logging in the desktop app."
+                : undefined
+            }
             onChange={(event) => onDevRunLoggingEnabledChange(event.target.checked)}
           />
           <span>Capture `npm run dev` logs locally (default: off)</span>

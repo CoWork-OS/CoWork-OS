@@ -61,13 +61,33 @@ export function getAddToolsRouteAvailability(
             action: "Unavailable here",
           };
     case "mcp":
-      return hasMethods("getMCPSettings", "saveMCPSettings")
+      return hasMethods(
+        "getMCPSettings",
+        "saveMCPSettings",
+        "getMCPStatus",
+        "addMCPServer",
+        "updateMCPServer",
+        "removeMCPServer",
+        "connectMCPServer",
+        "disconnectMCPServer",
+        "getMCPServerStatus",
+        "getMCPServerTools",
+        "getMCPAllTools",
+        "testMCPServer",
+        "fetchMCPRegistry",
+        "searchMCPRegistry",
+        "previewMCPServerInstall",
+        "installMCPServer",
+        "uninstallMCPServer",
+        "checkMCPUpdates",
+        "previewMCPServerUpdate",
+        "updateMCPServerFromRegistry",
+      )
         ? { kind: "available", message: "", action: "Open setup" }
         : {
             kind: "unavailable",
-            message:
-              "MCP catalog and status are readable here, but install and configuration require the desktop app.",
-            action: "Desktop setup required",
+            message: "MCP server management is unavailable on this browser host.",
+            action: "Unavailable here",
           };
     case "tools":
       return hasMethods("getBuiltinToolsSettings", "saveBuiltinToolsSettings")

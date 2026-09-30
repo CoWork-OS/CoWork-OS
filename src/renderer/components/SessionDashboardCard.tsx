@@ -1,4 +1,4 @@
-import { hasHostMethod } from "../host/browser-capabilities";
+import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
@@ -122,7 +122,11 @@ export function SessionDashboardCard({
 
   useEffect(() => {
     let cancelled = false;
-    if (!task?.id || !workspacePath || !window.electronAPI?.listLocalPreviews) {
+    if (
+      !task?.id ||
+      !workspacePath ||
+      !hasHostMethods("listLocalPreviewTemplates", "listLocalPreviews")
+    ) {
       setPreview(undefined);
       setPreviewTemplates([]);
       setHasDevScript(false);

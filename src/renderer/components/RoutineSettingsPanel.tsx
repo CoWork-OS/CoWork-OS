@@ -9,6 +9,7 @@ import {
   type RoutineHookStatus,
 } from "./routine-hook-metadata";
 import { getRoutineListDisplayState } from "./routine-list-state";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
 
 type CronSchedule =
   | { kind: "cron"; expr: string; tz?: string }
@@ -428,7 +429,7 @@ export function RoutineSettingsPanel({
             () => window.electronAPI.getHooksStatus(),
             () => window.electronAPI.getHooksSettings(),
           ),
-          window.electronAPI.getMCPStatus?.() || Promise.resolve([]),
+          hasHostMethod("getMCPStatus") ? invokeMcpApi("getMCPStatus") : Promise.resolve([]),
           hasHostMethod("getCronStatus")
             ? window.electronAPI.getCronStatus().catch(() => null)
             : Promise.resolve(null),

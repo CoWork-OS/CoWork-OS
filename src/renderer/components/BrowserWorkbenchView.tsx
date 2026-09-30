@@ -36,6 +36,7 @@ import type {
   LLMProviderType,
   LLMReasoningEffort,
 } from "../../shared/types";
+import { hasHostMethod } from "../host/browser-capabilities";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
 import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
@@ -967,7 +968,10 @@ export function BrowserWorkbenchView({
   );
 
   const loadBrowserAnnotations = useCallback(async () => {
-    if (!window.electronAPI.listAnnotations) return;
+    if (!hasHostMethod("listAnnotations")) {
+      setBrowserAnnotations([]);
+      return;
+    }
     const currentUrl = activeUrlRef.current || activeUrl;
     const currentUrlKey = getAnnotationUrlKey(currentUrl);
     const annotations = await window.electronAPI.listAnnotations({

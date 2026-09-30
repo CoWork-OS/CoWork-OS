@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import { MCPRegistryBrowser } from "./MCPRegistryBrowser";
+import { MCPLaunchPlanReview } from "./MCPLaunchPlanReview";
+import type { MCPLaunchPlanPreview } from "./MCPLaunchPlanReview";
 import { ConnectorSetupModal, ConnectorProvider } from "./ConnectorSetupModal";
 import { useAgentContext } from "../hooks/useAgentContext";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import type { AddToolsSelection } from "./AddToolsPanel";
 
 // Types (matching preload types)
@@ -72,7 +75,7 @@ interface MCPSettingsData {
   reconnectDelayMs: number;
   registryEnabled: boolean;
   registryUrl?: string;
-  hostEnabled: boolean;
+  hostEnabled?: boolean;
   hostPort?: number;
 }
 
@@ -139,6 +142,7 @@ export function MCPSettings({
 }: {
   initialSelection?: AddToolsSelection;
 } = {}) {
+  const isBrowserHost = window.coworkBrowserHost === true;
   const [settings, setSettings] = useState<MCPSettingsData | null>(null);
   const [serverStatuses, setServerStatuses] = useState<MCPServerStatus[]>([]);
   const [secureTunnels, setSecureTunnels] = useState<SecureMcpTunnelConfig[]>([]);
@@ -192,6 +196,10 @@ export function MCPSettings({
   const [availableUpdates, setAvailableUpdates] = useState<MCPUpdateInfo[]>([]);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingServer, setUpdatingServer] = useState<string | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<{
+    serverId: string;
+    preview: MCPLaunchPlanPreview;
+  } | null>(null);
 
   // Connector setup modal state
   const [connectorSetup, setConnectorSetup] = useState<{
@@ -219,32 +227,37 @@ export function MCPSettings({
     const unsubscribe = window.electronAPI.onMCPStatusChange((statuses) => {
       setServerStatuses(statuses);
     });
-    const unsubscribeTunnels = window.electronAPI.onSecureMcpTunnelStatusChange((statuses) => {
-      setSecureTunnelStatuses(statuses);
-    });
+    const unsubscribeTunnels = isBrowserHost
+      ? () => undefined
+      : window.electronAPI.onSecureMcpTunnelStatusChange((statuses) => {
+          setSecureTunnelStatuses(statuses);
+        });
 
     return () => {
       unsubscribe();
       unsubscribeTunnels();
     };
-  }, []);
+  }, [isBrowserHost]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [loadedSettings, statuses, tunnelSettings, tunnelStatuses, tunnelAudit] =
-        await Promise.all([
-          window.electronAPI.getMCPSettings(),
-          window.electronAPI.getMCPStatus(),
+      const [loadedSettings, statuses] = await Promise.all([
+        invokeMcpApi<MCPSettingsData>("getMCPSettings"),
+        invokeMcpApi<MCPServerStatus[]>("getMCPStatus"),
+      ]);
+      setSettings(loadedSettings);
+      setServerStatuses(statuses);
+      if (!isBrowserHost) {
+        const [tunnelSettings, tunnelStatuses, tunnelAudit] = await Promise.all([
           window.electronAPI.getSecureMcpTunnelSettings(),
           window.electronAPI.getSecureMcpTunnelStatus(),
           window.electronAPI.getSecureMcpTunnelAudit(),
         ]);
-      setSettings(loadedSettings);
-      setServerStatuses(statuses);
-      setSecureTunnels(tunnelSettings.tunnels || []);
-      setSecureTunnelStatuses(tunnelStatuses || []);
-      setSecureTunnelAudit(tunnelAudit || []);
+        setSecureTunnels(tunnelSettings.tunnels || []);
+        setSecureTunnelStatuses(tunnelStatuses || []);
+        setSecureTunnelAudit(tunnelAudit || []);
+      }
     } catch (error) {
       console.error("Failed to load MCP settings:", error);
     } finally {
@@ -287,7 +300,7 @@ export function MCPSettings({
         });
       }
 
-      await window.electronAPI.addMCPServer({
+      await invokeMcpApi("addMCPServer", {
         name: newServerName,
         transport: "stdio" as MCPTransportType,
         command: newServerCommand,
@@ -384,7 +397,7 @@ export function MCPSettings({
     if (!confirm("Are you sure you want to remove this server?")) return;
 
     try {
-      await window.electronAPI.removeMCPServer(serverId);
+      await invokeMcpApi("removeMCPServer", serverId);
       await loadData();
     } catch (error: Any) {
       console.error("Failed to remove server:", error);
@@ -400,7 +413,8 @@ export function MCPSettings({
         const { [serverId]: _, ...rest } = prev;
         return rest;
       });
-      await window.electronAPI.connectMCPServer(serverId);
+      await invokeMcpApi("connectMCPServer", serverId);
+      await loadData();
     } catch (error: Any) {
       console.error("Failed to connect server:", error);
       // Store error in state for inline display
@@ -421,7 +435,8 @@ export function MCPSettings({
         const { [serverId]: _, ...rest } = prev;
         return rest;
       });
-      await window.electronAPI.disconnectMCPServer(serverId);
+      await invokeMcpApi("disconnectMCPServer", serverId);
+      await loadData();
     } catch (error: Any) {
       console.error("Failed to disconnect server:", error);
       setConnectionErrors((prev) => ({
@@ -437,7 +452,10 @@ export function MCPSettings({
     try {
       setTestingServer(serverId);
       setTestResult(null);
-      const result = await window.electronAPI.testMCPServer(serverId);
+      const result = await invokeMcpApi<{ success: boolean; error?: string; tools?: number }>(
+        "testMCPServer",
+        serverId,
+      );
       setTestResult({ serverId, ...result });
     } catch (error: Any) {
       setTestResult({ serverId, success: false, error: error.message });
@@ -448,7 +466,7 @@ export function MCPSettings({
 
   const handleViewTools = async (serverId: string) => {
     try {
-      const tools = await window.electronAPI.getMCPServerTools(serverId);
+      const tools = await invokeMcpApi<MCPTool[]>("getMCPServerTools", serverId);
       setServerTools(tools);
       setViewingToolsFor(serverId);
     } catch (error) {
@@ -458,7 +476,7 @@ export function MCPSettings({
 
   const handleToggleEnabled = async (serverId: string, enabled: boolean) => {
     try {
-      await window.electronAPI.updateMCPServer(serverId, { enabled });
+      await invokeMcpApi("updateMCPServer", serverId, { enabled });
       await loadData();
     } catch (error: Any) {
       console.error("Failed to update server:", error);
@@ -476,6 +494,7 @@ export function MCPSettings({
   };
 
   const handleOpenEditServer = (serverId: string) => {
+    if (isBrowserHost) return;
     const config = settings?.servers.find((s) => s.id === serverId);
     if (!config) return;
 
@@ -551,7 +570,7 @@ export function MCPSettings({
         });
       }
 
-      await window.electronAPI.updateMCPServer(editingServer, {
+      await invokeMcpApi("updateMCPServer", editingServer, {
         args: args.length > 0 ? args : undefined,
         env: Object.keys(env).length > 0 ? env : undefined,
       });
@@ -584,7 +603,7 @@ export function MCPSettings({
 
     try {
       setSaving(true);
-      await window.electronAPI.saveMCPSettings(settings);
+      await invokeMcpApi("saveMCPSettings", settings);
     } catch (error: Any) {
       console.error("Failed to save settings:", error);
       alert(`Failed to save settings: ${error.message}`);
@@ -615,7 +634,7 @@ export function MCPSettings({
   const handleCheckUpdates = async () => {
     try {
       setCheckingUpdates(true);
-      const updates = await window.electronAPI.checkMCPUpdates();
+      const updates = await invokeMcpApi<MCPUpdateInfo[]>("checkMCPUpdates");
       setAvailableUpdates(updates);
       if (updates.length === 0) {
         alert("All MCP servers are up to date!");
@@ -631,7 +650,15 @@ export function MCPSettings({
   const handleUpdateServer = async (serverId: string) => {
     try {
       setUpdatingServer(serverId);
-      await window.electronAPI.updateMCPServerFromRegistry(serverId);
+      if (isBrowserHost) {
+        const preview = await invokeMcpApi<MCPLaunchPlanPreview>(
+          "previewMCPServerUpdate",
+          serverId,
+        );
+        setPendingUpdate({ serverId, preview });
+        return;
+      }
+      await invokeMcpApi("updateMCPServerFromRegistry", serverId);
       // Remove from available updates
       setAvailableUpdates((prev) => prev.filter((u) => u.serverId !== serverId));
       // Reload data
@@ -639,6 +666,24 @@ export function MCPSettings({
       alert("Server updated successfully!");
     } catch (error: Any) {
       console.error("Failed to update server:", error);
+      alert(`Failed to update server: ${error.message}`);
+    } finally {
+      setUpdatingServer(null);
+    }
+  };
+
+  const confirmUpdateServer = async () => {
+    if (!pendingUpdate) return;
+    const { serverId, preview } = pendingUpdate;
+    try {
+      setUpdatingServer(serverId);
+      await invokeMcpApi("updateMCPServerFromRegistry", serverId, preview.approvalToken);
+      setPendingUpdate(null);
+      setAvailableUpdates((prev) => prev.filter((update) => update.serverId !== serverId));
+      await loadData();
+      alert("Server updated successfully!");
+    } catch (error: Any) {
+      setPendingUpdate(null);
       alert(`Failed to update server: ${error.message}`);
     } finally {
       setUpdatingServer(null);
@@ -716,12 +761,14 @@ export function MCPSettings({
         >
           Browse Registry
         </button>
-        <button
-          className={`mcp-nav-button ${activeView === "tunnels" ? "active" : ""}`}
-          onClick={() => setActiveView("tunnels")}
-        >
-          Secure Tunnels
-        </button>
+        {!isBrowserHost && (
+          <button
+            className={`mcp-nav-button ${activeView === "tunnels" ? "active" : ""}`}
+            onClick={() => setActiveView("tunnels")}
+          >
+            Secure Tunnels
+          </button>
+        )}
         <button
           className={`mcp-nav-button ${activeView === "settings" ? "active" : ""}`}
           onClick={() => setActiveView("settings")}
@@ -970,13 +1017,15 @@ export function MCPSettings({
                           View Tools
                         </button>
 
-                        <button
-                          className="button-small button-secondary"
-                          onClick={() => handleOpenEditServer(serverStatus.id)}
-                          title="Configure arguments and environment variables"
-                        >
-                          Configure
-                        </button>
+                        {!isBrowserHost && (
+                          <button
+                            className="button-small button-secondary"
+                            onClick={() => handleOpenEditServer(serverStatus.id)}
+                            title="Configure arguments and environment variables"
+                          >
+                            Configure
+                          </button>
+                        )}
 
                         <button
                           className="button-small button-secondary"
@@ -1534,6 +1583,16 @@ export function MCPSettings({
           initialEnv={connectorSetup.env}
           onClose={() => setConnectorSetup(null)}
           onSaved={loadData}
+        />
+      )}
+      {pendingUpdate && (
+        <MCPLaunchPlanReview
+          plan={pendingUpdate.preview.plan}
+          expiresAt={pendingUpdate.preview.expiresAt}
+          action="update"
+          busy={updatingServer === pendingUpdate.serverId}
+          onApprove={confirmUpdateServer}
+          onCancel={() => setPendingUpdate(null)}
         />
       )}
     </div>

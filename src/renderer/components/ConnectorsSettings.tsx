@@ -14,6 +14,10 @@ import { SharePointSettings } from "./SharePointSettings";
 import { ConnectorBrandIcon } from "./ConnectorBrandIcon";
 import { NATIVE_INTEGRATIONS, type NativeIntegrationKey } from "./native-integration-catalog";
 import type { AddToolsSelection } from "./AddToolsPanel";
+import { ManagedAccountsPanel } from "./ManagedAccountsPanel";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
+import { MCPLaunchPlanReview } from "./MCPLaunchPlanReview";
+import type { MCPLaunchPlanPreview } from "./MCPLaunchPlanReview";
 
 // Types (matching preload types)
 type MCPConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
@@ -916,6 +920,10 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
   const [registryConnectorIds, setRegistryConnectorIds] = useState<Set<string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [installingId, setInstallingId] = useState<string | null>(null);
+  const [pendingInstall, setPendingInstall] = useState<{
+    registryId: string;
+    preview: MCPLaunchPlanPreview;
+  } | null>(null);
   const [connectingServer, setConnectingServer] = useState<string | null>(null);
   const [connectionErrors, setConnectionErrors] = useState<Record<string, string>>({});
 
@@ -963,9 +971,9 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
     try {
       setLoading(true);
       const [loadedSettings, statuses, registry] = await Promise.all([
-        window.electronAPI.getMCPSettings(),
-        window.electronAPI.getMCPStatus(),
-        window.electronAPI.fetchMCPRegistry().catch(() => null),
+        invokeMcpApi<MCPSettingsData>("getMCPSettings"),
+        invokeMcpApi<MCPServerStatus[]>("getMCPStatus"),
+        invokeMcpApi<{ servers: Array<{ id: string }> }>("fetchMCPRegistry").catch(() => null),
       ]);
       setSettings(loadedSettings);
       setServerStatuses(statuses);
@@ -1011,10 +1019,37 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
   const handleInstall = async (connector: ConnectorDefinition) => {
     try {
       setInstallingId(connector.registryId);
-      await window.electronAPI.installMCPServer(connector.registryId);
+      if (window.coworkBrowserHost === true) {
+        const preview = await invokeMcpApi<MCPLaunchPlanPreview>(
+          "previewMCPServerInstall",
+          connector.registryId,
+        );
+        setPendingInstall({ registryId: connector.registryId, preview });
+        return;
+      }
+      await invokeMcpApi("installMCPServer", connector.registryId);
       await loadData();
     } catch (error: Any) {
       alert(`Failed to install ${connector.name}: ${error.message}`);
+    } finally {
+      setInstallingId(null);
+    }
+  };
+
+  const confirmInstall = async () => {
+    if (!pendingInstall) return;
+    try {
+      setInstallingId(pendingInstall.registryId);
+      await invokeMcpApi(
+        "installMCPServer",
+        pendingInstall.registryId,
+        pendingInstall.preview.approvalToken,
+      );
+      setPendingInstall(null);
+      await loadData();
+    } catch (error: Any) {
+      setPendingInstall(null);
+      alert(`Failed to install connector: ${error.message}`);
     } finally {
       setInstallingId(null);
     }
@@ -1027,7 +1062,8 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
         const { [serverId]: _, ...rest } = prev;
         return rest;
       });
-      await window.electronAPI.connectMCPServer(serverId);
+      await invokeMcpApi("connectMCPServer", serverId);
+      await loadData();
     } catch (error: Any) {
       setConnectionErrors((prev) => ({
         ...prev,
@@ -1045,7 +1081,8 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
         const { [serverId]: _, ...rest } = prev;
         return rest;
       });
-      await window.electronAPI.disconnectMCPServer(serverId);
+      await invokeMcpApi("disconnectMCPServer", serverId);
+      await loadData();
     } catch (error: Any) {
       setConnectionErrors((prev) => ({
         ...prev,
@@ -1064,7 +1101,7 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
         .split(" ")
         .map((a) => a.trim())
         .filter(Boolean);
-      await window.electronAPI.addMCPServer({
+      await invokeMcpApi("addMCPServer", {
         name: customName.trim(),
         command: customCommand.trim(),
         args,
@@ -1151,6 +1188,8 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
       <div className="settings-section-header">
         <h3>Connectors</h3>
       </div>
+
+      <ManagedAccountsPanel />
 
       <div className="cm-toolbar">
         <div className="cm-filter-tabs" role="tablist">
@@ -1415,6 +1454,16 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
           fields={envModal.fields}
           onClose={() => setEnvModal(null)}
           onSaved={loadData}
+        />
+      )}
+      {pendingInstall && (
+        <MCPLaunchPlanReview
+          plan={pendingInstall.preview.plan}
+          expiresAt={pendingInstall.preview.expiresAt}
+          action="install"
+          busy={installingId === pendingInstall.registryId}
+          onApprove={confirmInstall}
+          onCancel={() => setPendingInstall(null)}
         />
       )}
     </div>

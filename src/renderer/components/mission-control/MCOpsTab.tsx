@@ -7,6 +7,7 @@ import type {
   CoreLearningsEntry,
 } from "../../../shared/types";
 import type { MissionControlData, OpsSubTab } from "./useMissionControlData";
+import { hasHostMethod, hasHostMethods } from "../../host/browser-capabilities";
 
 interface MCOpsTabProps {
   data: MissionControlData;
@@ -117,6 +118,9 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
           <OpsPlanner
             config={plannerConfig}
             runs={plannerRuns}
+            canEditConfig={hasHostMethods("getPlannerConfig", "updatePlannerConfig")}
+            canRun={hasHostMethod("runPlanner")}
+            canReadRuns={hasHostMethod("listPlannerRuns")}
             running={plannerRunning}
             saving={plannerSaving}
             loading={plannerLoading}
@@ -635,6 +639,9 @@ function OpsExecutionMap({
 function OpsPlanner({
   config,
   runs,
+  canEditConfig,
+  canRun,
+  canReadRuns,
   running,
   saving,
   loading,
@@ -666,11 +673,18 @@ function OpsPlanner({
         )}
       </div>
 
+      {!canEditConfig && (
+        <div className="mc-v2-empty" role="status">
+          Planner settings are not available in this browser session.
+        </div>
+      )}
+
       {config && (
         <div className="mc-v2-planner-fields">
           <label className="mc-v2-planner-field checkbox">
             <input
               type="checkbox"
+              disabled={!canEditConfig || saving}
               checked={config.enabled}
               onChange={(e) => void onConfigChange({ enabled: e.target.checked })}
             />
@@ -679,6 +693,7 @@ function OpsPlanner({
           <label className="mc-v2-planner-field checkbox">
             <input
               type="checkbox"
+              disabled={!canEditConfig || saving}
               checked={config.autoDispatch}
               onChange={(e) => void onConfigChange({ autoDispatch: e.target.checked })}
             />
@@ -688,6 +703,7 @@ function OpsPlanner({
             <span>Interval</span>
             <input
               type="number"
+              disabled={!canEditConfig || saving}
               min={5}
               step={5}
               value={config.intervalMinutes}
@@ -699,6 +715,7 @@ function OpsPlanner({
           <label className="mc-v2-planner-field">
             <span>Workspace</span>
             <select
+              disabled={!canEditConfig || saving}
               value={config.planningWorkspaceId || ""}
               onChange={(e) => void onConfigChange({ planningWorkspaceId: e.target.value || null })}
             >
@@ -713,6 +730,7 @@ function OpsPlanner({
           <label className="mc-v2-planner-field">
             <span>Agent</span>
             <select
+              disabled={!canEditConfig || saving}
               value={config.plannerAgentRoleId || ""}
               onChange={(e) => void onConfigChange({ plannerAgentRoleId: e.target.value || null })}
             >
@@ -729,6 +747,7 @@ function OpsPlanner({
           <label className="mc-v2-planner-field">
             <span>Approval</span>
             <select
+              disabled={!canEditConfig || saving}
               value={config.approvalPreset}
               onChange={(e) => void onConfigChange({ approvalPreset: e.target.value })}
             >
@@ -737,7 +756,14 @@ function OpsPlanner({
               <option value="founder_edge">Founder edge</option>
             </select>
           </label>
-          <button className="mc-v2-icon-btn" onClick={() => void onRun()} disabled={running}>
+          <button
+            className="mc-v2-icon-btn"
+            onClick={() => void onRun()}
+            disabled={running || !canRun}
+            title={
+              !canRun ? "Planner execution is not available in this browser session." : undefined
+            }
+          >
             {running ? "Running..." : "Run Planner"}
           </button>
         </div>
@@ -746,7 +772,11 @@ function OpsPlanner({
       <div className="mc-v2-detail-section">
         <h4>Recent Runs</h4>
         <div className="mc-v2-planner-runs">
-          {runs.length === 0 ? (
+          {!canReadRuns ? (
+            <div className="mc-v2-empty" style={{ padding: "12px 0" }} role="status">
+              Planner run history is not available in this browser session.
+            </div>
+          ) : runs.length === 0 ? (
             <div className="mc-v2-empty" style={{ padding: "12px 0" }}>
               No planner runs yet.
             </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, RefreshCw, Search } from "lucide-react";
 import type { SkillStatusEntry } from "../../shared/types";
 import { hasHostMethods } from "../host/browser-capabilities";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import { NATIVE_INTEGRATIONS } from "./native-integration-catalog";
 import { getAddToolsRouteAvailability } from "./add-tools-route-availability";
 import "./add-tools.css";
@@ -176,8 +177,12 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
       const [packs, skills, settings, statuses] = await Promise.all([
         window.electronAPI.listPluginPacks().catch(() => null),
         window.electronAPI.getSkillStatus().catch(() => null),
-        window.electronAPI.getMCPSettings().catch(() => null),
-        window.electronAPI.getMCPStatus().catch(() => null),
+        invokeMcpApi<{
+          servers: Array<{ id: string; name: string; description?: string; enabled: boolean }>;
+        }>("getMCPSettings").catch(() => null),
+        invokeMcpApi<Array<{ id: string; name: string; status: string; error?: string }>>(
+          "getMCPStatus",
+        ).catch(() => null),
       ]);
       if (cancelled) return;
       const nextErrors: string[] = [];
@@ -271,7 +276,14 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
         term
           ? window.electronAPI.searchClawHubSkills(term).catch(() => null)
           : Promise.resolve(null),
-        window.electronAPI.fetchMCPRegistry().catch(() => null),
+        invokeMcpApi<{
+          servers: Array<{
+            id: string;
+            name: string;
+            description?: string;
+            installMethod?: string;
+          }>;
+        }>("fetchMCPRegistry").catch(() => null),
       ]);
       if (cancelled) return;
       const nextErrors: string[] = [];

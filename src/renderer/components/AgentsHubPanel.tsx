@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import {
   ArrowLeft,
   ArrowUp,
@@ -1153,7 +1154,7 @@ export function AgentsHubPanel({
         window.electronAPI.listImageGenProfiles(),
         window.electronAPI.listManagedEnvironments(),
         window.electronAPI.getPermissionSettings(),
-        window.electronAPI.getMCPSettings(),
+        invokeMcpApi("getMCPSettings"),
         window.electronAPI.getAgentRoles(true),
         window.electronAPI.listAutomationProfiles(),
       ]);

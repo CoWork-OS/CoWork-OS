@@ -1,6 +1,46 @@
 import { ALL_WORKSPACES_ID } from "./useMissionControlData";
 import { isTempWorkspaceId } from "../../../shared/types";
 import type { MissionControlData, MCTab } from "./useMissionControlData";
+import { hasHostMethod, hasHostMethods } from "../../host/browser-capabilities";
+
+const TEAM_PANEL_METHODS = [
+  "listTeams",
+  "listTeamMembers",
+  "listTeamRuns",
+  "listTeamItems",
+  "onTeamRunEvent",
+  "createTeam",
+  "updateTeam",
+  "deleteTeam",
+  "addTeamMember",
+  "removeTeamMember",
+  "updateTeamMember",
+  "reorderTeamMembers",
+  "createTeamRun",
+  "resumeTeamRun",
+  "pauseTeamRun",
+  "cancelTeamRun",
+  "createTeamItem",
+  "updateTeamItem",
+  "deleteTeamItem",
+  "moveTeamItem",
+] as const;
+
+const STANDUP_REPORT_METHODS = ["listStandupReports", "generateStandupReport"] as const;
+const PERFORMANCE_REVIEW_METHODS = [
+  "listAgentReviews",
+  "getLatestAgentReview",
+  "generateAgentReview",
+  "updateAgentRole",
+] as const;
+
+const CORE_HARNESS_METHODS = [
+  "listCoreFailureRecords",
+  "listCoreFailureClusters",
+  "listCoreEvalCases",
+  "listCoreExperiments",
+  "listCoreLearnings",
+] as const;
 
 interface MCTopBarProps {
   data: MissionControlData;
@@ -41,6 +81,24 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
     agentContext,
   } = data;
   const supportsWorkspaceReports = !!selectedWorkspace && !isTempWorkspaceId(selectedWorkspace.id);
+  const supportsTeams = hasHostMethods(...TEAM_PANEL_METHODS);
+  const supportsStandupReports = hasHostMethods(...STANDUP_REPORT_METHODS);
+  const supportsPerformanceReviews = hasHostMethods(...PERFORMANCE_REVIEW_METHODS);
+  const unavailableBrowserWorkflows =
+    typeof window !== "undefined" && window.coworkBrowserHost === true
+      ? [
+          ...(!supportsTeams ? ["Team management"] : []),
+          ...(!supportsPerformanceReviews ? ["Performance reviews"] : []),
+          ...(!supportsStandupReports ? ["Standup reports"] : []),
+          ...(!hasHostMethod("getCommandCenterSummary") ? ["Command center summaries"] : []),
+          ...(!hasHostMethods("getPlannerConfig", "updatePlannerConfig")
+            ? ["Planner settings"]
+            : []),
+          ...(!hasHostMethod("runPlanner") ? ["Planner execution"] : []),
+          ...(!hasHostMethod("listPlannerRuns") ? ["Planner run history"] : []),
+          ...(!hasHostMethods(...CORE_HARNESS_METHODS) ? ["Core harness review data"] : []),
+        ]
+      : [];
   const runtimeStatusValue =
     queueStatusState === "ready"
       ? runtimeMaxConcurrent
@@ -115,21 +173,42 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
           <button
             className="mc-v2-icon-btn"
             onClick={() => setTeamsOpen(true)}
-            disabled={!selectedWorkspace}
+            disabled={!selectedWorkspace || !supportsTeams}
+            title={
+              !selectedWorkspace
+                ? "Choose a workspace before opening team management."
+                : !supportsTeams
+                  ? "Team management is not available in this browser session yet."
+                  : undefined
+            }
           >
             Teams
           </button>
           <button
             className="mc-v2-icon-btn"
             onClick={() => setReviewsOpen(true)}
-            disabled={!supportsWorkspaceReports}
+            disabled={!supportsWorkspaceReports || !supportsPerformanceReviews}
+            title={
+              !supportsWorkspaceReports
+                ? "Choose a non-temporary workspace before opening performance reviews."
+                : !supportsPerformanceReviews
+                  ? "Performance reviews are not available in this browser session yet."
+                  : undefined
+            }
           >
             Reviews
           </button>
           <button
             className="mc-v2-icon-btn"
             onClick={() => setStandupOpen(true)}
-            disabled={!supportsWorkspaceReports}
+            disabled={!supportsWorkspaceReports || !supportsStandupReports}
+            title={
+              !supportsWorkspaceReports
+                ? "Choose a non-temporary workspace before opening standup reports."
+                : !supportsStandupReports
+                  ? "Standup reports are not available in this browser session yet."
+                  : undefined
+            }
           >
             {agentContext.getUiCopy("mcStandupButton")}
           </button>
@@ -156,6 +235,14 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
           ></span>
         </div>
       </header>
+
+      {unavailableBrowserWorkflows.length > 0 && (
+        <p className="mc-v2-capability-notice" role="status">
+          {unavailableBrowserWorkflows.join(", ")}{" "}
+          {unavailableBrowserWorkflows.length === 1 ? "is" : "are"} unavailable because this browser
+          host does not expose the required services yet.
+        </p>
+      )}
 
       {/* Tab Bar */}
       <nav className="mc-v2-tabbar">

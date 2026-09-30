@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   Ellipsis,
+  GitBranch,
   Inbox,
   Library,
   Lightbulb,
@@ -37,6 +38,8 @@ export interface CalmSidebarNavProps {
   isSearchActive?: boolean;
   onOpenLibrary?: () => void;
   isLibraryActive?: boolean;
+  onOpenGitChanges?: () => void;
+  isGitChangesActive?: boolean;
   onOpenPlugins?: () => void;
   onOpenAutomations?: () => void;
   isAutomationsActive?: boolean;
@@ -108,6 +111,17 @@ export function CalmSidebarNav(props: CalmSidebarNavProps) {
       active: props.isLibraryActive,
       onClick: props.onOpenLibrary,
     },
+    ...(props.onOpenGitChanges
+      ? [
+          {
+            id: "git-changes",
+            label: "Git Changes",
+            icon: GitBranch,
+            active: props.isGitChangesActive,
+            onClick: props.onOpenGitChanges,
+          },
+        ]
+      : []),
     { id: "plugins", label: "Add tools", icon: Puzzle, onClick: props.onOpenPlugins },
     {
       id: "automations",
@@ -116,7 +130,7 @@ export function CalmSidebarNav(props: CalmSidebarNavProps) {
       active: props.isAutomationsActive,
       onClick: props.onOpenAutomations,
     },
-  ];
+  ].filter((item) => Boolean(item.onClick));
 
   const secondary: NavItem[] = [
     {

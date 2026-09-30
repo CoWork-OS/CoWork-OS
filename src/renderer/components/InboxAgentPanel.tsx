@@ -1216,7 +1216,10 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
           .catch(() => null);
         setGoogleWorkspaceEnabled(Boolean(googleSettings?.enabled));
         setGoogleWorkspaceConfigured(
-          Boolean(googleSettings?.accessToken || googleSettings?.refreshToken),
+          Boolean(
+            googleSettings?.credentialsConfigured ??
+            (googleSettings?.accessToken || googleSettings?.refreshToken),
+          ),
         );
         setGoogleWorkspaceScopes(googleSettings?.scopes ?? null);
         await loadMissionControlOptions();

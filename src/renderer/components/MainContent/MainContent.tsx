@@ -1,4 +1,8 @@
-import { hasHostMethod } from "../../host/browser-capabilities";
+import {
+  getHostCapabilityReason,
+  hasHostMethod,
+  hasHostMethods,
+} from "../../host/browser-capabilities";
 import {
   getInteractionModeSelection,
   isChatActionShortcut,
@@ -4410,7 +4414,7 @@ function MainContentComponent({
 
   // Detect if the current task is a collaborative team run
   useEffect(() => {
-    if (!task?.id) {
+    if (!task?.id || !hasHostMethods("onTeamRunEvent", "findTeamRunByRootTask")) {
       setCollaborativeRun(null);
       return;
     }
@@ -4845,6 +4849,7 @@ function MainContentComponent({
   const skillsMenuRef = useRef<HTMLDivElement>(null);
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
   const permissionDropdownRef = useRef<HTMLDivElement>(null);
+  const calmAccessMenuRef = useRef<HTMLDivElement>(null);
   // Overflow menu state (welcome view only - no task)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
@@ -5101,7 +5106,6 @@ function MainContentComponent({
 
   const handleMessageFeedback = useCallback(
     async (payload: { messageId: string; decision: "accepted" | "rejected"; reason?: string }) => {
-      setMessageFeedbackMap((prev) => new Map(prev).set(payload.messageId, payload.decision));
       setRejectMenuOpenFor(null);
       try {
         await window.electronAPI.submitMessageFeedback({
@@ -5110,8 +5114,10 @@ function MainContentComponent({
           decision: payload.decision,
           reason: payload.reason,
         });
+        setMessageFeedbackMap((prev) => new Map(prev).set(payload.messageId, payload.decision));
       } catch (err) {
         console.error("[Feedback] Failed to submit message feedback:", err);
+        setHeaderActionError("Could not save your feedback. Please try again.");
       }
     },
     [task?.id],
@@ -5134,7 +5140,7 @@ function MainContentComponent({
         setStepFeedbackOpen(false);
         setStepFeedbackText("");
       } catch {
-        // Silently handle — executor may have moved on
+        setHeaderActionError("Could not send feedback for this step. The task may have moved on.");
       } finally {
         setStepFeedbackSending(false);
       }
@@ -5834,7 +5840,7 @@ function MainContentComponent({
 
   // Load canvas sessions when task changes
   useEffect(() => {
-    if (!task?.id) {
+    if (!task?.id || !hasHostMethod("canvasListSessions")) {
       setCanvasSessions([]);
       return;
     }
@@ -5851,6 +5857,7 @@ function MainContentComponent({
 
   // Subscribe to canvas events
   useEffect(() => {
+    if (!hasHostMethods("onCanvasEvent", "canvasGetSession")) return;
     const unsubscribe = window.electronAPI.onCanvasEvent((event) => {
       // Only process events for the current task
       if (task?.id && event.taskId === task.id) {
@@ -8407,6 +8414,9 @@ function MainContentComponent({
   };
 
   const handleWelcomeTaskSuggestion = (suggestion: WelcomeTaskSuggestion) => {
+    if (suggestion.action.type === "url" && !onOpenWebLinkInSidebar && !onOpenBrowserView) {
+      return;
+    }
     if (suggestion.action.type === "task") {
       setActiveWelcomeSuggestionDraft(null);
       onSelectTask?.(suggestion.action.taskId);
@@ -8483,14 +8493,18 @@ function MainContentComponent({
 
   const renderWelcomeTaskSuggestions = () => {
     if (!homeNextActionsEnabled) return null;
-    if (welcomeTaskSuggestions.length === 0) return null;
+    const visibleSuggestions = welcomeTaskSuggestions.filter(
+      (suggestion) =>
+        suggestion.action.type !== "url" || Boolean(onOpenWebLinkInSidebar || onOpenBrowserView),
+    );
+    if (visibleSuggestions.length === 0) return null;
     return (
       <section className="welcome-next-actions" aria-label="Next actions">
         <div className="welcome-next-actions-header">
           <span className="welcome-next-actions-title">Next actions</span>
         </div>
         <div className="welcome-next-actions-list">
-          {welcomeTaskSuggestions.map((suggestion) => {
+          {visibleSuggestions.map((suggestion) => {
             const Icon = iconForWelcomeAction(suggestion);
             const actionLabel = labelForWelcomeAction(suggestion.action);
             const title = [suggestion.title, suggestion.whyNow, suggestion.description]
@@ -8927,7 +8941,13 @@ function MainContentComponent({
   }, []);
 
   const handleTaskHeaderPin = useCallback(async () => {
-    if (!task || remoteSession) return;
+    if (
+      !task ||
+      remoteSession ||
+      !hasHostMethod("toggleTaskPin") ||
+      (window.coworkBrowserHost === true && workspace?.permissions.write !== true)
+    )
+      return;
     closeTaskHeaderMenu();
     try {
       await window.electronAPI.toggleTaskPin(task.id);
@@ -8935,10 +8955,16 @@ function MainContentComponent({
     } catch (error) {
       console.error("Failed to toggle task pin from header:", error);
     }
-  }, [closeTaskHeaderMenu, onTasksChanged, remoteSession, task]);
+  }, [closeTaskHeaderMenu, onTasksChanged, remoteSession, task, workspace?.permissions.write]);
 
   const handleTaskHeaderRename = useCallback(async () => {
-    if (!task || remoteSession) return;
+    if (
+      !task ||
+      remoteSession ||
+      !hasHostMethod("renameTask") ||
+      (window.coworkBrowserHost === true && workspace?.permissions.write !== true)
+    )
+      return;
     closeTaskHeaderMenu();
     const nextTitle = window.prompt(actionLabels.rename, task.title)?.trim();
     if (!nextTitle || nextTitle === task.title) return;
@@ -8949,10 +8975,23 @@ function MainContentComponent({
       console.error("Failed to rename task from header:", error);
       setHeaderActionError("Could not rename. Please try again.");
     }
-  }, [actionLabels.rename, closeTaskHeaderMenu, onTasksChanged, remoteSession, task]);
+  }, [
+    actionLabels.rename,
+    closeTaskHeaderMenu,
+    onTasksChanged,
+    remoteSession,
+    task,
+    workspace?.permissions.write,
+  ]);
 
   const handleTaskHeaderArchive = useCallback(async () => {
-    if (!task || remoteSession) return;
+    if (
+      !task ||
+      remoteSession ||
+      !hasHostMethod("archiveTask") ||
+      (window.coworkBrowserHost === true && workspace?.permissions.write !== true)
+    )
+      return;
     closeTaskHeaderMenu();
     try {
       await window.electronAPI.archiveTask(task.id);
@@ -8962,10 +9001,23 @@ function MainContentComponent({
       console.error("Failed to archive task from header:", error);
       setHeaderActionError("Could not archive. Please try again.");
     }
-  }, [closeTaskHeaderMenu, onSelectTask, onTasksChanged, remoteSession, task]);
+  }, [
+    closeTaskHeaderMenu,
+    onSelectTask,
+    onTasksChanged,
+    remoteSession,
+    task,
+    workspace?.permissions.write,
+  ]);
 
   const handleTaskHeaderFork = useCallback(async () => {
-    if (!task || remoteSession) return;
+    if (
+      !task ||
+      remoteSession ||
+      !hasHostMethod("forkTaskSession") ||
+      (window.coworkBrowserHost === true && workspace?.permissions.write !== true)
+    )
+      return;
     closeTaskHeaderMenu();
     try {
       const forkedTask = await window.electronAPI.forkTaskSession({
@@ -8980,17 +9032,38 @@ function MainContentComponent({
       console.error("Failed to fork task session from header:", error);
       setHeaderActionError("Could not fork this task. Please try again.");
     }
-  }, [closeTaskHeaderMenu, onSelectTask, onTasksChanged, remoteSession, task]);
+  }, [
+    closeTaskHeaderMenu,
+    onSelectTask,
+    onTasksChanged,
+    remoteSession,
+    task,
+    workspace?.permissions.write,
+  ]);
 
   const handleTaskHeaderSideChat = useCallback(async () => {
-    if (!task || remoteSession || !onOpenSideChat) return;
+    if (
+      !task ||
+      remoteSession ||
+      !hasHostMethod("forkTaskSession") ||
+      (window.coworkBrowserHost === true && workspace?.permissions.write !== true) ||
+      !onOpenSideChat
+    )
+      return;
     closeTaskHeaderMenu();
     await onOpenSideChat({ taskId: task.id });
-  }, [closeTaskHeaderMenu, onOpenSideChat, remoteSession, task]);
+  }, [closeTaskHeaderMenu, onOpenSideChat, remoteSession, task, workspace?.permissions.write]);
 
   const handleForkTaskSessionFromEvent = useCallback(
     async (event: TaskEvent) => {
-      if (!task || remoteSession || !event.id) return;
+      if (
+        !task ||
+        remoteSession ||
+        !event.id ||
+        !hasHostMethod("forkTaskSession") ||
+        (window.coworkBrowserHost === true && workspace?.permissions.write !== true)
+      )
+        return;
       try {
         const forkedTask = await window.electronAPI.forkTaskSession({
           taskId: event.taskId || task.id,
@@ -9005,20 +9078,54 @@ function MainContentComponent({
         void error;
       }
     },
-    [onSelectTask, onTasksChanged, remoteSession, task],
+    [onSelectTask, onTasksChanged, remoteSession, task, workspace?.permissions.write],
   );
 
   const handleTaskHeaderAddAutomation = useCallback(() => {
-    if (!task || remoteSession) return;
+    if (
+      !task ||
+      remoteSession ||
+      !hasHostMethod("createRoutine") ||
+      (window.coworkBrowserHost === true && workspace?.permissions.write !== true)
+    )
+      return;
     closeTaskHeaderMenu();
     setShowTaskAutomationModal(true);
-  }, [closeTaskHeaderMenu, remoteSession, task]);
+  }, [closeTaskHeaderMenu, remoteSession, task, workspace?.permissions.write]);
 
   const handleTaskHeaderOpenBrowser = useCallback(() => {
     if (!task || remoteSession || !workspace?.path || !onOpenBrowserWorkbenchSidebar) return;
     closeTaskHeaderMenu();
     onOpenBrowserWorkbenchSidebar();
   }, [closeTaskHeaderMenu, onOpenBrowserWorkbenchSidebar, remoteSession, task, workspace?.path]);
+  const taskHeaderOpenBrowserUnavailableReason = remoteSession
+    ? "The browser workbench is unavailable for remote tasks."
+    : !workspace?.path
+      ? "Select a workspace before opening the browser."
+      : !onOpenBrowserWorkbenchSidebar
+        ? (getHostCapabilityReason("browser.interactive") ??
+          "The browser workbench is unavailable for this task.")
+        : undefined;
+  const taskHeaderTaskMutationUnavailableReason =
+    window.coworkBrowserHost === true && workspace?.permissions.write !== true
+      ? "This workspace is read-only."
+      : undefined;
+  const taskHeaderForkUnavailableReason = remoteSession
+    ? "Forking is unavailable for remote tasks."
+    : (taskHeaderTaskMutationUnavailableReason ??
+      (!hasHostMethod("forkTaskSession")
+        ? (getHostCapabilityReason("tasks.create") ??
+          "Forking is not available on this browser host.")
+        : undefined));
+  const taskHeaderRoutineUnavailableReason = remoteSession
+    ? "Routines are unavailable for remote tasks."
+    : !workspace?.id
+      ? "Select a workspace before creating a routine."
+      : (taskHeaderTaskMutationUnavailableReason ??
+        (!hasHostMethod("createRoutine")
+          ? (getHostCapabilityReason("automation.manage") ??
+            "Routine creation is not available on this browser host.")
+          : undefined));
 
   const initialPromptEventId = useMemo(() => {
     if (!trimmedPrompt) return null;
@@ -9664,6 +9771,33 @@ function MainContentComponent({
                 )}
               </div>
 
+              {profileConstraintNotice && (
+                <div className="permission-profile-notice" role="note">
+                  <span>{profileConstraintNotice}</span>
+                  <button
+                    type="button"
+                    className="permission-profile-notice-action"
+                    onClick={() => {
+                      if (isCalm) {
+                        const trigger =
+                          calmAccessMenuRef.current?.querySelector<HTMLButtonElement>(
+                            ".calm-access-button",
+                          );
+                        trigger?.click();
+                        trigger?.focus();
+                        return;
+                      }
+                      setShowPermissionDropdown(true);
+                      permissionDropdownRef.current
+                        ?.querySelector<HTMLButtonElement>(".permission-access-btn")
+                        ?.focus();
+                    }}
+                  >
+                    Review profiles
+                  </button>
+                </div>
+              )}
+
               <div className="welcome-input-footer">
                 <div className="input-left-actions">
                   <button
@@ -9685,7 +9819,9 @@ function MainContentComponent({
                         selection={displayedInteractionMode}
                         onChange={setInteractionMode}
                       />
-                      <CalmAccessMenu access={calmAccess} placement="up" />
+                      <div ref={calmAccessMenuRef}>
+                        <CalmAccessMenu access={calmAccess} placement="up" />
+                      </div>
                     </>
                   )}
                   <div className="permission-dropdown-container" ref={permissionDropdownRef}>
@@ -10686,7 +10822,13 @@ function MainContentComponent({
       onOpenWebArtifact={openWebArtifact}
       onQuoteAssistantMessage={handleQuoteAssistantMessage}
       botName={botName}
-      onForkTaskSessionFromEvent={remoteSession ? undefined : handleForkTaskSessionFromEvent}
+      onForkTaskSessionFromEvent={
+        remoteSession ||
+        !hasHostMethod("forkTaskSession") ||
+        (isBrowserHost && workspace?.permissions.write !== true)
+          ? undefined
+          : handleForkTaskSessionFromEvent
+      }
       onSelectChildTask={onSelectChildTask}
       onOpenChildAgentSidebar={onOpenChildAgentSidebar}
       onViewTaskOutputs={onViewTaskOutputs}
@@ -10873,7 +11015,17 @@ function MainContentComponent({
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={Boolean(remoteSession)}
+                        disabled={
+                          Boolean(remoteSession) ||
+                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                          !hasHostMethod("toggleTaskPin")
+                        }
+                        title={
+                          taskHeaderTaskMutationUnavailableReason ??
+                          (!hasHostMethod("toggleTaskPin")
+                            ? "Pinning is not available on this browser host."
+                            : undefined)
+                        }
                         onClick={handleTaskHeaderPin}
                       >
                         {task.pinned ? (
@@ -10888,7 +11040,17 @@ function MainContentComponent({
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={Boolean(remoteSession)}
+                        disabled={
+                          Boolean(remoteSession) ||
+                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                          !hasHostMethod("renameTask")
+                        }
+                        title={
+                          taskHeaderTaskMutationUnavailableReason ??
+                          (!hasHostMethod("renameTask")
+                            ? "Renaming is not available on this browser host."
+                            : undefined)
+                        }
                         onClick={handleTaskHeaderRename}
                       >
                         <Pencil size={17} aria-hidden="true" />
@@ -10899,7 +11061,17 @@ function MainContentComponent({
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={Boolean(remoteSession)}
+                        disabled={
+                          Boolean(remoteSession) ||
+                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                          !hasHostMethod("archiveTask")
+                        }
+                        title={
+                          taskHeaderTaskMutationUnavailableReason ??
+                          (!hasHostMethod("archiveTask")
+                            ? "Archiving is not available on this browser host."
+                            : undefined)
+                        }
                         onClick={handleTaskHeaderArchive}
                       >
                         <ArchiveIcon size={17} aria-hidden="true" />
@@ -10913,7 +11085,17 @@ function MainContentComponent({
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={Boolean(remoteSession)}
+                        disabled={
+                          Boolean(remoteSession) ||
+                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                          !hasHostMethod("toggleTaskPin")
+                        }
+                        title={
+                          taskHeaderTaskMutationUnavailableReason ??
+                          (!hasHostMethod("toggleTaskPin")
+                            ? "Pinning is not available on this browser host."
+                            : undefined)
+                        }
                         onClick={handleTaskHeaderPin}
                       >
                         {task.pinned ? (
@@ -10928,7 +11110,17 @@ function MainContentComponent({
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={Boolean(remoteSession)}
+                        disabled={
+                          Boolean(remoteSession) ||
+                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                          !hasHostMethod("renameTask")
+                        }
+                        title={
+                          taskHeaderTaskMutationUnavailableReason ??
+                          (!hasHostMethod("renameTask")
+                            ? "Renaming is not available on this browser host."
+                            : undefined)
+                        }
                         onClick={handleTaskHeaderRename}
                       >
                         <Pencil size={17} aria-hidden="true" />
@@ -10939,7 +11131,17 @@ function MainContentComponent({
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={Boolean(remoteSession)}
+                        disabled={
+                          Boolean(remoteSession) ||
+                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                          !hasHostMethod("archiveTask")
+                        }
+                        title={
+                          taskHeaderTaskMutationUnavailableReason ??
+                          (!hasHostMethod("archiveTask")
+                            ? "Archiving is not available on this browser host."
+                            : undefined)
+                        }
                         onClick={handleTaskHeaderArchive}
                       >
                         <ArchiveIcon size={17} aria-hidden="true" />
@@ -10956,11 +11158,22 @@ function MainContentComponent({
                     disabled={
                       Boolean(remoteSession) || !workspace?.path || !onOpenBrowserWorkbenchSidebar
                     }
+                    title={taskHeaderOpenBrowserUnavailableReason}
+                    aria-label={
+                      taskHeaderOpenBrowserUnavailableReason
+                        ? `Open browser unavailable. ${taskHeaderOpenBrowserUnavailableReason}`
+                        : "Open browser"
+                    }
                     onClick={handleTaskHeaderOpenBrowser}
                   >
                     <Globe size={17} aria-hidden="true" />
                     <span>Open browser</span>
                   </button>
+                  {!remoteSession && workspace?.path && !onOpenBrowserWorkbenchSidebar && (
+                    <div className="main-header-task-menu-note" role="note">
+                      {taskHeaderOpenBrowserUnavailableReason}
+                    </div>
+                  )}
                   {!isBotConversation && (
                     <>
                       <button
@@ -11028,7 +11241,13 @@ function MainContentComponent({
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={Boolean(remoteSession)}
+                        disabled={Boolean(taskHeaderForkUnavailableReason)}
+                        title={taskHeaderForkUnavailableReason}
+                        aria-label={
+                          taskHeaderForkUnavailableReason
+                            ? `${actionLabels.fork} unavailable. ${taskHeaderForkUnavailableReason}`
+                            : actionLabels.fork
+                        }
                         onClick={handleTaskHeaderFork}
                       >
                         <GitFork size={17} aria-hidden="true" />
@@ -11040,7 +11259,13 @@ function MainContentComponent({
                           className="main-header-task-menu-item"
                           role="menuitem"
                           data-task-header-menu-option
-                          disabled={Boolean(remoteSession)}
+                          disabled={Boolean(taskHeaderForkUnavailableReason)}
+                          title={taskHeaderForkUnavailableReason}
+                          aria-label={
+                            taskHeaderForkUnavailableReason
+                              ? `Open side chat unavailable. ${taskHeaderForkUnavailableReason}`
+                              : "Open side chat"
+                          }
                           onClick={handleTaskHeaderSideChat}
                         >
                           <MessageCircle size={17} aria-hidden="true" />
@@ -11056,7 +11281,13 @@ function MainContentComponent({
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={Boolean(remoteSession)}
+                        disabled={Boolean(taskHeaderForkUnavailableReason)}
+                        title={taskHeaderForkUnavailableReason}
+                        aria-label={
+                          taskHeaderForkUnavailableReason
+                            ? `${actionLabels.fork} unavailable. ${taskHeaderForkUnavailableReason}`
+                            : actionLabels.fork
+                        }
                         onClick={handleTaskHeaderFork}
                       >
                         <GitFork size={17} aria-hidden="true" />
@@ -11068,7 +11299,13 @@ function MainContentComponent({
                           className="main-header-task-menu-item"
                           role="menuitem"
                           data-task-header-menu-option
-                          disabled={Boolean(remoteSession)}
+                          disabled={Boolean(taskHeaderForkUnavailableReason)}
+                          title={taskHeaderForkUnavailableReason}
+                          aria-label={
+                            taskHeaderForkUnavailableReason
+                              ? `Open side chat unavailable. ${taskHeaderForkUnavailableReason}`
+                              : "Open side chat"
+                          }
                           onClick={handleTaskHeaderSideChat}
                         >
                           <MessageCircle size={17} aria-hidden="true" />
@@ -11077,17 +11314,33 @@ function MainContentComponent({
                       )}
                     </>
                   )}
+                  {taskHeaderForkUnavailableReason && (
+                    <div className="main-header-task-menu-note" role="note">
+                      {taskHeaderForkUnavailableReason}
+                    </div>
+                  )}
                   <button
                     type="button"
                     className="main-header-task-menu-item"
                     role="menuitem"
                     data-task-header-menu-option
-                    disabled={Boolean(remoteSession) || !workspace?.id}
+                    disabled={Boolean(taskHeaderRoutineUnavailableReason)}
+                    title={taskHeaderRoutineUnavailableReason}
+                    aria-label={
+                      taskHeaderRoutineUnavailableReason
+                        ? `Create routine unavailable. ${taskHeaderRoutineUnavailableReason}`
+                        : "Create routine"
+                    }
                     onClick={handleTaskHeaderAddAutomation}
                   >
                     <Clock size={17} aria-hidden="true" />
                     <span>Create routine...</span>
                   </button>
+                  {taskHeaderRoutineUnavailableReason && (
+                    <div className="main-header-task-menu-note" role="note">
+                      {taskHeaderRoutineUnavailableReason}
+                    </div>
+                  )}
                   {hasTaskOutputs(taskOutputSummary) && onViewTaskOutputs && (
                     <button
                       type="button"

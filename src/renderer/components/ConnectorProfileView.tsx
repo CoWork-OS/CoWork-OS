@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, Copy, ExternalLink } from "lucide-react";
 import { getConnectorProfile, type ConnectorProfile } from "../../shared/connector-profiles";
 import { ConnectorBrandIcon } from "./ConnectorBrandIcon";
+import { invokeMcpApi } from "../host/browser-mcp-bridge";
+import { MCPLaunchPlanReview } from "./MCPLaunchPlanReview";
+import type { MCPLaunchPlanPreview } from "./MCPLaunchPlanReview";
 import type { ConnectorProvider } from "./ConnectorSetupModal";
 import type { ConnectorEnvField } from "./ConnectorEnvModal";
 
@@ -143,12 +146,13 @@ export function ConnectorProfileView({
   const [registryEntry, setRegistryEntry] = useState<MCPRegistryEntry | null>(null);
   const [updateInfo, setUpdateInfo] = useState<MCPUpdateInfo | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<MCPLaunchPlanPreview | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const registry = await window.electronAPI.fetchMCPRegistry();
+        const registry = await invokeMcpApi<{ servers: MCPRegistryEntry[] }>("fetchMCPRegistry");
         const entry = registry?.servers?.find((s: { id: string }) => s.id === connector.registryId);
         if (!cancelled && entry) setRegistryEntry(entry);
       } catch {
@@ -165,7 +169,7 @@ export function ConnectorProfileView({
     let cancelled = false;
     (async () => {
       try {
-        const updates = await window.electronAPI.checkMCPUpdates();
+        const updates = await invokeMcpApi<MCPUpdateInfo[]>("checkMCPUpdates");
         const info = updates?.find((u: MCPUpdateInfo) => u.serverId === config.id);
         if (!cancelled && info) setUpdateInfo(info);
       } catch {
@@ -214,9 +218,35 @@ export function ConnectorProfileView({
     if (!config?.id || updating) return;
     try {
       setUpdating(true);
-      await window.electronAPI.updateMCPServerFromRegistry(config.id);
+      if (window.coworkBrowserHost === true) {
+        const preview = await invokeMcpApi<MCPLaunchPlanPreview>(
+          "previewMCPServerUpdate",
+          config.id,
+        );
+        setPendingUpdate(preview);
+        return;
+      }
+      await invokeMcpApi("updateMCPServerFromRegistry", config.id);
       setUpdateInfo(null);
       onUpdate?.(config.id);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "The MCP server update failed.");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const confirmUpdate = async () => {
+    if (!config?.id || !pendingUpdate) return;
+    try {
+      setUpdating(true);
+      await invokeMcpApi("updateMCPServerFromRegistry", config.id, pendingUpdate.approvalToken);
+      setPendingUpdate(null);
+      setUpdateInfo(null);
+      await onUpdate?.(config.id);
+    } catch (error) {
+      setPendingUpdate(null);
+      alert(error instanceof Error ? error.message : "The MCP server update failed.");
     } finally {
       setUpdating(false);
     }
@@ -507,6 +537,16 @@ export function ConnectorProfileView({
           </div>
         )}
       </div>
+      {pendingUpdate && (
+        <MCPLaunchPlanReview
+          plan={pendingUpdate.plan}
+          expiresAt={pendingUpdate.expiresAt}
+          action="update"
+          busy={updating}
+          onApprove={confirmUpdate}
+          onCancel={() => setPendingUpdate(null)}
+        />
+      )}
     </div>
   );
 }

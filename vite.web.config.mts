@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 
 // Keep this build artifact version explicit; the host refuses assets whose
@@ -11,6 +12,7 @@ const WEB_OUTPUT_DIR = path.resolve(import.meta.dirname, "dist/web");
 const packageManifest = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf8"),
 ) as { version: string };
+const webBuildId = `${packageManifest.version}-${randomUUID()}`;
 
 /** Browser assets are independent of the Electron renderer build. */
 export default defineConfig({
@@ -29,6 +31,7 @@ export default defineConfig({
           JSON.stringify({
             apiVersion: WEB_ARTIFACT_API_VERSION,
             appVersion: packageManifest.version,
+            buildId: webBuildId,
             assets,
           }),
         );
@@ -47,6 +50,9 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "src"),
       "@shared": path.resolve(import.meta.dirname, "src/shared"),
     },
+  },
+  define: {
+    __WEB_BUILD_ID__: JSON.stringify(webBuildId),
   },
   server: {
     host: "127.0.0.1",

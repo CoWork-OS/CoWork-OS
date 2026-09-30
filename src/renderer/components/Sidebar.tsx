@@ -1,4 +1,4 @@
-import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
+import { hasHostCapability, hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import {
   useState,
   useRef,
@@ -145,6 +145,8 @@ interface SidebarProps {
   isBuildActive?: boolean;
   onOpenLibrary?: () => void;
   isLibraryActive?: boolean;
+  onOpenGitChanges?: () => void;
+  isGitChangesActive?: boolean;
   onOpenPlugins?: () => void;
 
   onTasksChanged: () => void;
@@ -920,6 +922,8 @@ function SidebarComponent({
   isBuildActive = false,
   onOpenLibrary,
   isLibraryActive = false,
+  onOpenGitChanges,
+  isGitChangesActive = false,
   onOpenPlugins,
   isLoadingMoreTasks = false,
 
@@ -932,7 +936,7 @@ function SidebarComponent({
   onBotUpdated,
   onBotDeleted,
 }: SidebarProps) {
-  const isBrowserHost = window.coworkBrowserHost === true;
+  const isBrowserHost = typeof window !== "undefined" && window.coworkBrowserHost === true;
   const [browserNotice, setBrowserNotice] = useState<string | null>(null);
   const [newWorkspaceName, setNewWorkspaceName] = useState<string | null>(null);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
@@ -2586,12 +2590,9 @@ function SidebarComponent({
                   <span className="cli-task-time" aria-hidden="true">
                     {formatRelativeShort(task.updatedAt || task.createdAt)}
                   </span>
-                  {sessionActions}
                 </span>
               )}
-              {isAwaitingSession && sessionActions && (
-                <span className="cli-task-action-wrap">{sessionActions}</span>
-              )}
+              {sessionActions && <span className="cli-task-action-wrap">{sessionActions}</span>}
             </div>
           )}
         </div>
@@ -3041,6 +3042,8 @@ function SidebarComponent({
             "Library",
           )}
           isLibraryActive={isLibraryActive}
+          onOpenGitChanges={isBrowserHost ? onOpenGitChanges : undefined}
+          isGitChangesActive={isGitChangesActive}
           onOpenPlugins={browserAction(["listPluginPacks"], onOpenPlugins, "Tools")}
           onOpenAutomations={browserAction(["listRoutines"], onOpenAutomations, "Automations")}
           isAutomationsActive={isAutomationsActive}
@@ -3090,6 +3093,30 @@ function SidebarComponent({
               </span>
             </span>
           </button>
+
+          {isBrowserHost && hasHostCapability("git.read") && (
+            <button
+              type="button"
+              className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isGitChangesActive ? "active" : ""}`}
+              onClick={onOpenGitChanges}
+              aria-pressed={isGitChangesActive}
+              title="Git Changes"
+            >
+              <span className="cli-btn-text">
+                <span className="terminal-only">git_changes</span>
+                <span className="modern-only cli-new-task-modern-label">
+                  <span
+                    className="sidebar-home-btn-icon"
+                    aria-hidden="true"
+                    style={{ display: "flex" }}
+                  >
+                    <GitBranch size={16} strokeWidth={2} style={{ display: "block" }} />
+                  </span>
+                  <span>Git Changes</span>
+                </span>
+              </span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -3274,7 +3301,7 @@ function SidebarComponent({
               <button
                 type="button"
                 className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-ideas-btn sidebar-nav-item ${isIdeasActive ? "active" : ""}`}
-                onClick={browserAction(["listSuggestions"], onOpenIdeas, "Ideas")}
+                onClick={onOpenIdeas}
                 aria-pressed={isIdeasActive}
                 title="Ideas"
               >

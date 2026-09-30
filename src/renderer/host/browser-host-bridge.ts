@@ -1,12 +1,31 @@
 import type { ElectronAPI } from "../../electron/preload";
-import type { AppearanceSettings, Task, TaskEvent, Workspace } from "../../shared/types";
+import type {
+  AppNotification,
+  AppearanceSettings,
+  Task,
+  TaskEvent,
+  TaskTimelinePageCursor,
+  Workspace,
+} from "../../shared/types";
+import type { MailboxEvent } from "../../shared/mailbox";
+import type { CronEvent } from "../../electron/cron/types";
 import type { WebSessionBootstrap } from "../../shared/host-api/contracts";
+import { createLLMSettingsPatch } from "../../shared/host-api/llm-settings-patch";
+import type {
+  BrowserGitAction,
+  BrowserGitApi,
+  BrowserGitDiffSummary,
+  BrowserGitMutationInput,
+  BrowserGitMutationResult,
+  BrowserGitStatusSummary,
+} from "../../shared/host-api/git";
 import { BrowserHostTransport, WebTransportError, webEndpoint } from "../../renderer-web/transport";
 import { createBrowserComposerDraftBridge } from "./browser-composer-draft-bridge";
 import { createBrowserFileBridge } from "./browser-file-bridge";
 import { createBrowserDecisionBridge } from "./browser-decision-bridge";
 import { createBrowserTerminalBridge } from "./browser-terminal-bridge";
 import { browserVisualAttachments } from "./browser-task-input";
+import { BROWSER_HOST_UNSUPPORTED_ACTION_EVENT } from "./browser-capabilities";
 
 /** A browser build can only invoke operations implemented by the browser host API. */
 export class UnsupportedBrowserHostMethodError extends Error {
@@ -79,7 +98,7 @@ interface PendingCancellation extends PendingOperation {
 interface FollowUpReceipt {
   found: boolean;
   state: "admitted" | "pending" | "unavailable";
-  deliveryStatus?: "accepted" | "queued";
+  deliveryStatus?: "accepted" | "queued" | "started";
   acceptedAt?: number;
   queuedAt?: number;
   startedAt?: number;
@@ -106,7 +125,21 @@ interface ObservedTaskEventScope {
   knownEventIds: Set<string>;
 }
 
+interface BrowserNotificationEvent {
+  type: "added" | "updated" | "removed" | "cleared";
+  notification?: AppNotification;
+  notifications?: AppNotification[];
+}
+
 const OPERATION_KEY_RE = /^[A-Za-z0-9._:-]{8,128}$/;
+const PROVIDER_SETTINGS_RELOAD_MESSAGE =
+  "Provider settings changed after this page loaded. Reload AI & Models to review the latest values, then reapply your changes.";
+const PROVIDER_SETTINGS_MUTATION_METHODS = new Set([
+  "saveLLMSettings",
+  "resetLLMProviderCredentials",
+  "setLLMModel",
+  "setLLMProvider",
+]);
 const TERMINAL_TASK_STATUSES = new Set<Task["status"]>([
   "completed",
   "failed",
@@ -124,15 +157,27 @@ export function installBrowserHostBridge(
   session: WebSessionBootstrap,
 ): () => void {
   const previousElectronApi = window.electronAPI;
+  const previousBrowserGit = window.coworkBrowserGit;
   const previousBrowserMarker = window.coworkBrowserHost;
   const previousBrowserInfo = window.coworkBrowserHostInfo;
   const browserInfo = {
     providerReady: session.providerReady,
     activeWorkspaceId: session.activeWorkspaceId,
+    capabilities: session.capabilities,
     desktopMethods: session.desktopMethods,
   };
   const appearanceStorageKey = `cowork:browser-appearance:${session.host.installationId}:${session.host.profileId}`;
   let active = true;
+  let providerSettingsRevision: string | null = null;
+  let providerSettingsRevisionBlocked = false;
+  let providerSettingsSnapshot: unknown;
+  let providerSettingsSnapshotLoaded = false;
+  let disposeQueueUpdatePolling: () => void = () => undefined;
+  let disposeCronEventPolling: () => void = () => undefined;
+  let disposeMailboxEventPolling: () => void = () => undefined;
+  let disposePersonalitySettingsPolling: () => void = () => undefined;
+  let disposeRoutingStatusPolling: () => void = () => undefined;
+  const disposeIntegrationPolling: Array<() => void> = [];
   let selectedWorkspaceId = session.activeWorkspaceId;
   const taskOffsets = new Map<string, number>();
   const observedTaskEventScopes = new Map<string, ObservedTaskEventScope>();
@@ -147,7 +192,7 @@ export function installBrowserHostBridge(
     verifyBrowserOperationSession(session, scope),
   );
   const getOperationStorageKey = async (
-    method: "create" | "follow-up" | "cancel" | "decision" | "desktop",
+    method: "create" | "follow-up" | "cancel" | "decision" | "desktop" | "git",
     scope: string,
   ): Promise<string> => {
     const sessionScope = await sessionScopePromise;
@@ -164,6 +209,61 @@ export function installBrowserHostBridge(
     const result = await transport.request<T>(method, params, options);
     if (!active) throw new StaleBrowserHostBridgeError();
     return result;
+  };
+
+  const readProviderSettingsSnapshot = async (): Promise<unknown> => {
+    const snapshot = await rpc<unknown>("desktop.getLLMSettings", { args: [] });
+    if (
+      !isRecord(snapshot) ||
+      !Object.hasOwn(snapshot, "settings") ||
+      typeof snapshot.revision !== "string"
+    ) {
+      throw new Error("The host returned an invalid provider settings snapshot.");
+    }
+    providerSettingsRevision = snapshot.revision;
+    providerSettingsRevisionBlocked = false;
+    providerSettingsSnapshot = snapshot.settings;
+    providerSettingsSnapshotLoaded = true;
+    return snapshot.settings;
+  };
+
+  const mutateGit = async (action: BrowserGitAction, request: BrowserGitMutationInput) => {
+    const fingerprint = await fingerprintPayload({ action, request });
+    const storageKey = await getOperationStorageKey(
+      "git",
+      `${request.workspaceId}:${action}:${fingerprint}`,
+    );
+    const operation = await getOrCreatePendingOperation(storageKey, fingerprint);
+    try {
+      const result = await rpc<BrowserGitMutationResult>(`git.${action}`, request, {
+        operationKey: operation.key,
+        mutation: true,
+        timeoutMs: 120_000,
+      });
+      clearPendingOperation(storageKey, operation.key);
+      return result;
+    } catch (error) {
+      if (
+        [
+          "INVALID_REQUEST",
+          "FORBIDDEN",
+          "UNSUPPORTED_CAPABILITY",
+          "STALE_STATE",
+          "CONFLICT",
+          "RATE_LIMITED",
+        ].some((code) => hasErrorCode(error, code))
+      ) {
+        clearPendingOperation(storageKey, operation.key);
+      }
+      throw error;
+    }
+  };
+  const browserGit: BrowserGitApi = {
+    status: (workspaceId) => rpc<BrowserGitStatusSummary>("git.status", { workspaceId }),
+    diff: (request) => rpc<BrowserGitDiffSummary>("git.diff", request),
+    stage: (request) => mutateGit("stage", request),
+    unstage: (request) => mutateGit("unstage", request),
+    commit: (request) => mutateGit("commit", request),
   };
 
   const mutateDecision = async <T>(
@@ -269,20 +369,22 @@ export function installBrowserHostBridge(
     return tasks;
   };
 
-  const getTaskEvents = async (taskId: string): Promise<TaskEvent[]> => {
-    const task = await getTask(taskId);
-    if (!task) throw new Error("This task is unavailable to the browser session.");
+  const readTaskEventSnapshot = async (task: Task, limit: number) => {
     const response = await rpc<TaskEventsResponse>("task.events.snapshot", {
-      taskId,
+      taskId: task.id,
       workspaceId: task.workspaceId,
-      limit: 600,
+      limit,
     });
-    if (!isRecord(response) || !Array.isArray(response.events)) {
+    if (
+      !isRecord(response) ||
+      response.taskId !== task.id ||
+      response.workspaceId !== task.workspaceId ||
+      !Array.isArray(response.events)
+    ) {
       throw new InvalidBrowserHostResponseError("task.events.snapshot");
     }
-    const events = response.events as TaskEvent[];
-    const hydratedEvents = await Promise.all(
-      events.map((event) => decisions.hydrateTaskEvent(event)),
+    const events = await Promise.all(
+      (response.events as TaskEvent[]).map((event) => decisions.hydrateTaskEvent(event)),
     );
     const cursor = parseTaskMutationCursor(response.cursor, task.id);
     if (cursor) {
@@ -291,7 +393,7 @@ export function installBrowserHostBridge(
         taskId: task.id,
         workspaceId: task.workspaceId,
         cursor,
-        knownEventIds: new Set(hydratedEvents.flatMap((event) => (event.id ? [event.id] : []))),
+        knownEventIds: new Set(events.flatMap((event) => (event.id ? [event.id] : []))),
       });
       while (observedTaskEventScopes.size > 8) {
         const oldest = observedTaskEventScopes.keys().next().value as string | undefined;
@@ -300,7 +402,70 @@ export function installBrowserHostBridge(
       }
       scheduleTaskEventPoll();
     }
-    return hydratedEvents;
+    return { response, events };
+  };
+
+  const getTaskEvents = async (taskId: string): Promise<TaskEvent[]> => {
+    const task = await getTask(taskId);
+    if (!task) throw new Error("This task is unavailable to the browser session.");
+    return (await readTaskEventSnapshot(task, 600)).events;
+  };
+
+  const getTaskTimelinePage: ElectronAPI["getTaskTimelinePage"] = async (request) => {
+    const task = await getTask(request.taskId);
+    if (!task) throw new Error("This task is unavailable to the browser session.");
+    const limit = normalizeTimelineLimit(request.limit);
+    let events: TaskEvent[];
+    let hasMoreHistory: boolean;
+    let nextCursor: TaskTimelinePageCursor | null;
+
+    if (request.cursor) {
+      const beforeCursor = parseTimelineHistoryCursor(request.cursor);
+      if (!beforeCursor) throw new Error("Invalid task timeline cursor.");
+      const response = await rpc<unknown>("task.events.history", {
+        taskId: task.id,
+        workspaceId: task.workspaceId,
+        beforeCursor,
+        limit,
+      });
+      if (!isRecord(response) || !Array.isArray(response.events)) {
+        throw new InvalidBrowserHostResponseError("task.events.history");
+      }
+      events = await Promise.all(
+        (response.events as TaskEvent[]).map((event) => decisions.hydrateTaskEvent(event)),
+      );
+      hasMoreHistory = response.hasMoreHistory === true;
+      nextCursor = parseTimelineHistoryCursor(response.nextHistoryCursor);
+    } else {
+      const snapshot = await readTaskEventSnapshot(task, limit);
+      events = snapshot.events;
+      hasMoreHistory = snapshot.response.hasMoreHistory === true;
+      nextCursor = parseTimelineHistoryCursor(snapshot.response.nextHistoryCursor);
+    }
+
+    const summary = summarizeTimelinePage(events);
+    return {
+      taskId: task.id,
+      events,
+      hasMoreHistory,
+      nextCursor: hasMoreHistory ? nextCursor : null,
+      summary,
+    };
+  };
+
+  const getTaskEventDetail: ElectronAPI["getTaskEventDetail"] = async (request) => {
+    const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
+    const eventId = typeof request?.eventId === "string" ? request.eventId.trim() : "";
+    if (!taskId || !eventId || eventId.length > 256) {
+      throw new Error("A valid task and event are required.");
+    }
+    const events = await getTaskEvents(taskId);
+    const event =
+      events.find((candidate) => candidate.id === eventId || candidate.eventId === eventId) ?? null;
+    return {
+      event,
+      payloadBytes: event ? utf8Size(JSON.stringify(event.payload ?? {})) : 0,
+    };
   };
 
   const onTaskEvent: ElectronAPI["onTaskEvent"] = (callback) => {
@@ -512,6 +677,24 @@ export function installBrowserHostBridge(
     };
     const storageKey = await getOperationStorageKey("follow-up", `${task.workspaceId}:${task.id}`);
     const fingerprint = await fingerprintPayload(request);
+    const existing = readStoredOperation(storageKey);
+    if (existing && existing.fingerprint !== fingerprint) {
+      const previous = parseFollowUpReceipt(
+        await rpc<unknown>("task.followUp.receipt", {
+          taskId: task.id,
+          workspaceId: task.workspaceId,
+          operationKey: existing.key,
+        }),
+      );
+      if (previous.found) {
+        clearPendingOperation(storageKey, existing.key);
+        throw new Error(
+          previous.state === "unavailable"
+            ? "The previous follow-up failed. Review its task history before sending again."
+            : "The previous follow-up was accepted. Review its task history before sending again.",
+        );
+      }
+    }
     const operation = await getOrCreatePendingOperation(storageKey, fingerprint);
     const receiptParams = {
       taskId: task.id,
@@ -679,6 +862,11 @@ export function installBrowserHostBridge(
     }
   };
 
+  // Session auto-approval is renderer-scoped in a browser. The shared App owns
+  // the actual state; these methods provide the optional desktop persistence
+  // seam without sending an unsupported RPC or persisting across sign-out.
+  let sessionAutoApprove = false;
+
   const supported: Record<string, unknown> = {
     listBrowserWorkspaceFiles: (request: unknown) => rpc("workspace.files.list", request),
     listBrowserTaskArtifacts: (request: unknown) => rpc("task.artifacts.list", request),
@@ -697,7 +885,28 @@ export function installBrowserHostBridge(
     },
     getPlatform: () => session.host.platform,
     getAppVersion: async () => ({ version: session.host.appVersion }),
+    openExternal: (rawUrl: unknown) => {
+      if (typeof rawUrl !== "string")
+        throw new Error("Only http, https, and mailto URLs are allowed.");
+      let url: URL;
+      try {
+        url = new URL(rawUrl);
+      } catch {
+        throw new Error("Only http, https, and mailto URLs are allowed.");
+      }
+      if (!["http:", "https:", "mailto:"].includes(url.protocol)) {
+        throw new Error("Only http, https, and mailto URLs are allowed.");
+      }
+      window.open(url.toString(), "_blank", "noopener,noreferrer");
+    },
     getNativeFrameMode: () => false,
+    getSessionAutoApprove: async () => sessionAutoApprove,
+    setSessionAutoApprove: async (enabled: unknown) => {
+      if (typeof enabled !== "boolean") {
+        throw new TypeError("Session auto-approval must be a boolean.");
+      }
+      sessionAutoApprove = enabled;
+    },
     getAppearanceSettings,
     saveAppearanceSettings,
     listWorkspaces,
@@ -706,6 +915,8 @@ export function installBrowserHostBridge(
     listSidebarTasks: listTasks,
     getTask,
     getTaskEvents,
+    getTaskTimelinePage,
+    getTaskEventDetail,
     onTaskEvent,
     createTask,
     sendMessage,
@@ -720,6 +931,11 @@ export function installBrowserHostBridge(
   }
   browserInfo.desktopMethods = {
     ...browserInfo.desktopMethods,
+    openExternal: { mutation: false },
+    getSessionAutoApprove: { mutation: false },
+    setSessionAutoApprove: { mutation: false },
+    getTaskTimelinePage: { mutation: false },
+    getTaskEventDetail: { mutation: false },
     ...Object.fromEntries(
       [
         ...(session.capabilities["files.read"]?.available ? ["listBrowserWorkspaceFiles"] : []),
@@ -729,7 +945,13 @@ export function installBrowserHostBridge(
       ].map((name) => [name, { mutation: name === "createBrowserArtifactDownload" }]),
     ),
   };
-  const files = createBrowserFileBridge({ session, listWorkspaces, isActive: () => active });
+  const files = createBrowserFileBridge({
+    session,
+    listWorkspaces,
+    createMediaHandle: (workspaceId, relativePath) =>
+      rpc("workspace.file.media.create", { workspaceId, relativePath }),
+    isActive: () => active,
+  });
   const drafts = createBrowserComposerDraftBridge({
     installationId: session.host.installationId,
     profileId: session.host.profileId,
@@ -797,6 +1019,8 @@ export function installBrowserHostBridge(
     if (updated.host?.generation !== session.host.generation) return;
     session.providerReady = updated.providerReady;
     browserInfo.providerReady = updated.providerReady;
+    session.capabilities = updated.capabilities;
+    browserInfo.capabilities = updated.capabilities;
     emitLocal("llm");
   };
 
@@ -804,8 +1028,24 @@ export function installBrowserHostBridge(
     if (!/^[a-zA-Z][a-zA-Z0-9]{0,79}$/.test(name) || name === "constructor") continue;
     supported[name] = async (...args: unknown[]) => {
       while (args.length > 0 && args[args.length - 1] === undefined) args.pop();
-      const omittedArgs = args.flatMap((arg, index) => (arg === undefined ? [index] : []));
-      const params = { args, ...(omittedArgs.length ? { omittedArgs } : {}) };
+      if (name === "getLLMSettings") return readProviderSettingsSnapshot();
+      const requestArgs = [...args];
+      const providerSettingsMutation = PROVIDER_SETTINGS_MUTATION_METHODS.has(name);
+      if (providerSettingsMutation) {
+        if (providerSettingsRevisionBlocked) {
+          throw new Error(PROVIDER_SETTINGS_RELOAD_MESSAGE);
+        }
+        if (!providerSettingsRevision || !providerSettingsSnapshotLoaded) {
+          await readProviderSettingsSnapshot();
+        }
+        if (!providerSettingsRevision) throw new Error(PROVIDER_SETTINGS_RELOAD_MESSAGE);
+        if (name === "saveLLMSettings") {
+          requestArgs[0] = createLLMSettingsPatch(requestArgs[0], providerSettingsSnapshot);
+        }
+        requestArgs.push(providerSettingsRevision);
+      }
+      const omittedArgs = requestArgs.flatMap((arg, index) => (arg === undefined ? [index] : []));
+      const params = { args: requestArgs, ...(omittedArgs.length ? { omittedArgs } : {}) };
       let operation: PendingOperation | null = null;
       let storageKey: string | null = null;
       if (descriptor.mutation) {
@@ -827,17 +1067,43 @@ export function installBrowserHostBridge(
           timeoutMs: 120_000,
         });
         if (storageKey && operation) clearPendingOperation(storageKey, operation.key);
-        if (name === "saveLLMSettings" || name === "setLLMProvider" || name === "setLLMModel") {
+        if (providerSettingsMutation) {
+          providerSettingsRevision =
+            isRecord(result) && typeof result.revision === "string" ? result.revision : null;
+          providerSettingsRevisionBlocked = providerSettingsRevision === null;
+          providerSettingsSnapshotLoaded = false;
+          if (!providerSettingsRevisionBlocked) {
+            try {
+              await readProviderSettingsSnapshot();
+            } catch {
+              providerSettingsRevision = null;
+              providerSettingsRevisionBlocked = true;
+            }
+          }
+        }
+        if (name === "openaiOAuthLogout") await readProviderSettingsSnapshot();
+        if (
+          name === "saveLLMSettings" ||
+          name === "resetLLMProviderCredentials" ||
+          name === "setLLMProvider" ||
+          name === "setLLMModel" ||
+          name === "openaiOAuthLogout"
+        ) {
           await refreshProviderReadiness();
         }
         return result;
       } catch (error) {
+        if (providerSettingsMutation && hasErrorCode(error, "CONFLICT")) {
+          providerSettingsRevision = null;
+          providerSettingsRevisionBlocked = true;
+        }
         if (
           storageKey &&
           operation &&
           [
             "INVALID_REQUEST",
             "FORBIDDEN",
+            "NOT_FOUND",
             "UNSUPPORTED_CAPABILITY",
             "CONFLICT",
             "RATE_LIMITED",
@@ -847,6 +1113,551 @@ export function installBrowserHostBridge(
         }
         throw error;
       }
+    };
+  }
+
+  // Portable integration managers expose scoped snapshots. Poll only while the
+  // shared settings screen has subscribers, and release all timers on teardown.
+  function subscribeIntegrationSnapshot(
+    read: () => Promise<unknown>,
+    publish: (current: unknown, previous: unknown, listener: (...args: unknown[]) => void) => void,
+  ) {
+    const listeners = new Set<(...args: unknown[]) => void>();
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let inFlight = false;
+    let previous: unknown;
+    let serialized: string | undefined;
+    const poll = async () => {
+      if (!active || inFlight || !listeners.size) return;
+      inFlight = true;
+      try {
+        const current = await read();
+        if (!active || !listeners.size) return;
+        const next = JSON.stringify(current);
+        if (next === serialized) return;
+        for (const listener of listeners) {
+          try {
+            publish(current, previous, listener);
+          } catch {
+            /* Isolate renderer observers. */
+          }
+        }
+        previous = current;
+        serialized = next;
+      } catch {
+        /* Reconcile after transient disconnect on the next poll. */
+      } finally {
+        inFlight = false;
+      }
+    };
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+      previous = undefined;
+      serialized = undefined;
+    };
+    disposeIntegrationPolling.push(() => {
+      stop();
+      listeners.clear();
+    });
+    return (listener: (...args: unknown[]) => void) => {
+      listeners.add(listener);
+      if (!timer) {
+        void poll();
+        timer = setInterval(() => void poll(), 2500);
+      }
+      return () => {
+        listeners.delete(listener);
+        if (!listeners.size) stop();
+      };
+    };
+  }
+  if (Object.hasOwn(session.desktopMethods ?? {}, "getMCPStatus")) {
+    supported.onMCPStatusChange = subscribeIntegrationSnapshot(
+      () => rpc("desktop.getMCPStatus", { args: [{ workspaceId: selectedWorkspaceId }] }),
+      (current, _previous, listener) => {
+        if (Array.isArray(current)) listener(current);
+      },
+    );
+  }
+  if (Object.hasOwn(session.desktopMethods ?? {}, "getGatewayChangeSignal")) {
+    supported.onGatewayUsersUpdated = subscribeIntegrationSnapshot(
+      () =>
+        rpc("desktop.getGatewayChangeSignal", {
+          args: [selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}],
+        }),
+      (current, previous, listener) => {
+        if (!Array.isArray(current)) return;
+        const prior = new Map(
+          (Array.isArray(previous) ? previous : [])
+            .filter(isRecord)
+            .map((row) => [row.channelId, row.revision]),
+        );
+        for (const row of current.filter(isRecord)) {
+          if (
+            typeof row.channelId === "string" &&
+            typeof row.channelType === "string" &&
+            row.revision !== prior.get(row.channelId)
+          )
+            listener({ channelId: row.channelId, channelType: row.channelType });
+        }
+      },
+    );
+  }
+  if (Object.hasOwn(session.desktopMethods ?? {}, "getWhatsAppInfo")) {
+    supported.onWhatsAppQRCode = subscribeIntegrationSnapshot(
+      () => rpc("desktop.getWhatsAppInfo", { args: [] }),
+      (current, previous, listener) => {
+        if (
+          isRecord(current) &&
+          typeof current.qrCode === "string" &&
+          current.qrCode !== (isRecord(previous) ? previous.qrCode : undefined)
+        )
+          listener(undefined, current.qrCode);
+      },
+    );
+    supported.onWhatsAppConnected = subscribeIntegrationSnapshot(
+      () => rpc("desktop.getWhatsAppInfo", { args: [] }),
+      (current, previous, listener) => {
+        if (
+          isRecord(current) &&
+          current.status === "connected" &&
+          (!isRecord(previous) || previous.status !== "connected")
+        )
+          listener();
+      },
+    );
+    supported.onWhatsAppStatus = subscribeIntegrationSnapshot(
+      () => rpc("desktop.getWhatsAppInfo", { args: [] }),
+      (current, _previous, listener) => {
+        if (isRecord(current) && typeof current.status === "string")
+          listener({ status: current.status });
+      },
+    );
+  }
+
+  // Desktop cron events are delivered over IPC. A browser host polls the
+  // permission-filtered cron snapshot only while a subscriber is mounted and
+  // synthesizes a change event so the shared Scheduled Tasks screen refreshes.
+  type CronEventListener = Parameters<ElectronAPI["onCronEvent"]>[0];
+  type CronStatus = Awaited<ReturnType<ElectronAPI["getCronStatus"]>>;
+  type CronJobs = Awaited<ReturnType<ElectronAPI["listCronJobs"]>>;
+  if (
+    Object.hasOwn(session.desktopMethods ?? {}, "getCronStatus") &&
+    Object.hasOwn(session.desktopMethods ?? {}, "listCronJobs")
+  ) {
+    const cronListeners = new Set<CronEventListener>();
+    let cronPollTimer: ReturnType<typeof setInterval> | null = null;
+    let cronPollInFlight = false;
+    let lastCronJobs: Map<string, string> | null = null;
+    let lastCronStatus: string | null = null;
+    const pollCronEvents = async () => {
+      if (!active || cronPollInFlight || cronListeners.size === 0) return;
+      cronPollInFlight = true;
+      try {
+        const [status, jobs] = await Promise.all([
+          rpc<CronStatus>("desktop.getCronStatus", { args: [] }),
+          rpc<CronJobs>("desktop.listCronJobs", { args: [{ includeDisabled: true }] }),
+        ]);
+        if (!active || cronListeners.size === 0 || !Array.isArray(jobs)) return;
+        const nextJobs = new Map(jobs.map((job) => [job.id, JSON.stringify(job)]));
+        const nextStatus = JSON.stringify({
+          enabled: status.enabled,
+          jobCount: status.jobCount,
+          enabledJobCount: status.enabledJobCount,
+          runningJobCount: status.runningJobCount,
+          maxConcurrentRuns: status.maxConcurrentRuns,
+          nextWakeAtMs: status.nextWakeAtMs,
+          nextWakeReason: status.nextWakeReason,
+          nextWakeScheduleKind: status.nextWakeScheduleKind,
+          nextWakeTimeZone: status.nextWakeTimeZone,
+          scheduler: {
+            profileScope: status.scheduler.profileScope,
+            runnerKind: status.scheduler.runnerKind,
+            state: status.scheduler.state,
+            timeZone: status.scheduler.timeZone,
+            runnerExclusivity: status.scheduler.runnerExclusivity,
+          },
+          webhookEnabled: status.webhook?.enabled,
+        });
+        const previousJobs = lastCronJobs;
+        const previousStatus = lastCronStatus;
+        lastCronJobs = nextJobs;
+        lastCronStatus = nextStatus;
+        if (!previousJobs) return;
+
+        let event: CronEvent | null = null;
+        for (const [jobId, serialized] of nextJobs) {
+          if (!previousJobs.has(jobId)) {
+            event = { jobId, action: "added" };
+            break;
+          }
+          if (previousJobs.get(jobId) !== serialized) {
+            event = { jobId, action: "updated" };
+            break;
+          }
+        }
+        if (!event) {
+          for (const jobId of previousJobs.keys()) {
+            if (!nextJobs.has(jobId)) {
+              event = { jobId, action: "removed" };
+              break;
+            }
+          }
+        }
+        if (!event && previousStatus !== nextStatus) {
+          event = { jobId: "scheduler", action: "updated" };
+        }
+        if (!event) return;
+        for (const listener of cronListeners) {
+          try {
+            listener(event);
+          } catch {
+            // One renderer subscriber must not stop other cron observers.
+          }
+        }
+      } catch {
+        // A later poll reconciles state after a transient host or network failure.
+      } finally {
+        cronPollInFlight = false;
+      }
+    };
+    const stopCronPolling = () => {
+      if (cronPollTimer) clearInterval(cronPollTimer);
+      cronPollTimer = null;
+      lastCronJobs = null;
+      lastCronStatus = null;
+    };
+    disposeCronEventPolling = () => {
+      stopCronPolling();
+      cronListeners.clear();
+    };
+    supported.onCronEvent = (listener: CronEventListener) => {
+      cronListeners.add(listener);
+      if (!cronPollTimer) {
+        void pollCronEvents();
+        cronPollTimer = setInterval(() => void pollCronEvents(), 2_500);
+      }
+      return () => {
+        cronListeners.delete(listener);
+        if (cronListeners.size === 0) stopCronPolling();
+      };
+    };
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      onCronEvent: { mutation: false },
+    };
+  }
+
+  // The desktop emits queue updates through IPC. A browser host uses the same
+  // queue read method and polls only while a shared-UI subscriber is mounted.
+  // Do not expose a no-op subscription that leaves queue state stale.
+  type QueueStatus = Awaited<ReturnType<ElectronAPI["getQueueStatus"]>>;
+  type QueueUpdateListener = Parameters<ElectronAPI["onQueueUpdate"]>[0];
+  if (Object.hasOwn(session.desktopMethods ?? {}, "getQueueStatus")) {
+    const queueListeners = new Set<QueueUpdateListener>();
+    let queuePollTimer: ReturnType<typeof setInterval> | null = null;
+    let queuePollInFlight = false;
+    let lastQueueStatus: string | null = null;
+    disposeQueueUpdatePolling = () => {
+      if (queuePollTimer) clearInterval(queuePollTimer);
+      queuePollTimer = null;
+      queueListeners.clear();
+    };
+    const pollQueueStatus = async () => {
+      if (!active || queuePollInFlight || queueListeners.size === 0) return;
+      queuePollInFlight = true;
+      try {
+        const status = await rpc<QueueStatus>("desktop.getQueueStatus", { args: [] });
+        if (!active || queueListeners.size === 0) return;
+        const serialized = JSON.stringify(status);
+        if (serialized === lastQueueStatus) return;
+        lastQueueStatus = serialized;
+        for (const listener of queueListeners) {
+          try {
+            listener(status);
+          } catch {
+            // One renderer subscriber must not stop other queue observers.
+          }
+        }
+      } catch {
+        // A later poll reconciles state after transient host or network failures.
+      } finally {
+        queuePollInFlight = false;
+      }
+    };
+    supported.onQueueUpdate = (listener: QueueUpdateListener) => {
+      queueListeners.add(listener);
+      if (!queuePollTimer) {
+        void pollQueueStatus();
+        queuePollTimer = setInterval(() => void pollQueueStatus(), 2_500);
+      }
+      return () => {
+        queueListeners.delete(listener);
+        if (queueListeners.size === 0 && queuePollTimer) {
+          clearInterval(queuePollTimer);
+          queuePollTimer = null;
+        }
+      };
+    };
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      onQueueUpdate: { mutation: false },
+    };
+  }
+
+  if (Object.hasOwn(session.desktopMethods ?? {}, "listMailboxEvents")) {
+    type MailboxEventListener = Parameters<ElectronAPI["onMailboxEvent"]>[0];
+    const mailboxListeners = new Set<MailboxEventListener>();
+    let mailboxPollTimer: ReturnType<typeof setInterval> | null = null;
+    let mailboxPollInFlight = false;
+    let lastMailboxEvent: string | null = null;
+    const pollMailboxEvents = async () => {
+      if (!active || mailboxPollInFlight || mailboxListeners.size === 0) return;
+      mailboxPollInFlight = true;
+      try {
+        const events = await rpc<MailboxEvent[]>("desktop.listMailboxEvents", { args: [1] });
+        if (!active || mailboxListeners.size === 0 || !Array.isArray(events)) return;
+        const latest = events[0];
+        const serialized = latest ? JSON.stringify(latest) : null;
+        if (serialized === lastMailboxEvent) return;
+        const previous = lastMailboxEvent;
+        lastMailboxEvent = serialized;
+        if (!previous || !latest) return;
+        for (const listener of mailboxListeners) {
+          try {
+            listener(latest);
+          } catch {
+            // One renderer subscriber must not stop other mailbox observers.
+          }
+        }
+      } catch {
+        // A later poll reconciles state after a transient host or network failure.
+      } finally {
+        mailboxPollInFlight = false;
+      }
+    };
+    disposeMailboxEventPolling = () => {
+      if (mailboxPollTimer) clearInterval(mailboxPollTimer);
+      mailboxPollTimer = null;
+      mailboxListeners.clear();
+      lastMailboxEvent = null;
+    };
+    supported.onMailboxEvent = (listener: MailboxEventListener) => {
+      mailboxListeners.add(listener);
+      if (!mailboxPollTimer) {
+        void pollMailboxEvents();
+        mailboxPollTimer = setInterval(() => void pollMailboxEvents(), 2_500);
+      }
+      return () => {
+        mailboxListeners.delete(listener);
+        if (mailboxListeners.size === 0 && mailboxPollTimer) {
+          clearInterval(mailboxPollTimer);
+          mailboxPollTimer = null;
+          lastMailboxEvent = null;
+        }
+      };
+    };
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      onMailboxEvent: { mutation: false },
+    };
+  }
+
+  if (Object.hasOwn(session.desktopMethods ?? {}, "getPersonalitySettingsChangeSignal")) {
+    type PersonalitySettingsListener = Parameters<ElectronAPI["onPersonalitySettingsChanged"]>[0];
+    const personalityListeners = new Set<PersonalitySettingsListener>();
+    let personalityPollTimer: ReturnType<typeof setInterval> | null = null;
+    let personalityPollInFlight = false;
+    let lastPersonalitySignal: string | null = null;
+    const pollPersonalitySettings = async () => {
+      if (!active || personalityPollInFlight || personalityListeners.size === 0) return;
+      personalityPollInFlight = true;
+      try {
+        const signal = await rpc<Record<string, unknown>>(
+          "desktop.getPersonalitySettingsChangeSignal",
+          { args: [] },
+        );
+        if (!active || personalityListeners.size === 0) return;
+        const serialized = JSON.stringify(signal);
+        if (serialized === lastPersonalitySignal) return;
+        const previous = lastPersonalitySignal;
+        lastPersonalitySignal = serialized;
+        if (previous === null) return;
+        for (const listener of personalityListeners) {
+          try {
+            listener(signal);
+          } catch {
+            // One renderer subscriber must not stop other settings observers.
+          }
+        }
+      } catch {
+        // A later poll reconciles state after a transient host or network failure.
+      } finally {
+        personalityPollInFlight = false;
+      }
+    };
+    disposePersonalitySettingsPolling = () => {
+      if (personalityPollTimer) clearInterval(personalityPollTimer);
+      personalityPollTimer = null;
+      personalityListeners.clear();
+      lastPersonalitySignal = null;
+    };
+    supported.onPersonalitySettingsChanged = (listener: PersonalitySettingsListener) => {
+      personalityListeners.add(listener);
+      if (!personalityPollTimer) {
+        void pollPersonalitySettings();
+        personalityPollTimer = setInterval(() => void pollPersonalitySettings(), 2_500);
+      }
+      return () => {
+        personalityListeners.delete(listener);
+        if (personalityListeners.size === 0 && personalityPollTimer) {
+          clearInterval(personalityPollTimer);
+          personalityPollTimer = null;
+          lastPersonalitySignal = null;
+        }
+      };
+    };
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      onPersonalitySettingsChanged: { mutation: false },
+    };
+  }
+
+  if (Object.hasOwn(session.desktopMethods ?? {}, "getLLMRoutingStatus")) {
+    type RoutingStatus = Awaited<ReturnType<ElectronAPI["getLLMRoutingStatus"]>>;
+    type RoutingListener = Parameters<ElectronAPI["onLLMRoutingEvent"]>[0];
+    const routingListeners = new Set<RoutingListener>();
+    let routingPollTimer: ReturnType<typeof setInterval> | null = null;
+    let routingPollInFlight = false;
+    let lastRoutingStatus: string | null = null;
+    const pollRoutingStatus = async () => {
+      if (!active || routingPollInFlight || routingListeners.size === 0) return;
+      routingPollInFlight = true;
+      try {
+        const status = await rpc<RoutingStatus>("desktop.getLLMRoutingStatus", { args: [] });
+        if (!active || routingListeners.size === 0) return;
+        const serialized = JSON.stringify(status);
+        if (serialized === lastRoutingStatus) return;
+        const previous = lastRoutingStatus;
+        lastRoutingStatus = serialized;
+        if (previous === null) return;
+        for (const listener of routingListeners) {
+          try {
+            listener(status);
+          } catch {
+            // One renderer subscriber must not stop other routing observers.
+          }
+        }
+      } catch {
+        // A later poll reconciles state after a transient host or network failure.
+      } finally {
+        routingPollInFlight = false;
+      }
+    };
+    disposeRoutingStatusPolling = () => {
+      if (routingPollTimer) clearInterval(routingPollTimer);
+      routingPollTimer = null;
+      routingListeners.clear();
+      lastRoutingStatus = null;
+    };
+    supported.onLLMRoutingEvent = (listener: RoutingListener) => {
+      routingListeners.add(listener);
+      if (!routingPollTimer) {
+        void pollRoutingStatus();
+        routingPollTimer = setInterval(() => void pollRoutingStatus(), 2_500);
+      }
+      return () => {
+        routingListeners.delete(listener);
+        if (routingListeners.size === 0 && routingPollTimer) {
+          clearInterval(routingPollTimer);
+          routingPollTimer = null;
+          lastRoutingStatus = null;
+        }
+      };
+    };
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      onLLMRoutingEvent: { mutation: false },
+    };
+  }
+
+  const notificationMethods = [
+    "listNotifications",
+    "getUnreadNotificationCount",
+    "markNotificationRead",
+    "markAllNotificationsRead",
+    "deleteNotification",
+    "deleteAllNotifications",
+  ];
+  let notificationSnapshot: Map<string, AppNotification> | null = null;
+  let notificationPollTimer: ReturnType<typeof setInterval> | null = null;
+  let notificationPollInFlight = false;
+  if (notificationMethods.every((name) => Object.hasOwn(session.desktopMethods ?? {}, name))) {
+    const pollNotifications = async () => {
+      if (!active || notificationPollInFlight) return;
+      notificationPollInFlight = true;
+      try {
+        const notifications = await rpc<AppNotification[]>("desktop.listNotifications", {
+          args: [],
+        });
+        if (!Array.isArray(notifications) || !active) return;
+        const next = new Map(notifications.map((notification) => [notification.id, notification]));
+        const previous = notificationSnapshot;
+        notificationSnapshot = next;
+        if (!previous) return;
+
+        if (previous.size > 0 && next.size === 0) {
+          emitLocal("notification", { type: "cleared" } satisfies BrowserNotificationEvent);
+          return;
+        }
+        for (const [id, notification] of previous) {
+          if (!next.has(id)) {
+            emitLocal("notification", {
+              type: "removed",
+              notification,
+            } satisfies BrowserNotificationEvent);
+          }
+        }
+        for (const [id, notification] of next) {
+          const prior = previous.get(id);
+          if (!prior) {
+            emitLocal("notification", {
+              type: "added",
+              notification,
+            } satisfies BrowserNotificationEvent);
+          } else if (JSON.stringify(prior) !== JSON.stringify(notification)) {
+            emitLocal("notification", {
+              type: "updated",
+              notification,
+            } satisfies BrowserNotificationEvent);
+          }
+        }
+      } catch {
+        // A later poll reconciles state after a transient host or network failure.
+      } finally {
+        notificationPollInFlight = false;
+      }
+    };
+
+    supported.onNotificationEvent = (listener: (...args: unknown[]) => void) => {
+      const unsubscribe = subscribeLocal("notification")(listener);
+      if (!notificationPollTimer) {
+        void pollNotifications();
+        notificationPollTimer = setInterval(() => void pollNotifications(), 2_500);
+      }
+      return () => {
+        unsubscribe();
+        if ((localListeners.get("notification")?.size ?? 0) === 0 && notificationPollTimer) {
+          clearInterval(notificationPollTimer);
+          notificationPollTimer = null;
+          notificationSnapshot = null;
+        }
+      };
+    };
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      onNotificationEvent: { mutation: false },
     };
   }
 
@@ -861,21 +1672,51 @@ export function installBrowserHostBridge(
     "getMigrationStatus",
     "dismissMigrationNotification",
     "getQueueStatus",
+    "getVoiceSettings",
+    "onVoiceEvent",
+    "onTrayOpenAbout",
+    "infraGetStatus",
+    "infraGetSettings",
+    "onInfraStatusChange",
     "checkForUpdates",
     "listBotConversations",
-    "getTaskEventDetail",
-    "getTaskTimelinePage",
+    // Local server management is optional in ElectronAPI and currently has no
+    // browser-host service. The settings UI checks the method manifest and
+    // disables these controls with an explanation.
+    "checkHf",
+    "detectHardware",
+    "startLocalAIServer",
+    "stopLocalAIServer",
+    "getLocalAIServerStatus",
+    "getLocalAIServerLog",
+    "onBrowserWorkbenchOpenRequest",
+    "onNavigateToTask",
+    "onNavigateToBotConversation",
   ]);
   const unsupported = new Map<string, (...args: unknown[]) => Promise<never>>();
+  const unsupportedSubscriptions = new Map<string, (...args: unknown[]) => () => void>();
   const adapter = new Proxy(supported, {
     get(target, property, receiver) {
       if (typeof property !== "string") return Reflect.get(target, property, receiver);
       if (Object.prototype.hasOwnProperty.call(target, property)) return target[property];
       if (absentOptionalMethods.has(property)) return undefined;
-      if (property.startsWith("on")) return noOpSubscription;
+      if (property.startsWith("on")) {
+        let stub = unsupportedSubscriptions.get(property);
+        if (!stub) {
+          stub = () => {
+            notifyUnsupportedAction(property);
+            return noOpSubscription;
+          };
+          unsupportedSubscriptions.set(property, stub);
+        }
+        return stub;
+      }
       let stub = unsupported.get(property);
       if (!stub) {
-        stub = () => Promise.reject(new UnsupportedBrowserHostMethodError(property));
+        stub = () => {
+          notifyUnsupportedAction(property);
+          return Promise.reject(new UnsupportedBrowserHostMethodError(property));
+        };
         unsupported.set(property, stub);
       }
       return stub;
@@ -883,12 +1724,22 @@ export function installBrowserHostBridge(
   }) as unknown as ElectronAPI;
 
   window.electronAPI = adapter;
+  window.coworkBrowserGit = browserGit;
   window.coworkBrowserHost = true;
   window.coworkBrowserHostInfo = browserInfo;
 
   return () => {
     if (!active) return;
     terminals.dispose();
+    disposeQueueUpdatePolling();
+    disposeCronEventPolling();
+    for (const dispose of disposeIntegrationPolling) dispose();
+    disposeMailboxEventPolling();
+    disposePersonalitySettingsPolling();
+    disposeRoutingStatusPolling();
+    if (notificationPollTimer) clearInterval(notificationPollTimer);
+    notificationPollTimer = null;
+    notificationSnapshot = null;
     active = false;
     const ownsBridge = window.electronAPI === adapter;
     if (ownsBridge) {
@@ -896,6 +1747,10 @@ export function installBrowserHostBridge(
       else Reflect.deleteProperty(window, "electronAPI");
       if (previousBrowserMarker === true) window.coworkBrowserHost = true;
       else Reflect.deleteProperty(window, "coworkBrowserHost");
+    }
+    if (window.coworkBrowserGit === browserGit) {
+      if (previousBrowserGit) window.coworkBrowserGit = previousBrowserGit;
+      else Reflect.deleteProperty(window, "coworkBrowserGit");
     }
     if (ownsBridge && window.coworkBrowserHostInfo === browserInfo) {
       if (previousBrowserInfo) window.coworkBrowserHostInfo = previousBrowserInfo;
@@ -950,6 +1805,43 @@ class UnresolvedBrowserSessionOperationError extends Error {
 function normalizePageLimit(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 50;
   return Math.min(100, Math.max(1, Math.trunc(value)));
+}
+
+function normalizeTimelineLimit(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 160;
+  return Math.min(600, Math.max(1, Math.trunc(value)));
+}
+
+function parseTimelineHistoryCursor(value: unknown): TaskTimelinePageCursor | null {
+  if (
+    !isRecord(value) ||
+    typeof value.order !== "number" ||
+    !Number.isSafeInteger(value.order) ||
+    typeof value.timestamp !== "number" ||
+    !Number.isSafeInteger(value.timestamp) ||
+    typeof value.id !== "string" ||
+    !value.id.trim() ||
+    value.id.length > 1024
+  ) {
+    return null;
+  }
+  return { order: value.order, timestamp: value.timestamp, id: value.id };
+}
+
+function summarizeTimelinePage(events: TaskEvent[]) {
+  const payloadSizes = events.map((event) => utf8Size(JSON.stringify(event.payload ?? {})));
+  return {
+    eventCount: events.length,
+    payloadBytes: payloadSizes.reduce((total, size) => total + size, 0),
+    truncatedEventCount: events.filter(
+      (event) => isRecord(event.payload) && event.payload.truncated === true,
+    ).length,
+    largestEventPayloadBytes: Math.max(0, ...payloadSizes),
+  };
+}
+
+function utf8Size(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function resolveTaskOffset(
@@ -1120,7 +2012,7 @@ async function fingerprintPayload(payload: unknown): Promise<string> {
 function operationStorageKey(
   session: WebSessionBootstrap,
   sessionScope: string,
-  method: "create" | "follow-up" | "cancel" | "decision" | "desktop",
+  method: "create" | "follow-up" | "cancel" | "decision" | "desktop" | "git",
   scope: string,
 ): string {
   return `cowork:browser-host:${session.host.installationId}:${session.host.profileId}:${sessionScope}:${method}:${scope}`;
@@ -1320,7 +2212,8 @@ function parseFollowUpReceipt(value: unknown): FollowUpReceipt {
   if (
     value.deliveryStatus !== undefined &&
     value.deliveryStatus !== "accepted" &&
-    value.deliveryStatus !== "queued"
+    value.deliveryStatus !== "queued" &&
+    value.deliveryStatus !== "started"
   ) {
     throw new InvalidBrowserHostResponseError("task.followUp.receipt");
   }
@@ -1478,6 +2371,13 @@ function sanitizeBrowserAppearance(value: Record<string, unknown>): Partial<Appe
 
 function noOpSubscription(): () => void {
   return () => undefined;
+}
+
+function notifyUnsupportedAction(method: string): void {
+  if (typeof window.dispatchEvent !== "function" || typeof CustomEvent === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(BROWSER_HOST_UNSUPPORTED_ACTION_EVENT, { detail: { method } }),
+  );
 }
 
 function toBrowserTaskSummary(value: unknown): BrowserTaskSummary {

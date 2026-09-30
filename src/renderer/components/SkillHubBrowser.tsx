@@ -109,6 +109,16 @@ interface SkillHubBrowserProps {
   initialSelection?: AddToolsSelection;
 }
 
+type BrowserSkillInstallProgress = {
+  status: "starting" | "downloading" | "checking" | "installing" | "completed" | "failed";
+  progress: number;
+  message: string;
+};
+
+type BrowserSkillInstallApi = {
+  getSkillInstallProgress?: () => Promise<BrowserSkillInstallProgress | null>;
+};
+
 export function SkillHubBrowser({
   onSkillInstalled,
   onClose,
@@ -124,6 +134,7 @@ export function SkillHubBrowser({
   const [installedSkills, setInstalledSkills] = useState<Set<string>>(new Set());
   const [skillStatus, setSkillStatus] = useState<SkillStatusReport | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [installProgress, setInstallProgress] = useState<BrowserSkillInstallProgress | null>(null);
   const [externalSource, setExternalSource] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [quarantinedSkills, setQuarantinedSkills] = useState<QuarantinedImportRecord[]>([]);
@@ -134,6 +145,30 @@ export function SkillHubBrowser({
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const focusedSelection = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!installing || !hasHostMethod("getSkillInstallProgress")) {
+      setInstallProgress(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const progress = await (
+          window.electronAPI as unknown as BrowserSkillInstallApi
+        ).getSkillInstallProgress?.();
+        if (!cancelled && progress) setInstallProgress(progress);
+      } catch {
+        // The install call reports the final outcome; progress polling is optional.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 750);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [installing]);
 
   useEffect(() => {
     loadSkillStatus();
@@ -1000,6 +1035,16 @@ export function SkillHubBrowser({
           <button className="button-secondary button-small" onClick={() => setError(null)}>
             Dismiss
           </button>
+        </div>
+      )}
+
+      {installing && installProgress && (
+        <div className="settings-card" role="status" aria-live="polite">
+          <div className="settings-section-header">
+            <strong>{installProgress.message}</strong>
+            <span>{installProgress.progress}%</span>
+          </div>
+          <progress max={100} value={Math.max(0, Math.min(100, installProgress.progress))} />
         </div>
       )}
 

@@ -1,4 +1,8 @@
-import { hasHostMethod } from "./host/browser-capabilities";
+import {
+  BROWSER_HOST_UNSUPPORTED_ACTION_EVENT,
+  hasHostCapability,
+  hasHostMethod,
+} from "./host/browser-capabilities";
 import {
   memo,
   useState,
@@ -49,6 +53,7 @@ import { GenericApprovalDialog } from "./components/GenericApprovalDialog";
 import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWarningDialog";
 import { LibraryPanel } from "./components/calm/LibraryPanel";
 import { BuildPanel } from "./components/calm/BuildPanel";
+import { GitChangesPanel } from "./components/GitChangesPanel";
 import { CalmAgentSetupHost } from "./components/calm/CalmAgentSetup";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
 import { NotificationPanel } from "./components/NotificationPanel";
@@ -686,6 +691,7 @@ type AppView =
   | "everydayAgent"
   | "missionControl"
   | "library"
+  | "git"
   | "build";
 type RemoteTaskView = {
   deviceId: string;
@@ -800,7 +806,7 @@ type SelectedTaskWorkspaceViewProps = {
       returnOnAccepted?: boolean;
     },
   ) => Promise<void | boolean>;
-  onOpenSideChat: (request: {
+  onOpenSideChat?: (request: {
     taskId: string;
     fromEventId?: string;
     initialMessage?: string;
@@ -966,6 +972,7 @@ const SelectedTaskWorkspaceView = memo(
     onCloseTerminalTabs,
     onModelChange,
   }: SelectedTaskWorkspaceViewProps) {
+    const canUseInteractiveBrowser = hasHostCapability("browser.interactive");
     const [spreadsheetArtifact, setSpreadsheetArtifact] = useState<{
       kind: ActiveArtifactKind;
       path: string;
@@ -977,6 +984,7 @@ const SelectedTaskWorkspaceView = memo(
       mode: "sidebar" | "fullscreen";
       requestId?: string;
     } | null>(null);
+    const visibleBrowserWorkbench = canUseInteractiveBrowser ? browserWorkbench : null;
     const [spawnedAgentSidebar, setSpawnedAgentSidebar] = useState<{
       taskId: string;
     } | null>(null);
@@ -998,6 +1006,9 @@ const SelectedTaskWorkspaceView = memo(
       setBrowserWorkbench(null);
       setSpawnedAgentSidebar(null);
     }, [sideChat?.task?.id]);
+    useEffect(() => {
+      if (!canUseInteractiveBrowser && browserWorkbench) setBrowserWorkbench(null);
+    }, [browserWorkbench, canUseInteractiveBrowser]);
     // Calm theme: artifacts take most of the width and the conversation narrows
     // to a column beside them, instead of opening the right panel as well.
     const prepareArtifactSidebar = useCallback(() => {
@@ -1087,6 +1098,7 @@ const SelectedTaskWorkspaceView = memo(
     }, []);
     const openBrowserWorkbenchSidebar = useCallback(
       (request: { sessionId?: string; url?: string; requestId?: string }) => {
+        if (!canUseInteractiveBrowser) return;
         setSpreadsheetArtifact(null);
         setSpawnedAgentSidebar(null);
         onRevealRightSidebar?.();
@@ -1106,7 +1118,7 @@ const SelectedTaskWorkspaceView = memo(
           requestId: request.requestId,
         });
       },
-      [onRevealRightSidebar],
+      [canUseInteractiveBrowser, onRevealRightSidebar],
     );
     const openWebLinkInBrowserSidebar = useCallback(
       (url: string) => {
@@ -1143,12 +1155,18 @@ const SelectedTaskWorkspaceView = memo(
     }, [selectedTaskId, workspace?.path]);
     useEffect(() => {
       if (!browserWorkbenchRequest || browserWorkbenchRequest.taskId !== selectedTaskId) return;
+      if (!canUseInteractiveBrowser) return;
       openBrowserWorkbenchSidebar({
         sessionId: browserWorkbenchRequest.sessionId || "default",
         url: browserWorkbenchRequest.url,
         requestId: browserWorkbenchRequest.requestId,
       });
-    }, [browserWorkbenchRequest, openBrowserWorkbenchSidebar, selectedTaskId]);
+    }, [
+      browserWorkbenchRequest,
+      canUseInteractiveBrowser,
+      openBrowserWorkbenchSidebar,
+      selectedTaskId,
+    ]);
     useEffect(() => {
       if (!spawnedAgentSidebar) return;
       if (childTasks.some((childTask) => childTask.id === spawnedAgentSidebar.taskId)) return;
@@ -1176,14 +1194,19 @@ const SelectedTaskWorkspaceView = memo(
       if (
         !(
           (spreadsheetArtifact && spreadsheetArtifact.mode === "sidebar") ||
-          (browserWorkbench && browserWorkbench.mode === "sidebar") ||
+          (visibleBrowserWorkbench && visibleBrowserWorkbench.mode === "sidebar") ||
           spawnedAgentSidebar
         )
       ) {
         return;
       }
       setSpreadsheetSidebarWidth((current) => clampSpreadsheetSidebarWidth(current));
-    }, [browserWorkbench, clampSpreadsheetSidebarWidth, spawnedAgentSidebar, spreadsheetArtifact]);
+    }, [
+      clampSpreadsheetSidebarWidth,
+      spawnedAgentSidebar,
+      spreadsheetArtifact,
+      visibleBrowserWorkbench,
+    ]);
     useEffect(() => {
       if (!isSpreadsheetResizing) return;
       const previousCursor = document.body.style.cursor;
@@ -1312,11 +1335,11 @@ const SelectedTaskWorkspaceView = memo(
     );
     const browserTurnContext = useMemo(
       () =>
-        browserWorkbench
+        visibleBrowserWorkbench
           ? buildSpreadsheetTurnContext({
               task,
               events: spreadsheetEvents,
-              filePath: browserWorkbench.url || "browser workbench",
+              filePath: visibleBrowserWorkbench.url || "browser workbench",
               isWorking: effectiveSpreadsheetTaskWorking,
               durationLabel: spreadsheetWorkDuration,
               turnStartedAt: activeSpreadsheetTurnStartedAt,
@@ -1324,7 +1347,7 @@ const SelectedTaskWorkspaceView = memo(
           : null,
       [
         activeSpreadsheetTurnStartedAt,
-        browserWorkbench,
+        visibleBrowserWorkbench,
         effectiveSpreadsheetTaskWorking,
         spreadsheetEvents,
         spreadsheetWorkDuration,
@@ -1392,14 +1415,14 @@ const SelectedTaskWorkspaceView = memo(
         : null
       : computedArtifactRefreshKey;
 
-    if (browserWorkbench?.mode === "fullscreen" && task) {
+    if (visibleBrowserWorkbench?.mode === "fullscreen" && task) {
       const selectedModelLabel =
         availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
       return (
         <BrowserWorkbenchView
           taskId={task.id}
-          sessionId={browserWorkbench.sessionId}
-          initialUrl={browserWorkbench.url}
+          sessionId={visibleBrowserWorkbench.sessionId}
+          initialUrl={visibleBrowserWorkbench.url}
           workspaceId={workspace?.id}
           workspacePath={workspace?.path}
           mode="fullscreen"
@@ -1521,7 +1544,7 @@ const SelectedTaskWorkspaceView = memo(
     }
 
     const hasSpreadsheetSidebar = Boolean(
-      (spreadsheetArtifact || browserWorkbench || spawnedAgentSidebar || sideChat) &&
+      (spreadsheetArtifact || visibleBrowserWorkbench || spawnedAgentSidebar || sideChat) &&
       workspace?.path &&
       !remoteTaskView,
     );
@@ -1589,7 +1612,7 @@ const SelectedTaskWorkspaceView = memo(
               pendingInputRequests={pendingInputRequests}
               onSubmitInputRequest={onSubmitInputRequest}
               onDismissInputRequest={onDismissInputRequest}
-              onOpenBrowserView={onOpenBrowserView}
+              onOpenBrowserView={canUseInteractiveBrowser ? onOpenBrowserView : undefined}
               onViewTaskOutputs={onViewTaskOutputs}
               onTasksChanged={onTasksChanged}
               selectedModel={selectedModel}
@@ -1619,12 +1642,14 @@ const SelectedTaskWorkspaceView = memo(
               onOpenPresentationArtifact={openPresentationArtifact}
               onOpenWebArtifact={openWebArtifact}
               onOpenBrowserWorkbenchSidebar={
-                task && workspace?.path && !remoteTaskView
+                canUseInteractiveBrowser && task && workspace?.path && !remoteTaskView
                   ? openEmptyBrowserWorkbenchSidebar
                   : undefined
               }
               onOpenWebLinkInSidebar={
-                task && workspace?.path && !remoteTaskView ? openWebLinkInBrowserSidebar : undefined
+                canUseInteractiveBrowser && task && workspace?.path && !remoteTaskView
+                  ? openWebLinkInBrowserSidebar
+                  : undefined
               }
               onOpenSideChat={onOpenSideChat}
               onOpenChildAgentSidebar={openSpawnedAgentSidebar}
@@ -1666,7 +1691,7 @@ const SelectedTaskWorkspaceView = memo(
                 </Suspense>
               </div>
             </>
-          ) : (spreadsheetArtifact || browserWorkbench || spawnedAgentSidebar) &&
+          ) : (spreadsheetArtifact || visibleBrowserWorkbench || spawnedAgentSidebar) &&
             workspace?.path &&
             !remoteTaskView ? (
             <>
@@ -1712,12 +1737,12 @@ const SelectedTaskWorkspaceView = memo(
                       onOpenPresentationArtifact={openPresentationArtifact}
                       onOpenWebArtifact={openWebArtifact}
                     />
-                  ) : browserWorkbench && task ? (
+                  ) : visibleBrowserWorkbench && task ? (
                     <BrowserWorkbenchView
-                      key={browserWorkbench.requestId || browserWorkbench.sessionId}
+                      key={visibleBrowserWorkbench.requestId || visibleBrowserWorkbench.sessionId}
                       taskId={task.id}
-                      sessionId={browserWorkbench.sessionId}
-                      initialUrl={browserWorkbench.url}
+                      sessionId={visibleBrowserWorkbench.sessionId}
+                      initialUrl={visibleBrowserWorkbench.url}
                       workspaceId={workspace.id}
                       workspacePath={workspace.path}
                       mode="sidebar"
@@ -2920,6 +2945,22 @@ export function App() {
   const isBrowserHost =
     typeof window !== "undefined" &&
     (window as Window & { coworkBrowserHost?: boolean }).coworkBrowserHost === true;
+  const [browserProviderReady, setBrowserProviderReady] = useState(
+    () => !isBrowserHost || window.coworkBrowserHostInfo?.providerReady === true,
+  );
+  useEffect(() => {
+    if (!isBrowserHost) return;
+    setBrowserProviderReady(window.coworkBrowserHostInfo?.providerReady === true);
+    const onLLMSettingsChanged = (
+      window.electronAPI as typeof window.electronAPI & {
+        onLLMSettingsChanged?: (listener: () => void) => (() => void) | void;
+      }
+    )?.onLLMSettingsChanged;
+    const unsubscribe = onLLMSettingsChanged?.(() => {
+      setBrowserProviderReady(window.coworkBrowserHostInfo?.providerReady === true);
+    });
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [isBrowserHost]);
   const [devLogCaptureEnabled, setDevLogCaptureEnabled] = useState(false);
   const rendererPerfLoggingEnabled = devRunLoggingEnabled || devLogCaptureEnabled;
   const startupMarksRef = useRef<Set<string>>(new Set());
@@ -3272,6 +3313,15 @@ export function App() {
   };
 
   const handleOpenBrowserView = (url?: string) => {
+    if (!hasHostCapability("browser.interactive")) {
+      addToast({
+        type: "info",
+        title: "Interactive browser unavailable",
+        message:
+          "This browser session does not provide an interactive browser yet. Use the CoWork desktop app for browser work.",
+      });
+      return;
+    }
     setBrowserUrl(url || "");
     setCurrentView("browser");
   };
@@ -3670,6 +3720,22 @@ export function App() {
 
     return id;
   };
+
+  useEffect(() => {
+    if (!isBrowserHost) return;
+    const onUnsupportedBrowserAction = () => {
+      addToast({
+        id: "browser-host-unsupported-action",
+        type: "info",
+        title: "Action unavailable in this browser",
+        message:
+          "This action is not connected to the browser session. Use CoWork OS on the host to complete it.",
+      });
+    };
+    window.addEventListener(BROWSER_HOST_UNSUPPORTED_ACTION_EVENT, onUnsupportedBrowserAction);
+    return () =>
+      window.removeEventListener(BROWSER_HOST_UNSUPPORTED_ACTION_EVENT, onUnsupportedBrowserAction);
+  }, [addToast, isBrowserHost]);
 
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -6212,7 +6278,18 @@ export function App() {
 
   const handleOpenSideChat = useCallback(
     async (request: { taskId: string; fromEventId?: string; initialMessage?: string }) => {
-      if (!window.electronAPI?.forkTaskSession) return;
+      if (!hasHostMethod("forkTaskSession")) return;
+      const cleanupStaleSideChat = (taskId: string) => {
+        const cleanup = hasHostMethod("deleteTask")
+          ? window.electronAPI.deleteTask
+          : hasHostMethod("archiveTask")
+            ? window.electronAPI.archiveTask
+            : undefined;
+        if (!cleanup) return;
+        void cleanup(taskId).catch((cleanupError) => {
+          console.error("Failed to clean up stale sidechat task:", cleanupError);
+        });
+      };
       const requestSeq = sideChatRequestSeqRef.current + 1;
       sideChatRequestSeqRef.current = requestSeq;
       const parentTaskId = request.taskId;
@@ -6259,18 +6336,14 @@ export function App() {
           ...(request.fromEventId ? { fromEventId: request.fromEventId } : {}),
         })) as Task;
         if (sideChatRequestSeqRef.current !== requestSeq) {
-          void window.electronAPI.deleteTask?.(forkedTask.id).catch((deleteError) => {
-            console.error("Failed to delete stale sidechat task:", deleteError);
-          });
+          cleanupStaleSideChat(forkedTask.id);
           return;
         }
         const forkedEvents = (await window.electronAPI
           .getTaskEvents(forkedTask.id)
           .catch(() => [])) as TaskEvent[];
         if (sideChatRequestSeqRef.current !== requestSeq) {
-          void window.electronAPI.deleteTask?.(forkedTask.id).catch((deleteError) => {
-            console.error("Failed to delete stale sidechat task:", deleteError);
-          });
+          cleanupStaleSideChat(forkedTask.id);
           return;
         }
         const cappedForkedEvents = capTaskEvents(forkedEvents);
@@ -7681,7 +7754,9 @@ export function App() {
               </svg>
             )}
           </button>
-          {!isBrowserHost && (
+          {(!isBrowserHost ||
+            (hasHostCapability("notifications.read") &&
+              hasHostCapability("notifications.manage"))) && (
             <NotificationPanel
               onNotificationClick={(notification) => {
                 // Prioritize taskId to show the completed task result
@@ -7855,8 +7930,26 @@ export function App() {
         currentView === "everydayAgent" ||
         currentView === "missionControl" ||
         currentView === "library" ||
+        currentView === "git" ||
         currentView === "build") && (
         <>
+          {isBrowserHost && !browserProviderReady && currentView !== "git" && (
+            <section className="browser-provider-notice" role="status">
+              <div>
+                <strong>No model provider is configured on this host.</strong>
+                <span>Connect a provider before starting tasks from this browser.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsTab("llm");
+                  setCurrentView("settings");
+                }}
+              >
+                Open AI &amp; Models
+              </button>
+            </section>
+          )}
           <div
             className={`app-layout ${leftSidebarCollapsed ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
           >
@@ -7880,9 +7973,11 @@ export function App() {
                 isEverydayAgentActive={currentView === "everydayAgent"}
                 isMissionControlActive={currentView === "missionControl"}
                 isDevicesActive={currentView === "devices"}
+                isGitChangesActive={currentView === "git"}
                 isBuildActive={currentView === "build"}
                 isLibraryActive={currentView === "library"}
                 onOpenHome={() => setCurrentView("main")}
+                onOpenGitChanges={() => setCurrentView("git")}
                 onOpenBuild={() => setCurrentView("build")}
                 onOpenLibrary={() => setCurrentView("library")}
                 onOpenPlugins={() => {
@@ -8149,6 +8244,8 @@ export function App() {
                 />
               ) : currentView === "library" ? (
                 <LibraryPanel workspaceId={currentWorkspace?.id} />
+              ) : currentView === "git" ? (
+                <GitChangesPanel workspace={currentWorkspace} />
               ) : currentView === "build" ? (
                 <BuildPanel
                   onStart={handleCreateTaskFromIdea}
@@ -8242,7 +8339,7 @@ export function App() {
                   onNewBotConversation={handleNewBotConversation}
                   onSelectTask={handleSelectTaskFromShell}
                   onSendMessage={handleSendMessage}
-                  onOpenSideChat={handleOpenSideChat}
+                  onOpenSideChat={hasHostMethod("forkTaskSession") ? handleOpenSideChat : undefined}
                   onSendSideChatMessage={handleSendSideChatMessage}
                   onCloseSideChat={handleCloseSideChat}
                   onOpenSideChatFullThread={handleOpenSideChatFullThread}

@@ -194,6 +194,31 @@ describe("browser decision bridge", () => {
     bridge.dispose();
   });
 
+  it("refreshes shared pending state before a second browser tab submits its cached decision", async () => {
+    const sharedApprovals = [approval()];
+    const mutate = vi.fn(async () => {
+      sharedApprovals.splice(0, sharedApprovals.length);
+      return { status: "handled" };
+    });
+    const firstTab = createBridge({ approvals: sharedApprovals, mutate });
+    const secondTab = createBridge({ approvals: sharedApprovals, mutate });
+    const pendingEvent = event("approval_requested", {
+      approvalId: "approval-one",
+      approval: { id: "approval-one", status: "pending" },
+    });
+
+    await firstTab.bridge.hydrateTaskEvent(pendingEvent);
+    await secondTab.bridge.hydrateTaskEvent(pendingEvent);
+    await firstTab.bridge.methods.respondToApproval({ approvalId: "approval-one", approved: true });
+
+    await expect(
+      secondTab.bridge.methods.respondToApproval({ approvalId: "approval-one", approved: false }),
+    ).rejects.toMatchObject({ code: "STALE_STATE" });
+    expect(mutate).toHaveBeenCalledTimes(1);
+    firstTab.bridge.dispose();
+    secondTab.bridge.dispose();
+  });
+
   it("hydrates only currently pending records and keeps historical IDs and status without making them actionable", async () => {
     const currentApproval = approval({ expectedVersion: 310, requestedAt: 310 });
     const currentInput = inputRequest({ expectedVersion: 320, requestedAt: 320 });

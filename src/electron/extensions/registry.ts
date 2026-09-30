@@ -213,7 +213,9 @@ export class PluginRegistry extends EventEmitter {
 
     if (SecureSettingsRepository.isInitialized()) {
       try {
-        SecureSettingsRepository.getInstance().save("plugin-packs", payload);
+        if (!SecureSettingsRepository.getInstance().save("plugin-packs", payload)) {
+          throw new Error("Secure storage refused to save feature pack settings");
+        }
         return;
       } catch (error) {
         logger.warn("Failed to save pack states to secure settings:", error);

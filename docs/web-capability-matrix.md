@@ -13,6 +13,7 @@ This is a source inventory and implementation map, not proof of a complete brows
 | Preview | The browser entry mounts the shared desktop App, sidebar, home, composer, and task view through a capability-limited bridge. | `src/renderer-web/browser-entry.tsx` installs the browser bridge before importing App. Desktop-only navigation and controls are gated; visual reuse does not imply capability parity or real-model browser acceptance. |
 | Preview | Rich task and follow-up input, scoped attachment capture, skill status and catalog discovery, installed Feature Pack details, and workspace text/image/PDF previews. | Focused source tests cover input validation, durable attachment storage, replay privacy, and catalog DTOs. Provider execution and refresh during a real running task still require acceptance. |
 | Preview | Installed Feature Pack and skill toggles through shared host services. | Focused service, registry, bridge, and UI tests pass. A disposable Node host smoke verifies mutation replay and state restoration; browser clicks verified pack state across a host restart and skill state after reopening. Installation and import remain desktop-only. |
+| Preview | Task Queue concurrency and timeout settings. | Closed host-admin methods use the authoritative queue manager, persist before runtime publication, and confirm readback. Focused tests cover refused/failed writes and runtime slot application; the disposable host smoke verifies save/replay/readback and restoration. Browser clicks verified a changed limit across a host restart, then restored the original value. |
 | In progress | Queued follow-up recovery across host restarts. | Source validation is ongoing; real-model crash recovery must pass before release claims. |
 | Planned | Video media ranges and Git writes. | These workflows still need browser adapters and real acceptance. |
 | Native-only today | Native window controls, folder dialog, Finder reveal, desktop update checks, tray callback, and system-settings launch. | These methods express Electron/OS UI behavior and are gated in the browser. The bridge reads host platform from the authenticated host identity, not the browser client. |
@@ -45,12 +46,12 @@ The App has a wide hook and component graph. The browser adapter should expose o
 | ElectronAPI members declared in preload type | 1022 |
 | Methods/properties exposed by contextBridge | 1042 |
 | Distinct direct window.electronAPI member names | 798 |
-| Direct member expressions | 1676 |
-| Direct member expressions used as calls | 1570 |
-| Direct bridge root expressions (including method receivers) | 1705 |
+| Direct member expressions | 1677 |
+| Direct member expressions used as calls | 1571 |
+| Direct bridge root expressions (including method receivers) | 1706 |
 | Simple alias/destructuring declarations surfaced | 34 |
 | Direct member expressions inside effect callbacks | 311 |
-| Direct member expressions inside other functions/components | 1365 |
+| Direct member expressions inside other functions/components | 1366 |
 | Direct member expressions at module scope | 0 |
 | Directly used names not found in ElectronAPI interface | 13 |
 | Declared names not found in exposed object | 0 |
@@ -385,7 +386,7 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getPlatform` | Native-only today | 6 | 5 | 1 | 5 | 0 | src/renderer/App.tsx:3161,3179; src/renderer/components/ComputerUseSettings.tsx:47; src/renderer/components/Settings.tsx:1489; src/renderer/components/TraySettings.tsx:9,10 |
 | `getProviderModels` | Unreviewed | 3 | 3 | 0 | 3 | 0 | src/renderer/components/MainContent/ModelDropdown.tsx:282; src/renderer/components/MultiLlmSelectionPanel.tsx:41; src/renderer/components/Settings.tsx:2290 |
 | `getPulseSettings` | Unreviewed | 2 | 1 | 1 | 1 | 0 | src/renderer/components/PulseConsentPrompt.tsx:31; src/renderer/components/PulseSettingsPanel.tsx:61 |
-| `getQueueSettings` | Unreviewed | 1 | 1 | 0 | 1 | 0 | src/renderer/components/QueueSettings.tsx:20 |
+| `getQueueSettings` | Unreviewed | 2 | 2 | 0 | 2 | 0 | src/renderer/components/QueueSettings.tsx:24,43 |
 | `getQueueStatus` | Planned for browser work | 4 | 2 | 4 | 0 | 0 | src/renderer/App.tsx:3422,3426; src/renderer/components/mission-control/useMissionControlData.ts:795,801 |
 | `getRecentHubFiles` | Unreviewed | 1 | 1 | 1 | 0 | 0 | src/renderer/components/FileHub.tsx:120 |
 | `getRecentMemories` | Unreviewed | 2 | 2 | 1 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:4707; src/renderer/components/MemorySettings.tsx:258 |
@@ -708,7 +709,7 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `savePermissionSettings` | Unreviewed | 2 | 2 | 0 | 2 | 0 | src/renderer/components/PermissionSettingsPanel.tsx:275,306 |
 | `savePersonalityConfigV2` | Unreviewed | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PersonalitySettings.tsx:108 |
 | `savePersonalitySettings` | Unreviewed | 2 | 2 | 0 | 2 | 0 | src/renderer/components/calm/CalmAgentSetup.tsx:85; src/renderer/hooks/useOnboardingFlow.ts:1687 |
-| `saveQueueSettings` | Unreviewed | 1 | 1 | 0 | 1 | 0 | src/renderer/components/QueueSettings.tsx:35 |
+| `saveQueueSettings` | Unreviewed | 1 | 1 | 0 | 1 | 0 | src/renderer/components/QueueSettings.tsx:41 |
 | `saveRemoteGatewayConfig` | Unreviewed | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:287 |
 | `saveRoutineWorkflowDraft` | Unreviewed | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:826 |
 | `saveSearchSettings` | Unreviewed | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SearchSettings.tsx:67 |

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   unregisterPluginSkills: vi.fn(),
   setPluginSkillEnabled: vi.fn(),
   secureInitialized: false,
+  secureRefusesWrites: false,
   strictPolicies: undefined as any,
   securePayload: undefined as
     | { packs?: Record<string, boolean>; skills?: Record<string, Record<string, boolean>> }
@@ -56,7 +57,9 @@ vi.mock("../../database/SecureSettingsRepository", () => ({
     getInstance: () => ({
       load: () => mocks.securePayload,
       save: (_category: string, payload: object) => {
+        if (mocks.secureRefusesWrites) return false;
         mocks.securePayload = payload as typeof mocks.securePayload;
+        return true;
       },
     }),
   },
@@ -122,6 +125,7 @@ describe("PluginRegistry pack runtime state", () => {
       fs.writeFileSync(filePath, contents, "utf-8");
     });
     mocks.secureInitialized = false;
+    mocks.secureRefusesWrites = false;
     mocks.strictPolicies = {
       version: 1,
       updatedAt: new Date().toISOString(),
@@ -275,6 +279,28 @@ describe("PluginRegistry pack runtime state", () => {
     ).rejects.toThrow("disk full");
     expect(registry.getSkillEnabled("smb-complete", "smb-plan-payroll")).toBeUndefined();
     expect(mocks.setPluginSkillEnabled).not.toHaveBeenCalled();
+  });
+
+  it("retains pack and live skill state when secure storage refuses a write", async () => {
+    mocks.secureInitialized = true;
+    const persisted = {
+      packs: { "smb-complete": true },
+      skills: { "smb-complete": { "smb-plan-payroll": true } },
+    };
+    mocks.securePayload = persisted;
+    const registry = await loadRegistry();
+    await registry.initialize();
+    mocks.secureRefusesWrites = true;
+
+    expect(() => registry.setPackEnabled("smb-complete", false)).toThrow("Secure storage refused");
+    expect(registry.getPackEnabled("smb-complete")).toBe(true);
+    await expect(
+      registry.setSkillEnabled("smb-complete", "smb-plan-payroll", false),
+    ).rejects.toThrow("Secure storage refused");
+    expect(registry.getSkillEnabled("smb-complete", "smb-plan-payroll")).toBe(true);
+    expect(mocks.setPluginSkillEnabled).not.toHaveBeenCalled();
+    expect(mocks.writePackStateFile).not.toHaveBeenCalled();
+    expect(mocks.securePayload).toEqual(persisted);
   });
 
   it("leaves runtime state unchanged when policy reconciliation cannot load policies", async () => {

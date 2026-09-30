@@ -56,6 +56,7 @@ import { createBrowserSettingsDefinitions } from "./browser-settings-methods";
 import { createBrowserMailboxDefinitions } from "./browser-mailbox-methods";
 import { createBrowserNavigationDefinitions } from "./browser-navigation-methods";
 import { createBrowserPlanningDefinitions } from "./browser-planning-methods";
+import { createBrowserQueueDefinitions } from "./browser-queue-methods";
 import { createBrowserDeviceDefinitions } from "./browser-device-methods";
 import { getFirstRunReadiness } from "../../shared/first-run-readiness";
 
@@ -160,6 +161,7 @@ export function createBrowserHostApplication(
       resolveWorkspace: resolveBrowserWorkspace,
     }),
     ...createBrowserSettingsDefinitions(),
+    ...createBrowserQueueDefinitions(options.agentDaemon),
     ...mailbox.definitions,
     ...devices.definitions,
     ...navigation?.definitions,

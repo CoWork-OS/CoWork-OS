@@ -52,6 +52,17 @@ describe("Automation settings subtab availability", () => {
     );
   });
 
+  it("enables Task Queue only when both browser read and write methods are advertised", () => {
+    const queueMethods = AUTOMATION_SUBTAB_METHOD_REQUIREMENTS.queue;
+    expect(getAutomationSubtabAvailability("queue", true, withMethods(...queueMethods))).toEqual({
+      available: true,
+      message: "",
+    });
+    expect(
+      getAutomationSubtabAvailability("queue", true, withMethods("getQueueSettings")).available,
+    ).toBe(false);
+  });
+
   it("keeps all automation destinations enabled in the native desktop app", () => {
     for (const tab of Object.keys(
       AUTOMATION_SUBTAB_METHOD_REQUIREMENTS,

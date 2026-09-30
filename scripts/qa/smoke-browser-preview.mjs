@@ -228,6 +228,8 @@ async function main() {
       "listPluginPacks",
       "togglePluginPack",
       "togglePluginPackSkill",
+      "getQueueSettings",
+      "saveQueueSettings",
     ]) {
       assert(session.desktopMethods?.[name], `${name} is missing from the browser method manifest`);
     }
@@ -240,6 +242,24 @@ async function main() {
     assert(Array.isArray(await desktop("listRoutineWorkflowRuns", [null, 60], undefined, [0])));
     const profiles = await desktop("listProfiles");
     assert.equal(profiles.filter((profile) => profile.isActive).length, 1);
+    const originalQueueSettings = await desktop("getQueueSettings");
+    const desiredQueueSettings = {
+      ...originalQueueSettings,
+      maxConcurrentTasks: originalQueueSettings.maxConcurrentTasks > 1
+        ? originalQueueSettings.maxConcurrentTasks - 1
+        : 2,
+    };
+    assert.deepEqual(
+      await desktop("saveQueueSettings", [desiredQueueSettings], "browser-queue-save-01"),
+      { success: true },
+    );
+    assert.deepEqual(await desktop("getQueueSettings"), desiredQueueSettings);
+    assert.deepEqual(
+      await desktop("saveQueueSettings", [desiredQueueSettings], "browser-queue-save-01"),
+      { success: true },
+    );
+    await desktop("saveQueueSettings", [originalQueueSettings], "browser-queue-restore-01");
+    assert.deepEqual(await desktop("getQueueSettings"), originalQueueSettings);
     const packs = await desktop("listPluginPacks");
     const testPack = packs.find(
       (pack) =>
@@ -712,7 +732,7 @@ async function main() {
     });
     assert.equal(afterLogout.status, 401);
     process.stdout.write(
-      "Browser preview smoke passed: shared desktop service reads, installed pack/skill toggles and replay, project creation/replay, pairing, scoped files, verified image admission/persistence, read-only Git, terminal detach/replay, upload/no-overwrite, artifact download/one-use handle, task cancellation/reconciliation, traversal denial, logout.\n",
+      "Browser preview smoke passed: shared desktop service reads, queue settings save/replay/readback, installed pack/skill toggles and replay, project creation/replay, pairing, scoped files, verified image admission/persistence, read-only Git, terminal detach/replay, upload/no-overwrite, artifact download/one-use handle, task cancellation/reconciliation, traversal denial, logout.\n",
     );
   } finally {
     await stopHost(child);

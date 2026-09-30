@@ -20,6 +20,8 @@ The shared composer now sends workspace-scoped visual attachment descriptors for
 
 Add tools and the Skill Store use host-backed catalog and status reads. Installed Feature Packs expose desired-state pack and skill toggles through the shared desktop service, with admin policy and quarantine checks. Installation, import and native settings actions require their own browser services. Desktop-only settings, native folder picking, voice capture, Git writes and media artifact previews remain separate delivery work. Text, raster-image and PDF Library previews are available; HTML and SVG download as attachments. Do not treat this preview as a complete browser task workflow or a release-quality remote deployment.
 
+Task Queue settings use the same host queue manager as desktop. Writes require host-admin capability, accept only bounded concurrency and timeout values, and persist before applying runtime changes. The browser confirms saved values by reading them back. Failed or refused storage writes report an error and retain the previous runtime settings.
+
 ## Checking shared controls
 
 After rebuilding or restarting the host, reload `/app/`; a host restart requires a new pairing code. Use a disposable profile for testing changes.
@@ -34,5 +36,6 @@ After rebuilding or restarting the host, reload `/app/`; a host restart requires
 8. Open Personality, save the assistant name, leave the screen, and verify the name is retained. Open Devices and check that the fleet view loads; task controls require a saved, connected device.
 9. Open an authorized task, expand its side panel, and open the terminal. Type a harmless command, check output, reconnect, then test Stop, Close tab, and New tab. The terminal requires a task whose current access profile permits shell use; the host chooses the workspace-root directory.
 10. Open Settings → Skills. Check that Skill Store status loads, search the catalog, and open a result. Open Feature Packs → QA & Testing and confirm its Commands, Skills and Agents tabs show host-backed details. Disable the test pack, reload, check the saved state, then restore it. Repeat for an individual skill. Required or quarantined packs must respect their restrictions. Installation and import controls must explain their availability instead of failing silently.
+11. Open Settings → Automations → Task Queue. Note the original limits, change one value, save, and confirm the saved status. Reopen the tab and verify the value; restart the disposable host, pair again, and verify it remains saved. Restore the original limits and save. Load or save failures must appear in the page instead of showing defaults or a false success.
 
 Run `npm run qa:web:smoke` for disposable host/service checks. It also checks the shared method manifest, provider/personality/agent/automation reads, optional positional arguments, and project creation with same-key replay. This is separate from interactive browser testing, a real-model workflow, and packaged release acceptance.

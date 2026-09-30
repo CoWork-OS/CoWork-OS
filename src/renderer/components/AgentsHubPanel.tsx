@@ -71,6 +71,7 @@ import {
   type AccessProfileId,
 } from "../../shared/access-profiles";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 
 type SkillLite = {
   id: string;
@@ -1027,7 +1028,6 @@ export function AgentsHubPanel({
   onOpenSettings,
   onOpenTask,
 }: AgentsHubPanelProps) {
-  void onOpenMissionControl;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1093,6 +1093,18 @@ export function AgentsHubPanel({
   const [studioTestError, setStudioTestError] = useState<string | null>(null);
   const [agentRunSubmitting, setAgentRunSubmitting] = useState(false);
   const [agentRunError, setAgentRunError] = useState<string | null>(null);
+  const [isAgentActionMenuOpen, setIsAgentActionMenuOpen] = useState(false);
+  const hasAgentFileUpload = hasHostMethods("selectFiles", "importFilesToWorkspace");
+  const selectedDraftWorkspace = workspaces.find(
+    (workspace) => workspace.id === studioDraft?.workspaceId,
+  );
+  const agentFileUploadUnavailableReason = !hasAgentFileUpload
+    ? "File attachments are unavailable on this host."
+    : window.coworkBrowserHost === true && selectedDraftWorkspace?.permissions?.write !== true
+      ? "Choose a project where you can add files."
+      : undefined;
+  const canImportAgentFiles = !agentFileUploadUnavailableReason;
+  const canCreateImageProfile = hasHostMethod("createImageGenProfile");
   const unresolvedBuilderSelections = getUnresolvedBuilderSelectionRequirements(builderPlan);
 
   const handleConnectionRequirementAction = (connection: AgentBuilderConnectionRequirement) => {
@@ -1523,17 +1535,36 @@ export function AgentsHubPanel({
 
   const handleSelectFiles = async () => {
     if (!studioDraft) return;
-    const selectedFiles = await window.electronAPI.selectFiles();
-    if (!Array.isArray(selectedFiles) || selectedFiles.length === 0) return;
-    const nextRefs = selectedFiles.map((file) => ({
-      id: crypto.randomUUID(),
-      path: file.path,
-      name: file.name || file.path.split(/[\\/]/).pop() || file.path,
-    }));
-    setStudioDraft({
-      ...studioDraft,
-      fileRefs: [...studioDraft.fileRefs, ...nextRefs],
-    });
+    try {
+      const selectedFiles = await window.electronAPI.selectFiles();
+      if (!Array.isArray(selectedFiles) || selectedFiles.length === 0) return;
+      const importedFiles =
+        window.coworkBrowserHost === true
+          ? await window.electronAPI.importFilesToWorkspace({
+              workspaceId: studioDraft.workspaceId,
+              files: selectedFiles.map((file) => file.path),
+            })
+          : selectedFiles.map((file) => ({
+              relativePath: file.path,
+              fileName: file.name || file.path.split(/[\\/]/).pop() || file.path,
+              size: file.size,
+              mimeType: file.mimeType,
+            }));
+      const nextRefs = importedFiles.map((file) => ({
+        id: crypto.randomUUID(),
+        path: file.relativePath,
+        name: file.fileName,
+        size: file.size,
+        ...(file.mimeType ? { mimeType: file.mimeType } : {}),
+      }));
+      setStudioDraft({
+        ...studioDraft,
+        fileRefs: [...studioDraft.fileRefs, ...nextRefs],
+      });
+      setError(null);
+    } catch (fileError) {
+      setError(fileError instanceof Error ? fileError.message : "Could not add files.");
+    }
   };
 
   const handleAddSlackTarget = () => {
@@ -1559,18 +1590,32 @@ export function AgentsHubPanel({
 
   const handleCreateImageProfile = async () => {
     if (!newProfileName.trim()) return;
-    const files = await window.electronAPI.selectFiles();
-    const profile = await window.electronAPI.createImageGenProfile({
-      name: newProfileName.trim(),
-      description: newProfileDescription.trim() || undefined,
-      isDefault: imageProfiles.length === 0,
-      referencePhotoPaths: files.map((file) => file.path),
-    });
-    setImageProfiles((current) => [profile, ...current.filter((entry) => entry.id !== profile.id)]);
-    setNewProfileName("");
-    setNewProfileDescription("");
-    if (studioDraft && !studioDraft.imageGenProfileId) {
-      setStudioDraft({ ...studioDraft, imageGenProfileId: profile.id });
+    if (!hasHostMethod("createImageGenProfile")) {
+      setError("Image profile creation is available in the desktop app.");
+      return;
+    }
+    try {
+      const files = await window.electronAPI.selectFiles();
+      const profile = await window.electronAPI.createImageGenProfile({
+        name: newProfileName.trim(),
+        description: newProfileDescription.trim() || undefined,
+        isDefault: imageProfiles.length === 0,
+        referencePhotoPaths: files.map((file) => file.path),
+      });
+      setImageProfiles((current) => [
+        profile,
+        ...current.filter((entry) => entry.id !== profile.id),
+      ]);
+      setNewProfileName("");
+      setNewProfileDescription("");
+      if (studioDraft && !studioDraft.imageGenProfileId) {
+        setStudioDraft({ ...studioDraft, imageGenProfileId: profile.id });
+      }
+      setError(null);
+    } catch (profileError) {
+      setError(
+        profileError instanceof Error ? profileError.message : "Could not add image profile.",
+      );
     }
   };
 
@@ -1909,6 +1954,10 @@ export function AgentsHubPanel({
   };
 
   const handleConvertAgentRole = async (agentRoleId: string) => {
+    if (!hasHostMethod("convertAgentRoleToManagedAgent")) {
+      setError("Agent persona conversion is available in the desktop app.");
+      return;
+    }
     try {
       const converted = await window.electronAPI.convertAgentRoleToManagedAgent({ agentRoleId });
       setSelectedAgentId(converted.agent.id);
@@ -1924,6 +1973,10 @@ export function AgentsHubPanel({
   };
 
   const handleConvertAutomationProfile = async (automationProfileId: string) => {
+    if (!hasHostMethod("convertAutomationProfileToManagedAgent")) {
+      setError("Automation profile conversion is available in the desktop app.");
+      return;
+    }
     try {
       const converted = await window.electronAPI.convertAutomationProfileToManagedAgent({
         automationProfileId,
@@ -2002,6 +2055,11 @@ export function AgentsHubPanel({
             {saving ? "Saving..." : "Save Agent"}
           </button>
         </div>
+        {error ? (
+          <div className="agents-error-banner" role="alert">
+            {error}
+          </div>
+        ) : null}
         {draftPermissions ? (
           <div className="agents-inline-permission-note">
             Your workspace role is <strong>{draftPermissions.role}</strong>. Builders can edit
@@ -2224,7 +2282,7 @@ export function AgentsHubPanel({
             </label>
           </section>
 
-          <section className="agents-section-card">
+          <section className="agents-section-card" id="agent-skills-section">
             <h3>Skills</h3>
             <div className="agents-chip-grid">
               {skills.slice(0, 24).map((skill) => (
@@ -2242,7 +2300,7 @@ export function AgentsHubPanel({
             </div>
           </section>
 
-          <section className="agents-section-card">
+          <section className="agents-section-card" id="agent-tools-section">
             <h3>Apps & Tools</h3>
             <label>
               <span>MCP servers</span>
@@ -2288,11 +2346,16 @@ export function AgentsHubPanel({
             </label>
           </section>
 
-          <section className="agents-section-card">
+          <section className="agents-section-card" id="agent-files-section">
             <h3>Files</h3>
-            <button className="agents-secondary-btn" onClick={handleSelectFiles}>
+            <button
+              className="agents-secondary-btn"
+              onClick={() => void handleSelectFiles()}
+              disabled={!canImportAgentFiles}
+              title={agentFileUploadUnavailableReason}
+            >
               <FileText size={16} />
-              Add files
+              {canImportAgentFiles ? "Add files" : "Files unavailable"}
             </button>
             <div className="agents-list">
               {studioDraft.fileRefs.map((file) => (
@@ -2358,7 +2421,7 @@ export function AgentsHubPanel({
             </label>
           </section>
 
-          <section className="agents-section-card">
+          <section className="agents-section-card" id="agent-triggers-schedule">
             <h3>Triggers & Schedule</h3>
             <div className="agents-chip-grid">
               {[
@@ -3007,11 +3070,25 @@ export function AgentsHubPanel({
                 value={newProfileDescription}
                 onChange={(event) => setNewProfileDescription(event.target.value)}
               />
-              <button className="agents-secondary-btn" onClick={handleCreateImageProfile}>
+              <button
+                className="agents-secondary-btn"
+                onClick={() => void handleCreateImageProfile()}
+                disabled={!canCreateImageProfile || !newProfileName.trim()}
+                title={
+                  canCreateImageProfile
+                    ? undefined
+                    : "Image profile creation is available in the desktop app."
+                }
+              >
                 <ImageIcon size={16} />
                 Add profile
               </button>
             </div>
+            {!canCreateImageProfile ? (
+              <p className="agents-inline-note">
+                Image profile creation is available in the desktop app.
+              </p>
+            ) : null}
           </section>
 
           <section className="agents-section-card">
@@ -3300,7 +3377,13 @@ export function AgentsHubPanel({
                 <h3>Starter prompts</h3>
                 <div>
                   {builderPlan.starterPrompts.slice(0, 3).map((starter) => (
-                    <button key={starter.id}>{starter.title}</button>
+                    <button
+                      key={starter.id}
+                      type="button"
+                      onClick={() => void handleGenerateBuilderPlan(starter.prompt)}
+                    >
+                      {starter.title}
+                    </button>
                   ))}
                 </div>
               </section>
@@ -3431,6 +3514,16 @@ export function AgentsHubPanel({
           linkedRoutines,
         ),
       );
+    const openSelectedAgentDraftAt = (sectionId: string) => {
+      openSelectedAgentDraft();
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          document
+            .getElementById(sectionId)
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+    };
 
     return (
       <div className="agents-panel agents-agent-detail-screen">
@@ -3446,9 +3539,15 @@ export function AgentsHubPanel({
                   ? `Updated ${formatRelative(latestAgentSession.updatedAt)}`
                   : "No runs recorded"}
               </span>
-              <button>
+              <button
+                onClick={() => {
+                  setIsAgentActionMenuOpen(false);
+                  openSelectedAgentDraftAt("agent-triggers-schedule");
+                }}
+                disabled={!canEditSelectedAgent}
+              >
                 <CalendarDays size={16} />
-                Schedule
+                Edit schedule
               </button>
               <button
                 onClick={() => void handlePublishAgent(selectedAgent.id)}
@@ -3481,9 +3580,49 @@ export function AgentsHubPanel({
                 <Play size={16} />
                 Preview
               </button>
-              <button aria-label="More agent actions">
+              <button
+                aria-label="More agent actions"
+                aria-haspopup="menu"
+                aria-expanded={isAgentActionMenuOpen}
+                onClick={() => setIsAgentActionMenuOpen((open) => !open)}
+              >
                 <MoreHorizontal size={18} />
               </button>
+              {isAgentActionMenuOpen ? (
+                <div className="agents-agent-action-menu" role="menu">
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setIsAgentActionMenuOpen(false);
+                      openSelectedAgentDraft();
+                    }}
+                    disabled={!canEditSelectedAgent}
+                  >
+                    Edit agent
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setIsAgentActionMenuOpen(false);
+                      openSelectedAgentDraftAt("agent-triggers-schedule");
+                    }}
+                    disabled={!canEditSelectedAgent}
+                  >
+                    Configure schedule
+                  </button>
+                  {onOpenMissionControl ? (
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setIsAgentActionMenuOpen(false);
+                        onOpenMissionControl();
+                      }}
+                    >
+                      Open Mission Control
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -3528,13 +3667,21 @@ export function AgentsHubPanel({
           <section className="agents-agent-section">
             <h2>Channels</h2>
             <div className="agents-agent-channel-grid">
-              <button className="agents-agent-channel-card">
+              <button
+                className="agents-agent-channel-card"
+                onClick={() => openSelectedAgentDraft()}
+                disabled={!canEditSelectedAgent}
+              >
                 <MessageSquare size={20} />
                 <strong>CoWork OS</strong>
-                <span>Customize and share your agent</span>
+                <span>Edit this agent</span>
               </button>
               {(studio?.deployment?.surfaces || []).includes("slack") && slackTargets[0] ? (
-                <button className="agents-agent-channel-card">
+                <button
+                  className="agents-agent-channel-card"
+                  onClick={() => openSelectedAgentDraft()}
+                  disabled={!canEditSelectedAgent}
+                >
                   <MessageSquare size={20} />
                   <strong>{slackTargets[0].channelName}</strong>
                   <span>
@@ -3542,7 +3689,11 @@ export function AgentsHubPanel({
                   </span>
                 </button>
               ) : (
-                <button className="agents-agent-channel-card">
+                <button
+                  className="agents-agent-channel-card"
+                  onClick={() => openSelectedAgentDraft()}
+                  disabled={!canEditSelectedAgent}
+                >
                   <MessageSquare size={20} />
                   <strong>Slack</strong>
                   <span>
@@ -3552,10 +3703,27 @@ export function AgentsHubPanel({
                   </span>
                 </button>
               )}
-              <button className="agents-agent-channel-card">
+              <button
+                className="agents-agent-channel-card"
+                onClick={() => {
+                  if (hasHostMethod("addGatewayChannel")) {
+                    onOpenSlackSettings?.();
+                  }
+                }}
+                disabled={!hasHostMethod("addGatewayChannel") || !onOpenSlackSettings}
+                title={
+                  hasHostMethod("addGatewayChannel")
+                    ? undefined
+                    : "Channel setup is available in the desktop app."
+                }
+              >
                 <Plus size={20} />
                 <strong>Add channel</strong>
-                <span>Use your agent in Slack</span>
+                <span>
+                  {hasHostMethod("addGatewayChannel")
+                    ? "Use your agent in Slack"
+                    : "Set up channels in the desktop app"}
+                </span>
               </button>
             </div>
           </section>
@@ -3613,13 +3781,17 @@ export function AgentsHubPanel({
               <div>
                 {toolLabels.length > 0
                   ? toolLabels.map((tool) => (
-                      <button key={tool.key} className="agents-agent-pill">
+                      <span key={tool.key} className="agents-agent-pill">
                         <Wrench size={15} />
                         {tool.label}
-                      </button>
+                      </span>
                     ))
                   : null}
-                <button className="agents-agent-add">
+                <button
+                  className="agents-agent-add"
+                  onClick={() => openSelectedAgentDraftAt("agent-tools-section")}
+                  disabled={!canEditSelectedAgent}
+                >
                   <Plus size={15} />
                   Add tool
                 </button>
@@ -3633,15 +3805,19 @@ export function AgentsHubPanel({
               <div>
                 {selectedSkillLabels.length > 0 ? (
                   selectedSkillLabels.map((skill) => (
-                    <button key={skill} className="agents-agent-pill">
+                    <span key={skill} className="agents-agent-pill">
                       <Briefcase size={15} />
                       {skill}
-                    </button>
+                    </span>
                   ))
                 ) : (
-                  <button className="agents-agent-pill muted">No skills selected</button>
+                  <span className="agents-agent-pill muted">No skills selected</span>
                 )}
-                <button className="agents-agent-add">
+                <button
+                  className="agents-agent-add"
+                  onClick={() => openSelectedAgentDraftAt("agent-skills-section")}
+                  disabled={!canEditSelectedAgent}
+                >
                   <Plus size={15} />
                   Add skill
                 </button>
@@ -3651,24 +3827,28 @@ export function AgentsHubPanel({
               <span>Files</span>
               <div>
                 {fileRefs.map((file) => (
-                  <button key={file.id} className="agents-agent-pill">
+                  <span key={file.id} className="agents-agent-pill">
                     <FileText size={15} />
                     {file.name}
-                  </button>
+                  </span>
                 ))}
                 {memoryMode ? (
-                  <button className="agents-agent-pill">
+                  <span className="agents-agent-pill">
                     <FileText size={15} />
                     Memory: {memoryMode}
-                  </button>
+                  </span>
                 ) : null}
                 {auditEntries.length > 0 ? (
-                  <button className="agents-agent-pill">
+                  <span className="agents-agent-pill">
                     <Clock3 size={15} />
                     {auditEntries.length} audit updates
-                  </button>
+                  </span>
                 ) : null}
-                <button className="agents-agent-add">
+                <button
+                  className="agents-agent-add"
+                  onClick={() => openSelectedAgentDraftAt("agent-files-section")}
+                  disabled={!canEditSelectedAgent}
+                >
                   <Plus size={15} />
                   Add
                 </button>
@@ -3848,6 +4028,16 @@ export function AgentsHubPanel({
                       conversionPanel === "agent-role"
                         ? void handleConvertAgentRole(entry.id)
                         : void handleConvertAutomationProfile(entry.id)
+                    }
+                    disabled={
+                      conversionPanel === "agent-role"
+                        ? !hasHostMethod("convertAgentRoleToManagedAgent")
+                        : !hasHostMethod("convertAutomationProfileToManagedAgent")
+                    }
+                    title={
+                      window.coworkBrowserHost === true
+                        ? "Conversion is available in the desktop app."
+                        : undefined
                     }
                   >
                     Convert
@@ -4154,6 +4344,28 @@ function renderAgentsStyles() {
         justify-content: flex-end;
         gap: 18px;
         min-width: 0;
+        position: relative;
+      }
+      .agents-agent-action-menu {
+        position: absolute;
+        z-index: 8;
+        top: calc(100% + 8px);
+        right: 0;
+        display: grid;
+        min-width: 190px;
+        gap: 4px;
+        padding: 6px;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+      }
+      .agents-agent-action-menu button {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--agents-text);
+        text-align: left;
       }
       .agents-agent-editor-bar button {
         display: inline-flex;

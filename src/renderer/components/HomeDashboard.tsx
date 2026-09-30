@@ -77,6 +77,8 @@ interface HomeDashboardProps {
   onOpenTask: (taskId: string) => void;
   onCreateTask: (title: string, prompt: string) => void;
   onNewSession: () => void;
+  onViewAllTasks: () => void;
+  onViewAllFiles: () => void;
   onOpenScheduledTasks: () => void;
   onOpenMissionControl: () => void;
   onOpenEverydayAgent: () => void;
@@ -150,6 +152,95 @@ interface CompanionNotification {
   suggestionId?: string;
   recommendedDelivery?: "briefing" | "inbox" | "nudge";
   companionStyle?: "email" | "note";
+}
+
+type HomeCompanionApi = {
+  listWorkspaces: () => Promise<Workspace[]>;
+  listNotifications?: () => Promise<unknown[]>;
+  listSuggestionsForWorkspaces: (
+    workspaceIds: string[],
+  ) => Promise<Array<{ workspaceId: string; suggestions: unknown[] }>>;
+};
+
+export async function loadHomeCompanionInbox(api: HomeCompanionApi): Promise<{
+  workspaces: Workspace[];
+  suggestions: CompanionSuggestion[];
+}> {
+  const loadedWorkspaces = await api.listWorkspaces();
+  const workspaces = (Array.isArray(loadedWorkspaces) ? loadedWorkspaces : []).filter(
+    (item) => !String(item.id || "").startsWith("__temp_workspace__"),
+  );
+  const [notificationResults, suggestionResults] = await Promise.all([
+    api.listNotifications
+      ? Promise.resolve()
+          .then(() => api.listNotifications!())
+          .catch(() => [])
+      : Promise.resolve([]),
+    workspaces.length
+      ? api.listSuggestionsForWorkspaces(workspaces.map((item) => item.id))
+      : Promise.resolve([]),
+  ]);
+
+  const companionNotifications = (
+    Array.isArray(notificationResults) ? (notificationResults as CompanionNotification[]) : []
+  ).filter((item) => item.type === "companion_suggestion");
+  const merged = new Map<string, CompanionSuggestion>();
+  for (const notification of companionNotifications) {
+    const workspaceName =
+      workspaces.find((item) => item.id === notification.workspaceId)?.name || "Workspace";
+    merged.set(notification.suggestionId || notification.id, {
+      id: notification.suggestionId || notification.id,
+      type: notification.type,
+      title: notification.title,
+      description: notification.message,
+      actionPrompt: undefined,
+      confidence: notification.recommendedDelivery === "nudge" ? 0.95 : 0.75,
+      createdAt: notification.createdAt,
+      expiresAt: notification.createdAt + 7 * 24 * 60 * 60 * 1000,
+      urgency: notification.recommendedDelivery === "nudge" ? "high" : "medium",
+      recommendedDelivery: notification.recommendedDelivery,
+      companionStyle: notification.companionStyle,
+      workspaceScope: "single",
+      sourceEntity: workspaceName,
+      sourceTaskId: notification.taskId,
+      workspaceId: notification.workspaceId,
+      notificationId: notification.id,
+      read: notification.read,
+      workspaceName,
+      kind: "notification",
+    });
+  }
+  for (const entry of suggestionResults) {
+    const workspaceName =
+      workspaces.find((item) => item.id === entry.workspaceId)?.name || "Workspace";
+    for (const suggestion of entry.suggestions as CompanionSuggestion[]) {
+      const existing = merged.get(suggestion.id);
+      merged.set(suggestion.id, {
+        ...(existing || suggestion),
+        ...suggestion,
+        workspaceName,
+        sourceEntity: suggestion.sourceEntity || workspaceName,
+        workspaceId: entry.workspaceId,
+        kind: "suggestion",
+        notificationId: existing?.notificationId,
+        read: existing?.read,
+      });
+    }
+  }
+
+  return {
+    workspaces,
+    suggestions: Array.from(merged.values()).sort((a, b) => {
+      const aUrgency = a.urgency === "high" ? 0 : a.urgency === "medium" ? 1 : 2;
+      const bUrgency = b.urgency === "high" ? 0 : b.urgency === "medium" ? 1 : 2;
+      if (aUrgency !== bUrgency) return aUrgency - bUrgency;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    }),
+  };
+}
+
+export function hasHomeFileTarget(recentHubFileCount: number, recentOutputCount: number): boolean {
+  return recentHubFileCount > 0 || recentOutputCount > 0;
 }
 
 const inboxMarkdownPlugins = [remarkGfm, remarkBreaks];
@@ -434,6 +525,8 @@ export function HomeDashboard({
   onOpenTask,
   onCreateTask,
   onNewSession,
+  onViewAllTasks,
+  onViewAllFiles,
   onOpenScheduledTasks,
   onOpenMissionControl,
   onOpenEverydayAgent,
@@ -563,80 +656,11 @@ export function HomeDashboard({
         setCompanionLoading(true);
         setCompanionError(null);
 
-        const loadedWorkspaces = await window.electronAPI.listWorkspaces();
-        const visibleWorkspaces = (Array.isArray(loadedWorkspaces) ? loadedWorkspaces : []).filter(
-          (item) => !String(item.id || "").startsWith("__temp_workspace__"),
-        );
-        setKnownWorkspaces(visibleWorkspaces as Workspace[]);
-
-        const notificationResults = await window.electronAPI.listNotifications();
-        const companionNotifications = (
-          Array.isArray(notificationResults) ? notificationResults : []
-        ).filter((item: CompanionNotification) => item.type === "companion_suggestion");
-
-        const suggestionResults = visibleWorkspaces.length
-          ? await window.electronAPI.listSuggestionsForWorkspaces(
-              visibleWorkspaces.map((item) => item.id),
-            )
-          : [];
+        const { workspaces, suggestions } = await loadHomeCompanionInbox(window.electronAPI);
 
         if (cancelled) return;
-
-        const merged = new Map<string, CompanionSuggestion>();
-
-        for (const notification of companionNotifications as CompanionNotification[]) {
-          const workspaceName =
-            visibleWorkspaces.find((item) => item.id === notification.workspaceId)?.name ||
-            "Workspace";
-          merged.set(notification.suggestionId || notification.id, {
-            id: notification.suggestionId || notification.id,
-            type: notification.type,
-            title: notification.title,
-            description: notification.message,
-            actionPrompt: undefined,
-            confidence: notification.recommendedDelivery === "nudge" ? 0.95 : 0.75,
-            createdAt: notification.createdAt,
-            expiresAt: notification.createdAt + 7 * 24 * 60 * 60 * 1000,
-            urgency: notification.recommendedDelivery === "nudge" ? "high" : "medium",
-            recommendedDelivery: notification.recommendedDelivery,
-            companionStyle: notification.companionStyle,
-            workspaceScope: "single",
-            sourceEntity: workspaceName,
-            sourceTaskId: notification.taskId,
-            workspaceId: notification.workspaceId,
-            notificationId: notification.id,
-            read: notification.read,
-            workspaceName,
-            kind: "notification",
-          });
-        }
-
-        for (const entry of suggestionResults) {
-          const workspaceName =
-            visibleWorkspaces.find((item) => item.id === entry.workspaceId)?.name || "Workspace";
-          for (const suggestion of entry.suggestions as CompanionSuggestion[]) {
-            const existing = merged.get(suggestion.id);
-            merged.set(suggestion.id, {
-              ...(existing || suggestion),
-              ...suggestion,
-              workspaceName,
-              sourceEntity: suggestion.sourceEntity || workspaceName,
-              workspaceId: entry.workspaceId,
-              kind: "suggestion",
-              notificationId: existing?.notificationId,
-              read: existing?.read,
-            });
-          }
-        }
-
-        setCompanionSuggestions(
-          Array.from(merged.values()).sort((a, b) => {
-            const aUrgency = a.urgency === "high" ? 0 : a.urgency === "medium" ? 1 : 2;
-            const bUrgency = b.urgency === "high" ? 0 : b.urgency === "medium" ? 1 : 2;
-            if (aUrgency !== bUrgency) return aUrgency - bUrgency;
-            return (b.createdAt || 0) - (a.createdAt || 0);
-          }),
-        );
+        setKnownWorkspaces(workspaces);
+        setCompanionSuggestions(suggestions);
       } catch (error) {
         if (cancelled) return;
         setCompanionError(error instanceof Error ? error.message : "Failed to load inbox");
@@ -936,7 +960,7 @@ export function HomeDashboard({
         <section className="home-section">
           <div className="home-section-header">
             <h2>Running Tasks</h2>
-            <button type="button" className="home-section-link" onClick={onNewSession}>
+            <button type="button" className="home-section-link" onClick={onViewAllTasks}>
               View all tasks <ArrowRight size={14} />
             </button>
           </div>
@@ -1321,13 +1345,18 @@ export function HomeDashboard({
             <button
               type="button"
               className="home-section-link"
-              onClick={() => {
-                const firstFile = recentHubFiles[0];
-                if (firstFile?.path) {
-                  void (window as any).electronAPI.openFile(firstFile.path, workspace?.path);
-                }
-              }}
-              disabled={recentHubFiles.length === 0 && recentOutputs.length === 0}
+              onClick={onViewAllFiles}
+              disabled={!hasHomeFileTarget(recentHubFiles.length, recentOutputs.length)}
+              title={
+                hasHomeFileTarget(recentHubFiles.length, recentOutputs.length)
+                  ? "Browse all files"
+                  : "No files are available to view yet."
+              }
+              aria-label={
+                hasHomeFileTarget(recentHubFiles.length, recentOutputs.length)
+                  ? "View all files"
+                  : "View all files unavailable: no files are available yet"
+              }
             >
               View all files <ArrowRight size={14} />
             </button>

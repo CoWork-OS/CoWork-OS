@@ -6,11 +6,13 @@ import { ModelDropdown, type ModelDropdownProps } from "../MainContent/ModelDrop
 import { CalmFolderMenu } from "./CalmTopBar";
 
 interface BuildPanelProps {
-  onStart: (prompt: string) => void | Promise<void>;
+  onStart: (prompt: string) => void | boolean | Promise<void | boolean>;
   /** Folder the new build task will run in. */
   workspace: Workspace | null;
   onSelectWorkspace: (workspace: Workspace) => void;
   onPickFolder: () => void;
+  folderPickerUnavailableReason?: string;
+  showWorkspacePaths?: boolean;
   /** Model picker shown in the composer, as in the modern theme. */
   model: ModelDropdownProps;
 }
@@ -39,6 +41,16 @@ const BUILD_STARTERS = [
 const BUILD_INSTRUCTIONS =
   "Build this as a self-contained interactive web app (HTML, CSS and JavaScript) and open a live preview when it is ready. Keep it clean and usable by non-developers.";
 
+export async function submitBuildTask(
+  onStart: BuildPanelProps["onStart"],
+  text: string,
+): Promise<boolean> {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const result = await onStart(`${trimmed}\n\n${BUILD_INSTRUCTIONS}`);
+  return result !== false;
+}
+
 /**
  * Entry point for building small apps, dashboards and tools from plain
  * language. Starts a normal task with instructions that steer it toward a
@@ -49,6 +61,8 @@ export function BuildPanel({
   workspace,
   onSelectWorkspace,
   onPickFolder,
+  folderPickerUnavailableReason,
+  showWorkspacePaths,
   model,
 }: BuildPanelProps) {
   const [value, setValue] = useState("");
@@ -77,8 +91,8 @@ export function BuildPanel({
     if (!trimmed || submitting) return;
     setSubmitting(true);
     try {
-      await onStart(`${trimmed}\n\n${BUILD_INSTRUCTIONS}`);
-      setValue("");
+      const admitted = await submitBuildTask(onStart, trimmed);
+      if (admitted) setValue("");
     } finally {
       setSubmitting(false);
     }
@@ -138,6 +152,8 @@ export function BuildPanel({
               activeWorkspaceId: workspace?.id,
               onSelect: onSelectWorkspace,
               onNewFolder: onPickFolder,
+              onNewFolderDisabledReason: folderPickerUnavailableReason,
+              showWorkspacePaths,
               onOpen: () => void loadRecentWorkspaces(),
             }}
           />

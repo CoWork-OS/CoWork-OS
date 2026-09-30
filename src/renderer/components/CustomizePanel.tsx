@@ -68,6 +68,9 @@ export function CustomizePanel({
   const canTogglePackSkill = hasHostMethod("togglePluginPackSkill");
   const canRetryQuarantinedImport = hasHostMethod("retryQuarantinedImport");
   const canRemoveQuarantinedImport = hasHostMethod("removeQuarantinedImport");
+  const canNavigateToConnectors =
+    Boolean(onNavigateToConnectors) &&
+    (window.coworkBrowserHost !== true || hasHostMethod("getConnectorSettings"));
 
   useEffect(() => {
     let cancelled = false;
@@ -298,7 +301,12 @@ export function CustomizePanel({
           <button
             className="cp-sidebar-item cp-sidebar-item--nav"
             onClick={onNavigateToConnectors}
-            disabled={!onNavigateToConnectors}
+            disabled={!canNavigateToConnectors}
+            title={
+              window.coworkBrowserHost === true && !canNavigateToConnectors
+                ? "Connector setup is available in the desktop app."
+                : undefined
+            }
           >
             <span className="cp-sidebar-icon">
               <Plug size={16} strokeWidth={1.5} />
@@ -512,10 +520,12 @@ export function CustomizePanel({
                       key={c}
                       className="cp-rc-chip"
                       onClick={onNavigateToConnectors}
-                      disabled={!onNavigateToConnectors}
+                      disabled={!canNavigateToConnectors}
                       title={
                         window.coworkBrowserHost === true
-                          ? `View connector availability for ${c}`
+                          ? canNavigateToConnectors
+                            ? `View connector availability for ${c}`
+                            : "Connector setup is available in the desktop app."
                           : `Set up ${c}`
                       }
                     >

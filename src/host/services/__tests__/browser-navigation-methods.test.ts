@@ -6,6 +6,7 @@ import { DatabaseManager } from "../../../electron/database/schema";
 import { WorkspaceStore } from "../../../electron/database/repositories";
 import { WorkspaceRepository } from "../../../electron/database/repository-facades";
 import type { EverydayActionReceipt, Workspace } from "../../../shared/types";
+import type { ChannelGateway } from "../../../electron/gateway";
 import type { ManagedSessionService } from "../../../electron/managed/ManagedSessionService";
 import type { EverydayAgentService } from "../../../electron/everyday-agent/everyday-agent-repository-facades";
 import type { RoutineService } from "../../../electron/routines/service";
@@ -78,10 +79,15 @@ describe("browser navigation desktop methods", () => {
     resolveWorkspace?: (id: string) => Promise<Workspace | null>,
     discovery?: Partial<BrowserDiscoverySources>,
     pluginPackToggleService?: Pick<PluginPackToggleService, "setPackEnabled" | "setSkillEnabled">,
+    channelGateway?: Pick<
+      ChannelGateway,
+      "getChannels" | "getChannel" | "getDistinctChatIds" | "sendMessage"
+    >,
   ) {
     return createBrowserNavigationDefinitions({
       db,
       agentDaemon: {} as never,
+      channelGateway,
       managedSessionService: managed,
       everydayAgentService: everyday,
       getRoutineService: () => routineService,
@@ -182,6 +188,67 @@ describe("browser navigation desktop methods", () => {
     ] as const) {
       expect(() => rpcMethods[`desktop.${name}`].validateParams?.({ args })).toThrow();
     }
+  });
+
+  it("returns bounded chat choices only for enabled channels", async () => {
+    const gateway = {
+      getChannel: vi.fn(async (id: string) =>
+        id === "enabled-channel" ? { id, type: "telegram", enabled: true } : undefined,
+      ),
+      getDistinctChatIds: vi.fn(async () => [
+        { chatId: "chat-one", lastTimestamp: 123 },
+        { chatId: "chat-two", lastTimestamp: -1 },
+      ]),
+    } as unknown as ChannelGateway;
+    const defs = definitions(undefined, undefined, undefined, gateway);
+
+    expect(defs.getGatewayChats?.capability).toBe("automation.manage");
+    await expect(invoke(defs, "getGatewayChats", ["enabled-channel"])).resolves.toEqual([
+      { chatId: "chat-one", lastTimestamp: 123 },
+      { chatId: "chat-two", lastTimestamp: 0 },
+    ]);
+    expect(gateway.getDistinctChatIds).toHaveBeenCalledWith("enabled-channel", 200);
+    await expect(invoke(defs, "getGatewayChats", ["missing-channel"])).resolves.toEqual([]);
+    expect(gateway.getDistinctChatIds).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends only the fixed scheduled-task test message through an enabled host channel", async () => {
+    const gateway = {
+      getChannel: vi.fn(async (id: string) => ({
+        id,
+        type: "slack",
+        enabled: id === "enabled-channel",
+      })),
+      sendMessage: vi.fn(async () => "message-id"),
+    } as unknown as ChannelGateway;
+    const defs = definitions(undefined, undefined, undefined, gateway);
+    const definition = defs.sendGatewayTestMessage;
+
+    expect(definition?.capability).toBe("automation.manage");
+    expect(definition?.mutation).toBe(true);
+    await expect(
+      invoke(defs, "sendGatewayTestMessage", [
+        { channelType: "telegram", channelDbId: "enabled-channel", chatId: "chat-123" },
+      ]),
+    ).resolves.toEqual({ ok: true });
+    expect(gateway.sendMessage).toHaveBeenCalledWith(
+      "slack",
+      "chat-123",
+      "Test delivery from CoWork OS",
+      { channelDbId: "enabled-channel", parseMode: "text" },
+    );
+
+    await expect(
+      invoke(defs, "sendGatewayTestMessage", [
+        { channelType: "telegram", channelDbId: "disabled-channel", chatId: "chat-123" },
+      ]),
+    ).rejects.toThrow("Choose an enabled channel");
+    expect(gateway.sendMessage).toHaveBeenCalledTimes(1);
+    expect(() =>
+      definition?.validate?.([
+        { channelType: "telegram", chatId: "chat-123", message: "arbitrary" },
+      ]),
+    ).toThrow();
   });
 
   it("returns bounded pack metadata required by CustomizePanel without prompts, paths, or secrets", async () => {

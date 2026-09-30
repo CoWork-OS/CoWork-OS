@@ -13,6 +13,7 @@ import { AgentDaemon } from "../../electron/agent/daemon";
 import { EverydayAgentService } from "../../electron/everyday-agent/everyday-agent-repository-facades";
 import { CronService, getCronService } from "../../electron/cron";
 import type { CronJob, CronJobCreate, CronJobPatch, CronSchedule } from "../../electron/cron/types";
+import { CHANNEL_TYPES, type ChannelType } from "../../electron/gateway/channels/types";
 import { SkillRepository, WorkspaceRepository } from "../../electron/database/repository-facades";
 import { TaskStore } from "../../electron/database/repositories";
 import { MCPSettingsManager } from "../../electron/mcp/settings";
@@ -89,7 +90,10 @@ type HeartbeatStatusSource = Pick<HeartbeatService, "getAllStatus">;
 export interface BrowserNavigationOptions {
   db: Database.Database;
   agentDaemon: AgentDaemon;
-  channelGateway?: Pick<ChannelGateway, "getChannels">;
+  channelGateway?: Pick<
+    ChannelGateway,
+    "getChannels" | "getChannel" | "getDistinctChatIds" | "sendMessage"
+  >;
   getRoutineService?: () => RoutineService | null;
   getEventTriggerService?: () => EventTriggerSource | null;
   getCronService?: () => CronService | null;
@@ -3154,6 +3158,91 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
       status: channel.status,
     }));
   });
+  definitions.getGatewayChats = definition(
+    automation,
+    async ([rawChannelId]) => {
+      const gateway = options.channelGateway;
+      if (!gateway)
+        throw new WebApplicationError(
+          "UNSUPPORTED_CAPABILITY",
+          "Channel chat lookup is unavailable on this browser host.",
+          501,
+        );
+      const channelId = String(rawChannelId);
+      const channel = await gateway.getChannel(channelId);
+      if (!channel?.enabled) return [];
+      const chats = await gateway.getDistinctChatIds(channelId, 200);
+      return chats.slice(0, 200).map(({ chatId, lastTimestamp }) => ({
+        chatId: textArg(chatId, 500),
+        lastTimestamp:
+          Number.isSafeInteger(lastTimestamp) && lastTimestamp >= 0 ? lastTimestamp : 0,
+      }));
+    },
+    { minArgs: 1, maxArgs: 1, validate: simpleIdValidator },
+  );
+  definitions.sendGatewayTestMessage = definition(
+    automation,
+    async ([rawRequest]) => {
+      const gateway = options.channelGateway;
+      if (!gateway)
+        throw new WebApplicationError(
+          "UNSUPPORTED_CAPABILITY",
+          "Channel test messages are unavailable on this browser host.",
+          501,
+        );
+      const input = requireRecord(rawRequest, ["channelType", "channelDbId", "chatId"]);
+      const requestedType = input.channelType;
+      if (
+        typeof requestedType !== "string" ||
+        !CHANNEL_TYPES.includes(requestedType as ChannelType)
+      ) {
+        return invalidRequest();
+      }
+      const chatId = textArg(input.chatId, 500);
+      const channelDbId =
+        input.channelDbId === undefined ? undefined : stringArg(input.channelDbId);
+      let channelType = requestedType as ChannelType;
+      if (channelDbId) {
+        const channel = await gateway.getChannel(channelDbId);
+        if (!channel?.enabled)
+          throw new WebApplicationError(
+            "INVALID_REQUEST",
+            "Choose an enabled channel before sending a test message.",
+            400,
+          );
+        if (!CHANNEL_TYPES.includes(channel.type as ChannelType)) return invalidRequest();
+        channelType = channel.type as ChannelType;
+      }
+      await gateway.sendMessage(channelType, chatId, "Test delivery from CoWork OS", {
+        ...(channelDbId ? { channelDbId } : {}),
+        parseMode: "text",
+      });
+      return { ok: true };
+    },
+    {
+      mutation: true,
+      minArgs: 1,
+      maxArgs: 1,
+      validate: (args) => {
+        const input = requireRecord(args[0], ["channelType", "channelDbId", "chatId"]);
+        if (
+          typeof input.channelType !== "string" ||
+          !CHANNEL_TYPES.includes(input.channelType as ChannelType)
+        ) {
+          return invalidRequest();
+        }
+        return [
+          boundedJson({
+            channelType: input.channelType,
+            ...(input.channelDbId === undefined
+              ? {}
+              : { channelDbId: stringArg(input.channelDbId) }),
+            chatId: textArg(input.chatId, 500),
+          }),
+        ];
+      },
+    },
+  );
   definitions.listImageGenProfiles = definition(agents, async () =>
     (await imageProfiles.list()).map((profile) => ({
       id: profile.id,

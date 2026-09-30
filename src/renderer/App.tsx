@@ -5826,6 +5826,7 @@ export function App() {
   // Build starts a new task, so picking a folder there only changes the
   // working folder and never moves the currently selected task.
   const handlePickBuildFolder = async () => {
+    if (isBrowserHost) return;
     try {
       const workspace = await pickFolderWorkspace();
       if (workspace) setCurrentWorkspace(workspace);
@@ -6687,9 +6688,7 @@ export function App() {
     await handleCreateTask(title, prompt, { generateTitle: true });
   };
 
-  const handleCreateTaskFromIdea = async (prompt: string) => {
-    setCurrentView("main");
-    clearRemoteTaskView();
+  const handleCreateTaskFromIdea = async (prompt: string): Promise<boolean> => {
     let workspace = currentWorkspace;
     if (!workspace) {
       try {
@@ -6698,17 +6697,19 @@ export function App() {
       } catch (error) {
         console.error("Failed to get workspace for idea:", error);
         addToast({ type: "error", title: "Error", message: "Could not create session" });
-        return;
+        return false;
       }
     }
     const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
-    await handleCreateTask(
+    const admitted = await handleCreateTask(
       title,
       prompt,
       { generateTitle: true },
       undefined,
       workspace || undefined,
     );
+    if (admitted) clearRemoteTaskView();
+    return admitted;
   };
 
   const handleNewSession = async () => {
@@ -7961,6 +7962,8 @@ export function App() {
                     setCurrentView("main");
                   }}
                   onNewSession={handleNewSession}
+                  onViewAllTasks={handleClearTaskView}
+                  onViewAllFiles={() => setCurrentView("library")}
                   onOpenScheduledTasks={() => {
                     setSettingsTab("scheduled");
                     setCurrentView("settings");
@@ -8152,6 +8155,12 @@ export function App() {
                   workspace={currentWorkspace}
                   onSelectWorkspace={setCurrentWorkspace}
                   onPickFolder={handlePickBuildFolder}
+                  folderPickerUnavailableReason={
+                    isBrowserHost
+                      ? "Browser sessions cannot select arbitrary computer folders. Workspace switching is limited to folders made available to this browser session; use the desktop app to choose another folder."
+                      : undefined
+                  }
+                  showWorkspacePaths={!isBrowserHost}
                   model={{
                     models: availableModels,
                     selectedModel,

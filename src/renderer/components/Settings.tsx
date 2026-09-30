@@ -2771,7 +2771,12 @@ export function Settings({
           if (!loadedSettings.openai.model) {
             setOpenaiModel(recommendChatGPTModelForPlan(loadedSettings.openai.chatgptPlanType));
           }
-          if (loadedSettings.openai.accessToken || loadedSettings.openai.refreshToken) {
+          if (
+            loadedSettings.openai.accessToken ||
+            loadedSettings.openai.refreshToken ||
+            (loadedSettings.openai as Any).accessTokenConfigured ||
+            (loadedSettings.openai as Any).refreshTokenConfigured
+          ) {
             // Tokens available - fully connected
             setOpenaiOAuthConnected(true);
           } else {
@@ -2865,7 +2870,13 @@ export function Settings({
       if (loadedSettings.xai?.model) {
         setXaiModel(loadedSettings.xai.model);
       }
-      setXaiOAuthConnected(!!(loadedSettings.xai?.accessToken && loadedSettings.xai?.refreshToken));
+      setXaiOAuthConnected(
+        Boolean(
+          (loadedSettings.xai?.accessToken && loadedSettings.xai?.refreshToken) ||
+          (loadedSettings.xai as Any)?.accessTokenConfigured ||
+          (loadedSettings.xai as Any)?.refreshTokenConfigured,
+        ),
+      );
 
       // Set DeepSeek form state
       if (loadedSettings.deepseek?.apiKey) {
@@ -6209,7 +6220,12 @@ export function Settings({
                     <button
                       className="button-small button-secondary"
                       onClick={handleOpenAIOAuthLogout}
-                      disabled={openaiOAuthLoading}
+                      disabled={openaiOAuthLoading || !hasHostMethods("openaiOAuthLogout")}
+                      title={
+                        !hasHostMethods("openaiOAuthLogout")
+                          ? "OAuth account changes are available in the desktop app."
+                          : undefined
+                      }
                     >
                       {openaiOAuthLoading ? "Disconnecting..." : "Disconnect Account"}
                     </button>
@@ -6227,7 +6243,12 @@ export function Settings({
                     <button
                       className="button-primary oauth-login-btn"
                       onClick={handleOpenAIOAuthLogin}
-                      disabled={openaiOAuthLoading}
+                      disabled={openaiOAuthLoading || !hasHostMethods("openaiOAuthStart")}
+                      title={
+                        !hasHostMethods("openaiOAuthStart")
+                          ? "OAuth sign-in is available in the desktop app."
+                          : undefined
+                      }
                     >
                       {openaiOAuthLoading ? (
                         <>
@@ -6262,6 +6283,12 @@ export function Settings({
                         </>
                       )}
                     </button>
+                    {window.coworkBrowserHost === true && !hasHostMethods("openaiOAuthStart") ? (
+                      <p className="settings-hint" role="status">
+                        OAuth sign-in is available in the desktop app. You can configure an API key
+                        here instead.
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -6708,7 +6735,12 @@ export function Settings({
                     <button
                       className="button-small button-secondary"
                       onClick={handleXAIOAuthLogout}
-                      disabled={xaiOAuthLoading}
+                      disabled={xaiOAuthLoading || !hasHostMethods("xaiOAuthLogout")}
+                      title={
+                        !hasHostMethods("xaiOAuthLogout")
+                          ? "OAuth account changes are available in the desktop app."
+                          : undefined
+                      }
                     >
                       {xaiOAuthLoading ? "Disconnecting..." : "Disconnect Account"}
                     </button>
@@ -6722,10 +6754,21 @@ export function Settings({
                     <button
                       className="button-primary oauth-login-btn"
                       onClick={handleXAIOAuthLogin}
-                      disabled={xaiOAuthLoading}
+                      disabled={xaiOAuthLoading || !hasHostMethods("xaiOAuthStart")}
+                      title={
+                        !hasHostMethods("xaiOAuthStart")
+                          ? "OAuth sign-in is available in the desktop app."
+                          : undefined
+                      }
                     >
                       {xaiOAuthLoading ? "Connecting..." : "Sign in with Grok"}
                     </button>
+                    {window.coworkBrowserHost === true && !hasHostMethods("xaiOAuthStart") ? (
+                      <p className="settings-hint" role="status">
+                        OAuth sign-in is available in the desktop app. You can configure an API key
+                        here instead.
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </div>

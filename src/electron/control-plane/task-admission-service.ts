@@ -7,6 +7,7 @@ import {
 } from "../database/repository-facades";
 import type {
   TaskAdmissionInput,
+  TaskAdmissionMediaMetadata,
   TaskAdmissionReceiptLookup,
   TaskAdmissionStoreOutcome,
 } from "../database/repositories";
@@ -86,6 +87,7 @@ export class TaskAdmissionService {
     operationKey: string,
     task: TaskAdmissionInput,
     requestIdentity?: unknown,
+    media?: TaskAdmissionMediaMetadata,
   ): Promise<TaskAdmissionResult> {
     const key = normalizeOperationKey(operationKey);
     const { input, preparedPayloadHash } = normalizeTaskInput(task);
@@ -94,7 +96,12 @@ export class TaskAdmissionService {
         ? preparedPayloadHash
         : hashCanonicalPayload(requestIdentity, "request identity");
     try {
-      return this.resolveOutcome(key, await this.repository.admit(key, payloadHash, input));
+      return this.resolveOutcome(
+        key,
+        media === undefined
+          ? await this.repository.admit(key, payloadHash, input)
+          : await this.repository.admit(key, payloadHash, input, media),
+      );
     } catch (firstError) {
       if (isFinalAdmissionError(firstError)) throw firstError;
 
@@ -109,7 +116,12 @@ export class TaskAdmissionService {
       }
 
       try {
-        return this.resolveOutcome(key, await this.repository.admit(key, payloadHash, input));
+        return this.resolveOutcome(
+          key,
+          media === undefined
+            ? await this.repository.admit(key, payloadHash, input)
+            : await this.repository.admit(key, payloadHash, input, media),
+        );
       } catch (retryError) {
         if (isFinalAdmissionError(retryError)) throw retryError;
         // Keep the original failure visible. A caller can use getByOperationKey(key) to

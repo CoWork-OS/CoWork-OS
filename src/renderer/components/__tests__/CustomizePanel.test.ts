@@ -16,4 +16,16 @@ describe("CustomizePanel styling", () => {
     );
     expect(source).toContain("transform: translateX(4px)");
   });
+
+  it("disables pack, skill, and quarantine mutations when browser methods are unavailable", () => {
+    const source = readFileSync(componentPath, "utf8");
+
+    expect(source).toContain("!canTogglePack");
+    expect(source).toContain("!canTogglePackSkill");
+    expect(source).toContain("!canRetryQuarantinedImport");
+    expect(source).toContain("!canRemoveQuarantinedImport");
+    expect(source).toContain("toggle pack and skill states");
+    expect(source).toContain("Installing, importing, and creating packs requires the desktop app.");
+    expect(source).toContain("activePackQuarantined");
+  });
 });

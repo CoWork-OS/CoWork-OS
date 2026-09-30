@@ -73,6 +73,184 @@ afterEach(() => {
 });
 
 describe("browser host bridge", () => {
+  it("keeps independent pack toggles usable while another target awaits its receipt", async () => {
+    const fakeWindow = stubBrowserWindow();
+    const pending: Array<() => void> = [];
+    const request = vi.fn(
+      async (_method: string, params: { args: unknown[] }, _options?: unknown) =>
+        new Promise((resolve) =>
+          pending.push(() =>
+            resolve({ success: true, name: params.args[0], enabled: params.args.at(-1) }),
+          ),
+        ),
+    );
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      {
+        ...session,
+        desktopMethods: {
+          togglePluginPack: { mutation: true },
+          togglePluginPackSkill: { mutation: true },
+        },
+      } as WebSessionBootstrap,
+    );
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+    const operations = Promise.all([
+      api.togglePluginPack("pack-one", false),
+      api.togglePluginPack("pack-two", false),
+      api.togglePluginPackSkill("pack-one", "skill-one", false),
+      api.togglePluginPackSkill("pack-one", "skill-two", false),
+    ]);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(4));
+    expect(
+      new Set(request.mock.calls.map((call) => (call[2] as { operationKey: string }).operationKey))
+        .size,
+    ).toBe(4);
+    pending.forEach((finish) => finish());
+    await expect(operations).resolves.toHaveLength(4);
+    dispose();
+  });
+
+  it("enables task submission after provider settings refresh the current host readiness", async () => {
+    const fakeWindow = stubBrowserWindow();
+    vi.stubGlobal("document", { baseURI: "http://127.0.0.1:18989/app/" });
+    const initialSession = {
+      ...session,
+      providerReady: false,
+      desktopMethods: { saveLLMSettings: { mutation: true } },
+    } as WebSessionBootstrap;
+    const request = vi.fn(async (method: string) => {
+      if (method === "desktop.saveLLMSettings") return { success: true };
+      if (method === "task.admission.get") return { found: false };
+      if (method === "task.create") return { taskId: taskDetail.id, task: taskSummary };
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ ...initialSession, providerReady: true }),
+      })),
+    );
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      initialSession,
+    );
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+    const input = { title: "Provider test", prompt: "Test", workspaceId: workspace.id };
+    await expect(api.createTask(input)).rejects.toThrow("Settings → AI & Models");
+    expect(request).not.toHaveBeenCalled();
+    await api.saveLLMSettings({ providerType: "anthropic" } as never);
+    expect(fakeWindow.coworkBrowserHostInfo).toMatchObject({ providerReady: true });
+    await expect(api.createTask(input)).resolves.toMatchObject({ id: taskDetail.id });
+    dispose();
+  });
+
+  it.each(["INVALID_REQUEST", "STALE_STATE", "FORBIDDEN", "UNSUPPORTED_CAPABILITY"] as const)(
+    "allows correcting a follow-up after definitive %s rejection",
+    async (code) => {
+      const fakeWindow = stubBrowserWindow();
+      let attempts = 0;
+      const request = vi.fn(async (method: string, _params?: unknown, _options?: unknown) => {
+        if (method === "desktop.task.get") return { task: taskDetail };
+        if (method === "task.followUp.receipt") return { found: false, state: "pending" };
+        if (method === "task.followUp") {
+          if (++attempts === 1)
+            throw new WebTransportError({
+              code,
+              message: "Invalid quote",
+              retryable: false,
+            });
+          return { found: true, state: "admitted" };
+        }
+        throw new Error(`Unexpected RPC method ${method}`);
+      });
+      const dispose = installBrowserHostBridge(
+        { request } as unknown as BrowserHostTransport,
+        session,
+      );
+      const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+      await expect(api.sendMessage(taskDetail.id, "First")).rejects.toMatchObject({
+        code,
+      });
+      await expect(api.sendMessage(taskDetail.id, "Corrected")).resolves.toMatchObject({
+        deliveryStatus: "accepted",
+      });
+      const keys = request.mock.calls
+        .filter(([method]) => method === "task.followUp")
+        .map((call) => (call[2] as { operationKey: string }).operationKey);
+      expect(new Set(keys).size).toBe(2);
+      dispose();
+    },
+  );
+
+  it("translates shared composer attachments and preserves rich follow-up context", async () => {
+    const fakeWindow = stubBrowserWindow();
+    const request = vi.fn(async (method: string, _params?: unknown) => {
+      if (method === "desktop.workspace.list") return { workspaces: [workspace] };
+      if (method === "desktop.task.get") return { task: taskDetail };
+      if (method === "task.admission.get") return { found: false };
+      if (method === "task.create")
+        return { found: true, taskId: taskDetail.id, task: taskSummary };
+      if (method === "task.followUp.receipt") return { found: false, state: "pending" };
+      if (method === "task.followUp") return { found: true, state: "admitted", acceptedAt: 10 };
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      session,
+    );
+    const api = fakeWindow.electronAPI as unknown as typeof window.electronAPI;
+    const images = [
+      {
+        filePath: `${workspace.path}/attachment.png`,
+        filename: "attachment.png",
+        mimeType: "image/png" as const,
+        sizeBytes: 10,
+      },
+    ];
+    await api.createTask({
+      title: "Read image",
+      prompt: "Read this",
+      workspaceId: workspace.id,
+      images,
+    });
+    const quote = { taskId: taskDetail.id, eventId: "event-1", message: "Previous answer" };
+    const mentions = [
+      {
+        id: "mcp:test",
+        label: "Test",
+        source: "mcp" as const,
+        providerKey: "test",
+        iconKey: "test",
+        tools: ["read"],
+        promptHint: "Use test",
+      },
+    ];
+    await api.sendMessage(taskDetail.id, "Continue", images, quote, {
+      expectedTurnId: "turn-1",
+      integrationMentions: mentions,
+    });
+    const expectedImages = [
+      {
+        relativePath: "attachment.png",
+        filename: "attachment.png",
+        mimeType: "image/png",
+        sizeBytes: 10,
+      },
+    ];
+    expect(request.mock.calls.find(([method]) => method === "task.create")?.[1]).toMatchObject({
+      images: expectedImages,
+    });
+    expect(request.mock.calls.find(([method]) => method === "task.followUp")?.[1]).toMatchObject({
+      images: expectedImages,
+      quotedAssistantMessage: quote,
+      expectedTurnId: "turn-1",
+      integrationMentions: mentions,
+    });
+    dispose();
+  });
+
   it("exposes file viewing independently of upload permission", () => {
     const fakeWindow = stubBrowserWindow();
     const readOnlySession = {

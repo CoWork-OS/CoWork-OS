@@ -93,6 +93,17 @@ export interface BrowserWorkspaceFilesOptions {
   maxActiveUploadBytes?: number;
 }
 
+export interface BrowserTaskMediaFileSnapshot {
+  bytes: Buffer;
+  sizeBytes: number;
+  identity: {
+    dev: number;
+    ino: number;
+    size: number;
+    mtimeMs: number;
+  };
+}
+
 /**
  * Bounded browser workspace file access. File bytes stream over HTTP and never
  * enter WebApplication's JSON-RPC response path.
@@ -178,6 +189,82 @@ export class BrowserWorkspaceFiles {
       entries: entries.slice(0, this.maxEntries),
       truncated,
     };
+  }
+
+  /**
+   * Read one workspace-relative attachment from an access-checked, identity-
+   * verified file handle. Callers use the returned bytes as a frozen admission
+   * snapshot and must not reopen the original path later.
+   */
+  async readTaskMedia(
+    context: WebRequestContext,
+    workspaceId: string,
+    relativePath: string,
+    maxBytes: number,
+    expectedSizeBytes: number,
+  ): Promise<BrowserTaskMediaFileSnapshot> {
+    await this.assertCapability(context);
+    const target = parseTarget({ workspaceId, relativePath }, this.maxPathChars);
+    if (!target.relativePath) throw invalidTarget();
+    const boundedMaxBytes = boundedInteger(maxBytes, 1, 1, 64 * 1024 * 1024);
+    const workspace = await this.resolveWorkspace(target.workspaceId, context);
+    const location = await this.resolveAuthorizedPath(workspace, target.relativePath, "file");
+    const handle = await openVerifiedFile(
+      location,
+      workspace,
+      (candidate) => this.hasReadAccess(workspace, candidate),
+      (filePath, flags) => this.openReadHandle(filePath, flags),
+    );
+
+    try {
+      const before = await handle.stat();
+      if (!before.isFile() || before.size <= 0) throw unavailable();
+      if (before.size > boundedMaxBytes) {
+        throw new WebApplicationError(
+          "UNSUPPORTED_CAPABILITY",
+          "This attachment exceeds the browser media size limit.",
+          413,
+        );
+      }
+      if (
+        !Number.isSafeInteger(expectedSizeBytes) ||
+        expectedSizeBytes <= 0 ||
+        before.size !== expectedSizeBytes
+      ) {
+        throw new WebApplicationError(
+          "INVALID_REQUEST",
+          "Visual attachment size changed after it was selected.",
+          400,
+        );
+      }
+
+      // The descriptor reservation is based on the selected file's expected size.
+      // Never let a post-stat growth turn that small reservation into a maxBytes
+      // read: fill an exactly sized buffer, then probe only one sentinel byte.
+      const bytes = Buffer.allocUnsafe(expectedSizeBytes);
+      let offset = 0;
+      while (offset < expectedSizeBytes) {
+        const { bytesRead } = await handle.read(bytes, offset, expectedSizeBytes - offset, offset);
+        if (bytesRead <= 0) break;
+        offset += bytesRead;
+      }
+      if (offset !== expectedSizeBytes) throw unavailable();
+      const extraByte = Buffer.allocUnsafe(1);
+      const { bytesRead: extraBytesRead } = await handle.read(extraByte, 0, 1, expectedSizeBytes);
+      if (extraBytesRead > 0) throw unavailable();
+
+      const after = await handle.stat();
+      if (
+        !hasSameIdentity(identityOf(before), identityOf(after)) ||
+        bytes.length !== expectedSizeBytes ||
+        bytes.length === 0
+      ) {
+        throw unavailable();
+      }
+      return { bytes, sizeBytes: bytes.length, identity: identityOf(after) };
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
   }
 
   /**

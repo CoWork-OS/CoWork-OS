@@ -178,6 +178,15 @@ describe("browser task event methods", () => {
     const olderEvent = event("assistant_message", {
       message: "older transcript message",
       apiKey: "secret-input-in-history",
+      queuedAttachmentRefs: [{ filePath: "/private/task-media/image.png" }],
+      initialAttachmentMessageId: "private-initial-message",
+      browserInitialAttachmentMessageId: "private-admission-message",
+      initialTaskMediaConsumed: true,
+      requestFingerprint: "private-media-fingerprint",
+      providerDispatchStatus: "pending",
+      providerDispatchStartedAt: 123,
+      providerDispatchCompletedAt: 456,
+      nested: { queuedAttachmentRefs: [{ blobId: "private-blob-id" }] },
     });
     const repository = sources({
       findScopedTimelineHistoryPage: vi.fn().mockResolvedValue({
@@ -223,6 +232,9 @@ describe("browser task event methods", () => {
       nextHistoryCursor: { order: 3, timestamp: 30, id: "event-older" },
     });
     expect(JSON.stringify(result)).not.toContain("secret-input-in-history");
+    expect(JSON.stringify(result)).not.toMatch(
+      /private\/task-media|private-initial-message|private-admission-message|private-media-fingerprint|private-blob-id|initialTaskMediaConsumed|providerDispatch/,
+    );
   });
 
   it("sanitizes upserts and preserves an explicit journal gap response", async () => {

@@ -34,6 +34,7 @@ import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
 import { isPackAllowed, isPackRequired, loadPoliciesStrict } from "../admin/policies";
+import { writePackStateFile } from "./pack-state-storage";
 import type { CustomSkill } from "../../shared/types";
 
 // Package version (will be replaced at build time or read from package.json)
@@ -221,13 +222,10 @@ export class PluginRegistry extends EventEmitter {
     }
 
     try {
-      const dir = path.dirname(this.packStatesPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(this.packStatesPath, JSON.stringify(payload, null, 2), "utf-8");
+      writePackStateFile(this.packStatesPath, JSON.stringify(payload, null, 2));
     } catch (error) {
       logger.warn("Failed to save pack states:", error);
+      throw error;
     }
   }
 
@@ -254,12 +252,20 @@ export class PluginRegistry extends EventEmitter {
    * Restore a pack's persisted enabled state after a failed runtime transition.
    */
   restorePackEnabled(name: string, enabled: boolean | undefined): void {
+    const hadPreviousState = this.packStates.has(name);
+    const previousState = this.packStates.get(name);
     if (enabled === undefined) {
       this.packStates.delete(name);
     } else {
       this.packStates.set(name, enabled);
     }
-    this.savePackStates();
+    try {
+      this.savePackStates();
+    } catch (error) {
+      if (hadPreviousState && previousState !== undefined) this.packStates.set(name, previousState);
+      else this.packStates.delete(name);
+      throw error;
+    }
   }
 
   /**
@@ -272,11 +278,21 @@ export class PluginRegistry extends EventEmitter {
   /**
    * Set and persist a skill's enabled state within a pack
    */
-  setSkillEnabled(packName: string, skillId: string, enabled: boolean): void {
+  async setSkillEnabled(packName: string, skillId: string, enabled: boolean): Promise<void> {
     const hadSkillMap = this.skillStates.has(packName);
     const skillMap = this.skillStates.get(packName);
     const hadPreviousState = skillMap?.has(skillId) ?? false;
     const previousState = skillMap?.get(skillId);
+
+    const restorePersistedState = (): void => {
+      if (!hadSkillMap) {
+        this.skillStates.delete(packName);
+      } else if (hadPreviousState && previousState !== undefined) {
+        this.skillStates.get(packName)!.set(skillId, previousState);
+      } else {
+        this.skillStates.get(packName)!.delete(skillId);
+      }
+    };
 
     if (!skillMap) {
       this.skillStates.set(packName, new Map());
@@ -285,12 +301,23 @@ export class PluginRegistry extends EventEmitter {
     try {
       this.savePackStates();
     } catch (error) {
-      if (!hadSkillMap) {
-        this.skillStates.delete(packName);
-      } else if (hadPreviousState && previousState !== undefined) {
-        this.skillStates.get(packName)!.set(skillId, previousState);
-      } else {
-        this.skillStates.get(packName)!.delete(skillId);
+      restorePersistedState();
+      throw error;
+    }
+
+    try {
+      const { getCustomSkillLoader } = await import("../agent/custom-skill-loader");
+      getCustomSkillLoader().setPluginSkillEnabled(packName, skillId, enabled);
+    } catch (error) {
+      restorePersistedState();
+      try {
+        this.savePackStates();
+      } catch (rollbackError) {
+        logger.error(
+          "Failed to roll back persisted skill state after runtime update failure:",
+          rollbackError,
+        );
+        throw new Error("Failed to update live skill state and roll back its persisted state");
       }
       throw error;
     }
@@ -327,9 +354,20 @@ export class PluginRegistry extends EventEmitter {
 
   /** Remove persisted state for a pack (used when a pack is fully uninstalled). */
   purgePackState(name: string): void {
+    const hadPackState = this.packStates.has(name);
+    const previousPackState = this.packStates.get(name);
+    const previousSkillState = this.skillStates.get(name);
     this.packStates.delete(name);
     this.skillStates.delete(name);
-    this.savePackStates();
+    try {
+      this.savePackStates();
+    } catch (error) {
+      if (hadPackState && previousPackState !== undefined) {
+        this.packStates.set(name, previousPackState);
+      }
+      if (previousSkillState) this.skillStates.set(name, previousSkillState);
+      throw error;
+    }
   }
 
   /**

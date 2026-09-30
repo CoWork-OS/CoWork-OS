@@ -264,15 +264,24 @@ describe("SessionRetentionService unit", () => {
     const referencedContentOnly = store.persist("live-content-task", "live-content-message", [
       { data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 },
     ]);
+    const initialContentOnly = store.persist("initial-media-task", "__task_initial_media__", [
+      { data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 },
+    ]);
     fs.unlinkSync(path.join(store.rootDir, `${referencedContentOnly.refs[0].key}.json`));
+    fs.unlinkSync(path.join(store.rootDir, `${initialContentOnly.refs[0].key}.json`));
     const oldSeconds = (Date.now() - 2 * 24 * 60 * 60 * 1000) / 1000;
     for (const record of store.listRecords()) {
       fs.utimesSync(record.manifestPath, oldSeconds, oldSeconds);
       fs.utimesSync(record.contentPath, oldSeconds, oldSeconds);
     }
     fs.utimesSync(referencedContentOnly.images[0].filePath!, oldSeconds, oldSeconds);
+    fs.utimesSync(initialContentOnly.images[0].filePath!, oldSeconds, oldSeconds);
     const service = makeService(
-      [makeTask({ id: "live-task" }), makeTask({ id: "live-content-task" })],
+      [
+        makeTask({ id: "live-task" }),
+        makeTask({ id: "live-content-task" }),
+        makeTask({ id: "initial-media-task" }),
+      ],
       [
         makeAttachmentEvent("live-task", "live-message", referenced.refs),
         makeAttachmentEvent(
@@ -280,6 +289,7 @@ describe("SessionRetentionService unit", () => {
           "live-content-message",
           referencedContentOnly.refs,
         ),
+        makeInitialTaskAttachmentEvent("initial-media-task", initialContentOnly.refs),
       ],
       store,
     );
@@ -290,6 +300,7 @@ describe("SessionRetentionService unit", () => {
     );
     expect(() => store.hydrate("live-task", "live-message", referenced.refs)).not.toThrow();
     expect(fs.existsSync(referencedContentOnly.images[0].filePath!)).toBe(true);
+    expect(fs.existsSync(initialContentOnly.images[0].filePath!)).toBe(true);
     fs.rmSync(root, { recursive: true, force: true });
   });
 
@@ -442,6 +453,21 @@ function makeAttachmentEvent(taskId: string, messageId: string, refs: unknown): 
       messageId,
       deliveryMode: "message",
       deliveryStatus: "queued",
+      queuedAttachmentRefs: refs,
+    },
+  };
+}
+
+function makeInitialTaskAttachmentEvent(taskId: string, refs: unknown): TaskEvent {
+  return {
+    id: randomUUID(),
+    taskId,
+    timestamp: Date.now(),
+    type: "timeline_group_started",
+    legacyType: "task_created",
+    schemaVersion: 2,
+    payload: {
+      browserInitialAttachmentMessageId: "__task_initial_media__",
       queuedAttachmentRefs: refs,
     },
   };

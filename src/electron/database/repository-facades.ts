@@ -126,6 +126,7 @@ const TASK_EVENT_REPLAY_METHODS = [
   "getCommittedMutationCursor",
   "findCommittedMutationPage",
   "findTimelinePage",
+  "findEventDetailById",
   "findScopedTimelineSnapshot",
   "findScopedTimelineHistoryPage",
   "findScopedMutationPage",

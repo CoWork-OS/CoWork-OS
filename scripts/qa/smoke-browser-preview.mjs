@@ -207,9 +207,28 @@ async function main() {
     assert.equal(session.capabilities["terminal.attach"]?.available, true);
 
     // Shared desktop controls must reach real services, including omitted positional arguments.
-    const desktop = (name, args = [], operationKey, omittedArgs) => rpc(base, cookie, session.csrfToken, manifest.apiVersion,
-      `desktop.${name}`, { args, ...(omittedArgs ? { omittedArgs } : {}) }, operationKey);
-    for (const name of ["getLLMSettings", "getPersonalityConfigV2", "getRelationshipStats", "listManagedAgents", "listRoutines", "listProfiles", "createWorkspace"]) {
+    const desktop = (name, args = [], operationKey, omittedArgs) =>
+      rpc(
+        base,
+        cookie,
+        session.csrfToken,
+        manifest.apiVersion,
+        `desktop.${name}`,
+        { args, ...(omittedArgs ? { omittedArgs } : {}) },
+        operationKey,
+      );
+    for (const name of [
+      "getLLMSettings",
+      "getPersonalityConfigV2",
+      "getRelationshipStats",
+      "listManagedAgents",
+      "listRoutines",
+      "listProfiles",
+      "createWorkspace",
+      "listPluginPacks",
+      "togglePluginPack",
+      "togglePluginPackSkill",
+    ]) {
       assert(session.desktopMethods?.[name], `${name} is missing from the browser method manifest`);
     }
     const settings = await desktop("getLLMSettings");
@@ -221,16 +240,91 @@ async function main() {
     assert(Array.isArray(await desktop("listRoutineWorkflowRuns", [null, 60], undefined, [0])));
     const profiles = await desktop("listProfiles");
     assert.equal(profiles.filter((profile) => profile.isActive).length, 1);
-    const createArgs = [{ name: "Browser controls project", path: "", permissions: { read: true, write: true, delete: true, network: true, shell: false } }];
-    const createdProject = await desktop("createWorkspace", createArgs, "browser-control-project-01");
+    const packs = await desktop("listPluginPacks");
+    const testPack = packs.find(
+      (pack) =>
+        !pack.policyBlocked &&
+        !pack.policyRequired &&
+        pack.securityReport?.verdict !== "quarantined" &&
+        pack.skills?.length > 0,
+    );
+    assert(testPack, "No installed pack is eligible for the disposable toggle test");
+    const originalPackEnabled = testPack.enabled;
+    const packToggleArgs = [testPack.name, !originalPackEnabled];
+    const toggledPack = await desktop("togglePluginPack", packToggleArgs, "browser-pack-toggle-01");
+    assert.equal(toggledPack.enabled, !originalPackEnabled);
+    assert.equal(
+      (await desktop("listPluginPacks")).find((pack) => pack.name === testPack.name)?.enabled,
+      !originalPackEnabled,
+    );
+    assert.deepEqual(
+      await desktop("togglePluginPack", packToggleArgs, "browser-pack-toggle-01"),
+      toggledPack,
+      "A same-key replay must not reverse the desired pack state",
+    );
+    await desktop(
+      "togglePluginPack",
+      [testPack.name, originalPackEnabled],
+      "browser-pack-restore-01",
+    );
+    const testSkill = testPack.skills[0];
+    const originalSkillEnabled = testSkill.enabled !== false;
+    await desktop(
+      "togglePluginPackSkill",
+      [testPack.name, testSkill.id, !originalSkillEnabled],
+      "browser-pack-skill-toggle-01",
+    );
+    assert.equal(
+      (await desktop("listPluginPacks"))
+        .find((pack) => pack.name === testPack.name)
+        ?.skills.find((skill) => skill.id === testSkill.id)?.enabled,
+      !originalSkillEnabled,
+    );
+    await desktop(
+      "togglePluginPackSkill",
+      [testPack.name, testSkill.id, originalSkillEnabled],
+      "browser-pack-skill-restore-01",
+    );
+    const restoredPack = (await desktop("listPluginPacks")).find(
+      (pack) => pack.name === testPack.name,
+    );
+    assert.equal(restoredPack?.enabled, originalPackEnabled);
+    assert.equal(
+      restoredPack?.skills.find((skill) => skill.id === testSkill.id)?.enabled,
+      originalSkillEnabled,
+    );
+    const createArgs = [
+      {
+        name: "Browser controls project",
+        path: "",
+        permissions: { read: true, write: true, delete: true, network: true, shell: false },
+      },
+    ];
+    const createdProject = await desktop(
+      "createWorkspace",
+      createArgs,
+      "browser-control-project-01",
+    );
     assert.equal(createdProject.name, "Browser controls project");
     assert.equal(createdProject.path, "");
     const projectDb = new Database(path.join(profile, "cowork-os.db"));
     try {
-      const row = projectDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(createdProject.id);
-      assert.equal(JSON.parse(row.permissions).shell, false, "Browser project creation must not grant shell access");
-    } finally { projectDb.close(); }
-    const replayedProject = await desktop("createWorkspace", createArgs, "browser-control-project-01");
+      const row = projectDb
+        .prepare("SELECT permissions FROM workspaces WHERE id = ?")
+        .get(createdProject.id);
+      assert.equal(
+        JSON.parse(row.permissions).shell,
+        false,
+        "Browser project creation must not grant shell access",
+      );
+    } finally {
+      projectDb.close();
+    }
+    const replayedProject = await desktop(
+      "createWorkspace",
+      createArgs,
+      "browser-control-project-01",
+    );
     assert.equal(replayedProject.id, createdProject.id);
 
     const workspaces = await rpc(
@@ -324,6 +418,19 @@ async function main() {
     });
     assert.equal(duplicateUpload.status, 409);
 
+    // A real uploaded raster exercises the shared composer's scoped media wire
+    // contract. This host has no model credential; acceptance is not inference.
+    const visualBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j6m0AAAAASUVORK5CYII=",
+      "base64",
+    );
+    const visualUpload = await fetch(`${base}/api/web/v1/workspace-files/upload`, {
+      method: "POST",
+      headers: { ...uploadHeaders, "X-CoWork-Relative-Path": "browser-image.png" },
+      body: visualBytes,
+    });
+    assert.equal(visualUpload.status, 201);
+
     const taskKey = randomUUID();
     let taskId;
     try {
@@ -337,6 +444,14 @@ async function main() {
           title: "Browser artifact smoke task",
           prompt: "Inspect the disposable input.csv file.",
           workspaceId: selected.id,
+          images: [
+            {
+              relativePath: "browser-image.png",
+              mimeType: "image/png",
+              filename: "browser-image.png",
+              sizeBytes: visualBytes.length,
+            },
+          ],
         },
         taskKey,
       );
@@ -356,6 +471,25 @@ async function main() {
     assert.equal(typeof taskId, "string");
     const terminalDb = new Database(path.join(profile, "cowork-os.db"));
     try {
+      const mediaEvents = terminalDb
+        .prepare(
+          "SELECT payload FROM task_events WHERE task_id = ? AND COALESCE(legacy_type, type) = 'task_created'",
+        )
+        .all(taskId);
+      assert.equal(mediaEvents.length, 1, "Media admission wrote duplicate task-created events");
+      const mediaPayload = JSON.parse(mediaEvents[0].payload);
+      assert.equal(mediaPayload.browserInitialAttachmentMessageId, "__task_initial_media__");
+      assert.equal(mediaPayload.queuedAttachmentRefs.length, 1);
+      const mediaRef = mediaPayload.queuedAttachmentRefs[0];
+      assert.equal(mediaRef.mimeType, "image/png");
+      const mediaRoot = path.join(profile, "runtime", "queued-attachments");
+      const mediaManifest = JSON.parse(
+        await fs.readFile(path.join(mediaRoot, `${mediaRef.key}.json`), "utf8"),
+      );
+      assert.equal(mediaManifest.taskId, taskId);
+      assert.equal(mediaManifest.messageId, "__task_initial_media__");
+      assert.equal(mediaManifest.sha256, createHash("sha256").update(visualBytes).digest("hex"));
+      assert.deepEqual(await fs.readFile(path.join(mediaRoot, `${mediaRef.key}.png`)), visualBytes);
       const row = terminalDb
         .prepare("SELECT permissions FROM workspaces WHERE id = ?")
         .get(selected.id);
@@ -432,8 +566,13 @@ async function main() {
     }
     assert(terminalOutput.includes(marker), "Detached terminal output did not replay");
     const stoppedTerminal = await rpc(
-      base, cookie, session.csrfToken, manifest.apiVersion, "terminal.stop",
-      { ...terminalScope, attachmentId: reattachedTerminal.attachmentId }, randomUUID(),
+      base,
+      cookie,
+      session.csrfToken,
+      manifest.apiVersion,
+      "terminal.stop",
+      { ...terminalScope, attachmentId: reattachedTerminal.attachmentId },
+      randomUUID(),
     );
     assert.equal(stoppedTerminal.status, "inactive");
 
@@ -573,7 +712,7 @@ async function main() {
     });
     assert.equal(afterLogout.status, 401);
     process.stdout.write(
-      "Browser preview smoke passed: shared desktop service reads, project creation/replay, pairing, scoped files, read-only Git, terminal detach/replay, upload/no-overwrite, artifact download/one-use handle, task cancellation/reconciliation, traversal denial, logout.\n",
+      "Browser preview smoke passed: shared desktop service reads, installed pack/skill toggles and replay, project creation/replay, pairing, scoped files, verified image admission/persistence, read-only Git, terminal detach/replay, upload/no-overwrite, artifact download/one-use handle, task cancellation/reconciliation, traversal denial, logout.\n",
     );
   } finally {
     await stopHost(child);

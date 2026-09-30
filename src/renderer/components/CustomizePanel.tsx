@@ -3,6 +3,7 @@ import { Plug, Zap, Package } from "lucide-react";
 import type { CapabilitySecurityReport, QuarantinedImportRecord } from "../../shared/types";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { MESSAGE_SHORTCUTS_UPDATED_EVENT } from "../utils/message-slash-options";
+import { hasHostMethod } from "../host/browser-capabilities";
 import { PluginStore } from "./PluginStore";
 import type { AddToolsSelection } from "./AddToolsPanel";
 
@@ -63,6 +64,10 @@ export function CustomizePanel({
   const [actioningRecordId, setActioningRecordId] = useState<string | null>(null);
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   const focusedSelection = useRef<string | null>(null);
+  const canTogglePack = hasHostMethod("togglePluginPack");
+  const canTogglePackSkill = hasHostMethod("togglePluginPackSkill");
+  const canRetryQuarantinedImport = hasHostMethod("retryQuarantinedImport");
+  const canRemoveQuarantinedImport = hasHostMethod("removeQuarantinedImport");
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +121,7 @@ export function CustomizePanel({
     let cancelled = false;
     (async () => {
       try {
+        if (!hasHostMethod("checkPackUpdates")) return;
         const updates = await window.electronAPI.checkPackUpdates();
         if (cancelled) return;
         const map = new Map<string, string>();
@@ -133,6 +139,7 @@ export function CustomizePanel({
   }, [loadKey]);
 
   const activePack = packs.find((p) => p.name === selectedPack);
+  const activePackQuarantined = activePack?.securityReport?.verdict === "quarantined";
 
   // Filter packs by search query
   const query = searchQuery.toLowerCase().trim();
@@ -262,6 +269,13 @@ export function CustomizePanel({
         <p className="cp-sidebar-note">
           Enable bundled workflows like Legal, SMB, finance, and other domain packs.
         </p>
+        {window.coworkBrowserHost === true && (
+          <p className="cp-sidebar-note" role="status">
+            {canTogglePack && canTogglePackSkill
+              ? "This browser host can show installed pack details and toggle pack and skill states. Installing, importing, and creating packs requires the desktop app."
+              : "This browser host can show installed pack details. Pack and skill changes, installing, importing, and creating packs require the desktop app."}
+          </p>
+        )}
 
         {/* Search */}
         <div className="cp-search-wrapper">
@@ -281,13 +295,21 @@ export function CustomizePanel({
 
         {/* Top-level navigation */}
         <div className="cp-sidebar-section">
-          <button className="cp-sidebar-item cp-sidebar-item--nav" onClick={onNavigateToConnectors}>
+          <button
+            className="cp-sidebar-item cp-sidebar-item--nav"
+            onClick={onNavigateToConnectors}
+            disabled={!onNavigateToConnectors}
+          >
             <span className="cp-sidebar-icon">
               <Plug size={16} strokeWidth={1.5} />
             </span>
             <span>Connectors</span>
           </button>
-          <button className="cp-sidebar-item cp-sidebar-item--nav" onClick={onNavigateToSkills}>
+          <button
+            className="cp-sidebar-item cp-sidebar-item--nav"
+            onClick={onNavigateToSkills}
+            disabled={!onNavigateToSkills}
+          >
             <span className="cp-sidebar-icon">
               <Zap size={16} strokeWidth={1.5} />
             </span>
@@ -415,7 +437,16 @@ export function CustomizePanel({
                       checked={activePack.enabled}
                       disabled={
                         activePack.policyBlocked ||
-                        (activePack.policyRequired && activePack.enabled)
+                        (activePack.policyRequired && activePack.enabled) ||
+                        !canTogglePack ||
+                        (activePackQuarantined && !activePack.enabled)
+                      }
+                      title={
+                        activePackQuarantined && !activePack.enabled
+                          ? "A quarantined pack cannot be enabled"
+                          : !canTogglePack
+                            ? "Change pack state in the desktop app"
+                            : undefined
                       }
                       onChange={(e) => handleToggle(activePack.name, e.target.checked)}
                     />
@@ -481,7 +512,12 @@ export function CustomizePanel({
                       key={c}
                       className="cp-rc-chip"
                       onClick={onNavigateToConnectors}
-                      title={`Set up ${c}`}
+                      disabled={!onNavigateToConnectors}
+                      title={
+                        window.coworkBrowserHost === true
+                          ? `View connector availability for ${c}`
+                          : `Set up ${c}`
+                      }
                     >
                       <span>
                         <Plug size={12} strokeWidth={1.5} />
@@ -555,6 +591,16 @@ export function CustomizePanel({
                         <input
                           type="checkbox"
                           checked={s.enabled !== false}
+                          disabled={
+                            !canTogglePackSkill || (activePackQuarantined && s.enabled === false)
+                          }
+                          title={
+                            activePackQuarantined && s.enabled === false
+                              ? "A skill in a quarantined pack cannot be enabled"
+                              : !canTogglePackSkill
+                                ? "Change pack skill state in the desktop app"
+                                : undefined
+                          }
                           onChange={(e) =>
                             handleSkillToggle(activePack.name, s.id, e.target.checked)
                           }
@@ -638,14 +684,26 @@ export function CustomizePanel({
                           <button
                             className="button-secondary button-small"
                             onClick={() => handleRetryQuarantined(record.id)}
-                            disabled={actioningRecordId === record.id}
+                            disabled={actioningRecordId === record.id || !canRetryQuarantinedImport}
+                            title={
+                              !canRetryQuarantinedImport
+                                ? "Retry this security scan in the desktop app"
+                                : undefined
+                            }
                           >
                             {actioningRecordId === record.id ? "Scanning..." : "Retry Scan"}
                           </button>
                           <button
                             className="button-danger button-small"
                             onClick={() => handleRemoveQuarantined(record.id)}
-                            disabled={actioningRecordId === record.id}
+                            disabled={
+                              actioningRecordId === record.id || !canRemoveQuarantinedImport
+                            }
+                            title={
+                              !canRemoveQuarantinedImport
+                                ? "Remove this quarantined pack in the desktop app"
+                                : undefined
+                            }
                           >
                             Remove
                           </button>

@@ -85,6 +85,11 @@ export const STORAGE_UNITS = {
     "findTimelinePage",
     { readonly: true },
   ),
+  taskEvent_findEventDetailById: storeUnit(
+    (db: Database.Database) => new TaskEventRepository(db),
+    "findEventDetailById",
+    { readonly: true },
+  ),
   taskEvent_findScopedTimelineSnapshot: storeUnit(
     (db: Database.Database) => new TaskEventRepository(db),
     "findScopedTimelineSnapshot",

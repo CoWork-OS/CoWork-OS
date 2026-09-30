@@ -321,6 +321,17 @@ function sanitizeValue(
   depth: number,
   budget: { nodes: number },
 ): unknown {
+  if (
+    key === "queuedAttachmentRefs" ||
+    key === "browserInitialAttachmentMessageId" ||
+    key === "initialAttachmentMessageId" ||
+    key === "initialTaskMediaConsumed" ||
+    key === "requestFingerprint" ||
+    key === "providerDispatchStatus" ||
+    key === "providerDispatchStartedAt" ||
+    key === "providerDispatchCompletedAt"
+  )
+    return undefined;
   if (key && (SECRET_KEY_RE.test(key) || PRIVATE_CONTENT_KEY_RE.test(key))) return "[REDACTED]";
   budget.nodes -= 1;
   if (budget.nodes < 0) return undefined;

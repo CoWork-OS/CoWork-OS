@@ -892,7 +892,7 @@ function isSafeWorkspaceRelativePath(value: unknown): value is string {
 }
 
 /** Resolve a renderer path only when its workspace path is an exact known root. */
-function relativePathForWorkspace(filePath: unknown, workspacePath: unknown): string | null {
+export function relativePathForWorkspace(filePath: unknown, workspacePath: unknown): string | null {
   if (isSafeWorkspaceRelativePath(filePath)) return filePath;
   if (
     typeof filePath !== "string" ||

@@ -54,6 +54,131 @@ describe("BrowserWorkspaceFiles", () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("captures attachment bytes without reopening the mutable workspace path", async () => {
+    const file = path.join(workspaceRoot, "media.png");
+    await fs.writeFile(file, "original");
+    const snapshot = await createService().readTaskMedia(
+      context,
+      workspace.id,
+      "media.png",
+      100,
+      8,
+    );
+    await fs.writeFile(file, "modified");
+    expect(snapshot.bytes.toString()).toBe("original");
+    expect(snapshot.sizeBytes).toBe(8);
+    expect(snapshot.identity.size).toBe(8);
+  });
+
+  it("rechecks file read permissions and browser capability for attachment capture", async () => {
+    await fs.writeFile(path.join(workspaceRoot, "private.png"), "private");
+    const files = createService();
+    workspace.permissions.accessFilesystemRules = [{ path: "private.png", access: "deny" }];
+    await expect(
+      files.readTaskMedia(context, workspace.id, "private.png", 100, 7),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    workspace.permissions.accessFilesystemRules = [];
+    const noCapability = createService({
+      getCapabilities: () => ({ "files.read": { available: false } }),
+    });
+    await expect(
+      noCapability.readTaskMedia(context, workspace.id, "private.png", 100, 7),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(
+      files.readTaskMedia(context, workspace.id, "../private.png", 100, 7),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it("rejects attachment bytes that exceed the caller's bounded capture limit", async () => {
+    await fs.writeFile(path.join(workspaceRoot, "large.png"), "12345");
+    await expect(
+      createService().readTaskMedia(context, workspace.id, "large.png", 4, 5),
+    ).rejects.toMatchObject({ statusCode: 413 });
+  });
+
+  it("rejects underreported attachment sizes before reading content", async () => {
+    await fs.writeFile(path.join(workspaceRoot, "media.png"), "original");
+    let readContent = false;
+    let handle: fs.FileHandle | undefined;
+    const files = new (class extends BrowserWorkspaceFiles {
+      protected override async openReadHandle(filePath: string, flags: number) {
+        handle = await super.openReadHandle(filePath, flags);
+        const read = handle.read.bind(handle);
+        handle.read = ((...args: Parameters<typeof handle.read>) => {
+          readContent = true;
+          return read(...args);
+        }) as typeof handle.read;
+        return handle;
+      }
+    })({
+      resolveWorkspace: () => workspace,
+      getCapabilities: () => ({ "files.read": { available: true } }),
+    });
+    await expect(
+      files.readTaskMedia(context, workspace.id, "media.png", 100, 1),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(readContent).toBe(false);
+    expect(handle?.fd).toBe(-1);
+  });
+
+  it("rejects mutation during attachment capture and closes the opened handle", async () => {
+    const file = path.join(workspaceRoot, "media.png");
+    await fs.writeFile(file, "inside");
+    let handle: fs.FileHandle | undefined;
+    let bytesRead = 0;
+    const files = new (class extends BrowserWorkspaceFiles {
+      protected override async openReadHandle(filePath: string, flags: number) {
+        handle = await super.openReadHandle(filePath, flags);
+        const read = handle.read.bind(handle);
+        let changed = false;
+        handle.read = (async (...args: Parameters<typeof handle.read>) => {
+          const result = await read(...args);
+          bytesRead += result.bytesRead;
+          if (!changed) {
+            changed = true;
+            await fs.appendFile(filePath, Buffer.alloc(64 * 1024, 1));
+          }
+          return result;
+        }) as typeof handle.read;
+        return handle;
+      }
+    })({
+      resolveWorkspace: () => workspace,
+      getCapabilities: () => ({ "files.read": { available: true } }),
+    });
+    await expect(
+      files.readTaskMedia(context, workspace.id, "media.png", 25 * 1024 * 1024, 6),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(bytesRead).toBeLessThanOrEqual(7);
+    expect(handle?.fd).toBe(-1);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects an attachment symlink swapped before opening",
+    async () => {
+      const file = path.join(workspaceRoot, "media.png");
+      const outside = path.join(tempRoot, "outside.png");
+      await fs.writeFile(file, "inside");
+      await fs.writeFile(outside, "outside secret");
+      let handle: fs.FileHandle | undefined;
+      const files = new (class extends BrowserWorkspaceFiles {
+        protected override async openReadHandle(filePath: string, flags: number) {
+          await fs.unlink(filePath);
+          await fs.symlink(outside, filePath);
+          handle = await super.openReadHandle(filePath, flags);
+          return handle;
+        }
+      })({
+        resolveWorkspace: () => workspace,
+        getCapabilities: () => ({ "files.read": { available: true } }),
+      });
+      await expect(
+        files.readTaskMedia(context, workspace.id, "media.png", 100, 6),
+      ).rejects.toMatchObject({ statusCode: 404 });
+      expect(handle).toBeUndefined();
+    },
+  );
+
   it("lists bounded, workspace-relative entries without returning host paths", async () => {
     await fs.mkdir(path.join(workspaceRoot, "docs"));
     await fs.writeFile(path.join(workspaceRoot, "docs", "a.txt"), "a");

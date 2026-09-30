@@ -1550,7 +1550,8 @@ export class SessionRuntime {
       normalized.length > 0 &&
       this.state.queues.pendingFollowUps.some(
         (followUp) =>
-          followUp.deliveryMode === "message" && followUp.messageId?.trim() === normalized,
+          (followUp.deliveryMode === "message" || followUp.deliveryMode === "follow_up") &&
+          followUp.messageId?.trim() === normalized,
       )
     );
   }
@@ -1679,7 +1680,12 @@ export class SessionRuntime {
     // An untrimmed truthiness test here made a whitespace-only id peek forever
     // without ever shifting: the executor could not consume it, and the drain
     // loop returned the same object on every pass.
-    if (pending?.deliveryMode === "message" && pending.messageId?.trim()) return pending;
+    if (
+      pending?.messageId?.trim() &&
+      (pending.deliveryMode === "message" || pending.deliveryMode === "follow_up")
+    ) {
+      return pending;
+    }
     return this.state.queues.pendingFollowUps.shift();
   }
 
@@ -1691,12 +1697,16 @@ export class SessionRuntime {
 
   takeNextFollowUpAtTurnBoundary(): TaskFollowUpInput | undefined {
     const followUp = this.state.queues.pendingFollowUps[0];
-    // Queue-only messages carry a durable receipt and may include payload data
-    // (for example image bytes) that the compact receipt event intentionally
-    // does not store. Keep the full item in the runtime snapshot until the
-    // executor has incorporated it and removes it at the acceptance boundary.
-    // Legacy/non-receipted follow-ups retain the old drain semantics.
-    if (followUp?.deliveryMode === "message" && followUp.messageId) return followUp;
+    // Stable queue receipts may include payload data (for example images)
+    // that the compact event intentionally does not store. Keep the complete
+    // queue item in the runtime snapshot until the executor incorporates it
+    // and commits the matching receipt status.
+    if (
+      followUp?.messageId &&
+      (followUp.deliveryMode === "message" || followUp.deliveryMode === "follow_up")
+    ) {
+      return followUp;
+    }
     const drained = this.state.queues.pendingFollowUps.shift();
     if (drained) this.saveSnapshot();
     return drained;
@@ -1707,7 +1717,8 @@ export class SessionRuntime {
     if (!normalized) return false;
     const index = this.state.queues.pendingFollowUps.findIndex(
       (followUp) =>
-        followUp.deliveryMode === "message" && followUp.messageId?.trim() === normalized,
+        (followUp.deliveryMode === "message" || followUp.deliveryMode === "follow_up") &&
+        followUp.messageId?.trim() === normalized,
     );
     if (index < 0) return false;
     this.state.queues.pendingFollowUps.splice(index, 1);
@@ -1719,7 +1730,8 @@ export class SessionRuntime {
     const alreadyPending = messageId
       ? this.state.queues.pendingFollowUps.some(
           (pending) =>
-            pending.deliveryMode === "message" && pending.messageId?.trim() === messageId,
+            (pending.deliveryMode === "message" || pending.deliveryMode === "follow_up") &&
+            pending.messageId?.trim() === messageId,
         )
       : this.state.queues.pendingFollowUps.includes(followUp);
     if (!alreadyPending) this.state.queues.pendingFollowUps.unshift(followUp);
@@ -4141,14 +4153,28 @@ export class SessionRuntime {
       }
       if (eventType !== "user_message") continue;
       const messageId = typeof payload.messageId === "string" ? payload.messageId.trim() : "";
-      if (!messageId || payload.deliveryMode !== "message") continue;
+      const status = payload.deliveryStatus ?? payload.status;
+      if (
+        !messageId ||
+        (payload.deliveryMode !== "message" &&
+          !(
+            payload.deliveryMode === "follow_up" &&
+            (status === "queued" || status === "started" || status === "accepted")
+          ))
+      ) {
+        continue;
+      }
       latestReceipts.set(messageId, payload as Record<string, unknown>);
     }
 
     const deliveredMessageIds = new Set<string>();
     for (const [messageId, payload] of latestReceipts) {
       const status = payload.deliveryStatus ?? payload.status;
-      if (status === "delivered") {
+      const providerDispatchPending =
+        payload.deliveryMode === "follow_up" &&
+        (payload.providerDispatchStatus === "pending" ||
+          payload.providerDispatchStatus === "started");
+      if (status === "delivered" || (status === "accepted" && !providerDispatchPending)) {
         deliveredMessageIds.add(messageId);
         this.markFollowUpMessageConsumed(messageId);
       }
@@ -4157,7 +4183,8 @@ export class SessionRuntime {
     const pending: TaskFollowUpInput[] = [];
     for (const originalFollowUp of this.state.queues.pendingFollowUps) {
       const messageId =
-        originalFollowUp.deliveryMode === "message" &&
+        (originalFollowUp.deliveryMode === "message" ||
+          originalFollowUp.deliveryMode === "follow_up") &&
         typeof originalFollowUp.messageId === "string"
           ? originalFollowUp.messageId.trim()
           : "";
@@ -4165,18 +4192,46 @@ export class SessionRuntime {
         continue;
       }
       let followUp = originalFollowUp;
+      const receipt = messageId ? latestReceipts.get(messageId) : undefined;
+      const providerDispatchPending =
+        receipt?.deliveryMode === "follow_up" &&
+        (receipt.providerDispatchStatus === "pending" ||
+          receipt.providerDispatchStatus === "started");
+      if (receipt?.deliveryMode === "follow_up") {
+        followUp = {
+          ...followUp,
+          deliveryMode: "follow_up",
+          ...(followUp.quotedAssistantMessage === undefined &&
+          receipt.quotedAssistantMessage &&
+          typeof receipt.quotedAssistantMessage === "object" &&
+          !Array.isArray(receipt.quotedAssistantMessage)
+            ? {
+                quotedAssistantMessage:
+                  receipt.quotedAssistantMessage as TaskFollowUpInput["quotedAssistantMessage"],
+              }
+            : {}),
+          ...(followUp.integrationMentions === undefined &&
+          Array.isArray(receipt.integrationMentions)
+            ? {
+                integrationMentions:
+                  receipt.integrationMentions as TaskFollowUpInput["integrationMentions"],
+              }
+            : {}),
+        };
+      }
       if (
         messageId &&
-        Array.isArray(originalFollowUp.images) &&
-        originalFollowUp.images.length > 0
+        (!this.isFollowUpMessageConsumed(messageId) || providerDispatchPending) &&
+        Array.isArray(followUp.images) &&
+        followUp.images.length > 0
       ) {
         try {
           const recoveredImages = this.queuedAttachmentStore.hydrateStoredImages(
             this.deps.getTask().id,
             messageId,
-            originalFollowUp.images,
+            followUp.images,
           );
-          if (recoveredImages) followUp = { ...originalFollowUp, images: recoveredImages };
+          if (recoveredImages) followUp = { ...followUp, images: recoveredImages };
         } catch (error) {
           this.blockQueuedAttachmentRecovery(messageId, error);
           continue;
@@ -4188,7 +4243,8 @@ export class SessionRuntime {
       pending
         .filter(
           (followUp) =>
-            followUp.deliveryMode === "message" && typeof followUp.messageId === "string",
+            (followUp.deliveryMode === "message" || followUp.deliveryMode === "follow_up") &&
+            typeof followUp.messageId === "string",
         )
         .map((followUp) => followUp.messageId as string),
     );
@@ -4204,13 +4260,22 @@ export class SessionRuntime {
       if (typeof payload.message !== "string") continue;
 
       let recoveredImages: ImageAttachment[] | undefined;
+      const alreadyConsumed = this.isFollowUpMessageConsumed(messageId);
+      const providerDispatchPending =
+        payload.deliveryMode === "follow_up" &&
+        (payload.providerDispatchStatus === "pending" ||
+          payload.providerDispatchStatus === "started");
       const hasLegacyAttachmentMetadata =
         Array.isArray(payload.images) && payload.images.length > 0;
       const hasQueuedAttachmentRefs = Object.prototype.hasOwnProperty.call(
         payload,
         "queuedAttachmentRefs",
       );
-      if (hasQueuedAttachmentRefs) {
+      if (alreadyConsumed && !providerDispatchPending) {
+        // The snapshot already contains this user turn. Keep a light queue
+        // marker so the daemon can finish the receipt update without requiring
+        // the attachment bytes or dispatching another provider prompt.
+      } else if (hasQueuedAttachmentRefs) {
         try {
           if (
             !Array.isArray(payload.queuedAttachmentRefs) ||
@@ -4249,7 +4314,7 @@ export class SessionRuntime {
       const interactionMode = payload.interactionMode;
       pending.push({
         message: payload.message,
-        deliveryMode: "message",
+        deliveryMode: payload.deliveryMode === "follow_up" ? "follow_up" : "message",
         ...(recoveredImages ? { images: recoveredImages } : {}),
         messageSource:
           payload.messageSource === "agent" || payload.messageSource === "user"

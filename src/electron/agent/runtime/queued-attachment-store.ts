@@ -15,6 +15,7 @@ const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 const MAX_STORE_BYTES = MAX_ATTACHMENTS_PER_MESSAGE * MAX_VIDEO_BYTES;
 const KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FILENAME_MAX_LENGTH = 255;
+export const INITIAL_TASK_ATTACHMENT_MESSAGE_ID = "__task_initial_media__";
 
 const VISUAL_MIME_TYPES = new Set<ImageAttachment["mimeType"]>([
   "image/jpeg",
@@ -47,6 +48,14 @@ export interface QueuedAttachmentRef {
 export interface QueuedAttachmentPersistence {
   refs: QueuedAttachmentRef[];
   images: ImageAttachment[];
+}
+
+/** Host-captured media bytes that must be snapshotted without reopening a source path. */
+export interface QueuedAttachmentBytes {
+  bytes: Buffer;
+  mimeType: ImageAttachment["mimeType"];
+  filename?: string;
+  sizeBytes: number;
 }
 
 export interface QueuedAttachmentRecord {
@@ -206,6 +215,67 @@ export class QueuedAttachmentStore {
     }
     if (images.length === 0) return { refs: [], images: [] };
 
+    return this.persistSources(
+      normalizedTaskId,
+      normalizedMessageId,
+      images.map((image) => {
+        const stored = this.readSource(image);
+        return {
+          ...stored,
+          sizeBytes: validateSize(image?.sizeBytes, stored.mimeType, "declared size"),
+        };
+      }),
+    );
+  }
+
+  persistBytes(
+    taskId: string,
+    messageId: string,
+    attachments?: QueuedAttachmentBytes[],
+  ): QueuedAttachmentPersistence {
+    const normalizedTaskId = normalizedId(taskId, "task id");
+    const normalizedMessageId = normalizedId(messageId, "message id");
+    if (attachments === undefined) return { refs: [], images: [] };
+    if (!Array.isArray(attachments) || attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      throw new Error("Queued attachment count exceeds the message limit.");
+    }
+    if (attachments.length === 0) return { refs: [], images: [] };
+    const sources = attachments.map((attachment) => {
+      if (!isRecord(attachment) || !Buffer.isBuffer(attachment.bytes)) {
+        throw new Error("Queued attachment bytes are invalid.");
+      }
+      const mimeType = validateMime(attachment.mimeType);
+      const filename = normalizedFilename(attachment.filename);
+      const sizeBytes = validateSize(attachment.sizeBytes, mimeType, "declared size");
+      // Persistence is synchronous, so this private host snapshot can be
+      // validated and written without another full-size allocation.
+      const bytes = attachment.bytes;
+      if (bytes.length !== sizeBytes) {
+        throw new Error("Queued attachment declared size does not match its bytes.");
+      }
+      const extension = filename ? path.extname(filename).toLowerCase() : "";
+      if (extension) {
+        const allowedExtensions =
+          mimeType === "image/jpeg" ? [".jpg", ".jpeg"] : [MIME_EXTENSIONS[mimeType]];
+        if (!allowedExtensions.includes(extension)) {
+          throw new Error("Queued attachment filename does not match its MIME type.");
+        }
+      }
+      return { bytes, mimeType, sizeBytes, ...(filename ? { filename } : {}) };
+    });
+    return this.persistSources(normalizedTaskId, normalizedMessageId, sources);
+  }
+
+  private persistSources(
+    normalizedTaskId: string,
+    normalizedMessageId: string,
+    sources: Array<{
+      bytes: Buffer;
+      mimeType: ImageAttachment["mimeType"];
+      sizeBytes: number;
+      filename?: string;
+    }>,
+  ): QueuedAttachmentPersistence {
     this.ensureRoot();
     const refs: QueuedAttachmentRef[] = [];
     const hydratedImages: ImageAttachment[] = [];
@@ -213,10 +283,9 @@ export class QueuedAttachmentStore {
     let totalImageBytes = 0;
     let storeUsageBytes = this.getStoreUsageBytes();
     try {
-      for (const image of images) {
-        const stored = this.readSource(image);
+      for (const stored of sources) {
         const actualBytes = stored.bytes.length;
-        const declaredSizeBytes = validateSize(image?.sizeBytes, stored.mimeType, "declared size");
+        const declaredSizeBytes = validateSize(stored.sizeBytes, stored.mimeType, "declared size");
         const maxBytes = stored.mimeType.startsWith("video/") ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
         if (actualBytes <= 0 || actualBytes > maxBytes) {
           throw new Error("Queued attachment file size is invalid.");

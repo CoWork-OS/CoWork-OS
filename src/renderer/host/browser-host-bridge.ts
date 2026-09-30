@@ -1,11 +1,12 @@
 import type { ElectronAPI } from "../../electron/preload";
 import type { AppearanceSettings, Task, TaskEvent, Workspace } from "../../shared/types";
 import type { WebSessionBootstrap } from "../../shared/host-api/contracts";
-import { BrowserHostTransport, webEndpoint } from "../../renderer-web/transport";
+import { BrowserHostTransport, WebTransportError, webEndpoint } from "../../renderer-web/transport";
 import { createBrowserComposerDraftBridge } from "./browser-composer-draft-bridge";
 import { createBrowserFileBridge } from "./browser-file-bridge";
 import { createBrowserDecisionBridge } from "./browser-decision-bridge";
 import { createBrowserTerminalBridge } from "./browser-terminal-bridge";
+import { browserVisualAttachments } from "./browser-task-input";
 
 /** A browser build can only invoke operations implemented by the browser host API. */
 export class UnsupportedBrowserHostMethodError extends Error {
@@ -423,7 +424,16 @@ export function installBrowserHostBridge(
 
   const createTask = async (data: unknown): Promise<Task> => {
     if (!session.providerReady) throw new BrowserProviderNotReadyError();
-    const request = parseTaskCreateRequest(data);
+    const parsed = parseTaskCreateRequest(data);
+    const { images, ...taskInput } = parsed;
+    const workspace = images?.length
+      ? (await listWorkspaces()).find((candidate) => candidate.id === parsed.workspaceId)
+      : undefined;
+    if (images?.length && !workspace) throw new Error("The attachment workspace is unavailable.");
+    const request = {
+      ...taskInput,
+      ...(images?.length ? { images: browserVisualAttachments(images, workspace!.path) } : {}),
+    };
     const storageKey = await getOperationStorageKey("create", request.workspaceId);
     const fingerprint = await fingerprintPayload(request);
     const operation = await getOrCreatePendingOperation(storageKey, fingerprint);
@@ -457,6 +467,9 @@ export function installBrowserHostBridge(
         clearPendingOperation(storageKey, operation.key);
         return reconciled;
       }
+      if (isDefinitiveInputRejection(error)) {
+        clearPendingOperation(storageKey, operation.key);
+      }
       throw error;
     }
   };
@@ -469,12 +482,8 @@ export function installBrowserHostBridge(
     options,
   ) => {
     if (!session.providerReady) throw new BrowserProviderNotReadyError();
-    if (
-      (images && images.length > 0) ||
-      quotedAssistantMessage ||
-      !isSupportedFollowUpOptions(options)
-    ) {
-      throw new UnsupportedBrowserHostMethodError("attachments or advanced follow-up options");
+    if (!isSupportedFollowUpOptions(options)) {
+      throw new UnsupportedBrowserHostMethodError("these follow-up options");
     }
     const cleanMessage = typeof message === "string" ? message.trim() : "";
     if (!cleanMessage || cleanMessage.length > 64_000) {
@@ -482,10 +491,20 @@ export function installBrowserHostBridge(
     }
     const task = await getTask(taskId);
     if (!task) throw new Error("This task is unavailable to the browser session.");
+    const workspace = images?.length
+      ? (await listWorkspaces()).find((candidate) => candidate.id === task.workspaceId)
+      : undefined;
+    if (images?.length && !workspace) throw new Error("The attachment workspace is unavailable.");
     const request = {
       taskId: task.id,
       workspaceId: task.workspaceId,
       message: cleanMessage,
+      ...(images?.length ? { images: browserVisualAttachments(images, workspace!.path) } : {}),
+      ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+      ...(options?.expectedTurnId !== undefined ? { expectedTurnId: options.expectedTurnId } : {}),
+      ...(options?.integrationMentions?.length
+        ? { integrationMentions: options.integrationMentions }
+        : {}),
       ...(options?.interactionMode ? { interactionMode: options.interactionMode } : {}),
       ...(options?.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
       ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
@@ -549,6 +568,9 @@ export function installBrowserHostBridge(
       if (reconciledResult) {
         clearPendingOperation(storageKey, operation.key);
         return reconciledResult;
+      }
+      if (isDefinitiveInputRejection(error)) {
+        clearPendingOperation(storageKey, operation.key);
       }
       throw error;
     }
@@ -787,7 +809,16 @@ export function installBrowserHostBridge(
       let operation: PendingOperation | null = null;
       let storageKey: string | null = null;
       if (descriptor.mutation) {
-        storageKey = await getOperationStorageKey("desktop", name);
+        // Independent pack controls can be used while another toggle is awaiting
+        // its receipt. Retain reconciliation for each logical target rather than
+        // making every pack share one pending operation slot.
+        const targetScope =
+          name === "togglePluginPack" || name === "togglePluginPackSkill"
+            ? `${name}:${await fingerprintPayload(
+                name === "togglePluginPack" ? args.slice(0, 1) : args.slice(0, 2),
+              )}`
+            : name;
+        storageKey = await getOperationStorageKey("desktop", targetScope);
         operation = await getOrCreatePendingOperation(storageKey, await fingerprintPayload(params));
       }
       try {
@@ -959,12 +990,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isDefinitiveInputRejection(error: unknown): boolean {
+  return (
+    error instanceof WebTransportError &&
+    !error.retryable &&
+    ["INVALID_REQUEST", "STALE_STATE", "FORBIDDEN", "UNSUPPORTED_CAPABILITY"].includes(error.code)
+  );
+}
+
 class BrowserProviderNotReadyError extends Error {
   readonly code = "UNSUPPORTED_CAPABILITY" as const;
   readonly retryable = false;
 
   constructor() {
-    super("This CoWork host does not currently have a model provider ready.");
+    super(
+      "Choose and configure a model provider in Settings → AI & Models before starting a task.",
+    );
     this.name = "BrowserProviderNotReadyError";
   }
 }
@@ -1133,6 +1174,7 @@ function parseTaskCreateRequest(value: unknown): {
   generateTitle?: true;
   agentConfig?: Record<string, unknown>;
   assignedAgentRoleId?: string;
+  images?: unknown[];
 } {
   if (!isRecord(value)) throw new Error("Task creation requires a title, prompt, and workspace.");
   const allowed = new Set([
@@ -1150,7 +1192,8 @@ function parseTaskCreateRequest(value: unknown): {
   if (value.generateTitle !== undefined && value.generateTitle !== true) {
     throw new UnsupportedBrowserHostMethodError("task title generation options");
   }
-  if (!isEmptyArray(value.images)) throw new UnsupportedBrowserHostMethodError("image task input");
+  if (value.images !== undefined && (!Array.isArray(value.images) || value.images.length > 5))
+    throw new Error("Attach up to five visual files per message.");
   if (value.agentConfig !== undefined && !isRecord(value.agentConfig))
     throw new Error("Invalid task options.");
   if (
@@ -1175,6 +1218,7 @@ function parseTaskCreateRequest(value: unknown): {
     title,
     prompt,
     workspaceId,
+    ...(Array.isArray(value.images) && value.images.length ? { images: value.images } : {}),
     ...(value.generateTitle === true ? { generateTitle: true as const } : {}),
     ...(value.agentConfig ? { agentConfig: value.agentConfig as Record<string, unknown> } : {}),
     ...(value.assignedAgentRoleId
@@ -1233,6 +1277,7 @@ function isSupportedFollowUpOptions(options: unknown): boolean {
     "integrationMentions",
     "permissionMode",
     "shellAccess",
+    "expectedTurnId",
   ]);
   if (Object.keys(options).some((key) => !allowed.has(key))) return false;
   if (options.returnOnAccepted !== undefined && options.returnOnAccepted !== true) return false;
@@ -1246,7 +1291,15 @@ function isSupportedFollowUpOptions(options: unknown): boolean {
   )
     return false;
   if (options.shellAccess !== undefined && options.shellAccess !== false) return false;
-  if (!isEmptyArray(options.integrationMentions)) return false;
+  if (options.integrationMentions !== undefined && !Array.isArray(options.integrationMentions))
+    return false;
+  if (
+    options.expectedTurnId !== undefined &&
+    (typeof options.expectedTurnId !== "string" ||
+      !options.expectedTurnId ||
+      options.expectedTurnId.length > 200)
+  )
+    return false;
   if (
     options.interactionMode !== undefined &&
     (!isRecord(options.interactionMode) ||
@@ -1254,10 +1307,6 @@ function isSupportedFollowUpOptions(options: unknown): boolean {
   )
     return false;
   return true;
-}
-
-function isEmptyArray(value: unknown): boolean {
-  return value === undefined || value === null || (Array.isArray(value) && value.length === 0);
 }
 
 function parseFollowUpReceipt(value: unknown): FollowUpReceipt {

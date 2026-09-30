@@ -462,6 +462,28 @@ describe("CustomSkillLoader", () => {
       expect(loader.getSkill("legal-review")).toBeDefined();
       expect(loader.getSkill("smb-custom-override")).toBeDefined();
     });
+
+    it("applies pack skill toggles to owned live skills and preserves workspace overrides", () => {
+      const managedSkill = createTestSkill({
+        id: "pack-owned-skill",
+        source: "managed",
+        metadata: { pluginSource: "smb-complete" },
+      });
+      const workspaceSkill = createTestSkill({
+        id: "workspace-owned-skill",
+        source: "workspace",
+        metadata: { pluginSource: "smb-complete" },
+      });
+      loader.registerPluginSkill(managedSkill);
+      loader.registerPluginSkill(workspaceSkill);
+
+      expect(loader.setPluginSkillEnabled("smb-complete", "pack-owned-skill", false)).toBe(true);
+      expect(loader.getSkill("pack-owned-skill")?.enabled).toBe(false);
+      expect(loader.setPluginSkillEnabled("smb-complete", "workspace-owned-skill", false)).toBe(
+        false,
+      );
+      expect(loader.getSkill("workspace-owned-skill")?.enabled).toBe(true);
+    });
   });
 
   describe("reloadSkills", () => {

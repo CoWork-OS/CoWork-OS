@@ -93,6 +93,213 @@ describe("TaskExecutor chat mode", () => {
     },
   );
 
+  it("reuses the recovered chat transcript turn without appending a duplicate provider prompt", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const recoveredTurn = {
+      role: "user",
+      content: [
+        { type: "text", text: "Compare these charts" },
+        { type: "image", data: "aGVsbG8=", mimeType: "image/png", originalSizeBytes: 5 },
+      ],
+    };
+    const history = [{ role: "user", content: "Earlier request" }, recoveredTurn];
+    executor.task = {
+      id: "recovered-chat",
+      agentConfig: {
+        interactionMode: { mode: "chat" },
+        executionMode: "chat",
+        conversationMode: "chat",
+        retainMemory: false,
+      },
+    };
+    executor.workspace = { id: "workspace-1", path: "/tmp/workspace" };
+    executor.provider = { type: "openai" };
+    executor.conversationHistory = history;
+    executor.getRoleContextPrompt = () => "";
+    executor.buildUserProfileBlock = () => "";
+    executor.buildChatOrThinkSystemBlocks = () => [];
+    executor.setPromptCacheContext = () => "system";
+    executor.getEffectiveExecutionMode = () => "chat";
+    executor.getEffectiveTaskDomain = () => "general";
+    executor.isExplicitChatExecutionMode = () => true;
+    executor.explicitChatSummaryBlock = null;
+    executor.explicitChatSummaryInputSignature = "";
+    executor.explicitChatSummaryCreatedAt = 0;
+    executor.explicitChatSummarySourceMessageCount = 0;
+    executor.resolveLLMMaxTokens = () => 1024;
+    executor.completeExplicitChatCompaction = vi.fn();
+    executor.emitEvent = vi.fn();
+    executor.saveConversationSnapshot = vi.fn(() => true);
+    executor.finalizeSuccessfulFollowUp = vi.fn();
+    executor.generateCompanionFallbackResponse = () => "fallback";
+    executor.responseLooksLikeUnexecutedToolCall = () => false;
+    executor.updateConversationHistory = (messages: Any[]) => {
+      executor.conversationHistory = messages;
+    };
+    const runTextTurnKernel = vi.fn(async ({ messages }: Any) => ({
+      assistantText: "The second chart is higher.",
+      messages: [...messages, { role: "assistant", content: "The second chart is higher." }],
+    }));
+    executor.runTextTurnKernel = runTextTurnKernel;
+    const incorporated = vi.fn(async () => undefined);
+
+    await (TaskExecutor as Any).prototype.respondInChatMode.call(
+      executor,
+      "Compare these charts",
+      undefined,
+      [{ data: "aGVsbG8=", mimeType: "image/png", sizeBytes: 5 }],
+      incorporated,
+      undefined,
+      true,
+    );
+
+    const providerHistory = runTextTurnKernel.mock.calls[0]?.[0].messages as Any[];
+    expect(providerHistory.filter((message) => message.role === "user")).toEqual(history);
+    expect(providerHistory.at(-1).content).toContainEqual(
+      expect.objectContaining({ type: "image", data: "aGVsbG8=", mimeType: "image/png" }),
+    );
+    expect(incorporated).toHaveBeenCalledTimes(1);
+    expect(executor.conversationHistory.filter((message: Any) => message.role === "user")).toEqual(
+      history,
+    );
+  });
+
+  it.each([true, false])(
+    "records direct follow-up dispatch around the real ordinary provider boundary (snapshot saved=%s)",
+    async (snapshotSaved) => {
+      const callOrder: string[] = [];
+      let receiptStatus: "pending" | "started" | "completed" = "pending";
+      const recoveredTurn = { role: "user", content: "Recovered ordinary follow-up" };
+      const history: Any[] = [recoveredTurn];
+      const task = {
+        id: "ordinary-recovery",
+        status: "executing",
+        title: "Recovery",
+        prompt: "Continue the task",
+        agentConfig: {
+          executionMode: "plan",
+          interactionMode: { mode: "smart" },
+          retainMemory: false,
+        },
+      };
+      const runtime = {
+        setRecoveryRequestActive: vi.fn(),
+        runFollowUpLoop: vi.fn(async ({ messages, policy }: Any) => {
+          const state = { iterationCount: 1, messages, emptyResponseCount: 0 };
+          await policy.requestResponse(state);
+          callOrder.push("response-captured");
+          state.messages.push({ role: "assistant", content: "Provider answer" });
+          return { messages: state.messages, iterations: 1, emptyResponseCount: 0 };
+        }),
+      };
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.task = task;
+      executor.workspace = {
+        id: "workspace-1",
+        path: "/tmp/workspace",
+        permissions: { read: false, write: false, delete: false, network: false, shell: false },
+      };
+      executor.provider = { type: "openai" };
+      executor.conversationHistory = history;
+      executor.daemon = {
+        getTask: vi.fn(() => task),
+        updateTaskStatus: vi.fn(),
+      };
+      executor.getSessionRuntime = () => runtime;
+      executor.refreshProviderIfSettingsChanged = vi.fn();
+      executor.ensureProviderFailoverSelectionsContext = vi.fn();
+      executor.getPendingSkillParameterCollection = () => null;
+      executor.handleGoalSlashFollowUp = () => ({ handled: false });
+      executor.isRecoveryIntent = () => false;
+      executor.isCapabilityUpgradeIntent = () => false;
+      executor.isRedirectIntent = () => false;
+      executor.isDebugMode = () => false;
+      executor.preflightShellExecutionCheck = () => false;
+      executor.isExplicitChatExecutionMode = () => false;
+      executor.isKnownContextInformationalFollowUp = () => false;
+      executor.getEffectiveExecutionMode = () => "plan";
+      executor.getEffectiveTaskDomain = () => "general";
+      executor.getEffectiveTaskPathRootPolicy = () => "none";
+      executor.getLoopGuardrailForMode = () => ({});
+      executor.followUpRequiresCommandExecution = () => false;
+      executor.followUpRequiresCanvasAction = () => false;
+      executor.loadExecutionPromptMemoryFeatures = () => ({ contextPackInjectionEnabled: false });
+      executor.getRoleContextPrompt = () => "";
+      executor.getInfraContextPrompt = () => "";
+      executor.buildAdaptiveRecoveryTurnGuidance = async () => "";
+      executor.buildFollowUpTurnGuidancePrompt = () => "";
+      executor.buildIntegrationMentionGuidancePrompt = () => "";
+      executor.buildExecutionSystemPrompt = async () => ({
+        systemBlocks: [],
+        memoryIndexInjected: false,
+        topicCount: 0,
+        droppedSections: [],
+        truncatedSections: [],
+        totalTokens: 0,
+      });
+      executor.setPromptCacheContext = () => "system";
+      executor.fileOperationTracker = { getKnowledgeSummary: () => "" };
+      executor.toolRegistry = { setCanvasSessionCutoff: vi.fn() };
+      executor.toolCallDeduplicator = { reset: vi.fn() };
+      executor.turnSuccessfulToolUsageCounts = new Map();
+      executor.emitEvent = vi.fn();
+      executor.updateConversationHistory = (messages: Any[]) => {
+        executor.conversationHistory = messages;
+      };
+      executor.saveConversationSnapshot = vi.fn(() => {
+        callOrder.push("snapshot");
+        return snapshotSaved;
+      });
+      executor.finalizeSuccessfulFollowUp = vi.fn();
+      executor.requestLLMResponseWithAdaptiveBudget = vi.fn(async ({ messages }: Any) => {
+        expect(receiptStatus).toBe("started");
+        expect(messages.filter((message: Any) => message.role === "user")).toEqual([recoveredTurn]);
+        callOrder.push("provider-request");
+        return { content: [], stopReason: "end_turn" };
+      });
+
+      await (TaskExecutor as Any).prototype.sendMessageUnified.call(
+        executor,
+        "Recovered ordinary follow-up",
+        undefined,
+        undefined,
+        {
+          messageContext: { messageSource: "web", messageId: "direct-ordinary" },
+          suppressUserMessageEvent: true,
+          transcriptAlreadyContainsMessage: true,
+          onProviderDispatchStarted: async () => {
+            callOrder.push("dispatch-started");
+            receiptStatus = "started";
+          },
+          onProviderDispatchCompleted: async () => {
+            callOrder.push("dispatch-completed");
+            receiptStatus = "completed";
+          },
+        },
+      );
+
+      expect(executor.requestLLMResponseWithAdaptiveBudget).toHaveBeenCalledTimes(1);
+      expect(
+        executor.conversationHistory.filter((message: Any) => message.role === "user"),
+      ).toEqual([recoveredTurn]);
+      expect(callOrder.indexOf("dispatch-started")).toBeLessThan(
+        callOrder.indexOf("provider-request"),
+      );
+      expect(callOrder.indexOf("provider-request")).toBeLessThan(
+        callOrder.indexOf("response-captured"),
+      );
+      expect(callOrder.indexOf("response-captured")).toBeLessThan(callOrder.indexOf("snapshot"));
+      if (snapshotSaved) {
+        expect(callOrder.indexOf("snapshot")).toBeLessThan(callOrder.indexOf("dispatch-completed"));
+        expect(receiptStatus).toBe("completed");
+      } else {
+        expect(callOrder).not.toContain("dispatch-completed");
+        expect(receiptStatus).toBe("started");
+      }
+      expect(receiptStatus === "pending" || receiptStatus === "started").toBe(!snapshotSaved);
+    },
+  );
+
   it.each([false, true])(
     "does not persist temporary overrides when a turn fails=%s",
     async (fails) => {

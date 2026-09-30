@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
+import { TaskAdmissionConflictError } from "../../control-plane/task-admission-service";
 
 type Any = any;
 
@@ -82,6 +83,101 @@ describe("AgentDaemon idempotent task admission", () => {
     });
     expect(order).toEqual(["projections", "wake"]);
     expect((daemon as Any).logTaskIntentRouted).toHaveBeenCalledWith(task.id, expect.any(Object));
+  });
+
+  it("stages captured media before the atomic receipt and forwards only durable refs", async () => {
+    const { daemon, task, taskAdmissionService } = createDaemonLike();
+    const refs = [{ key: "attachment-key", mimeType: "image/png", sizeBytes: 8 }];
+    const store = {
+      persistBytes: vi.fn((taskId: string, messageId: string) => ({ refs, images: [] })),
+      release: vi.fn(),
+    };
+    (daemon as Any).queuedAttachmentStore = store;
+    taskAdmissionService.admit.mockImplementation(async (_key, _input, _identity, media) => ({
+      task: { ...task, id: media?.taskId || task.id },
+      replayed: false,
+    }));
+
+    const result = await AgentDaemon.prototype.createTaskIdempotent.call(daemon, {
+      operationKey: "operation-media",
+      title: task.title,
+      prompt: task.prompt,
+      workspaceId: task.workspaceId,
+      requestIdentity: { prompt: task.prompt, imageSha256: "a".repeat(64) },
+      capturedAttachments: [{ bytes: Buffer.from("image"), mimeType: "image/png", sizeBytes: 5 }],
+      autoStart: false,
+    });
+
+    expect(store.persistBytes).toHaveBeenCalledWith(
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+      "__task_initial_media__",
+      expect.any(Array),
+    );
+    const media = taskAdmissionService.admit.mock.calls[0][3];
+    expect(media).toMatchObject({
+      taskId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      messageId: "__task_initial_media__",
+      queuedAttachmentRefs: refs,
+    });
+    expect(result.task.id).toBe(media?.taskId);
+    expect(store.release).not.toHaveBeenCalled();
+  });
+
+  it("releases staged media after a definite conflicting admission", async () => {
+    const { daemon, task, taskAdmissionService } = createDaemonLike();
+    const refs = [{ key: "attachment-key", mimeType: "image/png", sizeBytes: 8 }];
+    let candidateTaskId = "";
+    const store = {
+      persistBytes: vi.fn((taskId: string) => {
+        candidateTaskId = taskId;
+        return { refs, images: [] };
+      }),
+      release: vi.fn(),
+    };
+    (daemon as Any).queuedAttachmentStore = store;
+    taskAdmissionService.admit.mockRejectedValue(
+      new TaskAdmissionConflictError("operation-media-conflict", task.id),
+    );
+
+    await expect(
+      AgentDaemon.prototype.createTaskIdempotent.call(daemon, {
+        operationKey: "operation-media-conflict",
+        title: task.title,
+        prompt: task.prompt,
+        workspaceId: task.workspaceId,
+        requestIdentity: { prompt: task.prompt, imageSha256: "b".repeat(64) },
+        capturedAttachments: [{ bytes: Buffer.from("image"), mimeType: "image/png", sizeBytes: 5 }],
+        autoStart: false,
+      }),
+    ).rejects.toBeInstanceOf(TaskAdmissionConflictError);
+
+    expect(candidateTaskId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(store.release).toHaveBeenCalledWith(candidateTaskId, "__task_initial_media__", refs);
+  });
+
+  it("retains staged media when the admission outcome remains uncertain", async () => {
+    const { daemon, task, taskAdmissionService } = createDaemonLike();
+    const refs = [{ key: "attachment-key", mimeType: "image/png", sizeBytes: 8 }];
+    const store = {
+      persistBytes: vi.fn(() => ({ refs, images: [] })),
+      release: vi.fn(),
+    };
+    (daemon as Any).queuedAttachmentStore = store;
+    taskAdmissionService.admit.mockRejectedValue(new Error("worker unavailable after commit"));
+
+    await expect(
+      AgentDaemon.prototype.createTaskIdempotent.call(daemon, {
+        operationKey: "operation-media-uncertain",
+        title: task.title,
+        prompt: task.prompt,
+        workspaceId: task.workspaceId,
+        requestIdentity: { prompt: task.prompt, imageSha256: "c".repeat(64) },
+        capturedAttachments: [{ bytes: Buffer.from("image"), mimeType: "image/png", sizeBytes: 5 }],
+        autoStart: false,
+      }),
+    ).rejects.toThrow("worker unavailable after commit");
+
+    expect(store.release).not.toHaveBeenCalled();
   });
 
   it("does not duplicate a replay already present in the in-memory queue or running set", async () => {
@@ -204,5 +300,145 @@ describe("AgentDaemon idempotent task admission", () => {
 
     expect(ensureTaskSessionProjections).toHaveBeenNthCalledWith(1, first);
     expect(ensureTaskSessionProjections).toHaveBeenNthCalledWith(2, second);
+  });
+
+  it("rehydrates initial media after an initial user-message event on restart", () => {
+    const refs = [{ key: "attachment-key", mimeType: "image/png", sizeBytes: 8 }];
+    const image = { filePath: "/private/queued.png", mimeType: "image/png", sizeBytes: 8 };
+    const createdEvent = {
+      id: "created-event",
+      taskId: "task-media",
+      type: "task_created",
+      payload: {
+        browserInitialAttachmentMessageId: "__task_initial_media__",
+        queuedAttachmentRefs: refs,
+      },
+    };
+    const eventRepo = {
+      findByTaskIdAndTypes: vi.fn((_: string, types: string[]) =>
+        types[0] === "task_created" ? [createdEvent] : [{ type: "user_message", payload: {} }],
+      ),
+    };
+    const store = { hydrate: vi.fn().mockReturnValue([image]) };
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      eventRepo,
+      queuedAttachmentStore: store,
+      pendingTaskImages: new Map(),
+      pendingInitialTaskMediaReceipts: new Map(),
+      initialTaskMediaStarted: new Set(),
+      taskRepo: { update: vi.fn() },
+      logEvent: vi.fn(),
+    });
+
+    expect(
+      (AgentDaemon.prototype as Any).prepareInitialTaskMediaForQueuedTask.call(daemon, {
+        id: "task-media",
+        status: "queued",
+      }),
+    ).toBe(true);
+    expect(store.hydrate).toHaveBeenCalledWith("task-media", "__task_initial_media__", refs);
+    expect(daemon.pendingTaskImages.get("task-media")).toEqual([image]);
+  });
+
+  it("reprepares media for a fresh executor after an earlier turn consumed its in-memory copy", () => {
+    const refs = [{ key: "attachment-key", mimeType: "image/png", sizeBytes: 8 }];
+    const createdEvent = {
+      id: "created-event",
+      taskId: "task-media",
+      type: "task_created",
+      payload: {
+        browserInitialAttachmentMessageId: "__task_initial_media__",
+        queuedAttachmentRefs: refs,
+      },
+    };
+    const eventRepo = {
+      findByTaskIdAndTypes: vi.fn((_: string, types: string[]) =>
+        types[0] === "task_created" ? [createdEvent] : [],
+      ),
+    };
+    const store = {
+      hydrate: vi
+        .fn()
+        .mockReturnValue([
+          { filePath: "/private/queued.png", mimeType: "image/png", sizeBytes: 8 },
+        ]),
+    };
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      eventRepo,
+      queuedAttachmentStore: store,
+      pendingTaskImages: new Map(),
+      pendingInitialTaskMediaReceipts: new Map(),
+      initialTaskMediaStarted: new Set(["task-media"]),
+      taskRepo: { update: vi.fn() },
+      logEvent: vi.fn(),
+    });
+
+    expect(
+      (AgentDaemon.prototype as Any).reprepareInitialTaskMediaForNewExecutor.call(daemon, {
+        id: "task-media",
+        status: "interrupted",
+      }),
+    ).toBe(true);
+    expect(store.hydrate).toHaveBeenCalledTimes(1);
+    expect(daemon.pendingTaskImages.has("task-media")).toBe(true);
+  });
+
+  it("broadcasts the committed media task-created event once without exposing private refs", () => {
+    const event = {
+      id: "created-event",
+      taskId: "task-media",
+      type: "task_created",
+      timestamp: 10,
+      schemaVersion: 2,
+      payload: {
+        task: { id: "task-media", status: "queued" },
+        browserInitialAttachmentMessageId: "__task_initial_media__",
+        queuedAttachmentRefs: [{ key: "attachment-key", mimeType: "image/png", sizeBytes: 8 }],
+      },
+    };
+    const emitTaskEvent = vi.fn();
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      eventRepo: { findByTaskIdAndTypes: vi.fn().mockReturnValue([event]) },
+      emittedPrecommittedTaskCreatedIds: new Set(),
+      emitTaskEvent,
+    });
+
+    expect(
+      (AgentDaemon.prototype as Any).emitPrecommittedTaskCreated.call(daemon, "task-media"),
+    ).toBe(true);
+    expect(
+      (AgentDaemon.prototype as Any).emitPrecommittedTaskCreated.call(daemon, "task-media"),
+    ).toBe(true);
+    expect(emitTaskEvent).toHaveBeenCalledTimes(1);
+    expect(emitTaskEvent.mock.calls[0][0].payload).toEqual({
+      task: { id: "task-media", status: "queued" },
+    });
+  });
+
+  it("finds initial media refs for task deletion cleanup", () => {
+    const refs = [{ key: "attachment-key", mimeType: "image/png", sizeBytes: 8 }];
+    const event = {
+      id: "created-event",
+      taskId: "task-media",
+      type: "task_created",
+      payload: {
+        browserInitialAttachmentMessageId: "__task_initial_media__",
+        queuedAttachmentRefs: refs,
+      },
+    };
+    const store = { validateRefs: vi.fn().mockReturnValue(refs) };
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      eventRepo: {
+        findByTaskIdAndTypes: vi.fn((_: string, types: string[]) =>
+          types[0] === "task_created" ? [event] : [],
+        ),
+      },
+      queuedAttachmentStore: store,
+    });
+
+    expect(
+      AgentDaemon.prototype.captureQueuedAttachmentRefsForTask.call(daemon, "task-media"),
+    ).toEqual([{ messageId: "__task_initial_media__", refs }]);
+    expect(store.validateRefs).toHaveBeenCalledWith("task-media", "__task_initial_media__", refs);
   });
 });

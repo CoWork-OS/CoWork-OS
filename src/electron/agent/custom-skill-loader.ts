@@ -489,6 +489,19 @@ export class CustomSkillLoader {
   }
 
   /**
+   * Apply a pack skill's desired enabled state to the live skill object. Workspace
+   * skills keep precedence and are never changed by a pack-level toggle.
+   */
+  setPluginSkillEnabled(pluginName: string, skillId: string, enabled: boolean): boolean {
+    const skill = this.skills.get(skillId);
+    if (!skill || skill.source === "workspace" || skill.metadata?.pluginSource !== pluginName) {
+      return false;
+    }
+    skill.enabled = enabled;
+    return true;
+  }
+
+  /**
    * Remove in-memory skills registered by a plugin pack.
    * Workspace skills with the same IDs are preserved because they are user-owned.
    */

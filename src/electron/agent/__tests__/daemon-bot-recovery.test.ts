@@ -430,6 +430,14 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
         hasRecoveredBotHandoff: false,
       }),
     ).toBe(true);
+    expect(
+      shouldRestartInterruptedTask({
+        hasSnapshot: false,
+        hasPlan: false,
+        hasRecoveredBotHandoff: false,
+        hasQueuedUserFollowUp: true,
+      }),
+    ).toBe(false);
   });
 
   it("does not replay an already-replied handoff from the legacy durable shape", () => {

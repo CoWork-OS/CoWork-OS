@@ -11,7 +11,7 @@ import { TaskQueueManager } from "../../agent/queue-manager";
 import { DatabaseClient } from "../async/DatabaseClient";
 import { DATABASE_COMMANDS, requiredTablesFor } from "../async/commands";
 import { TaskAdmissionRepository } from "../repository-facades";
-import { TaskStore, WorkspaceStore } from "../repositories";
+import { TaskEventRepository, TaskStore, WorkspaceStore } from "../repositories";
 import { DatabaseManager } from "../schema";
 import { setStatementClient } from "../statements/statement-route";
 
@@ -125,6 +125,94 @@ describe("durable task admission", () => {
       taskId: created.task.id,
       task: { id: created.task.id, status: "queued" },
     });
+  });
+
+  it("commits one initial-media task event atomically with its task receipt", async () => {
+    const db = manager.getDatabase();
+    const service = new TaskAdmissionService(db);
+    const identity = {
+      title: "Review chart",
+      prompt: "Explain this chart",
+      workspaceId,
+      media: [{ sha256: "a".repeat(64), identity: { dev: 1, ino: 2, size: 8, mtimeMs: 3 } }],
+    };
+    const media = {
+      taskId: "7f6f3d2b-4528-4c9d-8d5e-a1cc82d8bb21",
+      messageId: "__task_initial_media__",
+      queuedAttachmentRefs: [
+        {
+          key: "7f6f3d2b-4528-4c9d-8d5e-a1cc82d8bb22",
+          mimeType: "image/png",
+          filename: "chart.png",
+          sizeBytes: 8,
+        },
+      ],
+    };
+
+    const created = await service.admit("browser-media-admission", taskInput(), identity, media);
+    const replay = await service.admit("browser-media-admission", taskInput(), identity, media);
+    const events = new TaskEventRepository(db).findByTaskIdAndTypes(created.task.id, [
+      "task_created",
+      "user_message",
+    ]);
+    const taskCreated = events.filter(
+      (event) => (event.legacyType || event.type) === "task_created",
+    );
+
+    expect(created.task.id).toBe(media.taskId);
+    expect(replay).toMatchObject({ task: { id: media.taskId }, replayed: true });
+    expect(taskCreated).toHaveLength(1);
+    expect(taskCreated[0].payload).toMatchObject({
+      browserInitialAttachmentMessageId: media.messageId,
+      queuedAttachmentRefs: media.queuedAttachmentRefs,
+    });
+    expect(events.filter((event) => event.type === "user_message")).toHaveLength(0);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM task_admission_receipts").get()).toEqual({
+      count: 1,
+    });
+  });
+
+  it("reconciles a lost media-admission reply without duplicating the initial record", async () => {
+    const db = manager.getDatabase();
+    const actual = new TaskAdmissionRepository(db);
+    const media = {
+      taskId: "7f6f3d2b-4528-4c9d-8d5e-a1cc82d8bb23",
+      messageId: "__task_initial_media__",
+      queuedAttachmentRefs: [
+        {
+          key: "7f6f3d2b-4528-4c9d-8d5e-a1cc82d8bb24",
+          mimeType: "image/png",
+          sizeBytes: 8,
+        },
+      ],
+    };
+    let loseFirstReply = true;
+    const repository = {
+      admit: vi.fn(async (...args: Parameters<typeof actual.admit>) => {
+        const result = await actual.admit(...args);
+        if (loseFirstReply) {
+          loseFirstReply = false;
+          throw new Error("simulated worker exit after media commit");
+        }
+        return result;
+      }),
+      findByOperationKey: actual.findByOperationKey,
+    };
+    const service = new TaskAdmissionService(db, repository);
+    const result = await service.admit(
+      "browser-media-after-commit",
+      taskInput(),
+      { prompt: "summarize", image: "sha256" },
+      media,
+    );
+    const events = new TaskEventRepository(db).findByTaskIdAndTypes(result.task.id, [
+      "task_created",
+    ]);
+
+    expect(result.replayed).toBe(true);
+    expect(result.task.id).toBe(media.taskId);
+    expect(events).toHaveLength(1);
+    expect(repository.admit).toHaveBeenCalledTimes(1);
   });
 
   it("replays across changed prepared context when the validated request identity is unchanged", async () => {

@@ -759,11 +759,22 @@ export class TaskStore {
     };
   }
 
-  create(task: Omit<Task, "id" | "createdAt" | "updatedAt">): Task {
-    const normalizedTask = TaskStore.normalizePromptFields(task);
+  create(task: Omit<Task, "id" | "createdAt" | "updatedAt"> & { id?: string }): Task {
+    const requestedId = task.id;
+    if (
+      requestedId !== undefined &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        requestedId,
+      )
+    ) {
+      throw new Error("Task id must be a UUID.");
+    }
+    const { id: _id, ...taskInput } = task;
+    void _id;
+    const normalizedTask = TaskStore.normalizePromptFields(taskInput);
     const newTask: Task = {
       ...normalizedTask,
-      id: uuidv4(),
+      id: requestedId || uuidv4(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -2192,6 +2203,17 @@ export type TaskAdmissionInput = Omit<
   "id" | "createdAt" | "updatedAt" | "status" | "resumeStrategy"
 > & { resumeStrategy: NonNullable<Task["resumeStrategy"]> };
 
+export interface TaskAdmissionMediaMetadata {
+  taskId: string;
+  messageId: string;
+  queuedAttachmentRefs: Array<{
+    key: string;
+    mimeType: string;
+    filename?: string;
+    sizeBytes: number;
+  }>;
+}
+
 export type TaskAdmissionStoreOutcome =
   | { kind: "created" | "replayed"; task: Task; createdAt: number }
   | { kind: "payload_conflict" | "task_missing"; taskId: string; createdAt: number };
@@ -2219,6 +2241,7 @@ export class TaskAdmissionStore {
     operationKey: string,
     payloadHash: string,
     input: TaskAdmissionInput,
+    media?: TaskAdmissionMediaMetadata,
   ): TaskAdmissionStoreOutcome {
     const normalizedOperationKey = this.requireOperationKey(operationKey);
     const normalizedPayloadHash = this.requirePayloadHash(payloadHash);
@@ -2240,7 +2263,12 @@ export class TaskAdmissionStore {
       return { kind: "replayed", task, createdAt };
     }
 
-    const createdTask = this.taskStore.create({ ...input, status: "queued" });
+    const normalizedMedia = media === undefined ? undefined : this.validateMedia(media);
+    const createdTask = this.taskStore.create({
+      ...input,
+      status: "queued",
+      ...(normalizedMedia ? { id: normalizedMedia.taskId } : {}),
+    });
     const sessionId =
       typeof input.sessionId === "string" && input.sessionId.trim()
         ? input.sessionId.trim()
@@ -2265,6 +2293,21 @@ export class TaskAdmissionStore {
     const task = this.taskStore.findById(createdTask.id);
     if (!task) throw new Error("admitted task disappeared before its receipt was written");
 
+    if (normalizedMedia) {
+      new TaskEventRepository(this.db).create({
+        taskId: task.id,
+        timestamp: Date.now(),
+        type: "task_created",
+        payload: {
+          task,
+          browserInitialAttachmentMessageId: normalizedMedia.messageId,
+          queuedAttachmentRefs: normalizedMedia.queuedAttachmentRefs,
+        },
+        schemaVersion: 2,
+        actor: "system",
+      });
+    }
+
     this.db
       .prepare(
         `INSERT INTO task_admission_receipts (operation_key, payload_hash, task_id, created_at)
@@ -2273,6 +2316,83 @@ export class TaskAdmissionStore {
       .run(normalizedOperationKey, normalizedPayloadHash, task.id, task.createdAt);
 
     return { kind: "created", task, createdAt: task.createdAt };
+  }
+
+  private requireTaskId(value: string): string {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+    ) {
+      throw new Error("Task admission media task id is invalid.");
+    }
+    return normalized;
+  }
+
+  private validateMedia(media: TaskAdmissionMediaMetadata): TaskAdmissionMediaMetadata {
+    const taskId = this.requireTaskId(media.taskId);
+    const messageId = typeof media.messageId === "string" ? media.messageId.trim() : "";
+    if (!messageId || messageId.length > 200) {
+      throw new Error("Task admission media message id is invalid.");
+    }
+    if (
+      !Array.isArray(media.queuedAttachmentRefs) ||
+      media.queuedAttachmentRefs.length < 1 ||
+      media.queuedAttachmentRefs.length > 5
+    ) {
+      throw new Error("Task admission attachment references are invalid.");
+    }
+    const allowedMimeTypes = new Set([
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "video/mp4",
+      "video/quicktime",
+      "video/webm",
+    ]);
+    const queuedAttachmentRefs = media.queuedAttachmentRefs.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error("Task admission attachment reference is invalid.");
+      }
+      const record = entry as Record<string, unknown>;
+      const allowedKeys = new Set(["key", "mimeType", "filename", "sizeBytes"]);
+      if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+        throw new Error("Task admission attachment reference has unsupported fields.");
+      }
+      if (
+        typeof record.key !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.key)
+      ) {
+        throw new Error("Task admission attachment key is invalid.");
+      }
+      if (typeof record.mimeType !== "string" || !allowedMimeTypes.has(record.mimeType)) {
+        throw new Error("Task admission attachment type is invalid.");
+      }
+      if (
+        typeof record.sizeBytes !== "number" ||
+        !Number.isSafeInteger(record.sizeBytes) ||
+        record.sizeBytes <= 0 ||
+        record.sizeBytes > 500 * 1024 * 1024
+      ) {
+        throw new Error("Task admission attachment size is invalid.");
+      }
+      if (
+        record.filename !== undefined &&
+        (typeof record.filename !== "string" ||
+          record.filename.length < 1 ||
+          record.filename.length > 255 ||
+          /[\\/\0]/.test(record.filename))
+      ) {
+        throw new Error("Task admission attachment filename is invalid.");
+      }
+      return {
+        key: record.key,
+        mimeType: record.mimeType,
+        ...(typeof record.filename === "string" ? { filename: record.filename } : {}),
+        sizeBytes: record.sizeBytes,
+      };
+    });
+    return { taskId, messageId, queuedAttachmentRefs };
   }
 
   findByOperationKey(operationKey: string): TaskAdmissionReceiptLookup | undefined {

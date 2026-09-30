@@ -24,6 +24,7 @@ import { createBrowserDesktopReadMethods } from "./browser-desktop-read-methods"
 import { BrowserWorkspaceFiles, createBrowserWorkspaceFileMethods } from "./browser-files";
 import { createBrowserTaskMethods, type BrowserTaskCommands } from "./browser-task-methods";
 import { createBrowserFollowUpMethods } from "./browser-follow-up-methods";
+import { resolveBrowserTaskMedia } from "./browser-task-media";
 import { createBrowserTaskEventMethods } from "./browser-task-event-methods";
 import {
   createBrowserApprovalMethods,
@@ -219,6 +220,7 @@ export function createBrowserHostApplication(
             getTaskAdmission: (operationKey) => taskAdmission.getByOperationKey(operationKey),
           },
           getWorkspace: resolveBrowserWorkspace,
+          mediaReader: workspaceFiles,
           isActiveAgentRole: async (id) => (await agentRoles.findById(id))?.isActive === true,
         })
       : {};
@@ -226,14 +228,35 @@ export function createBrowserHostApplication(
     ? createBrowserFollowUpMethods({
         getWorkspace: resolveBrowserWorkspace,
         getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+        getQuotedAssistantEvent: async (taskId, eventId) =>
+          (await taskEventRepository.findEventDetailById(eventId, { taskId })).event,
+        prepareFollowUpMedia: (context, workspaceId, descriptors) =>
+          resolveBrowserTaskMedia(workspaceFiles, context, workspaceId, descriptors),
         commands: {
-          sendFollowUp: (taskId, message, messageId, followUpOptions) =>
-            options.taskCommands!.sendMessage(taskId, message, undefined, undefined, {
-              deliveryMode: "follow_up",
-              returnOnAccepted: true,
-              messageId,
-              ...followUpOptions,
-            }),
+          sendFollowUp: (
+            taskId,
+            message,
+            messageId,
+            followUpOptions,
+            capturedAttachments,
+            requestFingerprint,
+          ) => {
+            const { quotedAssistantMessage, ...sendOptions } = followUpOptions;
+            return options.taskCommands!.sendMessage(
+              taskId,
+              message,
+              undefined,
+              quotedAssistantMessage,
+              {
+                deliveryMode: "follow_up",
+                returnOnAccepted: true,
+                messageId,
+                ...sendOptions,
+                ...(capturedAttachments?.length ? { capturedAttachments } : {}),
+                ...(requestFingerprint ? { requestFingerprint } : {}),
+              },
+            );
+          },
           getFollowUpReceipt: async (taskId, messageId) =>
             options.taskCommands!.getDurableTaskFollowUpReceipt(taskId, messageId),
         },

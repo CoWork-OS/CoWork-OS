@@ -771,6 +771,7 @@ describe("SessionRuntime", () => {
           }),
         ],
       });
+
       expect(JSON.stringify(harness.runtime.state.queues.pendingFollowUps)).not.toContain(
         "aGVsbG8=",
       );
@@ -778,6 +779,161 @@ describe("SessionRuntime", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("reconstructs one ordinary busy follow-up with its media and quoted context after a receipt-only crash", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "cowork-runtime-follow-up-recovery-"));
+    try {
+      const store = new QueuedAttachmentStore(path.join(root, "store"));
+      const persisted = store.persist("task-1", "browser-follow-up", [
+        { data: "aGVsbG8=", mimeType: "image/png", filename: "chart.png", sizeBytes: 5 },
+      ]);
+      const harness = createHarness();
+      (harness.runtime as Any).queuedAttachmentStore = store;
+
+      harness.runtime.restoreFromEvents([
+        {
+          id: "busy-follow-up-receipt",
+          taskId: "task-1",
+          timestamp: 1,
+          type: "user_message",
+          payload: {
+            message: "Compare these charts",
+            messageId: "browser-follow-up",
+            deliveryMode: "follow_up",
+            deliveryStatus: "queued",
+            queuedAttachmentRefs: persisted.refs,
+            images: [{ mimeType: "image/png", filename: "chart.png", sizeBytes: 5 }],
+            quotedAssistantMessage: {
+              eventId: "assistant-7",
+              message: "The first chart shows a sharp rise.",
+            },
+            integrationMentions: ["connector-analytics"],
+            interactionMode: { mode: "chat" },
+            requestFingerprint: "f".repeat(64),
+          },
+        } as Any,
+      ]);
+
+      expect(harness.runtime.state.queues.pendingFollowUps).toHaveLength(1);
+      const recovered = harness.runtime.takeNextFollowUpAtTurnBoundary();
+      expect(recovered).toMatchObject({
+        message: "Compare these charts",
+        messageId: "browser-follow-up",
+        deliveryMode: "follow_up",
+        quotedAssistantMessage: {
+          eventId: "assistant-7",
+          message: "The first chart shows a sharp rise.",
+        },
+        integrationMentions: ["connector-analytics"],
+        interactionMode: { mode: "chat" },
+        images: [
+          expect.objectContaining({
+            filePath: persisted.images[0].filePath,
+            mimeType: "image/png",
+            sizeBytes: 5,
+          }),
+        ],
+      });
+      expect(harness.runtime.takeNextFollowUpAtTurnBoundary()).toBe(recovered);
+      expect(harness.runtime.state.queues.pendingFollowUps).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["pending", "started"] as const)(
+    "retains an accepted turn with %s provider dispatch across restart",
+    (providerDispatchStatus) => {
+      const root = mkdtempSync(path.join(tmpdir(), "cowork-runtime-follow-up-dispatch-"));
+      try {
+        const store = new QueuedAttachmentStore(path.join(root, "store"));
+        const persisted = store.persist("task-1", "accepted-follow-up", [
+          { data: "aGVsbG8=", mimeType: "image/png", filename: "chart.png", sizeBytes: 5 },
+        ]);
+        const first = createHarness();
+        first.runtime.appendConversationHistory({
+          role: "user",
+          content: "USER UPDATE: Compare these charts",
+        });
+        first.runtime.markFollowUpMessageConsumed("accepted-follow-up");
+        expect(first.runtime.saveSnapshot()).toBe(true);
+        const snapshot = first.emittedEvents
+          .filter((event) => event.type === "conversation_snapshot")
+          .at(-1)!.payload;
+
+        const restored = createHarness();
+        (restored.runtime as Any).queuedAttachmentStore = store;
+        restored.runtime.restoreFromEvents([
+          {
+            id: "accepted-follow-up-receipt",
+            taskId: "task-1",
+            timestamp: 1,
+            type: "user_message",
+            payload: {
+              message: "Compare these charts",
+              messageId: "accepted-follow-up",
+              deliveryMode: "follow_up",
+              deliveryStatus: "accepted",
+              providerDispatchStatus,
+              queuedAttachmentRefs: persisted.refs,
+              images: [{ mimeType: "image/png", filename: "chart.png", sizeBytes: 5 }],
+              quotedAssistantMessage: { eventId: "assistant-7", message: "Earlier chart context" },
+            },
+          } as Any,
+          {
+            id: "accepted-follow-up-snapshot",
+            taskId: "task-1",
+            timestamp: 2,
+            type: "conversation_snapshot",
+            payload: JSON.parse(JSON.stringify(snapshot)),
+          } as Any,
+        ]);
+
+        expect(restored.runtime.isFollowUpMessageConsumed("accepted-follow-up")).toBe(true);
+        expect(restored.runtime.state.queues.pendingFollowUps).toHaveLength(1);
+        expect(restored.runtime.takeNextFollowUpAtTurnBoundary()).toMatchObject({
+          message: "Compare these charts",
+          messageId: "accepted-follow-up",
+          deliveryMode: "follow_up",
+          quotedAssistantMessage: { eventId: "assistant-7", message: "Earlier chart context" },
+          images: [
+            expect.objectContaining({
+              filePath: persisted.images[0].filePath,
+              mimeType: "image/png",
+              sizeBytes: 5,
+            }),
+          ],
+        });
+
+        const completed = createHarness();
+        completed.runtime.restoreFromEvents([
+          {
+            id: "completed-follow-up-receipt",
+            taskId: "task-1",
+            timestamp: 1,
+            type: "user_message",
+            payload: {
+              message: "Compare these charts",
+              messageId: "accepted-follow-up",
+              deliveryMode: "follow_up",
+              deliveryStatus: "accepted",
+              providerDispatchStatus: "completed",
+            },
+          } as Any,
+          {
+            id: "completed-follow-up-snapshot",
+            taskId: "task-1",
+            timestamp: 2,
+            type: "conversation_snapshot",
+            payload: JSON.parse(JSON.stringify(snapshot)),
+          } as Any,
+        ]);
+        expect(completed.runtime.state.queues.pendingFollowUps).toHaveLength(0);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("blocks a receipt-only replay when its durable attachment is missing", () => {
     const root = mkdtempSync(path.join(tmpdir(), "cowork-runtime-attachments-"));

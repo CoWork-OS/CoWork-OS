@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, RefreshCw, Search } from "lucide-react";
 import type { SkillStatusEntry } from "../../shared/types";
+import { hasHostMethods } from "../host/browser-capabilities";
 import { NATIVE_INTEGRATIONS } from "./native-integration-catalog";
+import { getAddToolsRouteAvailability } from "./add-tools-route-availability";
 import "./add-tools.css";
 
 export type AddToolsRoute = {
@@ -409,19 +411,28 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
       </div>
 
       <div className="add-tools-paths">
-        {PATHS.map((path) => (
-          <button
-            type="button"
-            key={path.route.tab}
-            className="add-tools-path"
-            onClick={() => onNavigate(path.route)}
-          >
-            <strong>{path.name}</strong>
-            <span>{path.description}</span>
-            <small>{path.setup}</small>
-            <ArrowRight size={16} aria-hidden="true" />
-          </button>
-        ))}
+        {PATHS.map((path) => {
+          const availability = getAddToolsRouteAvailability(
+            path.route.tab,
+            window.coworkBrowserHost === true,
+            hasHostMethods,
+          );
+          return (
+            <button
+              type="button"
+              key={path.route.tab}
+              className="add-tools-path"
+              onClick={() => onNavigate(path.route)}
+              disabled={availability.kind === "unavailable"}
+              title={availability.kind === "unavailable" ? availability.message : undefined}
+            >
+              <strong>{path.name}</strong>
+              <span>{path.description}</span>
+              <small>{availability.message || path.setup}</small>
+              {availability.kind !== "unavailable" && <ArrowRight size={16} aria-hidden="true" />}
+            </button>
+          );
+        })}
       </div>
 
       {[...errors, ...registryErrors].length > 0 && (
@@ -446,29 +457,42 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
         </p>
       ) : (
         <div className="add-tools-results">
-          {results.slice(0, 30).map((entry) => (
-            <button
-              type="button"
-              key={entry.id}
-              className="add-tools-result"
-              onClick={() => onNavigate(entry.route, entry)}
-            >
-              <span className="add-tools-result-top">
-                <strong>{entry.name}</strong>
-                <span>{entry.source}</span>
-              </span>
-              <span className="add-tools-result-description">{entry.description}</span>
-              <span
-                className={`add-tools-state${entry.attention ? " add-tools-state-attention" : ""}`}
+          {results.slice(0, 30).map((entry) => {
+            const availability = getAddToolsRouteAvailability(
+              entry.route.tab,
+              window.coworkBrowserHost === true,
+              hasHostMethods,
+            );
+            return (
+              <button
+                type="button"
+                key={entry.id}
+                className="add-tools-result"
+                onClick={() => onNavigate(entry.route, entry)}
+                disabled={availability.kind === "unavailable"}
+                title={availability.kind === "unavailable" ? availability.message : undefined}
               >
-                {entry.state}
-              </span>
-              {entry.detail && <small>{entry.detail}</small>}
-              <span className="add-tools-result-action">
-                Open setup <ArrowRight size={14} aria-hidden="true" />
-              </span>
-            </button>
-          ))}
+                <span className="add-tools-result-top">
+                  <strong>{entry.name}</strong>
+                  <span>{entry.source}</span>
+                </span>
+                <span className="add-tools-result-description">{entry.description}</span>
+                <span
+                  className={`add-tools-state${entry.attention ? " add-tools-state-attention" : ""}`}
+                >
+                  {entry.state}
+                </span>
+                {entry.detail && <small>{entry.detail}</small>}
+                {availability.message && <small>{availability.message}</small>}
+                <span className="add-tools-result-action">
+                  {availability.action}
+                  {availability.kind !== "unavailable" && (
+                    <ArrowRight size={14} aria-hidden="true" />
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
       {results.length > 30 && (
@@ -478,8 +502,21 @@ export function AddToolsPanel({ onNavigate }: AddToolsPanelProps) {
         </p>
       )}
       <div className="add-tools-permissions">
-        <span>Tool permissions and approvals are managed separately from installation.</span>
-        <button type="button" onClick={() => onNavigate({ tab: "system" })}>
+        <span>
+          {window.coworkBrowserHost === true
+            ? "Tool permissions and approvals are managed separately. System & Security settings are available in the desktop app."
+            : "Tool permissions and approvals are managed separately from installation."}
+        </span>
+        <button
+          type="button"
+          onClick={() => onNavigate({ tab: "system" })}
+          disabled={window.coworkBrowserHost === true}
+          title={
+            window.coworkBrowserHost === true
+              ? "System & Security settings are available in the desktop app"
+              : undefined
+          }
+        >
           Review System &amp; Security <ArrowRight size={14} />
         </button>
       </div>

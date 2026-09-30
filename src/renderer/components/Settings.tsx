@@ -1,5 +1,11 @@
 import { hasHostMethods } from "../host/browser-capabilities";
 import {
+  AUTOMATION_SUBTAB_METHOD_REQUIREMENTS,
+  AutomationSubtabNavigation,
+  getInitialAutomationSubtab,
+  type AutomationSettingsSubTab,
+} from "./AutomationSubtabNavigation";
+import {
   useState,
   useEffect,
   useCallback,
@@ -20,7 +26,6 @@ import {
   Sparkles,
   Sun,
   User,
-  Users,
   Mic,
   Layers,
   Search,
@@ -32,11 +37,9 @@ import {
   MoreHorizontal,
   Shield,
   Brain,
-  ListOrdered,
   GitBranch,
   Wrench,
   Store,
-  Clock,
   LayoutGrid,
   Zap,
   Monitor,
@@ -56,8 +59,6 @@ import {
   Cloud,
   Star,
   Globe,
-  Box,
-  Link,
   Hexagon,
   ChevronDown,
   Building2,
@@ -310,15 +311,31 @@ const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
   everydayAgent: ["everydayAgentGetProfile"],
   aimodels: ["getLLMSettings", "saveLLMSettings"],
   jev: ["testJevProvider"],
-  automations: ["listRoutines", "getRoutineWorkflowCapabilities"],
-  skills: ["listSkills", "getSkill"],
+  automations: AUTOMATION_SUBTAB_METHOD_REQUIREMENTS.routines,
+  skills: [
+    "listSkills",
+    "getSkill",
+    "getSkillStatus",
+    "listQuarantinedImports",
+    "searchSkillRegistry",
+    "searchClawHubSkills",
+  ],
   suggestions: ["listSuggestions", "dismissSuggestion"],
   mcp: ["getMCPSettings", "saveMCPSettings"],
   memory: ["getMemorySettings", "listMemories"],
   tools: ["getBuiltinToolsSettings", "saveBuiltinToolsSettings"],
   integrations: ["getConnectorSettings"],
   customize: ["listPluginPacks"],
-  addtools: ["listPluginPacks", "getMCPSettings"],
+  addtools: [
+    "listPluginPacks",
+    "getMCPSettings",
+    "getSkillStatus",
+    "getMCPStatus",
+    "searchPackRegistry",
+    "searchSkillRegistry",
+    "searchClawHubSkills",
+    "fetchMCPRegistry",
+  ],
   access: ["getControlPlaneSettings", "getWebAccessStatus"],
 };
 
@@ -1402,26 +1419,31 @@ export function Settings({
   const [addToolsSelection, setAddToolsSelection] = useState<AddToolsSelection | null>(null);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
-    initialTab === "skillhub" ? "store" : "custom",
+    initialTab === "skillhub" || !hasHostMethods("listCustomSkills", "getCustomSkillSettings")
+      ? "store"
+      : "custom",
   );
   const [activeAIModelsSubTab, setActiveAIModelsSubTab] = useState<
     "llm" | "image" | "video" | "search"
   >(initialTab === "search" ? "search" : initialTab === "image" ? "image" : "llm");
-  const [activeAutomationsSubTab, setActiveAutomationsSubTab] = useState<
-    "routines" | "queue" | "subconscious" | "scheduled" | "hooks" | "triggers" | "council"
-  >(
-    ["routines", "queue", "subconscious", "scheduled", "hooks", "triggers", "council"].includes(
-      initialTab as string,
-    )
-      ? (initialTab as
-          | "routines"
-          | "queue"
-          | "subconscious"
-          | "scheduled"
-          | "hooks"
-          | "triggers"
-          | "council")
-      : "routines",
+  const requestedAutomationSubTab = [
+    "routines",
+    "queue",
+    "subconscious",
+    "scheduled",
+    "hooks",
+    "triggers",
+    "council",
+  ].includes(initialTab as string)
+    ? (initialTab as AutomationSettingsSubTab)
+    : "routines";
+  const [activeAutomationsSubTab, setActiveAutomationsSubTab] = useState<AutomationSettingsSubTab>(
+    () =>
+      getInitialAutomationSubtab(
+        requestedAutomationSubTab,
+        window.coworkBrowserHost === true,
+        hasHostMethods,
+      ),
   );
   const [activeIntegrationsSubTab, setActiveIntegrationsSubTab] = useState<
     "git" | "connectors" | "identity" | "infrastructure"
@@ -9057,42 +9079,12 @@ export function Settings({
                       automation engines that routines compile into
                     </p>
                   </div>
-                  <div className="more-channels-tabs">
-                    {(
-                      [
-                        "routines",
-                        "queue",
-                        "council",
-                        "subconscious",
-                        "scheduled",
-                        "hooks",
-                        "triggers",
-                      ] as const
-                    ).map((key) => (
-                      <button
-                        key={key}
-                        className={`more-channels-tab ${activeAutomationsSubTab === key ? "active" : ""}`}
-                        onClick={() => setActiveAutomationsSubTab(key)}
-                      >
-                        {key === "routines" && <Box {...S} />}
-                        {key === "queue" && <ListOrdered {...S} />}
-                        {key === "council" && <Users {...S} />}
-                        {key === "subconscious" && <Sparkles {...S} />}
-                        {key === "scheduled" && <Clock {...S} />}
-                        {key === "hooks" && <Link {...S} />}
-                        {key === "triggers" && <Zap {...S} />}
-                        <span>
-                          {key === "routines" && "Routines"}
-                          {key === "queue" && "Task Queue"}
-                          {key === "council" && "R&D Council"}
-                          {key === "subconscious" && "Workflow Intelligence"}
-                          {key === "scheduled" && "Scheduled Tasks"}
-                          {key === "hooks" && "Webhooks"}
-                          {key === "triggers" && "Event Triggers"}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  <AutomationSubtabNavigation
+                    activeTab={activeAutomationsSubTab}
+                    isBrowserHost={window.coworkBrowserHost === true}
+                    hasMethods={hasHostMethods}
+                    onSelect={setActiveAutomationsSubTab}
+                  />
                   <div className="more-channels-content">
                     {activeAutomationsSubTab === "routines" && (
                       <RoutineSettingsPanel
@@ -9165,6 +9157,12 @@ export function Settings({
                     <button
                       className={`more-channels-tab ${activeSkillsSubTab === "custom" ? "active" : ""}`}
                       onClick={() => setActiveSkillsSubTab("custom")}
+                      disabled={!hasHostMethods("listCustomSkills", "getCustomSkillSettings")}
+                      title={
+                        !hasHostMethods("listCustomSkills", "getCustomSkillSettings")
+                          ? "Manage custom skill files in the desktop app"
+                          : undefined
+                      }
                     >
                       <Wrench {...S} />
                       <span>Custom Skills</span>
@@ -9178,7 +9176,15 @@ export function Settings({
                     </button>
                   </div>
                   <div className="more-channels-content">
-                    {activeSkillsSubTab === "custom" && <SkillsSettings />}
+                    {activeSkillsSubTab === "custom" &&
+                      (hasHostMethods("listCustomSkills", "getCustomSkillSettings") ? (
+                        <SkillsSettings />
+                      ) : (
+                        <p className="settings-description">
+                          Manage custom skill files in the desktop app. Browse installed skills and
+                          catalogs in Skill Store.
+                        </p>
+                      ))}
                     {activeSkillsSubTab === "store" && (
                       <SkillHubBrowser
                         initialSelection={

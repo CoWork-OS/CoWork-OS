@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { CustomSkill } from "../../../shared/types";
 import type { LoadedPlugin, PluginManifest } from "../types";
 
@@ -10,16 +13,19 @@ const mocks = vi.hoisted(() => ({
   register: vi.fn(),
   unregister: vi.fn(),
   unregisterPluginSkills: vi.fn(),
+  setPluginSkillEnabled: vi.fn(),
   secureInitialized: false,
   strictPolicies: undefined as any,
   securePayload: undefined as
     | { packs?: Record<string, boolean>; skills?: Record<string, Record<string, boolean>> }
     | undefined,
+  userDataDir: "",
+  writePackStateFile: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
   app: {
-    getPath: vi.fn().mockReturnValue("/tmp/cowork-registry-test"),
+    getPath: vi.fn(() => mocks.userDataDir),
   },
 }));
 
@@ -40,6 +46,7 @@ vi.mock("../../agent/custom-skill-loader", () => ({
   getCustomSkillLoader: () => ({
     registerPluginSkill: vi.fn(),
     unregisterPluginSkills: mocks.unregisterPluginSkills,
+    setPluginSkillEnabled: mocks.setPluginSkillEnabled,
   }),
 }));
 
@@ -56,7 +63,11 @@ vi.mock("../../database/SecureSettingsRepository", () => ({
 }));
 
 vi.mock("../../utils/user-data-dir", () => ({
-  getUserDataDir: () => "/tmp/cowork-registry-test",
+  getUserDataDir: () => mocks.userDataDir,
+}));
+
+vi.mock("../pack-state-storage", () => ({
+  writePackStateFile: mocks.writePackStateFile,
 }));
 
 function makeSkill(overrides: Partial<CustomSkill> = {}): CustomSkill {
@@ -105,6 +116,11 @@ async function loadRegistry() {
 describe("PluginRegistry pack runtime state", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-registry-test-"));
+    mocks.writePackStateFile.mockImplementation((filePath: string, contents: string) => {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, contents, "utf-8");
+    });
     mocks.secureInitialized = false;
     mocks.strictPolicies = {
       version: 1,
@@ -150,6 +166,10 @@ describe("PluginRegistry pack runtime state", () => {
       success: true,
       plugin: makeLoadedPlugin(),
     });
+  });
+
+  afterEach(() => {
+    fs.rmSync(mocks.userDataDir, { recursive: true, force: true });
   });
 
   it("does not register runtime content for admin-blocked packs", async () => {
@@ -224,6 +244,37 @@ describe("PluginRegistry pack runtime state", () => {
 
     expect(mocks.unregisterPluginSkills).toHaveBeenCalledWith("smb-complete");
     expect(registry.getPlugin("smb-complete")?.state).toBe("disabled");
+  });
+
+  it("synchronizes an individual skill toggle with the live plugin-skill loader", async () => {
+    const registry = await loadRegistry();
+    await registry.initialize();
+
+    await registry.setSkillEnabled("smb-complete", "smb-plan-payroll", false);
+
+    expect(mocks.setPluginSkillEnabled).toHaveBeenCalledWith(
+      "smb-complete",
+      "smb-plan-payroll",
+      false,
+    );
+    expect(registry.getSkillEnabled("smb-complete", "smb-plan-payroll")).toBe(false);
+    expect(registry.getPlugin("smb-complete")?.manifest.skills?.[0].enabled).toBe(true);
+  });
+
+  it("fails closed and rolls back in-memory states when legacy-file persistence fails", async () => {
+    const registry = await loadRegistry();
+    await registry.initialize();
+    mocks.writePackStateFile.mockImplementation(() => {
+      throw new Error("disk full");
+    });
+
+    expect(() => registry.setPackEnabled("smb-complete", false)).toThrow("disk full");
+    expect(registry.getPackEnabled("smb-complete")).toBeUndefined();
+    await expect(
+      registry.setSkillEnabled("smb-complete", "smb-plan-payroll", false),
+    ).rejects.toThrow("disk full");
+    expect(registry.getSkillEnabled("smb-complete", "smb-plan-payroll")).toBeUndefined();
+    expect(mocks.setPluginSkillEnabled).not.toHaveBeenCalled();
   });
 
   it("leaves runtime state unchanged when policy reconciliation cannot load policies", async () => {

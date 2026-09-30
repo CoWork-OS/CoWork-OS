@@ -1,6 +1,10 @@
 import type Database from "better-sqlite3";
 import { PluginRegistry } from "../../electron/extensions/registry";
 import {
+  getPluginPackToggleService,
+  type PluginPackToggleService,
+} from "../../electron/extensions/plugin-pack-toggle-service";
+import {
   AgentRoleRepository,
   AutomationProfileRepository,
 } from "../../electron/agents/agent-repository-facades";
@@ -13,6 +17,10 @@ import { SkillRepository, WorkspaceRepository } from "../../electron/database/re
 import { TaskStore } from "../../electron/database/repositories";
 import { MCPSettingsManager } from "../../electron/mcp/settings";
 import { getCustomSkillLoader } from "../../electron/agent/custom-skill-loader";
+import { getSkillRegistry } from "../../electron/agent/skill-registry";
+import { getPackRegistry } from "../../electron/extensions/pack-registry";
+import { MCPClientManager } from "../../electron/mcp/client/MCPClientManager";
+import { MCPRegistryManager } from "../../electron/mcp/registry/MCPRegistryManager";
 import {
   AgentBuilderService,
   type AgentBuilderInventory,
@@ -21,7 +29,12 @@ import { AgentTemplateService } from "../../electron/managed/AgentTemplateServic
 import { ImageGenProfileService } from "../../electron/managed/ImageGenProfileService";
 import { ManagedSessionService } from "../../electron/managed/ManagedSessionService";
 import { PermissionSettingsManager } from "../../electron/security/permission-settings-manager";
-import { loadPolicies } from "../../electron/admin/policies";
+import {
+  isPackAllowed,
+  isPackRequired,
+  loadPolicies,
+  loadPoliciesStrict,
+} from "../../electron/admin/policies";
 import {
   applyAccessProfileToWorkspace,
   resolveEffectiveAccessProfile,
@@ -86,8 +99,33 @@ export interface BrowserNavigationOptions {
   everydayAgentService?: EverydayAgentService;
   agentBuilderService?: AgentBuilderService;
   imageGenProfileService?: ImageGenProfileService;
+  /** Read-only discovery sources; injectable so browser DTOs can be tested without network access. */
+  discovery?: Partial<BrowserDiscoverySources>;
+  /** Shared desired-state operations; injectable for browser-method boundary tests. */
+  pluginPackToggleService?: Pick<PluginPackToggleService, "setPackEnabled" | "setSkillEnabled">;
   /** Existing desktop-only executor, when the host owns the full workflow runtime. */
   executeWorkflowAction?: ConstructorParameters<typeof RoutineService>[0]["executeWorkflowAction"];
+}
+
+export interface BrowserDiscoverySources {
+  listPluginPacks: () => Promise<unknown>;
+  getSkillStatus: () => Promise<unknown>;
+  listQuarantinedImports: () => unknown;
+  searchSkillRegistry: (
+    query: string,
+    options?: { page?: number; pageSize?: number },
+  ) => Promise<unknown>;
+  searchClawHubSkills: (
+    query: string,
+    options?: { page?: number; pageSize?: number },
+  ) => Promise<unknown>;
+  searchPackRegistry: (
+    query: string,
+    options?: { page?: number; pageSize?: number; category?: string },
+  ) => Promise<unknown>;
+  getMCPStatus: () => unknown;
+  fetchMCPRegistry: () => Promise<unknown>;
+  searchMCPRegistry: (query: string, tags?: string[]) => Promise<unknown>;
 }
 
 type RecordLike = Record<string, unknown>;
@@ -106,7 +144,13 @@ type ManagedPermission = keyof Pick<
 >;
 
 const IDENTIFIER = /^[A-Za-z0-9._:-]{1,160}$/;
+const DISCOVERY_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,159}$/;
 const MAX_JSON_CHARS = 512 * 1024;
+const MAX_DISCOVERY_SKILLS = 500;
+const MAX_DISCOVERY_QUARANTINE_RECORDS = 100;
+const MAX_DISCOVERY_REGISTRY_ENTRIES = 200;
+const MAX_DISCOVERY_PLUGIN_PACKS = 100;
+const MAX_PLUGIN_PACK_CHILDREN = 100;
 const ROUTINE_TRIGGER_TYPES = new Set([
   "manual",
   "schedule",
@@ -139,11 +183,34 @@ function boundedJson(value: unknown): unknown {
   return value;
 }
 
+function boundedJsonArray<T>(items: T[]): T[] {
+  let selected = items;
+  while (selected.length > 0 && JSON.stringify(selected).length > MAX_JSON_CHARS) {
+    selected = selected.slice(0, Math.floor(selected.length / 2));
+  }
+  return boundedJson(selected) as T[];
+}
+
+function boundedJsonListResult(base: RecordLike, key: string, items: unknown[]): RecordLike {
+  let selected = items;
+  let result: RecordLike = { ...base, [key]: selected };
+  while (selected.length > 0 && JSON.stringify(result).length > MAX_JSON_CHARS) {
+    selected = selected.slice(0, Math.floor(selected.length / 2));
+    result = { ...base, [key]: selected, truncated: true };
+  }
+  return boundedJson(result) as RecordLike;
+}
+
 function stringArg(value: unknown, max = 512): string {
   if (typeof value !== "string") return invalidRequest();
   const result = value.trim();
   if (!result || result.length > max || !IDENTIFIER.test(result)) return invalidRequest();
   return result;
+}
+
+function booleanArg(value: unknown): boolean {
+  if (typeof value !== "boolean") return invalidRequest();
+  return value;
 }
 
 function textArg(value: unknown, max = 100_000, allowEmpty = false): string {
@@ -173,6 +240,574 @@ function optionalBoolean(value: unknown): boolean | undefined {
 function stringArray(value: unknown, maxItems = 256): string[] {
   if (!Array.isArray(value) || value.length > maxItems) return invalidRequest();
   return value.map((entry) => textArg(entry, 2048));
+}
+
+function safeDiscoveryRecord(value: unknown): RecordLike | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as RecordLike) : null;
+}
+
+function safeDiscoveryText(value: unknown, max = 1000): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, max);
+}
+
+function safeDiscoveryId(value: unknown): string | undefined {
+  const id = safeDiscoveryText(value, 160)?.trim();
+  return id && DISCOVERY_IDENTIFIER.test(id) && !id.includes("..") ? id : undefined;
+}
+
+function pluginPackToggleIdArg(value: unknown): string {
+  const id = safeDiscoveryId(value);
+  if (!id) return invalidRequest();
+  return id;
+}
+
+function safeDiscoveryCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? Math.min(value, 1_000_000_000)
+    : undefined;
+}
+
+function safeDiscoveryMetric(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function safeDiscoveryTextList(value: unknown, maxItems = 24, maxText = 120): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maxItems).flatMap((item) => {
+    const text = safeDiscoveryText(item, maxText)?.trim();
+    return text ? [text] : [];
+  });
+}
+
+function discoveryQueryArg(value: unknown): string {
+  const query = textArg(value, 256, true).trim();
+  if (/[\u0000-\u001f\u007f]/.test(query)) return invalidRequest();
+  return query;
+}
+
+function parseDiscoveryPageOptions(
+  value: unknown,
+  allowCategory = false,
+): { page?: number; pageSize?: number; category?: string } | undefined {
+  if (value === undefined) return undefined;
+  const input = requireRecord(
+    value,
+    allowCategory ? ["page", "pageSize", "category"] : ["page", "pageSize"],
+  );
+  const category =
+    allowCategory && input.category !== undefined ? textArg(input.category, 100).trim() : undefined;
+  return {
+    ...(input.page === undefined ? {} : { page: integerArg(input.page, 1, 10_000) }),
+    ...(input.pageSize === undefined ? {} : { pageSize: integerArg(input.pageSize, 1, 50) }),
+    ...(category ? { category } : {}),
+  };
+}
+
+function safeSkillRegistryEntry(value: unknown): RecordLike | null {
+  const entry = safeDiscoveryRecord(value);
+  const id = safeDiscoveryId(entry?.id);
+  if (!entry || !id) return null;
+  const source = entry.source === "clawhub" || entry.source === "cowork" ? entry.source : undefined;
+  const metadata: RecordLike = {
+    id,
+    name: safeDiscoveryText(entry.name, 200) || id,
+    description: safeDiscoveryText(entry.description, 1600) || "",
+    version: safeDiscoveryText(entry.version, 80) || "",
+  };
+  if (source) metadata.source = source;
+  for (const key of ["author", "category", "updatedAt", "icon"] as const) {
+    const text = safeDiscoveryText(entry[key], key === "icon" ? 80 : 160);
+    if (text) metadata[key] = text;
+  }
+  for (const key of [
+    "downloads",
+    "stars",
+    "installsCurrent",
+    "installsAllTime",
+    "rating",
+  ] as const) {
+    const number = safeDiscoveryCount(entry[key]);
+    if (number !== undefined) metadata[key] = number;
+  }
+  metadata.tags = safeDiscoveryTextList(entry.tags);
+  return metadata;
+}
+
+function safeClawHubSkillUrl(value: unknown): string | undefined {
+  const candidate = safeDiscoveryText(value, 2000);
+  if (!candidate) return undefined;
+  try {
+    const parsed = new URL(candidate);
+    const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    if (parsed.protocol !== "https:" || host !== "clawhub.ai") return undefined;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 2 || parts[0]?.toLowerCase() === "skills") return undefined;
+    const owner = safeDiscoveryId(parts[0]);
+    const slug = safeDiscoveryId(parts[parts.length - 1]);
+    return owner && slug ? `https://clawhub.ai/${owner}/${slug}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeSkillSearchResult(
+  value: unknown,
+  query: string,
+  options?: { page?: number; pageSize?: number },
+) {
+  const result = safeDiscoveryRecord(value);
+  const page = options?.page ?? 1;
+  const pageSize = options?.pageSize ?? 20;
+  const rawEntries = Array.isArray(result?.results) ? result.results : [];
+  const safeEntries = rawEntries.slice(0, pageSize).flatMap((entry) => {
+    const safeEntry = safeSkillRegistryEntry(entry);
+    return safeEntry ? [safeEntry] : [];
+  });
+  return boundedJsonListResult(
+    { query, total: safeDiscoveryCount(result?.total) ?? rawEntries.length, page, pageSize },
+    "results",
+    safeEntries,
+  );
+}
+
+function safePackRegistryEntry(value: unknown): RecordLike | null {
+  const entry = safeDiscoveryRecord(value);
+  const id = safeDiscoveryId(entry?.id);
+  if (!entry || !id) return null;
+  const pack: RecordLike = {
+    id,
+    name: safeDiscoveryText(entry.name, 200) || id,
+    displayName:
+      safeDiscoveryText(entry.displayName, 200) || safeDiscoveryText(entry.name, 200) || id,
+    description: safeDiscoveryText(entry.description, 1600) || "",
+  };
+  const category = safeDiscoveryText(entry.category, 100);
+  const skillCount = safeDiscoveryCount(entry.skillCount);
+  if (category) pack.category = category;
+  if (skillCount !== undefined) pack.skillCount = skillCount;
+  return pack;
+}
+
+function safePackSearchResult(
+  value: unknown,
+  query: string,
+  options?: { page?: number; pageSize?: number },
+) {
+  const result = safeDiscoveryRecord(value);
+  const page = options?.page ?? 1;
+  const pageSize = options?.pageSize ?? 20;
+  const rawEntries = Array.isArray(result?.results) ? result.results : [];
+  const safeEntries = rawEntries.slice(0, pageSize).flatMap((entry) => {
+    const safeEntry = safePackRegistryEntry(entry);
+    return safeEntry ? [safeEntry] : [];
+  });
+  return boundedJsonListResult(
+    { query, total: safeDiscoveryCount(result?.total) ?? rawEntries.length, page, pageSize },
+    "results",
+    safeEntries,
+  );
+}
+
+const SKILL_SOURCES = new Set(["bundled", "managed", "external", "workspace"]);
+const SKILL_VERDICTS = new Set(["clean", "warning", "quarantined"]);
+const SECURITY_SEVERITIES = new Set(["info", "warning", "critical"]);
+
+function safeSecurityText(value: unknown, max = 1000): string | undefined {
+  const text = safeDiscoveryText(value, max);
+  if (!text) return text;
+  return text
+    .replace(/\b[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s)]*/g, "[host path]")
+    .replace(
+      /\/(?:Users|home|tmp|private|var|Volumes|workspace|mnt)\/(?:[^\s/]+\/)*[^\s),;]*/gi,
+      "[host path]",
+    );
+}
+
+const PLUGIN_STATES = new Set(["loading", "loaded", "registered", "active", "error", "disabled"]);
+const PLUGIN_SECURITY_VERDICTS = new Set(["clean", "warning", "quarantined"]);
+const PACK_WORKFLOWS = new Set(["support_ops", "it_ops", "sales_ops"]);
+
+function titleFromSafeId(id: string): string {
+  return id
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function safePluginPack(value: unknown, policies: ReturnType<typeof loadPoliciesStrict>) {
+  const pack = safeDiscoveryRecord(value);
+  const manifest = safeDiscoveryRecord(pack?.manifest) || pack;
+  const name = safeDiscoveryId(manifest?.name ?? pack?.name);
+  if (!pack || !manifest || !name) return null;
+
+  const rawState = safeDiscoveryText(pack.state, 40);
+  const state = rawState && PLUGIN_STATES.has(rawState) ? rawState : "disabled";
+  const policyBlocked = !policies || !isPackAllowed(name, policies);
+  const policyRequired = Boolean(policies && isPackRequired(name, policies));
+
+  const safeSkills = (raw: unknown, directoryBacked = false) => {
+    if (!Array.isArray(raw)) return [];
+    return raw.slice(0, MAX_PLUGIN_PACK_CHILDREN).flatMap((value) => {
+      const skill = safeDiscoveryRecord(value);
+      const id = safeDiscoveryId(skill?.id);
+      if (!skill || !id) return [];
+      const description = safeSecurityText(skill.description, 1600);
+      return [
+        {
+          id,
+          name: safeSecurityText(skill.name, 200) || titleFromSafeId(id),
+          description: description || (directoryBacked ? "Directory-backed skill" : ""),
+          ...(safeSecurityText(skill.icon, 80) ? { icon: safeSecurityText(skill.icon, 80) } : {}),
+          enabled: skill.enabled !== false,
+        },
+      ];
+    });
+  };
+
+  const skills = [
+    ...safeSkills(manifest.skills),
+    ...safeSkills(manifest.skillDirectories, true),
+  ].slice(0, MAX_PLUGIN_PACK_CHILDREN);
+
+  const slashCommands = (Array.isArray(manifest.slashCommands) ? manifest.slashCommands : [])
+    .slice(0, MAX_PLUGIN_PACK_CHILDREN)
+    .flatMap((value) => {
+      const command = safeDiscoveryRecord(value);
+      const commandName = safeDiscoveryId(command?.name);
+      const skillId = safeDiscoveryId(command?.skillId);
+      if (!command || !commandName || !skillId) return [];
+      return [
+        {
+          name: commandName,
+          description: safeSecurityText(command.description, 1000) || "",
+          skillId,
+        },
+      ];
+    });
+
+  const agentRoles = (Array.isArray(manifest.agentRoles) ? manifest.agentRoles : [])
+    .slice(0, MAX_PLUGIN_PACK_CHILDREN)
+    .flatMap((value) => {
+      const role = safeDiscoveryRecord(value);
+      const roleName = safeDiscoveryId(role?.name);
+      const displayName = safeSecurityText(role?.displayName, 200);
+      if (!role || !roleName || !displayName) return [];
+      const color = safeDiscoveryText(role.color, 16);
+      return [
+        {
+          name: roleName,
+          displayName,
+          ...(safeSecurityText(role.description, 1000)
+            ? { description: safeSecurityText(role.description, 1000) }
+            : {}),
+          icon: safeSecurityText(role.icon, 80) || "",
+          color: color && /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(color) ? color : "#808080",
+        },
+      ];
+    });
+
+  const verdictValue = safeDiscoveryText(safeDiscoveryRecord(pack.securityReport)?.verdict, 32);
+  const verdict = verdictValue && PLUGIN_SECURITY_VERDICTS.has(verdictValue) ? verdictValue : null;
+  const category = safeSecurityText(manifest.category, 100);
+  const icon = safeSecurityText(manifest.icon, 80);
+  const scope =
+    manifest.scope === "personal" || manifest.scope === "organization" ? manifest.scope : undefined;
+  const workflows = Array.isArray(manifest.bestFitWorkflows)
+    ? manifest.bestFitWorkflows
+        .slice(0, 12)
+        .filter(
+          (workflow): workflow is string =>
+            typeof workflow === "string" && PACK_WORKFLOWS.has(workflow),
+        )
+    : [];
+
+  return {
+    name,
+    displayName: safeSecurityText(manifest.displayName, 200) || name,
+    version: safeSecurityText(manifest.version, 80) || "",
+    description: safeSecurityText(manifest.description, 1600) || "",
+    ...(icon ? { icon } : {}),
+    ...(category ? { category } : {}),
+    ...(scope ? { scope } : {}),
+    ...(safeDiscoveryId(manifest.personaTemplateId)
+      ? { personaTemplateId: safeDiscoveryId(manifest.personaTemplateId) }
+      : {}),
+    recommendedConnectors: safeDiscoveryTextList(manifest.recommendedConnectors, 32, 120).filter(
+      (connector) => Boolean(safeDiscoveryId(connector)),
+    ),
+    ...(workflows.length ? { bestFitWorkflows: workflows } : {}),
+    outcomeExamples: safeDiscoveryTextList(manifest.outcomeExamples, 12, 400)
+      .map((example) => safeSecurityText(example, 400) || "")
+      .filter(Boolean),
+    skills,
+    slashCommands,
+    agentRoles,
+    state,
+    enabled: !policyBlocked && (state === "registered" || state === "active"),
+    policyBlocked,
+    policyRequired,
+    ...(verdict
+      ? {
+          securityReport: {
+            verdict,
+            summary:
+              verdict === "warning"
+                ? "Security findings require review."
+                : verdict === "quarantined"
+                  ? "This pack is quarantined."
+                  : "No security issue reported.",
+          },
+        }
+      : {}),
+  };
+}
+
+function safePluginPackList(value: unknown) {
+  const policies = loadPoliciesStrict();
+  const packs = Array.isArray(value) ? value : [];
+  return boundedJsonArray(
+    packs.slice(0, MAX_DISCOVERY_PLUGIN_PACKS).flatMap((pack) => {
+      const safe = safePluginPack(pack, policies);
+      return safe ? [safe] : [];
+    }),
+  );
+}
+
+function safePackToggleResult(value: unknown, name: string, enabled: boolean) {
+  const result = safeDiscoveryRecord(value);
+  if (result?.success !== true || result.name !== name || result.enabled !== enabled) {
+    throw new WebApplicationError("INTERNAL_ERROR", "Pack toggle returned an invalid result.", 500);
+  }
+  return { success: true as const, name, enabled };
+}
+
+function safePackSkillToggleResult(
+  value: unknown,
+  packName: string,
+  skillId: string,
+  enabled: boolean,
+) {
+  const result = safeDiscoveryRecord(value);
+  if (
+    result?.success !== true ||
+    result.packName !== packName ||
+    result.skillId !== skillId ||
+    result.enabled !== enabled
+  ) {
+    throw new WebApplicationError(
+      "INTERNAL_ERROR",
+      "Pack skill toggle returned an invalid result.",
+      500,
+    );
+  }
+  return { success: true as const, packName, skillId, enabled };
+}
+
+function safeSkillStatusReport(value: unknown) {
+  const report = safeDiscoveryRecord(value);
+  const rawSkills = Array.isArray(report?.skills) ? report.skills : [];
+  const skills = rawSkills.slice(0, MAX_DISCOVERY_SKILLS).flatMap((value) => {
+    const skill = safeDiscoveryRecord(value);
+    const id = safeDiscoveryId(skill?.id);
+    if (!skill || !id) return [];
+    const source =
+      typeof skill.source === "string" && SKILL_SOURCES.has(skill.source)
+        ? skill.source
+        : undefined;
+    const securityReport = safeDiscoveryRecord(skill.securityReport);
+    const safeEntry: RecordLike = {
+      id,
+      name: safeDiscoveryText(skill.name, 200) || id,
+      description: safeDiscoveryText(skill.description, 1600) || "",
+      eligible: skill.eligible === true,
+      disabled: skill.disabled === true,
+      blockedByAllowlist: skill.blockedByAllowlist === true,
+      missing: {
+        bins: safeDiscoveryTextList(safeDiscoveryRecord(skill.missing)?.bins, 32, 120),
+        anyBins: safeDiscoveryTextList(safeDiscoveryRecord(skill.missing)?.anyBins, 32, 120),
+        env: safeDiscoveryTextList(safeDiscoveryRecord(skill.missing)?.env, 32, 120),
+        config: safeDiscoveryTextList(safeDiscoveryRecord(skill.missing)?.config, 32, 120),
+        os: safeDiscoveryTextList(safeDiscoveryRecord(skill.missing)?.os, 32, 120),
+      },
+    };
+    if (source) safeEntry.source = source;
+    const icon = safeDiscoveryText(skill.icon, 80);
+    const category = safeDiscoveryText(skill.category, 100);
+    if (icon) safeEntry.icon = icon;
+    if (category) safeEntry.category = category;
+    const metadata = safeDiscoveryRecord(skill.metadata);
+    const version = safeDiscoveryText(metadata?.version, 80);
+    const clawHubUrl =
+      safeClawHubSkillUrl(metadata?.homepage) || safeClawHubSkillUrl(metadata?.repository);
+    if (version || clawHubUrl) {
+      safeEntry.metadata = {
+        ...(version ? { version } : {}),
+        ...(clawHubUrl ? { homepage: clawHubUrl } : {}),
+      };
+    }
+    if (securityReport && SKILL_VERDICTS.has(String(securityReport.verdict))) {
+      safeEntry.securityReport = {
+        verdict: securityReport.verdict,
+        summary: safeSecurityText(securityReport.summary, 1000) || "",
+      };
+    }
+    return [safeEntry];
+  });
+  const summary = safeDiscoveryRecord(report?.summary);
+  const safeReport: RecordLike = {
+    // Keep the legacy shape, but never reveal host filesystem locations.
+    workspaceDir: "",
+    managedSkillsDir: "",
+    bundledSkillsDir: "",
+    externalSkillDirs: [],
+    skills,
+    summary: {
+      total: safeDiscoveryCount(summary?.total) ?? skills.length,
+      eligible:
+        safeDiscoveryCount(summary?.eligible) ?? skills.filter((skill) => skill.eligible).length,
+      disabled:
+        safeDiscoveryCount(summary?.disabled) ?? skills.filter((skill) => skill.disabled).length,
+      missingRequirements:
+        safeDiscoveryCount(summary?.missingRequirements) ??
+        skills.filter((skill) => {
+          const missing = safeDiscoveryRecord(skill.missing);
+          return Object.values(missing || {}).some(
+            (items) => Array.isArray(items) && items.length > 0,
+          );
+        }).length,
+    },
+  };
+  return boundedJsonListResult(safeReport, "skills", skills);
+}
+
+function safeQuarantinedSkillImports(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return boundedJsonArray(
+    value
+      .filter((record) => safeDiscoveryRecord(record)?.bundleKind === "skill")
+      .slice(0, MAX_DISCOVERY_QUARANTINE_RECORDS)
+      .flatMap((value) => {
+        const record = safeDiscoveryRecord(value);
+        const id = safeDiscoveryId(record?.id);
+        const bundleId = safeDiscoveryId(record?.bundleId);
+        const report = safeDiscoveryRecord(record?.report);
+        if (!record || !id || !bundleId || !report) return [];
+        const verdict = SKILL_VERDICTS.has(String(report.verdict)) ? report.verdict : "quarantined";
+        const rawFindings = Array.isArray(report.findings) ? report.findings : [];
+        const findings = rawFindings.slice(0, 32).flatMap((value) => {
+          const finding = safeDiscoveryRecord(value);
+          if (!finding) return [];
+          const severity = SECURITY_SEVERITIES.has(String(finding.severity))
+            ? finding.severity
+            : "warning";
+          const code = safeDiscoveryText(finding.code, 100);
+          const message = safeSecurityText(finding.message, 1200);
+          return [{ ...(code ? { code } : {}), severity, message: message || "Security finding" }];
+        });
+        return [
+          {
+            id,
+            bundleKind: "skill",
+            bundleId,
+            ...(safeDiscoveryText(record.displayName, 200)
+              ? { displayName: safeDiscoveryText(record.displayName, 200) }
+              : {}),
+            quarantinedAt: safeDiscoveryText(record.quarantinedAt, 80) || "",
+            summary: safeSecurityText(record.summary, 1200) || "Import quarantined",
+            report: {
+              verdict,
+              summary: safeSecurityText(report.summary, 1200) || "Import quarantined",
+              findings,
+            },
+          },
+        ];
+      }),
+  );
+}
+
+const MCP_INSTALL_METHODS = new Set(["npm", "pip", "binary", "docker", "manual"]);
+const MCP_TRANSPORTS = new Set(["stdio", "sse", "websocket", "streamable-http"]);
+const MCP_STATUSES = new Set(["disconnected", "connecting", "connected", "reconnecting", "error"]);
+
+function safeMCPRegistryEntry(value: unknown): RecordLike | null {
+  const entry = safeDiscoveryRecord(value);
+  const id = safeDiscoveryId(entry?.id);
+  if (!entry || !id) return null;
+  const installMethod = MCP_INSTALL_METHODS.has(String(entry.installMethod))
+    ? entry.installMethod
+    : "manual";
+  const transport = MCP_TRANSPORTS.has(String(entry.transport)) ? entry.transport : "stdio";
+  const tools = Array.isArray(entry.tools)
+    ? entry.tools.slice(0, 100).flatMap((value) => {
+        const tool = safeDiscoveryRecord(value);
+        const name = safeDiscoveryText(tool?.name, 120);
+        return name ? [{ name, description: safeDiscoveryText(tool?.description, 800) || "" }] : [];
+      })
+    : [];
+  const safeEntry: RecordLike = {
+    id,
+    name: safeDiscoveryText(entry.name, 200) || id,
+    description: safeDiscoveryText(entry.description, 2000) || "",
+    version: safeDiscoveryText(entry.version, 80) || "",
+    author: safeDiscoveryText(entry.author, 200) || "",
+    installMethod,
+    transport,
+    tools,
+    tags: safeDiscoveryTextList(entry.tags, 50, 100),
+    verified: entry.verified === true,
+  };
+  for (const key of ["license", "category", "tagline"] as const) {
+    const text = safeDiscoveryText(entry[key], 200);
+    if (text) safeEntry[key] = text;
+  }
+  if (entry.featured === true) safeEntry.featured = true;
+  const downloads = safeDiscoveryCount(entry.downloads);
+  if (downloads !== undefined) safeEntry.downloads = downloads;
+  // Deliberately omit homepage/repository URLs, commands, package install data,
+  // default URLs, arguments, and environment values from browser discovery.
+  return safeEntry;
+}
+
+function safeMCPRegistry(value: unknown) {
+  const registry = safeDiscoveryRecord(value);
+  const rawServers = Array.isArray(registry?.servers) ? registry.servers : [];
+  const safeEntries = rawServers.slice(0, MAX_DISCOVERY_REGISTRY_ENTRIES).flatMap((server) => {
+    const safeEntry = safeMCPRegistryEntry(server);
+    return safeEntry ? [safeEntry] : [];
+  });
+  return boundedJsonListResult(
+    {
+      version: safeDiscoveryText(registry?.version, 80) || "",
+      lastUpdated: safeDiscoveryText(registry?.lastUpdated, 80) || "",
+    },
+    "servers",
+    safeEntries,
+  );
+}
+
+function safeMCPStatuses(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return boundedJson(
+    value.slice(0, MAX_DISCOVERY_REGISTRY_ENTRIES).flatMap((value) => {
+      const status = safeDiscoveryRecord(value);
+      const id = safeDiscoveryId(status?.id);
+      if (!status || !id) return [];
+      const safeStatus: RecordLike = {
+        id,
+        name: safeDiscoveryText(status.name, 200) || id,
+        status: MCP_STATUSES.has(String(status.status)) ? status.status : "disconnected",
+      };
+      const lastPing = safeDiscoveryMetric(status.lastPing);
+      const uptime = safeDiscoveryMetric(status.uptime);
+      if (lastPing !== undefined) safeStatus.lastPing = lastPing;
+      if (uptime !== undefined) safeStatus.uptime = uptime;
+      // Errors, tools, resources, prompts, and server info can carry host paths,
+      // command output, account details, or data returned by a connected server.
+      return [safeStatus];
+    }),
+  );
 }
 
 function parseAgentListParams(value: unknown): RecordLike | undefined {
@@ -1669,6 +2304,47 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
   const imageProfiles = options.imageGenProfileService || new ImageGenProfileService();
   const taskStore = new TaskStore(db);
   const definitions: BrowserDesktopDefinitions = {};
+  const packToggleService =
+    options.pluginPackToggleService || getPluginPackToggleService(PluginRegistry.getInstance());
+  const discoverySources: BrowserDiscoverySources = {
+    listPluginPacks:
+      options.discovery?.listPluginPacks ||
+      (async () => {
+        const registry = PluginRegistry.getInstance();
+        await registry.initialize();
+        return registry.getPluginsByType("pack").map((plugin) => ({
+          manifest: plugin.manifest,
+          state: plugin.state,
+          securityReport: plugin.securityReport,
+        }));
+      }),
+    getSkillStatus:
+      options.discovery?.getSkillStatus ||
+      (async () => {
+        const loader = getCustomSkillLoader();
+        await loader.initialize();
+        return loader.getSkillStatus();
+      }),
+    listQuarantinedImports:
+      options.discovery?.listQuarantinedImports ||
+      (() => getSkillRegistry().listQuarantinedImports()),
+    searchSkillRegistry:
+      options.discovery?.searchSkillRegistry ||
+      ((query, searchOptions) => getSkillRegistry().search(query, searchOptions)),
+    searchClawHubSkills:
+      options.discovery?.searchClawHubSkills ||
+      ((query, searchOptions) => getSkillRegistry().searchClawHub(query, searchOptions)),
+    searchPackRegistry:
+      options.discovery?.searchPackRegistry ||
+      ((query, searchOptions) => getPackRegistry().search(query, searchOptions)),
+    getMCPStatus:
+      options.discovery?.getMCPStatus || (() => MCPClientManager.getInstance().getStatus()),
+    fetchMCPRegistry:
+      options.discovery?.fetchMCPRegistry || (() => MCPRegistryManager.fetchRegistry()),
+    searchMCPRegistry:
+      options.discovery?.searchMCPRegistry ||
+      ((query, tags) => MCPRegistryManager.searchServers({ query, tags, limit: 50, offset: 0 })),
+  };
   let ownedRoutineService: RoutineService | null = null;
   let workflowRuntimeStarted = false;
 
@@ -2501,18 +3177,152 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
       description: skill.description,
     })),
   );
-  definitions.listPluginPacks = definition(agents, async () => {
-    const registry = PluginRegistry.getInstance();
-    await registry.initialize();
-    return registry.getPluginsByType("pack").map((plugin) => ({
-      name: plugin.manifest.name,
-      displayName: plugin.manifest.displayName,
-      description: plugin.manifest.description,
-      category: plugin.manifest.category,
-      recommendedConnectors: plugin.manifest.recommendedConnectors,
-      enabled: plugin.state !== "disabled",
-    }));
-  });
+  definitions.listPluginPacks = definition(agents, async () =>
+    safePluginPackList(await discoverySources.listPluginPacks()),
+  );
+  definitions.togglePluginPack = definition(
+    agents,
+    async ([name, enabled]) =>
+      safePackToggleResult(
+        await packToggleService.setPackEnabled(name as string, enabled as boolean),
+        name as string,
+        enabled as boolean,
+      ),
+    {
+      mutation: true,
+      minArgs: 2,
+      maxArgs: 2,
+      validate: (args) => [pluginPackToggleIdArg(args[0]), booleanArg(args[1])],
+    },
+  );
+  definitions.togglePluginPackSkill = definition(
+    agents,
+    async ([packName, skillId, enabled]) =>
+      safePackSkillToggleResult(
+        await packToggleService.setSkillEnabled(
+          packName as string,
+          skillId as string,
+          enabled as boolean,
+        ),
+        packName as string,
+        skillId as string,
+        enabled as boolean,
+      ),
+    {
+      mutation: true,
+      minArgs: 3,
+      maxArgs: 3,
+      validate: (args) => [
+        pluginPackToggleIdArg(args[0]),
+        pluginPackToggleIdArg(args[1]),
+        booleanArg(args[2]),
+      ],
+    },
+  );
+  definitions.getSkillStatus = definition(
+    "tasks.read",
+    async () => safeSkillStatusReport(await discoverySources.getSkillStatus()),
+    { minArgs: 0, maxArgs: 0 },
+  );
+  definitions.listQuarantinedImports = definition(
+    "tasks.read",
+    async () => safeQuarantinedSkillImports(discoverySources.listQuarantinedImports()),
+    { minArgs: 0, maxArgs: 0 },
+  );
+  definitions.searchSkillRegistry = definition(
+    "tasks.read",
+    async ([query, searchOptions]) =>
+      safeSkillSearchResult(
+        await discoverySources.searchSkillRegistry(
+          query as string,
+          searchOptions as { page?: number; pageSize?: number } | undefined,
+        ),
+        query as string,
+        searchOptions as { page?: number; pageSize?: number } | undefined,
+      ),
+    {
+      minArgs: 1,
+      maxArgs: 2,
+      validate: (args) => [discoveryQueryArg(args[0]), parseDiscoveryPageOptions(args[1])],
+    },
+  );
+  definitions.searchClawHubSkills = definition(
+    "tasks.read",
+    async ([query, searchOptions]) =>
+      safeSkillSearchResult(
+        await discoverySources.searchClawHubSkills(
+          query as string,
+          searchOptions as { page?: number; pageSize?: number } | undefined,
+        ),
+        query as string,
+        searchOptions as { page?: number; pageSize?: number } | undefined,
+      ),
+    {
+      minArgs: 1,
+      maxArgs: 2,
+      validate: (args) => [discoveryQueryArg(args[0]), parseDiscoveryPageOptions(args[1])],
+    },
+  );
+  definitions.searchPackRegistry = definition(
+    "tasks.read",
+    async ([query, searchOptions]) =>
+      safePackSearchResult(
+        await discoverySources.searchPackRegistry(
+          query as string,
+          searchOptions as { page?: number; pageSize?: number; category?: string } | undefined,
+        ),
+        query as string,
+        searchOptions as { page?: number; pageSize?: number } | undefined,
+      ),
+    {
+      minArgs: 1,
+      maxArgs: 2,
+      validate: (args) => [discoveryQueryArg(args[0]), parseDiscoveryPageOptions(args[1], true)],
+    },
+  );
+  definitions.getMCPStatus = definition(
+    "tasks.read",
+    async () => safeMCPStatuses(discoverySources.getMCPStatus()),
+    { minArgs: 0, maxArgs: 0 },
+  );
+  definitions.fetchMCPRegistry = definition(
+    "tasks.read",
+    async () => safeMCPRegistry(await discoverySources.fetchMCPRegistry()),
+    { minArgs: 0, maxArgs: 0 },
+  );
+  definitions.searchMCPRegistry = definition(
+    "tasks.read",
+    async ([query, tags]) => {
+      const results = await discoverySources.searchMCPRegistry(
+        query as string,
+        tags as string[] | undefined,
+      );
+      return boundedJsonArray(
+        Array.isArray(results)
+          ? results.slice(0, 50).flatMap((entry) => {
+              const safeEntry = safeMCPRegistryEntry(entry);
+              return safeEntry ? [safeEntry] : [];
+            })
+          : [],
+      );
+    },
+    {
+      minArgs: 1,
+      maxArgs: 2,
+      validate: (args) => {
+        const query = discoveryQueryArg(args[0]);
+        if (args[1] === undefined) return [query, undefined];
+        if (!Array.isArray(args[1]) || args[1].length > 20) return invalidRequest();
+        const tags = args[1].map((tag) => {
+          if (typeof tag !== "string" || tag.length > 100 || !tag.trim()) return invalidRequest();
+          const normalized = tag.trim();
+          if (/[\u0000-\u001f\u007f]/.test(normalized)) return invalidRequest();
+          return normalized;
+        });
+        return [query, tags];
+      },
+    },
+  );
   definitions.getAgentRoles = definition(
     agents,
     async ([includeInactive]) => {

@@ -1,6 +1,14 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { Cable, Clock3, Link2, Pencil, Play, Plus, Save, Trash2, Workflow } from "lucide-react";
+import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import { validateCronExpression } from "../../electron/cron/schedule";
+import {
+  getRoutineApiBaseUrl,
+  loadRoutineHookMetadata,
+  type RoutineHookSettings,
+  type RoutineHookStatus,
+} from "./routine-hook-metadata";
+import { getRoutineListDisplayState } from "./routine-list-state";
 
 type CronSchedule =
   | { kind: "cron"; expr: string; tz?: string }
@@ -135,18 +143,6 @@ type Workspace = {
   id: string;
   name: string;
   path: string;
-};
-
-type HookStatus = {
-  enabled: boolean;
-  serverRunning: boolean;
-  serverAddress?: { host: string; port: number };
-};
-
-type HookSettings = {
-  path: string;
-  host?: string;
-  port?: number;
 };
 
 type MCPServerStatus = {
@@ -375,12 +371,13 @@ export function RoutineSettingsPanel({
   const [runs, setRuns] = useState<RoutineRun[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
-  const [hooksStatus, setHooksStatus] = useState<HookStatus | null>(null);
-  const [hooksSettings, setHooksSettings] = useState<HookSettings | null>(null);
+  const [hooksStatus, setHooksStatus] = useState<RoutineHookStatus | null>(null);
+  const [hooksSettings, setHooksSettings] = useState<RoutineHookSettings | null>(null);
   const [cronStatus, setCronStatus] = useState<Awaited<
     ReturnType<typeof window.electronAPI.getCronStatus>
   > | null>(null);
   const [loading, setLoading] = useState(true);
+  const [routinesLoaded, setRoutinesLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -407,35 +404,44 @@ export function RoutineSettingsPanel({
     [workspaces],
   );
 
-  const apiBaseUrl = useMemo(() => {
-    const host = hooksStatus?.serverAddress?.host || hooksSettings?.host || "127.0.0.1";
-    const port = hooksStatus?.serverAddress?.port || hooksSettings?.port || 9877;
-    const path = hooksSettings?.path || "/hooks";
-    return `http://${host}:${port}${path}`;
-  }, [hooksSettings, hooksStatus]);
+  const hookMetadataAvailable = hasHostMethods("getHooksStatus", "getHooksSettings");
+  const canManageApiHooks = hookMetadataAvailable;
+  const apiBaseUrl = getRoutineApiBaseUrl({
+    isBrowserHost: window.coworkBrowserHost === true,
+    hookMetadataAvailable,
+    status: hooksStatus,
+    settings: hooksSettings,
+  });
+  const routineListDisplayState = getRoutineListDisplayState(routinesLoaded, routines.length);
 
   async function loadAll() {
     setLoading(true);
     setError(null);
     try {
-      const [routineList, routineRuns, workspaceList, status, settings, servers, schedulerStatus] =
+      const [routineList, routineRuns, workspaceList, hookMetadata, servers, schedulerStatus] =
         await Promise.all([
           window.electronAPI.listRoutines(),
           window.electronAPI.listRoutineRuns?.(undefined, 200) || Promise.resolve([]),
           window.electronAPI.listWorkspaces(),
-          window.electronAPI.getHooksStatus(),
-          window.electronAPI.getHooksSettings(),
+          loadRoutineHookMetadata(
+            hasHostMethods,
+            () => window.electronAPI.getHooksStatus(),
+            () => window.electronAPI.getHooksSettings(),
+          ),
           window.electronAPI.getMCPStatus?.() || Promise.resolve([]),
-          window.electronAPI.getCronStatus().catch(() => null),
+          hasHostMethod("getCronStatus")
+            ? window.electronAPI.getCronStatus().catch(() => null)
+            : Promise.resolve(null),
         ]);
 
       setRoutines((routineList || []) as Routine[]);
       setRuns((routineRuns || []) as RoutineRun[]);
       setWorkspaces(workspaceList || []);
-      setHooksStatus(status);
-      setHooksSettings(settings);
+      setHooksStatus(hookMetadata.status);
+      setHooksSettings(hookMetadata.settings);
       setMcpServers(Array.isArray(servers) ? servers : []);
       setCronStatus(schedulerStatus);
+      setRoutinesLoaded(true);
 
       if (!form.workspaceId && workspaceList?.length) {
         setForm((current) => ({ ...current, workspaceId: workspaceList[0].id }));
@@ -446,7 +452,6 @@ export function RoutineSettingsPanel({
       setLoading(false);
     }
   }
-
 
   function resetForm() {
     setEditingRoutineId(null);
@@ -765,7 +770,12 @@ export function RoutineSettingsPanel({
               CoWork&apos;s local-first runtime.
             </p>
           </div>
-          <button style={routineButtonStyle("primary")} onClick={startCreate}>
+          <button
+            style={routineButtonStyle("primary", !routinesLoaded)}
+            onClick={startCreate}
+            disabled={!routinesLoaded}
+            title={!routinesLoaded ? "Load routines before creating one" : undefined}
+          >
             <Plus size={16} />
             New Routine
           </button>
@@ -1012,12 +1022,19 @@ export function RoutineSettingsPanel({
                 </div>
               )}
 
-              <RoutineCheckbox
-                checked={form.outputWebhookResponse}
-                label="Return a webhook response body for API-triggered runs"
-                onChange={(checked) => setForm({ ...form, outputWebhookResponse: checked })}
-              />
-              {form.outputWebhookResponse && (
+              {canManageApiHooks ? (
+                <RoutineCheckbox
+                  checked={form.outputWebhookResponse}
+                  label="Return a webhook response body for API-triggered runs"
+                  onChange={(checked) => setForm({ ...form, outputWebhookResponse: checked })}
+                />
+              ) : (
+                <p className="settings-help" role="status">
+                  Webhook responses are unavailable on this browser host. Configure API hooks in the
+                  desktop app.
+                </p>
+              )}
+              {canManageApiHooks && form.outputWebhookResponse && (
                 <div style={nestedOptionsStyle}>
                   <div
                     style={{
@@ -1125,13 +1142,20 @@ export function RoutineSettingsPanel({
                 </div>
               )}
 
-              <TriggerToggle
-                checked={form.apiEnabled}
-                label="API"
-                description="Generate a webhook path and token for external callers."
-                onChange={(checked) => setForm({ ...form, apiEnabled: checked })}
-              />
-              {form.apiEnabled && (
+              {canManageApiHooks ? (
+                <TriggerToggle
+                  checked={form.apiEnabled}
+                  label="API"
+                  description="Generate a webhook path and token for external callers."
+                  onChange={(checked) => setForm({ ...form, apiEnabled: checked })}
+                />
+              ) : (
+                <p className="settings-help" role="status">
+                  API hooks are unavailable on this browser host. Configure API triggers in the
+                  desktop app.
+                </p>
+              )}
+              {canManageApiHooks && form.apiEnabled && (
                 <input
                   className="settings-input"
                   value={form.apiPath}
@@ -1394,7 +1418,11 @@ export function RoutineSettingsPanel({
       )}
 
       <div className="settings-section" style={{ display: "grid", gap: 16 }}>
-        {routines.length === 0 ? (
+        {routineListDisplayState === "unavailable" ? (
+          <div className="settings-empty-state" role="status">
+            The routine list has not loaded. Retry after the browser host is available.
+          </div>
+        ) : routineListDisplayState === "empty" ? (
           <div className="settings-empty-state">
             No routines yet. Create one to compile schedules, webhooks, and event triggers from a
             single top-level automation definition.
@@ -1486,7 +1514,7 @@ export function RoutineSettingsPanel({
                   ))}
                 </div>
 
-                {apiTrigger?.type === "api" && (
+                {apiTrigger?.type === "api" && apiBaseUrl && (
                   <div
                     style={{
                       border: "1px solid var(--color-border, rgba(127, 127, 127, 0.2))",
@@ -1514,7 +1542,7 @@ export function RoutineSettingsPanel({
                       >
                         Copy URL
                       </button>
-                      {apiTrigger.token && (
+                      {apiTrigger.token && window.coworkBrowserHost !== true && (
                         <>
                           <button
                             style={routineButtonStyle("secondary")}
@@ -1522,17 +1550,25 @@ export function RoutineSettingsPanel({
                           >
                             Copy Token
                           </button>
-                          <button
-                            style={routineButtonStyle("secondary", saving)}
-                            onClick={() => regenerateApiToken(routine, apiTrigger.id)}
-                            disabled={saving}
-                          >
-                            Rotate Token
-                          </button>
+                          {hasHostMethod("regenerateRoutineApiToken") && (
+                            <button
+                              style={routineButtonStyle("secondary", saving)}
+                              onClick={() => regenerateApiToken(routine, apiTrigger.id)}
+                              disabled={saving}
+                            >
+                              Rotate Token
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
                   </div>
+                )}
+                {apiTrigger?.type === "api" && !apiBaseUrl && (
+                  <p className="settings-help" role="status">
+                    This routine has an API trigger, but its endpoint is unavailable on this browser
+                    host. View or change hook endpoints in the desktop app.
+                  </p>
                 )}
 
                 <div style={{ display: "grid", gap: 8 }}>

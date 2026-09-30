@@ -7,6 +7,7 @@ import {
   resolveAccessProfileDefinitionWithStatus,
 } from "../../shared/access-profiles";
 import { PermissionSettingsManager } from "../../electron/security/permission-settings-manager";
+import type { QueuedAttachmentBytes } from "../../electron/agent/runtime/queued-attachment-store";
 import {
   TaskAdmissionConflictError,
   TaskAdmissionReceiptUnavailableError,
@@ -17,6 +18,13 @@ import {
   type WebRequestContext,
   type WebRpcMethod,
 } from "../web/WebApplication";
+import {
+  parseBrowserTaskMediaDescriptors,
+  releaseBrowserTaskMedia,
+  resolveBrowserTaskMedia,
+  type BrowserTaskMediaDescriptor,
+  type BrowserTaskMediaReader,
+} from "./browser-task-media";
 
 type SafeAgentConfig = Pick<
   AgentConfig,
@@ -54,6 +62,7 @@ interface CreateTaskRequest {
   agentConfig: SafeAgentConfig;
   assignedAgentRoleId?: string;
   generateTitle?: true;
+  images?: BrowserTaskMediaDescriptor[];
 }
 
 export interface BrowserTaskCommands {
@@ -66,6 +75,7 @@ export interface BrowserTaskCommands {
     taskOverrides?: Partial<Task>;
     source: "api";
     requestIdentity: CreateTaskRequest;
+    capturedAttachments?: QueuedAttachmentBytes[];
     autoStart: false;
   }): Promise<{ task: Task; replayed: boolean }>;
   startAdmittedTask(operationKey: string, taskId: string): Promise<void>;
@@ -78,6 +88,7 @@ export interface BrowserTaskSources {
     "createTaskIdempotent" | "startAdmittedTask" | "getTaskAdmission"
   >;
   getWorkspace: (id: string) => Promise<Workspace | null>;
+  mediaReader?: BrowserTaskMediaReader;
   /** Browser tasks may target active agent roles only. */
   isActiveAgentRole?: (id: string) => Promise<boolean> | boolean;
 }
@@ -103,52 +114,97 @@ export function createBrowserTaskMethods(
             throw new WebApplicationError("INVALID_REQUEST", "Agent role is unavailable.", 400);
           }
         }
-        const key = scopedOperationKey(context);
-        let admitted: { task: Task; replayed: boolean };
-        try {
-          admitted = await sources.commands.createTaskIdempotent({
-            operationKey: key,
-            ...request,
-            taskOverrides: request.assignedAgentRoleId
-              ? { assignedAgentRoleId: request.assignedAgentRoleId }
-              : undefined,
-            source: "api",
-            requestIdentity: request,
-            autoStart: false,
-          });
-        } catch (error) {
-          if (error instanceof TaskAdmissionConflictError) {
-            throw new WebApplicationError(
-              "CONFLICT",
-              "This task request key was already used.",
-              409,
-            );
+        let capturedAttachments: Awaited<ReturnType<typeof resolveBrowserTaskMedia>> = [];
+        if (request.images !== undefined) {
+          if (request.images.length > 0 && !sources.mediaReader) throw invalidRequest();
+          if (sources.mediaReader) {
+            try {
+              capturedAttachments = await resolveBrowserTaskMedia(
+                sources.mediaReader,
+                context,
+                workspace.id,
+                request.images,
+              );
+            } catch (error) {
+              if (error instanceof WebApplicationError) throw error;
+              throw new WebApplicationError(
+                "INVALID_REQUEST",
+                error instanceof Error ? error.message : "Visual attachment is invalid.",
+                400,
+              );
+            }
           }
-          if (error instanceof TaskAdmissionReceiptUnavailableError) {
+        }
+        const taskRequest = { ...request };
+        delete taskRequest.images;
+        const requestIdentity = {
+          ...taskRequest,
+          ...(capturedAttachments.length > 0
+            ? {
+                images: capturedAttachments.map((attachment) => ({
+                  relativePath: attachment.relativePath,
+                  mimeType: attachment.mimeType,
+                  filename: attachment.filename,
+                  sizeBytes: attachment.sizeBytes,
+                  sha256: attachment.sha256,
+                  identity: attachment.identity,
+                })),
+              }
+            : request.images !== undefined
+              ? { images: [] }
+              : {}),
+        };
+        const key = scopedOperationKey(context);
+        try {
+          let admitted: { task: Task; replayed: boolean };
+          try {
+            admitted = await sources.commands.createTaskIdempotent({
+              operationKey: key,
+              ...taskRequest,
+              taskOverrides: request.assignedAgentRoleId
+                ? { assignedAgentRoleId: request.assignedAgentRoleId }
+                : undefined,
+              source: "api",
+              requestIdentity,
+              ...(capturedAttachments.length > 0 ? { capturedAttachments } : {}),
+              autoStart: false,
+            });
+          } catch (error) {
+            if (error instanceof TaskAdmissionConflictError) {
+              throw new WebApplicationError(
+                "CONFLICT",
+                "This task request key was already used.",
+                409,
+              );
+            }
+            if (error instanceof TaskAdmissionReceiptUnavailableError) {
+              throw new WebApplicationError(
+                "OUTCOME_UNKNOWN",
+                "Task admission exists, but its task is unavailable.",
+                503,
+                true,
+              );
+            }
+            throw error;
+          }
+          try {
+            await sources.commands.startAdmittedTask(key, admitted.task.id);
+          } catch {
             throw new WebApplicationError(
               "OUTCOME_UNKNOWN",
-              "Task admission exists, but its task is unavailable.",
+              "The task was admitted, but its start has not been confirmed. Retry with the same request key.",
               503,
               true,
             );
           }
-          throw error;
+          return {
+            taskId: admitted.task.id,
+            task: publicTask(admitted.task),
+            replayed: admitted.replayed,
+          };
+        } finally {
+          releaseBrowserTaskMedia(capturedAttachments);
         }
-        try {
-          await sources.commands.startAdmittedTask(key, admitted.task.id);
-        } catch {
-          throw new WebApplicationError(
-            "OUTCOME_UNKNOWN",
-            "The task was admitted, but its start has not been confirmed. Retry with the same request key.",
-            503,
-            true,
-          );
-        }
-        return {
-          taskId: admitted.task.id,
-          task: publicTask(admitted.task),
-          replayed: admitted.replayed,
-        };
       },
     },
     "task.admission.get": {
@@ -195,10 +251,7 @@ export function parseBrowserCreateTaskRequest(value: unknown): CreateTaskRequest
     throw invalidRequest();
   }
   if (value.generateTitle !== undefined && value.generateTitle !== true) throw invalidRequest();
-  // Host-local image paths and arbitrary image payloads are not accepted from a browser.
-  if (value.images !== undefined && (!Array.isArray(value.images) || value.images.length > 0)) {
-    throw invalidRequest();
-  }
+  const images = parseBrowserTaskMediaDescriptors(value.images);
 
   const assignedAgentRoleId = value.assignedAgentRoleId;
   if (
@@ -216,6 +269,7 @@ export function parseBrowserCreateTaskRequest(value: unknown): CreateTaskRequest
     agentConfig,
     ...(assignedAgentRoleId ? { assignedAgentRoleId } : {}),
     ...(value.generateTitle === true ? { generateTitle: true } : {}),
+    ...(images !== undefined ? { images } : {}),
   };
 }
 

@@ -9,7 +9,12 @@ import type { EverydayActionReceipt, Workspace } from "../../../shared/types";
 import type { ManagedSessionService } from "../../../electron/managed/ManagedSessionService";
 import type { EverydayAgentService } from "../../../electron/everyday-agent/everyday-agent-repository-facades";
 import type { RoutineService } from "../../../electron/routines/service";
-import { createBrowserNavigationDefinitions } from "../browser-navigation-methods";
+import type { PluginPackToggleService } from "../../../electron/extensions/plugin-pack-toggle-service";
+import { BrowserDesktopRpcService } from "../browser-desktop-rpc";
+import {
+  createBrowserNavigationDefinitions,
+  type BrowserDiscoverySources,
+} from "../browser-navigation-methods";
 
 describe("browser navigation desktop methods", () => {
   let tempDir: string;
@@ -69,7 +74,11 @@ describe("browser navigation desktop methods", () => {
     vi.restoreAllMocks();
   });
 
-  function definitions(resolveWorkspace?: (id: string) => Promise<Workspace | null>) {
+  function definitions(
+    resolveWorkspace?: (id: string) => Promise<Workspace | null>,
+    discovery?: Partial<BrowserDiscoverySources>,
+    pluginPackToggleService?: Pick<PluginPackToggleService, "setPackEnabled" | "setSkillEnabled">,
+  ) {
     return createBrowserNavigationDefinitions({
       db,
       agentDaemon: {} as never,
@@ -78,6 +87,8 @@ describe("browser navigation desktop methods", () => {
       getRoutineService: () => routineService,
       getCronService: () => null,
       resolveWorkspace: resolveWorkspace || (async (id) => workspaceRepository.findById(id)),
+      discovery,
+      pluginPackToggleService,
     }).definitions;
   }
 
@@ -93,9 +104,559 @@ describe("browser navigation desktop methods", () => {
     expect(defs.everydayAgentGetProfile).toBeDefined();
     expect(defs.generateManagedAgentPlan).toBeDefined();
     expect(defs.createManagedAgentFromPlan).toBeDefined();
+    expect(defs.getSkillStatus).toBeDefined();
+    expect(defs.listPluginPacks).toBeDefined();
+    expect(defs.togglePluginPack).toBeDefined();
+    expect(defs.togglePluginPackSkill).toBeDefined();
+    expect(defs.listQuarantinedImports).toBeDefined();
+    expect(defs.searchSkillRegistry).toBeDefined();
+    expect(defs.searchClawHubSkills).toBeDefined();
+    expect(defs.searchPackRegistry).toBeDefined();
+    expect(defs.getMCPStatus).toBeDefined();
+    expect(defs.fetchMCPRegistry).toBeDefined();
+    expect(defs.searchMCPRegistry).toBeDefined();
     expect(defs.listRoutineWorkflowEventSamples).toBeUndefined();
     expect(defs.getAllHeartbeatStatus).toBeUndefined();
     expect(Object.keys(defs).some((name) => name.toLowerCase().includes("ipc"))).toBe(false);
+  });
+
+  it("authorizes desired-state pack toggles as agents.manage mutations and returns bounded results", async () => {
+    const pluginPackToggleService = {
+      setPackEnabled: vi.fn(async (name: string, enabled: boolean) => ({
+        success: true as const,
+        name,
+        enabled,
+        hostPath: "/Users/private/secret",
+      })),
+      setSkillEnabled: vi.fn(async (packName: string, skillId: string, enabled: boolean) => ({
+        success: true as const,
+        packName,
+        skillId,
+        enabled,
+        secret: "should not escape",
+      })),
+    } as unknown as Pick<PluginPackToggleService, "setPackEnabled" | "setSkillEnabled">;
+    const defs = definitions(undefined, undefined, pluginPackToggleService);
+    const pack = defs.togglePluginPack;
+    const skill = defs.togglePluginPackSkill;
+
+    expect(pack.capability).toBe("agents.manage");
+    expect(pack.mutation).toBe(true);
+    expect(pack.minArgs).toBe(2);
+    expect(pack.maxArgs).toBe(2);
+    expect(skill.capability).toBe("agents.manage");
+    expect(skill.mutation).toBe(true);
+    expect(skill.minArgs).toBe(3);
+    expect(skill.maxArgs).toBe(3);
+
+    await expect(invoke(defs, "togglePluginPack", ["pack-one", true])).resolves.toEqual({
+      success: true,
+      name: "pack-one",
+      enabled: true,
+    });
+    await expect(
+      invoke(defs, "togglePluginPackSkill", ["pack-one", "skill-one", false]),
+    ).resolves.toEqual({
+      success: true,
+      packName: "pack-one",
+      skillId: "skill-one",
+      enabled: false,
+    });
+    expect(pluginPackToggleService.setPackEnabled).toHaveBeenCalledWith("pack-one", true);
+    expect(pluginPackToggleService.setSkillEnabled).toHaveBeenCalledWith(
+      "pack-one",
+      "skill-one",
+      false,
+    );
+  });
+
+  it("rejects malformed pack-toggle identifiers, desired states, and argument counts", () => {
+    const defs = definitions();
+    const rpcMethods = new BrowserDesktopRpcService(defs).methods();
+    for (const [name, args] of [
+      ["togglePluginPack", ["/Users/private/pack", true]],
+      ["togglePluginPack", ["pack-one", "true"]],
+      ["togglePluginPack", ["pack-one", true, "extra"]],
+      ["togglePluginPackSkill", ["pack-one", "../skill", false]],
+      ["togglePluginPackSkill", ["pack-one", "skill-one", 1]],
+    ] as const) {
+      expect(() => rpcMethods[`desktop.${name}`].validateParams?.({ args })).toThrow();
+    }
+  });
+
+  it("returns bounded pack metadata required by CustomizePanel without prompts, paths, or secrets", async () => {
+    const listPluginPacks = vi.fn(async () => [
+      {
+        manifest: {
+          name: "safe-pack",
+          displayName: "Safe Pack",
+          version: "1.2.3",
+          description: "A review pack backed by /Users/alice/private-workspace",
+          category: "Operations",
+          scope: "personal",
+          personaTemplateId: "operator",
+          recommendedConnectors: ["jira", "C:\\Users\\alice\\secret"],
+          tryAsking: ["Private prompt: disclose customer credentials"],
+          bestFitWorkflows: ["it_ops", "unsupported"],
+          outcomeExamples: ["Review a queue", "/Users/alice/private-workspace/output.csv"],
+          skills: [
+            {
+              id: "review-queue",
+              name: "Review Queue",
+              description: "Review a support queue",
+              icon: "📋",
+              enabled: false,
+              prompt: "Private skill instructions",
+              filePath: "/Users/alice/private-workspace/SKILL.md",
+              config: { API_TOKEN: "private-value" },
+            },
+          ],
+          skillDirectories: [
+            {
+              id: "directory-skill",
+              path: "/Users/alice/private-workspace/skills/directory-skill",
+              systemPrompt: "Another private prompt",
+            },
+          ],
+          slashCommands: [
+            {
+              name: "review-queue",
+              description: "Review the queue",
+              skillId: "review-queue",
+              prompt: "Do not return this prompt",
+            },
+          ],
+          agentRoles: [
+            {
+              name: "queue-reviewer",
+              displayName: "Queue Reviewer",
+              description: "A bounded role description",
+              icon: "🤖",
+              color: "#112233",
+              systemPrompt: "Private role prompt",
+              capabilities: ["secret-capability"],
+            },
+          ],
+          configSchema: { properties: { token: { default: "private-value", secret: true } } },
+          dependencies: { "private-package": "private-version" },
+        },
+        state: "registered",
+        securityReport: {
+          verdict: "warning",
+          summary: "Found /Users/alice/private-workspace/SKILL.md",
+          findings: [{ path: "/Users/alice/private-workspace/SKILL.md" }],
+        },
+      },
+      {
+        manifest: {
+          name: "Users/alice/private-pack.json",
+          displayName: "Path-like pack must be rejected",
+        },
+      },
+    ]);
+    const defs = definitions(undefined, { listPluginPacks });
+
+    const packs = (await invoke(defs, "listPluginPacks")) as Array<Record<string, unknown>>;
+
+    expect(listPluginPacks).toHaveBeenCalledOnce();
+    expect(packs).toHaveLength(1);
+    expect(packs[0]).toMatchObject({
+      name: "safe-pack",
+      displayName: "Safe Pack",
+      version: "1.2.3",
+      description: "A review pack backed by [host path]",
+      scope: "personal",
+      recommendedConnectors: ["jira"],
+      bestFitWorkflows: ["it_ops"],
+      skills: [
+        {
+          id: "review-queue",
+          name: "Review Queue",
+          description: "Review a support queue",
+          icon: "📋",
+          enabled: false,
+        },
+        {
+          id: "directory-skill",
+          name: "Directory Skill",
+          description: "Directory-backed skill",
+          enabled: true,
+        },
+      ],
+      slashCommands: [
+        { name: "review-queue", description: "Review the queue", skillId: "review-queue" },
+      ],
+      agentRoles: [
+        {
+          name: "queue-reviewer",
+          displayName: "Queue Reviewer",
+          description: "A bounded role description",
+          icon: "🤖",
+          color: "#112233",
+        },
+      ],
+      state: "registered",
+      enabled: true,
+      policyBlocked: false,
+      policyRequired: false,
+      securityReport: {
+        verdict: "warning",
+        summary: "Security findings require review.",
+      },
+    });
+    expect(packs[0]).not.toHaveProperty("tryAsking");
+    const serialized = JSON.stringify(packs);
+    for (const privateValue of [
+      "Private prompt",
+      "systemPrompt",
+      "private-value",
+      "private-capability",
+      "private-version",
+      "configSchema",
+      "dependencies",
+      "/Users/alice",
+      "C:\\Users\\alice",
+      "filePath",
+    ]) {
+      expect(serialized).not.toContain(privateValue);
+    }
+
+    const manyChildren = {
+      manifest: {
+        name: "bounded-pack",
+        skills: Array.from({ length: 125 }, (_, index) => ({
+          id: `skill-${index}`,
+          name: `Skill ${index}`,
+        })),
+        slashCommands: Array.from({ length: 125 }, (_, index) => ({
+          name: `command-${index}`,
+          skillId: `skill-${index}`,
+        })),
+        agentRoles: Array.from({ length: 125 }, (_, index) => ({
+          name: `role-${index}`,
+          displayName: `Role ${index}`,
+        })),
+      },
+      state: "registered",
+    };
+    const boundedDefs = definitions(undefined, {
+      listPluginPacks: async () => [manyChildren],
+    });
+    const boundedPacks = (await invoke(boundedDefs, "listPluginPacks")) as Array<{
+      skills: unknown[];
+      slashCommands: unknown[];
+      agentRoles: unknown[];
+    }>;
+    expect(boundedPacks[0]?.skills).toHaveLength(100);
+    expect(boundedPacks[0]?.slashCommands).toHaveLength(100);
+    expect(boundedPacks[0]?.agentRoles).toHaveLength(100);
+  });
+
+  it("reports error-state packs as disabled rather than claiming runtime registration", async () => {
+    const defs = definitions(undefined, {
+      listPluginPacks: async () => [
+        {
+          manifest: { name: "error-pack", displayName: "Error Pack" },
+          state: "error",
+        },
+      ],
+    });
+    const packs = (await invoke(defs, "listPluginPacks")) as Array<Record<string, unknown>>;
+    expect(packs[0]).toMatchObject({ state: "error", enabled: false });
+  });
+
+  it("returns skill readiness without prompts, configuration values, security paths, or host directories", async () => {
+    const defs = definitions(undefined, {
+      getSkillStatus: vi.fn(async () => ({
+        workspaceDir: "/Users/alice/private-workspace",
+        managedSkillsDir: "/Users/alice/.config/cowork/skills",
+        bundledSkillsDir: "/opt/cowork/skills",
+        externalSkillDirs: ["/Users/alice/third-party-skills"],
+        skills: [
+          {
+            id: "outline",
+            name: "Outline",
+            description: "Make a concise outline",
+            icon: "🧭",
+            prompt: "private instructions and access token",
+            filePath: "/Users/alice/.config/cowork/skills/outline.json",
+            source: "managed",
+            category: "ClawHub",
+            metadata: {
+              version: "1.2.0",
+              homepage: "https://clawhub.ai/owner/outline?token=private-token",
+              repository: "https://example.test/private-repository",
+            },
+            eligible: false,
+            disabled: false,
+            blockedByAllowlist: true,
+            missing: {
+              bins: ["python"],
+              anyBins: [],
+              env: ["PRIVATE_API_TOKEN"],
+              config: [],
+              os: [],
+            },
+            requirements: { env: ["PRIVATE_API_TOKEN"] },
+            securityReport: {
+              verdict: "warning",
+              summary: "Review /Users/alice/private-workspace/source.py",
+              bundleDigest: "private-digest",
+              findings: [{ path: "/Users/alice/private-workspace/source.py" }],
+            },
+          },
+        ],
+        summary: { total: 1, eligible: 0, disabled: 0, missingRequirements: 1 },
+      })),
+    });
+
+    const report = (await invoke(defs, "getSkillStatus")) as Record<string, unknown>;
+    const skills = report.skills as Array<Record<string, unknown>>;
+    expect(skills[0]).toMatchObject({
+      id: "outline",
+      name: "Outline",
+      source: "managed",
+      category: "ClawHub",
+      eligible: false,
+      blockedByAllowlist: true,
+      missing: { bins: ["python"], env: ["PRIVATE_API_TOKEN"] },
+      metadata: { version: "1.2.0", homepage: "https://clawhub.ai/owner/outline" },
+      securityReport: { verdict: "warning" },
+    });
+    expect(report).toMatchObject({
+      workspaceDir: "",
+      managedSkillsDir: "",
+      bundledSkillsDir: "",
+      externalSkillDirs: [],
+      summary: { total: 1, missingRequirements: 1 },
+    });
+    expect(JSON.stringify(report)).not.toContain("private instructions");
+    expect(JSON.stringify(report)).not.toContain("private-repository");
+    expect(JSON.stringify(report)).not.toContain("private-token");
+    expect(JSON.stringify(report)).not.toContain("private-digest");
+    expect(JSON.stringify(report)).not.toContain("/Users/alice");
+    expect(JSON.stringify(report)).not.toContain("filePath");
+    expect(JSON.stringify(report)).not.toContain("requirements");
+  });
+
+  it("lists only sanitized skill quarantine metadata and findings", async () => {
+    const defs = definitions(undefined, {
+      listQuarantinedImports: () => [
+        {
+          id: "quarantine-1",
+          bundleKind: "skill",
+          bundleId: "dangerous-skill",
+          displayName: "Dangerous Skill",
+          quarantinedAt: "2026-09-29T12:00:00Z",
+          summary:
+            "Blocked file /Users/alice/private-workspace/skill.md and C:\\Users\\alice\\private-workspace\\skill.md",
+          filePath: "/Users/alice/.config/cowork/quarantine/record.json",
+          report: {
+            verdict: "quarantined",
+            summary: "Review /Users/alice/private-workspace/skill.md",
+            bundleDigest: "private-digest",
+            findings: [
+              {
+                code: "script-execution",
+                severity: "critical",
+                message: "Found /Users/alice/private-workspace/skill.md",
+                path: "/Users/alice/private-workspace/skill.md",
+                detail: "private details",
+              },
+            ],
+          },
+        },
+        {
+          id: "quarantine-pack",
+          bundleKind: "plugin-pack",
+          bundleId: "untrusted-pack",
+          report: { findings: [] },
+        },
+      ],
+    });
+
+    const records = (await invoke(defs, "listQuarantinedImports")) as Array<
+      Record<string, unknown>
+    >;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      id: "quarantine-1",
+      bundleKind: "skill",
+      bundleId: "dangerous-skill",
+      report: {
+        verdict: "quarantined",
+        findings: [{ code: "script-execution", severity: "critical" }],
+      },
+    });
+    expect(JSON.stringify(records)).not.toContain("/Users/alice");
+    expect(JSON.stringify(records)).not.toContain("C:\\Users\\alice");
+    expect(JSON.stringify(records)).not.toContain("private-digest");
+    expect(JSON.stringify(records)).not.toContain("private details");
+    expect(JSON.stringify(records)).not.toContain("quarantine-pack");
+    expect(JSON.stringify(records)).not.toContain("filePath");
+  });
+
+  it("bounds catalog queries and strips install links and package content from discovery results", async () => {
+    const searchSkillRegistry = vi.fn(async (query: string) => ({
+      query,
+      total: 1,
+      page: 1,
+      pageSize: 20,
+      results: [
+        {
+          id: "safe-skill",
+          name: "Safe Skill",
+          description: "Public catalog entry",
+          version: "1.0.0",
+          source: "cowork",
+          author: "CoWork",
+          tags: ["review"],
+          homepage: "https://example.test/hidden-homepage",
+          prompt: "private catalog payload",
+        },
+        {
+          id: "Users/alice/private-skill.json",
+          name: "Path-like identifier",
+          description: "Must not cross the host boundary",
+          version: "1.0.0",
+        },
+      ],
+    }));
+    const searchPackRegistry = vi.fn(async (query: string) => ({
+      query,
+      total: 1,
+      page: 1,
+      pageSize: 24,
+      results: [
+        {
+          id: "safe-pack",
+          name: "safe-pack",
+          displayName: "Safe Pack",
+          description: "Public pack metadata",
+          skillCount: 2,
+          downloadUrl: "https://example.test/untrusted-download",
+          gitUrl: "https://example.test/untrusted-git",
+        },
+      ],
+    }));
+    const defs = definitions(undefined, {
+      searchSkillRegistry,
+      searchClawHubSkills: vi.fn(async () => ({ results: [] })),
+      searchPackRegistry,
+    });
+
+    const skills = (await invoke(defs, "searchSkillRegistry", [
+      "outline",
+      { page: 1, pageSize: 10 },
+    ])) as Record<string, unknown>;
+    expect(searchSkillRegistry).toHaveBeenCalledWith("outline", { page: 1, pageSize: 10 });
+    expect(skills.results).toEqual([
+      expect.objectContaining({ id: "safe-skill", name: "Safe Skill", tags: ["review"] }),
+    ]);
+    expect(JSON.stringify(skills)).not.toContain("hidden-homepage");
+    expect(JSON.stringify(skills)).not.toContain("private catalog payload");
+    expect(JSON.stringify(skills)).not.toContain("Users/alice");
+
+    const packs = (await invoke(defs, "searchPackRegistry", [
+      "pack",
+      { page: 1, pageSize: 24 },
+    ])) as Record<string, unknown>;
+    expect(searchPackRegistry).toHaveBeenCalledWith("pack", { page: 1, pageSize: 24 });
+    expect(packs.results).toEqual([
+      expect.objectContaining({ id: "safe-pack", displayName: "Safe Pack", skillCount: 2 }),
+    ]);
+    expect(JSON.stringify(packs)).not.toContain("untrusted-download");
+    expect(JSON.stringify(packs)).not.toContain("untrusted-git");
+
+    await expect(
+      invoke(defs, "searchSkillRegistry", ["outline", { pageSize: 51 }]),
+    ).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+    });
+    await expect(invoke(defs, "searchSkillRegistry", ["x".repeat(257)])).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+    });
+    expect(searchSkillRegistry).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns MCP catalog and connection summaries without commands, URLs, env values, or server data", async () => {
+    const mcpEntry = {
+      id: "postgres",
+      name: "PostgreSQL",
+      description: "Read-only database connector",
+      version: "1.0.0",
+      author: "CoWork",
+      homepage: "https://example.test/homepage",
+      repository: "https://example.test/repository",
+      license: "MIT",
+      installMethod: "npm",
+      installCommand: "npx",
+      packageName: "@example/server",
+      transport: "stdio",
+      defaultCommand: "npx",
+      defaultUrl: "https://example.test/endpoint",
+      defaultArgs: ["--token", "secret-token"],
+      defaultEnv: { API_TOKEN: "secret-value" },
+      tools: [{ name: "query", description: "Run query" }],
+      tags: ["database"],
+      category: "data",
+      verified: true,
+    };
+    const defs = definitions(undefined, {
+      fetchMCPRegistry: vi.fn(async () => ({
+        version: "1",
+        lastUpdated: "2026-09-29",
+        servers: [mcpEntry],
+      })),
+      searchMCPRegistry: vi.fn(async () => [mcpEntry]),
+      getMCPStatus: () => [
+        {
+          id: "server-1",
+          name: "PostgreSQL",
+          status: "error",
+          error: "secret-token /Users/alice/private.txt",
+          tools: [{ name: "query", description: "private data" }],
+          resources: [{ uri: "file:///Users/alice/private.txt" }],
+          serverInfo: { name: "private server info" },
+          uptime: 50,
+        },
+      ],
+    });
+
+    const registry = (await invoke(defs, "fetchMCPRegistry")) as Record<string, unknown>;
+    expect(registry.servers).toEqual([
+      expect.objectContaining({
+        id: "postgres",
+        installMethod: "npm",
+        tools: [{ name: "query", description: "Run query" }],
+      }),
+    ]);
+    expect(JSON.stringify(registry)).not.toContain("secret-value");
+    expect(JSON.stringify(registry)).not.toContain("secret-token");
+    expect(JSON.stringify(registry)).not.toContain("defaultEnv");
+    expect(JSON.stringify(registry)).not.toContain("defaultUrl");
+    expect(JSON.stringify(registry)).not.toContain("installCommand");
+    expect(JSON.stringify(registry)).not.toContain("repository");
+
+    const search = (await invoke(defs, "searchMCPRegistry", ["postgres", ["database"]])) as Array<
+      Record<string, unknown>
+    >;
+    expect(search).toHaveLength(1);
+    expect(JSON.stringify(search)).not.toContain("secret-value");
+
+    const statuses = (await invoke(defs, "getMCPStatus")) as Array<Record<string, unknown>>;
+    expect(statuses).toEqual([
+      expect.objectContaining({ id: "server-1", name: "PostgreSQL", status: "error", uptime: 50 }),
+    ]);
+    expect(JSON.stringify(statuses)).not.toContain("secret-token");
+    expect(JSON.stringify(statuses)).not.toContain("private.txt");
+    expect(JSON.stringify(statuses)).not.toContain("private data");
+
+    await expect(
+      invoke(defs, "searchMCPRegistry", ["postgres", Array.from({ length: 21 }, () => "x")]),
+    ).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+    });
   });
 
   it("rejects malformed mutation arguments before dispatching a handler", () => {

@@ -2,6 +2,13 @@
   "description": "Explanations for every file in the SQLite ratchet register (async SQLite migration plan, DB6). Each remaining synchronous database access on an application thread must match a rule that names its domain, how it is reached, and where it is migrated. `node scripts/qa/sqlite-audit.mjs` fails on a register entry no rule explains.",
   "rules": [
     {
+      "pattern": "^src/host/services/browser-navigation-methods\\.ts$",
+      "domain": "browser approval readback",
+      "access": "One synchronous preview read by id before validating profile and workspace permission for Everyday Agent approval. No write or agent execution occurs in this readback.",
+      "plan": "Move the preview scope lookup into a services-domain unit behind the EverydayAgentService facade; preserve the profile and workspace checks before approving.",
+      "owner": "browser host and database platform"
+    },
+    {
       "pattern": "^src/electron/database/(async/statement-commands|post-startup-maintenance|secure-settings-sql|memory-embedding-sql|migrated-event-sql|llm-call-events)\\.ts$",
       "domain": "shared SQL",
       "access": "Dual-use SQL modules: run in the database worker when enabled, on the host only as the no-worker fallback.",

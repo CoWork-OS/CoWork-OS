@@ -1,9 +1,4 @@
-import {
-  monitorEventLoopDelay,
-  performance,
-  type EventLoopUtilization,
-  type IntervalHistogram,
-} from "perf_hooks";
+import { monitorEventLoopDelay, performance, type EventLoopUtilization } from "perf_hooks";
 import {
   getSqliteInstrumentationSnapshot,
   type SqliteInstrumentationSnapshot,
@@ -84,7 +79,10 @@ function envSummaryEnabled(): boolean {
 
 export function buildHostPerfSample(
   runtime: HostPerfRuntime,
-  histogram: Pick<IntervalHistogram, "count" | "percentile" | "max" | "mean">,
+  histogram: Pick<
+    ReturnType<typeof monitorEventLoopDelay>,
+    "count" | "percentile" | "max" | "mean"
+  >,
   utilization: EventLoopUtilization,
   sqlite: SqliteInstrumentationSnapshot,
 ): HostPerfSample {

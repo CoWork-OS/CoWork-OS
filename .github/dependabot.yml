@@ -17,6 +17,9 @@ updates:
       minor-and-patch:
         patterns:
           - "*"
+        exclude-patterns:
+          # The 0.x pi-ai releases can remove runtime/OAuth APIs; migrate separately.
+          - "@earendil-works/pi-ai"
         update-types:
           - "minor"
           - "patch"

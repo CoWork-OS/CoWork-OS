@@ -193,7 +193,7 @@
     "@aws-sdk/client-bedrock": "^3.1009.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
     "@chenglou/pretext": "^0.0.9",
-    "@earendil-works/pi-ai": "^0.87.1",
+    "@earendil-works/pi-ai": "0.74.2",
     "@electron/rebuild": "4.2.0",
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",

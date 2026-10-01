@@ -1,0 +1,411 @@
+:root {
+  --sidebar-rail-width: 64px;
+}
+
+.sidebar-rail {
+  --rail-accent: var(--color-accent);
+  width: var(--sidebar-rail-width);
+  flex-shrink: 0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: calc(var(--title-bar-height) + 6px) 0 10px;
+  background: var(--color-bg-sidebar);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  position: relative;
+  /* Above the panel so the More menu can overlap it. */
+  z-index: 20;
+}
+
+/* Each destination is an icon with its caption underneath. */
+.sidebar-rail-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  width: 56px;
+  flex-shrink: 0;
+  padding: 3px 0 5px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  /* right-panel.css clips every button; the edge notch sits outside. */
+  overflow: visible;
+}
+
+.sidebar-rail-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 28px;
+  border-radius: 9px;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.sidebar-rail-icon > svg {
+  display: block;
+}
+
+.sidebar-rail-label {
+  max-width: 56px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font: 500 10px/1.15 var(--font-ui);
+  letter-spacing: -0.005em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.12s ease;
+}
+
+.sidebar-rail-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.sidebar-rail-btn:hover .sidebar-rail-icon,
+.sidebar-rail-btn.open .sidebar-rail-icon {
+  background: var(--color-bg-hover);
+}
+
+.sidebar-rail-btn:hover .sidebar-rail-label,
+.sidebar-rail-btn.open .sidebar-rail-label {
+  color: var(--color-text-secondary);
+}
+
+/* More with its menu open looks pressed; the notch stays on the current destination. */
+.sidebar-rail-btn.open {
+  color: var(--color-text-primary);
+}
+
+/* Active destination: accent icon tile, accent caption, and a notch on the rail edge. */
+.sidebar-rail-btn.active {
+  color: var(--rail-accent);
+}
+
+.sidebar-rail-btn.active .sidebar-rail-icon {
+  background: color-mix(in srgb, var(--rail-accent) 15%, transparent);
+}
+
+/* Idle weight on purpose: a bolder caption is wider and truncates sooner. */
+.sidebar-rail-btn.active .sidebar-rail-label {
+  color: var(--rail-accent);
+}
+
+.sidebar-rail-btn.active::before {
+  content: "";
+  position: absolute;
+  top: 17px;
+  left: -4px;
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: var(--rail-accent);
+  transform: translateY(-50%);
+}
+
+/* An installable update sits above Settings in the accent colour; one click
+   opens the update. */
+.sidebar-rail-btn.sidebar-rail-update,
+.sidebar-rail-btn.sidebar-rail-update .sidebar-rail-label {
+  color: var(--rail-accent);
+}
+
+/* No resting tile: that is how the current destination reads. */
+.sidebar-rail-btn.sidebar-rail-update:hover .sidebar-rail-icon {
+  background: color-mix(in srgb, var(--rail-accent) 18%, transparent);
+}
+
+.sidebar-rail-dot {
+  position: absolute;
+  top: 2px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.sidebar-rail-dot-unread {
+  background: var(--color-purple, #a78bfa);
+}
+
+.sidebar-rail-dot-update {
+  background: var(--color-warning);
+}
+
+.sidebar-rail-divider {
+  width: 28px;
+  height: 1px;
+  margin: 5px 0;
+  background: var(--color-border);
+}
+
+.sidebar-rail-spacer {
+  flex: 1;
+}
+
+.sidebar-rail-more {
+  position: relative;
+}
+
+.sidebar-rail-menu.task-item-menu {
+  top: 0;
+  right: auto;
+  left: calc(100% + 8px);
+  margin-top: 0;
+  min-width: 220px;
+}
+
+.sidebar-rail-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-rail-menu-row .sidebar-workspace-menu-option {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-rail-menu-row .sidebar-workspace-menu-option.active {
+  background: var(--color-bg-hover);
+}
+
+.sidebar-rail-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.sidebar-rail-pin:hover,
+.sidebar-rail-pin:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.sidebar-rail-pin.pinned {
+  color: var(--color-accent);
+}
+
+html.visual-calm .sidebar-rail {
+  --rail-accent: var(--calm-accent);
+}
+
+html.visual-calm .sidebar-rail-btn {
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .sidebar-rail-label {
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .sidebar-rail-btn:hover {
+  color: var(--calm-text);
+}
+
+html.visual-calm .sidebar-rail-btn:hover .sidebar-rail-icon,
+html.visual-calm .sidebar-rail-btn.open .sidebar-rail-icon {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .sidebar-rail-btn.open {
+  color: var(--calm-text);
+}
+
+html.visual-calm .sidebar-rail-btn:hover .sidebar-rail-label,
+html.visual-calm .sidebar-rail-btn.open .sidebar-rail-label {
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .sidebar-rail-btn.active,
+html.visual-calm .sidebar-rail-btn.active .sidebar-rail-label {
+  color: var(--rail-accent);
+}
+
+html.visual-calm .sidebar-rail-btn.sidebar-rail-update,
+html.visual-calm .sidebar-rail-btn.sidebar-rail-update:hover,
+html.visual-calm .sidebar-rail-btn.sidebar-rail-update .sidebar-rail-label {
+  color: var(--rail-accent);
+}
+
+html.visual-calm .sidebar-rail-dot-unread {
+  background: var(--calm-agent);
+}
+
+/* On macOS the layout already paints the translucent sidebar surface; a second
+   layer here would make the rail darker than the navbar above it. */
+html.platform-darwin .sidebar-rail {
+  background: transparent !important;
+}
+
+html.platform-darwin.opaque-vibrancy .sidebar-rail {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.visual-calm .sidebar-rail {
+  background: var(--calm-sidebar);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html.platform-darwin.visual-calm .sidebar-rail {
+  background: var(--calm-sidebar) !important;
+}
+
+/* ---------- Navbar ----------
+   The title bar reads as the top of the chrome, on the same surface as the rail,
+   and hosts the open session's header after a divider over the panel edge. */
+
+.title-bar.title-bar-shell {
+  background: var(--color-bg-sidebar);
+}
+
+html.platform-darwin .title-bar.title-bar-shell {
+  background: rgba(28, 28, 32, 0.42);
+}
+
+html.platform-darwin.theme-light .title-bar.title-bar-shell {
+  background: var(--color-bg-sidebar);
+}
+
+/* Calm's surface must also beat the macOS light-mode rule above. */
+html.visual-calm .app.app-shell > .title-bar.title-bar-shell {
+  background: var(--calm-sidebar);
+}
+
+.title-bar-context {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(
+    var(--sidebar-rail-width, 48px) +
+      clamp(var(--sidebar-width-min), var(--sidebar-width), var(--sidebar-width-max))
+  );
+  /* Stop before a right-hand panel when one is open, and before the title-bar
+     buttons either way. */
+  right: max(240px, calc(100% - var(--title-bar-main-right, 100%) + 12px));
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-left: 16px;
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+html.visual-calm .title-bar-context {
+  border-left-color: var(--calm-border);
+}
+
+.title-bar-context:empty {
+  display: none;
+}
+
+/* Panel hidden: the header follows the back, forward and sidebar buttons. */
+.title-bar-context.title-bar-context-collapsed {
+  left: 188px;
+  padding-left: 4px;
+  border-left: 0;
+}
+
+html.platform-win32 .title-bar-context.title-bar-context-collapsed {
+  left: 120px;
+}
+
+.title-bar-context-header {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+/* The macOS shell navbar is taller than the overlay title bar so the traffic
+   lights (placed at y=18 by the main process, centred near 24px) get equal room
+   above and below. Everything else in the bar centres on the same line, so the
+   downward nudges used for the overlay title bar are dropped. */
+html.platform-darwin:not(.platform-native-frame) .app.app-shell {
+  --app-title-bar-height: 48px;
+}
+
+html.platform-darwin .app.app-shell > .title-bar {
+  height: var(--app-title-bar-height);
+  min-height: var(--app-title-bar-height);
+}
+
+html.platform-darwin .app.app-shell .title-bar-left {
+  transform: none;
+}
+
+html.platform-darwin .app.app-shell .title-bar-actions {
+  padding-top: 0;
+}
+
+.title-bar .title-bar-context-header .main-header {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+}
+
+/* Divider over the left edge of a right-hand panel, matching the one over the
+   sidebar panel. */
+.title-bar-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--title-bar-main-right);
+  width: 1px;
+  background: var(--color-border-subtle);
+  pointer-events: none;
+}
+
+html.visual-calm .title-bar-divider {
+  background: var(--calm-border);
+}
+
+/* Breadcrumb: the session's project before its title. */
+.title-bar .main-header-crumb {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 30%;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar .main-header-crumb-sep {
+  opacity: 0.55;
+}
+
+/* The bell moves here when the panel is hidden; open reads as pressed. */
+.title-bar-notifications.active {
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}

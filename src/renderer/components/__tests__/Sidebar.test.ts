@@ -2,7 +2,7 @@ import React from "react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   Sidebar,
@@ -17,47 +17,120 @@ const stylesPath = fileURLToPath(new URL("../../styles/index.css", import.meta.u
 const sidebarSourcePath = fileURLToPath(new URL("../Sidebar.tsx", import.meta.url));
 
 describe("Sidebar top-level destinations", () => {
-  it("shows Bots when a bot conversation view is active", () => {
+  it("shows Bots when the shell selects the Bots list", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
         workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
         tasks: [] as Any,
         selectedTaskId: "bot-task-1",
-        isBotViewActive: true,
+        activeTab: "bots",
         onSelectTask: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
         onTasksChanged: () => {},
       }),
     );
 
-    expect(markup).toMatch(
-      /class="sidebar-session-tab active"[^>]*aria-selected="true"[^>]*>Bots<\/button>/,
-    );
-    expect(markup).toMatch(
-      /class="sidebar-session-tab "[^>]*aria-selected="false"[^>]*>Sessions<\/button>/,
-    );
     expect(markup).toContain("sidebar-bots-pane");
+    expect(markup).not.toContain('aria-label="Search sessions"');
   });
 
-  it("marks Automations as the active main-screen destination", () => {
+  describe("Calm workspace switch", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const renderCalm = (activeDestinationId: string | null) => {
+      vi.stubGlobal("document", {
+        documentElement: { classList: { contains: (name: string) => name === "visual-calm" } },
+      });
+      return renderToStaticMarkup(
+        React.createElement(Sidebar, {
+          workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+          tasks: [] as Any,
+          selectedTaskId: null,
+          activeDestinationId: activeDestinationId as Any,
+          onNavigate: () => {},
+          onSelectTask: () => {},
+          onOpenSettings: () => {},
+          onTasksChanged: () => {},
+        }),
+      );
+    };
+
+    it("shows Home, Build, and Agents and marks the destination in view", () => {
+      const markup = renderCalm("build");
+      expect(markup).toContain("sidebar-panel-segments");
+      expect(markup).toMatch(/aria-selected="true" class="active">Build<\/button>/);
+      expect(markup).toMatch(/aria-selected="false" class="">Home<\/button>/);
+      expect(markup).toContain(">Agents</button>");
+    });
+
+    it("selects no segment for destinations outside the switch", () => {
+      expect(renderCalm("inbox")).not.toContain('aria-selected="true"');
+    });
+
+    it("names the primary button after what the panel shows", () => {
+      const home = renderCalm("home");
+      expect(home).toMatch(/data-action="session"[\s\S]*>New session<\/span>/);
+      expect(home).not.toContain("sidebar-panel-kbd");
+
+      const build = renderCalm("build");
+      expect(build).toMatch(/data-action="build"[\s\S]*>New build<\/span>/);
+
+      const agents = renderToStaticMarkup(
+        React.createElement(Sidebar, {
+          workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+          tasks: [] as Any,
+          selectedTaskId: null,
+          activeTab: "bots",
+          activeDestinationId: "agents",
+          onNavigate: () => {},
+          onSelectTask: () => {},
+          onOpenSettings: () => {},
+          onTasksChanged: () => {},
+        }),
+      );
+      expect(agents).toMatch(/data-action="bot"[\s\S]*>New bot<\/span>/);
+      // The roster's own + would repeat it.
+      expect(agents).not.toContain("sidebar-bot-add");
+    });
+
+    it("stays out of the modern theme", () => {
+      const markup = renderToStaticMarkup(
+        React.createElement(Sidebar, {
+          workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+          tasks: [] as Any,
+          selectedTaskId: null,
+          activeDestinationId: "home",
+          onNavigate: () => {},
+          onSelectTask: () => {},
+          onOpenSettings: () => {},
+          onTasksChanged: () => {},
+        }),
+      );
+      expect(markup).not.toContain("sidebar-panel-segments");
+    });
+  });
+
+  it("leaves top-level destinations to the rail and keeps New in the panel", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
         workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
         tasks: [] as Any,
         selectedTaskId: null,
-        isAutomationsActive: true,
         onSelectTask: () => {},
-        onOpenAutomations: () => {},
+        onNewSession: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
         onTasksChanged: () => {},
       }),
     );
 
-    expect(markup).toMatch(
-      /<button[^>]*class="[^"]*\bactive\b[^"]*"[^>]*aria-pressed="true"[^>]*title="Automations"/,
-    );
+    expect(markup).toContain("sidebar-panel-new");
+    expect(markup).not.toContain("sidebar-session-tab");
+    expect(markup).not.toContain('title="Automations"');
+    expect(markup).not.toContain("Mission Control");
+    expect(markup).not.toContain("sidebar-more-toggle");
+    expect(markup).not.toContain('title="Settings"');
   });
 
   it("clips sidebar titles to the available width without an ellipsis", () => {
@@ -82,97 +155,22 @@ describe("Sidebar top-level destinations", () => {
     expect(truncateSidebarTitleToFit("Presentation", 5, measureByCharacters)).toBe("Prese");
   });
 
-  it("renders Agents as a primary destination and keeps More collapsed by default", () => {
+  it("leaves the update prompt to the rail, beside Settings", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
         workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
         tasks: [] as Any,
         selectedTaskId: null,
-        isAgentsActive: true,
         onSelectTask: () => {},
-        onOpenAutomations: () => {},
-        onOpenIdeas: () => {},
-        onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
-        onOpenEverydayAgent: () => {},
         onNewSession: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
-        onOpenDevices: () => {},
         onTasksChanged: () => {},
       }),
     );
 
-    expect(markup).toContain("Agents");
-    expect(markup).toContain("Everyday");
-    expect(markup).toContain("More");
-    expect(markup).not.toContain("Mission Control");
-    expect(markup).toContain('aria-pressed="true"');
-  });
-
-  it("expands More when a nested destination is active", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(Sidebar, {
-        workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
-        tasks: [] as Any,
-        selectedTaskId: null,
-        isMissionControlActive: true,
-        onSelectTask: () => {},
-        onOpenAutomations: () => {},
-        onOpenIdeas: () => {},
-        onOpenInboxAgent: () => {},
-        onOpenAgents: () => {},
-        onOpenEverydayAgent: () => {},
-        onNewSession: () => {},
-        onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
-        onOpenDevices: () => {},
-        onTasksChanged: () => {},
-      }),
-    );
-
-    expect(markup).toContain('aria-expanded="true"');
-    expect(markup).toContain("Mission Control");
-  });
-
-  it("renders available app updates as a single Update button", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(Sidebar, {
-        workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
-        tasks: [] as Any,
-        selectedTaskId: null,
-        updateInfo: {
-          available: true,
-          currentVersion: "0.5.45",
-          latestVersion: "0.5.46",
-          updateMode: "electron-updater",
-        } as Any,
-        onSelectTask: () => {},
-        onOpenAutomations: () => {},
-        onOpenIdeas: () => {},
-        onOpenInboxAgent: () => {},
-        onOpenAgents: () => {},
-        onOpenEverydayAgent: () => {},
-        onNewSession: () => {},
-        onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
-        onOpenDevices: () => {},
-        onTasksChanged: () => {},
-      }),
-    );
-
-    expect(markup).toMatch(/class="[^"]*\bupdate-banner\b[^"]*"/);
-    expect(markup).toContain(">Update</button>");
-    expect(markup).toMatch(
-      /class="sidebar-footer cli-sidebar-footer"[\s\S]*Settings[\s\S]*class="sidebar-update-actions"[\s\S]*>Update<\/button>/,
-    );
-    expect(markup).not.toContain("sidebar-update-slot");
-    const source = readFileSync(stylesPath, "utf8");
-    expect(source).toMatch(
-      /\.sidebar-update-actions\s*\{[\s\S]*justify-content:\s*flex-end;[\s\S]*margin-left:\s*auto;/,
-    );
-    expect(markup).not.toContain("0.5.46");
-    expect(markup).not.toContain("Dismiss update notification");
+    expect(markup).not.toContain("update-banner");
+    expect(markup).not.toContain(">Update</button>");
   });
 
   it("prioritizes the session title over time while a session is awaiting response", () => {
@@ -192,15 +190,9 @@ describe("Sidebar top-level destinations", () => {
         ] as Any,
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenAutomations: () => {},
-        onOpenIdeas: () => {},
-        onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
-        onOpenEverydayAgent: () => {},
         onNewSession: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
-        onOpenDevices: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -213,7 +205,7 @@ describe("Sidebar top-level destinations", () => {
     expect(markup).not.toContain("cli-task-time");
   });
 
-  it("places active session spinners in the leading sidebar gutter", () => {
+  it("places active session spinners at the end of the row", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
         workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
@@ -241,16 +233,15 @@ describe("Sidebar top-level destinations", () => {
         selectedTaskId: "active-task-1",
         onSelectTask: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
         onTasksChanged: () => {},
       }),
     );
 
-    expect((markup.match(/cli-task-status active cli-task-status-leading/g) ?? []).length).toBe(2);
+    expect((markup.match(/cli-task-status active cli-task-status-trailing/g) ?? []).length).toBe(2);
     expect(markup).toContain("Active session");
     const source = readFileSync(stylesPath, "utf8");
     expect(source).toMatch(
-      /\.density-focused \.cli-task-status-leading\s*\{[\s\S]*position:\s*absolute;[\s\S]*left:\s*10px;/,
+      /\.density-focused \.cli-task-status-trailing\s*\{[\s\S]*position:\s*absolute;[\s\S]*right:\s*10px;/,
     );
   });
 
@@ -272,13 +263,14 @@ describe("Sidebar top-level destinations", () => {
         selectedTaskId: null,
         onSelectTask: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
         onTasksChanged: () => {},
       }),
     );
 
     expect(markup).toContain("Recently stopped session");
-    expect(markup).toContain('title="Filter sessions"');
+    // The filter toggle sits in the search row, which opens from the header.
+    expect(markup).toContain('title="Search sessions"');
+    expect(readFileSync(sidebarSourcePath, "utf8")).toContain('title="Filter sessions"');
   });
 
   it("keeps projects opt-in while retaining pinned and recent sessions", () => {
@@ -309,14 +301,14 @@ describe("Sidebar top-level destinations", () => {
         selectedTaskId: null,
         onSelectTask: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
         onTasksChanged: () => {},
       }),
     );
 
     expect(markup).toContain("Pinned");
     expect(markup).toContain("Projects");
-    expect(markup).toContain("Recents");
+    // Recents are grouped under day labels.
+    expect(markup).toContain('class="sidebar-date-group">Today<');
     expect(markup).toContain("No projects added");
     expect(markup).toContain('aria-label="Organize projects"');
     expect(markup).not.toContain('sidebar-workspace-label">cowork');
@@ -475,15 +467,9 @@ describe("Sidebar top-level destinations", () => {
         completionAttentionTaskIds: ["task-1"],
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenAutomations: () => {},
-        onOpenIdeas: () => {},
-        onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
-        onOpenEverydayAgent: () => {},
         onNewSession: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
-        onOpenDevices: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -525,15 +511,9 @@ describe("Sidebar top-level destinations", () => {
         ] as Any,
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenAutomations: () => {},
-        onOpenIdeas: () => {},
-        onOpenInboxAgent: () => {},
         onOpenAgents: () => {},
-        onOpenEverydayAgent: () => {},
         onNewSession: () => {},
         onOpenSettings: () => {},
-        onOpenMissionControl: () => {},
-        onOpenDevices: () => {},
         onTasksChanged: () => {},
       }),
     );

@@ -45,8 +45,9 @@ describe("App title bar actions", () => {
 
     expect(styles).toContain("FLOATING RIGHT INSPECTOR");
     expect(styles).toContain("height: fit-content !important;");
-    expect(styles).toContain("max-height: calc(100% - 66px);");
-    expect(styles).toContain("margin: 54px 12px 12px 0;");
+    // Clears the title bar only where it overlays the row; the shell layout sets it to 0.
+    expect(styles).toContain("max-height: calc(100% - var(--title-bar-height) - 28px);");
+    expect(styles).toContain("margin: calc(var(--title-bar-height) + 16px) 12px 12px 0;");
     expect(styles).toContain("background: var(--color-bg-primary) !important;");
     expect(styles).toContain("border-radius: var(--app-shell-panel-radius);");
     expect(styles).toContain(".theme-light .app-layout,");

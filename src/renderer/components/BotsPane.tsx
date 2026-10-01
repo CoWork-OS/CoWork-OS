@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, CircleDashed, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
+import { AlertCircle, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import type { Task } from "../../shared/types";
 import {
@@ -50,6 +50,9 @@ interface BotsPaneProps {
   onBotCreated?: (bot: BotRole) => void | Promise<void>;
   onBotUpdated?: (bot: BotRole) => void | Promise<void>;
   onBotDeleted?: (botId: string) => void | Promise<void>;
+  /** Lets the host open the create dialog from its own button (controlled with the next prop). */
+  createOpen?: boolean;
+  onCreateOpenChange?: (open: boolean) => void;
 }
 
 const ACTIVE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["executing", "planning"]);
@@ -587,9 +590,13 @@ export function BotsPane({
   onBotCreated,
   onBotUpdated,
   onBotDeleted,
+  createOpen: createOpenProp,
+  onCreateOpenChange,
 }: BotsPaneProps) {
   const [query, setQuery] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
+  const [ownCreateOpen, setOwnCreateOpen] = useState(false);
+  const createOpen = createOpenProp ?? ownCreateOpen;
+  const setCreateOpen = onCreateOpenChange ?? setOwnCreateOpen;
   const [editingBot, setEditingBot] = useState<BotRole | null>(null);
 
   const visibleBots = useMemo(
@@ -612,28 +619,21 @@ export function BotsPane({
             <span className="sidebar-bots-count">{roles.length}</span>
           )}
         </div>
-        <div className="sidebar-bots-actions">
-          {onOpenAgents && (
+        {/* Managing agents is the rail's Agents destination. When the host owns
+            the create dialog it also offers the button (the panel's New bot). */}
+        {!onCreateOpenChange && (
+          <div className="sidebar-bots-actions">
             <button
               type="button"
-              className="sidebar-session-action"
-              onClick={onOpenAgents}
-              title="Manage agents"
-              aria-label="Manage agents"
+              className="sidebar-session-action sidebar-bot-add"
+              onClick={() => setCreateOpen(true)}
+              title="Create bot"
+              aria-label="Create bot"
             >
-              <CircleDashed size={15} strokeWidth={1.9} />
+              <Plus size={17} strokeWidth={2} />
             </button>
-          )}
-          <button
-            type="button"
-            className="sidebar-session-action sidebar-bot-add"
-            onClick={() => setCreateOpen(true)}
-            title="Create bot"
-            aria-label="Create bot"
-          >
-            <Plus size={17} strokeWidth={2} />
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
       <label className="sidebar-bots-search">

@@ -1202,6 +1202,9 @@ html.platform-darwin .title-bar-left {
   justify-content: center;
   width: 32px;
   height: 32px;
+  /* right-panel.css ships an unscoped `button { padding: 10px 16px }` that
+     would squeeze these icons to zero width. */
+  padding: 0;
   border-radius: 6px;
   background-color: transparent;
   border: none;
@@ -1218,8 +1221,20 @@ html.platform-darwin .title-bar-left {
   color: var(--color-text-secondary);
 }
 
+.title-bar-btn:disabled,
+.title-bar-btn:disabled:hover {
+  background-color: transparent;
+  opacity: 0.35;
+  cursor: default;
+}
+
 .title-bar-btn:active {
   background-color: var(--color-bg-secondary);
+}
+
+/* `display: flex` above would otherwise keep `hidden` buttons on screen. */
+.title-bar-btn[hidden] {
+  display: none;
 }
 
 .title-bar-browser-signout {
@@ -1270,76 +1285,6 @@ html.platform-darwin .title-bar-left {
   border: 1px solid rgba(0, 0, 0, 0.25);
 }
 
-/* ============================================
-   Update Notification Pill
-   ============================================ */
-
-.sidebar-update-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-shrink: 0;
-  margin-left: auto;
-  min-width: 0;
-  height: 26px;
-}
-
-.update-banner {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 1;
-  min-width: 0;
-  width: auto;
-  height: 26px;
-  padding: 0 12px;
-  background: color-mix(in srgb, var(--color-bg-glass) 62%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
-  border-radius: 8px;
-  color: var(--color-accent);
-  box-sizing: border-box;
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 650;
-  position: relative;
-  z-index: 1;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.update-banner:hover {
-  background: color-mix(in srgb, var(--color-accent-subtle) 74%, transparent);
-  border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border));
-}
-
-.update-banner-dismiss {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-left: 2px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.update-banner-dismiss:hover {
-  color: var(--color-text-primary);
-  background: color-mix(in srgb, var(--color-text-muted) 15%, transparent);
-}
-
 /* Make sure interactive elements are not draggable */
 button,
 input,
@@ -1365,12 +1310,27 @@ a,
   overflow: hidden;
 }
 
+/* The title bar is a navbar strip above the shell. The layout starts below it,
+   so views inside the layout no longer pad for an overlaid title bar. */
+.app {
+  --app-title-bar-height: var(--title-bar-height);
+}
+
+.app-layout {
+  --title-bar-height: 0px;
+  margin-top: var(--app-title-bar-height);
+}
+
+.browser-provider-notice + .app-layout {
+  margin-top: 0;
+}
+
 .browser-provider-notice {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin: 10px 16px 0;
+  margin: calc(var(--app-title-bar-height) + 10px) 16px 0;
   padding: 12px 16px;
   border: 1px solid color-mix(in srgb, var(--color-warning) 34%, transparent);
   border-radius: var(--radius-md);
@@ -1406,16 +1366,6 @@ a,
     align-items: flex-start;
     flex-direction: column;
   }
-}
-
-/* Collapsed sidebar states */
-.app-layout.left-collapsed .main-content {
-  margin-left: 0;
-}
-
-.app-layout.left-collapsed .main-header {
-  padding-left: 116px;
-  /* Space for macOS window controls (80px) + sidebar toggle (32px) + gap (4px) */
 }
 
 .app-layout.right-collapsed .main-content {
@@ -1578,10 +1528,25 @@ a,
   outline-offset: 2px;
 }
 
+/* Minimal sidebar resize handle: no grip and no line of its own. It takes no
+   layout space and sits centred on the panel's border, so the column edge stays
+   one hairline that lines up with the navbar divider; the edge turns accent on
+   hover, focus, or while dragging. */
 .spreadsheet-sidebar-resize-handle {
   z-index: 8;
   flex-basis: 8px !important;
   width: 8px;
+  margin: 0 -4px;
+}
+
+.spreadsheet-sidebar-resize-handle::before {
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s ease 0.08s;
+}
+
+.spreadsheet-sidebar-resize-handle .app-resizable-divider-grip {
+  display: none;
 }
 
 .spreadsheet-resizable-sidebar {
@@ -1963,10 +1928,6 @@ a,
 /* Ideas tab — above Sessions in sidebar */
 .sidebar-ideas-tab {
   flex-shrink: 0;
-}
-
-.sidebar-ideas-btn {
-  width: 100%;
 }
 
 /* ── Ideas panel — extends dp-* Devices theme ────────────────────── */
@@ -2688,22 +2649,6 @@ a,
   display: block;
 }
 
-.sidebar-home-btn {
-  width: 100%;
-  margin-top: 0;
-  justify-content: flex-start;
-}
-
-.sidebar-home-btn:hover {
-  transform: none;
-}
-
-.sidebar-home-btn.active {
-  border-color: color-mix(in srgb, var(--color-accent) 36%, var(--color-border-light)) !important;
-  background: var(--color-bg-glass) !important;
-  color: var(--color-text-secondary) !important;
-}
-
 .sidebar-home-btn-icon {
   display: inline-flex;
   align-items: center;
@@ -2993,83 +2938,6 @@ a,
   color: var(--color-text) !important;
 }
 
-.sidebar-nav-item {
-  height: 34px;
-  min-height: 34px;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 7px;
-  background: transparent !important;
-  box-shadow: none !important;
-  color: var(--color-text-secondary) !important;
-}
-
-.sidebar-nav-item .cli-new-task-modern-label {
-  width: 100%;
-  min-width: 0;
-  gap: 14px;
-  color: inherit;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.sidebar-nav-item .cli-new-task-modern-label > span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-nav-item .sidebar-home-btn-icon {
-  color: inherit;
-  width: 20px;
-  height: 20px;
-  opacity: 0.9;
-}
-
-.sidebar-nav-item .sidebar-home-btn-icon svg {
-  width: 20px;
-  height: 20px;
-}
-
-.sidebar-nav-item:hover {
-  transform: none;
-  border: 0 !important;
-  background: transparent !important;
-  color: var(--color-text) !important;
-}
-
-.sidebar-nav-item.active,
-.sidebar-home-btn.active.sidebar-nav-item {
-  border: 0 !important;
-  background: transparent !important;
-  color: var(--color-text) !important;
-  font-weight: 600;
-}
-
-.sidebar-nav-item.active .sidebar-home-btn-icon {
-  opacity: 1;
-  color: var(--color-accent);
-}
-
-.sidebar-more-toggle {
-  justify-content: flex-start !important;
-}
-
-.sidebar-more-toggle:hover {
-  color: var(--color-text);
-}
-
-.sidebar-more-dots {
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.sidebar-more-items {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
 .sidebar-ideas-tab {
   flex-shrink: 0;
   padding: 0 18px 10px;
@@ -3220,7 +3088,6 @@ a,
 }
 
 .theme-light .sidebar .sidebar-new-session-btn,
-.theme-light .sidebar .sidebar-nav-item,
 .theme-light .sidebar .cli-sessions-header {
   background: transparent !important;
   border: 0 !important;
@@ -3229,7 +3096,6 @@ a,
 }
 
 .theme-light .sidebar .sidebar-new-session-btn:hover,
-.theme-light .sidebar .sidebar-nav-item:hover,
 .theme-light .sidebar .cli-sessions-header:hover {
   background: transparent !important;
   border: 0 !important;
@@ -3377,48 +3243,10 @@ a,
   gap: 8px;
 }
 
-.devices-sidebar-item.featured {
-  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--color-accent-subtle) 55%, transparent),
-    var(--color-bg-glass)
-  );
-}
-
-.devices-sidebar-item-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
 .devices-sidebar-item-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
-}
-
-.devices-sidebar-item-dot {
-  margin-left: auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent-subtle) 70%, transparent);
-}
-
-.devices-sidebar-item strong {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.devices-sidebar-item span:last-child {
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--color-text-muted);
 }
 
 .devices-sidebar-home-btn:hover,
@@ -4849,6 +4677,11 @@ a,
   min-height: 40px !important;
 }
 
+/* Settings moved to the rail; drop the footer when it has no wallet or update prompt. */
+.cli-sidebar-footer:empty {
+  display: none !important;
+}
+
 .cli-footer-actions {
   display: flex;
   align-items: center;
@@ -5186,41 +5019,6 @@ a,
   background: var(--color-bg-primary);
   padding-top: var(--title-bar-height);
   /* Space for title bar buttons */
-}
-
-/* Back button styled like a nav item */
-.settings-back-btn {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 8px;
-  background: transparent;
-  border: 2px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.settings-back-btn:hover {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-}
-
-.settings-back-btn svg {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  opacity: 0.7;
-}
-
-.settings-back-btn:hover svg {
-  opacity: 1;
 }
 
 .settings-nav-divider {
@@ -8522,15 +8320,6 @@ a,
 }
 
 /* ── Sidebar devices button ── */
-
-.cli-devices-btn {
-  font-size: 12px;
-}
-
-.cli-devices-btn.active {
-  color: var(--color-accent, #0d9488);
-  background: var(--color-bg-elevated);
-}
 
 .nodes-settings {
   display: flex;
@@ -16734,6 +16523,30 @@ a,
   .browser-workbench-right-actions {
     width: auto;
     flex-basis: auto;
+  }
+}
+
+/* Docked beside a session the workbench is far narrower than the window, so
+   the fixed side groups left the URL field no width at all. Size by the
+   toolbar instead. */
+.browser-workbench-toolbar {
+  container: browser-workbench-toolbar / inline-size;
+}
+
+@container browser-workbench-toolbar (max-width: 760px) {
+  .browser-workbench-device-toolbar,
+  .browser-workbench-profile {
+    display: none;
+  }
+
+  .browser-workbench-nav-controls,
+  .browser-workbench-right-actions {
+    width: auto;
+    flex-basis: auto;
+  }
+
+  .browser-workbench-url-form {
+    margin: 0 8px;
   }
 }
 
@@ -25605,12 +25418,6 @@ a,
   padding: 0 !important;
 }
 
-.density-focused .sidebar-nav-item {
-  height: 34px;
-  min-height: 34px;
-  padding: 0 !important;
-}
-
 .density-focused .cli-sessions-header {
   height: 28px;
   min-height: 28px;
@@ -25637,12 +25444,12 @@ a,
   display: inline-flex;
 }
 
-/* Keep the active-session spinner in the leading gutter so its title aligns
+/* The active-session spinner sits at the end of the row so its title aligns
    with every other session in the focused sidebar. */
-.density-focused .cli-task-status-leading {
+.density-focused .cli-task-status-trailing {
   position: absolute;
   top: 50%;
-  left: 10px;
+  right: 10px;
   width: 12px;
   height: 12px;
   margin: 0;
@@ -25808,13 +25615,11 @@ a,
     gap: 3px;
   }
 
-  .sidebar-new-session-btn .cli-new-task-modern-label,
-  .sidebar-nav-item .cli-new-task-modern-label {
+  .sidebar-new-session-btn .cli-new-task-modern-label {
     gap: 9px;
   }
 
   .sidebar-home-btn-icon,
-  .sidebar-nav-item .sidebar-home-btn-icon,
   .sidebar-new-session-btn .sidebar-new-session-icon {
     width: 18px;
     height: 18px;
@@ -26020,15 +25825,6 @@ a,
 .density-focused .toast {
   font-family: var(--font-ui);
   border-radius: 10px;
-}
-
-/* ==================== FOCUSED MODE: UPDATE PILL ==================== */
-
-.density-focused .update-banner {
-  font-family: var(--font-ui);
-  height: 26px;
-  border-radius: 8px;
-  font-size: 12px;
 }
 
 /* ============ Infrastructure Settings ============ */
@@ -28987,8 +28783,10 @@ html
   align-self: flex-start;
   flex: 0 0 var(--right-panel-width);
   height: fit-content !important;
-  max-height: calc(100% - 66px);
-  margin: 54px 12px 12px 0;
+  /* Clear the title bar when it overlays the content row; inside the app shell
+     the layout already starts below it and the variable is 0. */
+  max-height: calc(100% - var(--title-bar-height) - 28px);
+  margin: calc(var(--title-bar-height) + 16px) 12px 12px 0;
   padding-top: 0 !important;
   padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
   scroll-padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));

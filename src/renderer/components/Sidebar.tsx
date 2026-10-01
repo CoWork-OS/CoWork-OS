@@ -1,4 +1,4 @@
-import { hasHostCapability, hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
+import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 import {
   useState,
   useRef,
@@ -12,7 +12,6 @@ import {
 import {
   ChevronDown,
   ChevronRight,
-  SlidersHorizontal,
   EyeOff,
   AppWindow,
   Bell,
@@ -29,15 +28,9 @@ import {
   Search,
   Server,
   Workflow,
-  Lightbulb,
-  Inbox,
-  Users,
-  UsersRound,
   ListFilter,
   EllipsisVertical,
-  Shapes,
   Plus,
-  Sparkles,
   Repeat2,
   X,
 } from "lucide-react";
@@ -48,10 +41,8 @@ import {
   Workspace,
   UiDensity,
   InfraStatus,
-  UpdateInfo,
   isTempWorkspaceId,
 } from "../../shared/types";
-import type { MailboxDigestSnapshot, MailboxSyncStatus } from "../../shared/mailbox";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
@@ -59,7 +50,11 @@ import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 import { BotsPane, type BotRole } from "./BotsPane";
 import { useIsCalmTheme } from "../hooks/useIsCalmTheme";
 import { useAgentContext } from "../hooks/useAgentContext";
-import { CalmSidebarNav, CalmSidebarProfile, type CalmSidebarSegment } from "./calm/CalmSidebarNav";
+import { CalmAgentAvatar } from "./calm/CalmAgentAvatar";
+import { openCalmAgentSetup } from "./calm/CalmAgentSetup";
+import { BUILD_FOCUS_COMPOSER_EVENT } from "./calm/build-events";
+import type { SidebarDestinationId, SidebarPanelTab } from "./sidebar/sidebar-destinations";
+import "./sidebar/sidebar-panel.css";
 import { BOT_PROFILE_DELETED_EVENT, BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
 import type { BotConversationRosterProjection } from "../../shared/bot-lifecycle";
 
@@ -112,49 +107,37 @@ interface SidebarProps {
   tasks: Task[];
   botTasks?: Task[];
   selectedTaskId: string | null;
+  /**
+   * Mark the selected session in the list. Off while another destination is in
+   * view, where the session stays selected behind it but isn't what's shown.
+   */
+  highlightSelection?: boolean;
   selectedBotConversationProjection?: BotConversationRosterProjection | null;
   botConversationProjections?: Readonly<Record<string, BotConversationRosterProjection>>;
-  isBotViewActive?: boolean;
-  isAutomationsActive?: boolean;
-  isIdeasActive?: boolean;
-  isInboxAgentActive?: boolean;
-  isAgentsActive?: boolean;
-  isEverydayAgentActive?: boolean;
-  isMissionControlActive?: boolean;
+  /** Which list the panel shows. Owned by the app shell so the rail can switch it. */
+  activeTab?: SidebarPanelTab;
+  /** Rendered next to search in the panel header (the notifications bell). */
+  headerAccessory?: React.ReactNode;
+  /** The rail destination in view; drives Calm's Home / Build / Agents switch. */
+  activeDestinationId?: SidebarDestinationId | null;
+  onNavigate?: (id: SidebarDestinationId) => void;
   isLoadingSessions?: boolean;
   isLoadingMoreTasks?: boolean;
   completionAttentionTaskIds?: string[];
   onSelectTask: (id: string | null) => void;
-  onOpenAutomations?: () => void;
-  onOpenIdeas?: () => void;
-  onOpenInboxAgent?: () => void;
   onOpenAgents?: () => void;
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
   onReopenBot?: (task: Task) => void | Promise<void>;
   onBotUpdated?: (bot: BotRole) => void | Promise<void>;
   onBotDeleted?: (botId: string) => void | Promise<void>;
-  onOpenEverydayAgent?: () => void;
   onNewSession?: () => void;
   onOpenSettings: () => void;
-  onOpenMissionControl: () => void;
-  onOpenDevices?: () => void;
   isDevicesActive?: boolean;
-  /** Calm-theme navigation targets. */
-  onOpenHome?: () => void;
-  onOpenBuild?: () => void;
-  isBuildActive?: boolean;
-  onOpenLibrary?: () => void;
-  isLibraryActive?: boolean;
-  onOpenGitChanges?: () => void;
-  isGitChangesActive?: boolean;
-  onOpenPlugins?: () => void;
 
   onTasksChanged: () => void;
   onLoadMoreTasks?: () => void;
   hasMoreTasks?: boolean;
   uiDensity?: UiDensity;
-  updateInfo?: UpdateInfo | null;
-  onViewUpdate?: () => void;
 }
 
 /** Visual session mode derived from task metadata */
@@ -211,30 +194,6 @@ const ACTIVE_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set([
 ]);
 const AWAITING_SESSION_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused", "blocked"]);
 
-function MacMiniIcon({ className, size = 18 }: { className?: string; size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      className={className}
-      stroke="currentColor"
-      style={{ display: "block" }}
-    >
-      <path
-        d="M 4 6.5 L 20 6.5 Q 21.8 6.5 21.8 8.3 L 21.8 14.1 Q 21.8 15.9 20 15.9 L 4 15.9 Q 2.2 15.9 2.2 14.1 L 2.2 8.3 Q 2.2 6.5 4 6.5 Z"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M 6.5 16.2 Q 12 19.1 17.5 16.2" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="17.0" cy="11.2" r="1.1" fill="currentColor" stroke="none" />
-      <circle cx="19.6" cy="11.2" r="0.55" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
 export function isActiveSessionStatus(status: Task["status"]): boolean {
   return ACTIVE_SESSION_STATUSES.has(status);
 }
@@ -280,6 +239,21 @@ export function getSidebarDateGroup(
   const yesterday = new Date(today.getTime() - 86400000);
   if (date >= today) return "Today";
   if (date >= yesterday) return "Yesterday";
+  return "Earlier";
+}
+
+const SIDEBAR_DAY_MS = 86_400_000;
+
+/** Day bucket for a Recents session, from the timestamp the list sorts by. */
+export function getSidebarRecencyBucket(
+  task: Pick<Task, "createdAt" | "updatedAt">,
+  now = new Date(),
+): string {
+  const timestamp = task.updatedAt || task.createdAt;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (timestamp >= today) return "Today";
+  if (timestamp >= today - SIDEBAR_DAY_MS) return "Yesterday";
+  if (timestamp >= today - 6 * SIDEBAR_DAY_MS) return "Previous 7 days";
   return "Earlier";
 }
 
@@ -849,6 +823,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
   return (
     prev.workspace?.id === next.workspace?.id &&
     prev.selectedTaskId === next.selectedTaskId &&
+    prev.highlightSelection === next.highlightSelection &&
     prev.selectedBotConversationProjection?.state ===
       next.selectedBotConversationProjection?.state &&
     prev.selectedBotConversationProjection?.activityLabel ===
@@ -857,16 +832,11 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
       next.selectedBotConversationProjection?.lastActivityAt &&
     getBotProjectionSignature(prev.botConversationProjections) ===
       getBotProjectionSignature(next.botConversationProjections) &&
-    prev.isBotViewActive === next.isBotViewActive &&
-    prev.isAutomationsActive === next.isAutomationsActive &&
-    prev.isIdeasActive === next.isIdeasActive &&
-    prev.isInboxAgentActive === next.isInboxAgentActive &&
-    prev.isAgentsActive === next.isAgentsActive &&
-    prev.isEverydayAgentActive === next.isEverydayAgentActive &&
-    prev.isMissionControlActive === next.isMissionControlActive &&
+    prev.activeTab === next.activeTab &&
+    prev.headerAccessory === next.headerAccessory &&
+    prev.activeDestinationId === next.activeDestinationId &&
+    prev.onNavigate === next.onNavigate &&
     prev.isDevicesActive === next.isDevicesActive &&
-    prev.isBuildActive === next.isBuildActive &&
-    prev.isLibraryActive === next.isLibraryActive &&
     prev.isLoadingSessions === next.isLoadingSessions &&
     prev.isLoadingMoreTasks === next.isLoadingMoreTasks &&
     prev.hasMoreTasks === next.hasMoreTasks &&
@@ -876,63 +846,50 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
       getSidebarTaskListSignature(next.botTasks || []) &&
     (prev.completionAttentionTaskIds || []).join(",") ===
       (next.completionAttentionTaskIds || []).join(",") &&
-    prev.updateInfo?.latestVersion === next.updateInfo?.latestVersion &&
     prev.onSelectTask === next.onSelectTask &&
     prev.onOpenBot === next.onOpenBot &&
     prev.onReopenBot === next.onReopenBot &&
     prev.onBotUpdated === next.onBotUpdated &&
     prev.onBotDeleted === next.onBotDeleted &&
     prev.onTasksChanged === next.onTasksChanged &&
-    prev.onOpenSettings === next.onOpenSettings &&
-    prev.onOpenMissionControl === next.onOpenMissionControl
+    prev.onOpenSettings === next.onOpenSettings
   );
 }
+
+/** Calm's top-level switch; each segment is a rail destination. */
+const CALM_PANEL_SEGMENTS: ReadonlyArray<{ id: SidebarDestinationId; label: string }> = [
+  { id: "home", label: "Home" },
+  { id: "build", label: "Build" },
+  { id: "agents", label: "Agents" },
+];
 
 function SidebarComponent({
   workspace,
   tasks,
   botTasks: botTasksOverride,
   selectedTaskId,
+  highlightSelection = true,
   selectedBotConversationProjection,
   botConversationProjections,
-  isBotViewActive = false,
-  isAutomationsActive = false,
-  isIdeasActive = false,
-  isInboxAgentActive = false,
-  isAgentsActive = false,
-  isEverydayAgentActive = false,
-  isMissionControlActive = false,
+  activeTab = "sessions",
+  headerAccessory,
+  activeDestinationId = null,
+  onNavigate,
   isLoadingSessions = false,
   completionAttentionTaskIds = [],
   onSelectTask,
-  onOpenAutomations,
-  onOpenIdeas,
-  onOpenInboxAgent,
   onOpenAgents,
   onOpenBot,
   onReopenBot,
-  onOpenEverydayAgent,
   onNewSession,
   onOpenSettings,
-  onOpenMissionControl,
-  onOpenDevices,
   isDevicesActive = false,
-  onOpenHome,
-  onOpenBuild,
-  isBuildActive = false,
-  onOpenLibrary,
-  isLibraryActive = false,
-  onOpenGitChanges,
-  isGitChangesActive = false,
-  onOpenPlugins,
   isLoadingMoreTasks = false,
 
   onTasksChanged,
   onLoadMoreTasks,
   hasMoreTasks = false,
   uiDensity = "focused",
-  updateInfo,
-  onViewUpdate,
   onBotUpdated,
   onBotDeleted,
 }: SidebarProps) {
@@ -946,21 +903,12 @@ function SidebarComponent({
       : () =>
           setBrowserNotice(`${label} requires a host service that is unavailable in this session.`);
   const isCalm = useIsCalmTheme();
-  const calmAgentContext = useAgentContext();
-  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
   const [renameTaskId, setRenameTaskId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
   const [agentRoles, setAgentRoles] = useState<Map<string, AgentRoleInfo>>(new Map());
-  const [sidebarTab, setSidebarTab] = useState<"sessions" | "bots">(
-    isBotViewActive ? "bots" : "sessions",
-  );
-  // Follow navigation into a bot, but let the user browse Sessions while that
-  // conversation stays open. A render-time override made Sessions unclickable.
-  useEffect(() => {
-    if (isBotViewActive) setSidebarTab("bots");
-  }, [isBotViewActive, selectedTaskId]);
+  const sidebarTab = activeTab;
   const [isLoadingBots, setIsLoadingBots] = useState(false);
   const [botsError, setBotsError] = useState<string | null>(null);
   // Keep the full session history visible by default. Users can still hide
@@ -973,8 +921,6 @@ function SidebarComponent({
   const [archiveActionError, setArchiveActionError] = useState<string | null>(null);
   const [activeModeFilters, setActiveModeFilters] = useState<Set<SessionMode>>(new Set());
   const [showFilterBar] = useState(false);
-  const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
-  const [moreCollapsed, setMoreCollapsed] = useState(true);
   const [sessionSearch, setSessionSearch] = useState("");
   const [sidebarWorkspaces, setSidebarWorkspaces] = useState<Workspace[]>([]);
   const [workspaceNavSettings, setWorkspaceNavSettings] = useState<SidebarWorkspaceSettings>(() =>
@@ -988,14 +934,13 @@ function SidebarComponent({
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   // Automated sessions folder is collapsed by default to keep the sidebar clean
   const [automatedFolderCollapsed, setAutomatedFolderCollapsed] = useState(true);
-  const [mailboxDigest, setMailboxDigest] = useState<MailboxDigestSnapshot | null>(null);
-  const [mailboxStatus, setMailboxStatus] = useState<MailboxSyncStatus | null>(null);
   const pinActionErrorTimeoutRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const workspaceSectionMenuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const sessionSearchInputRef = useRef<HTMLInputElement>(null);
   const taskListRef = useRef<HTMLDivElement>(null);
   const completionAttentionSet = useMemo(
     () => new Set(completionAttentionTaskIds),
@@ -1007,8 +952,6 @@ function SidebarComponent({
     [deferredSessionSearch],
   );
   const hasSessionSearch = normalizedSessionSearch.length > 0;
-  const isMoreActive = isMissionControlActive || isIdeasActive;
-  const isMoreExpanded = isMoreActive || !moreCollapsed;
 
   const loadSidebarWorkspaces = useCallback(async () => {
     if (!window.electronAPI?.listWorkspaces) return;
@@ -1341,6 +1284,8 @@ function SidebarComponent({
     [botTasksOverride, tasks, workspace?.id],
   );
   const visibleSidebarTab = sidebarTab;
+  // The roster's create dialog, opened by the panel's New bot.
+  const [botCreateOpen, setBotCreateOpen] = useState(false);
 
   const handleBotCreated = useCallback((bot: BotRole) => {
     if (bot.isSystem) return;
@@ -1354,60 +1299,6 @@ function SidebarComponent({
     });
   }, []);
 
-  const loadMailboxInboxUnread = useCallback(async () => {
-    const api = window.electronAPI;
-    if (!api?.getMailboxDigest || !api?.getMailboxSyncStatus) return;
-    const [digest, status] = await Promise.all([
-      api.getMailboxDigest(workspace?.id).catch(() => null),
-      api.getMailboxSyncStatus().catch(() => null),
-    ]);
-    setMailboxDigest(digest);
-    setMailboxStatus(status);
-  }, [workspace?.id]);
-
-  useEffect(() => {
-    void loadMailboxInboxUnread();
-  }, [loadMailboxInboxUnread]);
-
-  const mailboxEventDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const api = window.electronAPI;
-    if (!api?.onMailboxEvent) return;
-    const unsubscribe = api.onMailboxEvent(() => {
-      if (mailboxEventDebounceRef.current !== null) {
-        clearTimeout(mailboxEventDebounceRef.current);
-      }
-      mailboxEventDebounceRef.current = setTimeout(() => {
-        mailboxEventDebounceRef.current = null;
-        void loadMailboxInboxUnread();
-      }, 500);
-    });
-    return () => {
-      unsubscribe();
-      if (mailboxEventDebounceRef.current !== null) {
-        clearTimeout(mailboxEventDebounceRef.current);
-      }
-    };
-  }, [loadMailboxInboxUnread]);
-
-  const inboxUnreadCount = mailboxDigest?.unreadCount ?? mailboxStatus?.unreadCount ?? 0;
-  const calmSegment: CalmSidebarSegment = isBuildActive
-    ? "build"
-    : isAgentsActive || sidebarTab === "bots"
-      ? "agents"
-      : "home";
-  const handleCalmSegmentChange = (segment: CalmSidebarSegment) => {
-    if (segment === "agents") {
-      setSidebarTab("bots");
-      onOpenAgents?.();
-      return;
-    }
-    setSidebarTab("sessions");
-    if (segment === "build") onOpenBuild?.();
-    else onOpenHome?.();
-  };
-  const inboxNavLabel =
-    inboxUnreadCount > 0 ? `Inbox (${inboxUnreadCount > 99 ? "99+" : inboxUnreadCount})` : "Inbox";
   // Build task tree from flat list
   const taskTree = useMemo(() => {
     const childrenMap = new Map<string, Task[]>();
@@ -1809,7 +1700,26 @@ function SidebarComponent({
     const hasRecentContent =
       workspaceGroups.recentNodes.length > 0 || unpinnedAutomatedTaskTree.length > 0;
     if (hasRecentContent) {
-      rows.push({ kind: "section-header", id: "section:recents", label: "Recents" });
+      // Recents read as a timeline: one label per day bucket.
+      const now = new Date();
+      let bucket = "";
+      let bucketNodes: TaskTreeNode[] = [];
+      const flushBucket = () => {
+        if (bucketNodes.length === 0) return;
+        rows.push({ kind: "date-header", id: `recents:${bucket}`, label: bucket });
+        appendTaskRows(bucketNodes, "user");
+        bucketNodes = [];
+      };
+      for (const node of workspaceGroups.recentNodes) {
+        const nodeBucket = getSidebarRecencyBucket(node.task, now);
+        if (nodeBucket !== bucket) {
+          flushBucket();
+          bucket = nodeBucket;
+        }
+        bucketNodes.push(node);
+      }
+      flushBucket();
+
       if (unpinnedAutomatedTaskTree.length > 0) {
         rows.push({
           kind: "automated-header",
@@ -1824,7 +1734,6 @@ function SidebarComponent({
           appendTaskRows(unpinnedAutomatedTaskTree, "automated", true);
         }
       }
-      appendTaskRows(workspaceGroups.recentNodes, "user", true);
     }
 
     if (hasMoreTasks && (!hasSessionSearch || rows.length > 0)) {
@@ -1920,7 +1829,7 @@ function SidebarComponent({
   // If the first page does not fill the scroll container (for example because
   // focused mode hides failed sessions), keep paging until the list can scroll.
   useEffect(() => {
-    if (useVirtualizedTaskRows || sessionsCollapsed || !hasMoreTasks || !onLoadMoreTasks) return;
+    if (useVirtualizedTaskRows || !hasMoreTasks || !onLoadMoreTasks) return;
 
     const frame = window.requestAnimationFrame(() => {
       const el = taskListRef.current;
@@ -1935,7 +1844,6 @@ function SidebarComponent({
     filteredTaskTree.length,
     hasMoreTasks,
     onLoadMoreTasks,
-    sessionsCollapsed,
     useVirtualizedTaskRows,
     visibleAutomatedTaskTree.length,
   ]);
@@ -2246,7 +2154,13 @@ function SidebarComponent({
       const Icon = resolveTwinIcon(role.icon);
       return (
         <span title={role.displayName}>
-          <Icon className="cli-subagent-icon" size={14} strokeWidth={2} />
+          {/* The role's colour marks its icon; the name reads like any other row. */}
+          <Icon
+            className="cli-subagent-icon"
+            size={14}
+            strokeWidth={2}
+            style={role.color ? { color: role.color } : undefined}
+          />
         </span>
       );
     }
@@ -2264,6 +2178,29 @@ function SidebarComponent({
     return null;
   };
 
+  const workingSessionCount = useMemo(
+    () => tasks.filter((task) => !task.parentTaskId && isActiveSessionStatus(task.status)).length,
+    [tasks],
+  );
+  const needsYouCount = useMemo(
+    () => tasks.filter((task) => !task.parentTaskId && isAwaitingSessionStatus(task.status)).length,
+    [tasks],
+  );
+  const agentContext = useAgentContext();
+  const agentName = agentContext.agentName?.trim() || "CoWork";
+
+  const toggleSessionSearch = () => {
+    if (showSessionSearch) {
+      setSessionSearch("");
+      setShowSessionFilters(false);
+    }
+    setShowSessionSearch(!showSessionSearch);
+  };
+
+  useEffect(() => {
+    if (showSessionSearch) sessionSearchInputRef.current?.focus();
+  }, [showSessionSearch]);
+
   const handleNewTask = () => {
     if (onNewSession) {
       onNewSession();
@@ -2272,6 +2209,19 @@ function SidebarComponent({
     // Fallback: deselect current task to show the welcome/new task screen
     onSelectTask(null);
   };
+
+  // The panel's primary button creates whatever the panel is showing: a bot on
+  // the roster, a build on Build, otherwise a session.
+  const primaryAction: { kind: "session" | "build" | "bot"; label: string; onClick: () => void } =
+    !isDevicesActive && visibleSidebarTab === "bots"
+      ? { kind: "bot", label: "New bot", onClick: () => setBotCreateOpen(true) }
+      : activeDestinationId === "build"
+        ? {
+            kind: "build",
+            label: "New build",
+            onClick: () => window.dispatchEvent(new Event(BUILD_FOCUS_COMPOSER_EVENT)),
+          }
+        : { kind: "session", label: "New session", onClick: handleNewTask };
 
   const navigateDevicesSection = useCallback(
     (section: "overview" | "tasks" | "devices" | "apps" | "storage" | "alerts") => {
@@ -2445,7 +2395,7 @@ function SidebarComponent({
 
     return (
       <div
-        className={`task-item cli-task-item ${selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass} ${hasChildren ? "task-item-has-children" : ""} ${showCompletionAttention ? "task-completion-unread" : ""}`}
+        className={`task-item cli-task-item ${highlightSelection && selectedTaskId === task.id ? "task-item-selected" : ""} ${isSubAgent ? "task-item-subagent" : ""} ${node.synthetic ? "task-item-group-root" : ""} ${modeClass} ${hasChildren ? "task-item-has-children" : ""} ${showCompletionAttention ? "task-completion-unread" : ""}`}
         data-task-id={node.synthetic ? undefined : task.id}
         onClick={() => {
           if (node.synthetic) return;
@@ -2454,12 +2404,7 @@ function SidebarComponent({
         }}
         style={
           {
-            "--cli-task-padding-left":
-              depth === 0
-                ? grouped
-                  ? "28px"
-                  : "12px"
-                : `${4 + depth * 12 + (grouped ? 16 : 0)}px`,
+            "--cli-task-padding-left": `${(grouped ? 30 : 8) + depth * 12}px`,
           } as React.CSSProperties
         }
         title={taskMode && taskMode !== "standard" ? SESSION_MODE_META[taskMode].label : undefined}
@@ -2473,7 +2418,7 @@ function SidebarComponent({
 
         {!isAwaitingSession && (
           <span
-            className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)} ${isActiveSessionStatus(task.status) ? "cli-task-status-leading" : ""}`}
+            className={`cli-task-status ${getStatusClass(task.status, showCompletionAttention)} ${isActiveSessionStatus(task.status) ? "cli-task-status-trailing" : ""}`}
           >
             {getStatusIndicator(task.status, showCompletionAttention)}
           </span>
@@ -2544,14 +2489,7 @@ function SidebarComponent({
                     const label = role
                       ? stripAllEmojis(role.displayName)
                       : stripAllEmojis(sessionTitle);
-                    return (
-                      <span
-                        className="cli-task-agent-name"
-                        style={role ? { color: role.color } : undefined}
-                      >
-                        {label}
-                      </span>
-                    );
+                    return <span className="cli-task-agent-name">{label}</span>;
                   })()}
                 </span>
               ) : (
@@ -2562,15 +2500,20 @@ function SidebarComponent({
                 />
               )}
               {isAwaitingSession && (
-                <span className="cli-task-awaiting-badge">Awaiting response</span>
+                <span className="cli-task-awaiting-badge" title="Awaiting your response">
+                  Awaiting response
+                </span>
               )}
               {hasChildren && !hasSessionSearch && (
                 <button
+                  type="button"
                   className="cli-collapse-btn cli-collapse-btn-inline"
                   onClick={(e) => toggleCollapse(e, task.id)}
+                  aria-expanded={!isCollapsed}
+                  aria-label={isCollapsed ? "Show subagents" : "Hide subagents"}
                   title={isCollapsed ? "Expand" : "Collapse"}
                 >
-                  {isCollapsed ? "▸" : "▾"}
+                  <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
                 </button>
               )}
               {!isAwaitingSession && (
@@ -2889,13 +2832,9 @@ function SidebarComponent({
           aria-expanded={row.expanded}
           title={row.expanded ? "Hide automated sessions" : "Show automated sessions"}
         >
-          <span className="automated-folder-label">
-            <span className="terminal-only">AUTOMATED</span>
-            <span className="modern-only">Automated</span>
-            <span className="automated-folder-chevron" aria-hidden="true">
-              {row.expanded ? "▾" : "▸"}
-            </span>
-          </span>
+          <Workflow className="automated-folder-icon" size={16} aria-hidden="true" />
+          <span className="automated-folder-label">Automated</span>
+          <ChevronRight className="automated-folder-chevron" size={13} aria-hidden="true" />
           <span className="automated-folder-count">{row.count}</span>
           {row.hasActive && (
             <span
@@ -2935,7 +2874,7 @@ function SidebarComponent({
   };
 
   return (
-    <div className={`sidebar cli-sidebar${isCalm ? " calm-sidebar" : ""}`}>
+    <div className={`sidebar cli-sidebar sidebar-panel${isCalm ? " calm-sidebar" : ""}`}>
       {browserNotice && (
         <div className="sidebar-browser-host-notice" role="status">
           <span>{browserNotice}</span>
@@ -3022,306 +2961,90 @@ function SidebarComponent({
           </form>
         </div>
       )}
-      {isCalm && (
-        <CalmSidebarNav
-          segment={calmSegment}
-          onSegmentChange={handleCalmSegmentChange}
-          onNew={handleNewTask}
-          onSearch={() => {
-            setSidebarTab("sessions");
-            setSessionsCollapsed(false);
-            setShowSessionSearch((value) => {
-              if (value) setSessionSearch("");
-              return !value;
-            });
-          }}
-          isSearchActive={showSessionSearch}
-          onOpenLibrary={browserAction(
-            ["listBrowserWorkspaceFiles", "listBrowserTaskArtifacts"],
-            onOpenLibrary,
-            "Library",
-          )}
-          isLibraryActive={isLibraryActive}
-          onOpenGitChanges={isBrowserHost ? onOpenGitChanges : undefined}
-          isGitChangesActive={isGitChangesActive}
-          onOpenPlugins={browserAction(["listPluginPacks"], onOpenPlugins, "Tools")}
-          onOpenAutomations={browserAction(["listRoutines"], onOpenAutomations, "Automations")}
-          isAutomationsActive={isAutomationsActive}
-          more={{
-            inboxLabel: "Inbox",
-            inboxUnread: inboxUnreadCount,
-            onOpenInbox: browserAction(
-              ["getMailboxSyncStatus", "listMailboxThreads"],
-              onOpenInboxAgent,
-              "Inbox",
-            ),
-            isInboxActive: isInboxAgentActive,
-            onOpenEveryday: browserAction(
-              ["everydayAgentGetProfile"],
-              onOpenEverydayAgent,
-              "Everyday Agent",
-            ),
-            isEverydayActive: isEverydayAgentActive,
-            onOpenDevices,
-            isDevicesActive,
-            onOpenMissionControl,
-            isMissionControlActive,
-            onOpenIdeas,
-            isIdeasActive,
-          }}
-        />
-      )}
-      {/* New Session Button */}
-      <div className="sidebar-header" hidden={isCalm}>
-        <div className="cli-header-actions sidebar-nav">
-          <button
-            className="new-task-btn cli-new-task-btn cli-action-btn sidebar-new-session-btn"
-            onClick={handleNewTask}
-          >
-            <span className="terminal-only">
-              <span className="cli-btn-bracket">[</span>
-              <span className="cli-btn-plus">+</span>
-              <span className="cli-btn-bracket">]</span>
-            </span>
-            <span className="cli-btn-text">
-              <span className="terminal-only">new_session</span>
-              <span className="modern-only cli-new-task-modern-label">
-                <span className="sidebar-home-btn-icon sidebar-new-session-icon" aria-hidden="true">
-                  <Plus size={16} strokeWidth={2} style={{ display: "block" }} />
-                </span>
-                <span>New</span>
-              </span>
-            </span>
-          </button>
-
-          {isBrowserHost && hasHostCapability("git.read") && (
+      <div className="sidebar-panel-header">
+        <div className="sidebar-panel-identity">
+          {isCalm ? (
             <button
               type="button"
-              className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isGitChangesActive ? "active" : ""}`}
-              onClick={onOpenGitChanges}
-              aria-pressed={isGitChangesActive}
-              title="Git Changes"
+              className="sidebar-panel-avatar"
+              onClick={openCalmAgentSetup}
+              aria-label={`Change ${agentName}'s name and look`}
+              title="Change your agent's name and look"
             >
-              <span className="cli-btn-text">
-                <span className="terminal-only">git_changes</span>
-                <span className="modern-only cli-new-task-modern-label">
-                  <span
-                    className="sidebar-home-btn-icon"
-                    aria-hidden="true"
-                    style={{ display: "flex" }}
-                  >
-                    <GitBranch size={16} strokeWidth={2} style={{ display: "block" }} />
-                  </span>
-                  <span>Git Changes</span>
+              <CalmAgentAvatar size={26} animated={workingSessionCount > 0} />
+            </button>
+          ) : (
+            <span className="sidebar-panel-avatar" aria-hidden="true">
+              <CalmAgentAvatar size={26} animated={workingSessionCount > 0} />
+            </span>
+          )}
+          <div className="sidebar-panel-identity-copy">
+            <span className="sidebar-panel-title">{agentName}</span>
+            <span className="sidebar-panel-status" role="status">
+              {needsYouCount > 0 && (
+                <span className="sidebar-panel-status-item sidebar-panel-status-needs">
+                  <span className="sidebar-panel-status-dot" aria-hidden="true" />
+                  {needsYouCount} {needsYouCount === 1 ? "needs" : "need"} you
                 </span>
-              </span>
+              )}
+              {workingSessionCount > 0 && (
+                <span className="sidebar-panel-status-item sidebar-panel-status-working">
+                  <span className="sidebar-panel-status-dot" aria-hidden="true" />
+                  {workingSessionCount} working
+                </span>
+              )}
+              {needsYouCount === 0 && workingSessionCount === 0 && (
+                <span className="sidebar-panel-status-item">All caught up</span>
+              )}
+            </span>
+          </div>
+        </div>
+        <div className="sidebar-panel-header-actions">
+          {headerAccessory}
+          {!isDevicesActive && visibleSidebarTab === "sessions" && (
+            <button
+              type="button"
+              className={`sidebar-panel-icon-btn${showSessionSearch ? " active" : ""}`}
+              onClick={toggleSessionSearch}
+              aria-pressed={showSessionSearch}
+              aria-label="Search sessions"
+              title="Search sessions"
+            >
+              <Search size={16} strokeWidth={1.9} />
             </button>
           )}
-
-          <button
-            type="button"
-            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isAgentsActive ? "active" : ""}`}
-            onClick={browserAction(
-              ["listManagedAgents", "listManagedSessions"],
-              onOpenAgents,
-              "Agents",
-            )}
-            aria-pressed={isAgentsActive}
-            title="Agents"
-          >
-            <span className="cli-btn-text">
-              <span className="terminal-only">agents</span>
-              <span className="modern-only cli-new-task-modern-label">
-                <span
-                  className="sidebar-home-btn-icon"
-                  aria-hidden="true"
-                  style={{ display: "flex" }}
-                >
-                  <UsersRound size={16} strokeWidth={2} style={{ display: "block" }} />
-                </span>
-                <span>Agents</span>
-              </span>
-            </span>
-          </button>
-
-          <button
-            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-devices-btn cli-devices-btn sidebar-nav-item ${isDevicesActive ? "active" : ""}`}
-            onClick={browserAction(
-              ["listManagedDevices", "getDeviceSummary"],
-              onOpenDevices,
-              "Devices",
-            )}
-            title="Devices"
-          >
-            <span className="terminal-only">
-              <span className="cli-btn-bracket">[</span>
-              <span className="cli-btn-accent">DV</span>
-              <span className="cli-btn-bracket">]</span>
-            </span>
-            <span className="cli-btn-text">
-              <span className="terminal-only">devices</span>
-              <span className="modern-only cli-new-task-modern-label">
-                <span
-                  className="sidebar-home-btn-icon"
-                  aria-hidden="true"
-                  style={{ display: "flex" }}
-                >
-                  <MacMiniIcon size={16} />
-                </span>
-                <span>Devices</span>
-              </span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isInboxAgentActive ? "active" : ""}`}
-            onClick={browserAction(
-              ["getMailboxSyncStatus", "listMailboxThreads"],
-              onOpenInboxAgent,
-              "Inbox",
-            )}
-            aria-pressed={isInboxAgentActive}
-            title={inboxNavLabel}
-            aria-label={inboxNavLabel}
-          >
-            <span className="cli-btn-text">
-              <span className="terminal-only">inbox</span>
-              <span className="modern-only cli-new-task-modern-label">
-                <span
-                  className="sidebar-home-btn-icon"
-                  aria-hidden="true"
-                  style={{ display: "flex" }}
-                >
-                  <Inbox size={16} strokeWidth={2} style={{ display: "block" }} />
-                </span>
-                <span>{inboxNavLabel}</span>
-              </span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isAutomationsActive ? "active" : ""}`}
-            onClick={browserAction(["listRoutines"], onOpenAutomations, "Automations")}
-            aria-pressed={isAutomationsActive}
-            title="Automations"
-          >
-            <span className="cli-btn-text">
-              <span className="terminal-only">automation</span>
-              <span className="modern-only cli-new-task-modern-label">
-                <span
-                  className="sidebar-home-btn-icon"
-                  aria-hidden="true"
-                  style={{ display: "flex" }}
-                >
-                  <Workflow size={16} strokeWidth={2} style={{ display: "block" }} />
-                </span>
-                <span>Automations</span>
-              </span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isEverydayAgentActive ? "active" : ""}`}
-            onClick={browserAction(
-              ["everydayAgentGetProfile"],
-              onOpenEverydayAgent,
-              "Everyday Agent",
-            )}
-            aria-pressed={isEverydayAgentActive}
-            title="Everyday Agent"
-          >
-            <span className="cli-btn-text">
-              <span className="terminal-only">everyday_agent</span>
-              <span className="modern-only cli-new-task-modern-label">
-                <span
-                  className="sidebar-home-btn-icon"
-                  aria-hidden="true"
-                  style={{ display: "flex" }}
-                >
-                  <Sparkles size={16} strokeWidth={2} style={{ display: "block" }} />
-                </span>
-                <span>Everyday</span>
-              </span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className="new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item sidebar-more-toggle"
-            onClick={() => setMoreCollapsed((value) => !value)}
-            aria-expanded={isMoreExpanded}
-            title={isMoreExpanded ? "Collapse More" : "Expand More"}
-          >
-            <span className="cli-btn-text">
-              <span className="terminal-only">more</span>
-              <span className="modern-only cli-new-task-modern-label">
-                <span
-                  className="sidebar-home-btn-icon sidebar-more-dots"
-                  aria-hidden="true"
-                  style={{ display: "flex" }}
-                >
-                  <Shapes size={16} strokeWidth={2.1} style={{ display: "block" }} />
-                </span>
-                <span>More</span>
-              </span>
-            </span>
-          </button>
-
-          {isMoreExpanded && (
-            <div className="sidebar-more-items">
-              <button
-                type="button"
-                className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-home-btn sidebar-nav-item ${isMissionControlActive ? "active" : ""}`}
-                onClick={browserAction(
-                  ["getAgentRoles", "listMissionControlItems"],
-                  onOpenMissionControl,
-                  "Mission Control",
-                )}
-                aria-pressed={isMissionControlActive}
-                title="Mission Control"
-              >
-                <span className="cli-btn-text">
-                  <span className="terminal-only">mission_control</span>
-                  <span className="modern-only cli-new-task-modern-label">
-                    <span
-                      className="sidebar-home-btn-icon"
-                      aria-hidden="true"
-                      style={{ display: "flex" }}
-                    >
-                      <Users size={16} strokeWidth={2} style={{ display: "block" }} />
-                    </span>
-                    <span>Mission Control</span>
-                  </span>
-                </span>
-              </button>
-
-              <button
-                type="button"
-                className={`new-task-btn cli-new-task-btn cli-action-btn sidebar-ideas-btn sidebar-nav-item ${isIdeasActive ? "active" : ""}`}
-                onClick={onOpenIdeas}
-                aria-pressed={isIdeasActive}
-                title="Ideas"
-              >
-                <span className="cli-btn-text">
-                  <span className="terminal-only">ideas</span>
-                  <span className="modern-only cli-new-task-modern-label">
-                    <span
-                      className="sidebar-home-btn-icon"
-                      aria-hidden="true"
-                      style={{ display: "flex" }}
-                    >
-                      <Lightbulb size={16} strokeWidth={2} style={{ display: "block" }} />
-                    </span>
-                    <span>Ideas</span>
-                  </span>
-                </span>
-              </button>
-            </div>
-          )}
         </div>
+      </div>
+      {isCalm && onNavigate && (
+        <div
+          className="calm-segmented sidebar-panel-segments"
+          role="tablist"
+          aria-label="Workspace"
+        >
+          {CALM_PANEL_SEGMENTS.map((segment) => (
+            <button
+              key={segment.id}
+              type="button"
+              role="tab"
+              aria-selected={activeDestinationId === segment.id}
+              className={activeDestinationId === segment.id ? "active" : ""}
+              onClick={() => onNavigate(segment.id)}
+            >
+              {segment.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="sidebar-panel-primary">
+        <button
+          type="button"
+          className="sidebar-panel-row sidebar-panel-new"
+          onClick={primaryAction.onClick}
+          data-action={primaryAction.kind}
+        >
+          <Plus className="sidebar-panel-new-icon" size={16} strokeWidth={2} aria-hidden="true" />
+          <span className="sidebar-panel-new-label">{primaryAction.label}</span>
+        </button>
       </div>
 
       {isDevicesActive ? (
@@ -3389,93 +3112,75 @@ function SidebarComponent({
             </button>
           </div>
 
+          {/* Each observer reads as a roster row: what it watches, then its state.
+              The longer explanation is the tooltip. */}
           <div className="devices-sidebar-list">
             <button
               type="button"
-              className="devices-sidebar-item featured"
+              className="devices-sidebar-item"
               onClick={() => navigateDevicesSection("tasks")}
+              title="Launch and supervise work happening on paired remotes."
             >
-              <div className="devices-sidebar-item-top">
-                <Rows3 size={14} />
+              <span className="devices-sidebar-item-icon" aria-hidden="true">
+                <Rows3 size={15} />
+              </span>
+              <span className="devices-sidebar-item-copy">
                 <span className="devices-sidebar-item-label">Execution lane</span>
-                <span className="devices-sidebar-item-dot" />
-              </div>
-              <strong>
-                {remoteTasks.length > 0
-                  ? `${remoteTasks.length} remote runs in view`
-                  : "No remote runs yet"}
-              </strong>
-              <span>Use this page to launch and supervise work happening on paired remotes.</span>
+                <span className="devices-sidebar-item-status">
+                  {remoteTasks.length > 0
+                    ? `${remoteTasks.length} remote ${remoteTasks.length === 1 ? "run" : "runs"} in view`
+                    : "No remote runs yet"}
+                </span>
+              </span>
             </button>
             <button
               type="button"
               className="devices-sidebar-item"
               onClick={() => triggerDevicesAction("pairing")}
+              title="Separate work, personal, archive, or automation machines without mixing disks."
             >
-              <div className="devices-sidebar-item-top">
-                <Server size={14} />
-                <span>Fleet shape</span>
-              </div>
-              <strong>
-                {remoteDeviceIds.size > 0
-                  ? `${remoteDeviceIds.size} remotes paired or active`
-                  : "Start with your first remote"}
-              </strong>
-              <span>
-                Separate work, personal, archive, or automation machines without mixing disks.
+              <span className="devices-sidebar-item-icon" aria-hidden="true">
+                <Server size={15} />
+              </span>
+              <span className="devices-sidebar-item-copy">
+                <span className="devices-sidebar-item-label">Fleet shape</span>
+                <span className="devices-sidebar-item-status">
+                  {remoteDeviceIds.size > 0
+                    ? `${remoteDeviceIds.size} ${remoteDeviceIds.size === 1 ? "remote" : "remotes"} paired or active`
+                    : "Start with your first remote"}
+                </span>
               </span>
             </button>
             <button
               type="button"
               className="devices-sidebar-item"
               onClick={() => navigateDevicesSection("alerts")}
+              title="Approvals, failed app connections, and offline remotes surface here."
             >
-              <div className="devices-sidebar-item-top">
-                <Bell size={14} />
-                <span>Observer feed</span>
-              </div>
-              <strong>
-                {remoteAttentionCount > 0
-                  ? `${remoteAttentionCount} issues waiting`
-                  : "Observer is quiet"}
-              </strong>
-              <span>Approvals, failed app connections, and offline remotes surface here.</span>
+              <span className="devices-sidebar-item-icon" aria-hidden="true">
+                <Bell size={15} />
+              </span>
+              <span className="devices-sidebar-item-copy">
+                <span className="devices-sidebar-item-label">Observer feed</span>
+                <span className="devices-sidebar-item-status">
+                  {remoteAttentionCount > 0
+                    ? `${remoteAttentionCount} ${remoteAttentionCount === 1 ? "issue" : "issues"} waiting`
+                    : "Observer is quiet"}
+                </span>
+              </span>
+              {remoteAttentionCount > 0 && (
+                <span className="devices-sidebar-item-attention" aria-hidden="true" />
+              )}
             </button>
           </div>
         </div>
       ) : (
         <>
-          <div
-            className="sidebar-session-tabs"
-            role="tablist"
-            aria-label="Workspace views"
-            hidden={isCalm}
-          >
-            <button
-              type="button"
-              role="tab"
-              className={`sidebar-session-tab ${visibleSidebarTab === "sessions" ? "active" : ""}`}
-              aria-selected={visibleSidebarTab === "sessions"}
-              onClick={() => setSidebarTab("sessions")}
-            >
-              Sessions
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className={`sidebar-session-tab ${visibleSidebarTab === "bots" ? "active" : ""}`}
-              aria-selected={visibleSidebarTab === "bots"}
-              onClick={() => setSidebarTab("bots")}
-            >
-              Bots
-            </button>
-          </div>
-
           {visibleSidebarTab === "bots" ? (
             <BotsPane
               roles={botRoles}
               tasks={botTasks}
-              selectedTaskId={selectedTaskId}
+              selectedTaskId={highlightSelection ? selectedTaskId : null}
               selectedConversationProjection={selectedBotConversationProjection}
               conversationProjections={botConversationProjections}
               isLoading={isLoadingBots}
@@ -3490,6 +3195,8 @@ function SidebarComponent({
                 "Agents",
               )}
               onBotCreated={handleBotCreated}
+              createOpen={botCreateOpen}
+              onCreateOpenChange={setBotCreateOpen}
               onBotUpdated={async (bot) => {
                 setAgentRoles((current) => {
                   const next = new Map(current);
@@ -3511,63 +3218,6 @@ function SidebarComponent({
             <>
               {/* Sessions List Header */}
               <div className="sidebar-header-sessions">
-                <div className="new-task-btn cli-new-task-btn cli-action-btn cli-sessions-header">
-                  <button
-                    type="button"
-                    className="cli-list-header-toggle"
-                    onClick={() => setSessionsCollapsed((value) => !value)}
-                    aria-expanded={!sessionsCollapsed}
-                    title={sessionsCollapsed ? "Expand sessions" : "Collapse sessions"}
-                  >
-                    <span className="cli-section-prompt terminal-only">
-                      {sessionsCollapsed ? "▸" : "▾"}
-                    </span>
-                    <span className="terminal-only">SESSIONS</span>
-                    <span className="modern-only cli-new-task-modern-label">
-                      <span className="sidebar-home-btn-icon cli-sessions-icon" aria-hidden="true">
-                        <SlidersHorizontal size={16} strokeWidth={2} style={{ display: "block" }} />
-                      </span>
-                      <span className="cli-sessions-title">Sessions</span>
-                      <span className="cli-sessions-collapse-indicator" aria-hidden="true">
-                        {sessionsCollapsed ? (
-                          <ChevronRight size={14} strokeWidth={2.5} />
-                        ) : (
-                          <ChevronDown size={14} strokeWidth={2.5} />
-                        )}
-                      </span>
-                    </span>
-                  </button>
-                  <div className="cli-list-header-actions">
-                    <button
-                      type="button"
-                      className={`sidebar-session-action ${showSessionSearch ? "active" : ""}`}
-                      onClick={() => {
-                        setSessionsCollapsed(false);
-                        setShowSessionSearch((value) => {
-                          if (value) setSessionSearch("");
-                          return !value;
-                        });
-                      }}
-                      aria-pressed={showSessionSearch}
-                      title={showSessionSearch ? "Hide search" : "Search sessions"}
-                    >
-                      <Search size={16} strokeWidth={2} />
-                    </button>
-                    <button
-                      type="button"
-                      className={`sidebar-session-action ${showSessionFilters ? "active" : ""}`}
-                      onClick={() => {
-                        setSessionsCollapsed(false);
-                        setShowSessionFilters((value) => !value);
-                      }}
-                      aria-pressed={showSessionFilters}
-                      title={showSessionFilters ? "Hide filters" : "Filter sessions"}
-                    >
-                      <ListFilter size={16} strokeWidth={2} />
-                    </button>
-                  </div>
-                </div>
-
                 {(pinActionError || archiveActionError || workspaceActionError) && (
                   <div
                     className="cli-sidebar-error"
@@ -3578,7 +3228,33 @@ function SidebarComponent({
                   </div>
                 )}
 
-                {!sessionsCollapsed && showSessionFilters && (
+                {showSessionSearch && (
+                  <div className="sidebar-panel-search">
+                    <label className="sidebar-sessions-search">
+                      <Search size={14} />
+                      <input
+                        ref={sessionSearchInputRef}
+                        type="search"
+                        aria-label="Search sessions"
+                        placeholder="Search"
+                        value={sessionSearch}
+                        onChange={(event) => setSessionSearch(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className={`sidebar-panel-icon-btn${showSessionFilters ? " active" : ""}`}
+                      onClick={() => setShowSessionFilters((value) => !value)}
+                      aria-pressed={showSessionFilters}
+                      aria-label="Filter sessions"
+                      title="Filter sessions"
+                    >
+                      <ListFilter size={15} strokeWidth={1.9} />
+                    </button>
+                  </div>
+                )}
+
+                {showSessionSearch && showSessionFilters && (
                   <div className="sidebar-session-filter-panel">
                     <button
                       type="button"
@@ -3601,19 +3277,6 @@ function SidebarComponent({
                       {automatedTaskTree.length > 0 && <span>{automatedTaskTree.length}</span>}
                     </button>
                   </div>
-                )}
-
-                {!sessionsCollapsed && showSessionSearch && (
-                  <label className="sidebar-sessions-search">
-                    <Search size={14} />
-                    <input
-                      type="search"
-                      aria-label="Search sessions"
-                      placeholder="Search"
-                      value={sessionSearch}
-                      onChange={(event) => setSessionSearch(event.target.value)}
-                    />
-                  </label>
                 )}
 
                 {showFilterBar && (
@@ -3657,121 +3320,107 @@ function SidebarComponent({
                 className={`task-list cli-task-list ${useVirtualizedTaskRows ? "task-list-virtualized" : ""}`}
                 ref={taskListRef}
               >
-                {!sessionsCollapsed && (
-                  <>
-                    {sidebarVirtualRows.length === 0 ? (
-                      isLoadingSessions && !hasSessionSearch && activeModeFilters.size === 0 ? (
-                        <div className="sidebar-session-skeleton" aria-label="Loading sessions">
-                          <span className="sidebar-session-skeleton-line" />
-                          <span className="sidebar-session-skeleton-line" />
-                          <span className="sidebar-session-skeleton-line" />
+                <>
+                  {sidebarVirtualRows.length === 0 ? (
+                    isLoadingSessions && !hasSessionSearch && activeModeFilters.size === 0 ? (
+                      <div className="sidebar-session-skeleton" aria-label="Loading sessions">
+                        <span className="sidebar-session-skeleton-line" />
+                        <span className="sidebar-session-skeleton-line" />
+                        <span className="sidebar-session-skeleton-line" />
+                      </div>
+                    ) : hasSessionSearch ? (
+                      <div
+                        className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
+                      >
+                        <div className="sidebar-empty-message sidebar-search-empty-message">
+                          <Search size={32} style={{ opacity: 0.3 }} />
+                          <p>No matching sessions</p>
+                          <span>Try a different title, prompt, or session id</span>
                         </div>
-                      ) : hasSessionSearch ? (
-                        <div
-                          className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
-                        >
-                          <div className="sidebar-empty-message sidebar-search-empty-message">
-                            <Search size={32} style={{ opacity: 0.3 }} />
-                            <p>No matching sessions</p>
-                            <span>Try a different title, prompt, or session id</span>
-                          </div>
-                        </div>
-                      ) : activeModeFilters.size > 0 ? null : (
-                        <div
-                          className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
-                        >
-                          <pre className="cli-tree terminal-only">{`├── (no sessions yet)
+                      </div>
+                    ) : activeModeFilters.size > 0 ? null : (
+                      <div
+                        className={`sidebar-empty cli-empty ${uiDensity === "focused" ? "sidebar-empty-focused" : ""}`}
+                      >
+                        <pre className="cli-tree terminal-only">{`├── (no sessions yet)
 └── ...`}</pre>
-                          {uiDensity === "focused" ? (
-                            <div className="sidebar-empty-message">
-                              <EyeOff size={32} style={{ opacity: 0.3 }} />
-                              <p>Your conversations will appear here</p>
-                              <span>Start a new session to get going</span>
-                            </div>
-                          ) : (
-                            <p className="cli-hint">
-                              <span className="terminal-only"># start a new session above</span>
-                              <span className="modern-only">Start a new session to begin</span>
-                            </p>
-                          )}
-                        </div>
-                      )
-                    ) : useVirtualizedTaskRows ? (
-                      <VirtualList
-                        items={sidebarVirtualRows}
-                        getItemKey={(row) => {
-                          if (row.kind === "task")
-                            return `${row.section ?? "user"}:${row.row.node.task.id}`;
-                          return row.id;
-                        }}
-                        getItemHeight={(row) =>
-                          row.kind === "section-header"
-                            ? SIDEBAR_SECTION_HEADER_HEIGHT
-                            : row.kind === "workspace-empty"
-                              ? SIDEBAR_SECTION_HEADER_HEIGHT + 20
-                              : row.kind === "workspace-session-action"
-                                ? SIDEBAR_WORKSPACE_SESSION_ACTION_HEIGHT
-                                : row.kind === "workspace-header"
-                                  ? SIDEBAR_WORKSPACE_HEADER_HEIGHT
-                                  : row.kind === "date-header"
-                                    ? uiDensity === "focused"
-                                      ? SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT
-                                      : SIDEBAR_DATE_HEADER_HEIGHT
-                                    : row.kind === "automated-header"
-                                      ? SIDEBAR_AUTOMATED_HEADER_HEIGHT
-                                      : row.kind === "load-more"
-                                        ? SIDEBAR_LOAD_MORE_HEIGHT
-                                        : uiDensity === "focused"
-                                          ? SIDEBAR_FOCUSED_ITEM_HEIGHT
-                                          : SIDEBAR_ITEM_HEIGHT
+                        {uiDensity === "focused" ? (
+                          <div className="sidebar-empty-message">
+                            <EyeOff size={32} style={{ opacity: 0.3 }} />
+                            <p>Your conversations will appear here</p>
+                            <span>Start a new session to get going</span>
+                          </div>
+                        ) : (
+                          <p className="cli-hint">
+                            <span className="terminal-only"># start a new session above</span>
+                            <span className="modern-only">Start a new session to begin</span>
+                          </p>
+                        )}
+                      </div>
+                    )
+                  ) : useVirtualizedTaskRows ? (
+                    <VirtualList
+                      items={sidebarVirtualRows}
+                      getItemKey={(row) => {
+                        if (row.kind === "task")
+                          return `${row.section ?? "user"}:${row.row.node.task.id}`;
+                        return row.id;
+                      }}
+                      getItemHeight={(row) =>
+                        row.kind === "section-header"
+                          ? SIDEBAR_SECTION_HEADER_HEIGHT
+                          : row.kind === "workspace-empty"
+                            ? SIDEBAR_SECTION_HEADER_HEIGHT + 20
+                            : row.kind === "workspace-session-action"
+                              ? SIDEBAR_WORKSPACE_SESSION_ACTION_HEIGHT
+                              : row.kind === "workspace-header"
+                                ? SIDEBAR_WORKSPACE_HEADER_HEIGHT
+                                : row.kind === "date-header"
+                                  ? uiDensity === "focused"
+                                    ? SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT
+                                    : SIDEBAR_DATE_HEADER_HEIGHT
+                                  : row.kind === "automated-header"
+                                    ? SIDEBAR_AUTOMATED_HEADER_HEIGHT
+                                    : row.kind === "load-more"
+                                      ? SIDEBAR_LOAD_MORE_HEIGHT
+                                      : uiDensity === "focused"
+                                        ? SIDEBAR_FOCUSED_ITEM_HEIGHT
+                                        : SIDEBAR_ITEM_HEIGHT
+                      }
+                      renderItem={(row) => renderSidebarVirtualRow(row)}
+                      estimatedItemHeight={
+                        uiDensity === "focused" ? SIDEBAR_FOCUSED_ITEM_HEIGHT : SIDEBAR_ITEM_HEIGHT
+                      }
+                      overscan={10}
+                      enabled
+                      suppressAutoScrollOnItemsChange
+                      className="sidebar-virtual-list"
+                      style={{ height: "100%" }}
+                      role="list"
+                      onScrollNearEnd={onLoadMoreTasks}
+                    />
+                  ) : (
+                    sidebarVirtualRows.map((row) => (
+                      <div
+                        key={
+                          row.kind === "task"
+                            ? `${row.section ?? "user"}:${row.row.node.task.id}`
+                            : row.id
                         }
-                        renderItem={(row) => renderSidebarVirtualRow(row)}
-                        estimatedItemHeight={
-                          uiDensity === "focused"
-                            ? SIDEBAR_FOCUSED_ITEM_HEIGHT
-                            : SIDEBAR_ITEM_HEIGHT
-                        }
-                        overscan={10}
-                        enabled
-                        suppressAutoScrollOnItemsChange
-                        className="sidebar-virtual-list"
-                        style={{ height: "100%" }}
-                        role="list"
-                        onScrollNearEnd={onLoadMoreTasks}
-                      />
-                    ) : (
-                      sidebarVirtualRows.map((row) => (
-                        <div
-                          key={
-                            row.kind === "task"
-                              ? `${row.section ?? "user"}:${row.row.node.task.id}`
-                              : row.id
-                          }
-                        >
-                          {renderSidebarVirtualRow(row)}
-                        </div>
-                      ))
-                    )}
-                  </>
-                )}
+                      >
+                        {renderSidebarVirtualRow(row)}
+                      </div>
+                    ))
+                  )}
+                </>
               </div>
             </>
           )}
         </>
       )}
 
-      {isCalm && (
-        <CalmSidebarProfile
-          agentName={calmAgentContext.agentName}
-          onOpenSettings={browserAction(
-            ["getLLMSettings", "getLLMConfigStatus"],
-            onOpenSettings,
-            "Settings",
-          )}
-        />
-      )}
-      {/* Footer */}
-      <div className="sidebar-footer cli-sidebar-footer" hidden={isCalm && !updateInfo?.available}>
+      {/* Footer: the wallet balance. Settings and the update prompt are on the rail. */}
+      <div className="sidebar-footer cli-sidebar-footer" hidden={isCalm}>
         <InfraWalletBadge
           onOpenSettings={browserAction(
             ["getLLMSettings", "getLLMConfigStatus"],
@@ -3779,79 +3428,6 @@ function SidebarComponent({
             "Settings",
           )}
         />
-        <div className="cli-footer-actions">
-          <button
-            className="settings-btn cli-settings-btn"
-            onClick={browserAction(
-              ["getLLMSettings", "getLLMConfigStatus"],
-              onOpenSettings,
-              "Settings",
-            )}
-            title="Settings"
-          >
-            <span className="terminal-only">[cfg]</span>
-            <span className="modern-only">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-              Settings
-            </span>
-          </button>
-          {updateInfo?.available && !updateDismissed && (
-            <div className="sidebar-update-actions">
-              <button
-                type="button"
-                className="update-banner"
-                aria-label={
-                  updateInfo.supported === false
-                    ? "View update system requirements"
-                    : "Open update settings"
-                }
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onViewUpdate?.();
-                }}
-              >
-                {updateInfo.supported === false ? "Requires macOS 13+" : "Update"}
-              </button>
-              <button
-                type="button"
-                className="update-banner-dismiss"
-                aria-label="Dismiss update banner"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setUpdateDismissed(true);
-                }}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 12 12"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    d="M9 3L3 9M3 3L9 9"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

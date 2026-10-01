@@ -1,8 +1,10 @@
+import { createPortal } from "react-dom";
 import {
   getHostCapabilityReason,
   hasHostMethod,
   hasHostMethods,
 } from "../../host/browser-capabilities";
+import { useTitleBarContextSlot } from "../../utils/title-bar-slot";
 import {
   getInteractionModeSelection,
   isChatActionShortcut,
@@ -526,6 +528,8 @@ function limitCommandOutputSessions(sessions: CommandOutputSession[]): CommandOu
 }
 
 interface MainContentProps {
+  /** `title-bar` renders the session header in the app title bar instead of above the body. */
+  headerPlacement?: "inline" | "title-bar";
   task: Task | undefined;
   selectedTaskId: string | null;
   workspace: Workspace | null;
@@ -3637,7 +3641,9 @@ function MainContentComponent({
   onReleaseTaskEventDetail,
   remoteSession = null,
   replayControls,
+  headerPlacement = "inline",
 }: MainContentProps) {
+  const titleBarSlot = useTitleBarContextSlot(headerPlacement === "title-bar");
   recordRendererRender(
     "MainContent",
     task?.id ? `task:${task.id}` : (selectedTaskId ?? "task:none"),
@@ -10866,6 +10872,20 @@ function MainContentComponent({
     />
   );
 
+  const renderMainHeader = (header: React.ReactNode) =>
+    titleBarSlot
+      ? createPortal(
+          <div
+            className={`title-bar-context-header${isBotConversation ? " bot-conversation" : ""}${
+              isCalm ? " calm-task" : ""
+            }`}
+          >
+            {header}
+          </div>,
+          titleBarSlot,
+        )
+      : header;
+
   // Task view
   return (
     <div
@@ -10900,448 +10920,325 @@ function MainContentComponent({
             onViewOutputs={onViewTaskOutputs}
           />
         )}
-      {/* Header */}
-      <div className="main-header">
-        {!isBotConversation && (task?.parentTaskId || task?.branchFromTaskId) && onSelectTask && (
-          <button
-            type="button"
-            className="main-header-parent-thread-btn"
-            onClick={() => onSelectTask(task.parentTaskId || task.branchFromTaskId || null)}
-            title="Back to parent thread"
-            aria-label="Back to parent thread"
-          >
-            <MessageCircle size={14} strokeWidth={1.5} />
-            <span>Parent thread</span>
-          </button>
-        )}
-        <div className="main-header-title-group">
-          {isBotConversation && (
+      {/* Header: in the app title bar when the shell provides a slot for it */}
+      {renderMainHeader(
+        <div className="main-header">
+          {!isBotConversation && (task?.parentTaskId || task?.branchFromTaskId) && onSelectTask && (
             <button
               type="button"
-              className="bot-conversation-identity"
-              disabled={Boolean(remoteSession) || !task?.assignedAgentRoleId}
-              onClick={() => setShowBotProfile(true)}
-              title="Edit bot"
-              aria-label={`Edit bot ${botName}`}
+              className="main-header-parent-thread-btn"
+              onClick={() => onSelectTask(task.parentTaskId || task.branchFromTaskId || null)}
+              title="Back to parent thread"
+              aria-label="Back to parent thread"
             >
-              <span className="bot-conversation-identity-avatar" aria-hidden="true">
-                <BotGlyph size={17} />
-              </span>
-              <span className="bot-conversation-identity-copy">
-                <strong>{botName}</strong>
-                <small>Bot</small>
-              </span>
+              <MessageCircle size={14} strokeWidth={1.5} />
+              <span>Parent thread</span>
             </button>
           )}
-          {!isBotConversation && (showHeaderTitle || task) && headerTitle.trim().length > 0 && (
-            <div className="main-header-title" title={headerTooltip}>
-              {headerTitle}
-            </div>
-          )}
-          {task && (
-            <div className="main-header-task-menu-container" ref={taskHeaderMenuRef}>
+          <div className="main-header-title-group">
+            {isBotConversation && (
               <button
                 type="button"
-                ref={taskHeaderMenuButtonRef}
-                className={`main-header-task-menu-btn ${showTaskHeaderMenu ? "active" : ""}`}
-                aria-haspopup="menu"
-                aria-expanded={showTaskHeaderMenu}
-                aria-controls="main-header-task-menu"
-                aria-label={menuLabel}
-                title={menuLabel}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setShowTaskHeaderMenu((open) => !open);
-                }}
-                onKeyDown={handleTaskHeaderMenuButtonKeyDown}
+                className="bot-conversation-identity"
+                disabled={Boolean(remoteSession) || !task?.assignedAgentRoleId}
+                onClick={() => setShowBotProfile(true)}
+                title="Edit bot"
+                aria-label={`Edit bot ${botName}`}
               >
-                <Ellipsis size={18} strokeWidth={2.4} aria-hidden="true" />
+                <span className="bot-conversation-identity-avatar" aria-hidden="true">
+                  <BotGlyph size={17} />
+                </span>
+                <span className="bot-conversation-identity-copy">
+                  <strong>{botName}</strong>
+                  <small>Bot</small>
+                </span>
               </button>
-              {showTaskHeaderMenu && (
-                <div
-                  id="main-header-task-menu"
-                  className="main-header-task-menu"
-                  role="menu"
+            )}
+            {headerPlacement === "title-bar" &&
+              !isBotConversation &&
+              workspace?.name &&
+              !workspace.isTemp &&
+              !isTempWorkspaceId(workspace.id) && (
+                <span className="main-header-crumb" title={workspace.path}>
+                  {workspace.name}
+                  <span className="main-header-crumb-sep" aria-hidden="true">
+                    /
+                  </span>
+                </span>
+              )}
+            {!isBotConversation && (showHeaderTitle || task) && headerTitle.trim().length > 0 && (
+              <div className="main-header-title" title={headerTooltip}>
+                {headerTitle}
+              </div>
+            )}
+            {task && (
+              <div className="main-header-task-menu-container" ref={taskHeaderMenuRef}>
+                <button
+                  type="button"
+                  ref={taskHeaderMenuButtonRef}
+                  className={`main-header-task-menu-btn ${showTaskHeaderMenu ? "active" : ""}`}
+                  aria-haspopup="menu"
+                  aria-expanded={showTaskHeaderMenu}
+                  aria-controls="main-header-task-menu"
                   aria-label={menuLabel}
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={handleTaskHeaderMenuKeyDown}
+                  title={menuLabel}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowTaskHeaderMenu((open) => !open);
+                  }}
+                  onKeyDown={handleTaskHeaderMenuButtonKeyDown}
                 >
-                  {isBotConversation ? (
-                    <>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={Boolean(remoteSession) || !task.assignedAgentRoleId}
-                        onClick={() => {
-                          closeTaskHeaderMenu();
-                          setShowBotProfile(true);
-                        }}
-                      >
-                        <BotGlyph size={17} weight="regular" />
-                        <span>Edit bot</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={Boolean(remoteSession) || !task.assignedAgentRoleId}
-                        onClick={() => {
-                          closeTaskHeaderMenu();
-                          void onNewBotConversation?.(task.assignedAgentRoleId!);
-                        }}
-                      >
-                        <Plus size={17} aria-hidden="true" />
-                        <span>New conversation</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        onClick={() => {
-                          closeTaskHeaderMenu();
-                          setShowBotHistory((open) => !open);
-                        }}
-                        aria-expanded={showBotHistory}
-                      >
-                        <History size={17} aria-hidden="true" />
-                        <span>Conversation history</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={
-                          Boolean(remoteSession) ||
-                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                          !hasHostMethod("toggleTaskPin")
-                        }
-                        title={
-                          taskHeaderTaskMutationUnavailableReason ??
-                          (!hasHostMethod("toggleTaskPin")
-                            ? "Pinning is not available on this browser host."
-                            : undefined)
-                        }
-                        onClick={handleTaskHeaderPin}
-                      >
-                        {task.pinned ? (
-                          <PinOff size={17} aria-hidden="true" />
-                        ) : (
-                          <Pin size={17} aria-hidden="true" />
-                        )}
-                        <span>{task.pinned ? actionLabels.unpin : actionLabels.pin}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={
-                          Boolean(remoteSession) ||
-                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                          !hasHostMethod("renameTask")
-                        }
-                        title={
-                          taskHeaderTaskMutationUnavailableReason ??
-                          (!hasHostMethod("renameTask")
-                            ? "Renaming is not available on this browser host."
-                            : undefined)
-                        }
-                        onClick={handleTaskHeaderRename}
-                      >
-                        <Pencil size={17} aria-hidden="true" />
-                        <span>{actionLabels.rename}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={
-                          Boolean(remoteSession) ||
-                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                          !hasHostMethod("archiveTask")
-                        }
-                        title={
-                          taskHeaderTaskMutationUnavailableReason ??
-                          (!hasHostMethod("archiveTask")
-                            ? "Archiving is not available on this browser host."
-                            : undefined)
-                        }
-                        onClick={handleTaskHeaderArchive}
-                      >
-                        <ArchiveIcon size={17} aria-hidden="true" />
-                        <span>{actionLabels.archive}</span>
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={
-                          Boolean(remoteSession) ||
-                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                          !hasHostMethod("toggleTaskPin")
-                        }
-                        title={
-                          taskHeaderTaskMutationUnavailableReason ??
-                          (!hasHostMethod("toggleTaskPin")
-                            ? "Pinning is not available on this browser host."
-                            : undefined)
-                        }
-                        onClick={handleTaskHeaderPin}
-                      >
-                        {task.pinned ? (
-                          <PinOff size={17} aria-hidden="true" />
-                        ) : (
-                          <Pin size={17} aria-hidden="true" />
-                        )}
-                        <span>{task.pinned ? actionLabels.unpin : actionLabels.pin}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={
-                          Boolean(remoteSession) ||
-                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                          !hasHostMethod("renameTask")
-                        }
-                        title={
-                          taskHeaderTaskMutationUnavailableReason ??
-                          (!hasHostMethod("renameTask")
-                            ? "Renaming is not available on this browser host."
-                            : undefined)
-                        }
-                        onClick={handleTaskHeaderRename}
-                      >
-                        <Pencil size={17} aria-hidden="true" />
-                        <span>{actionLabels.rename}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={
-                          Boolean(remoteSession) ||
-                          Boolean(taskHeaderTaskMutationUnavailableReason) ||
-                          !hasHostMethod("archiveTask")
-                        }
-                        title={
-                          taskHeaderTaskMutationUnavailableReason ??
-                          (!hasHostMethod("archiveTask")
-                            ? "Archiving is not available on this browser host."
-                            : undefined)
-                        }
-                        onClick={handleTaskHeaderArchive}
-                      >
-                        <ArchiveIcon size={17} aria-hidden="true" />
-                        <span>{actionLabels.archive}</span>
-                      </button>
-                      <div className="main-header-task-menu-divider" role="separator" />
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    disabled={
-                      Boolean(remoteSession) || !workspace?.path || !onOpenBrowserWorkbenchSidebar
-                    }
-                    title={taskHeaderOpenBrowserUnavailableReason}
-                    aria-label={
-                      taskHeaderOpenBrowserUnavailableReason
-                        ? `Open browser unavailable. ${taskHeaderOpenBrowserUnavailableReason}`
-                        : "Open browser"
-                    }
-                    onClick={handleTaskHeaderOpenBrowser}
+                  <Ellipsis size={18} strokeWidth={2.4} aria-hidden="true" />
+                </button>
+                {showTaskHeaderMenu && (
+                  <div
+                    id="main-header-task-menu"
+                    className="main-header-task-menu"
+                    role="menu"
+                    aria-label={menuLabel}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={handleTaskHeaderMenuKeyDown}
                   >
-                    <Globe size={17} aria-hidden="true" />
-                    <span>Open browser</span>
-                  </button>
-                  {!remoteSession && workspace?.path && !onOpenBrowserWorkbenchSidebar && (
-                    <div className="main-header-task-menu-note" role="note">
-                      {taskHeaderOpenBrowserUnavailableReason}
-                    </div>
-                  )}
-                  {!isBotConversation && (
-                    <>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={!taskWorkingDirectory}
-                        onClick={() => {
-                          closeTaskHeaderMenu();
-                          void copyTaskHeaderMenuText(taskWorkingDirectory);
-                        }}
-                      >
-                        <Folder size={17} aria-hidden="true" />
-                        <span>Copy working directory</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={!taskIdCopyValue}
-                        onClick={() => {
-                          closeTaskHeaderMenu();
-                          void copyTaskHeaderMenuText(taskIdCopyValue);
-                        }}
-                      >
-                        <Copy size={17} aria-hidden="true" />
-                        <span>{actionLabels.copyId}</span>
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    onClick={() => {
-                      closeTaskHeaderMenu();
-                      void copyTaskHeaderMenuText(botDeeplink);
-                    }}
-                  >
-                    <LinkIcon size={17} aria-hidden="true" />
-                    <span>{actionLabels.copyLink}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    onClick={() => {
-                      closeTaskHeaderMenu();
-                      void copyTaskHeaderMenuText(
-                        isBotConversation ? botTranscriptMarkdown : taskMarkdown,
-                      );
-                    }}
-                  >
-                    <ClipboardCopy size={17} aria-hidden="true" />
-                    <span>Copy as Markdown</span>
-                  </button>
-                  {isBotConversation ? (
-                    <>
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={Boolean(taskHeaderForkUnavailableReason)}
-                        title={taskHeaderForkUnavailableReason}
-                        aria-label={
-                          taskHeaderForkUnavailableReason
-                            ? `${actionLabels.fork} unavailable. ${taskHeaderForkUnavailableReason}`
-                            : actionLabels.fork
-                        }
-                        onClick={handleTaskHeaderFork}
-                      >
-                        <GitFork size={17} aria-hidden="true" />
-                        <span>{actionLabels.fork}</span>
-                      </button>
-                      {onOpenSideChat && (
+                    {isBotConversation ? (
+                      <>
                         <button
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
                           data-task-header-menu-option
-                          disabled={Boolean(taskHeaderForkUnavailableReason)}
-                          title={taskHeaderForkUnavailableReason}
-                          aria-label={
-                            taskHeaderForkUnavailableReason
-                              ? `Open side chat unavailable. ${taskHeaderForkUnavailableReason}`
-                              : "Open side chat"
-                          }
-                          onClick={handleTaskHeaderSideChat}
+                          disabled={Boolean(remoteSession) || !task.assignedAgentRoleId}
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            setShowBotProfile(true);
+                          }}
                         >
-                          <MessageCircle size={17} aria-hidden="true" />
-                          <span>Open side chat</span>
+                          <BotGlyph size={17} weight="regular" />
+                          <span>Edit bot</span>
                         </button>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <div className="main-header-task-menu-divider" role="separator" />
-                      <button
-                        type="button"
-                        className="main-header-task-menu-item"
-                        role="menuitem"
-                        data-task-header-menu-option
-                        disabled={Boolean(taskHeaderForkUnavailableReason)}
-                        title={taskHeaderForkUnavailableReason}
-                        aria-label={
-                          taskHeaderForkUnavailableReason
-                            ? `${actionLabels.fork} unavailable. ${taskHeaderForkUnavailableReason}`
-                            : actionLabels.fork
-                        }
-                        onClick={handleTaskHeaderFork}
-                      >
-                        <GitFork size={17} aria-hidden="true" />
-                        <span>{actionLabels.fork}</span>
-                      </button>
-                      {onOpenSideChat && (
                         <button
                           type="button"
                           className="main-header-task-menu-item"
                           role="menuitem"
                           data-task-header-menu-option
-                          disabled={Boolean(taskHeaderForkUnavailableReason)}
-                          title={taskHeaderForkUnavailableReason}
-                          aria-label={
-                            taskHeaderForkUnavailableReason
-                              ? `Open side chat unavailable. ${taskHeaderForkUnavailableReason}`
-                              : "Open side chat"
-                          }
-                          onClick={handleTaskHeaderSideChat}
+                          disabled={Boolean(remoteSession) || !task.assignedAgentRoleId}
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            void onNewBotConversation?.(task.assignedAgentRoleId!);
+                          }}
                         >
-                          <MessageCircle size={17} aria-hidden="true" />
-                          <span>Open side chat</span>
+                          <Plus size={17} aria-hidden="true" />
+                          <span>New conversation</span>
                         </button>
-                      )}
-                    </>
-                  )}
-                  {taskHeaderForkUnavailableReason && (
-                    <div className="main-header-task-menu-note" role="note">
-                      {taskHeaderForkUnavailableReason}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    className="main-header-task-menu-item"
-                    role="menuitem"
-                    data-task-header-menu-option
-                    disabled={Boolean(taskHeaderRoutineUnavailableReason)}
-                    title={taskHeaderRoutineUnavailableReason}
-                    aria-label={
-                      taskHeaderRoutineUnavailableReason
-                        ? `Create routine unavailable. ${taskHeaderRoutineUnavailableReason}`
-                        : "Create routine"
-                    }
-                    onClick={handleTaskHeaderAddAutomation}
-                  >
-                    <Clock size={17} aria-hidden="true" />
-                    <span>Create routine...</span>
-                  </button>
-                  {taskHeaderRoutineUnavailableReason && (
-                    <div className="main-header-task-menu-note" role="note">
-                      {taskHeaderRoutineUnavailableReason}
-                    </div>
-                  )}
-                  {hasTaskOutputs(taskOutputSummary) && onViewTaskOutputs && (
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            setShowBotHistory((open) => !open);
+                          }}
+                          aria-expanded={showBotHistory}
+                        >
+                          <History size={17} aria-hidden="true" />
+                          <span>Conversation history</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={
+                            Boolean(remoteSession) ||
+                            Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                            !hasHostMethod("toggleTaskPin")
+                          }
+                          title={
+                            taskHeaderTaskMutationUnavailableReason ??
+                            (!hasHostMethod("toggleTaskPin")
+                              ? "Pinning is not available on this browser host."
+                              : undefined)
+                          }
+                          onClick={handleTaskHeaderPin}
+                        >
+                          {task.pinned ? (
+                            <PinOff size={17} aria-hidden="true" />
+                          ) : (
+                            <Pin size={17} aria-hidden="true" />
+                          )}
+                          <span>{task.pinned ? actionLabels.unpin : actionLabels.pin}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={
+                            Boolean(remoteSession) ||
+                            Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                            !hasHostMethod("renameTask")
+                          }
+                          title={
+                            taskHeaderTaskMutationUnavailableReason ??
+                            (!hasHostMethod("renameTask")
+                              ? "Renaming is not available on this browser host."
+                              : undefined)
+                          }
+                          onClick={handleTaskHeaderRename}
+                        >
+                          <Pencil size={17} aria-hidden="true" />
+                          <span>{actionLabels.rename}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={
+                            Boolean(remoteSession) ||
+                            Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                            !hasHostMethod("archiveTask")
+                          }
+                          title={
+                            taskHeaderTaskMutationUnavailableReason ??
+                            (!hasHostMethod("archiveTask")
+                              ? "Archiving is not available on this browser host."
+                              : undefined)
+                          }
+                          onClick={handleTaskHeaderArchive}
+                        >
+                          <ArchiveIcon size={17} aria-hidden="true" />
+                          <span>{actionLabels.archive}</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={
+                            Boolean(remoteSession) ||
+                            Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                            !hasHostMethod("toggleTaskPin")
+                          }
+                          title={
+                            taskHeaderTaskMutationUnavailableReason ??
+                            (!hasHostMethod("toggleTaskPin")
+                              ? "Pinning is not available on this browser host."
+                              : undefined)
+                          }
+                          onClick={handleTaskHeaderPin}
+                        >
+                          {task.pinned ? (
+                            <PinOff size={17} aria-hidden="true" />
+                          ) : (
+                            <Pin size={17} aria-hidden="true" />
+                          )}
+                          <span>{task.pinned ? actionLabels.unpin : actionLabels.pin}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={
+                            Boolean(remoteSession) ||
+                            Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                            !hasHostMethod("renameTask")
+                          }
+                          title={
+                            taskHeaderTaskMutationUnavailableReason ??
+                            (!hasHostMethod("renameTask")
+                              ? "Renaming is not available on this browser host."
+                              : undefined)
+                          }
+                          onClick={handleTaskHeaderRename}
+                        >
+                          <Pencil size={17} aria-hidden="true" />
+                          <span>{actionLabels.rename}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={
+                            Boolean(remoteSession) ||
+                            Boolean(taskHeaderTaskMutationUnavailableReason) ||
+                            !hasHostMethod("archiveTask")
+                          }
+                          title={
+                            taskHeaderTaskMutationUnavailableReason ??
+                            (!hasHostMethod("archiveTask")
+                              ? "Archiving is not available on this browser host."
+                              : undefined)
+                          }
+                          onClick={handleTaskHeaderArchive}
+                        >
+                          <ArchiveIcon size={17} aria-hidden="true" />
+                          <span>{actionLabels.archive}</span>
+                        </button>
+                        <div className="main-header-task-menu-divider" role="separator" />
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      className="main-header-task-menu-item"
+                      role="menuitem"
+                      data-task-header-menu-option
+                      disabled={
+                        Boolean(remoteSession) || !workspace?.path || !onOpenBrowserWorkbenchSidebar
+                      }
+                      title={taskHeaderOpenBrowserUnavailableReason}
+                      aria-label={
+                        taskHeaderOpenBrowserUnavailableReason
+                          ? `Open browser unavailable. ${taskHeaderOpenBrowserUnavailableReason}`
+                          : "Open browser"
+                      }
+                      onClick={handleTaskHeaderOpenBrowser}
+                    >
+                      <Globe size={17} aria-hidden="true" />
+                      <span>Open browser</span>
+                    </button>
+                    {!remoteSession && workspace?.path && !onOpenBrowserWorkbenchSidebar && (
+                      <div className="main-header-task-menu-note" role="note">
+                        {taskHeaderOpenBrowserUnavailableReason}
+                      </div>
+                    )}
+                    {!isBotConversation && (
+                      <>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={!taskWorkingDirectory}
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            void copyTaskHeaderMenuText(taskWorkingDirectory);
+                          }}
+                        >
+                          <Folder size={17} aria-hidden="true" />
+                          <span>Copy working directory</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={!taskIdCopyValue}
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            void copyTaskHeaderMenuText(taskIdCopyValue);
+                          }}
+                        >
+                          <Copy size={17} aria-hidden="true" />
+                          <span>{actionLabels.copyId}</span>
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       className="main-header-task-menu-item"
@@ -11349,65 +11246,202 @@ function MainContentComponent({
                       data-task-header-menu-option
                       onClick={() => {
                         closeTaskHeaderMenu();
-                        onViewTaskOutputs(task.id, taskOutputSummary.primaryOutputPath);
+                        void copyTaskHeaderMenuText(botDeeplink);
                       }}
                     >
-                      <FileText size={17} aria-hidden="true" />
-                      <span>View outputs</span>
+                      <LinkIcon size={17} aria-hidden="true" />
+                      <span>{actionLabels.copyLink}</span>
                     </button>
-                  )}
-                  {isBotConversation && (
                     <button
                       type="button"
                       className="main-header-task-menu-item"
                       role="menuitem"
                       data-task-header-menu-option
-                      aria-expanded={showBotAdvanced}
-                      aria-controls="bot-advanced-actions"
-                      onClick={() => setShowBotAdvanced((open) => !open)}
+                      onClick={() => {
+                        closeTaskHeaderMenu();
+                        void copyTaskHeaderMenuText(
+                          isBotConversation ? botTranscriptMarkdown : taskMarkdown,
+                        );
+                      }}
                     >
-                      <SlidersHorizontal size={17} aria-hidden="true" />
-                      <span>Advanced</span>
+                      <ClipboardCopy size={17} aria-hidden="true" />
+                      <span>Copy as Markdown</span>
                     </button>
-                  )}
-                  {isBotConversation && showBotAdvanced && (
-                    <div id="bot-advanced-actions" role="group" aria-label="Advanced actions">
+                    {isBotConversation ? (
+                      <>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={Boolean(taskHeaderForkUnavailableReason)}
+                          title={taskHeaderForkUnavailableReason}
+                          aria-label={
+                            taskHeaderForkUnavailableReason
+                              ? `${actionLabels.fork} unavailable. ${taskHeaderForkUnavailableReason}`
+                              : actionLabels.fork
+                          }
+                          onClick={handleTaskHeaderFork}
+                        >
+                          <GitFork size={17} aria-hidden="true" />
+                          <span>{actionLabels.fork}</span>
+                        </button>
+                        {onOpenSideChat && (
+                          <button
+                            type="button"
+                            className="main-header-task-menu-item"
+                            role="menuitem"
+                            data-task-header-menu-option
+                            disabled={Boolean(taskHeaderForkUnavailableReason)}
+                            title={taskHeaderForkUnavailableReason}
+                            aria-label={
+                              taskHeaderForkUnavailableReason
+                                ? `Open side chat unavailable. ${taskHeaderForkUnavailableReason}`
+                                : "Open side chat"
+                            }
+                            onClick={handleTaskHeaderSideChat}
+                          >
+                            <MessageCircle size={17} aria-hidden="true" />
+                            <span>Open side chat</span>
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="main-header-task-menu-divider" role="separator" />
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={Boolean(taskHeaderForkUnavailableReason)}
+                          title={taskHeaderForkUnavailableReason}
+                          aria-label={
+                            taskHeaderForkUnavailableReason
+                              ? `${actionLabels.fork} unavailable. ${taskHeaderForkUnavailableReason}`
+                              : actionLabels.fork
+                          }
+                          onClick={handleTaskHeaderFork}
+                        >
+                          <GitFork size={17} aria-hidden="true" />
+                          <span>{actionLabels.fork}</span>
+                        </button>
+                        {onOpenSideChat && (
+                          <button
+                            type="button"
+                            className="main-header-task-menu-item"
+                            role="menuitem"
+                            data-task-header-menu-option
+                            disabled={Boolean(taskHeaderForkUnavailableReason)}
+                            title={taskHeaderForkUnavailableReason}
+                            aria-label={
+                              taskHeaderForkUnavailableReason
+                                ? `Open side chat unavailable. ${taskHeaderForkUnavailableReason}`
+                                : "Open side chat"
+                            }
+                            onClick={handleTaskHeaderSideChat}
+                          >
+                            <MessageCircle size={17} aria-hidden="true" />
+                            <span>Open side chat</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {taskHeaderForkUnavailableReason && (
+                      <div className="main-header-task-menu-note" role="note">
+                        {taskHeaderForkUnavailableReason}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="main-header-task-menu-item"
+                      role="menuitem"
+                      data-task-header-menu-option
+                      disabled={Boolean(taskHeaderRoutineUnavailableReason)}
+                      title={taskHeaderRoutineUnavailableReason}
+                      aria-label={
+                        taskHeaderRoutineUnavailableReason
+                          ? `Create routine unavailable. ${taskHeaderRoutineUnavailableReason}`
+                          : "Create routine"
+                      }
+                      onClick={handleTaskHeaderAddAutomation}
+                    >
+                      <Clock size={17} aria-hidden="true" />
+                      <span>Create routine...</span>
+                    </button>
+                    {taskHeaderRoutineUnavailableReason && (
+                      <div className="main-header-task-menu-note" role="note">
+                        {taskHeaderRoutineUnavailableReason}
+                      </div>
+                    )}
+                    {hasTaskOutputs(taskOutputSummary) && onViewTaskOutputs && (
                       <button
                         type="button"
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={!taskWorkingDirectory}
                         onClick={() => {
                           closeTaskHeaderMenu();
-                          void copyTaskHeaderMenuText(taskWorkingDirectory);
+                          onViewTaskOutputs(task.id, taskOutputSummary.primaryOutputPath);
                         }}
                       >
-                        <Folder size={17} aria-hidden="true" />
-                        <span>Copy working directory</span>
+                        <FileText size={17} aria-hidden="true" />
+                        <span>View outputs</span>
                       </button>
+                    )}
+                    {isBotConversation && (
                       <button
                         type="button"
                         className="main-header-task-menu-item"
                         role="menuitem"
                         data-task-header-menu-option
-                        disabled={!taskIdCopyValue}
-                        onClick={() => {
-                          closeTaskHeaderMenu();
-                          void copyTaskHeaderMenuText(taskIdCopyValue);
-                        }}
+                        aria-expanded={showBotAdvanced}
+                        aria-controls="bot-advanced-actions"
+                        onClick={() => setShowBotAdvanced((open) => !open)}
                       >
-                        <Copy size={17} aria-hidden="true" />
-                        <span>{actionLabels.copyId}</span>
+                        <SlidersHorizontal size={17} aria-hidden="true" />
+                        <span>Advanced</span>
                       </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+                    )}
+                    {isBotConversation && showBotAdvanced && (
+                      <div id="bot-advanced-actions" role="group" aria-label="Advanced actions">
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={!taskWorkingDirectory}
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            void copyTaskHeaderMenuText(taskWorkingDirectory);
+                          }}
+                        >
+                          <Folder size={17} aria-hidden="true" />
+                          <span>Copy working directory</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitem"
+                          data-task-header-menu-option
+                          disabled={!taskIdCopyValue}
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            void copyTaskHeaderMenuText(taskIdCopyValue);
+                          }}
+                        >
+                          <Copy size={17} aria-hidden="true" />
+                          <span>{actionLabels.copyId}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>,
+      )}
       {isBotConversation && showBotHistory && (
         <BotConversationHistory
           botName={botName || "Bot"}
@@ -12453,6 +12487,7 @@ function getRemoteSessionSignature(
 
 function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps): boolean {
   return (
+    prev.headerPlacement === next.headerPlacement &&
     getMainContentTaskSignature(prev.task) === getMainContentTaskSignature(next.task) &&
     prev.selectedTaskId === next.selectedTaskId &&
     prev.workspace?.path === next.workspace?.path &&

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -41,6 +42,8 @@ interface AppNotification {
   companionStyle?: "email" | "note";
 }
 
+export type NotificationPanelNotification = AppNotification;
+
 interface NotificationEvent {
   type: "added" | "updated" | "removed" | "cleared";
   notification?: AppNotification;
@@ -49,6 +52,11 @@ interface NotificationEvent {
 
 interface NotificationPanelProps {
   onNotificationClick?: (notification: AppNotification) => void;
+  /**
+   * `sidebar` renders a compact bell for the sidebar panel header. Its list
+   * opens in a portal because the panel clips overflow.
+   */
+  placement?: "title-bar" | "sidebar";
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -56,41 +64,6 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
     zIndex: 9999,
     overflow: "visible",
-  },
-  bellButton: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "32px",
-    height: "32px",
-    borderRadius: "6px",
-    backgroundColor: "transparent",
-    border: "none",
-    cursor: "pointer",
-    transition: "all 0.15s ease",
-    position: "relative" as const,
-    overflow: "visible",
-  },
-  bellButtonHover: {
-    color: "#3b82f6",
-  },
-  badge: {
-    position: "absolute" as const,
-    top: "-4px",
-    right: "-4px",
-    minWidth: "16px",
-    height: "16px",
-    borderRadius: "8px",
-    backgroundColor: "#ef4444",
-    color: "white",
-    fontSize: "9px",
-    fontWeight: 700,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "0 4px",
-    border: "none",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
   },
   panel: {
     position: "absolute" as const,
@@ -464,14 +437,38 @@ function formatNotificationTitle(title: string): {
   return { primary, badge };
 }
 
-export function NotificationPanel({ onNotificationClick }: NotificationPanelProps) {
+export function NotificationPanel({
+  onNotificationClick,
+  placement = "title-bar",
+}: NotificationPanelProps) {
   const canUseNotifications = hasHostMethods(...NOTIFICATION_PANEL_METHODS);
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [isHoveringButton, setIsHoveringButton] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const bellButtonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(
+    null,
+  );
+  const inSidebar = placement === "sidebar";
+
+  useLayoutEffect(() => {
+    if (!isOpen || !inSidebar) return;
+    const updatePosition = () => {
+      const rect = bellButtonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = 360;
+      setDropdownPosition({
+        top: rect.bottom + 8,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+      });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    return () => window.removeEventListener("resize", updatePosition);
+  }, [inSidebar, isOpen]);
 
   // Load notifications on mount
   useEffect(() => {
@@ -517,17 +514,26 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
     return unsubscribe;
   }, [canUseNotifications]);
 
-  // Close panel when clicking outside
+  // Close panel when clicking outside or pressing Escape
   useEffect(() => {
+    if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = e.target as Node;
+      if (panelRef.current?.contains(target) || dropdownRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setIsOpen(false);
+      bellButtonRef.current?.focus();
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [isOpen]);
 
   const handleMarkAllRead = async () => {
@@ -575,138 +581,161 @@ export function NotificationPanel({ onNotificationClick }: NotificationPanelProp
     }
   };
 
+  const unreadLabel =
+    unreadCount > 0 ? `Notifications, ${unreadCount > 99 ? "99+" : unreadCount} unread` : null;
+  const renderDropdown = (dropdown: ReactNode) =>
+    inSidebar ? createPortal(dropdown, document.body) : dropdown;
+  const dropdownStyle: React.CSSProperties = inSidebar
+    ? {
+        ...styles.panel,
+        position: "fixed",
+        top: dropdownPosition?.top ?? 0,
+        left: dropdownPosition?.left ?? 0,
+        right: "auto",
+        visibility: dropdownPosition ? "visible" : "hidden",
+      }
+    : styles.panel;
+
   return (
     <div style={styles.container} ref={panelRef}>
+      {/* Both placements match their neighbours' icon buttons; unread shows as a dot. */}
       <button
-        style={styles.bellButton}
+        ref={bellButtonRef}
+        type="button"
+        className={`${inSidebar ? "sidebar-panel-icon-btn" : "title-bar-btn title-bar-notifications"}${isOpen ? " active" : ""}`}
         onClick={() => setIsOpen(!isOpen)}
-        onMouseEnter={() => setIsHoveringButton(true)}
-        onMouseLeave={() => setIsHoveringButton(false)}
         disabled={!canUseNotifications}
-        aria-label={canUseNotifications ? "Notifications" : "Notifications unavailable"}
+        aria-expanded={isOpen}
+        aria-label={
+          canUseNotifications ? (unreadLabel ?? "Notifications") : "Notifications unavailable"
+        }
         title={
           canUseNotifications
-            ? "Notifications — click to view past notifications and open tasks"
+            ? "Notifications"
             : "Notifications are not available in this browser session yet."
         }
       >
-        <BellIcon color={isHoveringButton ? "#3b82f6" : unreadCount > 0 ? "#3b82f6" : "#6b7280"} />
-        {unreadCount > 0 && (
-          <span style={styles.badge}>{unreadCount > 99 ? "99+" : unreadCount}</span>
-        )}
+        <BellIcon color="currentColor" />
+        {unreadCount > 0 && <span className="sidebar-panel-icon-dot" aria-hidden="true" />}
       </button>
 
-      {isOpen && canUseNotifications && (
-        <div style={styles.panel}>
-          <div style={styles.header}>
-            <h3 style={styles.headerTitle}>Notifications</h3>
-            <div style={styles.headerActions}>
-              {unreadCount > 0 && (
-                <button
-                  style={styles.headerBtn}
-                  onClick={handleMarkAllRead}
-                  title="Mark all as read"
-                >
-                  {Icons.check} Mark all read
-                </button>
-              )}
-              {notifications.length > 0 && (
-                <button style={styles.headerBtn} onClick={handleDeleteAll} title="Clear all">
-                  {Icons.trash} Clear all
-                </button>
+      {isOpen &&
+        canUseNotifications &&
+        renderDropdown(
+          <div ref={dropdownRef} style={dropdownStyle}>
+            <div style={styles.header}>
+              <h3 style={styles.headerTitle}>Notifications</h3>
+              <div style={styles.headerActions}>
+                {unreadCount > 0 && (
+                  <button
+                    style={styles.headerBtn}
+                    onClick={handleMarkAllRead}
+                    title="Mark all as read"
+                  >
+                    {Icons.check} Mark all read
+                  </button>
+                )}
+                {notifications.length > 0 && (
+                  <button style={styles.headerBtn} onClick={handleDeleteAll} title="Clear all">
+                    {Icons.trash} Clear all
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={styles.list}>
+              {notifications.length === 0 ? (
+                <div style={styles.emptyState}>
+                  <div style={styles.emptyIcon}>{Icons.bell}</div>
+                  <p style={styles.emptyText}>No notifications yet</p>
+                </div>
+              ) : (
+                notifications.map((notification) => {
+                  const typeConfig = typeIcons[notification.type] || typeIcons.info;
+                  const isHovered = hoveredId === notification.id;
+                  const { primary, badge } = formatNotificationTitle(notification.title);
+                  const isTechnicalReason =
+                    /^[a-z][a-z0-9_]*$/.test(notification.message.trim()) &&
+                    notification.message.includes("_");
+                  const statusBadge = isTechnicalReason
+                    ? humanizeStatus(notification.message)
+                    : null;
+                  const showMessage = !isTechnicalReason && notification.message.trim();
+                  const displayBadge = statusBadge ?? badge;
+
+                  return (
+                    <div
+                      key={notification.id}
+                      style={{
+                        ...styles.notificationItem,
+                        ...(!notification.read ? styles.notificationItemUnread : {}),
+                        backgroundColor: isHovered
+                          ? "var(--color-bg-tertiary)"
+                          : !notification.read
+                            ? "var(--color-bg-secondary)"
+                            : "var(--color-bg-elevated)",
+                      }}
+                      onClick={() => handleNotificationClick(notification)}
+                      onMouseEnter={() => setHoveredId(notification.id)}
+                      onMouseLeave={() => setHoveredId(null)}
+                    >
+                      <div
+                        style={{
+                          ...styles.notificationIcon,
+                          backgroundColor: typeConfig.bg,
+                          color: typeConfig.color,
+                        }}
+                      >
+                        {typeConfig.icon}
+                      </div>
+                      <div style={styles.notificationContent}>
+                        {displayBadge && (
+                          <span style={styles.notificationBadge}>{displayBadge}</span>
+                        )}
+                        <NotificationMarkdownPreview
+                          text={primary}
+                          style={styles.notificationTitle}
+                        />
+                        {showMessage && (
+                          <NotificationMarkdownPreview
+                            text={notification.message}
+                            style={styles.notificationMessage}
+                          />
+                        )}
+                        <span style={styles.notificationTime}>
+                          {formatRelativeTime(notification.createdAt)}
+                        </span>
+                        {notification.type === "input_required" && (
+                          <button
+                            style={styles.viewBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleNotificationClick(notification);
+                            }}
+                          >
+                            View & respond
+                          </button>
+                        )}
+                      </div>
+                      <div style={styles.notificationActions}>
+                        <button
+                          style={{
+                            ...styles.deleteBtn,
+                            opacity: isHovered ? 1 : 0,
+                          }}
+                          onClick={(e) => handleDelete(e, notification.id)}
+                          title="Delete"
+                        >
+                          {Icons.close}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
-          </div>
-
-          <div style={styles.list}>
-            {notifications.length === 0 ? (
-              <div style={styles.emptyState}>
-                <div style={styles.emptyIcon}>{Icons.bell}</div>
-                <p style={styles.emptyText}>No notifications yet</p>
-              </div>
-            ) : (
-              notifications.map((notification) => {
-                const typeConfig = typeIcons[notification.type] || typeIcons.info;
-                const isHovered = hoveredId === notification.id;
-                const { primary, badge } = formatNotificationTitle(notification.title);
-                const isTechnicalReason =
-                  /^[a-z][a-z0-9_]*$/.test(notification.message.trim()) &&
-                  notification.message.includes("_");
-                const statusBadge = isTechnicalReason ? humanizeStatus(notification.message) : null;
-                const showMessage = !isTechnicalReason && notification.message.trim();
-                const displayBadge = statusBadge ?? badge;
-
-                return (
-                  <div
-                    key={notification.id}
-                    style={{
-                      ...styles.notificationItem,
-                      ...(!notification.read ? styles.notificationItemUnread : {}),
-                      backgroundColor: isHovered
-                        ? "var(--color-bg-tertiary)"
-                        : !notification.read
-                          ? "var(--color-bg-secondary)"
-                          : "var(--color-bg-elevated)",
-                    }}
-                    onClick={() => handleNotificationClick(notification)}
-                    onMouseEnter={() => setHoveredId(notification.id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                  >
-                    <div
-                      style={{
-                        ...styles.notificationIcon,
-                        backgroundColor: typeConfig.bg,
-                        color: typeConfig.color,
-                      }}
-                    >
-                      {typeConfig.icon}
-                    </div>
-                    <div style={styles.notificationContent}>
-                      {displayBadge && <span style={styles.notificationBadge}>{displayBadge}</span>}
-                      <NotificationMarkdownPreview
-                        text={primary}
-                        style={styles.notificationTitle}
-                      />
-                      {showMessage && (
-                        <NotificationMarkdownPreview
-                          text={notification.message}
-                          style={styles.notificationMessage}
-                        />
-                      )}
-                      <span style={styles.notificationTime}>
-                        {formatRelativeTime(notification.createdAt)}
-                      </span>
-                      {notification.type === "input_required" && (
-                        <button
-                          style={styles.viewBtn}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleNotificationClick(notification);
-                          }}
-                        >
-                          View & respond
-                        </button>
-                      )}
-                    </div>
-                    <div style={styles.notificationActions}>
-                      <button
-                        style={{
-                          ...styles.deleteBtn,
-                          opacity: isHovered ? 1 : 0,
-                        }}
-                        onClick={(e) => handleDelete(e, notification.id)}
-                        title="Delete"
-                      >
-                        {Icons.close}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
+          </div>,
+        )}
     </div>
   );
 }

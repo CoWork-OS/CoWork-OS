@@ -270,7 +270,7 @@
     "twilio": "^6.1.1",
     "typescript": "^5.9.0",
     "vite": "^8.3.0",
-    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron": "^1.1.2",
     "vitest": "^5.0.1"
   },
   "optionalDependencies": {
